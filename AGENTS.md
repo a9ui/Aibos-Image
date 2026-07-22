@@ -12,7 +12,8 @@ Before changing code, read:
 2. `SECURITY.md`;
 3. `docs/product-contract.md`;
 4. `contracts/parity-v1.json` when changing a registered shared-state meaning;
-5. any more specific `AGENTS.md` closer to the files being changed.
+5. `contracts/shared-root-locator-v1.json` when changing shared-root discovery;
+6. any more specific `AGENTS.md` closer to the files being changed.
 
 `docs/product-contract.md` is normative for this WPF application and for the
 cross-repository durable-state boundary. Historical documents, screenshots,
