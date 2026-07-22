@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "status": "initial-policy",
+  "launch": {
+    "coldObservations": 10,
+    "warmObservations": 10,
+    "relativeImprovementTarget": 0.3
+  },
+  "scan": {
+    "observations": 5,
+    "firstVisibleRelativeImprovementTarget": 0.25,
+    "maxProgressGapMs": 500
+  },
+  "thumbnail": {
+    "observations": 30,
+    "visibleFirstRequired": true,
+    "unboundedQueueAllowed": false
+  },
+  "modal": {
+    "observations": 30,
+    "cachedInputToDisplayedP95Ms": 100,
+    "uncachedInputToLoadingP95Ms": 100,
+    "allowWrongImageFlash": false
+  },
+  "api": {
+    "observations": 30,
+    "tailMetric": "p95",
+    "maxDiagnosticOnly": true,
+    "criticalRegressionLimit": 0.1
+  },
+  "heavyWork": {
+    "ordinaryBrowsingEnhancementEnqueues": 0,
+    "ordinaryBrowsingWorkerStarts": 0
+  },
+  "validImprovement": {
+    "minimumRelativeImprovement": 0.1,
+    "minimumNoiseMultiple": 2,
+    "maxVarianceBeforeHarnessFix": 0.1
+  }
+}

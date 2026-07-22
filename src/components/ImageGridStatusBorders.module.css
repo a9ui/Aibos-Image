@@ -1,0 +1,35 @@
+.overlay {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.thumbnailHost {
+  position: relative;
+}
+
+.grid,
+.list {
+  inset: 0;
+}
+
+.overlay::before,
+.overlay::after {
+  content: '';
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.hasEnhanced::before {
+  inset: 0;
+  border: 3px solid var(--enhanced-thumbnail-border-color);
+}
+
+.hasFavorite::after {
+  inset: 4px;
+  border: 2px solid var(--favorite-thumbnail-border-color);
+}

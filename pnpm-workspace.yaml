@@ -1,0 +1,13 @@
+packages:
+  - .
+
+overrides:
+  brace-expansion@1.1.15: 1.1.16
+  electron-to-chromium: 1.5.385
+  postcss: 8.5.16
+  sharp: 0.35.3
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true

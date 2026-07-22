@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy an API-format ComfyUI workflow to config/comfy-upscale-workflow.json, or set PVU_COMFY_WORKFLOW_PATH to your workflow JSON. The adapter patches LoadImage/image inputs with the uploaded source image and numeric scale/upscale_by/factor inputs with the selected scale.",
+  "example": {
+    "replace_this_file": "Export a real workflow from ComfyUI with Dev mode > Save (API Format)."
+  }
+}
