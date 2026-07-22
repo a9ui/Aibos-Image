@@ -14796,15 +14796,28 @@ public partial class MainWindow : Window
         => ModalFilmstripOverlay.Visibility == Visibility.Visible;
     public bool ModalFilmstripPinnedForSmoke => _modalFilmstripOpen;
     public double ModalImageAreaHeightForSmoke => ModalImageArea.ActualHeight;
+    public double ModalImageAreaWidthForSmoke => ModalImageArea.ActualWidth;
+    public double ModalHeightForSmoke => Modal.ActualHeight;
+    public double ModalWidthForSmoke => Modal.ActualWidth;
+    public double ModalImageHeightForSmoke => ModalImage.ActualHeight;
+    public double ModalImageWidthForSmoke => ModalImage.ActualWidth;
+    public bool ModalFitSurfaceVisibleForSmoke => Modal.Visibility == Visibility.Visible;
+    public bool ModalFitStretchUniformForSmoke => ModalBitmap.Stretch == Stretch.Uniform;
+    public bool ModalImageAreaCoversWindowForSmoke
+        => ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
+            && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2);
+    public bool ModalImageWithinAreaForSmoke
+        => ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 2
+            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 2;
+    public bool ModalImageTouchesFitEdgeForSmoke
+        => Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 2
+            || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 2;
     public bool ModalFullWindowFitContractForSmoke
-        => Modal.Visibility == Visibility.Visible
-            && ModalBitmap.Stretch == Stretch.Uniform
-            && ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
-            && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2)
-            && ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 2
-            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 2
-            && (Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 2
-                || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 2);
+        => ModalFitSurfaceVisibleForSmoke
+            && ModalFitStretchUniformForSmoke
+            && ModalImageAreaCoversWindowForSmoke
+            && ModalImageWithinAreaForSmoke
+            && ModalImageTouchesFitEdgeForSmoke;
     public bool ModalWindowCaptionControlsContractForSmoke
         => Modal.Visibility == Visibility.Visible
             && ModalWindowCaptionControls.Visibility == Visibility.Visible

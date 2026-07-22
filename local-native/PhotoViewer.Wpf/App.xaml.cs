@@ -13673,6 +13673,17 @@ public partial class App : Application
                 bool filmstripPinned = win.ModalFilmstripPinnedForSmoke;
                 bool filmstripPortraitContract = win.ModalBottomPortraitFilmstripContractForSmoke;
                 bool modalFullWindowFit = win.ModalFullWindowFitContractForSmoke;
+                bool modalFitSurfaceVisible = win.ModalFitSurfaceVisibleForSmoke;
+                bool modalFitStretchUniform = win.ModalFitStretchUniformForSmoke;
+                bool modalImageAreaCoversWindow = win.ModalImageAreaCoversWindowForSmoke;
+                bool modalImageWithinArea = win.ModalImageWithinAreaForSmoke;
+                bool modalImageTouchesFitEdge = win.ModalImageTouchesFitEdgeForSmoke;
+                double modalWidth = win.ModalWidthForSmoke;
+                double modalHeight = win.ModalHeightForSmoke;
+                double modalImageAreaWidth = win.ModalImageAreaWidthForSmoke;
+                double modalImageAreaHeight = win.ModalImageAreaHeightForSmoke;
+                double modalImageWidth = win.ModalImageWidthForSmoke;
+                double modalImageHeight = win.ModalImageHeightForSmoke;
                 bool filmstripLayout = filmstripLayoutVisible
                     && filmstripPinned
                     && filmstripPortraitContract
@@ -13911,6 +13922,17 @@ public partial class App : Application
                     FilmstripPinned = filmstripPinned,
                     FilmstripPortraitContract = filmstripPortraitContract,
                     ModalFullWindowFit = modalFullWindowFit,
+                    ModalFitSurfaceVisible = modalFitSurfaceVisible,
+                    ModalFitStretchUniform = modalFitStretchUniform,
+                    ModalImageAreaCoversWindow = modalImageAreaCoversWindow,
+                    ModalImageWithinArea = modalImageWithinArea,
+                    ModalImageTouchesFitEdge = modalImageTouchesFitEdge,
+                    ModalWidth = modalWidth,
+                    ModalHeight = modalHeight,
+                    ModalImageAreaWidth = modalImageAreaWidth,
+                    ModalImageAreaHeight = modalImageAreaHeight,
+                    ModalImageWidth = modalImageWidth,
+                    ModalImageHeight = modalImageHeight,
                     ContextMenuAction = contextMenuAction,
                     ManualVisiblePersistent = manualVisiblePersistent,
                     ChromeHidden = chromeHidden,
@@ -19543,6 +19565,17 @@ public partial class App : Application
         public bool FilmstripPinned { get; init; }
         public bool FilmstripPortraitContract { get; init; }
         public bool ModalFullWindowFit { get; init; }
+        public bool ModalFitSurfaceVisible { get; init; }
+        public bool ModalFitStretchUniform { get; init; }
+        public bool ModalImageAreaCoversWindow { get; init; }
+        public bool ModalImageWithinArea { get; init; }
+        public bool ModalImageTouchesFitEdge { get; init; }
+        public double ModalWidth { get; init; }
+        public double ModalHeight { get; init; }
+        public double ModalImageAreaWidth { get; init; }
+        public double ModalImageAreaHeight { get; init; }
+        public double ModalImageWidth { get; init; }
+        public double ModalImageHeight { get; init; }
         public bool ContextMenuAction { get; init; }
         public bool ManualVisiblePersistent { get; init; }
         public bool ChromeHidden { get; init; }
