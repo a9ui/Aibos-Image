@@ -61,6 +61,34 @@ The shared durable set is:
 - `recent-folders.json`;
 - `enhance/jobs.json` and managed outputs under `enhance/outputs/**`.
 
+The current shared `settings.json` allowlist includes
+`confirmBeforeDelete` and `thumbnailStatusBorders`. WPF adopts the shared
+delete-confirmation value when present and keeps its local value only as the
+migration fallback when the supported shared field is absent. If the shared
+document is present but protected, unreadable, malformed, or unsupported, WPF
+enables delete confirmation in memory as the fail-safe value without changing
+either file. WPF keybindings remain renderer-local and are preserved, not
+adopted, when they occur in the shared document.
+
+Shared `settings.json` is readable either as the existing versionless document
+or with `version: 1`. A present non-integer or non-1 `version`, malformed JSON,
+an empty/whitespace-only file, or an invalid known field is protected and no
+writer may change its bytes. Only a genuinely missing file may be initialized
+by an explicit owned-setting mutation. Supported writers preserve `version`,
+key bindings, unknown root fields, and unknown nested border fields.
+Readers and locked writers determine missing state by opening the document;
+only `FileNotFound` or `DirectoryNotFound` is missing. Access denial, sharing
+contention, and every other I/O failure protect the existing document.
+
+A present, supported `recent-folders.json` is the startup authority for the
+last folder set, including an explicit empty `lastFolderSet`. A genuinely
+missing, malformed, unreadable, or unsupported-future shared document leaves
+its bytes untouched and uses the renderer-local last-folder state only as a
+migration/recovery fallback. That fallback does not become a second shared
+writer and does not initialize or repair the shared file merely by starting.
+Recent readers and writers use the same direct-open missing rule, so an
+unreadable existing document can never be replaced as though it were absent.
+
 Derived thumbnails, indexes, and metadata caches are rebuildable data and do
 not receive the same retention semantics as the durable set. Renderer-local
 presentation state remains local. WPF window geometry, panels, card width,
@@ -73,10 +101,13 @@ the smallest defined semantic unit. Malformed and unsupported future state is
 rejected without changing its bytes. A reader must not rewrite state merely by
 opening it.
 
-The current public-foundation change does not select or activate a shared root
-and does not move, merge, initialize, rewrite, or delete existing user state.
-Root discovery and schema rollout require a read-only ledger and separate
-reviewed changes.
+The public-foundation change does not select or activate a shared root and does
+not move, merge, initialize, rewrite, or delete existing user state. A later
+WPF activation resolves the root once at process startup and routes only the
+durable set named above. It does not create a locator, shared root, durable-data
+directory, or store; locator creation and any data migration remain separate
+reviewed changes. The only startup write this activation may make is the empty
+TEMP coordination directory/file defined by the lease protocol below.
 
 ### `PV-ROOT-001` — Shared data root locator
 
@@ -110,8 +141,13 @@ without copying or rewriting any durable data.
   override is next, followed by the default locator. The legacy repository
   data root is used only when the selected locator file is genuinely absent.
 - A reader does not create the locator, root, directories, or stores and does
-  not probe writability. The resolved root is fixed for the process lifetime
-  when activation is introduced.
+  not probe writability. WPF fixes the resolved root and all seven store paths
+  for the process lifetime. A malformed, future, inaccessible, or invalid
+  locator prevents shared-store activation without falling back or changing
+  bytes. When a fresh checkout has neither a locator nor an initialized legacy
+  data directory, WPF preserves the existing lazy legacy behavior and creates
+  no locator, shared root, durable-data directory, or store during startup. The
+  empty TEMP lease artifact remains the sole operational exception.
 - The locator contains no credentials, network endpoint, dynamic companion
   port, renderer state, index path, thumbnail cache, or migration instruction.
 
@@ -126,6 +162,47 @@ Activation additionally requires a process-lifetime reader lease and exclusive
 writer lease, plus a two-process missing/create/replace test. Until that gate is
 green, the locator is not created or changed while either application is
 running.
+
+The v1 lease is an empty operational file under
+`%TEMP%\aibos-shared-root-locator-leases-v1`; it is not durable state and is
+never deleted at runtime, avoiding last-reader deletion races. Its fixed name
+is `locator.lock`, protocol-global within that v1 TEMP directory; no locator
+path or user data is encoded in the name. This deliberately conservative scope
+also removes cross-runtime Unicode/case-mapping ambiguity: any v1 reader blocks
+any v1 locator change, even when separate installations selected differently
+spelled locator paths. Readers open or create the file with read access and
+`FileShare.Read` and hold that handle until process exit. A locator
+creator/replacer opens the same file with read/write access and `FileShare.None`
+for the entire same-volume create or atomic-replace operation. A sharing
+violation is contention and fails closed; other lease failures are unavailable,
+not contention. The lease may create only this TEMP coordination directory/file,
+never the locator, shared root, store directories, or stores.
+
+### `PV-SET-001` — Shared settings protection
+
+- Versionless and `version: 1` documents are supported; any other present
+  version is protected.
+- `confirmBeforeDelete` and each dirty thumbnail-border preference are separate
+  owned semantic units. Writers lock, reread, merge only those leaves, validate
+  the result, and atomically replace the latest supported document.
+- Existing malformed, empty, whitespace-only, future, or invalid-known-field
+  documents remain byte-identical and make delete confirmation fail safe to
+  enabled in memory. Missing or an absent field is distinct and uses the local
+  migration fallback; a missing document may initialize only the explicitly
+  changed owned leaf.
+- Compatible unknown root/nested fields and renderer-local key bindings survive
+  every supported mutation.
+
+### `PV-REC-001` — Recent-folder startup authority
+
+- A present supported shared document wins over renderer-local last-folder
+  state, including when its `lastFolderSet` is explicitly empty.
+- A genuinely missing shared document uses the local migration fallback without
+  creating a shared file.
+- A malformed, unreadable, or unsupported-future shared document uses the local
+  recovery fallback without changing the protected bytes.
+- Shared recent-folder writers continue to lock, reread, preserve unknown root
+  fields, and merge the newest folder set as one semantic unit.
 
 ### `PV-SH-001` — Search History identity
 

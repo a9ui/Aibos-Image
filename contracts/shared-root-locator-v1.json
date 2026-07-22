@@ -3,6 +3,7 @@
   "contractId": "PV-ROOT-001",
   "protocol": "aibos.shared-root-locator/v1",
   "activation": "reader-only",
+  "wpfProductionRouting": "process-lifetime-reader-lease-candidate",
   "environmentVariable": "AIBOS_SHARED_ROOT_LOCATOR_PATH",
   "defaultLocator": {
     "specialFolder": "LocalApplicationData",
@@ -21,6 +22,33 @@
     "duplicateRequiredFields": "rejected"
   },
   "maxLocatorBytes": 65536,
+  "locatorLease": {
+    "directory": {
+      "specialFolder": "Temporary",
+      "relativeSegments": [
+        "aibos-shared-root-locator-leases-v1"
+      ]
+    },
+    "identity": {
+      "scope": "protocol-global within the temporary directory",
+      "fileName": "locator.lock",
+      "locatorPathEncoding": "none"
+    },
+    "reader": {
+      "fileMode": "OpenOrCreate",
+      "fileAccess": "Read",
+      "fileShare": "Read",
+      "lifetime": "process"
+    },
+    "writer": {
+      "fileMode": "OpenOrCreate",
+      "fileAccess": "ReadWrite",
+      "fileShare": "None",
+      "lifetime": "create-or-replace-operation"
+    },
+    "contents": "empty",
+    "runtimeDeletion": "never"
+  },
   "dataLayout": [
     "favorites.json",
     "seen.json",

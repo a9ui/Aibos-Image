@@ -382,6 +382,304 @@
           }
         }
       ]
+    },
+    {
+      "id": "PV-SET-001",
+      "kind": "shared-settings-document",
+      "cases": [
+        {
+          "id": "versionless-merge-preserves-unknown",
+          "initial": {
+            "mode": "json",
+            "document": {
+              "confirmBeforeDelete": true,
+              "keyBindings": {
+                "nextImage": "ArrowRight",
+                "futureChord": { "mode": "keep" }
+              },
+              "futureRoot": { "owner": "browser" },
+              "thumbnailStatusBorders": {
+                "futureStatus": "keep",
+                "favorite": {
+                  "enabled": false,
+                  "color": "#112233",
+                  "futureFavorite": 17
+                },
+                "enhanced": {
+                  "enabled": true,
+                  "color": "#445566",
+                  "futureEnhanced": { "mode": "keep" }
+                }
+              }
+            }
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false },
+            {
+              "action": "borders",
+              "dirty": ["favorite"],
+              "favorite": { "enabled": true, "color": "#ABCDEF" },
+              "enhanced": { "enabled": false, "color": "#010203" }
+            }
+          ],
+          "expected": {
+            "initialProtected": false,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Succeeded", "Succeeded"],
+            "fileExists": true,
+            "bytesUnchanged": false,
+            "final": {
+              "mode": "json",
+              "document": {
+                "confirmBeforeDelete": false,
+                "keyBindings": {
+                  "nextImage": "ArrowRight",
+                  "futureChord": { "mode": "keep" }
+                },
+                "futureRoot": { "owner": "browser" },
+                "thumbnailStatusBorders": {
+                  "futureStatus": "keep",
+                  "favorite": {
+                    "enabled": true,
+                    "color": "#abcdef",
+                    "futureFavorite": 17
+                  },
+                  "enhanced": {
+                    "enabled": true,
+                    "color": "#445566",
+                    "futureEnhanced": { "mode": "keep" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "id": "missing-initializes-owned-leaf",
+          "initial": { "mode": "missing" },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false }
+          ],
+          "expected": {
+            "initialProtected": false,
+            "effectiveConfirmBeforeDelete": false,
+            "statuses": ["Succeeded"],
+            "fileExists": true,
+            "bytesUnchanged": false,
+            "final": {
+              "mode": "json",
+              "document": { "confirmBeforeDelete": false }
+            }
+          }
+        },
+        {
+          "id": "present-without-confirm-uses-local",
+          "initial": {
+            "mode": "json",
+            "document": {
+              "version": 1,
+              "futureRoot": { "keep": true }
+            }
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": true }
+          ],
+          "expected": {
+            "initialProtected": false,
+            "effectiveConfirmBeforeDelete": false,
+            "statuses": ["Succeeded"],
+            "fileExists": true,
+            "bytesUnchanged": false,
+            "final": {
+              "mode": "json",
+              "document": {
+                "version": 1,
+                "confirmBeforeDelete": true,
+                "futureRoot": { "keep": true }
+              }
+            }
+          }
+        },
+        {
+          "id": "version-one-supported",
+          "initial": {
+            "mode": "json",
+            "document": {
+              "version": 1,
+              "confirmBeforeDelete": true,
+              "futureRoot": { "keep": true }
+            }
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false }
+          ],
+          "expected": {
+            "initialProtected": false,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Succeeded"],
+            "fileExists": true,
+            "bytesUnchanged": false,
+            "final": {
+              "mode": "json",
+              "document": {
+                "version": 1,
+                "confirmBeforeDelete": false,
+                "futureRoot": { "keep": true }
+              }
+            }
+          }
+        },
+        {
+          "id": "future-version-protected",
+          "initial": {
+            "mode": "json",
+            "document": {
+              "version": 2,
+              "confirmBeforeDelete": true,
+              "futureRoot": { "keep": true }
+            }
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false },
+            {
+              "action": "borders",
+              "dirty": ["favorite", "enhanced"],
+              "favorite": { "enabled": true, "color": "#abcdef" },
+              "enhanced": { "enabled": true, "color": "#123456" }
+            }
+          ],
+          "expected": {
+            "initialProtected": true,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Protected", "Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true,
+            "final": {
+              "mode": "json",
+              "document": {
+                "version": 2,
+                "confirmBeforeDelete": true,
+                "futureRoot": { "keep": true }
+              }
+            }
+          }
+        },
+        {
+          "id": "whitespace-protected",
+          "initial": { "mode": "raw", "text": " \n\t" },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false },
+            {
+              "action": "borders",
+              "dirty": ["favorite"],
+              "favorite": { "enabled": true, "color": "#abcdef" },
+              "enhanced": { "enabled": true, "color": "#123456" }
+            }
+          ],
+          "expected": {
+            "initialProtected": true,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Protected", "Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true,
+            "final": { "mode": "raw", "text": " \n\t" }
+          }
+        }
+      ]
+    },
+    {
+      "id": "PV-REC-001",
+      "kind": "recent-folder-authority",
+      "cases": [
+        {
+          "id": "supported-shared-wins",
+          "initial": {
+            "mode": "json",
+            "document": {
+              "version": 1,
+              "lastFolderSet": ["${ROOT}/shared"],
+              "recentFolderSets": [["${ROOT}/shared"]],
+              "futureRoot": { "keep": true }
+            }
+          },
+          "localFolderSet": ["${ROOT}/local"],
+          "expected": {
+            "readOk": true,
+            "exists": true,
+            "selectedFolderSet": ["${ROOT}/shared"],
+            "fileExists": true,
+            "bytesUnchanged": true
+          }
+        },
+        {
+          "id": "supported-explicit-empty-wins",
+          "initial": {
+            "mode": "json",
+            "document": {
+              "version": 1,
+              "lastFolderSet": [],
+              "recentFolderSets": []
+            }
+          },
+          "localFolderSet": ["${ROOT}/local"],
+          "expected": {
+            "readOk": true,
+            "exists": true,
+            "selectedFolderSet": [],
+            "fileExists": true,
+            "bytesUnchanged": true
+          }
+        },
+        {
+          "id": "missing-uses-local-fallback",
+          "initial": { "mode": "missing" },
+          "localFolderSet": ["${ROOT}/local"],
+          "expected": {
+            "readOk": true,
+            "exists": false,
+            "selectedFolderSet": ["${ROOT}/local"],
+            "fileExists": false,
+            "bytesUnchanged": true
+          }
+        },
+        {
+          "id": "malformed-uses-local-fallback",
+          "initial": { "mode": "raw", "text": "[" },
+          "localFolderSet": ["${ROOT}/local"],
+          "expected": {
+            "readOk": false,
+            "exists": true,
+            "selectedFolderSet": ["${ROOT}/local"],
+            "fileExists": true,
+            "bytesUnchanged": true
+          }
+        },
+        {
+          "id": "future-version-uses-local-fallback",
+          "initial": {
+            "mode": "json",
+            "document": {
+              "version": 2,
+              "lastFolderSet": ["${ROOT}/future"],
+              "futureRoot": { "keep": true }
+            }
+          },
+          "localFolderSet": ["${ROOT}/local"],
+          "expected": {
+            "readOk": false,
+            "exists": true,
+            "selectedFolderSet": ["${ROOT}/local"],
+            "fileExists": true,
+            "bytesUnchanged": true
+          }
+        }
+      ]
     }
   ]
 }

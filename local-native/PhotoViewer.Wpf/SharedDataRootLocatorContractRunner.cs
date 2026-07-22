@@ -444,6 +444,16 @@ internal static class SharedDataRootLocatorContractRunner
             .ToArray();
         JsonElement document = contract.GetProperty("document");
         JsonElement requiredFields = document.GetProperty("requiredFields");
+        JsonElement locatorLease = contract.GetProperty("locatorLease");
+        JsonElement leaseDirectory = locatorLease.GetProperty("directory");
+        JsonElement leaseIdentity = locatorLease.GetProperty("identity");
+        JsonElement readerLease = locatorLease.GetProperty("reader");
+        JsonElement writerLease = locatorLease.GetProperty("writer");
+        string[] leaseRelativeSegments = leaseDirectory
+            .GetProperty("relativeSegments")
+            .EnumerateArray()
+            .Select(static item => item.GetString() ?? "")
+            .ToArray();
         string[] expectedLayout =
         [
             "favorites.json",
@@ -477,6 +487,28 @@ internal static class SharedDataRootLocatorContractRunner
             && document.GetProperty("unknownFields").GetString() == "ignored"
             && document.GetProperty("duplicateRequiredFields").GetString()
                 == "rejected"
+            && leaseDirectory.GetProperty("specialFolder").GetString()
+                == "Temporary"
+            && leaseRelativeSegments.SequenceEqual(
+                [SharedDataRootLocatorLease.DefaultLeaseDirectoryName],
+                StringComparer.Ordinal)
+            && leaseIdentity.GetProperty("scope").GetString()
+                == "protocol-global within the temporary directory"
+            && leaseIdentity.GetProperty("fileName").GetString()
+                == SharedDataRootLocatorLease.LockFileName
+            && leaseIdentity.GetProperty("locatorPathEncoding").GetString()
+                == "none"
+            && readerLease.GetProperty("fileMode").GetString() == "OpenOrCreate"
+            && readerLease.GetProperty("fileAccess").GetString() == "Read"
+            && readerLease.GetProperty("fileShare").GetString() == "Read"
+            && readerLease.GetProperty("lifetime").GetString() == "process"
+            && writerLease.GetProperty("fileMode").GetString() == "OpenOrCreate"
+            && writerLease.GetProperty("fileAccess").GetString() == "ReadWrite"
+            && writerLease.GetProperty("fileShare").GetString() == "None"
+            && writerLease.GetProperty("lifetime").GetString()
+                == "create-or-replace-operation"
+            && locatorLease.GetProperty("contents").GetString() == "empty"
+            && locatorLease.GetProperty("runtimeDeletion").GetString() == "never"
             && actualLayout.SequenceEqual(expectedLayout, StringComparer.Ordinal);
     }
 

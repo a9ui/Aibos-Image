@@ -13,7 +13,46 @@ $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
 $runRoot = Join-Path $tempBase ('aibos-shared-root-locator-' + [guid]::NewGuid().ToString('N'))
 $fixtureRoot = Join-Path $runRoot 'fixture'
 $resultPath = Join-Path $runRoot 'result.json'
+$activationRoot = Join-Path $runRoot 'activation'
+$leaseProofRoot = Join-Path $runRoot 'lease-proof'
 $buildOutput = Join-Path $runRoot 'build'
+$holderProcesses = [Collections.Generic.List[Diagnostics.Process]]::new()
+
+function Start-DotNetSmokeProcess {
+    param([string[]]$Arguments)
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'dotnet'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $quotedArguments = foreach ($argument in $Arguments) {
+        if ($argument.Contains('"')) {
+            throw 'Smoke-process arguments must not contain quote characters.'
+        }
+        '"' + $argument + '"'
+    }
+    $startInfo.Arguments = $quotedArguments -join ' '
+    return [Diagnostics.Process]::Start($startInfo)
+}
+
+function Wait-SmokeSignal {
+    param(
+        [Diagnostics.Process]$Process,
+        [string]$Path,
+        [string]$Description
+    )
+
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while (-not (Test-Path -LiteralPath $Path -PathType Leaf) -and
+        -not $Process.HasExited -and
+        $watch.Elapsed -lt [TimeSpan]::FromSeconds(10)) {
+        Start-Sleep -Milliseconds 25
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        $exitDetail = if ($Process.HasExited) { " exit=$($Process.ExitCode)" } else { '' }
+        throw "$Description did not become ready.$exitDetail"
+    }
+}
 
 try {
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
@@ -52,9 +91,177 @@ try {
         throw 'The reader changed a fixture or created a missing locator.'
     }
 
-    Write-Host "Shared root locator PASS: $($result.caseCount)/$($result.caseCount) cases; reader-only; fixture bytes unchanged."
+    $activationCases = @(
+        'valid',
+        'store-override',
+        'invalid',
+        'legacy',
+        'overrides-only',
+        'legacy-uninitialized'
+    )
+    $activationResults = foreach ($caseId in $activationCases) {
+        $caseRoot = Join-Path $activationRoot $caseId
+        $caseResult = Join-Path $runRoot ("activation-$caseId.json")
+        & dotnet $dll --shared-root-activation-smoke $caseResult --case $caseId --temp-root $caseRoot
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "Shared root activation case '$caseId' failed with exit $exitCode."
+        }
+        if (-not (Test-Path -LiteralPath $caseResult -PathType Leaf)) {
+            throw "Shared root activation case '$caseId' produced no result."
+        }
+
+        Get-Content -Raw -LiteralPath $caseResult | ConvertFrom-Json
+    }
+
+    $failedActivationCases = @($activationResults | Where-Object {
+        $_.ok -ne $true -or
+        $_.rootMatches -ne $true -or
+        $_.allCanonicalPaths -ne $true -or
+        $_.outputsMatch -ne $true -or
+        $_.pathsMatchEnvironment -ne $true -or
+        $_.pathCountMatches -ne $true -or
+        $_.productionResolversMatch -ne $true -or
+        $_.readerLeaseHeld -ne $true -or
+        $_.productionLeasePathMatches -ne $true -or
+        $_.nonSharedUntouched -ne $true -or
+        $_.treeUnchanged -ne $true -or
+        $_.fixedForLifetime -ne $true
+    })
+    if ($failedActivationCases.Count -ne 0) {
+        $failedIds = @($failedActivationCases | ForEach-Object { $_.caseId }) -join ', '
+        throw "WPF shared root activation failed. Failed cases: $failedIds"
+    }
+
+    $legacyRoot = Join-Path $leaseProofRoot 'legacy'
+    $dataRootA = Join-Path $leaseProofRoot 'data-a'
+    $dataRootB = Join-Path $leaseProofRoot 'data-b'
+    $leaseDirectory = Join-Path $leaseProofRoot 'leases'
+    $locatorPath = Join-Path $leaseProofRoot 'shared-root.v1.json'
+    New-Item -ItemType Directory -Path $legacyRoot, $dataRootA, $dataRootB -Force | Out-Null
+
+    $invokeWriter = {
+        param([string]$Mode, [string]$Result, [string]$DataRoot)
+        & dotnet $dll --shared-root-lease-writer-smoke $Result `
+            --mode $Mode `
+            --temp-root $leaseProofRoot `
+            --locator-path $locatorPath `
+            --shared-data-root $DataRoot `
+            --lease-directory $leaseDirectory
+        if ($LASTEXITCODE -ne 0) {
+            throw "Locator writer smoke '$Mode' failed with exit $LASTEXITCODE."
+        }
+        if (-not (Test-Path -LiteralPath $Result -PathType Leaf)) {
+            throw "Locator writer smoke '$Mode' produced no result."
+        }
+        return Get-Content -Raw -LiteralPath $Result | ConvertFrom-Json
+    }
+
+    $startHolder = {
+        param([string]$Prefix)
+        $holderResult = Join-Path $leaseProofRoot ($Prefix + '-holder.json')
+        $ready = Join-Path $leaseProofRoot ($Prefix + '.ready')
+        $release = Join-Path $leaseProofRoot ($Prefix + '.release')
+        $arguments = @(
+            $dll,
+            '--shared-root-lease-holder-smoke', $holderResult,
+            '--temp-root', $leaseProofRoot,
+            '--locator-path', $locatorPath,
+            '--legacy-root', $legacyRoot,
+            '--ready-path', $ready,
+            '--release-path', $release,
+            '--lease-directory', $leaseDirectory
+        )
+        $process = Start-DotNetSmokeProcess -Arguments $arguments
+        $null = $holderProcesses.Add($process)
+        Wait-SmokeSignal -Process $process -Path $ready -Description "Locator reader '$Prefix'"
+        return [pscustomobject]@{
+            Process = $process
+            Result = $holderResult
+            Release = $release
+        }
+    }
+
+    $releaseHolder = {
+        param($Holder, [string]$ExpectedRoot)
+        [IO.File]::WriteAllText($Holder.Release, 'release')
+        if (-not $Holder.Process.WaitForExit(10000)) {
+            throw 'Locator reader holder did not exit after release.'
+        }
+        if ($Holder.Process.ExitCode -ne 0) {
+            throw "Locator reader holder failed with exit $($Holder.Process.ExitCode)."
+        }
+        if (-not (Test-Path -LiteralPath $Holder.Result -PathType Leaf)) {
+            throw 'Locator reader holder produced no result.'
+        }
+        $holderResult = Get-Content -Raw -LiteralPath $Holder.Result | ConvertFrom-Json
+        if ($holderResult.ok -ne $true -or
+            $holderResult.pathCount -ne 7 -or
+            [IO.Path]::GetFullPath($holderResult.sharedDataRoot) -ne [IO.Path]::GetFullPath($ExpectedRoot)) {
+            throw 'Locator reader holder resolved the wrong fixed root.'
+        }
+        return $holderResult
+    }
+
+    $missingHolder = & $startHolder 'missing'
+    $blockedCreateResultPath = Join-Path $leaseProofRoot 'blocked-create.json'
+    $blockedCreate = & $invokeWriter 'create' $blockedCreateResultPath $dataRootA
+    if ($blockedCreate.ok -ne $true -or
+        $blockedCreate.acquired -ne $false -or
+        $blockedCreate.errorCode -ne 'locator-lease-busy' -or
+        $blockedCreate.locatorChanged -ne $false -or
+        (Test-Path -LiteralPath $locatorPath)) {
+        throw 'An exclusive locator create was not blocked by the live reader.'
+    }
+    $null = & $releaseHolder $missingHolder $legacyRoot
+
+    $createResultPath = Join-Path $leaseProofRoot 'create.json'
+    $created = & $invokeWriter 'create' $createResultPath $dataRootA
+    if ($created.ok -ne $true -or
+        $created.acquired -ne $true -or
+        $created.locatorChanged -ne $true -or
+        [IO.Path]::GetFullPath($created.resolvedRoot) -ne [IO.Path]::GetFullPath($dataRootA)) {
+        throw 'Exclusive locator create did not publish the expected synthetic root.'
+    }
+
+    $resolvedHolder = & $startHolder 'resolved-a'
+    $blockedReplaceResultPath = Join-Path $leaseProofRoot 'blocked-replace.json'
+    $blockedReplace = & $invokeWriter 'replace' $blockedReplaceResultPath $dataRootB
+    if ($blockedReplace.ok -ne $true -or
+        $blockedReplace.acquired -ne $false -or
+        $blockedReplace.errorCode -ne 'locator-lease-busy' -or
+        $blockedReplace.locatorChanged -ne $false -or
+        [IO.Path]::GetFullPath($blockedReplace.resolvedRoot) -ne [IO.Path]::GetFullPath($dataRootA)) {
+        throw 'An exclusive locator replacement was not blocked by the live reader.'
+    }
+    $null = & $releaseHolder $resolvedHolder $dataRootA
+
+    $replaceResultPath = Join-Path $leaseProofRoot 'replace.json'
+    $replaced = & $invokeWriter 'replace' $replaceResultPath $dataRootB
+    if ($replaced.ok -ne $true -or
+        $replaced.acquired -ne $true -or
+        $replaced.locatorChanged -ne $true -or
+        [IO.Path]::GetFullPath($replaced.resolvedRoot) -ne [IO.Path]::GetFullPath($dataRootB)) {
+        throw 'Exclusive locator replacement did not publish the expected synthetic root.'
+    }
+
+    $finalHolder = & $startHolder 'resolved-b'
+    $null = & $releaseHolder $finalHolder $dataRootB
+
+    Write-Host "Shared root locator PASS: $($result.caseCount)/$($result.caseCount) reader cases; $($activationResults.Count)/$($activationResults.Count) WPF activation cases; two-process missing/create/replace lease proof; fixture bytes unchanged."
 }
 finally {
+    foreach ($holder in $holderProcesses) {
+        try {
+            if (-not $holder.HasExited) {
+                $holder.Kill($true)
+                $holder.WaitForExit(5000) | Out-Null
+            }
+            $holder.Dispose()
+        }
+        catch {
+        }
+    }
     if (Test-Path -LiteralPath $runRoot) {
         $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
         $tempPrefix = $tempBase + [IO.Path]::DirectorySeparatorChar

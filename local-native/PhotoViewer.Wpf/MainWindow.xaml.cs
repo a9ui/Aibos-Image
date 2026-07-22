@@ -345,6 +345,7 @@ public partial class MainWindow : Window
     private double _modalPanY;
     private bool _modalShowingEnhanced;
     private bool _confirmBeforeDelete = true;
+    private bool _syncingConfirmBeforeDelete;
     private Dictionary<ViewerKeyAction, KeyChord> _keyBindings = KeyBindingSettings.CreateDefaults();
     private Dictionary<ViewerKeyAction, KeyChord> _draftKeyBindings = KeyBindingSettings.CreateDefaults();
     private Dictionary<string, JsonElement>? _keyBindingUnknownEntries;
@@ -1919,7 +1920,8 @@ public partial class MainWindow : Window
         var read = ReadSharedRecentFolders();
         if (!read.Ok)
             ReportPersistenceRefusal("Recent folder history", ResolvedSharedRecentPath, protectedFile: true);
-        _lastFolderSet = read.Recent.LastFolderSet;
+        if (read.Ok && read.Exists)
+            _lastFolderSet = read.Recent.LastFolderSet;
         if (LastFolderSetText is not null)
             LastFolderSetText.Text = _lastFolderSet.Count == 0
                 ? "  No saved folder set"
@@ -3430,7 +3432,9 @@ public partial class MainWindow : Window
         _seenDirtyPaths.Clear();
         _seenWriteBlocked = false;
 
-        if (!string.IsNullOrWhiteSpace(SeenPathOverride))
+        if (!string.IsNullOrWhiteSpace(SeenPathOverride)
+            && SharedDataRootActivation.WasExplicitStoreOverride(
+                SharedDataRootActivation.SeenEnvironmentVariable))
         {
             string overridePath = ResolvedSeenPath;
             _seenWriteBlocked = !TryLoadSeenFile(overridePath, _seenPaths);
@@ -8895,9 +8899,7 @@ public partial class MainWindow : Window
 
     private async void OpenLastFolder_Click(object sender, RoutedEventArgs e)
     {
-        var lastFolderSet = _lastFolderSet.Count > 0
-            ? _lastFolderSet
-            : ReadSharedRecentFolders().Recent.LastFolderSet;
+        var lastFolderSet = _lastFolderSet;
         if (lastFolderSet.Count > 0)
         {
             SetLandingFolderSet(lastFolderSet);
@@ -10929,6 +10931,11 @@ public partial class MainWindow : Window
         _draftThumbnailStatusBorderSettings = loaded.Settings;
         _thumbnailStatusBorderSettingsProtected = loaded.IsProtected;
         _thumbnailStatusBorderSettingsError = loaded.Error;
+        _confirmBeforeDelete =
+            ThumbnailStatusBorderSettingsStore.ResolveEffectiveConfirmBeforeDelete(
+                _confirmBeforeDelete,
+                loaded);
+        SyncConfirmBeforeDeleteCheckBox();
         ApplyThumbnailStatusBorderResources(loaded.Settings);
     }
 
@@ -11151,14 +11158,11 @@ public partial class MainWindow : Window
         bool saved = TryWithPersistenceLock(path, () =>
         {
             operationStarted = true;
-            string? existingJson;
-            try
+            if (!ThumbnailStatusBorderSettingsStore.TryReadExistingJson(
+                    path,
+                    out string? existingJson,
+                    out operationError))
             {
-                existingJson = File.Exists(path) ? File.ReadAllText(path) : null;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                operationError = $"Shared settings could not be read: {ex.Message}";
                 return false;
             }
 
@@ -11261,8 +11265,117 @@ public partial class MainWindow : Window
 
     private void ConfirmBeforeDelete_Changed(object sender, RoutedEventArgs e)
     {
-        _confirmBeforeDelete = ConfirmBeforeDeleteCheckBox.IsChecked == true;
+        if (_initializing || _syncingConfirmBeforeDelete)
+            return;
+
+        bool requested = ConfirmBeforeDeleteCheckBox.IsChecked == true;
+        if (requested == _confirmBeforeDelete)
+            return;
+        if (!TrySetConfirmBeforeDelete(requested, out string? error))
+        {
+            SetStatusToast($"Shared delete confirmation was not changed. {error}");
+            return;
+        }
+    }
+
+    private bool TrySetConfirmBeforeDelete(bool value, out string? error)
+    {
+        error = null;
+        if (value != _confirmBeforeDelete
+            && !TryPersistSharedConfirmBeforeDelete(value, out error))
+        {
+            SyncConfirmBeforeDeleteCheckBox();
+            return false;
+        }
+
+        _confirmBeforeDelete = value;
+        SyncConfirmBeforeDeleteCheckBox();
         SaveState();
+        return true;
+    }
+
+    private void SyncConfirmBeforeDeleteCheckBox()
+    {
+        _syncingConfirmBeforeDelete = true;
+        try
+        {
+            ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
+        }
+        finally
+        {
+            _syncingConfirmBeforeDelete = false;
+        }
+    }
+
+    private static bool TryPersistSharedConfirmBeforeDelete(bool value, out string? error)
+    {
+        error = null;
+        string path;
+        try
+        {
+            path = ThumbnailStatusBorderSettingsPath;
+        }
+        catch (Exception ex)
+        {
+            error = $"Shared settings path is unavailable: {ex.Message}";
+            return false;
+        }
+
+        string? operationError = null;
+        bool operationStarted = false;
+        bool saved = TryWithPersistenceLock(path, () =>
+        {
+            operationStarted = true;
+            if (!ThumbnailStatusBorderSettingsStore.TryReadExistingJson(
+                    path,
+                    out string? existingJson,
+                    out operationError))
+            {
+                return false;
+            }
+
+            ThumbnailStatusBorderLoadResult existing =
+                ThumbnailStatusBorderSettingsStore.Parse(existingJson ?? "{}");
+            if (existing.IsProtected)
+            {
+                operationError = existing.Error ?? "The shared settings file is protected.";
+                return false;
+            }
+            if (existing.ConfirmBeforeDelete == value)
+                return true;
+
+            if (!ThumbnailStatusBorderSettingsStore.TryMergeConfirmBeforeDelete(
+                    existingJson,
+                    value,
+                    out string mergedJson,
+                    out operationError))
+            {
+                return false;
+            }
+
+            ThumbnailStatusBorderLoadResult merged =
+                ThumbnailStatusBorderSettingsStore.Parse(mergedJson);
+            if (merged.IsProtected || merged.ConfirmBeforeDelete != value)
+            {
+                operationError = merged.Error
+                    ?? "The merged shared delete confirmation setting was invalid.";
+                return false;
+            }
+
+            if (!TryWriteAtomicText(path, mergedJson))
+            {
+                operationError = "Windows did not allow the atomic settings replacement.";
+                return false;
+            }
+            return true;
+        });
+
+        if (saved)
+            return true;
+        error = operationError ?? (operationStarted
+            ? "The shared settings write failed."
+            : "The shared settings file is busy. Try again.");
+        return false;
     }
 
     private string BuildDiagnosticsText()
@@ -11404,15 +11517,19 @@ public partial class MainWindow : Window
         Tile? tile = _pendingDeleteTile;
         DeleteSnapshot? bulkSnapshot = _pendingBulkDeleteSnapshot;
         bool favoriteProtected = _favoriteDeleteConfirmationRequired;
+        if (!favoriteProtected && DoNotAskAgainCheckBox.IsChecked == true)
+        {
+            if (!TrySetConfirmBeforeDelete(false, out string? error))
+            {
+                DoNotAskAgainCheckBox.IsChecked = false;
+                SetStatusToast($"Delete confirmation stays enabled. {error}");
+            }
+        }
+
         _pendingDeleteTile = null;
         _pendingBulkDeleteSnapshot = null;
         _favoriteDeleteConfirmationRequired = false;
         DeleteConfirmationDialog.Visibility = Visibility.Collapsed;
-        if (!favoriteProtected && DoNotAskAgainCheckBox.IsChecked == true)
-        {
-            _confirmBeforeDelete = false;
-            SaveState();
-        }
         if (bulkSnapshot is not null)
             ExecuteBulkDelete(bulkSnapshot, favoriteConfirmed: favoriteProtected);
         else if (tile is not null)
@@ -12041,11 +12158,12 @@ public partial class MainWindow : Window
     private void RestoreState()
     {
         var state = ReadState();
-        var lastFolderSet = NormalizeFolderSet(state?.LastFolderSet ?? []);
-        if (lastFolderSet.Count == 0 && !string.IsNullOrWhiteSpace(state?.LastFolder))
-            lastFolderSet = NormalizeFolderSet([state.LastFolder]);
-        if (lastFolderSet.Count == 0)
-            lastFolderSet = ReadSharedRecentFolders().Recent.LastFolderSet;
+        SharedRecentReadResult sharedRecent = ReadSharedRecentFolders();
+        var lastFolderSet = ResolveStartupFolderSet(
+            state?.LastFolderSet ?? [],
+            state?.LastFolder,
+            sharedRecent);
+        _lastFolderSet = lastFolderSet.ToList();
 
         if (lastFolderSet.Count > 0)
         {
@@ -12283,21 +12401,51 @@ public partial class MainWindow : Window
 
     private static SharedRecentReadResult ReadSharedRecentFolders(string path)
     {
-        if (!File.Exists(path))
-            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(null), null);
-
         try
         {
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             if (document.RootElement.ValueKind != JsonValueKind.Object)
-                return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), "shared recent root is not an object");
-            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(document.RootElement), null);
+                return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), "shared recent root is not an object", true);
+            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(document.RootElement), null, true);
+        }
+        catch (FileNotFoundException)
+        {
+            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(null), null, false);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(null), null, false);
         }
         catch (Exception ex)
         {
-            return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), ex.Message);
+            return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), ex.Message, true);
         }
     }
+
+    private static List<string> ResolveStartupFolderSet(
+        IEnumerable<string> localLastFolderSet,
+        string? localLastFolder,
+        SharedRecentReadResult sharedRecent)
+    {
+        var local = NormalizeFolderSet(localLastFolderSet);
+        if (local.Count == 0 && !string.IsNullOrWhiteSpace(localLastFolder))
+            local = NormalizeFolderSet([localLastFolder]);
+        return sharedRecent.Ok && sharedRecent.Exists
+            ? sharedRecent.Recent.LastFolderSet.ToList()
+            : local;
+    }
+
+    internal static IReadOnlyList<string> ResolveStartupFolderSetForSmoke(
+        string sharedRecentPath,
+        IEnumerable<string> localLastFolderSet,
+        string? localLastFolder)
+        => ResolveStartupFolderSet(
+            localLastFolderSet,
+            localLastFolder,
+            ReadSharedRecentFolders(sharedRecentPath));
+
+    internal static SharedRecentReadResult ReadSharedRecentFoldersForSmoke(string path)
+        => ReadSharedRecentFolders(path);
 
     private static SharedRecentFoldersState NormalizeSharedRecentFolders(JsonElement? root)
     {
@@ -13038,6 +13186,17 @@ public partial class MainWindow : Window
     public string SeenPathForSmoke => ResolvedSeenPath;
     public string SharedRecentPathForSmoke => ResolvedSharedRecentPath;
     public string SearchHistoryPathForSmoke => SearchHistoryStore.ResolvePath();
+    internal static IReadOnlyDictionary<string, string> ResolveSharedDurableStorePathsForSmoke()
+        => new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [SharedDataRootActivation.FavoritesEnvironmentVariable] = ResolvedFavoritesPath,
+            [SharedDataRootActivation.SeenEnvironmentVariable] = ResolvedSeenPath,
+            [SharedDataRootActivation.SettingsEnvironmentVariable] = ThumbnailStatusBorderSettingsPath,
+            [SharedDataRootActivation.AlbumsEnvironmentVariable] = AlbumStore.ResolvePath(),
+            [SharedDataRootActivation.SearchHistoryEnvironmentVariable] = SearchHistoryStore.ResolvePath(),
+            [SharedDataRootActivation.RecentFoldersEnvironmentVariable] = ResolvedSharedRecentPath,
+            [SharedDataRootActivation.EnhancementJobsEnvironmentVariable] = ResolvedEnhancementJobsPath,
+        };
     public bool SearchHistoryPopupOpenForSmoke => SearchHistoryPopup.IsOpen;
     public List<string> SearchHistoryEntriesForSmoke => _searchHistoryEntries.Select(static item => item.Query).ToList();
     public string SearchHistoryStatusForSmoke => SearchHistoryStatusText.Text;
@@ -13352,6 +13511,11 @@ public partial class MainWindow : Window
     public void ResetProtectedDeleteRootsForSmoke() => _protectedDeleteRoots = ResolveProtectedDeleteRoots;
 
     public void SetConfirmBeforeDeleteForSmoke(bool value) => _confirmBeforeDelete = value;
+    public bool PersistConfirmBeforeDeleteForSmoke(bool value)
+    {
+        return TrySetConfirmBeforeDelete(value, out _)
+            && _confirmBeforeDelete == value;
+    }
     public void FlushStateForSmoke()
     {
         _searchStateSaveTimer.Stop();
@@ -15773,7 +15937,8 @@ public sealed class SharedRecentFoldersState
 public sealed record SharedRecentReadResult(
     bool Ok,
     SharedRecentFoldersState Recent,
-    string? Error);
+    string? Error,
+    bool Exists);
 
 public sealed record FavoriteImportSummary(
     bool Ok,

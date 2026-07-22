@@ -31,10 +31,15 @@ internal sealed record ThumbnailStatusBorderSettings(
 internal readonly record struct ThumbnailStatusBorderLoadResult(
     ThumbnailStatusBorderSettings Settings,
     bool IsProtected,
-    string? Error);
+    string? Error)
+{
+    internal bool? ConfirmBeforeDelete { get; init; }
+}
 
 internal static class ThumbnailStatusBorderSettingsStore
 {
+    internal const int SchemaVersion = 1;
+
     private static readonly string[] BrowserKeyBindingNames =
     [
         "nextImage",
@@ -58,19 +63,46 @@ internal static class ThumbnailStatusBorderSettingsStore
 
     public static ThumbnailStatusBorderLoadResult Read(string path)
     {
-        try
-        {
-            if (!File.Exists(path))
-                return new ThumbnailStatusBorderLoadResult(ThumbnailStatusBorderSettings.Default, false, null);
-
-            return Parse(File.ReadAllText(path));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        if (!TryReadExistingJson(path, out string? json, out string? error))
         {
             return new ThumbnailStatusBorderLoadResult(
                 ThumbnailStatusBorderSettings.Default,
                 true,
-                $"Shared settings could not be read: {ex.Message}");
+                error);
+        }
+
+        return json is null
+            ? new ThumbnailStatusBorderLoadResult(
+                ThumbnailStatusBorderSettings.Default,
+                false,
+                null)
+            : Parse(json);
+    }
+
+    internal static bool TryReadExistingJson(
+        string path,
+        out string? json,
+        out string? error)
+    {
+        json = null;
+        error = null;
+        try
+        {
+            json = File.ReadAllText(path);
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            return true;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            error = $"Shared settings could not be read: {ex.Message}";
+            return false;
         }
     }
 
@@ -85,15 +117,29 @@ internal static class ThumbnailStatusBorderSettingsStore
             });
             if (parsed is not JsonObject root)
                 return Protected("Shared settings JSON must contain an object.");
-            if (!TryReadSettings(root, out ThumbnailStatusBorderSettings settings, out string? error))
+            if (!TryReadSettings(
+                    root,
+                    out ThumbnailStatusBorderSettings settings,
+                    out bool? confirmBeforeDelete,
+                    out string? error))
                 return Protected(error ?? "Shared thumbnail border settings do not match the supported schema.");
-            return new ThumbnailStatusBorderLoadResult(settings, false, null);
+            return new ThumbnailStatusBorderLoadResult(settings, false, null)
+            {
+                ConfirmBeforeDelete = confirmBeforeDelete,
+            };
         }
         catch (JsonException ex)
         {
             return Protected($"Shared settings JSON is malformed: {ex.Message}");
         }
     }
+
+    internal static bool ResolveEffectiveConfirmBeforeDelete(
+        bool localFallback,
+        ThumbnailStatusBorderLoadResult shared)
+        => shared.IsProtected
+            ? true
+            : shared.ConfirmBeforeDelete ?? localFallback;
 
     public static bool TryMerge(
         string? existingJson,
@@ -113,7 +159,7 @@ internal static class ThumbnailStatusBorderSettingsStore
             }
 
             JsonObject root;
-            if (string.IsNullOrWhiteSpace(existingJson))
+            if (existingJson is null)
             {
                 root = new JsonObject();
             }
@@ -130,7 +176,7 @@ internal static class ThumbnailStatusBorderSettingsStore
                     return false;
                 }
                 root = parsedRoot;
-                if (!TryReadSettings(root, out _, out error))
+                if (!TryReadSettings(root, out _, out _, out error))
                     return false;
             }
 
@@ -148,6 +194,54 @@ internal static class ThumbnailStatusBorderSettingsStore
                 enhanced["color"] = NormalizeEnhancedColor(settings.Enhanced.Color);
             }
 
+            mergedJson = root.ToJsonString(IndentedJson) + Environment.NewLine;
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            error = $"Shared settings JSON is malformed: {ex.Message}";
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    public static bool TryMergeConfirmBeforeDelete(
+        string? existingJson,
+        bool confirmBeforeDelete,
+        out string mergedJson,
+        out string? error)
+    {
+        mergedJson = "";
+        error = null;
+        try
+        {
+            JsonObject root;
+            if (existingJson is null)
+            {
+                root = new JsonObject();
+            }
+            else
+            {
+                JsonNode? parsed = JsonNode.Parse(existingJson, documentOptions: new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                });
+                if (parsed is not JsonObject parsedRoot)
+                {
+                    error = "Shared settings JSON must contain an object.";
+                    return false;
+                }
+                root = parsedRoot;
+                if (!TryReadSettings(root, out _, out _, out error))
+                    return false;
+            }
+
+            root["confirmBeforeDelete"] = confirmBeforeDelete;
             mergedJson = root.ToJsonString(IndentedJson) + Environment.NewLine;
             return true;
         }
@@ -198,15 +292,35 @@ internal static class ThumbnailStatusBorderSettingsStore
     private static bool TryReadSettings(
         JsonObject root,
         out ThumbnailStatusBorderSettings settings,
+        out bool? confirmBeforeDelete,
         out string? error)
     {
         settings = ThumbnailStatusBorderSettings.Default;
+        confirmBeforeDelete = null;
         error = null;
-        if (root.TryGetPropertyValue("confirmBeforeDelete", out JsonNode? confirmNode)
-            && (confirmNode is not JsonValue confirmValue || !confirmValue.TryGetValue(out bool _)))
+        if (root.TryGetPropertyValue("version", out JsonNode? versionNode))
         {
-            error = "confirmBeforeDelete must be a boolean.";
-            return false;
+            if (versionNode is not JsonValue versionValue
+                || !versionValue.TryGetValue(out int version))
+            {
+                error = "Shared settings version must be an integer.";
+                return false;
+            }
+            if (version != SchemaVersion)
+            {
+                error = $"Shared settings version {version} is unsupported.";
+                return false;
+            }
+        }
+        if (root.TryGetPropertyValue("confirmBeforeDelete", out JsonNode? confirmNode))
+        {
+            if (confirmNode is not JsonValue confirmValue
+                || !confirmValue.TryGetValue(out bool parsedConfirmBeforeDelete))
+            {
+                error = "confirmBeforeDelete must be a boolean.";
+                return false;
+            }
+            confirmBeforeDelete = parsedConfirmBeforeDelete;
         }
         if (root.TryGetPropertyValue("keyBindings", out JsonNode? bindingsNode))
         {

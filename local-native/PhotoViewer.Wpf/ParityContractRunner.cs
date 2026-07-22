@@ -26,6 +26,8 @@ internal static class ParityContractRunner
         "search-history-document",
         "album-document",
         "album-operations",
+        "shared-settings-document",
+        "recent-folder-authority",
     ];
 
     internal static int Run(string? contractPath, string? explicitTempRoot, string? receiptPath)
@@ -196,6 +198,14 @@ internal static class ParityContractRunner
                 ValidateInitial(contractCase.GetProperty("initial"), scope);
                 ValidateAlbumOperations(contractCase.GetProperty("operations"), scope);
                 ValidateAlbumOperationsExpected(contractCase.GetProperty("expected"), scope);
+                break;
+
+            case "shared-settings-document":
+                ValidateSharedSettingsCase(contractCase, scope);
+                break;
+
+            case "recent-folder-authority":
+                ValidateRecentAuthorityCase(contractCase, scope);
                 break;
 
             default:
@@ -415,6 +425,136 @@ internal static class ParityContractRunner
         RequireObject(unknownMember.GetProperty("fields"), $"{scope} unknownMember fields");
     }
 
+    private static void ValidateSharedSettingsCase(JsonElement contractCase, string scope)
+    {
+        RequireProperties(
+            contractCase,
+            scope,
+            ["id", "initial", "localConfirmBeforeDelete", "operations", "expected"]);
+        ValidateInitial(contractCase.GetProperty("initial"), scope);
+        _ = contractCase.GetProperty("localConfirmBeforeDelete").GetBoolean();
+        JsonElement operations = RequireArray(
+            contractCase,
+            "operations",
+            scope,
+            requireNonEmpty: true);
+        foreach (JsonElement operation in operations.EnumerateArray())
+        {
+            RequireObject(operation, $"{scope} operation");
+            string action = RequireString(operation, "action", scope);
+            if (action == "confirm")
+            {
+                RequireProperties(operation, $"{scope} confirm operation", ["action", "value"]);
+                _ = operation.GetProperty("value").GetBoolean();
+                continue;
+            }
+            if (action == "borders")
+            {
+                RequireProperties(
+                    operation,
+                    $"{scope} borders operation",
+                    ["action", "dirty", "favorite", "enhanced"]);
+                JsonElement dirty = RequireArray(
+                    operation,
+                    "dirty",
+                    scope,
+                    requireNonEmpty: true);
+                foreach (JsonElement item in dirty.EnumerateArray())
+                {
+                    string name = item.GetString()
+                        ?? throw new InvalidDataException($"{scope} dirty entry must be a string");
+                    if (name is not ("favorite" or "enhanced"))
+                        throw new InvalidDataException($"{scope} has unknown dirty setting {name}");
+                }
+                ValidateBorderPreference(operation.GetProperty("favorite"), $"{scope} favorite");
+                ValidateBorderPreference(operation.GetProperty("enhanced"), $"{scope} enhanced");
+                continue;
+            }
+            throw new InvalidDataException($"{scope} has unknown settings action {action}");
+        }
+
+        JsonElement expected = contractCase.GetProperty("expected");
+        RequireObject(expected, $"{scope} expected");
+        RequireProperties(
+            expected,
+            $"{scope} expected",
+            [
+                "initialProtected",
+                "effectiveConfirmBeforeDelete",
+                "statuses",
+                "fileExists",
+                "bytesUnchanged",
+                "final",
+            ]);
+        _ = expected.GetProperty("initialProtected").GetBoolean();
+        _ = expected.GetProperty("effectiveConfirmBeforeDelete").GetBoolean();
+        _ = RequireArray(expected, "statuses", scope, requireNonEmpty: true);
+        _ = expected.GetProperty("fileExists").GetBoolean();
+        _ = expected.GetProperty("bytesUnchanged").GetBoolean();
+        ValidateExpectedFinalDocument(expected.GetProperty("final"), scope);
+    }
+
+    private static void ValidateBorderPreference(JsonElement preference, string scope)
+    {
+        RequireObject(preference, scope);
+        RequireProperties(preference, scope, ["enabled", "color"]);
+        _ = preference.GetProperty("enabled").GetBoolean();
+        _ = RequireString(preference, "color", scope);
+    }
+
+    private static void ValidateExpectedFinalDocument(JsonElement final, string scope)
+    {
+        RequireObject(final, $"{scope} final");
+        string mode = RequireString(final, "mode", $"{scope} final");
+        switch (mode)
+        {
+            case "missing":
+                RequireProperties(final, $"{scope} final", ["mode"]);
+                break;
+            case "raw":
+                RequireProperties(final, $"{scope} final", ["mode", "text"]);
+                _ = RequireString(final, "text", scope);
+                break;
+            case "json":
+                RequireProperties(final, $"{scope} final", ["mode", "document"]);
+                RequireObject(final.GetProperty("document"), $"{scope} final document");
+                break;
+            default:
+                throw new InvalidDataException($"{scope} has unknown final mode {mode}");
+        }
+    }
+
+    private static void ValidateRecentAuthorityCase(JsonElement contractCase, string scope)
+    {
+        RequireProperties(contractCase, scope, ["id", "initial", "localFolderSet", "expected"]);
+        ValidateInitial(contractCase.GetProperty("initial"), scope);
+        JsonElement local = RequireArray(
+            contractCase,
+            "localFolderSet",
+            scope,
+            requireNonEmpty: false);
+        foreach (JsonElement item in local.EnumerateArray())
+            _ = item.GetString() ?? throw new InvalidDataException($"{scope} local folder must be a string");
+
+        JsonElement expected = contractCase.GetProperty("expected");
+        RequireObject(expected, $"{scope} expected");
+        RequireProperties(
+            expected,
+            $"{scope} expected",
+            ["readOk", "exists", "selectedFolderSet", "fileExists", "bytesUnchanged"]);
+        _ = expected.GetProperty("readOk").GetBoolean();
+        _ = expected.GetProperty("exists").GetBoolean();
+        JsonElement selected = RequireArray(
+            expected,
+            "selectedFolderSet",
+            scope,
+            requireNonEmpty: false);
+        foreach (JsonElement item in selected.EnumerateArray())
+            _ = item.GetString() ?? throw new InvalidDataException($"{scope} expected folder must be a string");
+        _ = expected.GetProperty("fileExists").GetBoolean();
+        _ = expected.GetProperty("bytesUnchanged").GetBoolean();
+    }
+
     private static void RunCase(
         string contractId,
         string kind,
@@ -438,6 +578,12 @@ internal static class ParityContractRunner
             case "album-operations":
                 RunAlbumOperations(contractCase, scope, caseRoot, failures);
                 break;
+            case "shared-settings-document":
+                RunSharedSettingsDocument(contractCase, scope, caseRoot, failures);
+                break;
+            case "recent-folder-authority":
+                RunRecentFolderAuthority(contractCase, scope, caseRoot, failures);
+                break;
             default:
                 throw new InvalidDataException($"unsupported kind {kind}");
         }
@@ -455,6 +601,160 @@ internal static class ParityContractRunner
             Expect(failures, scope, comparisonKey == sample.GetProperty("comparisonKey").GetString(), $"sample {sampleIndex} comparisonKey mismatch");
             sampleIndex++;
         }
+    }
+
+    private static void RunSharedSettingsDocument(
+        JsonElement contractCase,
+        string scope,
+        string caseRoot,
+        List<string> failures)
+    {
+        string storePath = Path.Combine(caseRoot, "settings.json");
+        PrepareInitial(storePath, contractCase.GetProperty("initial"), caseRoot);
+        byte[]? initialBytes = ReadOptionalBytes(storePath);
+        ThumbnailStatusBorderLoadResult initial = File.Exists(storePath)
+            ? ThumbnailStatusBorderSettingsStore.Parse(File.ReadAllText(storePath))
+            : new ThumbnailStatusBorderLoadResult(
+                ThumbnailStatusBorderSettings.Default,
+                false,
+                null);
+        JsonElement expected = contractCase.GetProperty("expected");
+        bool effectiveConfirmBeforeDelete =
+            ThumbnailStatusBorderSettingsStore.ResolveEffectiveConfirmBeforeDelete(
+                contractCase.GetProperty("localConfirmBeforeDelete").GetBoolean(),
+                initial);
+        Expect(
+            failures,
+            scope,
+            initial.IsProtected == expected.GetProperty("initialProtected").GetBoolean(),
+            "initialProtected mismatch");
+        Expect(
+            failures,
+            scope,
+            effectiveConfirmBeforeDelete
+                == expected.GetProperty("effectiveConfirmBeforeDelete").GetBoolean(),
+            "effectiveConfirmBeforeDelete mismatch");
+
+        var statuses = new List<string>();
+        foreach (JsonElement operation in contractCase.GetProperty("operations").EnumerateArray())
+        {
+            string? existingJson = File.Exists(storePath)
+                ? File.ReadAllText(storePath)
+                : null;
+            string action = operation.GetProperty("action").GetString()!;
+            bool merged;
+            string mergedJson;
+            if (action == "confirm")
+            {
+                merged = ThumbnailStatusBorderSettingsStore.TryMergeConfirmBeforeDelete(
+                    existingJson,
+                    operation.GetProperty("value").GetBoolean(),
+                    out mergedJson,
+                    out _);
+            }
+            else
+            {
+                ThumbnailStatusBorderDirtyPreferences dirty =
+                    ThumbnailStatusBorderDirtyPreferences.None;
+                foreach (JsonElement name in operation.GetProperty("dirty").EnumerateArray())
+                {
+                    dirty |= name.GetString() switch
+                    {
+                        "favorite" => ThumbnailStatusBorderDirtyPreferences.Favorite,
+                        "enhanced" => ThumbnailStatusBorderDirtyPreferences.Enhanced,
+                        _ => ThumbnailStatusBorderDirtyPreferences.None,
+                    };
+                }
+                JsonElement favorite = operation.GetProperty("favorite");
+                JsonElement enhanced = operation.GetProperty("enhanced");
+                var settings = new ThumbnailStatusBorderSettings(
+                    new ThumbnailStatusBorderPreference(
+                        favorite.GetProperty("enabled").GetBoolean(),
+                        favorite.GetProperty("color").GetString()!),
+                    new ThumbnailStatusBorderPreference(
+                        enhanced.GetProperty("enabled").GetBoolean(),
+                        enhanced.GetProperty("color").GetString()!));
+                merged = ThumbnailStatusBorderSettingsStore.TryMerge(
+                    existingJson,
+                    settings,
+                    dirty,
+                    out mergedJson,
+                    out _);
+            }
+
+            statuses.Add(merged ? "Succeeded" : "Protected");
+            if (merged)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+                File.WriteAllText(storePath, mergedJson, Utf8WithoutBom);
+            }
+        }
+
+        AssertStringArray(statuses, expected.GetProperty("statuses"), scope, "statuses", failures);
+        Expect(
+            failures,
+            scope,
+            File.Exists(storePath) == expected.GetProperty("fileExists").GetBoolean(),
+            "fileExists mismatch");
+        Expect(
+            failures,
+            scope,
+            OptionalBytesEqual(initialBytes, ReadOptionalBytes(storePath))
+                == expected.GetProperty("bytesUnchanged").GetBoolean(),
+            "byte-preservation expectation failed");
+        AssertExpectedFinalDocument(
+            storePath,
+            expected.GetProperty("final"),
+            caseRoot,
+            scope,
+            failures);
+    }
+
+    private static void RunRecentFolderAuthority(
+        JsonElement contractCase,
+        string scope,
+        string caseRoot,
+        List<string> failures)
+    {
+        string storePath = Path.Combine(caseRoot, "recent-folders.json");
+        PrepareInitial(storePath, contractCase.GetProperty("initial"), caseRoot);
+        byte[]? initialBytes = ReadOptionalBytes(storePath);
+        SharedRecentReadResult read = MainWindow.ReadSharedRecentFoldersForSmoke(storePath);
+        IReadOnlyList<string> local = ReadExpandedPaths(
+            contractCase.GetProperty("localFolderSet"),
+            caseRoot);
+        IReadOnlyList<string> selected = MainWindow.ResolveStartupFolderSetForSmoke(
+            storePath,
+            local,
+            null);
+        JsonElement expected = contractCase.GetProperty("expected");
+        Expect(
+            failures,
+            scope,
+            read.Ok == expected.GetProperty("readOk").GetBoolean(),
+            "readOk mismatch");
+        Expect(
+            failures,
+            scope,
+            read.Exists == expected.GetProperty("exists").GetBoolean(),
+            "exists mismatch");
+        ExpectPathSequence(
+            failures,
+            scope,
+            selected,
+            ReadExpandedPaths(expected.GetProperty("selectedFolderSet"), caseRoot),
+            "selectedFolderSet");
+        Expect(
+            failures,
+            scope,
+            File.Exists(storePath) == expected.GetProperty("fileExists").GetBoolean(),
+            "fileExists mismatch");
+        Expect(
+            failures,
+            scope,
+            OptionalBytesEqual(initialBytes, ReadOptionalBytes(storePath))
+                == expected.GetProperty("bytesUnchanged").GetBoolean(),
+            "byte-preservation expectation failed");
     }
 
     private static void RunSearchDocument(JsonElement contractCase, string scope, string caseRoot, List<string> failures)
@@ -816,6 +1116,57 @@ internal static class ParityContractRunner
         }
         using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(path));
         AssertUnknownObject(document.RootElement, expected, known, scope, "unknownRoot", failures);
+    }
+
+    private static void AssertExpectedFinalDocument(
+        string path,
+        JsonElement expectedFinal,
+        string caseRoot,
+        string scope,
+        List<string> failures)
+    {
+        string mode = expectedFinal.GetProperty("mode").GetString()!;
+        if (mode == "missing")
+        {
+            Expect(failures, scope, !File.Exists(path), "expected final document to be missing");
+            return;
+        }
+        if (!File.Exists(path))
+        {
+            failures.Add($"{scope}: expected final document is missing");
+            return;
+        }
+        if (mode == "raw")
+        {
+            Expect(
+                failures,
+                scope,
+                string.Equals(
+                    File.ReadAllText(path),
+                    expectedFinal.GetProperty("text").GetString(),
+                    StringComparison.Ordinal),
+                "final raw bytes mismatch");
+            return;
+        }
+
+        using JsonDocument actual = JsonDocument.Parse(File.ReadAllBytes(path));
+        JsonElement expandedExpected = ExpandJsonElement(
+            expectedFinal.GetProperty("document"),
+            caseRoot);
+        Expect(
+            failures,
+            scope,
+            JsonEquivalent(actual.RootElement, expandedExpected),
+            "final JSON document mismatch");
+    }
+
+    private static JsonElement ExpandJsonElement(JsonElement element, string caseRoot)
+    {
+        JsonNode node = JsonNode.Parse(element.GetRawText())
+            ?? throw new InvalidDataException("expected JSON document was null");
+        ExpandPlaceholders(node, caseRoot);
+        using JsonDocument document = JsonDocument.Parse(node.ToJsonString());
+        return document.RootElement.Clone();
     }
 
     private static void AssertUnknownObject(

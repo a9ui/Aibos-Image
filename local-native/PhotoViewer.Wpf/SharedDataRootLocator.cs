@@ -48,29 +48,52 @@ internal static class SharedDataRootLocator
 
     internal static SharedDataRootResolution ResolveForCurrentProcess(string legacyDataRoot)
     {
-        string locatorPath;
-        string? overridePath = Environment.GetEnvironmentVariable(
-            LocatorPathEnvironmentVariable);
-        if (overridePath is not null)
+        if (!TryGetSelectedLocatorPathForCurrentProcess(
+                out string locatorPath,
+                out string? errorCode,
+                out string? error))
         {
-            locatorPath = overridePath;
+            return Unavailable(
+                locatorPath,
+                errorCode ?? "locator-path-unavailable",
+                error ?? "The shared data root locator path is unavailable.");
         }
-        else
+        return Resolve(locatorPath, legacyDataRoot);
+    }
+
+    internal static bool TryGetSelectedLocatorPathForCurrentProcess(
+        out string locatorPath,
+        out string? errorCode,
+        out string? error)
+    {
+        locatorPath = "";
+        errorCode = null;
+        error = null;
+
+        string? selected = Environment.GetEnvironmentVariable(
+            LocatorPathEnvironmentVariable);
+        if (selected is null)
         {
             try
             {
-                locatorPath = GetDefaultLocatorPath();
+                selected = GetDefaultLocatorPath();
             }
             catch
             {
-                return Unavailable(
-                    "",
-                    "locator-path-unavailable",
-                    "The shared data root locator path is unavailable.");
+                errorCode = "locator-path-unavailable";
+                error = "The shared data root locator path is unavailable.";
+                return false;
             }
         }
 
-        return Resolve(locatorPath, legacyDataRoot);
+        if (!TryNormalizeAbsolutePath(selected, out locatorPath))
+        {
+            errorCode = "locator-path-invalid";
+            error = "The shared data root locator path must be fully qualified.";
+            return false;
+        }
+
+        return true;
     }
 
     internal static SharedDataRootResolution Resolve(
@@ -273,7 +296,7 @@ internal static class SharedDataRootLocator
             errorCode,
             error);
 
-    private static bool TryNormalizeAbsolutePath(
+    internal static bool TryNormalizeAbsolutePath(
         string? candidate,
         out string normalized)
     {
