@@ -18,7 +18,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         int parityContractSmokeIdx = Array.IndexOf(e.Args, "--parity-contract-smoke");
-        if (parityContractSmokeIdx < 0 && IsAutomationInvocation(e.Args))
+        int sharedRootLocatorSmokeIdx = Array.IndexOf(e.Args, "--shared-root-locator-smoke");
+        if (parityContractSmokeIdx < 0
+            && sharedRootLocatorSmokeIdx < 0
+            && IsAutomationInvocation(e.Args))
         {
             try
             {
@@ -635,6 +638,17 @@ public partial class App : Application
         if (sharedProjectRootSmokeIdx >= 0 && sharedProjectRootSmokeIdx + 1 < e.Args.Length)
         {
             CaptureSharedProjectRootSmoke(e.Args[sharedProjectRootSmokeIdx + 1], e.Args);
+            return;
+        }
+
+        if (sharedRootLocatorSmokeIdx >= 0 && sharedRootLocatorSmokeIdx + 1 < e.Args.Length)
+        {
+            int exitCode = SharedDataRootLocatorContractRunner.Run(
+                ArgValue(e.Args, "--contract"),
+                ArgValue(e.Args, "--temp-root"),
+                e.Args[sharedRootLocatorSmokeIdx + 1]);
+            Environment.ExitCode = exitCode;
+            Shutdown(exitCode);
             return;
         }
 

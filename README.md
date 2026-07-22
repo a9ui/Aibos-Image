@@ -55,11 +55,17 @@ not move, merge, initialize, rewrite, or delete existing state. A read-only
 ledger and a versioned, repository-independent locator will be introduced in
 separate reviewed changes before either application changes its write target.
 
+The locator v1 candidate is intentionally reader-only. It validates
+`contracts/shared-root-locator-v1.json` without creating a locator or changing
+any production read/write target. Activation waits for the independently
+versioned H25 Browser reader to pass the same fixture.
+
 ## Verification
 
 ```powershell
 dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-album-library-hardening.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-enhancement-actions.ps1
 ```

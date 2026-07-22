@@ -78,6 +78,55 @@ and does not move, merge, initialize, rewrite, or delete existing user state.
 Root discovery and schema rollout require a read-only ledger and separate
 reviewed changes.
 
+### `PV-ROOT-001` — Shared data root locator
+
+The locator protocol is a reader-first compatibility contract. Its default
+location is %LOCALAPPDATA%\Aibos Image\shared-root.v1.json. Installers and
+isolated tests may select a different locator file with
+AIBOS_SHARED_ROOT_LOCATOR_PATH. A set but invalid override fails closed; it
+does not fall through to the default locator.
+
+The version 1 locator is UTF-8 JSON no larger than 65,536 bytes:
+
+    {
+      "schemaVersion": 1,
+      "sharedDataRoot": "<fully-qualified existing directory>"
+    }
+
+sharedDataRoot names the data directory that directly contains favorites.json,
+seen.json, settings.json, albums.json, search-history.json, and
+recent-folders.json, plus enhance/jobs.json and enhance/outputs/**. It is not a
+repository root. It may therefore point at an existing legacy .cache directory
+without copying or rewriting any durable data.
+
+- Both required fields occur exactly once. Duplicate required fields,
+  malformed JSON, unsupported versions, relative roots, unavailable roots, and
+  file-valued roots are rejected.
+- Readers apply ordinary absolute-path normalization and remove a trailing
+  directory separator except at the volume root, so independent application
+  locations resolve the same locator to the same lexical root.
+- Unknown fields in a supported version are ignored by readers.
+- Existing per-store test overrides retain highest precedence. The locator-path
+  override is next, followed by the default locator. The legacy repository
+  data root is used only when the selected locator file is genuinely absent.
+- A reader does not create the locator, root, directories, or stores and does
+  not probe writability. The resolved root is fixed for the process lifetime
+  when activation is introduced.
+- The locator contains no credentials, network endpoint, dynamic companion
+  port, renderer state, index path, thumbnail cache, or migration instruction.
+
+The canonical fixture is contracts/shared-root-locator-v1.json. The first
+rollout implements and verifies readers only. Production store paths and
+writers remain on their legacy targets until exact Aibos and H25 revisions
+both pass that fixture and a separately reviewed activation gate.
+Any later locator writer must preserve supported unknown fields and use the
+shared lock plus same-volume atomic replacement; application startup never
+writes the locator.
+Activation additionally requires a process-lifetime reader lease and exclusive
+writer lease, plus a two-process missing/create/replace test. Until that gate is
+green, the locator is not created or changed while either application is
+running.
+
 ### `PV-SH-001` — Search History identity
 
 - Browser and WPF normalize comma-separated query tokens with the same explicit

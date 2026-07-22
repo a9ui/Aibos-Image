@@ -44,6 +44,10 @@ jobs:
         shell: pwsh
         run: dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
 
+      - name: Shared data root locator contract
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1
+
       - name: Modal interaction smoke
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
