@@ -14,16 +14,6 @@ try {
         throw "WPF Album store Release build failed with exit code $LASTEXITCODE"
     }
 
-    & corepack pnpm vitest run `
-        src/lib/albums.test.ts `
-        src/lib/albums.scale.test.ts `
-        src/lib/albumSource.test.ts `
-        src/app/api/albums/route.test.ts `
-        src/lib/albums.crossRuntime.test.ts
-    if ($LASTEXITCODE -ne 0) {
-        throw "Browser/WPF Album store verifier failed with exit code $LASTEXITCODE"
-    }
-
     New-Item -ItemType Directory -Path $albumUiRoot | Out-Null
     $albumUiResultPath = Join-Path $albumUiRoot 'result.json'
     $albumUiStorePath = Join-Path $albumUiRoot 'albums.json'
@@ -51,12 +41,8 @@ finally {
 [pscustomobject]@{
     ok = $true
     releaseBuild = $true
-    browserWpfInterleaving = $true
-    simultaneousBrowserWpfWriters = $true
-    malformedAndFutureProtected = $true
-    revisionConflictProtected = $true
-    unknownFieldsPreserved = $true
-    lockAndTempResidueAbsent = $true
+    runtime = 'wpf'
+    browserCompatibilityNotRun = $true
     wpfUiContract = [bool]$albumUiResult.uiContract
     wpfCurrentOutsideMissing = [bool]$albumUiResult.unavailableExplicit
     activeAvailabilityCancellation = [bool]$albumUiResult.activeAvailabilityCancellation

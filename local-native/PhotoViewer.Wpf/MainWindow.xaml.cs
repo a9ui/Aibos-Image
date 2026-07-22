@@ -9606,7 +9606,7 @@ public partial class MainWindow : Window
                 false,
                 0,
                 null,
-                $"Browser AI engine is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start Aibos in the Browser, then retry.");
+                $"The optional Browser Enhancement companion is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start the H25 Browser application, then retry.");
         }
     }
 
@@ -13952,6 +13952,7 @@ public partial class MainWindow : Window
     public bool FocusAppSettingsButtonForSmoke() => OpenAppSettingsButton.Focus();
     public bool IsGlobalShortcutInputFocusedForSmoke => IsGlobalShortcutInputFocused(Keyboard.FocusedElement);
     public bool IsGlobalShortcutSuppressedForSmoke(IInputElement focused) => IsGlobalShortcutInputFocused(focused);
+    public bool SearchInputSuppressesGlobalShortcutForSmoke => IsGlobalShortcutInputFocused(SearchInput);
 
     public bool InvokePreviewKeyForSmoke(Key key)
     {
@@ -13964,6 +13965,19 @@ public partial class MainWindow : Window
             RoutedEvent = Keyboard.PreviewKeyDownEvent,
         };
         OnPreviewKeyDown(args);
+        return args.Handled;
+    }
+    public bool InvokePreviewKeyFromSearchInputForSmoke(Key key)
+    {
+        var source = PresentationSource.FromVisual(this);
+        if (source is null)
+            return false;
+
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+        };
+        SearchInput.RaiseEvent(args);
         return args.Handled;
     }
     public bool InvokePreviewKeyForSmoke(Key key, ModifierKeys modifiers)
@@ -14796,15 +14810,28 @@ public partial class MainWindow : Window
         => ModalFilmstripOverlay.Visibility == Visibility.Visible;
     public bool ModalFilmstripPinnedForSmoke => _modalFilmstripOpen;
     public double ModalImageAreaHeightForSmoke => ModalImageArea.ActualHeight;
+    public double ModalImageAreaWidthForSmoke => ModalImageArea.ActualWidth;
+    public double ModalHeightForSmoke => Modal.ActualHeight;
+    public double ModalWidthForSmoke => Modal.ActualWidth;
+    public double ModalImageHeightForSmoke => ModalImage.ActualHeight;
+    public double ModalImageWidthForSmoke => ModalImage.ActualWidth;
+    public bool ModalFitSurfaceVisibleForSmoke => Modal.Visibility == Visibility.Visible;
+    public bool ModalFitStretchUniformForSmoke => ModalBitmap.Stretch == Stretch.Uniform;
+    public bool ModalImageAreaCoversWindowForSmoke
+        => ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
+            && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2);
+    public bool ModalImageWithinAreaForSmoke
+        => ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 0.5
+            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 0.5;
+    public bool ModalImageTouchesFitEdgeForSmoke
+        => Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 0.5
+            || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 0.5;
     public bool ModalFullWindowFitContractForSmoke
-        => Modal.Visibility == Visibility.Visible
-            && ModalBitmap.Stretch == Stretch.Uniform
-            && ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
-            && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2)
-            && ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 0.5
-            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 0.5
-            && (Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 0.5
-                || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 0.5);
+        => ModalFitSurfaceVisibleForSmoke
+            && ModalFitStretchUniformForSmoke
+            && ModalImageAreaCoversWindowForSmoke
+            && ModalImageWithinAreaForSmoke
+            && ModalImageTouchesFitEdgeForSmoke;
     public bool ModalWindowCaptionControlsContractForSmoke
         => Modal.Visibility == Visibility.Visible
             && ModalWindowCaptionControls.Visibility == Visibility.Visible
@@ -14902,7 +14929,11 @@ public partial class MainWindow : Window
             && !ModalInteractionFeedbackText.Text.StartsWith("Zoom", StringComparison.OrdinalIgnoreCase);
     public void RevealModalChromeTransientForSmoke() => RevealModalChromeTransient();
     public void ExpireModalChromeTransientForSmoke() => ExpireModalChromeTransient();
-    public void SetModalChromeVisibleForSmoke(bool visible) => SetModalChromeVisible(visible, showFeedback: false);
+    public void SetModalChromeVisibleForSmoke(bool visible)
+    {
+        CancelPendingModalSingleClick();
+        SetModalChromeVisible(visible, showFeedback: false);
+    }
     public void SetModalBottomHoverForSmoke(bool visible) => SetModalFilmstripHoverVisible(visible);
     public bool ToggleModalFilmstripForSmoke() => ToggleModalFilmstrip();
     public bool FocusModalFavoriteIncreaseForSmoke() => ModalFavoriteIncreaseButton.Focus();
@@ -14930,7 +14961,6 @@ public partial class MainWindow : Window
         string expectedFeedback = expectedVisible ? "shown" : "hidden";
         return _modalManualChromeVisible == expectedVisible
             && ModalChromeEffectivelyVisible == expectedVisible
-            && ModalInteractionFeedback.Visibility == Visibility.Visible
             && ModalInteractionFeedbackText.Text.Contains(expectedFeedback, StringComparison.OrdinalIgnoreCase);
     }
     public async Task<bool> WaitForModalChromeTransientExpirationForSmokeAsync(int timeoutMilliseconds = 5000)

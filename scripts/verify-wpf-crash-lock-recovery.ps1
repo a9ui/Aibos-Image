@@ -16,7 +16,6 @@ if (-not $fullRoot.StartsWith($tempBase + [IO.Path]::DirectorySeparatorChar, [St
 
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net8.0-windows\PhotoViewer.Wpf.exe"
-$pnpm = (Get-Command pnpm.cmd -ErrorAction Stop).Source
 $failures = [Collections.Generic.List[string]]::new()
 
 function Start-Wpf([string[]]$Arguments) {
@@ -51,26 +50,6 @@ function Invoke-Recovery([string]$Kind, [string]$Target, [string]$Key, [string]$
         '--key', $Key
     )
     return Wait-Wpf $process
-}
-
-function Invoke-PnpmVitest([string]$TestPath) {
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        # Windows PowerShell converts redirected native stderr into ErrorRecord
-        # objects. Keep those as verifier evidence and judge the worker by its
-        # real process exit code instead of aborting before $LASTEXITCODE can be
-        # inspected.
-        $ErrorActionPreference = 'Continue'
-        $output = & $pnpm exec vitest run $TestPath --reporter=dot 2>&1
-        $exitCode = $LASTEXITCODE
-        return [pscustomobject]@{
-            ExitCode = $exitCode
-            Output = @($output | ForEach-Object { $_.ToString() })
-        }
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
 }
 
 function Fingerprint([string]$Path) {
@@ -261,7 +240,7 @@ try {
         Assert-NoResidue $scenarioRoot $target
     }
 
-    $sharedRoot = Join-Path $fullRoot 'three-owner-shared-state'
+    $sharedRoot = Join-Path $fullRoot 'three-wpf-owner-shared-state'
     New-Item -ItemType Directory -Force -Path $sharedRoot | Out-Null
     $favoritesPath = Join-Path $sharedRoot 'favorites.json'
     $seenPath = Join-Path $sharedRoot 'seen.json'
@@ -269,72 +248,65 @@ try {
     $wpfBResult = Join-Path $sharedRoot 'wpf-b.json'
     $wpfAKeys = Join-Path $sharedRoot 'wpf-a-keys'
     $wpfBKeys = Join-Path $sharedRoot 'wpf-b-keys'
-    $browserKeys = Join-Path $sharedRoot 'browser-keys'
+    $wpfCResult = Join-Path $sharedRoot 'wpf-c.json'
+    $wpfCKeys = Join-Path $sharedRoot 'wpf-c-keys'
     $wpfA = Start-Wpf @('--cross-runtime-shared-state-smoke', $wpfAResult, '--favorites-path', $favoritesPath, '--seen-path', $seenPath, '--key-root', $wpfAKeys, '--iterations', $Iterations)
     $wpfB = Start-Wpf @('--cross-runtime-shared-state-smoke', $wpfBResult, '--favorites-path', $favoritesPath, '--seen-path', $seenPath, '--key-root', $wpfBKeys, '--iterations', $Iterations)
-    $env:PVU_FAVORITES_PATH = $favoritesPath
-    $env:PVU_SEEN_PATH = $seenPath
-    $env:CROSS_RUNTIME_KEY_ROOT = $browserKeys
-    $env:CROSS_RUNTIME_ITERATIONS = $Iterations.ToString([Globalization.CultureInfo]::InvariantCulture)
-    $browserSharedRun = Invoke-PnpmVitest 'src/app/api/crossRuntimeSharedState.worker.test.ts'
-    $browserSharedOutput = $browserSharedRun.Output
-    $browserSharedExit = $browserSharedRun.ExitCode
+    $wpfC = Start-Wpf @('--cross-runtime-shared-state-smoke', $wpfCResult, '--favorites-path', $favoritesPath, '--seen-path', $seenPath, '--key-root', $wpfCKeys, '--iterations', $Iterations)
     $wpfAExit = Wait-Wpf $wpfA
     $wpfBExit = Wait-Wpf $wpfB
-    if ($browserSharedExit -ne 0 -or $wpfAExit -ne 0 -or $wpfBExit -ne 0) {
-        throw "three-owner shared-state workers failed: Browser=$browserSharedExit WPF-A=$wpfAExit WPF-B=$wpfBExit $($browserSharedOutput -join [Environment]::NewLine)"
+    $wpfCExit = Wait-Wpf $wpfC
+    if ($wpfAExit -ne 0 -or $wpfBExit -ne 0 -or $wpfCExit -ne 0) {
+        throw "three WPF shared-state workers failed: WPF-A=$wpfAExit WPF-B=$wpfBExit WPF-C=$wpfCExit"
     }
     $favorites = Get-Content -Raw -LiteralPath $favoritesPath | ConvertFrom-Json
     $seen = Get-Content -Raw -LiteralPath $seenPath | ConvertFrom-Json
     if (@($favorites.PSObject.Properties).Count -ne ($Iterations * 3) -or @($seen.PSObject.Properties).Count -ne ($Iterations * 3)) {
-        $failures.Add('two WPF processes plus Browser did not preserve every disjoint favorite/seen update')
+        $failures.Add('three WPF processes did not preserve every disjoint favorite/seen update')
     }
     Assert-NoResidue $sharedRoot $favoritesPath
     Assert-NoResidue $sharedRoot $seenPath
 
-    $recentRoot = Join-Path $fullRoot 'four-owner-recent'
+    $recentRoot = Join-Path $fullRoot 'four-wpf-owner-recent'
     New-Item -ItemType Directory -Force -Path $recentRoot | Out-Null
     $recentPath = Join-Path $recentRoot 'recent-folders.json'
     @{ version = 1; lastFolderSet = @(); recentFolderSets = @(); updatedAtUtc = '2026-07-18T00:00:00.000Z'; futureRecent = @{ keep = $true } } |
         ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $recentPath -Encoding utf8
     $recentAKeys = Join-Path $recentRoot 'wpf-a-keys'
     $recentBKeys = Join-Path $recentRoot 'wpf-b-keys'
-    $recentBrowserKeys = Join-Path $recentRoot 'browser-keys'
+    $recentCKeys = Join-Path $recentRoot 'wpf-c-keys'
+    $recentDKeys = Join-Path $recentRoot 'wpf-d-keys'
     $recentA = Start-Wpf @('--cross-runtime-recent-smoke', (Join-Path $recentRoot 'wpf-a.json'), '--recent-path', $recentPath, '--key-root', $recentAKeys, '--iterations', $Iterations)
     $recentB = Start-Wpf @('--cross-runtime-recent-smoke', (Join-Path $recentRoot 'wpf-b.json'), '--recent-path', $recentPath, '--key-root', $recentBKeys, '--iterations', $Iterations)
-    $env:PVU_RECENT_FOLDERS_PATH = $recentPath
-    $env:CROSS_RUNTIME_KEY_ROOT = $recentBrowserKeys
-    $browserRecentRun = Invoke-PnpmVitest 'src/app/api/crossRuntimeRecent.worker.test.ts'
-    $browserRecentOutput = $browserRecentRun.Output
-    $browserRecentExit = $browserRecentRun.ExitCode
+    $recentC = Start-Wpf @('--cross-runtime-recent-smoke', (Join-Path $recentRoot 'wpf-c.json'), '--recent-path', $recentPath, '--key-root', $recentCKeys, '--iterations', $Iterations)
+    $recentD = Start-Wpf @('--cross-runtime-recent-smoke', (Join-Path $recentRoot 'wpf-d.json'), '--recent-path', $recentPath, '--key-root', $recentDKeys, '--iterations', $Iterations)
     $recentAExit = Wait-Wpf $recentA
     $recentBExit = Wait-Wpf $recentB
-    if ($browserRecentExit -ne 0 -or $recentAExit -ne 0 -or $recentBExit -ne 0) {
-        throw "four-owner recent workers failed: Browser=$browserRecentExit WPF-A=$recentAExit WPF-B=$recentBExit $($browserRecentOutput -join [Environment]::NewLine)"
+    $recentCExit = Wait-Wpf $recentC
+    $recentDExit = Wait-Wpf $recentD
+    if ($recentAExit -ne 0 -or $recentBExit -ne 0 -or $recentCExit -ne 0 -or $recentDExit -ne 0) {
+        throw "four WPF recent workers failed: WPF-A=$recentAExit WPF-B=$recentBExit WPF-C=$recentCExit WPF-D=$recentDExit"
     }
     $recent = Get-Content -Raw -LiteralPath $recentPath | ConvertFrom-Json
     $recentSets = @($recent.recentFolderSets | ForEach-Object { @($_) -join "`n" })
     $expectedMarkers = @(
         [IO.Path]::GetFullPath((Join-Path $recentAKeys 'wpf-latest')),
         [IO.Path]::GetFullPath((Join-Path $recentBKeys 'wpf-latest')),
-        [IO.Path]::GetFullPath((Join-Path $recentBrowserKeys 'browser-latest')),
-        [IO.Path]::GetFullPath((Join-Path $recentBrowserKeys 'third-latest'))
+        [IO.Path]::GetFullPath((Join-Path $recentCKeys 'wpf-latest')),
+        [IO.Path]::GetFullPath((Join-Path $recentDKeys 'wpf-latest'))
     )
     if ($recent.futureRecent.keep -ne $true -or @($recent.recentFolderSets).Count -gt 12 -or
         @($expectedMarkers | Where-Object { $_ -notin $recentSets }).Count -ne 0) {
-        $failures.Add('two WPF processes plus Browser/third writer lost recent owners, cap, or unknown fields')
+        $failures.Add('four WPF processes lost recent owners, cap, or unknown fields')
     }
     Assert-NoResidue $recentRoot $recentPath
 
-    $browserLockRun = Invoke-PnpmVitest 'src/lib/fileWriteLock.test.ts'
-    $browserLockOutput = $browserLockRun.Output
-    if ($browserLockRun.ExitCode -ne 0) { throw "Browser shared-lock unit gate failed: $($browserLockOutput -join [Environment]::NewLine)" }
     if ($failures.Count -gt 0) { throw ($failures -join '; ') }
 
     Remove-Item -LiteralPath $fullRoot -Recurse -Force
     [pscustomobject]@{
         ok = $true
-        message = 'Actual WPF crash processes proved fresh and stale legacy locks fail closed; explicit TEMP-owned cleanup, residue cleanup, schema protection, and concurrent Browser/WPF writers passed.'
+        message = 'Actual WPF crash processes proved fresh and stale legacy locks fail closed; explicit TEMP-owned cleanup, residue cleanup, schema protection, and concurrent WPF writers passed.'
         iterations = $Iterations
         crashRecoveries = $explicitCrashRecoveries
         explicitCrashRecoveries = $explicitCrashRecoveries
@@ -352,15 +324,11 @@ try {
         tempResidue = 0
         tempRootRemoved = -not (Test-Path -LiteralPath $fullRoot)
         browserPortUsed = $false
+        browserCompatibilityNotRun = $true
         sourceOrUserCacheTouched = $false
     } | ConvertTo-Json -Depth 5
 }
 finally {
-    Remove-Item Env:PVU_FAVORITES_PATH -ErrorAction SilentlyContinue
-    Remove-Item Env:PVU_SEEN_PATH -ErrorAction SilentlyContinue
-    Remove-Item Env:PVU_RECENT_FOLDERS_PATH -ErrorAction SilentlyContinue
-    Remove-Item Env:CROSS_RUNTIME_KEY_ROOT -ErrorAction SilentlyContinue
-    Remove-Item Env:CROSS_RUNTIME_ITERATIONS -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $fullRoot) {
         Remove-Item -LiteralPath $fullRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
