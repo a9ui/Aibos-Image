@@ -180,27 +180,35 @@ never the locator, shared root, store directories, or stores.
 
 ### `PV-SET-001` — Shared settings protection
 
+- The document is strict UTF-8, with either no BOM or one leading UTF-8 BOM,
+  and is no larger than 1,048,576 bytes including any BOM. UTF-16, UTF-32,
+  invalid UTF-8, and oversized documents are protected. Canonical writers emit
+  UTF-8 without a BOM and refuse any merged result above the same byte limit.
 - Versionless and `version: 1` documents are supported; any other present
   version is protected.
 - `confirmBeforeDelete` and each dirty thumbnail-border preference are separate
   owned semantic units. Writers lock, reread, merge only those leaves, validate
   the result, and atomically replace the latest supported document.
-- Existing malformed, empty, whitespace-only, future, or invalid-known-field
-  documents remain byte-identical and make delete confirmation fail safe to
-  enabled in memory. Missing or an absent field is distinct and uses the local
-  migration fallback; a missing document may initialize only the explicitly
-  changed owned leaf.
+- Existing malformed, empty, whitespace-only, future, invalid-encoding,
+  oversized, or invalid-known-field documents remain byte-identical and make
+  delete confirmation fail safe to enabled in memory. Missing or an absent
+  field is distinct and uses the local migration fallback; a missing document
+  may initialize only the explicitly changed owned leaf.
 - Compatible unknown root/nested fields and renderer-local key bindings survive
   every supported mutation.
 
 ### `PV-REC-001` — Recent-folder startup authority
 
+- The document uses the same strict UTF-8, optional single UTF-8 BOM, and
+  1,048,576-byte boundary as `PV-SET-001`. Canonical writers emit UTF-8 without
+  a BOM and refuse a merged document above that boundary.
 - A present supported shared document wins over renderer-local last-folder
   state, including when its `lastFolderSet` is explicitly empty.
 - A genuinely missing shared document uses the local migration fallback without
   creating a shared file.
-- A malformed, unreadable, or unsupported-future shared document uses the local
-  recovery fallback without changing the protected bytes.
+- A malformed, unreadable, invalid-encoding, oversized, or unsupported-future
+  shared document uses the local recovery fallback without changing the
+  protected bytes.
 - Shared recent-folder writers continue to lock, reread, preserve unknown root
   fields, and merge the newest folder set as one semantic unit.
 

@@ -230,6 +230,42 @@ internal static class ParityContractRunner
                 RequireProperties(initial, $"{scope} initial", ["mode", "document"]);
                 RequireObject(initial.GetProperty("document"), $"{scope} initial document");
                 break;
+            case "bytes-base64":
+                RequireProperties(initial, $"{scope} initial", ["mode", "base64"]);
+                byte[] decoded;
+                try
+                {
+                    decoded = Convert.FromBase64String(
+                        RequireString(initial, "base64", scope));
+                }
+                catch (FormatException ex)
+                {
+                    throw new InvalidDataException(
+                        $"{scope} initial base64 is invalid",
+                        ex);
+                }
+                if (decoded.Length > SharedJsonDocumentReader.MaxDocumentBytes + 1)
+                    throw new InvalidDataException($"{scope} initial byte fixture is too large");
+                break;
+            case "generated-utf8":
+                RequireProperties(
+                    initial,
+                    $"{scope} initial",
+                    ["mode", "byteLength", "prefix", "fillByte", "suffix"]);
+                int byteLength = RequireNonNegativeInt(initial, "byteLength", scope);
+                string prefix = RequireString(initial, "prefix", scope);
+                string suffix = RequireString(initial, "suffix", scope);
+                int fillByte = RequireNonNegativeInt(initial, "fillByte", scope);
+                if (byteLength > SharedJsonDocumentReader.MaxDocumentBytes + 1)
+                    throw new InvalidDataException($"{scope} generated fixture is too large");
+                if (fillByte > 0x7F)
+                    throw new InvalidDataException($"{scope} fillByte must be ASCII");
+                if (Utf8WithoutBom.GetByteCount(prefix) != prefix.Length
+                    || Utf8WithoutBom.GetByteCount(suffix) != suffix.Length)
+                    throw new InvalidDataException($"{scope} generated fixture framing must be ASCII");
+                if (byteLength < prefix.Length + suffix.Length)
+                    throw new InvalidDataException($"{scope} generated fixture is shorter than its framing");
+                break;
             default:
                 throw new InvalidDataException($"{scope} has unknown initial mode {mode}");
         }
@@ -519,6 +555,36 @@ internal static class ParityContractRunner
                 RequireProperties(final, $"{scope} final", ["mode", "document"]);
                 RequireObject(final.GetProperty("document"), $"{scope} final document");
                 break;
+            case "bytes-base64":
+                RequireProperties(final, $"{scope} final", ["mode", "base64"]);
+                try
+                {
+                    _ = Convert.FromBase64String(
+                        RequireString(final, "base64", scope));
+                }
+                catch (FormatException ex)
+                {
+                    throw new InvalidDataException(
+                        $"{scope} final base64 is invalid",
+                        ex);
+                }
+                break;
+            case "generated-utf8":
+                RequireProperties(
+                    final,
+                    $"{scope} final",
+                    ["mode", "byteLength", "prefix", "fillByte", "suffix"]);
+                int byteLength = RequireNonNegativeInt(final, "byteLength", scope);
+                string prefix = RequireString(final, "prefix", scope);
+                string suffix = RequireString(final, "suffix", scope);
+                int fillByte = RequireNonNegativeInt(final, "fillByte", scope);
+                if (byteLength > SharedJsonDocumentReader.MaxDocumentBytes + 1
+                    || fillByte > 0x7F
+                    || Utf8WithoutBom.GetByteCount(prefix) != prefix.Length
+                    || Utf8WithoutBom.GetByteCount(suffix) != suffix.Length
+                    || byteLength < prefix.Length + suffix.Length)
+                    throw new InvalidDataException($"{scope} final generated fixture is invalid");
+                break;
             default:
                 throw new InvalidDataException($"{scope} has unknown final mode {mode}");
         }
@@ -526,7 +592,11 @@ internal static class ParityContractRunner
 
     private static void ValidateRecentAuthorityCase(JsonElement contractCase, string scope)
     {
-        RequireProperties(contractCase, scope, ["id", "initial", "localFolderSet", "expected"]);
+        RequireProperties(
+            contractCase,
+            scope,
+            ["id", "initial", "localFolderSet", "expected"],
+            ["operations"]);
         ValidateInitial(contractCase.GetProperty("initial"), scope);
         JsonElement local = RequireArray(
             contractCase,
@@ -535,13 +605,29 @@ internal static class ParityContractRunner
             requireNonEmpty: false);
         foreach (JsonElement item in local.EnumerateArray())
             _ = item.GetString() ?? throw new InvalidDataException($"{scope} local folder must be a string");
+        if (contractCase.TryGetProperty("operations", out JsonElement operations))
+        {
+            foreach (JsonElement operation in RequireArray(
+                         contractCase,
+                         "operations",
+                         scope,
+                         requireNonEmpty: true).EnumerateArray())
+            {
+                RequireObject(operation, $"{scope} operation");
+                RequireProperties(operation, $"{scope} operation", ["action", "folder"]);
+                if (RequireString(operation, "action", scope) != "merge")
+                    throw new InvalidDataException($"{scope} has an unsupported Recent operation");
+                _ = RequireString(operation, "folder", scope);
+            }
+        }
 
         JsonElement expected = contractCase.GetProperty("expected");
         RequireObject(expected, $"{scope} expected");
         RequireProperties(
             expected,
             $"{scope} expected",
-            ["readOk", "exists", "selectedFolderSet", "fileExists", "bytesUnchanged"]);
+            ["readOk", "exists", "selectedFolderSet", "fileExists", "bytesUnchanged"],
+            ["statuses", "canonicalUtf8WithoutBom", "unknownRoot"]);
         _ = expected.GetProperty("readOk").GetBoolean();
         _ = expected.GetProperty("exists").GetBoolean();
         JsonElement selected = RequireArray(
@@ -553,6 +639,12 @@ internal static class ParityContractRunner
             _ = item.GetString() ?? throw new InvalidDataException($"{scope} expected folder must be a string");
         _ = expected.GetProperty("fileExists").GetBoolean();
         _ = expected.GetProperty("bytesUnchanged").GetBoolean();
+        if (expected.TryGetProperty("statuses", out JsonElement statuses))
+            ValidateStringArray(statuses, $"{scope} statuses");
+        if (expected.TryGetProperty("canonicalUtf8WithoutBom", out _))
+            RequireBoolean(expected, "canonicalUtf8WithoutBom", scope);
+        if (expected.TryGetProperty("unknownRoot", out JsonElement unknownRoot))
+            RequireObject(unknownRoot, $"{scope} expected unknownRoot");
     }
 
     private static void RunCase(
@@ -612,12 +704,8 @@ internal static class ParityContractRunner
         string storePath = Path.Combine(caseRoot, "settings.json");
         PrepareInitial(storePath, contractCase.GetProperty("initial"), caseRoot);
         byte[]? initialBytes = ReadOptionalBytes(storePath);
-        ThumbnailStatusBorderLoadResult initial = File.Exists(storePath)
-            ? ThumbnailStatusBorderSettingsStore.Parse(File.ReadAllText(storePath))
-            : new ThumbnailStatusBorderLoadResult(
-                ThumbnailStatusBorderSettings.Default,
-                false,
-                null);
+        ThumbnailStatusBorderLoadResult initial =
+            ThumbnailStatusBorderSettingsStore.Read(storePath);
         JsonElement expected = contractCase.GetProperty("expected");
         bool effectiveConfirmBeforeDelete =
             ThumbnailStatusBorderSettingsStore.ResolveEffectiveConfirmBeforeDelete(
@@ -638,9 +726,14 @@ internal static class ParityContractRunner
         var statuses = new List<string>();
         foreach (JsonElement operation in contractCase.GetProperty("operations").EnumerateArray())
         {
-            string? existingJson = File.Exists(storePath)
-                ? File.ReadAllText(storePath)
-                : null;
+            if (!ThumbnailStatusBorderSettingsStore.TryReadExistingJson(
+                    storePath,
+                    out string? existingJson,
+                    out _))
+            {
+                statuses.Add("Protected");
+                continue;
+            }
             string action = operation.GetProperty("action").GetString()!;
             bool merged;
             string mergedJson;
@@ -744,6 +837,23 @@ internal static class ParityContractRunner
             selected,
             ReadExpandedPaths(expected.GetProperty("selectedFolderSet"), caseRoot),
             "selectedFolderSet");
+        if (contractCase.TryGetProperty("operations", out JsonElement operations))
+        {
+            var statuses = new List<string>();
+            foreach (JsonElement operation in operations.EnumerateArray())
+            {
+                bool merged = MainWindow.TryMergeSharedRecentForSmoke(
+                    storePath,
+                    ExpandString(operation.GetProperty("folder").GetString()!, caseRoot));
+                statuses.Add(merged ? "Succeeded" : "Protected");
+            }
+            AssertStringArray(
+                statuses,
+                expected.GetProperty("statuses"),
+                scope,
+                "statuses",
+                failures);
+        }
         Expect(
             failures,
             scope,
@@ -755,6 +865,49 @@ internal static class ParityContractRunner
             OptionalBytesEqual(initialBytes, ReadOptionalBytes(storePath))
                 == expected.GetProperty("bytesUnchanged").GetBoolean(),
             "byte-preservation expectation failed");
+        if (expected.TryGetProperty("canonicalUtf8WithoutBom", out JsonElement canonicalExpected)
+            || expected.TryGetProperty("unknownRoot", out _))
+        {
+            if (!File.Exists(storePath))
+            {
+                failures.Add($"{scope}: final Recent document is missing");
+            }
+            else
+            {
+                byte[] finalBytes = File.ReadAllBytes(storePath);
+                try
+                {
+                    _ = StrictUtf8WithoutBom.GetString(finalBytes);
+                    if (canonicalExpected.ValueKind != JsonValueKind.Undefined)
+                    {
+                        bool hasBom = finalBytes.Length >= 3
+                            && finalBytes[0] == 0xEF
+                            && finalBytes[1] == 0xBB
+                            && finalBytes[2] == 0xBF;
+                        Expect(
+                            failures,
+                            scope,
+                            !hasBom == canonicalExpected.GetBoolean(),
+                            "canonical UTF-8 BOM expectation failed");
+                    }
+                    if (expected.TryGetProperty("unknownRoot", out JsonElement unknownExpected))
+                    {
+                        using JsonDocument final = JsonDocument.Parse(finalBytes);
+                        AssertUnknownObject(
+                            final.RootElement,
+                            unknownExpected,
+                            ["version", "lastFolderSet", "recentFolderSets", "updatedAtUtc"],
+                            scope,
+                            "unknownRoot",
+                            failures);
+                    }
+                }
+                catch (Exception ex) when (ex is DecoderFallbackException or JsonException)
+                {
+                    failures.Add($"{scope}: final Recent encoding or JSON was invalid: {ex.Message}");
+                }
+            }
+        }
     }
 
     private static void RunSearchDocument(JsonElement contractCase, string scope, string caseRoot, List<string> failures)
@@ -967,14 +1120,34 @@ internal static class ParityContractRunner
         if (mode == "missing")
             return;
         Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+        File.WriteAllBytes(storePath, BuildFixtureBytes(initial, caseRoot));
+    }
+
+    private static byte[] BuildFixtureBytes(JsonElement descriptor, string caseRoot)
+    {
+        string mode = descriptor.GetProperty("mode").GetString()!;
         if (mode == "raw")
+            return Utf8WithoutBom.GetBytes(descriptor.GetProperty("text").GetString()!);
+        if (mode == "bytes-base64")
+            return Convert.FromBase64String(descriptor.GetProperty("base64").GetString()!);
+        if (mode == "generated-utf8")
         {
-            File.WriteAllText(storePath, initial.GetProperty("text").GetString()!, Utf8WithoutBom);
-            return;
+            int byteLength = descriptor.GetProperty("byteLength").GetInt32();
+            byte[] prefix = Utf8WithoutBom.GetBytes(descriptor.GetProperty("prefix").GetString()!);
+            byte[] suffix = Utf8WithoutBom.GetBytes(descriptor.GetProperty("suffix").GetString()!);
+            byte fill = checked((byte)descriptor.GetProperty("fillByte").GetInt32());
+            byte[] generated = new byte[byteLength];
+            prefix.CopyTo(generated, 0);
+            generated.AsSpan(prefix.Length, byteLength - prefix.Length - suffix.Length).Fill(fill);
+            suffix.CopyTo(generated, byteLength - suffix.Length);
+            return generated;
         }
-        JsonNode? node = JsonNode.Parse(initial.GetProperty("document").GetRawText());
+        if (mode != "json")
+            throw new InvalidDataException($"unsupported fixture mode {mode}");
+        JsonNode? node = JsonNode.Parse(descriptor.GetProperty("document").GetRawText());
         ExpandPlaceholders(node, caseRoot);
-        File.WriteAllText(storePath, node!.ToJsonString(IndentedJson) + Environment.NewLine, Utf8WithoutBom);
+        return Utf8WithoutBom.GetBytes(
+            node!.ToJsonString(IndentedJson) + Environment.NewLine);
     }
 
     private static byte[] CanonicalizeContractBytes(byte[] bytes)
@@ -1146,6 +1319,16 @@ internal static class ParityContractRunner
                     expectedFinal.GetProperty("text").GetString(),
                     StringComparison.Ordinal),
                 "final raw bytes mismatch");
+            return;
+        }
+        if (mode is "bytes-base64" or "generated-utf8")
+        {
+            Expect(
+                failures,
+                scope,
+                File.ReadAllBytes(path).AsSpan().SequenceEqual(
+                    BuildFixtureBytes(expectedFinal, caseRoot)),
+                "final exact bytes mismatch");
             return;
         }
 

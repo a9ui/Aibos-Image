@@ -45,6 +45,10 @@ try {
         'malformedPreserved',
         'futurePreserved',
         'unreadableExistingProtected',
+        'invalidUtf8RecentProtected',
+        'utf32RecentProtected',
+        'exactLimitRecentWriterRefused',
+        'oversizedRecentProtected',
         'localFallbackTracksSharedAuthority',
         'favoritesUnchanged',
         'seenUnchanged'

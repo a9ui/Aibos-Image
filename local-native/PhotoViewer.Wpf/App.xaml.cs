@@ -2735,6 +2735,122 @@ public partial class App : Application
                         StringComparison.Ordinal);
                 whitespaceSettings.Close();
 
+                byte[] utf8BomSettingsBytes = Convert.FromBase64String(
+                    "77u/eyJ2ZXJzaW9uIjoxLCJjb25maXJtQmVmb3JlRGVsZXRlIjp0cnVlLCJmdXR1cmVSb290Ijp7ImtlZXAiOnRydWV9fQ==");
+                File.WriteAllBytes(settingsPath, utf8BomSettingsBytes);
+                var utf8BomSettings = HiddenWindow();
+                windows.Add(utf8BomSettings);
+                utf8BomSettings.Show();
+                bool utf8BomWriteSucceeded =
+                    !utf8BomSettings.ThumbnailStatusBorderSettingsProtectedForSmoke
+                    && utf8BomSettings.ConfirmBeforeDeleteForSmoke
+                    && utf8BomSettings.PersistConfirmBeforeDeleteForSmoke(false);
+                byte[] canonicalSettingsBytes = File.ReadAllBytes(settingsPath);
+                bool canonicalSettingsHasBom = canonicalSettingsBytes.Length >= 3
+                    && canonicalSettingsBytes[0] == 0xEF
+                    && canonicalSettingsBytes[1] == 0xBB
+                    && canonicalSettingsBytes[2] == 0xBF;
+                using JsonDocument canonicalSettings = JsonDocument.Parse(
+                    canonicalSettingsBytes);
+                bool utf8BomSettingsCanonicalized = utf8BomWriteSucceeded
+                    && !canonicalSettingsHasBom
+                    && !canonicalSettings.RootElement
+                        .GetProperty("confirmBeforeDelete")
+                        .GetBoolean()
+                    && canonicalSettings.RootElement
+                        .GetProperty("futureRoot")
+                        .GetProperty("keep")
+                        .GetBoolean();
+                utf8BomSettings.Close();
+
+                byte[] invalidUtf8SettingsBytes = Convert.FromBase64String(
+                    "eyJ2ZXJzaW9uIjoxLCJmdXR1cmVSb290IjoiwygifQ==");
+                File.WriteAllBytes(settingsPath, invalidUtf8SettingsBytes);
+                var invalidUtf8Settings = HiddenWindow();
+                windows.Add(invalidUtf8Settings);
+                invalidUtf8Settings.Show();
+                invalidUtf8Settings.OpenAppSettingsForSmoke();
+                invalidUtf8Settings.SetThumbnailStatusBorderDraftForSmoke(
+                    true,
+                    "#111111",
+                    true,
+                    "#222222");
+                bool invalidUtf8SettingsProtected =
+                    invalidUtf8Settings.ThumbnailStatusBorderSettingsProtectedForSmoke
+                    && invalidUtf8Settings.ConfirmBeforeDeleteForSmoke
+                    && !invalidUtf8Settings.SaveThumbnailStatusBorderDraftForSmoke()
+                    && !invalidUtf8Settings.PersistConfirmBeforeDeleteForSmoke(false)
+                    && File.ReadAllBytes(settingsPath).AsSpan().SequenceEqual(
+                        invalidUtf8SettingsBytes);
+                invalidUtf8Settings.Close();
+
+                byte[] utf16SettingsBytes = Convert.FromBase64String(
+                    "//57ACIAdgBlAHIAcwBpAG8AbgAiADoAMQAsACIAYwBvAG4AZgBpAHIAbQBCAGUAZgBvAHIAZQBEAGUAbABlAHQAZQAiADoAdAByAHUAZQAsACIAZgB1AHQAdQByAGUAUgBvAG8AdAAiADoAewAiAGsAZQBlAHAAIgA6AHQAcgB1AGUAfQB9AA==");
+                File.WriteAllBytes(settingsPath, utf16SettingsBytes);
+                var utf16Settings = HiddenWindow();
+                windows.Add(utf16Settings);
+                utf16Settings.Show();
+                utf16Settings.OpenAppSettingsForSmoke();
+                utf16Settings.SetThumbnailStatusBorderDraftForSmoke(
+                    true,
+                    "#111111",
+                    true,
+                    "#222222");
+                bool utf16SettingsProtected =
+                    utf16Settings.ThumbnailStatusBorderSettingsProtectedForSmoke
+                    && utf16Settings.ConfirmBeforeDeleteForSmoke
+                    && !utf16Settings.SaveThumbnailStatusBorderDraftForSmoke()
+                    && !utf16Settings.PersistConfirmBeforeDeleteForSmoke(false)
+                    && File.ReadAllBytes(settingsPath).AsSpan().SequenceEqual(
+                        utf16SettingsBytes);
+                utf16Settings.Close();
+
+                byte[] exactLimitSettingsBytes = BuildPaddedSharedJsonFixture(
+                    "{\"version\":1,\"confirmBeforeDelete\":true,\"padding\":\"",
+                    "\"}",
+                    SharedJsonDocumentReader.MaxDocumentBytes);
+                File.WriteAllBytes(settingsPath, exactLimitSettingsBytes);
+                var exactLimitSettings = HiddenWindow();
+                windows.Add(exactLimitSettings);
+                exactLimitSettings.Show();
+                exactLimitSettings.OpenAppSettingsForSmoke();
+                exactLimitSettings.SetThumbnailStatusBorderDraftForSmoke(
+                    true,
+                    "#111111",
+                    true,
+                    "#222222");
+                bool exactLimitSettingsWriterRefused =
+                    !exactLimitSettings.ThumbnailStatusBorderSettingsProtectedForSmoke
+                    && exactLimitSettings.ConfirmBeforeDeleteForSmoke
+                    && !exactLimitSettings.SaveThumbnailStatusBorderDraftForSmoke()
+                    && !exactLimitSettings.PersistConfirmBeforeDeleteForSmoke(false)
+                    && File.ReadAllBytes(settingsPath).AsSpan().SequenceEqual(
+                        exactLimitSettingsBytes);
+                exactLimitSettings.Close();
+
+                byte[] oversizedSettingsBytes = BuildPaddedSharedJsonFixture(
+                    "{\"version\":1,\"confirmBeforeDelete\":true,\"padding\":\"",
+                    "\"}",
+                    SharedJsonDocumentReader.MaxDocumentBytes + 1);
+                File.WriteAllBytes(settingsPath, oversizedSettingsBytes);
+                var oversizedSettings = HiddenWindow();
+                windows.Add(oversizedSettings);
+                oversizedSettings.Show();
+                oversizedSettings.OpenAppSettingsForSmoke();
+                oversizedSettings.SetThumbnailStatusBorderDraftForSmoke(
+                    true,
+                    "#111111",
+                    true,
+                    "#222222");
+                bool oversizedSettingsProtected =
+                    oversizedSettings.ThumbnailStatusBorderSettingsProtectedForSmoke
+                    && oversizedSettings.ConfirmBeforeDeleteForSmoke
+                    && !oversizedSettings.SaveThumbnailStatusBorderDraftForSmoke()
+                    && !oversizedSettings.PersistConfirmBeforeDeleteForSmoke(false)
+                    && File.ReadAllBytes(settingsPath).AsSpan().SequenceEqual(
+                        oversizedSettingsBytes);
+                oversizedSettings.Close();
+
                 ThumbnailStatusBorderLoadResult invalidSchema = ThumbnailStatusBorderSettingsStore.Parse(
                     "{\"thumbnailStatusBorders\":{\"favorite\":{\"enabled\":\"yes\"}}}");
                 ThumbnailStatusBorderLoadResult invalidConfirm = ThumbnailStatusBorderSettingsStore.Parse(
@@ -2806,6 +2922,9 @@ public partial class App : Application
                     && unreadableSettingsProtected
                     && retrySucceeded && retryReloaded && deleteDoNotAskShared && busyDeleteHandled
                     && malformedProtected && futureVersionProtected && whitespaceProtected && invalidSchemaProtected
+                    && utf8BomSettingsCanonicalized
+                    && invalidUtf8SettingsProtected && utf16SettingsProtected
+                    && exactLimitSettingsWriterRefused && oversizedSettingsProtected
                     && legacyRainbowSchemaMigrated && missingDefaults && missingDefaultsApplied
                     && existingO1StatusBindings && noSettingsResidue;
                 result = new
@@ -2838,6 +2957,11 @@ public partial class App : Application
                     malformedProtected,
                     futureVersionProtected,
                     whitespaceProtected,
+                    utf8BomSettingsCanonicalized,
+                    invalidUtf8SettingsProtected,
+                    utf16SettingsProtected,
+                    exactLimitSettingsWriterRefused,
+                    oversizedSettingsProtected,
                     invalidSchemaProtected,
                     legacyRainbowSchemaMigrated,
                     missingDefaults,
@@ -6455,6 +6579,97 @@ public partial class App : Application
                 File.ReadAllText(sharedRecentPath),
                 StringComparison.Ordinal);
 
+        byte[] invalidUtf8RecentBytes = Convert.FromBase64String(
+            "eyJ2ZXJzaW9uIjoxLCJsYXN0Rm9sZGVyU2V0IjpbXSwicmVjZW50Rm9sZGVyU2V0cyI6W10sImZ1dHVyZVJvb3QiOiLDKCJ9");
+        File.WriteAllBytes(sharedRecentPath, invalidUtf8RecentBytes);
+        SharedRecentReadResult invalidUtf8RecentRead =
+            PhotoViewer.Wpf.MainWindow.ReadSharedRecentFoldersForSmoke(
+                sharedRecentPath);
+        IReadOnlyList<string> invalidUtf8Selection =
+            PhotoViewer.Wpf.MainWindow.ResolveStartupFolderSetForSmoke(
+                sharedRecentPath,
+                [localFallbackFolder],
+                null);
+        bool invalidUtf8RecentProtected = !invalidUtf8RecentRead.Ok
+            && invalidUtf8RecentRead.Exists
+            && invalidUtf8Selection.Count == 1
+            && string.Equals(
+                NormalizeFavoritePath(invalidUtf8Selection[0]),
+                NormalizeFavoritePath(localFallbackFolder),
+                StringComparison.OrdinalIgnoreCase)
+            && !PhotoViewer.Wpf.MainWindow.TryMergeSharedRecentForSmoke(
+                sharedRecentPath,
+                unreadableFolder)
+            && File.ReadAllBytes(sharedRecentPath).AsSpan().SequenceEqual(
+                invalidUtf8RecentBytes);
+
+        byte[] utf32RecentBytes = Convert.FromBase64String(
+            "//4AAHsAAAAiAAAAdgAAAGUAAAByAAAAcwAAAGkAAABvAAAAbgAAACIAAAA6AAAAMQAAACwAAAAiAAAAbAAAAGEAAABzAAAAdAAAAEYAAABvAAAAbAAAAGQAAABlAAAAcgAAAFMAAABlAAAAdAAAACIAAAA6AAAAWwAAAF0AAAAsAAAAIgAAAHIAAABlAAAAYwAAAGUAAABuAAAAdAAAAEYAAABvAAAAbAAAAGQAAABlAAAAcgAAAFMAAABlAAAAdAAAAHMAAAAiAAAAOgAAAFsAAABdAAAALAAAACIAAABmAAAAdQAAAHQAAAB1AAAAcgAAAGUAAABSAAAAbwAAAG8AAAB0AAAAIgAAADoAAAB7AAAAIgAAAGsAAABlAAAAZQAAAHAAAAAiAAAAOgAAAHQAAAByAAAAdQAAAGUAAAB9AAAAfQAAAA==");
+        File.WriteAllBytes(sharedRecentPath, utf32RecentBytes);
+        SharedRecentReadResult utf32RecentRead =
+            PhotoViewer.Wpf.MainWindow.ReadSharedRecentFoldersForSmoke(
+                sharedRecentPath);
+        IReadOnlyList<string> utf32Selection =
+            PhotoViewer.Wpf.MainWindow.ResolveStartupFolderSetForSmoke(
+                sharedRecentPath,
+                [localFallbackFolder],
+                null);
+        bool utf32RecentProtected = !utf32RecentRead.Ok
+            && utf32RecentRead.Exists
+            && utf32Selection.Count == 1
+            && string.Equals(
+                NormalizeFavoritePath(utf32Selection[0]),
+                NormalizeFavoritePath(localFallbackFolder),
+                StringComparison.OrdinalIgnoreCase)
+            && !PhotoViewer.Wpf.MainWindow.TryMergeSharedRecentForSmoke(
+                sharedRecentPath,
+                unreadableFolder)
+            && File.ReadAllBytes(sharedRecentPath).AsSpan().SequenceEqual(
+                utf32RecentBytes);
+
+        byte[] exactLimitRecentBytes = BuildPaddedSharedJsonFixture(
+            "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"padding\":\"",
+            "\"}",
+            SharedJsonDocumentReader.MaxDocumentBytes);
+        File.WriteAllBytes(sharedRecentPath, exactLimitRecentBytes);
+        SharedRecentReadResult exactLimitRecentRead =
+            PhotoViewer.Wpf.MainWindow.ReadSharedRecentFoldersForSmoke(
+                sharedRecentPath);
+        bool exactLimitRecentWriterRefused = exactLimitRecentRead.Ok
+            && exactLimitRecentRead.Exists
+            && exactLimitRecentRead.Recent.LastFolderSet.Count == 0
+            && !PhotoViewer.Wpf.MainWindow.TryMergeSharedRecentForSmoke(
+                sharedRecentPath,
+                unreadableFolder)
+            && File.ReadAllBytes(sharedRecentPath).AsSpan().SequenceEqual(
+                exactLimitRecentBytes);
+
+        byte[] oversizedRecentBytes = BuildPaddedSharedJsonFixture(
+            "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"padding\":\"",
+            "\"}",
+            SharedJsonDocumentReader.MaxDocumentBytes + 1);
+        File.WriteAllBytes(sharedRecentPath, oversizedRecentBytes);
+        SharedRecentReadResult oversizedRecentRead =
+            PhotoViewer.Wpf.MainWindow.ReadSharedRecentFoldersForSmoke(
+                sharedRecentPath);
+        IReadOnlyList<string> oversizedSelection =
+            PhotoViewer.Wpf.MainWindow.ResolveStartupFolderSetForSmoke(
+                sharedRecentPath,
+                [localFallbackFolder],
+                null);
+        bool oversizedRecentProtected = !oversizedRecentRead.Ok
+            && oversizedRecentRead.Exists
+            && oversizedSelection.Count == 1
+            && string.Equals(
+                NormalizeFavoritePath(oversizedSelection[0]),
+                NormalizeFavoritePath(localFallbackFolder),
+                StringComparison.OrdinalIgnoreCase)
+            && !PhotoViewer.Wpf.MainWindow.TryMergeSharedRecentForSmoke(
+                sharedRecentPath,
+                unreadableFolder)
+            && File.ReadAllBytes(sharedRecentPath).AsSpan().SequenceEqual(
+                oversizedRecentBytes);
+
         WriteLocalFolderFallback(statePath, localFallbackFolder);
         WriteSharedRecentSeed(sharedRecentPath, fullFolder, preservedFolder);
         var writeWindow = HiddenWindow();
@@ -6509,6 +6724,10 @@ public partial class App : Application
             && malformedPreserved
             && futurePreserved
             && unreadableExistingProtected
+            && invalidUtf8RecentProtected
+            && utf32RecentProtected
+            && exactLimitRecentWriterRefused
+            && oversizedRecentProtected
             && localFallbackTracksSharedAuthority
             && favoritesUnchanged
             && seenUnchanged;
@@ -6542,6 +6761,10 @@ public partial class App : Application
             MalformedPreserved = malformedPreserved,
             FuturePreserved = futurePreserved,
             UnreadableExistingProtected = unreadableExistingProtected,
+            InvalidUtf8RecentProtected = invalidUtf8RecentProtected,
+            Utf32RecentProtected = utf32RecentProtected,
+            ExactLimitRecentWriterRefused = exactLimitRecentWriterRefused,
+            OversizedRecentProtected = oversizedRecentProtected,
             LocalFallbackTracksSharedAuthority = localFallbackTracksSharedAuthority,
             FavoritesUnchanged = favoritesUnchanged,
             SeenUnchanged = seenUnchanged,
@@ -19578,6 +19801,24 @@ public partial class App : Application
         File.WriteAllText(path, json);
     }
 
+    private static byte[] BuildPaddedSharedJsonFixture(
+        string prefix,
+        string suffix,
+        int byteLength)
+    {
+        byte[] prefixBytes = Encoding.UTF8.GetBytes(prefix);
+        byte[] suffixBytes = Encoding.UTF8.GetBytes(suffix);
+        if (byteLength < prefixBytes.Length + suffixBytes.Length)
+            throw new ArgumentOutOfRangeException(nameof(byteLength));
+        byte[] bytes = new byte[byteLength];
+        prefixBytes.CopyTo(bytes, 0);
+        bytes.AsSpan(
+            prefixBytes.Length,
+            byteLength - prefixBytes.Length - suffixBytes.Length).Fill((byte)'a');
+        suffixBytes.CopyTo(bytes, byteLength - suffixBytes.Length);
+        return bytes;
+    }
+
     private static void WriteSharedRecentSmokeResult(string path, SharedRecentSmokeResult result)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
@@ -20379,6 +20620,10 @@ public partial class App : Application
         public bool MalformedPreserved { get; init; }
         public bool FuturePreserved { get; init; }
         public bool UnreadableExistingProtected { get; init; }
+        public bool InvalidUtf8RecentProtected { get; init; }
+        public bool Utf32RecentProtected { get; init; }
+        public bool ExactLimitRecentWriterRefused { get; init; }
+        public bool OversizedRecentProtected { get; init; }
         public bool LocalFallbackTracksSharedAuthority { get; init; }
         public bool FavoritesUnchanged { get; init; }
         public bool SeenUnchanged { get; init; }

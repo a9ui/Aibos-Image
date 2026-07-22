@@ -534,6 +534,132 @@
           }
         },
         {
+          "id": "utf8-bom-supported",
+          "initial": {
+            "mode": "bytes-base64",
+            "base64": "77u/eyJ2ZXJzaW9uIjoxLCJjb25maXJtQmVmb3JlRGVsZXRlIjp0cnVlLCJmdXR1cmVSb290Ijp7ImtlZXAiOnRydWV9fQ=="
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false }
+          ],
+          "expected": {
+            "initialProtected": false,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Succeeded"],
+            "fileExists": true,
+            "bytesUnchanged": false,
+            "final": {
+              "mode": "json",
+              "document": {
+                "version": 1,
+                "confirmBeforeDelete": false,
+                "futureRoot": { "keep": true }
+              }
+            }
+          }
+        },
+        {
+          "id": "invalid-utf8-protected",
+          "initial": {
+            "mode": "bytes-base64",
+            "base64": "eyJ2ZXJzaW9uIjoxLCJmdXR1cmVSb290IjoiwygifQ=="
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false }
+          ],
+          "expected": {
+            "initialProtected": true,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true,
+            "final": {
+              "mode": "bytes-base64",
+              "base64": "eyJ2ZXJzaW9uIjoxLCJmdXR1cmVSb290IjoiwygifQ=="
+            }
+          }
+        },
+        {
+          "id": "utf16-bom-protected",
+          "initial": {
+            "mode": "bytes-base64",
+            "base64": "//57ACIAdgBlAHIAcwBpAG8AbgAiADoAMQAsACIAYwBvAG4AZgBpAHIAbQBCAGUAZgBvAHIAZQBEAGUAbABlAHQAZQAiADoAdAByAHUAZQAsACIAZgB1AHQAdQByAGUAUgBvAG8AdAAiADoAewAiAGsAZQBlAHAAIgA6AHQAcgB1AGUAfQB9AA=="
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false }
+          ],
+          "expected": {
+            "initialProtected": true,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true,
+            "final": {
+              "mode": "bytes-base64",
+              "base64": "//57ACIAdgBlAHIAcwBpAG8AbgAiADoAMQAsACIAYwBvAG4AZgBpAHIAbQBCAGUAZgBvAHIAZQBEAGUAbABlAHQAZQAiADoAdAByAHUAZQAsACIAZgB1AHQAdQByAGUAUgBvAG8AdAAiADoAewAiAGsAZQBlAHAAIgA6AHQAcgB1AGUAfQB9AA=="
+            }
+          }
+        },
+        {
+          "id": "exact-limit-writer-refused",
+          "initial": {
+            "mode": "generated-utf8",
+            "byteLength": 1048576,
+            "prefix": "{\"version\":1,\"confirmBeforeDelete\":true,\"padding\":\"",
+            "fillByte": 97,
+            "suffix": "\"}"
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false }
+          ],
+          "expected": {
+            "initialProtected": false,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true,
+            "final": {
+              "mode": "generated-utf8",
+              "byteLength": 1048576,
+              "prefix": "{\"version\":1,\"confirmBeforeDelete\":true,\"padding\":\"",
+              "fillByte": 97,
+              "suffix": "\"}"
+            }
+          }
+        },
+        {
+          "id": "oversized-protected",
+          "initial": {
+            "mode": "generated-utf8",
+            "byteLength": 1048577,
+            "prefix": "{\"version\":1,\"confirmBeforeDelete\":true,\"padding\":\"",
+            "fillByte": 97,
+            "suffix": "\"}"
+          },
+          "localConfirmBeforeDelete": false,
+          "operations": [
+            { "action": "confirm", "value": false }
+          ],
+          "expected": {
+            "initialProtected": true,
+            "effectiveConfirmBeforeDelete": true,
+            "statuses": ["Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true,
+            "final": {
+              "mode": "generated-utf8",
+              "byteLength": 1048577,
+              "prefix": "{\"version\":1,\"confirmBeforeDelete\":true,\"padding\":\"",
+              "fillByte": 97,
+              "suffix": "\"}"
+            }
+          }
+        },
+        {
           "id": "future-version-protected",
           "initial": {
             "mode": "json",
@@ -632,6 +758,111 @@
             "readOk": true,
             "exists": true,
             "selectedFolderSet": [],
+            "fileExists": true,
+            "bytesUnchanged": true
+          }
+        },
+        {
+          "id": "utf8-bom-supported",
+          "initial": {
+            "mode": "bytes-base64",
+            "base64": "77u/eyJ2ZXJzaW9uIjoxLCJsYXN0Rm9sZGVyU2V0IjpbXSwicmVjZW50Rm9sZGVyU2V0cyI6W10sImZ1dHVyZVJvb3QiOnsia2VlcCI6dHJ1ZX19"
+          },
+          "localFolderSet": ["${ROOT}/local"],
+          "operations": [
+            { "action": "merge", "folder": "${ROOT}/bom-write" }
+          ],
+          "expected": {
+            "readOk": true,
+            "exists": true,
+            "selectedFolderSet": [],
+            "statuses": ["Succeeded"],
+            "canonicalUtf8WithoutBom": true,
+            "unknownRoot": {
+              "futureRoot": { "keep": true }
+            },
+            "fileExists": true,
+            "bytesUnchanged": false
+          }
+        },
+        {
+          "id": "invalid-utf8-uses-local-fallback",
+          "initial": {
+            "mode": "bytes-base64",
+            "base64": "eyJ2ZXJzaW9uIjoxLCJsYXN0Rm9sZGVyU2V0IjpbXSwicmVjZW50Rm9sZGVyU2V0cyI6W10sImZ1dHVyZVJvb3QiOiLDKCJ9"
+          },
+          "localFolderSet": ["${ROOT}/local"],
+          "operations": [
+            { "action": "merge", "folder": "${ROOT}/blocked" }
+          ],
+          "expected": {
+            "readOk": false,
+            "exists": true,
+            "selectedFolderSet": ["${ROOT}/local"],
+            "statuses": ["Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true
+          }
+        },
+        {
+          "id": "utf32-bom-uses-local-fallback",
+          "initial": {
+            "mode": "bytes-base64",
+            "base64": "//4AAHsAAAAiAAAAdgAAAGUAAAByAAAAcwAAAGkAAABvAAAAbgAAACIAAAA6AAAAMQAAACwAAAAiAAAAbAAAAGEAAABzAAAAdAAAAEYAAABvAAAAbAAAAGQAAABlAAAAcgAAAFMAAABlAAAAdAAAACIAAAA6AAAAWwAAAF0AAAAsAAAAIgAAAHIAAABlAAAAYwAAAGUAAABuAAAAdAAAAEYAAABvAAAAbAAAAGQAAABlAAAAcgAAAFMAAABlAAAAdAAAAHMAAAAiAAAAOgAAAFsAAABdAAAALAAAACIAAABmAAAAdQAAAHQAAAB1AAAAcgAAAGUAAABSAAAAbwAAAG8AAAB0AAAAIgAAADoAAAB7AAAAIgAAAGsAAABlAAAAZQAAAHAAAAAiAAAAOgAAAHQAAAByAAAAdQAAAGUAAAB9AAAAfQAAAA=="
+          },
+          "localFolderSet": ["${ROOT}/local"],
+          "operations": [
+            { "action": "merge", "folder": "${ROOT}/blocked" }
+          ],
+          "expected": {
+            "readOk": false,
+            "exists": true,
+            "selectedFolderSet": ["${ROOT}/local"],
+            "statuses": ["Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true
+          }
+        },
+        {
+          "id": "exact-limit-writer-refused",
+          "initial": {
+            "mode": "generated-utf8",
+            "byteLength": 1048576,
+            "prefix": "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"padding\":\"",
+            "fillByte": 97,
+            "suffix": "\"}"
+          },
+          "localFolderSet": ["${ROOT}/local"],
+          "operations": [
+            { "action": "merge", "folder": "${ROOT}/blocked" }
+          ],
+          "expected": {
+            "readOk": true,
+            "exists": true,
+            "selectedFolderSet": [],
+            "statuses": ["Protected"],
+            "fileExists": true,
+            "bytesUnchanged": true
+          }
+        },
+        {
+          "id": "oversized-uses-local-fallback",
+          "initial": {
+            "mode": "generated-utf8",
+            "byteLength": 1048577,
+            "prefix": "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"padding\":\"",
+            "fillByte": 97,
+            "suffix": "\"}"
+          },
+          "localFolderSet": ["${ROOT}/local"],
+          "operations": [
+            { "action": "merge", "folder": "${ROOT}/blocked" }
+          ],
+          "expected": {
+            "readOk": false,
+            "exists": true,
+            "selectedFolderSet": ["${ROOT}/local"],
+            "statuses": ["Protected"],
             "fileExists": true,
             "bytesUnchanged": true
           }

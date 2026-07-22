@@ -2741,6 +2741,49 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool TryWriteAtomicSharedJson(
+        string path,
+        string json,
+        out string? error)
+    {
+        if (!SharedJsonDocumentReader.TryEncodeCanonical(
+                json,
+                out byte[] bytes,
+                out error))
+            return false;
+        if (TryWriteAtomicBytes(path, bytes))
+            return true;
+        error = "Windows did not allow the atomic shared JSON replacement.";
+        return false;
+    }
+
+    private static bool TryWriteAtomicBytes(string path, byte[] bytes)
+    {
+        string? tempPath = null;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            tempPath = Path.Combine(
+                Path.GetDirectoryName(path)!,
+                $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            File.WriteAllBytes(tempPath, bytes);
+            File.Move(tempPath, path, overwrite: true);
+            tempPath = null;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (tempPath is not null)
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
+        }
+    }
+
     private static bool TryWithPersistenceLock(string targetPath, Func<bool> operation)
     {
         // Interactive handlers take one create-new attempt and yield on contention;
@@ -11179,11 +11222,8 @@ public partial class MainWindow : Window
                 operationError = parsed.Error ?? "The merged thumbnail border settings were invalid.";
                 return false;
             }
-            if (!TryWriteAtomicText(path, mergedJson))
-            {
-                operationError = "Windows did not allow the atomic settings replacement.";
+            if (!TryWriteAtomicSharedJson(path, mergedJson, out operationError))
                 return false;
-            }
             mergedSettings = parsed.Settings;
             return true;
         });
@@ -11362,11 +11402,8 @@ public partial class MainWindow : Window
                 return false;
             }
 
-            if (!TryWriteAtomicText(path, mergedJson))
-            {
-                operationError = "Windows did not allow the atomic settings replacement.";
+            if (!TryWriteAtomicSharedJson(path, mergedJson, out operationError))
                 return false;
-            }
             return true;
         });
 
@@ -12401,20 +12438,30 @@ public partial class MainWindow : Window
 
     private static SharedRecentReadResult ReadSharedRecentFolders(string path)
     {
+        SharedJsonDocumentReadResult read = SharedJsonDocumentReader.Read(path);
+        if (!read.Ok)
+        {
+            return new SharedRecentReadResult(
+                false,
+                NormalizeSharedRecentFolders(null),
+                read.Error,
+                true);
+        }
+        if (!read.Exists)
+        {
+            return new SharedRecentReadResult(
+                true,
+                NormalizeSharedRecentFolders(null),
+                null,
+                false);
+        }
+
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            using var document = JsonDocument.Parse(read.Json!);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
                 return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), "shared recent root is not an object", true);
             return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(document.RootElement), null, true);
-        }
-        catch (FileNotFoundException)
-        {
-            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(null), null, false);
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(null), null, false);
         }
         catch (Exception ex)
         {
@@ -12623,7 +12670,15 @@ public partial class MainWindow : Window
                     ExtensionData = CloneExtensionData(current.Recent.ExtensionData),
                 };
                 var json = JsonSerializer.Serialize(next, SharedRecentJsonOptions);
-                return TryWriteAtomicText(path, json);
+                if (!SharedJsonDocumentReader.TryEncodeCanonical(
+                        json,
+                        out byte[] bytes,
+                        out _))
+                {
+                    malformed = true;
+                    return false;
+                }
+                return TryWriteAtomicBytes(path, bytes);
             });
             if (!saved)
                 ReportPersistenceRefusal("Recent folder history", path, malformed, malformed ? null : () => SaveSharedRecentFolderSet(folderSet));
@@ -14495,7 +14550,12 @@ public partial class MainWindow : Window
                 UpdatedAtUtc = DateTime.UtcNow.ToString("O"),
                 ExtensionData = CloneExtensionData(current.Recent.ExtensionData),
             };
-            return TryWriteAtomicText(path, JsonSerializer.Serialize(next, SharedRecentJsonOptions));
+            string json = JsonSerializer.Serialize(next, SharedRecentJsonOptions);
+            return SharedJsonDocumentReader.TryEncodeCanonical(
+                    json,
+                    out byte[] bytes,
+                    out _)
+                && TryWriteAtomicBytes(path, bytes);
         });
     }
 

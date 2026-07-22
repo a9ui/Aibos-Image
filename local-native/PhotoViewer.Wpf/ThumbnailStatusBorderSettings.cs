@@ -1,4 +1,3 @@
-using System.IO;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -84,26 +83,10 @@ internal static class ThumbnailStatusBorderSettingsStore
         out string? json,
         out string? error)
     {
-        json = null;
-        error = null;
-        try
-        {
-            json = File.ReadAllText(path);
-            return true;
-        }
-        catch (FileNotFoundException)
-        {
-            return true;
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            error = $"Shared settings could not be read: {ex.Message}";
-            return false;
-        }
+        SharedJsonDocumentReadResult read = SharedJsonDocumentReader.Read(path);
+        json = read.Json;
+        error = read.Error;
+        return read.Ok;
     }
 
     internal static ThumbnailStatusBorderLoadResult Parse(string json)
@@ -195,7 +178,13 @@ internal static class ThumbnailStatusBorderSettingsStore
             }
 
             mergedJson = root.ToJsonString(IndentedJson) + Environment.NewLine;
-            return true;
+            if (SharedJsonDocumentReader.TryEncodeCanonical(
+                    mergedJson,
+                    out _,
+                    out error))
+                return true;
+            mergedJson = "";
+            return false;
         }
         catch (JsonException ex)
         {
@@ -243,7 +232,13 @@ internal static class ThumbnailStatusBorderSettingsStore
 
             root["confirmBeforeDelete"] = confirmBeforeDelete;
             mergedJson = root.ToJsonString(IndentedJson) + Environment.NewLine;
-            return true;
+            if (SharedJsonDocumentReader.TryEncodeCanonical(
+                    mergedJson,
+                    out _,
+                    out error))
+                return true;
+            mergedJson = "";
+            return false;
         }
         catch (JsonException ex)
         {

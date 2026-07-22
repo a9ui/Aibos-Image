@@ -48,6 +48,18 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1
 
+      - name: WPF durable-state fixture contract
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-parity-foundation.ps1
+
+      - name: Shared settings and delete-confirmation smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-thumbnail-status-borders.ps1
+
+      - name: Shared recent-folder smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-recent.ps1
+
       - name: Modal interaction smoke
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
