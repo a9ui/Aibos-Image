@@ -381,11 +381,19 @@ async function writeReceipt(receipt: ParityReceipt) {
   const target = process.env.PVU_PARITY_BROWSER_RECEIPT_PATH;
   if (!target) return;
   const fullTarget = path.resolve(target);
-  const tempRoot = path.resolve(os.tmpdir());
-  if (fullTarget !== tempRoot && !fullTarget.startsWith(`${tempRoot}${path.sep}`)) {
+  const targetParent = path.dirname(fullTarget);
+  const [realTempRoot, realTargetParent] = await Promise.all([
+    fs.realpath(os.tmpdir()),
+    fs.realpath(targetParent),
+  ]);
+  const relativeParent = path.relative(realTempRoot, realTargetParent);
+  if (
+    relativeParent === '..'
+    || relativeParent.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativeParent)
+  ) {
     throw new Error(`Browser parity receipt must stay under TEMP: ${fullTarget}`);
   }
-  await fs.mkdir(path.dirname(fullTarget), { recursive: true });
   await fs.writeFile(fullTarget, `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
 }
 
