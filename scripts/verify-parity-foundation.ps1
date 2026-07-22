@@ -72,8 +72,20 @@ try {
         $structure = ($structureOutput -join [Environment]::NewLine) | ConvertFrom-Json
 
         [Environment]::SetEnvironmentVariable('PVU_PARITY_BROWSER_RECEIPT_PATH', $browserReceiptPath, 'Process')
-        $browserOutput = & corepack pnpm exec vitest run src/lib/parityContracts.test.ts --reporter=dot 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            # Windows PowerShell converts native stderr records into
+            # NativeCommandError objects. Vitest may write progress to stderr
+            # in CI even when it succeeds, so judge the native process by its
+            # exit code and retain the merged output for a real failure.
+            $ErrorActionPreference = 'Continue'
+            $browserOutput = & corepack pnpm exec vitest run src/lib/parityContracts.test.ts --reporter=dot 2>&1
+            $browserExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($browserExitCode -ne 0) {
             throw "Browser parity vectors failed: $($browserOutput -join [Environment]::NewLine)"
         }
         if (-not (Test-Path -LiteralPath $browserReceiptPath -PathType Leaf)) {

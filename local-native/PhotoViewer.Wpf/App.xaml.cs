@@ -13669,10 +13669,14 @@ public partial class App : Application
                     && win.ModalSingleZoomReadoutForSmoke;
                 win.UpdateLayout();
                 double layoutImageHeight = win.ModalImageAreaHeightForSmoke;
-                bool filmstripLayout = win.ModalFilmstripLayoutVisibleForSmoke
-                    && win.ModalFilmstripPinnedForSmoke
-                    && win.ModalBottomPortraitFilmstripContractForSmoke
-                    && win.ModalFullWindowFitContractForSmoke;
+                bool filmstripLayoutVisible = win.ModalFilmstripLayoutVisibleForSmoke;
+                bool filmstripPinned = win.ModalFilmstripPinnedForSmoke;
+                bool filmstripPortraitContract = win.ModalBottomPortraitFilmstripContractForSmoke;
+                bool modalFullWindowFit = win.ModalFullWindowFitContractForSmoke;
+                bool filmstripLayout = filmstripLayoutVisible
+                    && filmstripPinned
+                    && filmstripPortraitContract
+                    && modalFullWindowFit;
                 int contextFavoriteBefore = win.SelectedFavoriteLevelForSmoke;
                 bool contextMenuAction = win.ActivateModalContextFavoriteForSmoke(1)
                     && win.ActivateModalContextFavoriteForSmoke(-1)
@@ -13903,6 +13907,10 @@ public partial class App : Application
                     EdgeChrome = edgeChrome,
                     ZoomIndicator = zoomIndicator,
                     FilmstripLayout = filmstripLayout,
+                    FilmstripLayoutVisible = filmstripLayoutVisible,
+                    FilmstripPinned = filmstripPinned,
+                    FilmstripPortraitContract = filmstripPortraitContract,
+                    ModalFullWindowFit = modalFullWindowFit,
                     ContextMenuAction = contextMenuAction,
                     ManualVisiblePersistent = manualVisiblePersistent,
                     ChromeHidden = chromeHidden,
@@ -19531,6 +19539,10 @@ public partial class App : Application
         public bool EdgeChrome { get; init; }
         public bool ZoomIndicator { get; init; }
         public bool FilmstripLayout { get; init; }
+        public bool FilmstripLayoutVisible { get; init; }
+        public bool FilmstripPinned { get; init; }
+        public bool FilmstripPortraitContract { get; init; }
+        public bool ModalFullWindowFit { get; init; }
         public bool ContextMenuAction { get; init; }
         public bool ManualVisiblePersistent { get; init; }
         public bool ChromeHidden { get; init; }

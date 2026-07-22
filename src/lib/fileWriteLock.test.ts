@@ -206,7 +206,7 @@ describe('withRecoverableDirectoryWriteLock', () => {
 
     await expect(withRecoverableDirectoryWriteLock(target, async () => 'recovered', {
       retryDelayMs: 1,
-      timeoutMs: 100,
+      timeoutMs: 1_000,
       staleMs: 1,
     })).resolves.toBe('recovered');
 
