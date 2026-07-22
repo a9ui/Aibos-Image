@@ -18,6 +18,12 @@ second normative specification.
   not be renamed without a non-destructive migration.
 - Browser and WPF expose the same product meanings through independent UI and
   runtime implementations.
+- WPF is the intended long-term primary renderer. Browser remains supported
+  until an explicit retirement milestone proves complete workflow and user-data
+  replacement.
+- Shared work may use a Browser-first implementation sequence, but the product
+  contract is decided first and the change is not complete until both
+  applicable renderer gates are green.
 - A shared product behavior change must be evaluated for both renderers.
 - A renderer-specific exception must identify the affected surface and explain
   why the other renderer is not applicable.

@@ -150,4 +150,26 @@ describe('production launcher CLI', () => {
     expect(watchdogSource).not.toContain('Get-NetTCPConnection');
     expect(watchdogSource).not.toContain('killPortOwner');
   });
+
+  it('keeps the Windows entry point pinned, non-destructive, and argument-transparent', () => {
+    const source = readFileSync(resolve(process.cwd(), 'start_viewer.bat'), 'utf8');
+
+    expect(source).toContain('corepack pnpm install --frozen-lockfile --prefer-offline');
+    expect(source).toContain('node scripts\\prod_launcher.js %*');
+    expect(source).not.toMatch(/\bnpm install\b/);
+    expect(source).not.toContain('approve-builds');
+    expect(source).not.toMatch(/rmdir\s+\/s\s+\/q\s+node_modules/i);
+  });
+
+  it('offers one canonical Windows launcher with explicit Browser and WPF targets', () => {
+    const source = readFileSync(resolve(process.cwd(), 'start_aibos.bat'), 'utf8');
+    const dialog = readFileSync(resolve(process.cwd(), 'scripts', 'select-launch-target.ps1'), 'utf8');
+
+    expect(source).toContain('select-launch-target.ps1');
+    expect(source).toContain('call ".\\start_viewer.bat" %*');
+    expect(source).toContain('call ".\\start_wpf.bat" %*');
+    expect(dialog).toContain('Content="Browser"');
+    expect(dialog).toContain('Content="WPF"');
+    expect(dialog).toContain('Content="Cancel"');
+  });
 });

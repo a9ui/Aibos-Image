@@ -4,6 +4,24 @@ This file contains public repository instructions for automated coding agents.
 It must not depend on a private workspace, private issue tracker, personal
 machine state, or a particular AI product.
 
+## Agent work model
+
+- One primary coding agent owns integration, final judgment, and the exact Git
+  and GitHub evidence for a task.
+- The primary agent may use bounded subagents, browser automation, UI
+  automation, security scanners, or independent AI review when they materially
+  improve speed or confidence. Give each helper a concrete scope and reconcile
+  its result against the source before adoption.
+- Keep GitHub Issues, pull requests, Actions, Milestones, and Releases as the
+  mutable project record. Advisory chats and local reports are not product
+  authority.
+- Do not create standing watchers, message buses, automatic oracle loops, or
+  unbounded parallel work. Stop helpers when their bounded task is complete.
+- Repository permission, credential, deployment, destructive-history, license,
+  and major product-direction decisions still require owner authorization.
+- Never bypass platform or system safety controls. Use another supported route
+  or record the blocked step instead.
+
 ## Read first
 
 Before changing code, read:
@@ -55,6 +73,12 @@ semantics remain in `docs/product-contract.md`.
   images as a repair strategy.
 
 ## Browser/WPF parity
+
+WPF is the intended long-term primary renderer. Until a separate retirement
+milestone proves that WPF replaces every supported workflow and preserves user
+data, Browser remains supported. Shared feature work may be implemented in the
+Browser first, then WPF, but the sequence is always contract first and the
+feature is not complete until both applicable renderer gates are green.
 
 For behavior owned by both renderers:
 

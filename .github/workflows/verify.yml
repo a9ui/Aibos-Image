@@ -1,0 +1,102 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    name: Public surface and parity
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore pinned JavaScript dependencies
+        shell: pwsh
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Verify public surface
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-public-surface.ps1 -FullTree
+
+      - name: Verify executable Browser/WPF parity
+        shell: pwsh
+        run: corepack pnpm verify:parity
+
+  browser:
+    name: Browser verification
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Restore pinned JavaScript dependencies
+        shell: pwsh
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        shell: pwsh
+        run: corepack pnpm test:unit
+
+      - name: Typecheck
+        shell: pwsh
+        run: corepack pnpm typecheck
+
+      - name: Lint
+        shell: pwsh
+        run: corepack pnpm lint
+
+      - name: Production build
+        shell: pwsh
+        run: corepack pnpm build
+
+  wpf:
+    name: WPF verification
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Release build
+        shell: pwsh
+        run: dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
+
+      - name: Modal interaction smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
+
+      - name: Album library hardening smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-album-library-hardening.ps1

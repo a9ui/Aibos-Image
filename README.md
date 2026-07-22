@@ -27,6 +27,12 @@ an explicit user action. Ordinary browsing, preview, search, modal navigation,
 and state hydration must not enqueue Enhancement jobs or start workers. The
 product contract defines the normative shared behavior.
 
+## Start on Windows
+
+Double-click `start_aibos.bat` and choose **Browser** or **WPF**. The two
+renderer-specific launchers remain available for direct use, but the selector
+is the canonical interactive entry point.
+
 ## Browser renderer
 
 Requirements:

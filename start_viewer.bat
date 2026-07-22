@@ -2,45 +2,61 @@
 setlocal
 cd /d "%~dp0"
 
-echo [Photoviewer] Starting environment check...
+echo [Aibos Browser] Checking the exact checkout and toolchain...
 
-:: Check if pnpm is available
-where pnpm >nul 2>&1
-set HAS_PNPM=%errorlevel%
-
-:: If node_modules was installed by pnpm but pnpm is not available, reinstall with npm
-set NEED_REINSTALL=0
-if exist "node_modules\.pnpm" if %HAS_PNPM% neq 0 set NEED_REINSTALL=1
-
-if %NEED_REINSTALL%==1 (
-    echo [Photoviewer] pnpm node_modules detected but pnpm is not available on this PC.
-    echo [Photoviewer] Reinstalling with npm - first time only, please wait...
-    rmdir /s /q node_modules
+where node >nul 2>&1
+if errorlevel 1 (
+    echo [Aibos Browser] Node.js 20.9 or later is required.
+    pause
+    exit /b 1
 )
 
-:: Install if node_modules does not exist
-if not exist "node_modules" (
-    echo [Photoviewer] Installing dependencies...
-    if %HAS_PNPM%==0 (
-        call pnpm install
-        call pnpm approve-builds
-        call pnpm install
-    ) else (
-        call npm install
-    )
-    if errorlevel 1 (
-        echo [Photoviewer] Install failed.
-        pause
-        exit /b 1
-    )
+set "NODE_MAJOR="
+set "NODE_MINOR="
+for /f "tokens=1,2 delims=." %%A in ('node -p "process.versions.node"') do (
+    set "NODE_MAJOR=%%A"
+    set "NODE_MINOR=%%B"
+)
+if not defined NODE_MAJOR (
+    echo [Aibos Browser] Could not determine the Node.js version.
+    pause
+    exit /b 1
+)
+if %NODE_MAJOR% LSS 20 goto node_version_error
+if %NODE_MAJOR% EQU 20 if %NODE_MINOR% LSS 9 goto node_version_error
+goto node_version_ok
+
+:node_version_error
+    echo [Aibos Browser] Node.js 20.9 or later is required. Current version:
+    node --version
+    pause
+    exit /b 1
+
+:node_version_ok
+
+where corepack >nul 2>&1
+if errorlevel 1 (
+    echo [Aibos Browser] Corepack is required to use the pinned pnpm version.
+    pause
+    exit /b 1
+)
+
+echo [Aibos Browser] Restoring the pinned dependency graph...
+call corepack pnpm install --frozen-lockfile --prefer-offline
+if errorlevel 1 (
+    echo [Aibos Browser] Dependency restore failed. No server was started.
+    pause
+    exit /b 1
 )
 
 echo.
-echo [Photoviewer] Launching production server...
-echo [Photoviewer] The first launch will build the app (~1 min). After that, startup is instant.
-echo [Photoviewer] Browser will open automatically when ready.
+echo [Aibos Browser] Launching the production build from this checkout...
+echo [Aibos Browser] The launcher rebuilds when the current source is newer.
+echo [Aibos Browser] The browser opens automatically when the loopback server is ready.
 echo.
 
-node scripts\prod_launcher.js
+node scripts\prod_launcher.js %*
+set "EXIT_CODE=%ERRORLEVEL%"
 
-pause
+if not "%EXIT_CODE%"=="0" pause
+exit /b %EXIT_CODE%

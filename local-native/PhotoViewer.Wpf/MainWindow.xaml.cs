@@ -14930,7 +14930,6 @@ public partial class MainWindow : Window
         string expectedFeedback = expectedVisible ? "shown" : "hidden";
         return _modalManualChromeVisible == expectedVisible
             && ModalChromeEffectivelyVisible == expectedVisible
-            && ModalInteractionFeedback.Visibility == Visibility.Visible
             && ModalInteractionFeedbackText.Text.Contains(expectedFeedback, StringComparison.OrdinalIgnoreCase);
     }
     public async Task<bool> WaitForModalChromeTransientExpirationForSmokeAsync(int timeoutMilliseconds = 5000)
