@@ -14807,11 +14807,11 @@ public partial class MainWindow : Window
         => ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
             && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2);
     public bool ModalImageWithinAreaForSmoke
-        => ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 2
-            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 2;
+        => ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 0.5
+            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 0.5;
     public bool ModalImageTouchesFitEdgeForSmoke
-        => Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 2
-            || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 2;
+        => Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 0.5
+            || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 0.5;
     public bool ModalFullWindowFitContractForSmoke
         => ModalFitSurfaceVisibleForSmoke
             && ModalFitStretchUniformForSmoke
