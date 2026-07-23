@@ -29,6 +29,22 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow : Window
 {
+    private enum ModalPointerState
+    {
+        Visible,
+        ArmedToHide,
+        Hidden,
+        Interacting,
+        Panning,
+    }
+
+    private enum ModalEdgeTarget
+    {
+        None,
+        Previous,
+        Next,
+    }
+
     private static readonly StringComparer EnhancementSourceIdentityComparer = StringComparer.OrdinalIgnoreCase;
     private static readonly HttpClient ModalEnhancementHttpClient = new()
     {
@@ -281,6 +297,11 @@ public partial class MainWindow : Window
     private Vector _modalPanStartOffset;
     private Point? _modalPointerStartPoint;
     private bool _modalPointerMoved;
+    private ModalPointerState _modalPointerState = ModalPointerState.Visible;
+    private ModalEdgeTarget _modalPressedEdgeTarget;
+    private Point _modalLastPointerPosition;
+    private bool _modalHasPointerPosition;
+    private bool _modalChromePointerPressActive;
     private bool _modalManualChromeVisible = true;
     private bool _modalTransientChromeVisible;
     private bool _modalFilmstripOpen = true;
@@ -10657,7 +10678,11 @@ public partial class MainWindow : Window
         UpdateModalFit();
         ScheduleModalFitUpdate();
         if (opening)
+        {
+            _modalHasPointerPosition = false;
+            _modalPressedEdgeTarget = ModalEdgeTarget.None;
             SetModalChromeVisible(true, showFeedback: false);
+        }
         SyncModalFilmstripSelection(t);
         SyncModalMetadataSidebar();
         watch.Stop();
@@ -10842,16 +10867,19 @@ public partial class MainWindow : Window
 
     private void ModalBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // The transformed image handles its own click. A direct hit on the
-        // surrounding black canvas returns to the gallery immediately.
-        if (TryCloseModalFromEmptySurface(e.OriginalSource))
+        // The transformed image and chrome handle their own clicks. Every
+        // remaining point on the black canvas returns to the gallery.
+        Point position = e.GetPosition(ModalImageArea);
+        if (TryCloseModalFromEmptySurface(e.OriginalSource as DependencyObject, position))
             e.Handled = true;
     }
 
-    private bool TryCloseModalFromEmptySurface(object? hitTarget)
+    private bool TryCloseModalFromEmptySurface(DependencyObject? hitTarget, Point position)
     {
         if (Modal.Visibility != Visibility.Visible
-            || (!ReferenceEquals(hitTarget, Modal) && !ReferenceEquals(hitTarget, ModalImageArea)))
+            || _modalPointerState == ModalPointerState.Panning
+            || IsModalChromeInteractionTarget(hitTarget)
+            || IsPointInsideTransformedModalImage(position))
         {
             return false;
         }
@@ -11410,6 +11438,9 @@ public partial class MainWindow : Window
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
         _modalChromeTransientTimer.Stop();
+        _modalHasPointerPosition = false;
+        _modalPressedEdgeTarget = ModalEdgeTarget.None;
+        _modalChromePointerPressActive = false;
         EndModalTransformInteraction();
         UpdateModalEnhancedControls(false);
         UpdateModalEnhancementActionControls();
@@ -11562,6 +11593,8 @@ public partial class MainWindow : Window
 
         if (ModalZoomLabel is not null)
             ModalZoomLabel.Text = $"{Math.Round(_modalFitScale * _modalZoom * 100):0}%";
+        if (ModalImageArea is not null)
+            UpdateModalEdgeNavigationPresentation();
     }
 
     private static void SetAnimatedTransformValue(
@@ -11646,6 +11679,10 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible)
             return;
 
+        // Image interaction is immersive from pointer-down, not after the
+        // button-up gesture has already completed.
+        SetModalChromeVisible(false, showFeedback: false);
+        BeginModalPointerInteraction();
         Point start = e.GetPosition(ModalImage);
         _modalPointerStartPoint = start;
         _modalPointerMoved = false;
@@ -11678,6 +11715,8 @@ public partial class MainWindow : Window
             || Math.Abs(delta.Y) >= SystemParameters.MinimumVerticalDragDistance)
         {
             _modalPointerMoved = true;
+            if (_modalZoom > 1 && _modalPanStartPoint.HasValue)
+                BeginModalPanning();
         }
 
         if (_modalZoom > 1 && _modalPanStartPoint.HasValue)
@@ -11714,9 +11753,19 @@ public partial class MainWindow : Window
 
     private void EndModalPointerGesture()
     {
+        bool wasPanning = _modalPointerState == ModalPointerState.Panning;
         _modalPointerStartPoint = null;
         _modalPointerMoved = false;
         EndModalPan();
+        if (wasPanning)
+        {
+            _modalPointerState = ModalPointerState.Hidden;
+            UpdateModalChromePresentation();
+        }
+        else
+        {
+            EndModalPointerInteraction();
+        }
     }
 
     private bool TryNavigateModalSwipe(Vector delta)
@@ -11762,6 +11811,9 @@ public partial class MainWindow : Window
         _modalManualChromeVisible = visible;
         _modalTransientChromeVisible = false;
         _modalFilmstripHoverVisible = false;
+        _modalPointerState = visible ? ModalPointerState.Visible : ModalPointerState.Hidden;
+        _modalPressedEdgeTarget = ModalEdgeTarget.None;
+        _modalChromePointerPressActive = false;
         if (!visible)
         {
             _modalFeedbackTimer.Stop();
@@ -11776,14 +11828,17 @@ public partial class MainWindow : Window
 
     private void RevealModalChromeTransient()
     {
-        if (Modal.Visibility != Visibility.Visible || _modalManualChromeVisible)
+        if (Modal.Visibility != Visibility.Visible
+            || _modalManualChromeVisible
+            || _modalPointerState == ModalPointerState.Panning)
             return;
 
         if (!_modalTransientChromeVisible)
         {
             _modalTransientChromeVisible = true;
-            UpdateModalChromePresentation();
         }
+        _modalPointerState = ModalPointerState.ArmedToHide;
+        UpdateModalChromePresentation();
         _modalChromeTransientTimer.Stop();
         _modalChromeTransientTimer.Start();
     }
@@ -11791,10 +11846,107 @@ public partial class MainWindow : Window
     private void ExpireModalChromeTransient()
     {
         _modalChromeTransientTimer.Stop();
+        if (_modalPointerState is ModalPointerState.Interacting or ModalPointerState.Panning)
+            return;
         if (!_modalTransientChromeVisible)
             return;
         _modalTransientChromeVisible = false;
+        _modalFilmstripHoverVisible = false;
+        _modalPointerState = _modalManualChromeVisible
+            ? ModalPointerState.Visible
+            : ModalPointerState.Hidden;
         UpdateModalChromePresentation();
+    }
+
+    private void BeginModalPointerInteraction()
+    {
+        if (Modal.Visibility != Visibility.Visible || _modalPointerState == ModalPointerState.Panning)
+            return;
+
+        _modalChromeTransientTimer.Stop();
+        _modalPointerState = ModalPointerState.Interacting;
+        UpdateModalEdgeNavigationPresentation();
+    }
+
+    private void EndModalPointerInteraction()
+    {
+        if (_modalPointerState != ModalPointerState.Interacting)
+            return;
+
+        if (_modalManualChromeVisible)
+        {
+            _modalPointerState = ModalPointerState.Visible;
+            _modalChromeTransientTimer.Stop();
+        }
+        else if (_modalTransientChromeVisible)
+        {
+            _modalPointerState = ModalPointerState.ArmedToHide;
+            _modalChromeTransientTimer.Stop();
+            _modalChromeTransientTimer.Start();
+        }
+        else
+        {
+            _modalPointerState = ModalPointerState.Hidden;
+        }
+        UpdateModalChromePresentation();
+    }
+
+    private void BeginModalPanning()
+    {
+        if (Modal.Visibility != Visibility.Visible || _modalPointerState == ModalPointerState.Panning)
+            return;
+
+        _modalChromeTransientTimer.Stop();
+        _modalManualChromeVisible = false;
+        _modalTransientChromeVisible = false;
+        _modalFilmstripHoverVisible = false;
+        _modalPressedEdgeTarget = ModalEdgeTarget.None;
+        _modalPointerState = ModalPointerState.Panning;
+        UpdateModalChromePresentation();
+    }
+
+    private void Modal_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || e.ChangedButton != MouseButton.Left
+            || e.OriginalSource is not DependencyObject source
+            || !IsModalChromeInteractionTarget(source))
+        {
+            return;
+        }
+
+        _modalChromePointerPressActive = true;
+        _modalPressedEdgeTarget = IsDescendantOrSelf(source, ModalPreviousButton)
+            ? ModalEdgeTarget.Previous
+            : IsDescendantOrSelf(source, ModalNextButton)
+                ? ModalEdgeTarget.Next
+                : ModalEdgeTarget.None;
+        BeginModalPointerInteraction();
+    }
+
+    private void Modal_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || !_modalChromePointerPressActive)
+            return;
+
+        _modalChromePointerPressActive = false;
+        Dispatcher.BeginInvoke(() =>
+        {
+            _modalPressedEdgeTarget = ModalEdgeTarget.None;
+            if (Modal.Visibility != Visibility.Visible || _modalPointerState == ModalPointerState.Panning)
+                return;
+
+            if (Mouse.DirectlyOver is DependencyObject target
+                && (IsModalChromeInteractionTarget(target) || IsModalChromeCaptureActive()))
+            {
+                BeginModalPointerInteraction();
+            }
+            else
+            {
+                EndModalPointerInteraction();
+            }
+            UpdateModalEdgeNavigationPresentation();
+        }, DispatcherPriority.Input);
     }
 
     private void Modal_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -11802,17 +11954,66 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible)
             return;
 
-        RevealModalChromeTransient();
-        Point position = e.GetPosition(Modal);
+        Point position = e.GetPosition(ModalImageArea);
+        _modalHasPointerPosition = double.IsFinite(position.X) && double.IsFinite(position.Y);
+        if (_modalHasPointerPosition)
+            _modalLastPointerPosition = position;
+
+        if (_modalPointerState == ModalPointerState.Panning)
+        {
+            SetModalFilmstripHoverVisible(false);
+            UpdateModalEdgeNavigationPresentation();
+            return;
+        }
+
+        if (_modalPointerStartPoint.HasValue)
+        {
+            BeginModalPointerInteraction();
+            SetModalFilmstripHoverVisible(false);
+            return;
+        }
+
+        bool overChrome = e.OriginalSource is DependencyObject target
+            && IsModalChromeInteractionTarget(target);
+        if (!overChrome)
+            overChrome = IsModalChromeCaptureActive();
+
+        if (!_modalManualChromeVisible && !_modalTransientChromeVisible)
+            RevealModalChromeTransient();
+        else if (!_modalManualChromeVisible && _modalTransientChromeVisible && !overChrome)
+            RevealModalChromeTransient();
+
+        if (overChrome)
+            BeginModalPointerInteraction();
+        else if (_modalPointerState == ModalPointerState.Interacting)
+            EndModalPointerInteraction();
+        else if (_modalManualChromeVisible)
+            _modalPointerState = ModalPointerState.Visible;
+
+        Point modalPosition = e.GetPosition(Modal);
         SetModalFilmstripHoverVisible(
-            position.Y >= Math.Max(0, Modal.ActualHeight - ModalFilmstripHoverZone)
-            && position.Y <= Modal.ActualHeight);
+            modalPosition.Y >= Math.Max(0, Modal.ActualHeight - ModalFilmstripHoverZone)
+            && modalPosition.Y <= Modal.ActualHeight);
+        UpdateModalEdgeNavigationPresentation();
     }
 
-    private void Modal_MouseLeave(object sender, MouseEventArgs e) => SetModalFilmstripHoverVisible(false);
+    private void Modal_MouseLeave(object sender, MouseEventArgs e)
+    {
+        _modalHasPointerPosition = false;
+        SetModalFilmstripHoverVisible(false);
+        if (!_modalChromePointerPressActive
+            && !_modalPointerStartPoint.HasValue
+            && !IsModalChromeCaptureActive())
+        {
+            EndModalPointerInteraction();
+        }
+        UpdateModalEdgeNavigationPresentation();
+    }
 
     private void SetModalFilmstripHoverVisible(bool visible)
     {
+        if (_modalPointerState == ModalPointerState.Panning)
+            visible = false;
         if (_modalFilmstripHoverVisible == visible)
             return;
         _modalFilmstripHoverVisible = visible;
@@ -11903,13 +12104,215 @@ public partial class MainWindow : Window
     private void UpdateModalFilmstripPresentation()
     {
         bool layoutVisible = _modalManualChromeVisible && _modalFilmstripOpen;
-        bool overlayVisible = _modalFilmstripOpen && _modalFilmstripHoverVisible && !layoutVisible;
+        bool overlayVisible = _modalFilmstripOpen
+            && _modalFilmstripHoverVisible
+            && !layoutVisible
+            && _modalPointerState != ModalPointerState.Panning;
         SetModalChromeElementVisibility(ModalFilmstripLayout, layoutVisible, animateReveal: false);
         SetModalChromeElementVisibility(ModalFilmstripOverlay, overlayVisible, animateReveal: true);
         ModalFilmstripToggleButton.ToolTip = $"{(_modalFilmstripOpen ? "Hide" : "Show")} image filmstrip ({BindingText(ViewerKeyAction.ToggleModalFilmstrip)})";
         AutomationProperties.SetName(ModalFilmstripToggleButton, $"{(_modalFilmstripOpen ? "Hide" : "Show")} image filmstrip");
         if (SelectedTile() is Tile selected)
             SyncModalFilmstripSelection(selected);
+    }
+
+    private bool IsModalChromeCaptureActive()
+        => Mouse.Captured is DependencyObject captured
+            && IsModalChromeInteractionTarget(captured);
+
+    private bool IsModalChromeInteractionTarget(DependencyObject? target)
+    {
+        if (target is null)
+            return false;
+
+        return IsDescendantOrSelf(target, ModalWindowCaptionControls)
+            || IsDescendantOrSelf(target, ModalTopBarSurface)
+            || IsDescendantOrSelf(target, ModalTopBar)
+            || IsDescendantOrSelf(target, ModalMetadataSidebar)
+            || IsDescendantOrSelf(target, ModalFooter)
+            || IsDescendantOrSelf(target, ModalFilmstripOverlay)
+            || IsDescendantOrSelf(target, ModalFilmstripLayout)
+            || IsDescendantOrSelf(target, ModalPreviousButton)
+            || IsDescendantOrSelf(target, ModalNextButton);
+    }
+
+    private bool TryGetTransformedModalImageRectangle(out Rect imageRectangle)
+    {
+        imageRectangle = Rect.Empty;
+        if (ModalImageArea.ActualWidth <= 0
+            || ModalImageArea.ActualHeight <= 0
+            || ModalImage.ActualWidth <= 0
+            || ModalImage.ActualHeight <= 0
+            || ModalVisual.RenderSize.Width <= 0
+            || ModalVisual.RenderSize.Height <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            imageRectangle = ModalVisual
+                .TransformToAncestor(ModalImageArea)
+                .TransformBounds(new Rect(new Point(0, 0), ModalVisual.RenderSize));
+            Rect imageClip = ModalImage
+                .TransformToAncestor(ModalImageArea)
+                .TransformBounds(new Rect(new Point(0, 0), ModalImage.RenderSize));
+            imageRectangle.Intersect(imageClip);
+            imageRectangle.Intersect(new Rect(0, 0, ModalImageArea.ActualWidth, ModalImageArea.ActualHeight));
+            return !imageRectangle.IsEmpty
+                && imageRectangle.Width > 0
+                && imageRectangle.Height > 0;
+        }
+        catch (InvalidOperationException)
+        {
+            imageRectangle = Rect.Empty;
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            imageRectangle = Rect.Empty;
+            return false;
+        }
+    }
+
+    private bool IsPointInsideTransformedModalImage(Point point)
+        => TryGetTransformedModalImageRectangle(out Rect imageRectangle)
+            && imageRectangle.Contains(point);
+
+    private ModalEdgeTarget ResolveModalEdgeTarget(Point point)
+    {
+        if (_modalPointerState == ModalPointerState.Panning
+            || _modalEdgeNavigationPercent <= 0
+            || ModalImageArea.ActualWidth <= 0
+            || !TryGetTransformedModalImageRectangle(out Rect imageRectangle)
+            || !imageRectangle.Contains(point))
+        {
+            return ModalEdgeTarget.None;
+        }
+
+        double edgeWidth = ModalImageArea.ActualWidth * (_modalEdgeNavigationPercent / 100d);
+        if (point.X <= edgeWidth)
+            return ModalEdgeTarget.Previous;
+        if (point.X >= ModalImageArea.ActualWidth - edgeWidth)
+            return ModalEdgeTarget.Next;
+        return ModalEdgeTarget.None;
+    }
+
+    private bool TryFindModalBlackCanvasPoint(out Point point)
+    {
+        point = default;
+        if (!TryGetTransformedModalImageRectangle(out Rect imageRectangle))
+            return false;
+
+        double width = ModalImageArea.ActualWidth;
+        double height = ModalImageArea.ActualHeight;
+        Point[] candidates =
+        [
+            new Point(1, height / 2),
+            new Point(Math.Max(1, width - 1), height / 2),
+            new Point(width / 2, 1),
+            new Point(width / 2, Math.Max(1, height - 1)),
+        ];
+        foreach (Point candidate in candidates)
+        {
+            if (candidate.X >= 0
+                && candidate.X <= width
+                && candidate.Y >= 0
+                && candidate.Y <= height
+                && !imageRectangle.Contains(candidate))
+            {
+                point = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void UpdateModalEdgeNavigationPresentation()
+    {
+        bool chromeVisible = ModalChromeEffectivelyVisible
+            && _modalPointerState != ModalPointerState.Panning;
+        bool hasImageRectangle = TryGetTransformedModalImageRectangle(out Rect imageRectangle);
+        ModalEdgeTarget target = _modalPressedEdgeTarget != ModalEdgeTarget.None
+            ? _modalPressedEdgeTarget
+            : _modalHasPointerPosition
+                ? ResolveModalEdgeTarget(_modalLastPointerPosition)
+                : ModalEdgeTarget.None;
+
+        SetModalEdgeButtonPresentation(
+            ModalPreviousButton,
+            chromeVisible,
+            target == ModalEdgeTarget.Previous,
+            hasImageRectangle ? imageRectangle : null);
+        SetModalEdgeButtonPresentation(
+            ModalNextButton,
+            chromeVisible,
+            target == ModalEdgeTarget.Next,
+            hasImageRectangle ? imageRectangle : null);
+    }
+
+    private static void SetModalEdgeButtonPresentation(
+        Button button,
+        bool chromeVisible,
+        bool active,
+        Rect? imageRectangle)
+    {
+        const double activeOpacity = 0.78;
+        bool wasActive = button.Visibility == Visibility.Visible && button.IsHitTestVisible;
+        if (!chromeVisible)
+        {
+            button.BeginAnimation(OpacityProperty, null);
+            button.Opacity = 0;
+            button.IsHitTestVisible = false;
+            KeyboardNavigation.SetIsTabStop(button, false);
+            button.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        button.Visibility = Visibility.Visible;
+        if (imageRectangle is Rect image)
+        {
+            button.VerticalAlignment = VerticalAlignment.Top;
+            button.Height = Math.Max(1, image.Height);
+            button.Margin = new Thickness(0, Math.Max(0, image.Top), 0, 0);
+        }
+        else
+        {
+            button.VerticalAlignment = VerticalAlignment.Stretch;
+            button.Height = double.NaN;
+            button.Margin = new Thickness(0);
+            active = false;
+        }
+
+        button.IsHitTestVisible = active;
+        KeyboardNavigation.SetIsTabStop(button, active);
+        if (!active)
+        {
+            if (wasActive || button.Opacity > 0)
+            {
+                button.BeginAnimation(OpacityProperty, null);
+                button.Opacity = 0;
+            }
+            return;
+        }
+
+        if (!wasActive)
+        {
+            button.BeginAnimation(OpacityProperty, null);
+            button.Opacity = activeOpacity;
+            button.BeginAnimation(
+                OpacityProperty,
+                new DoubleAnimation(0, activeOpacity, TimeSpan.FromMilliseconds(ModalChromeRevealAnimationMilliseconds))
+                {
+                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+                    FillBehavior = FillBehavior.Stop,
+                },
+                HandoffBehavior.SnapshotAndReplace);
+        }
+        else if (!button.HasAnimatedProperties)
+        {
+            button.Opacity = activeOpacity;
+        }
     }
 
     private void UpdateModalChromePresentation()
@@ -11920,8 +12323,7 @@ public partial class MainWindow : Window
         SetModalChromeElementVisibility(ModalTopBar, visible, animateReveal);
         SetModalChromeElementVisibility(ModalFooter, visible, animateReveal);
         SetModalChromeElementVisibility(ModalZoomIndicator, visible, animateReveal);
-        SetModalChromeElementVisibility(ModalPreviousButton, visible, animateReveal);
-        SetModalChromeElementVisibility(ModalNextButton, visible, animateReveal);
+        UpdateModalEdgeNavigationPresentation();
         UpdateModalFilmstripPresentation();
 
         bool cursorHidden = !ModalChromeEffectivelyVisible && ModalFilmstripOverlay.Visibility != Visibility.Visible;
@@ -17202,6 +17604,7 @@ public partial class MainWindow : Window
             && ModalNextButton.Visibility == Visibility.Visible;
     public bool ModalManualChromeVisibleForSmoke => _modalManualChromeVisible;
     public bool ModalTransientChromeVisibleForSmoke => _modalTransientChromeVisible;
+    public string ModalPointerStateForSmoke => _modalPointerState.ToString();
     public bool ModalTransientChromeAnimationActiveForSmoke
         => new UIElement[]
         {
@@ -17299,6 +17702,53 @@ public partial class MainWindow : Window
             && ReferenceEquals(ModalNextButton.Style, TryFindResource("ModalEdgeButton"))
             && ModalPreviousButton.FocusVisualStyle is not null
             && ModalNextButton.FocusVisualStyle is not null;
+    public bool ModalEdgeImageIntersectionContractForSmoke
+    {
+        get
+        {
+            UpdateLayout();
+            UpdateModalEdgeNavigationPresentation();
+            if (!TryGetTransformedModalImageRectangle(out Rect imageRectangle)
+                || ModalImageArea.ActualWidth <= 0
+                || ModalImageArea.ActualHeight <= 0)
+            {
+                return false;
+            }
+
+            double edgeWidth = ModalImageArea.ActualWidth * (_modalEdgeNavigationPercent / 100d);
+            Rect previousRegion = new(0, 0, edgeWidth, ModalImageArea.ActualHeight);
+            Rect nextRegion = new(
+                Math.Max(0, ModalImageArea.ActualWidth - edgeWidth),
+                0,
+                edgeWidth,
+                ModalImageArea.ActualHeight);
+            previousRegion.Intersect(imageRectangle);
+            nextRegion.Intersect(imageRectangle);
+            bool previousMatches = previousRegion.IsEmpty
+                || ResolveModalEdgeTarget(new Point(
+                    previousRegion.Left + (previousRegion.Width / 2),
+                    previousRegion.Top + (previousRegion.Height / 2))) == ModalEdgeTarget.Previous;
+            bool nextMatches = nextRegion.IsEmpty
+                || ResolveModalEdgeTarget(new Point(
+                    nextRegion.Left + (nextRegion.Width / 2),
+                    nextRegion.Top + (nextRegion.Height / 2))) == ModalEdgeTarget.Next;
+            bool centerRejected = ResolveModalEdgeTarget(new Point(
+                imageRectangle.Left + (imageRectangle.Width / 2),
+                imageRectangle.Top + (imageRectangle.Height / 2))) == ModalEdgeTarget.None;
+            bool blackCanvasRejected = TryFindModalBlackCanvasPoint(out Point blackCanvas)
+                && ResolveModalEdgeTarget(blackCanvas) == ModalEdgeTarget.None;
+            bool heightMatches = Math.Abs(ModalPreviousButton.Height - imageRectangle.Height) < 0.5
+                && Math.Abs(ModalNextButton.Height - imageRectangle.Height) < 0.5
+                && Math.Abs(ModalPreviousButton.Margin.Top - imageRectangle.Top) < 0.5
+                && Math.Abs(ModalNextButton.Margin.Top - imageRectangle.Top) < 0.5;
+            return (!previousRegion.IsEmpty || !nextRegion.IsEmpty)
+                && previousMatches
+                && nextMatches
+                && centerRejected
+                && blackCanvasRejected
+                && heightMatches;
+        }
+    }
     public bool ActivateModalContextFavoriteForSmoke(int delta)
     {
         string prefix = delta switch
@@ -17340,6 +17790,43 @@ public partial class MainWindow : Window
             && !ModalInteractionFeedbackText.Text.StartsWith("Zoom", StringComparison.OrdinalIgnoreCase);
     public void RevealModalChromeTransientForSmoke() => RevealModalChromeTransient();
     public void ExpireModalChromeTransientForSmoke() => ExpireModalChromeTransient();
+    public bool BeginModalControlInteractionForSmoke()
+    {
+        BeginModalPointerInteraction();
+        return _modalPointerState == ModalPointerState.Interacting
+            && !_modalChromeTransientTimer.IsEnabled;
+    }
+    public bool EndModalControlInteractionForSmoke()
+    {
+        EndModalPointerInteraction();
+        return _modalPointerState == (_modalManualChromeVisible
+                ? ModalPointerState.Visible
+                : _modalTransientChromeVisible
+                    ? ModalPointerState.ArmedToHide
+                    : ModalPointerState.Hidden)
+            && (_modalManualChromeVisible
+                || !_modalTransientChromeVisible
+                || _modalChromeTransientTimer.IsEnabled);
+    }
+    public bool BeginModalPanningForSmoke()
+    {
+        BeginModalPanning();
+        return _modalPointerState == ModalPointerState.Panning
+            && !_modalManualChromeVisible
+            && !_modalTransientChromeVisible
+            && !ModalPreviousButton.IsHitTestVisible
+            && !ModalNextButton.IsHitTestVisible
+            && Modal.Cursor == Cursors.None;
+    }
+    public bool EndModalPanningForSmoke()
+    {
+        if (_modalPointerState != ModalPointerState.Panning)
+            return false;
+        EndModalPointerGesture();
+        return _modalPointerState == ModalPointerState.Hidden
+            && !ModalChromeEffectivelyVisible
+            && Modal.Cursor == Cursors.None;
+    }
     public void SetModalChromeVisibleForSmoke(bool visible)
     {
         CancelPendingModalSingleClick();
@@ -17378,7 +17865,9 @@ public partial class MainWindow : Window
             && !ModalChromeEffectivelyVisible
             && Modal.Cursor == Cursors.None;
     }
-    public bool CloseModalFromEmptySurfaceForSmoke() => TryCloseModalFromEmptySurface(ModalImageArea);
+    public bool CloseModalFromEmptySurfaceForSmoke()
+        => TryFindModalBlackCanvasPoint(out Point blackCanvas)
+            && TryCloseModalFromEmptySurface(ModalImageArea, blackCanvas);
     public bool ModalInteractionFeedbackVisibleForSmoke => ModalInteractionFeedback.Visibility == Visibility.Visible;
     public string ModalInteractionFeedbackForSmoke => ModalInteractionFeedbackText.Text;
     public async Task<bool> WaitForModalChromeTransientExpirationForSmokeAsync(int timeoutMilliseconds = 5000)

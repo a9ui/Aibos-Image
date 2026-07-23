@@ -2624,6 +2624,14 @@ public partial class App : Application
             "photoviewer-wpf-automation-metadata-index-cross-process-v1");
     }
 
+    // Automation fixtures never inherit CLI, result-file, TEMP, or shared-state
+    // paths. Keeping their write root under the executable-owned test output
+    // prevents a smoke argument from becoming a filesystem authority.
+    private static string CreateManagedAutomationRoot()
+        => Path.Combine(
+            AppContext.BaseDirectory,
+            ".aibos-automation-" + Guid.NewGuid().ToString("N"));
+
     private static string ResolveLegacySharedDataRootForActivation()
     {
         foreach (string start in new[] { Environment.CurrentDirectory, AppContext.BaseDirectory })
@@ -3416,12 +3424,13 @@ public partial class App : Application
 
     private void CaptureUiLanguageSmoke(string resultPath)
     {
-        string statePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH")
-            ?? throw new InvalidOperationException("automation state path was not configured");
-        string settingsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH")
-            ?? throw new InvalidOperationException("automation shared settings path was not configured");
-        string root = Path.GetDirectoryName(Path.GetFullPath(statePath))
-            ?? throw new InvalidOperationException("automation state root was unavailable");
+        string root = CreateManagedAutomationRoot();
+        string statePath = Path.Combine(root, "state.json");
+        string settingsPath = Path.Combine(root, "settings.json");
+        string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
+        string? previousSettingsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH");
+        Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
+        Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", settingsPath);
         Directory.CreateDirectory(root);
         File.WriteAllText(
             statePath,
@@ -3527,6 +3536,9 @@ public partial class App : Application
                 {
                     try { window.Close(); } catch { }
                 }
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", previousStatePath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", previousSettingsPath);
+                try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); } catch { }
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(resultPath))!);
@@ -7156,8 +7168,7 @@ public partial class App : Application
         }
 
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -7221,8 +7232,7 @@ public partial class App : Application
 
         string fullFolder = Path.GetFullPath(folder);
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -7618,8 +7628,7 @@ public partial class App : Application
 
         string fullFolder = Path.GetFullPath(folder);
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -7754,8 +7763,7 @@ public partial class App : Application
     private void CaptureFolderBucketSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -8323,8 +8331,7 @@ public partial class App : Application
 
         string fullFolder = Path.GetFullPath(folder);
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -8423,8 +8430,7 @@ public partial class App : Application
     private void CaptureAspectSmoke(string resultPath, string[] args)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -8597,8 +8603,7 @@ public partial class App : Application
         }
 
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -8773,8 +8778,7 @@ public partial class App : Application
     private void CaptureDateFilterSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -8982,8 +8986,7 @@ public partial class App : Application
     private void CaptureP1ASmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -14147,8 +14150,7 @@ public partial class App : Application
     private void CaptureRightPanelSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -14328,8 +14330,7 @@ public partial class App : Application
     {
         string resultFullPath = Path.GetFullPath(resultPath);
         string fixtureFolder = Path.GetFullPath(ArgValue(args, "--fixture-folder") ?? "");
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-state-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -14430,8 +14431,7 @@ public partial class App : Application
         }
 
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -14586,8 +14586,7 @@ public partial class App : Application
         }
 
         string resultFullPath = Path.GetFullPath(resultPath);
-        string resultDir = Path.GetDirectoryName(resultFullPath) ?? Path.GetTempPath();
-        string smokeRoot = Path.Combine(resultDir, Path.GetFileNameWithoutExtension(resultFullPath) + "-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -16272,7 +16271,7 @@ public partial class App : Application
     private void CaptureModalInteractionSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string smokeRoot = Path.Combine(Path.GetTempPath(), "photoviewer-wpf-modal-interaction-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = CreateManagedAutomationRoot();
         string folder = Path.Combine(smokeRoot, "images");
         string statePath = Path.Combine(smokeRoot, "state.json");
         string seenPath = Path.Combine(smokeRoot, "seen.json");
@@ -16328,6 +16327,8 @@ public partial class App : Application
                     && win.ActivateModalMaximizeForSmoke();
                 bool edgeChrome = win.ModalEdgeChromeContractForSmoke;
                 bool edgePercentageSet = win.SetModalEdgeNavigationPercentForSmoke(12);
+                bool edgeImageIntersection = edgePercentageSet
+                    && win.ModalEdgeImageIntersectionContractForSmoke;
                 bool edgePercentagePersisted = false;
                 if (edgePercentageSet && File.Exists(statePath))
                 {
@@ -16375,7 +16376,8 @@ public partial class App : Application
                 await Task.Delay(1050);
                 bool manualVisiblePersistent = win.ModalManualChromeVisibleForSmoke
                     && win.ModalChromeVisibleForSmoke
-                    && win.ModalFilmstripLayoutVisibleForSmoke;
+                    && win.ModalFilmstripLayoutVisibleForSmoke
+                    && string.Equals(win.ModalPointerStateForSmoke, "Visible", StringComparison.Ordinal);
 
                 bool imageClickImmediateHide = win.ModalVisibleForSmoke
                     && win.HideModalChromeFromImageForSmoke();
@@ -16384,7 +16386,8 @@ public partial class App : Application
                     && !win.ModalManualChromeVisibleForSmoke
                     && win.ModalCursorHiddenForSmoke
                     && !win.ModalFilmstripLayoutVisibleForSmoke
-                    && win.ModalWindowCaptionControlsContractForSmoke;
+                    && win.ModalWindowCaptionControlsContractForSmoke
+                    && string.Equals(win.ModalPointerStateForSmoke, "Hidden", StringComparison.Ordinal);
                 win.UpdateLayout();
                 double hiddenImageHeight = win.ModalImageAreaHeightForSmoke;
 
@@ -16393,14 +16396,35 @@ public partial class App : Application
                     && !win.ModalManualChromeVisibleForSmoke
                     && win.ModalTransientChromeVisibleForSmoke
                     && !win.ModalCursorHiddenForSmoke
-                    && !win.ModalFilmstripLayoutVisibleForSmoke;
+                    && !win.ModalFilmstripLayoutVisibleForSmoke
+                    && string.Equals(win.ModalPointerStateForSmoke, "ArmedToHide", StringComparison.Ordinal);
                 bool transientRevealMotion = win.ModalTransientChromeAnimationActiveForSmoke;
+                bool controlInteractionStarted = win.BeginModalControlInteractionForSmoke();
+                win.ExpireModalChromeTransientForSmoke();
+                bool controlAutoHideSuspended = controlInteractionStarted
+                    && win.ModalChromeVisibleForSmoke
+                    && win.ModalTransientChromeVisibleForSmoke
+                    && string.Equals(win.ModalPointerStateForSmoke, "Interacting", StringComparison.Ordinal);
+                bool controlInteractionArmed = win.EndModalControlInteractionForSmoke()
+                    && string.Equals(win.ModalPointerStateForSmoke, "ArmedToHide", StringComparison.Ordinal);
                 bool transientExpirationObserved = await win.WaitForModalChromeTransientExpirationForSmokeAsync();
                 bool transientExpired = transientExpirationObserved
                     && !win.ModalChromeVisibleForSmoke
                     && !win.ModalManualChromeVisibleForSmoke
                     && !win.ModalTransientChromeVisibleForSmoke
-                    && win.ModalCursorHiddenForSmoke;
+                    && win.ModalCursorHiddenForSmoke
+                    && string.Equals(win.ModalPointerStateForSmoke, "Hidden", StringComparison.Ordinal);
+                bool pointerStateContract = manualVisiblePersistent
+                    && chromeHidden
+                    && transientReveal
+                    && controlAutoHideSuspended
+                    && controlInteractionArmed
+                    && transientExpired;
+
+                win.RevealModalChromeTransientForSmoke();
+                bool panningStarted = win.BeginModalPanningForSmoke();
+                bool panningEnded = win.EndModalPanningForSmoke();
+                bool panningSuppressesChrome = panningStarted && panningEnded;
 
                 bool hiddenZoomPersistence = win.ModalZoomShortcutForSmoke("plus")
                     && !win.ModalChromeVisibleForSmoke
@@ -16583,9 +16607,12 @@ public partial class App : Application
                     && win.InvokePreviewKeyForSmoke(Key.Escape)
                     && !win.ModalVisibleForSmoke;
 
-                bool ok = selected && opened && accessibility && windowCaptionControls && edgeChrome && edgePercentageSetting
+                bool ok = selected && opened && accessibility && windowCaptionControls && edgeChrome
+                    && edgePercentageSetting && edgeImageIntersection
                     && zoomIndicator && filmstripLayout && contextMenuAction && manualVisiblePersistent
-                    && chromeHidden && transientReveal && transientRevealMotion && transientExpired && hiddenZoomPersistence
+                    && chromeHidden && transientReveal && transientRevealMotion && transientExpired
+                    && pointerStateContract && controlAutoHideSuspended && panningSuppressesChrome
+                    && hiddenZoomPersistence
                     && filmstripOverlay && filmstripOverlayDismissed && filmstripOverlayStableGeometry
                     && chromeShown && controlDidNotToggle && doubleClickMetadata && detailsOverlayStableGeometry
                     && edgeNext && !string.Equals(beforeEdge, afterEdge, StringComparison.OrdinalIgnoreCase) && edgeFeedback
@@ -16597,11 +16624,12 @@ public partial class App : Application
                 result = new ModalInteractionSmokeResult
                 {
                     Ok = ok,
-                    Message = ok ? "modal full-canvas fit, immediate image-click chrome hide, empty-canvas gallery return, stable details overlay, fixed filmstrip controls, edge zones, and hidden-state enhanced/navigation/delete parity passed" : "modal interaction parity did not meet the expected contract",
+                    Message = ok ? "modal pointer states, transformed-image edge zones, full-canvas fit, immediate chrome hide, black-canvas gallery return, fixed filmstrip controls, and hidden-state parity passed" : "modal interaction parity did not meet the expected contract",
                     Accessibility = accessibility,
                     WindowCaptionControls = windowCaptionControls,
                     EdgeChrome = edgeChrome,
                     EdgePercentageSetting = edgePercentageSetting,
+                    EdgeImageIntersection = edgeImageIntersection,
                     ZoomIndicator = zoomIndicator,
                     FilmstripLayout = filmstripLayout,
                     FilmstripLayoutVisible = filmstripLayoutVisible,
@@ -16626,6 +16654,9 @@ public partial class App : Application
                     TransientReveal = transientReveal,
                     TransientRevealMotion = transientRevealMotion,
                     TransientExpired = transientExpired,
+                    PointerStateContract = pointerStateContract,
+                    ControlAutoHideSuspended = controlAutoHideSuspended,
+                    PanningSuppressesChrome = panningSuppressesChrome,
                     HiddenZoomPersistence = hiddenZoomPersistence,
                     FilmstripOverlay = filmstripOverlay && filmstripOverlayDismissed,
                     FilmstripOverlayStableGeometry = filmstripOverlayStableGeometry,
@@ -22293,6 +22324,7 @@ public partial class App : Application
         public bool WindowCaptionControls { get; init; }
         public bool EdgeChrome { get; init; }
         public bool EdgePercentageSetting { get; init; }
+        public bool EdgeImageIntersection { get; init; }
         public bool ZoomIndicator { get; init; }
         public bool FilmstripLayout { get; init; }
         public bool FilmstripLayoutVisible { get; init; }
@@ -22317,6 +22349,9 @@ public partial class App : Application
         public bool TransientReveal { get; init; }
         public bool TransientRevealMotion { get; init; }
         public bool TransientExpired { get; init; }
+        public bool PointerStateContract { get; init; }
+        public bool ControlAutoHideSuspended { get; init; }
+        public bool PanningSuppressesChrome { get; init; }
         public bool HiddenZoomPersistence { get; init; }
         public bool FilmstripOverlay { get; init; }
         public bool FilmstripOverlayStableGeometry { get; init; }

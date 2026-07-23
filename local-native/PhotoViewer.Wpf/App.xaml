@@ -240,7 +240,7 @@
       </Setter>
     </Style>
 
-    <!-- Full-height modal edge zones: tint the edge and brighten the chevron without circular chrome. -->
+    <!-- Image-intersection edge zones: tint only the valid hover target without circular chrome. -->
     <Style x:Key="ModalEdgeButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
       <Setter Property="Foreground" Value="{StaticResource TextDisabled}"/>
       <Setter Property="Background" Value="Transparent"/>

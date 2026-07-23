@@ -1289,7 +1289,9 @@
 
     <Grid x:Name="Modal" Grid.RowSpan="3" Panel.ZIndex="300" Visibility="Collapsed" Background="{StaticResource BgPrimary}"
           Focusable="True" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle"
-          MouseLeftButtonDown="ModalBackdrop_MouseLeftButtonDown" PreviewMouseMove="Modal_PreviewMouseMove" MouseLeave="Modal_MouseLeave"
+          MouseLeftButtonDown="ModalBackdrop_MouseLeftButtonDown"
+          PreviewMouseDown="Modal_PreviewMouseDown" PreviewMouseUp="Modal_PreviewMouseUp"
+          PreviewMouseMove="Modal_PreviewMouseMove" MouseLeave="Modal_MouseLeave"
           AutomationProperties.Name="Image preview dialog"
           AutomationProperties.HelpText="Preview the selected image. Use Left and Right to navigate, Escape to close, and Tab to move through preview controls.">
       <Grid.Resources>
