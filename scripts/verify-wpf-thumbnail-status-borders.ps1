@@ -14,7 +14,10 @@ try {
     $staticContracts = @(
         'FavoriteThumbnailStatusBorderBrush',
         'EnhancedThumbnailStatusBorderBrush',
-        '<SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="#38BDF8"/>',
+        '<Color x:Key="FavoriteThumbnailStatusBorderColor">#F4C45B</Color>',
+        '<Color x:Key="EnhancedThumbnailStatusBorderColor">#38BDF8</Color>',
+        '<SolidColorBrush x:Key="FavoriteThumbnailStatusBorderBrush" Color="{DynamicResource FavoriteThumbnailStatusBorderColor}"/>',
+        '<SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="{DynamicResource EnhancedThumbnailStatusBorderColor}"/>',
         'AutomationProperties.Name="AI-enhanced thumbnail border color"',
         'Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"',
         'Visibility="{Binding Enhanced, Converter={StaticResource BoolToVis}}"',

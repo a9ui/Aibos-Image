@@ -12,13 +12,15 @@
   - `private-evidence://aibos/grid-narrow-final.png` — 900 x 820, SHA-256 `2cdc3ade67543a4de7e49fe38645d46406596556b70e71e33d790d088b19ead0`
   - `private-evidence://aibos/settings.png` — 900 x 700, SHA-256 `7c12723af1bf1a23ec62996bc2afe861eebcea11459fde797c6412cad6371979`
   - `private-evidence://aibos/modal-wide.png` — 1280 x 820, SHA-256 `cd6490a4df436d46c477b4b32f7f7c91ef76ede0f2b4162c9934bf89cca9d178`
+  - `private-evidence://aibos/album-library-populated.png` — 1120 x 760, SHA-256 `25a795f85c075e926e578d0834e571f146d95d7be4b6834c45d9974fd1298715`
+  - `private-evidence://aibos/settings-high-contrast.png` — 1280 x 820, SHA-256 `acbf9eb9e820a40218c5e7ab631b518691f91c9ca9fee719f3a0782f5102272d`
 - Local filesystem paths are deliberately omitted because this report is intended for a public repository and the captures contain private workstation path text.
 - WPF captures used 96 DPI at 1.0 density. Pixel dimensions equal the arranged WPF DIP viewport. The composite source board contains several differently sized states, so each implementation capture was compared to its corresponding source region rather than scaled as one full frame.
-- State: dark theme; synthetic TEMP image fixture; landing/grid/settings/modal states; wide and 900-DIP adaptive layouts. No user image, cache, history, or shared state was used.
+- State: dark theme; synthetic TEMP image fixture; landing/grid/settings/modal/populated-Album states; wide and 900-DIP adaptive layouts. No user image, cache, history, or shared state was used.
 
 ## Full-view comparison evidence
 
-The source board and each rendered implementation capture were opened together in the same comparison input. Wide workbench composition, 900-DIP adaptive composition, Settings, and modal-with-filmstrip were reviewed against their corresponding source regions. The implementation retains the product's real portrait-filmstrip and complete toolbar semantics where the visual board was illustrative rather than exhaustive.
+The source board and each rendered implementation capture were opened together in the same comparison input. Wide workbench composition, 900-DIP adaptive composition, Settings, modal-with-filmstrip, and the populated Album Library were reviewed against the same token, density, border, and control language. The implementation retains the product's real portrait-filmstrip and complete toolbar semantics where the visual board was illustrative rather than exhaustive.
 
 ## Focused region comparison evidence
 
@@ -26,6 +28,8 @@ The source board and each rendered implementation capture were opened together i
 - Modal: compared top toolbar density, image fit, navigation edge zones, bottom filmstrip, footer controls, opaque surfaces, and window controls at readable scale.
 - Narrow workbench: compared the 44-DIP navigation rail, gallery region, bottom preview, and persistent header at 900 x 820.
 - Selection projection: compared the selected gallery card against the source board in both 1600-DIP wide and 900-DIP adaptive layouts. The final captures show the same persistent accent outline after focus moves to the Preview action surface.
+- Album Library: compared its populated library/member columns, selected state, compact actions, status strip, borders, radii, and typography against the selected workbench language. The source board has no standalone Album surface, so the comparison is token- and density-based rather than pixel-fidelity based.
+- High Contrast: inspected the Settings surface under the live Windows system palette. This accessibility mode intentionally replaces the dark visual direction rather than claiming pixel fidelity; the evidence confirms opaque system backgrounds, system text, highlight/focus color, readable primary action text, and preserved control hierarchy.
 
 ## Required fidelity surfaces
 
@@ -42,6 +46,8 @@ The source board and each rendered implementation capture were opened together i
 3. Initial P2: Settings was one long undifferentiated scroll surface. Fix: added functional General, Display, Thumbnails, Keyboard, and About navigation with a fixed footer. Post-fix evidence: `settings.png`; settings/unseen-state smoke passes without changing Seen or cache data.
 4. Initial P2: Album and modal chrome retained large radii, capsule badges, and the default context-menu treatment. Fix: reduced radii, removed the fake Album text mark, compacted modal controls, and added an opaque lightweight context-menu surface. Post-fix evidence: `modal-wide.png`; modal interaction and Album hardening smokes pass.
 5. PRO High: gallery selection was represented in the header and Preview but was not durable enough visually after keyboard focus moved away from the gallery. Fix: projected canonical selection state into compact Grid, standard Grid, and List templates independently of transient WPF focus selection. Post-fix evidence: `grid-wide-final.png` and `grid-narrow-final.png`; the Grid → narrow Grid → List → wide Grid smoke preserves the same canonical path, visible marker, and source bytes.
+6. Follow-up polish: the Right Preview action row overflowed at its minimum width and the Album Library lacked populated visual evidence. Fix: replaced the fixed action grid with an ordered wrapping surface (240 DIP = two rows, 380 DIP = one row) and added an isolated secondary-window capture using a synthetic populated Album store. Post-fix evidence: right-panel smoke and `album-library-populated.png`.
+7. Accessibility pass: the static dark palette did not follow Windows High Contrast and several Right Preview actions depended on tooltip-only names. Fix: routed opaque color tokens through live system colors, restored the standard palette without restarting, preserved user-configured thumbnail-border semantics, and added explicit automation names/focus/tab-order checks. Post-fix evidence: `settings-high-contrast.png`; accessibility, keyboard, modal-focus, Album-focus, and DPI-anchor gates pass.
 
 ## Findings
 
@@ -59,12 +65,16 @@ No actionable P0, P1, or P2 visual mismatch remains for this implementation batc
 - [x] Functional Settings category navigation.
 - [x] Modal, filmstrip, context menu, and Album chrome alignment.
 - [x] Persistent canonical selection marker in compact Grid, standard Grid, and List across focus and wide/narrow mode changes.
+- [x] Right Preview actions fit at 240–380 DIP without clipping or changing keyboard order.
+- [x] Populated Album Library secondary-window visual captured from isolated synthetic state.
+- [x] Live Windows High Contrast palette with standard-theme restoration.
+- [x] Right Preview automation names, focus visuals, and logical Tab order.
+- [x] DPI anchor, editable keyboard, modal focus, and Album focus regression gates.
 - [x] .NET 10 Release build with zero warnings and zero errors.
 - [x] Focused UI, state-isolation, modal, Album, zoom-anchor, and rapid-churn gates.
 
 ## Follow-up polish
 
 - P3: add optional monochrome category icons to Settings only if a licensed, consistent icon source is adopted; text navigation is currently clearer than placeholder glyphs.
-- P3: capture a populated Album Library visual in a future synthetic fixture pass once the screenshot harness supports secondary windows.
 
 final result: passed

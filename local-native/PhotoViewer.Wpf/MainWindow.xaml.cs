@@ -389,6 +389,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        if (Application.Current is App app)
+            app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
         InitializeKeyBindingEditor();
         _currentMonitorWorkArea = ResolveCurrentMonitorWorkArea;
         _searchFilterTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -460,6 +462,8 @@ public partial class MainWindow : Window
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
+            if (Application.Current is App app)
+                app.AccessibilityPaletteChanged -= App_AccessibilityPaletteChanged;
             Interlocked.Increment(ref _activeAlbumAsyncGeneration);
             Interlocked.Exchange(ref _activeAlbumAvailabilityCts, null)?.Cancel();
             CancelPreviewTabHoverDecode();
@@ -11189,6 +11193,16 @@ public partial class MainWindow : Window
     {
         if (Application.Current is null)
             return;
+        if (Application.Current is App { HighContrastPaletteApplied: true })
+        {
+            Application.Current.Resources["FavoriteThumbnailStatusBorderBrush"] = settings.Favorite.Enabled
+                ? CreateFrozenSolidColorBrush(SystemColors.HotTrackColor)
+                : Brushes.Transparent;
+            Application.Current.Resources["EnhancedThumbnailStatusBorderBrush"] = settings.Enhanced.Enabled
+                ? CreateFrozenSolidColorBrush(SystemColors.HotTrackColor)
+                : Brushes.Transparent;
+            return;
+        }
         Application.Current.Resources["FavoriteThumbnailStatusBorderBrush"] = CreateThumbnailStatusBorderBrush(
             settings.Favorite);
         Application.Current.Resources["EnhancedThumbnailStatusBorderBrush"] = CreateThumbnailStatusBorderBrush(
@@ -11215,6 +11229,21 @@ public partial class MainWindow : Window
         byte green = byte.Parse(color.AsSpan(3, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
         byte blue = byte.Parse(color.AsSpan(5, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
         var brush = new SolidColorBrush(Color.FromRgb(red, green, blue));
+        brush.Freeze();
+        return brush;
+    }
+
+    private void App_AccessibilityPaletteChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.CheckAccess())
+            ApplyThumbnailStatusBorderResources(_thumbnailStatusBorderSettings);
+        else
+            Dispatcher.BeginInvoke(() => ApplyThumbnailStatusBorderResources(_thumbnailStatusBorderSettings));
+    }
+
+    private static Brush CreateFrozenSolidColorBrush(Color color)
+    {
+        var brush = new SolidColorBrush(color);
         brush.Freeze();
         return brush;
     }
@@ -14873,6 +14902,55 @@ public partial class MainWindow : Window
     public double RightPanelWidthForSmoke => RightPanel.ActualWidth;
     public double RightPanelStoredWidthForSmoke => _rightPanelWidth;
     public bool RightPanelOpenForSmoke => RightPanel.Visibility == Visibility.Visible;
+    public bool RightPreviewActionAccessibilityForSmoke
+    {
+        get
+        {
+            Button[] actions =
+            [
+                FavoriteDecreaseButton,
+                FavoriteIncreaseButton,
+                RightPreviewOpenButton,
+                RightPreviewRevealButton,
+                RightPreviewTabButton,
+                RightPreviewDeleteButton,
+            ];
+            return KeyboardNavigation.GetTabNavigation(SingleSelectionActions) == KeyboardNavigationMode.Continue
+                && actions.All(static action => action.Focusable
+                    && action.FocusVisualStyle is not null
+                    && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(action)))
+                && SingleSelectionActions.Children.Count == 5
+                && ReferenceEquals(SingleSelectionActions.Children[1], RightPreviewOpenButton)
+                && ReferenceEquals(SingleSelectionActions.Children[2], RightPreviewRevealButton)
+                && ReferenceEquals(SingleSelectionActions.Children[3], RightPreviewTabButton)
+                && ReferenceEquals(SingleSelectionActions.Children[4], RightPreviewDeleteButton);
+        }
+    }
+    public RightPreviewActionLayoutSmokeSnapshot MeasureRightPreviewActionLayoutForSmoke(double panelWidth)
+    {
+        const double previewContentHorizontalMargin = 28;
+        double availableWidth = Math.Max(1, panelWidth - previewContentHorizontalMargin);
+        SingleSelectionActions.Measure(new Size(availableWidth, double.PositiveInfinity));
+
+        double rowHeight = 0;
+        bool childrenFit = true;
+        foreach (UIElement child in SingleSelectionActions.Children)
+        {
+            rowHeight = Math.Max(rowHeight, child.DesiredSize.Height);
+            childrenFit &= child.DesiredSize.Width <= availableWidth + 0.5;
+        }
+
+        double desiredHeight = SingleSelectionActions.DesiredSize.Height;
+        int rowCount = rowHeight <= 0 ? 0 : Math.Max(1, (int)Math.Round(desiredHeight / rowHeight));
+        bool fits = childrenFit && SingleSelectionActions.DesiredSize.Width <= availableWidth + 0.5;
+        return new RightPreviewActionLayoutSmokeSnapshot(
+            panelWidth,
+            availableWidth,
+            SingleSelectionActions.DesiredSize.Width,
+            desiredHeight,
+            rowCount,
+            fits);
+    }
     public bool SetRightPanelWidthForSmoke(double width)
     {
         bool changed = SetRightPanelWidth(width);
@@ -16412,6 +16490,14 @@ public sealed record ListSelectionVisualSmokeSnapshot(
     bool ContainerRealized,
     bool ContainerSelected,
     bool CanonicalMarkerVisible);
+
+public sealed record RightPreviewActionLayoutSmokeSnapshot(
+    double PanelWidth,
+    double AvailableWidth,
+    double DesiredWidth,
+    double DesiredHeight,
+    int RowCount,
+    bool Fits);
 
 public sealed record PreviewDecodeSmokeSnapshot(
     bool Selected,

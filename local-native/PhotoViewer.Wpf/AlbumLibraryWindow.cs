@@ -701,9 +701,16 @@ internal sealed class AlbumLibraryWindow : Window
 
     private Button ActionButton(string text, string toolTip, RoutedEventHandler click, string styleKey = "GhostButton")
     {
+        object content = text;
+        if (string.Equals(styleKey, "PrimaryButton", StringComparison.Ordinal))
+        {
+            var label = new TextBlock { Text = text };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "SelectionText");
+            content = label;
+        }
         var button = new Button
         {
-            Content = text,
+            Content = content,
             ToolTip = toolTip,
             Margin = new Thickness(0, 0, 7, 0),
             Padding = new Thickness(10, 5, 10, 5),
