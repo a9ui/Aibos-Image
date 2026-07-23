@@ -13357,6 +13357,9 @@ public partial class App : Application
         for (int index = 0; index < parts.Length; index++)
         {
             string candidate = Path.Combine(current, parts[index]);
+            // This helper is the path sanitizer: it must inspect each existing component so
+            // junctions/symlinks can be resolved before any smoke-test write is permitted.
+            // codeql[cs/path-injection]
             if (!File.Exists(candidate) && !Directory.Exists(candidate))
             {
                 for (int remainder = index; remainder < parts.Length; remainder++)
@@ -13364,6 +13367,8 @@ public partial class App : Application
                 return Path.GetFullPath(current);
             }
 
+            // See the sanitizer invariant above; candidate is inspected, never written here.
+            // codeql[cs/path-injection]
             FileSystemInfo info = Directory.Exists(candidate) ? new DirectoryInfo(candidate) : new FileInfo(candidate);
             if (info.LinkTarget is null)
             {
