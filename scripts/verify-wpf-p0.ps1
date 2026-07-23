@@ -8,7 +8,7 @@ $project = Join-Path $root 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 dotnet build $project -c Release --nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$exe = Join-Path $root 'local-native\PhotoViewer.Wpf\bin\Release\net8.0-windows\PhotoViewer.Wpf.exe'
+$exe = Join-Path $root 'local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.exe'
 Remove-Item -LiteralPath $OutputPath -ErrorAction SilentlyContinue
 if ($OutputPath.Contains('"')) { throw 'OutputPath cannot contain a double quote.' }
 $process = Start-Process -FilePath $exe `

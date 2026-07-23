@@ -30,6 +30,9 @@ $storeEnvironment = [ordered]@{
     PHOTOVIEWER_WPF_FAVORITES_PATH = Join-Path $sentinelRoot 'favorites.json'
     PHOTOVIEWER_WPF_SEEN_PATH = Join-Path $sentinelRoot 'seen.json'
     PHOTOVIEWER_WPF_RECENT_PATH = Join-Path $sentinelRoot 'recent-folders.json'
+    PHOTOVIEWER_WPF_SETTINGS_PATH = Join-Path $sentinelRoot 'settings.json'
+    PHOTOVIEWER_WPF_ALBUMS_PATH = Join-Path $sentinelRoot 'albums.json'
+    PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH = Join-Path $sentinelRoot 'search-history.json'
     PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH = Join-Path $sentinelRoot 'enhance\jobs.json'
 }
 $sentinelContents = @{
@@ -37,13 +40,19 @@ $sentinelContents = @{
     PHOTOVIEWER_WPF_FAVORITES_PATH = '{"C:\\sentinel-favorite.png":3}'
     PHOTOVIEWER_WPF_SEEN_PATH = '{"C:\\sentinel-seen.png":true}'
     PHOTOVIEWER_WPF_RECENT_PATH = '{"version":1,"lastFolderSet":[],"recentFolderSets":[],"updatedAtUtc":"2026-07-18T00:00:00Z","sentinel":"recent"}'
+    PHOTOVIEWER_WPF_SETTINGS_PATH = '{"version":1,"sentinel":"settings"}'
+    PHOTOVIEWER_WPF_ALBUMS_PATH = '{"version":1,"revision":0,"updatedAtUtc":"2026-07-23T00:00:00Z","albums":[],"recentAlbumIds":[],"sentinel":"albums"}'
+    PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH = '{"version":1,"entries":[],"updatedAtUtc":"2026-07-23T00:00:00Z","sentinel":"search-history"}'
     PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH = '{"version":1,"jobs":[],"sentinel":"jobs"}'
 }
+$metadataSentinelDirectory = Join-Path $sentinelRoot 'metadata-index'
+$metadataSentinelPath = Join-Path $metadataSentinelDirectory 'sentinel.txt'
 $previousEnvironment = @{}
 $sentinelHashesBefore = @{}
 $childExitCode = $null
 $summary = $null
 $previousBrowserBaseUrl = [Environment]::GetEnvironmentVariable('PHOTOVIEWER_BROWSER_BASE_URL', 'Process')
+$previousMetadataIndexDirectory = [Environment]::GetEnvironmentVariable('PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY', 'Process')
 foreach ($name in $storeEnvironment.Keys) {
     $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
@@ -58,6 +67,10 @@ try {
         $sentinelHashesBefore[$name] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
         [Environment]::SetEnvironmentVariable($name, $path, 'Process')
     }
+    New-Item -ItemType Directory -Path $metadataSentinelDirectory -Force | Out-Null
+    [IO.File]::WriteAllText($metadataSentinelPath, 'metadata-index-sentinel', [Text.UTF8Encoding]::new($false))
+    $metadataSentinelHashBefore = (Get-FileHash -LiteralPath $metadataSentinelPath -Algorithm SHA256).Hash
+    [Environment]::SetEnvironmentVariable('PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY', $metadataSentinelDirectory, 'Process')
 
     [Environment]::SetEnvironmentVariable('PHOTOVIEWER_BROWSER_BASE_URL', 'http://127.0.0.1:65534/', 'Process')
 
@@ -72,10 +85,13 @@ try {
 
     & dotnet $dll --modal-enhancement-actions-smoke $resultPath
     $childExitCode = $LASTEXITCODE
-    Assert-True ($childExitCode -eq 0) "Modal enhancement smoke exited with $childExitCode."
     Assert-True (Test-Path -LiteralPath $resultPath -PathType Leaf) 'Modal enhancement smoke did not produce JSON.'
 
     $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+    if ($childExitCode -ne 0) {
+        $failureEvidence = $result | ConvertTo-Json -Depth 5 -Compress
+        throw "Modal enhancement smoke exited with $childExitCode. Evidence: $failureEvidence"
+    }
     $requiredTrue = @(
         'ok',
         'selected',
@@ -93,6 +109,12 @@ try {
         'outputRemoved',
         'createContract',
         'routesOk',
+        'sourceIdentityCaseInsensitive',
+        'alternateLexicalIdentity',
+        'pollIdentityCanonical',
+        'restartRecovery',
+        'lexicalOutputRejected',
+        'canonicalOutputRejected',
         'navigatedDuringResponse',
         'staleResponseDiscarded',
         'closeCompleted',
@@ -102,6 +124,7 @@ try {
         'sharedStoresByteIdentical',
         'stateJsonValid',
         'sourceUntouched',
+        'canonicalSourceUntouched',
         'residueFree'
     )
     foreach ($propertyName in $requiredTrue) {
@@ -111,12 +134,12 @@ try {
     }
 
     $appStorePaths = @($result.storePaths.PSObject.Properties | ForEach-Object { [IO.Path]::GetFullPath([string]$_.Value) })
-    Assert-True ($appStorePaths.Count -eq 5) 'Smoke must report state, favorites, seen, recent, and jobs paths.'
+    Assert-True ($appStorePaths.Count -eq 8) 'Smoke must report every durable state file used by the enhancement path.'
     foreach ($path in $appStorePaths) {
         Assert-True $path.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) "App smoke store escaped TEMP: $path"
     }
 
-    foreach ($storeName in @('favorites', 'seen', 'recent', 'jobs')) {
+    foreach ($storeName in @('favorites', 'seen', 'recent', 'settings', 'albums', 'searchHistory', 'jobs')) {
         $before = [string]$result.storeFingerprintsBefore.$storeName
         $after = [string]$result.storeFingerprintsAfter.$storeName
         Assert-True (-not [string]::IsNullOrWhiteSpace($before) -and $before -ne 'missing') "Missing before fingerprint for $storeName."
@@ -142,25 +165,34 @@ try {
         }
     }
     Assert-True $callerStoresUnchanged 'The smoke mutated a caller-provided store sentinel.'
+    $metadataSentinelUnchanged = (Test-Path -LiteralPath $metadataSentinelPath -PathType Leaf) `
+        -and $metadataSentinelHashBefore -eq (Get-FileHash -LiteralPath $metadataSentinelPath -Algorithm SHA256).Hash `
+        -and @(Get-ChildItem -LiteralPath $metadataSentinelDirectory -Force).Count -eq 1
+    Assert-True $metadataSentinelUnchanged 'The smoke mutated the caller-provided metadata cache sentinel.'
 
     # The app deletes its own isolated fixture before exiting; the verifier's
     # result remains outside that fixture until this script's finally cleanup.
     $appTempStoresRemoved = @($appStorePaths | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0
     Assert-True $appTempStoresRemoved 'The modal enhancement smoke left its internal TEMP stores behind.'
 
-    $allPassed = $requiredTrue.Count -eq 26 `
+    $allPassed = $requiredTrue.Count -eq 33 `
         -and $callerStoresUnchanged `
+        -and $metadataSentinelUnchanged `
         -and $stateWriteCaptured `
         -and $appTempStoresRemoved
     Assert-True $allPassed 'Aggregate modal enhancement verifier did not reach allPassed.'
 
     $summary = [pscustomobject]@{
         allPassed = $allPassed
-        message = 'Modal enhancement actions, TEMP store isolation, stale-response navigation guard, and cleanup passed.'
+        message = 'Modal enhancement source identity, output ownership, actions, TEMP isolation, stale-response guard, and cleanup passed.'
         childExitCode = $childExitCode
         storesUnchanged = [bool]$result.sharedStoresByteIdentical
         callerStoresUnchanged = $callerStoresUnchanged
+        callerMetadataCacheUnchanged = $metadataSentinelUnchanged
         sourceUntouched = [bool]$result.sourceUntouched
+        canonicalSourceUntouched = [bool]$result.canonicalSourceUntouched
+        restartRecovery = [bool]$result.restartRecovery
+        outputOwnership = [bool]$result.lexicalOutputRejected -and [bool]$result.canonicalOutputRejected
         staleResponseDiscarded = [bool]$result.staleResponseDiscarded
         navigationDuringResponse = [bool]$result.navigatedDuringResponse
         closeCompleted = [bool]$result.closeCompleted
@@ -176,6 +208,7 @@ finally {
     foreach ($name in $storeEnvironment.Keys) {
         [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
     }
+    [Environment]::SetEnvironmentVariable('PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY', $previousMetadataIndexDirectory, 'Process')
     [Environment]::SetEnvironmentVariable('PHOTOVIEWER_BROWSER_BASE_URL', $previousBrowserBaseUrl, 'Process')
 
     if (Test-Path -LiteralPath $runRoot) {

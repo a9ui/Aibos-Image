@@ -18,7 +18,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         int parityContractSmokeIdx = Array.IndexOf(e.Args, "--parity-contract-smoke");
-        if (parityContractSmokeIdx < 0 && IsAutomationInvocation(e.Args))
+        int h25EnhancementCompanionSmokeIdx = Array.IndexOf(e.Args, "--h25-enhancement-companion-smoke");
+        if (parityContractSmokeIdx < 0
+            && h25EnhancementCompanionSmokeIdx < 0
+            && IsAutomationInvocation(e.Args))
         {
             try
             {
@@ -607,6 +610,12 @@ public partial class App : Application
         if (modalEnhancementActionsSmokeIdx >= 0 && modalEnhancementActionsSmokeIdx + 1 < e.Args.Length)
         {
             CaptureModalEnhancementActionsSmoke(e.Args[modalEnhancementActionsSmokeIdx + 1]);
+            return;
+        }
+
+        if (h25EnhancementCompanionSmokeIdx >= 0 && h25EnhancementCompanionSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureH25EnhancementCompanionSmoke(e.Args[h25EnhancementCompanionSmokeIdx + 1], e.Args);
             return;
         }
 
@@ -6697,7 +6706,10 @@ public partial class App : Application
                 double resizeDrift = win.LastGridZoomAnchorDriftForSmoke;
                 win.SimulateDpiGeometryChangeForSmoke(1280, 820);
                 await win.WaitForGridZoomAnchorForSmokeAsync();
-                bool dpiAnchorKept = string.Equals(win.LastGridZoomAnchorPathForSmoke, selectedAnchorPath, StringComparison.OrdinalIgnoreCase);
+                string? dpiAnchorPath = win.LastGridZoomAnchorPathForSmoke;
+                string? dpiStableAnchorPath = win.LastStableGridViewportAnchorPathForSmoke;
+                string? dpiRequestedAnchorPath = win.LastRequestedGridGeometryAnchorPathForSmoke;
+                bool dpiAnchorKept = string.Equals(dpiAnchorPath, selectedAnchorPath, StringComparison.OrdinalIgnoreCase);
                 double dpiDrift = win.LastGridZoomAnchorDriftForSmoke;
 
                 win.ClearSelectionForSmoke();
@@ -6828,6 +6840,9 @@ public partial class App : Application
                     ResizeAnchorKept = resizeAnchorKept,
                     ResizeDrift = resizeDrift,
                     DpiAnchorKept = dpiAnchorKept,
+                    DpiAnchorPath = dpiAnchorPath,
+                    DpiStableAnchorPath = dpiStableAnchorPath,
+                    DpiRequestedAnchorPath = dpiRequestedAnchorPath,
                     DpiDrift = dpiDrift,
                     NoSelectionAnchor = noSelectionAnchor,
                     NoSelectionAnchorPath = noSelectionAnchorPath,
@@ -12352,6 +12367,18 @@ public partial class App : Application
                 bool maxClamped = third.SetRightPanelWidthForSmoke(1200);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 double maxWidth = third.RightPanelWidthForSmoke;
+                third.ResizeWindowForSmoke(900, 820);
+                await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                bool adaptiveLayout = third.AdaptiveWorkbenchForSmoke
+                    && third.NarrowSidebarRailVisibleForSmoke
+                    && third.RightPanelDockedBelowForSmoke;
+                third.ResizeWindowForSmoke(1280, 820);
+                await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                bool wideLayoutRestored = !third.AdaptiveWorkbenchForSmoke
+                    && !third.NarrowSidebarRailVisibleForSmoke
+                    && !third.RightPanelDockedBelowForSmoke;
                 third.Close();
 
                 bool ok = defaultOpen
@@ -12369,7 +12396,9 @@ public partial class App : Application
                     && minClamped
                     && Nearly(minWidth, 240)
                     && maxClamped
-                    && Nearly(maxWidth, 900);
+                    && Nearly(maxWidth, 900)
+                    && adaptiveLayout
+                    && wideLayoutRestored;
                 result = new RightPanelSmokeResult
                 {
                     Ok = ok,
@@ -12389,6 +12418,8 @@ public partial class App : Application
                     ReopenedWidth = reopenedWidth,
                     MinWidth = minWidth,
                     MaxWidth = maxWidth,
+                    AdaptiveLayout = adaptiveLayout,
+                    WideLayoutRestored = wideLayoutRestored,
                 };
             }
             catch (Exception ex)
@@ -12818,26 +12849,43 @@ public partial class App : Application
         string smokeRoot = Path.Combine(Path.GetTempPath(), "photoviewer-wpf-modal-enhancement-actions-" + Guid.NewGuid().ToString("N"));
         string folder = Path.Combine(smokeRoot, "images");
         string sourcePath = Path.Combine(folder, "enhance-source.png");
+        string canonicalSourceRoot = Path.Combine(smokeRoot, "canonical-source");
+        string canonicalSourcePath = Path.Combine(canonicalSourceRoot, "enhance-source.png");
+        string canonicalSourceCaseVariant = canonicalSourcePath.ToUpperInvariant();
         string navigationTargetPath = Path.Combine(folder, "navigation-target.png");
+        string canonicalNavigationTargetPath = Path.Combine(canonicalSourceRoot, "navigation-target.png");
         string storeRoot = Path.Combine(smokeRoot, "stores");
         string outputPath = Path.Combine(storeRoot, "enhance", "outputs", "enhance-source.webp");
+        string lexicalOutsideOutputPath = Path.Combine(smokeRoot, "outside-managed", "lexical-escape.webp");
+        string canonicalEscapeOutputPath = Path.Combine(storeRoot, "enhance", "outputs", "junction-alias", "canonical-escape.webp");
+        string canonicalEscapeTargetPath = Path.Combine(smokeRoot, "outside-managed", "canonical-escape.webp");
         string statePath = Path.Combine(storeRoot, "state.json");
         string favoritesPath = Path.Combine(storeRoot, "favorites.json");
         string seenPath = Path.Combine(storeRoot, "seen.json");
         string recentPath = Path.Combine(storeRoot, "recent-folders.json");
+        string settingsPath = Path.Combine(storeRoot, "settings.json");
+        string albumsPath = Path.Combine(storeRoot, "albums.json");
+        string searchHistoryPath = Path.Combine(storeRoot, "search-history.json");
+        string metadataIndexDirectory = Path.Combine(storeRoot, "metadata-index");
         string jobsPath = Path.Combine(storeRoot, "enhance", "jobs.json");
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousRecentPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH");
+        string? previousSettingsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH");
+        string? previousAlbumsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH");
+        string? previousSearchHistoryPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH");
+        string? previousMetadataIndexDirectory = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY");
         string? previousJobsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH");
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         Dispatcher.InvokeAsync(async () =>
         {
             MainWindow? win = null;
+            MainWindow? recoveryWin = null;
             string mode = "empty";
             var requests = new List<string>();
+            var polledSourceIds = new List<string>();
             string createBody = "";
             string failure = "";
             bool functionalOk = false;
@@ -12856,16 +12904,28 @@ public partial class App : Application
             bool outputRemoved = false;
             bool createContract = false;
             bool routesOk = false;
+            bool sourceIdentityCaseInsensitive = false;
+            bool alternateLexicalIdentity = false;
+            bool pollIdentityCanonical = false;
+            bool restartRecovery = false;
+            bool lexicalOutputRejected = false;
+            bool canonicalOutputRejected = false;
+            bool canonicalSourceUntouched = false;
             bool navigatedDuringResponse = false;
             bool staleResponseDiscarded = false;
             bool closeCompleted = false;
             string sourceBefore = "missing";
+            string canonicalSourceBefore = "missing";
+            string jobsSeed = "";
             var storePaths = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["state"] = statePath,
                 ["favorites"] = favoritesPath,
                 ["seen"] = seenPath,
                 ["recent"] = recentPath,
+                ["settings"] = settingsPath,
+                ["albums"] = albumsPath,
+                ["searchHistory"] = searchHistoryPath,
                 ["jobs"] = jobsPath,
             };
             var storeFingerprintsBefore = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -12882,12 +12942,12 @@ public partial class App : Application
 
             object Job(string status, int progress = 0, string? output = null)
             {
-                var sourceInfo = new FileInfo(sourcePath);
+                var sourceInfo = new FileInfo(canonicalSourcePath);
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
                 return new
                 {
                     id = "smoke-enhancement-job",
-                    sourceId = sourcePath,
+                    sourceId = canonicalSourceCaseVariant,
                     sourcePath,
                     sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
                     status,
@@ -12900,10 +12960,21 @@ public partial class App : Application
             try
             {
                 Directory.CreateDirectory(folder);
+                Directory.CreateDirectory(Path.GetDirectoryName(canonicalSourcePath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(lexicalOutsideOutputPath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(canonicalEscapeOutputPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
+                Directory.CreateDirectory(metadataIndexDirectory);
                 WriteSmokePng(sourcePath, 96, 72, Color.FromRgb(92, 128, 214));
+                File.Copy(sourcePath, canonicalSourcePath, overwrite: true);
+                File.SetLastWriteTimeUtc(canonicalSourcePath, File.GetLastWriteTimeUtc(sourcePath));
                 WriteSmokePng(navigationTargetPath, 80, 96, Color.FromRgb(174, 92, 132));
+                File.Copy(navigationTargetPath, canonicalNavigationTargetPath, overwrite: true);
+                File.SetLastWriteTimeUtc(canonicalNavigationTargetPath, File.GetLastWriteTimeUtc(navigationTargetPath));
+                WriteSmokePng(lexicalOutsideOutputPath, 40, 40, Color.FromRgb(212, 92, 68));
+                WriteSmokePng(canonicalEscapeOutputPath, 44, 44, Color.FromRgb(226, 158, 62));
+                File.Copy(canonicalEscapeOutputPath, canonicalEscapeTargetPath, overwrite: true);
                 File.WriteAllText(statePath, "{\"version\":2}");
                 File.WriteAllText(favoritesPath, "{}");
                 File.WriteAllText(seenPath, JsonSerializer.Serialize(new Dictionary<string, bool>
@@ -12912,15 +12983,24 @@ public partial class App : Application
                     [navigationTargetPath] = true,
                 }));
                 File.WriteAllText(recentPath, "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"updatedAtUtc\":\"\"}");
+                File.WriteAllText(settingsPath, "{\"version\":1,\"smokeMarker\":\"preserve-settings\"}");
+                File.WriteAllText(albumsPath, "{\"version\":1,\"revision\":0,\"updatedAtUtc\":\"2026-07-23T00:00:00.000Z\",\"albums\":[],\"recentAlbumIds\":[],\"smokeMarker\":\"preserve-albums\"}");
+                File.WriteAllText(searchHistoryPath, "{\"version\":1,\"entries\":[],\"updatedAtUtc\":\"2026-07-23T00:00:00.000Z\",\"smokeMarker\":\"preserve-search-history\"}");
                 File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[]}");
+                jobsSeed = File.ReadAllText(jobsPath);
 
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", favoritesPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", seenPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH", recentPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", settingsPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH", albumsPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH", searchHistoryPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY", metadataIndexDirectory);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", jobsPath);
 
                 sourceBefore = FolderFingerprint(folder);
+                canonicalSourceBefore = FolderFingerprint(canonicalSourceRoot);
                 foreach ((string key, string path) in storePaths)
                     storeFingerprintsBefore[key] = FileFingerprint(path);
 
@@ -12929,17 +13009,44 @@ public partial class App : Application
                 // observe the real project cache even if global automation setup changes.
                 win = HiddenWindow();
                 win.SuppressStatePersistence();
+                string ResolveSmokeIdentity(string path)
+                {
+                    string fullPath = Path.GetFullPath(path);
+                    if (string.Equals(fullPath, folder, StringComparison.OrdinalIgnoreCase))
+                        return canonicalSourceRoot;
+                    if (string.Equals(fullPath, sourcePath, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(fullPath, canonicalSourcePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return canonicalSourcePath;
+                    }
+                    if (string.Equals(fullPath, navigationTargetPath, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(fullPath, canonicalNavigationTargetPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return canonicalNavigationTargetPath;
+                    }
+
+                    return string.Equals(fullPath, canonicalEscapeOutputPath, StringComparison.OrdinalIgnoreCase)
+                        ? canonicalEscapeTargetPath
+                        : fullPath;
+                }
+                win.SetCanonicalPathResolverForSmoke(ResolveSmokeIdentity);
                 win.ConfigureModalEnhancementForSmoke(async (request, token) =>
                 {
                     string route = request.RequestUri?.AbsolutePath ?? "";
                     requests.Add($"{request.Method.Method} {route}");
                     if (request.Method == HttpMethod.Get)
                     {
+                        string query = request.RequestUri?.Query ?? "";
+                        const string sourcePrefix = "?sourceId=";
+                        if (query.StartsWith(sourcePrefix, StringComparison.Ordinal))
+                            polledSourceIds.Add(Uri.UnescapeDataString(query[sourcePrefix.Length..]));
                         object[] jobs = mode switch
                         {
                             "queued" => [Job("queued")],
                             "canceled" => [Job("canceled")],
                             "succeeded" => [Job("succeeded", 100, outputPath)],
+                            "lexical-escape" => [Job("succeeded", 100, lexicalOutsideOutputPath)],
+                            "canonical-escape" => [Job("succeeded", 100, canonicalEscapeOutputPath)],
                             _ => [],
                         };
                         return JsonResponse(HttpStatusCode.OK, new { jobs });
@@ -12981,6 +13088,9 @@ public partial class App : Application
                 await win.LoadFolderSetAsync([folder], commitRecent: false);
                 selected = win.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
                 opened = win.OpenModalForSmoke();
+                sourceIdentityCaseInsensitive = !string.Equals(canonicalSourceCaseVariant, canonicalSourcePath, StringComparison.Ordinal)
+                    && string.Equals(canonicalSourceCaseVariant, canonicalSourcePath, StringComparison.OrdinalIgnoreCase);
+                alternateLexicalIdentity = !string.Equals(sourcePath, canonicalSourcePath, StringComparison.OrdinalIgnoreCase);
                 refreshedEmpty = await win.RefreshModalEnhancementForSmokeAsync();
                 started = await win.StartModalEnhancementForSmokeAsync();
                 queuedUi = win.ModalEnhancementCancelVisibleForSmoke
@@ -13000,19 +13110,66 @@ public partial class App : Application
                     && string.Equals(win.ModalDisplayPathForSmoke, outputPath, StringComparison.OrdinalIgnoreCase);
                 bool toggledOriginal = win.ToggleModalEnhancedForSmoke()
                     && !win.ModalShowingEnhancedForSmoke
-                    && string.Equals(win.ModalDisplayPathForSmoke, sourcePath, StringComparison.OrdinalIgnoreCase);
+                    && string.Equals(win.ModalDisplayPathForSmoke, canonicalSourcePath, StringComparison.OrdinalIgnoreCase);
                 toggledEnhanced = defaultEnhanced && toggledOriginal
                     && win.ToggleModalEnhancedForSmoke()
                     && win.ModalShowingEnhancedForSmoke
                     && string.Equals(win.ModalDisplayPathForSmoke, outputPath, StringComparison.OrdinalIgnoreCase);
+
+                var canonicalSourceInfo = new FileInfo(canonicalSourcePath);
+                double canonicalSourceMtimeMs = new DateTimeOffset(canonicalSourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+                File.WriteAllText(jobsPath, JsonSerializer.Serialize(new
+                {
+                    version = 1,
+                    jobs = new[]
+                    {
+                        new
+                        {
+                            id = "restart-recovery-job",
+                            sourceId = canonicalSourceCaseVariant,
+                            sourcePath,
+                            sourceSignature = new { size = canonicalSourceInfo.Length, mtimeMs = canonicalSourceMtimeMs },
+                            status = "succeeded",
+                            progress = 100,
+                            outputPath,
+                        },
+                    },
+                }));
+                recoveryWin = HiddenWindow();
+                recoveryWin.SuppressStatePersistence();
+                recoveryWin.SetCanonicalPathResolverForSmoke(ResolveSmokeIdentity);
+                recoveryWin.Show();
+                await recoveryWin.LoadFolderSetAsync([folder], commitRecent: false);
+                bool recoverySelected = recoveryWin.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
+                restartRecovery = recoverySelected
+                    && recoveryWin.SelectedEnhancedForSmoke
+                    && string.Equals(recoveryWin.SelectedEnhancedOutputPathForSmoke, outputPath, StringComparison.OrdinalIgnoreCase);
+                recoveryWin.Close();
+                recoveryWin = null;
+                File.WriteAllText(jobsPath, jobsSeed);
+
                 deletedOutput = await win.DeleteModalEnhancedOutputForSmokeAsync();
                 originalPreserved = File.Exists(sourcePath);
                 outputRemoved = !File.Exists(outputPath);
+                mode = "lexical-escape";
+                await win.RefreshModalEnhancementForSmokeAsync();
+                lexicalOutputRejected = !win.ModalEnhancedToggleAvailableForSmoke
+                    && (win.ModalEnhancementErrorForSmoke?.Contains("outside managed storage", StringComparison.OrdinalIgnoreCase) ?? false);
+                mode = "canonical-escape";
+                await win.RefreshModalEnhancementForSmokeAsync();
+                canonicalOutputRejected = !win.ModalEnhancedToggleAvailableForSmoke
+                    && (win.ModalEnhancementErrorForSmoke?.Contains("outside managed storage", StringComparison.OrdinalIgnoreCase) ?? false);
+                mode = "empty";
+                await win.RefreshModalEnhancementForSmokeAsync();
+                pollIdentityCanonical = polledSourceIds.Any(sourceId =>
+                    string.Equals(sourceId, canonicalSourcePath, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(sourceId, sourcePath, StringComparison.OrdinalIgnoreCase));
                 try
                 {
                     using JsonDocument createDocument = JsonDocument.Parse(createBody);
                     JsonElement createRoot = createDocument.RootElement;
-                    createContract = string.Equals(createRoot.GetProperty("sourceId").GetString(), sourcePath, StringComparison.OrdinalIgnoreCase)
+                    createContract = string.Equals(createRoot.GetProperty("sourceId").GetString(), canonicalSourcePath, StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(createRoot.GetProperty("sourceId").GetString(), sourcePath, StringComparison.OrdinalIgnoreCase)
                         && string.Equals(createRoot.GetProperty("presetId").GetString(), "anime-sharp-x2", StringComparison.Ordinal)
                         && string.Equals(createRoot.GetProperty("adapterId").GetString(), "realesrgan-ncnn", StringComparison.Ordinal)
                         && createRoot.GetProperty("scale").GetInt32() == 2;
@@ -13043,6 +13200,8 @@ public partial class App : Application
                 functionalOk = selected && opened && refreshedEmpty && started && queuedUi && canceled && canceledUi
                     && refreshedSucceeded && outputAvailable && toggledEnhanced && deletedOutput
                     && originalPreserved && outputRemoved && createContract && routesOk
+                    && sourceIdentityCaseInsensitive && alternateLexicalIdentity && pollIdentityCanonical
+                    && restartRecovery && lexicalOutputRejected && canonicalOutputRejected
                     && navigatedDuringResponse && staleResponseDiscarded;
             }
             catch (Exception ex)
@@ -13052,6 +13211,15 @@ public partial class App : Application
             finally
             {
                 staleCreateRelease.TrySetResult(true);
+                if (recoveryWin is not null)
+                {
+                    try { recoveryWin.Close(); } catch { }
+                    recoveryWin = null;
+                }
+                if (!string.IsNullOrEmpty(jobsSeed))
+                {
+                    try { File.WriteAllText(jobsPath, jobsSeed); } catch { }
+                }
                 if (win is not null)
                 {
                     try
@@ -13074,6 +13242,10 @@ public partial class App : Application
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", previousFavoritesPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", previousSeenPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH", previousRecentPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", previousSettingsPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH", previousAlbumsPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH", previousSearchHistoryPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY", previousMetadataIndexDirectory);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", previousJobsPath);
             }
 
@@ -13083,6 +13255,10 @@ public partial class App : Application
                 && string.Equals(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH"), previousFavoritesPath, StringComparison.Ordinal)
                 && string.Equals(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH"), previousSeenPath, StringComparison.Ordinal)
                 && string.Equals(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH"), previousRecentPath, StringComparison.Ordinal)
+                && string.Equals(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH"), previousSettingsPath, StringComparison.Ordinal)
+                && string.Equals(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH"), previousAlbumsPath, StringComparison.Ordinal)
+                && string.Equals(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH"), previousSearchHistoryPath, StringComparison.Ordinal)
+                && string.Equals(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY"), previousMetadataIndexDirectory, StringComparison.Ordinal)
                 && string.Equals(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"), previousJobsPath, StringComparison.Ordinal);
             string normalizedSmokeRoot = Path.GetFullPath(smokeRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             bool pathsIsolated = storePaths.Values.All(path => Path.GetFullPath(path).StartsWith(normalizedSmokeRoot, StringComparison.OrdinalIgnoreCase));
@@ -13090,7 +13266,7 @@ public partial class App : Application
                 && storeFingerprintsAfter.Count == storePaths.Count
                 && storeFingerprintsBefore.Values.All(static fingerprint => fingerprint != "missing")
                 && storeFingerprintsAfter.Values.All(static fingerprint => fingerprint != "missing");
-            bool sharedStoresByteIdentical = new[] { "favorites", "seen", "recent", "jobs" }
+            bool sharedStoresByteIdentical = new[] { "favorites", "seen", "recent", "settings", "albums", "searchHistory", "jobs" }
                 .All(key => storeFingerprintsBefore.TryGetValue(key, out string? before)
                     && storeFingerprintsAfter.TryGetValue(key, out string? after)
                     && string.Equals(before, after, StringComparison.Ordinal));
@@ -13104,9 +13280,10 @@ public partial class App : Application
             {
             }
             bool sourceUntouched = string.Equals(sourceBefore, FolderFingerprint(folder), StringComparison.Ordinal);
+            canonicalSourceUntouched = string.Equals(canonicalSourceBefore, FolderFingerprint(canonicalSourceRoot), StringComparison.Ordinal);
             bool residueFree = NoPersistenceResidue(smokeRoot);
             bool isolationOk = closeCompleted && environmentRestored && pathsIsolated && fingerprintsCaptured
-                && sharedStoresByteIdentical && stateJsonValid && sourceUntouched && residueFree;
+                && sharedStoresByteIdentical && stateJsonValid && sourceUntouched && canonicalSourceUntouched && residueFree;
             bool ok = functionalOk && isolationOk && string.IsNullOrWhiteSpace(failure);
             object result = new
             {
@@ -13129,6 +13306,12 @@ public partial class App : Application
                 outputRemoved,
                 createContract,
                 routesOk,
+                sourceIdentityCaseInsensitive,
+                alternateLexicalIdentity,
+                pollIdentityCanonical,
+                restartRecovery,
+                lexicalOutputRejected,
+                canonicalOutputRejected,
                 navigatedDuringResponse,
                 staleResponseDiscarded,
                 closeCompleted,
@@ -13138,15 +13321,288 @@ public partial class App : Application
                 sharedStoresByteIdentical,
                 stateJsonValid,
                 sourceUntouched,
+                canonicalSourceUntouched,
                 residueFree,
                 storePaths,
                 storeFingerprintsBefore,
                 storeFingerprintsAfter,
                 requests,
+                polledSourceIds,
             };
             Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
             File.WriteAllText(resultFullPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
             try { if (Directory.Exists(smokeRoot)) Directory.Delete(smokeRoot, recursive: true); } catch { }
+            Shutdown(ok ? 0 : 1);
+        }, DispatcherPriority.ContextIdle);
+    }
+
+    private void CaptureH25EnhancementCompanionSmoke(string resultPath, string[] args)
+    {
+        string resultFullPath = Path.GetFullPath(resultPath);
+        string fixtureRoot = Path.GetFullPath(ArgValue(args, "--fixture-root")
+            ?? throw new ArgumentException("--fixture-root is required"));
+        string tempPrefix = Path.GetFullPath(Path.GetTempPath())
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        string fixturePrefix = fixtureRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        string phase = ArgValue(args, "--phase") ?? "full";
+        string sourceName = Path.GetFileName(ArgValue(args, "--source-name") ?? $"{phase}-source.png");
+        if (!fixturePrefix.StartsWith(tempPrefix, StringComparison.OrdinalIgnoreCase)
+            || !resultFullPath.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase)
+            || sourceName.Length == 0
+            || phase is not ("full" or "start-interrupted" or "recover"))
+        {
+            throw new ArgumentException("H25 companion smoke paths and phase must be bounded under TEMP");
+        }
+
+        string imagesRoot = Path.Combine(fixtureRoot, "images");
+        string sourcePath = Path.Combine(imagesRoot, sourceName);
+        string jobsPath = Path.GetFullPath(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH")
+            ?? throw new InvalidOperationException("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH is required"));
+        string metadataIndexDirectory = Path.GetFullPath(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY")
+            ?? throw new InvalidOperationException("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY is required"));
+        string[] fileEnvironmentNames =
+        [
+            "PHOTOVIEWER_WPF_STATE_PATH",
+            "PHOTOVIEWER_WPF_FAVORITES_PATH",
+            "PHOTOVIEWER_WPF_SEEN_PATH",
+            "PHOTOVIEWER_WPF_RECENT_PATH",
+            "PHOTOVIEWER_WPF_SETTINGS_PATH",
+            "PHOTOVIEWER_WPF_ALBUMS_PATH",
+            "PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH",
+            "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH",
+        ];
+        var storePaths = fileEnvironmentNames.ToDictionary(
+            static name => name,
+            name => Path.GetFullPath(Environment.GetEnvironmentVariable(name)
+                ?? throw new InvalidOperationException($"{name} is required")),
+            StringComparer.Ordinal);
+        var storePathIsolation = storePaths.ToDictionary(
+            static pair => pair.Key,
+            pair => pair.Value.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase),
+            StringComparer.Ordinal);
+        bool metadataIndexIsolated = metadataIndexDirectory.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase);
+        bool sourcePathIsolated = sourcePath.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase);
+        bool pathsIsolated = storePathIsolation.Values.All(static isolated => isolated)
+            && metadataIndexIsolated
+            && sourcePathIsolated;
+        string configuredBaseUrl = Environment.GetEnvironmentVariable("PHOTOVIEWER_BROWSER_BASE_URL") ?? "";
+        bool loopbackOnly = Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out Uri? companionUri)
+            && companionUri.IsLoopback
+            && companionUri.Scheme == Uri.UriSchemeHttp
+            && string.Equals(companionUri.Host, "127.0.0.1", StringComparison.Ordinal);
+
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        Dispatcher.InvokeAsync(async () =>
+        {
+            MainWindow? win = null;
+            bool selected = false;
+            bool opened = false;
+            bool passiveRefresh = false;
+            bool started = false;
+            bool canceled = false;
+            bool retried = false;
+            bool succeeded = false;
+            bool outputAccepted = false;
+            bool deletedOutput = false;
+            bool restartJobObserved = false;
+            bool sourceUnchanged = false;
+            string? jobId = null;
+            string? status = null;
+            string? outputPath = null;
+            string failure = "";
+            string sourceSha256Before = "missing";
+            var checkpoints = new List<string>();
+
+            async Task<bool> WaitForStatusAsync(string expected, TimeSpan timeout)
+            {
+                var wait = Stopwatch.StartNew();
+                while (wait.Elapsed < timeout)
+                {
+                    await win!.RefreshModalEnhancementForSmokeAsync();
+                    if (string.Equals(win.ModalEnhancementStatusForSmoke, expected, StringComparison.Ordinal))
+                        return true;
+                    await Task.Delay(75);
+                }
+                return false;
+            }
+
+            Dictionary<string, object?> Snapshot(bool ok, string message)
+                => new(StringComparer.Ordinal)
+                {
+                    ["ok"] = ok,
+                    ["message"] = message,
+                    ["phase"] = phase,
+                    ["selected"] = selected,
+                    ["opened"] = opened,
+                    ["passiveRefresh"] = passiveRefresh,
+                    ["started"] = started,
+                    ["canceled"] = canceled,
+                    ["retried"] = retried,
+                    ["succeeded"] = succeeded,
+                    ["outputAccepted"] = outputAccepted,
+                    ["deletedOutput"] = deletedOutput,
+                    ["restartJobObserved"] = restartJobObserved,
+                    ["sourceUnchanged"] = sourceUnchanged,
+                    ["pathsIsolated"] = pathsIsolated,
+                    ["pathIsolationFailures"] = storePathIsolation
+                        .Where(static pair => !pair.Value)
+                        .Select(static pair => pair.Key)
+                        .OrderBy(static name => name, StringComparer.Ordinal)
+                        .ToArray(),
+                    ["metadataIndexIsolated"] = metadataIndexIsolated,
+                    ["sourcePathIsolated"] = sourcePathIsolated,
+                    ["loopbackOnly"] = loopbackOnly,
+                    ["checkpoints"] = checkpoints.ToArray(),
+                    ["jobId"] = jobId,
+                    ["status"] = status,
+                    ["outputPath"] = outputPath,
+                    ["sourceSha256Before"] = sourceSha256Before,
+                    ["sourceSha256After"] = File.Exists(sourcePath)
+                        ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sourcePath)))
+                        : "missing",
+                };
+
+            void WriteSnapshot(Dictionary<string, object?> snapshot)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
+                File.WriteAllText(resultFullPath, JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true }));
+            }
+
+            void RecordCheckpoint(string checkpoint)
+            {
+                checkpoints.Add(checkpoint);
+                WriteSnapshot(Snapshot(false, $"checkpoint: {checkpoint}"));
+            }
+
+            try
+            {
+                if (!pathsIsolated || !loopbackOnly)
+                    throw new InvalidOperationException("companion smoke did not receive TEMP-only stores and an explicit 127.0.0.1 endpoint");
+                RecordCheckpoint("isolation-accepted");
+                Directory.CreateDirectory(imagesRoot);
+                Directory.CreateDirectory(metadataIndexDirectory);
+                if (!File.Exists(sourcePath))
+                    WriteSmokePng(sourcePath, 320, 240, Color.FromRgb(76, 132, 196));
+                sourceSha256Before = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sourcePath)));
+
+                win = HiddenWindow();
+                win.SuppressStatePersistence();
+                win.ConfigureModalEnhancementRequestProfileForSmoke("anime-sharp-x2", "sharp-test", 2);
+                win.ConfigureModalEnhancementConfirmationsForSmoke();
+                win.Show();
+                await win.LoadFolderSetAsync([imagesRoot], commitRecent: false);
+                selected = win.SelectFileNameForSmoke(sourceName);
+                opened = win.OpenModalForSmoke();
+                string jobsBeforeRefresh = FileFingerprint(jobsPath);
+                await win.RefreshModalEnhancementForSmokeAsync();
+                passiveRefresh = string.Equals(jobsBeforeRefresh, FileFingerprint(jobsPath), StringComparison.Ordinal);
+                RecordCheckpoint("modal-opened-passive-refresh-complete");
+
+                if (phase == "full")
+                {
+                    started = await win.StartModalEnhancementForSmokeAsync();
+                    jobId = win.ModalEnhancementJobIdForSmoke;
+                    RecordCheckpoint("full-start-complete");
+                    canceled = await win.CancelModalEnhancementForSmokeAsync()
+                        || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(8));
+                    RecordCheckpoint("full-cancel-complete");
+                    retried = canceled && await win.StartModalEnhancementForSmokeAsync();
+                    RecordCheckpoint("full-retry-complete");
+                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(20));
+                    RecordCheckpoint("full-success-wait-complete");
+                    outputAccepted = succeeded && win.ModalEnhancedToggleAvailableForSmoke;
+                    outputPath = win.ModalDisplayPathForSmoke;
+                    deletedOutput = outputAccepted && await win.DeleteModalEnhancedOutputForSmokeAsync();
+                    RecordCheckpoint("full-delete-complete");
+                }
+                else if (phase == "start-interrupted")
+                {
+                    started = await win.StartModalEnhancementForSmokeAsync();
+                    jobId = win.ModalEnhancementJobIdForSmoke;
+                    status = win.ModalEnhancementStatusForSmoke;
+                    bool readyForInterruption = started
+                        && !string.IsNullOrWhiteSpace(jobId)
+                        && status is "queued" or "running";
+                    sourceUnchanged = string.Equals(
+                        sourceSha256Before,
+                        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sourcePath))),
+                        StringComparison.Ordinal);
+                    WriteSnapshot(Snapshot(
+                        readyForInterruption && selected && opened && passiveRefresh && sourceUnchanged,
+                        readyForInterruption
+                            ? "real H25 job is active and ready for the verifier to interrupt the companion"
+                            : "real H25 job did not reach an interruptible state"));
+                    await Task.Delay(TimeSpan.FromSeconds(10));
+                }
+                else
+                {
+                    status = win.ModalEnhancementStatusForSmoke;
+                    restartJobObserved = status == "running" && !string.IsNullOrWhiteSpace(win.ModalEnhancementJobIdForSmoke);
+                    jobId = win.ModalEnhancementJobIdForSmoke;
+                    RecordCheckpoint("recovery-stale-job-observed");
+                    canceled = restartJobObserved && (await win.CancelModalEnhancementForSmokeAsync()
+                        || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(8)));
+                    RecordCheckpoint("recovery-cancel-complete");
+                    retried = canceled && await win.StartModalEnhancementForSmokeAsync();
+                    RecordCheckpoint("recovery-retry-complete");
+                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(20));
+                    RecordCheckpoint("recovery-success-wait-complete");
+                    outputAccepted = succeeded && win.ModalEnhancedToggleAvailableForSmoke;
+                    outputPath = win.ModalDisplayPathForSmoke;
+                    deletedOutput = outputAccepted && await win.DeleteModalEnhancedOutputForSmokeAsync();
+                    RecordCheckpoint("recovery-delete-complete");
+                }
+
+                status = win.ModalEnhancementStatusForSmoke;
+                sourceUnchanged = string.Equals(
+                    sourceSha256Before,
+                    Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sourcePath))),
+                    StringComparison.Ordinal);
+            }
+            catch (Exception ex)
+            {
+                failure = ex.Message;
+            }
+            finally
+            {
+                if (win is not null)
+                {
+                    try
+                    {
+                        RecordCheckpoint("window-close-start");
+                        await win.WaitForModalEnhancementRequestCompletionForSmokeAsync();
+                        RecordCheckpoint("window-request-drain-complete");
+                        if (win.IsLoaded)
+                            await win.CloseAndWaitForSmokeAsync();
+                        else
+                            win.Close();
+                        RecordCheckpoint("window-close-complete");
+                    }
+                    catch (Exception closeError)
+                    {
+                        if (string.IsNullOrWhiteSpace(failure))
+                            failure = closeError.Message;
+                    }
+                }
+            }
+
+            bool ok = string.IsNullOrWhiteSpace(failure)
+                && selected
+                && opened
+                && passiveRefresh
+                && sourceUnchanged
+                && pathsIsolated
+                && loopbackOnly
+                && (phase == "start-interrupted"
+                    ? started && !string.IsNullOrWhiteSpace(jobId) && status is "queued" or "running"
+                    : phase == "full"
+                        ? started && canceled && retried && succeeded && outputAccepted && deletedOutput
+                        : restartJobObserved && canceled && retried && succeeded && outputAccepted && deletedOutput);
+            WriteSnapshot(Snapshot(ok, ok
+                ? $"real H25 companion phase '{phase}' passed"
+                : string.IsNullOrWhiteSpace(failure) ? $"real H25 companion phase '{phase}' failed" : failure));
             Shutdown(ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);
     }
@@ -13668,16 +14124,36 @@ public partial class App : Application
                 bool zoomIndicator = win.ModalZoomIndicatorContractForSmoke
                     && win.ModalSingleZoomReadoutForSmoke;
                 win.UpdateLayout();
+                // OpenModal queues an actual-bounds refit at Loaded priority.
+                // Yield below that priority so clamped CI desktops measure the
+                // settled fit rather than the pre-clamp requested window size.
+                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
                 double layoutImageHeight = win.ModalImageAreaHeightForSmoke;
-                bool filmstripLayout = win.ModalFilmstripLayoutVisibleForSmoke
-                    && win.ModalFilmstripPinnedForSmoke
-                    && win.ModalBottomPortraitFilmstripContractForSmoke
-                    && win.ModalFullWindowFitContractForSmoke;
+                bool filmstripLayoutVisible = win.ModalFilmstripLayoutVisibleForSmoke;
+                bool filmstripPinned = win.ModalFilmstripPinnedForSmoke;
+                bool filmstripPortraitContract = win.ModalBottomPortraitFilmstripContractForSmoke;
+                bool modalFullWindowFit = win.ModalFullWindowFitContractForSmoke;
+                bool modalFitSurfaceVisible = win.ModalFitSurfaceVisibleForSmoke;
+                bool modalFitStretchUniform = win.ModalFitStretchUniformForSmoke;
+                bool modalImageAreaCoversWindow = win.ModalImageAreaCoversWindowForSmoke;
+                bool modalImageWithinArea = win.ModalImageWithinAreaForSmoke;
+                bool modalImageTouchesFitEdge = win.ModalImageTouchesFitEdgeForSmoke;
+                double modalWidth = win.ModalWidthForSmoke;
+                double modalHeight = win.ModalHeightForSmoke;
+                double modalImageAreaWidth = win.ModalImageAreaWidthForSmoke;
+                double modalImageAreaHeight = win.ModalImageAreaHeightForSmoke;
+                double modalImageWidth = win.ModalImageWidthForSmoke;
+                double modalImageHeight = win.ModalImageHeightForSmoke;
+                bool filmstripLayout = filmstripLayoutVisible
+                    && filmstripPinned
+                    && filmstripPortraitContract
+                    && modalFullWindowFit;
                 int contextFavoriteBefore = win.SelectedFavoriteLevelForSmoke;
                 bool contextMenuAction = win.ActivateModalContextFavoriteForSmoke(1)
                     && win.ActivateModalContextFavoriteForSmoke(-1)
                     && win.SelectedFavoriteLevelForSmoke == contextFavoriteBefore;
 
+                win.SetModalChromeVisibleForSmoke(true);
                 await Task.Delay(1050);
                 bool manualVisiblePersistent = win.ModalManualChromeVisibleForSmoke
                     && win.ModalChromeVisibleForSmoke
@@ -13819,10 +14295,10 @@ public partial class App : Application
                     && buttonDelete
                     && buttonFilmstrip;
 
-                bool textFocused = win.FocusSearchInputForSmoke();
+                _ = win.FocusSearchInputForSmoke();
                 bool flippedBeforeTextKey = win.ModalTransformForSmoke().Flipped;
-                bool textInputIsolated = textFocused
-                    && !win.InvokePreviewKeyForSmoke(Key.H)
+                bool textInputIsolated = win.SearchInputSuppressesGlobalShortcutForSmoke
+                    && !win.InvokePreviewKeyFromSearchInputForSmoke(Key.H)
                     && win.ModalTransformForSmoke().Flipped == flippedBeforeTextKey;
 
                 bool selectedEnhanced = win.SelectFileNameForSmoke(firstName);
@@ -13903,6 +14379,21 @@ public partial class App : Application
                     EdgeChrome = edgeChrome,
                     ZoomIndicator = zoomIndicator,
                     FilmstripLayout = filmstripLayout,
+                    FilmstripLayoutVisible = filmstripLayoutVisible,
+                    FilmstripPinned = filmstripPinned,
+                    FilmstripPortraitContract = filmstripPortraitContract,
+                    ModalFullWindowFit = modalFullWindowFit,
+                    ModalFitSurfaceVisible = modalFitSurfaceVisible,
+                    ModalFitStretchUniform = modalFitStretchUniform,
+                    ModalImageAreaCoversWindow = modalImageAreaCoversWindow,
+                    ModalImageWithinArea = modalImageWithinArea,
+                    ModalImageTouchesFitEdge = modalImageTouchesFitEdge,
+                    ModalWidth = modalWidth,
+                    ModalHeight = modalHeight,
+                    ModalImageAreaWidth = modalImageAreaWidth,
+                    ModalImageAreaHeight = modalImageAreaHeight,
+                    ModalImageWidth = modalImageWidth,
+                    ModalImageHeight = modalImageHeight,
                     ContextMenuAction = contextMenuAction,
                     ManualVisiblePersistent = manualVisiblePersistent,
                     ChromeHidden = chromeHidden,
@@ -19531,6 +20022,21 @@ public partial class App : Application
         public bool EdgeChrome { get; init; }
         public bool ZoomIndicator { get; init; }
         public bool FilmstripLayout { get; init; }
+        public bool FilmstripLayoutVisible { get; init; }
+        public bool FilmstripPinned { get; init; }
+        public bool FilmstripPortraitContract { get; init; }
+        public bool ModalFullWindowFit { get; init; }
+        public bool ModalFitSurfaceVisible { get; init; }
+        public bool ModalFitStretchUniform { get; init; }
+        public bool ModalImageAreaCoversWindow { get; init; }
+        public bool ModalImageWithinArea { get; init; }
+        public bool ModalImageTouchesFitEdge { get; init; }
+        public double ModalWidth { get; init; }
+        public double ModalHeight { get; init; }
+        public double ModalImageAreaWidth { get; init; }
+        public double ModalImageAreaHeight { get; init; }
+        public double ModalImageWidth { get; init; }
+        public double ModalImageHeight { get; init; }
         public bool ContextMenuAction { get; init; }
         public bool ManualVisiblePersistent { get; init; }
         public bool ChromeHidden { get; init; }
@@ -20082,6 +20588,9 @@ public partial class App : Application
         public bool ResizeAnchorKept { get; init; }
         public double ResizeDrift { get; init; }
         public bool DpiAnchorKept { get; init; }
+        public string? DpiAnchorPath { get; init; }
+        public string? DpiStableAnchorPath { get; init; }
+        public string? DpiRequestedAnchorPath { get; init; }
         public double DpiDrift { get; init; }
         public string? NoSelectionAnchor { get; init; }
         public string? NoSelectionAnchorPath { get; init; }
@@ -20864,6 +21373,8 @@ public partial class App : Application
         public double ReopenedWidth { get; init; }
         public double MinWidth { get; init; }
         public double MaxWidth { get; init; }
+        public bool AdaptiveLayout { get; init; }
+        public bool WideLayoutRestored { get; init; }
     }
 
     private sealed class FormatSmokeResult

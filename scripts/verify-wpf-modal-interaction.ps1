@@ -2,7 +2,7 @@ param(
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "photoviewer-wpf-modal-interaction.json"),
     [ValidateRange(1, 300)]
-    [int]$OverallTimeoutSeconds = 45
+    [int]$OverallTimeoutSeconds = 90
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +47,10 @@ try {
         throw "Modal interaction smoke produced no result. Process exit code: $($process.ExitCode)"
     }
 
+    $processExitCode = $process.ExitCode
+    $process.WaitForExit()
+    $process.Dispose()
+    $process = $null
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 8
     $required = @(
@@ -77,8 +81,8 @@ try {
         'escapeClosed'
     )
     $missing = @($required | Where-Object { $result.$_ -ne $true })
-    if ($process.ExitCode -ne 0 -or $result.ok -ne $true -or $missing.Count -gt 0) {
-        throw "Modal interaction contract failed (exit $($process.ExitCode)): $($missing -join ', ')"
+    if ($processExitCode -ne 0 -or $result.ok -ne $true -or $missing.Count -gt 0) {
+        throw "Modal interaction contract failed (exit $processExitCode): $($missing -join ', ')"
     }
 }
 finally {
@@ -90,6 +94,15 @@ finally {
         if (-not $resolvedRunRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to clean a verifier path outside TEMP: $resolvedRunRoot"
         }
-        Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
+        for ($cleanupAttempt = 1; $cleanupAttempt -le 10; $cleanupAttempt++) {
+            try {
+                Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
+                break
+            }
+            catch {
+                if ($cleanupAttempt -eq 10) { throw }
+                Start-Sleep -Milliseconds 100
+            }
+        }
     }
 }

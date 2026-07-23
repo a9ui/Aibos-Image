@@ -8,7 +8,7 @@ if ($OutputPath.Contains('"')) { throw 'OutputPath cannot contain a double quote
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net8.0-windows\PhotoViewer.Wpf.exe"
+$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
 
 dotnet build $project -c $Configuration --nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

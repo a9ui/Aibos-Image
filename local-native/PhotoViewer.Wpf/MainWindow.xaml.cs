@@ -27,6 +27,7 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow : Window
 {
+    private static readonly StringComparer EnhancementSourceIdentityComparer = StringComparer.OrdinalIgnoreCase;
     private static readonly HttpClient ModalEnhancementHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(5),
@@ -67,6 +68,8 @@ public partial class MainWindow : Window
     private const double DefaultRightPanelWidth = 340;
     private const double MinRightPanelWidth = 240;
     private const double MaxRightPanelWidth = 900;
+    private const double AdaptiveWorkbenchThreshold = 1080;
+    private const double AdaptivePreviewHeight = 280;
     private const double ModalZoomMin = 0.25;
     private const double ModalZoomMax = 10;
     private const string EnhancedStatusBorderDefaultColor = "#38BDF8";
@@ -140,7 +143,7 @@ public partial class MainWindow : Window
     private int _activeAlbumAvailabilityDelayForSmokeMs;
     private int _activeAlbumSourceApplyCount;
     private bool _lastActiveAlbumAvailabilityOffDispatcher;
-    private readonly Dictionary<string, ManagedEnhancedOutput> _enhancedOutputs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ManagedEnhancedOutput> _enhancedOutputs = new(EnhancementSourceIdentityComparer);
     private readonly List<string> _restoredPreviewTabPaths = [];
     private readonly SemaphoreSlim _thumbnailDecodeGate = new(MaxThumbnailDecodeWorkers, MaxThumbnailDecodeWorkers);
     private readonly ConcurrentDictionary<string, byte> _thumbnailLoadsInFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -184,6 +187,8 @@ public partial class MainWindow : Window
     private int _failNextSeenWriterForSmoke;
     private bool _stateWriteBlocked;
     private double _rightPanelWidth = DefaultRightPanelWidth;
+    private bool _adaptiveWorkbench;
+    private bool _sidebarVisibleBeforeAdaptive = true;
     private Dictionary<string, JsonElement>? _stateExtensionData;
     private bool _syncingSelection;
     private long _selectionVisualSyncGeneration;
@@ -249,6 +254,9 @@ public partial class MainWindow : Window
     private long _modalEnhancementGeneration;
     private Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _modalEnhancementSender
         = static (request, token) => ModalEnhancementHttpClient.SendAsync(request, token);
+    private string _modalEnhancementPresetId = "anime-sharp-x2";
+    private string _modalEnhancementAdapterId = "realesrgan-ncnn";
+    private int _modalEnhancementScale = 2;
     private Func<bool>? _confirmLargeEnhancementForSmoke;
     private Func<bool>? _confirmEnhancedOutputDeleteForSmoke;
     private CancellationTokenSource? _loadCts;
@@ -334,6 +342,7 @@ public partial class MainWindow : Window
     private string? _lastGridZoomAnchorPath;
     private double _lastGridZoomAnchorDrift;
     private GridZoomAnchor? _lastStableGridViewportAnchor;
+    private GridZoomAnchor? _lastRequestedGridGeometryAnchor;
     private long _gridAnchorRememberGeneration;
     private GridZoomAnchor? _rightPanelResizeAnchor;
     private bool _cardWidthMigrationPending;
@@ -440,6 +449,7 @@ public partial class MainWindow : Window
 
         Loaded += (_, _) =>
         {
+            ApplyAdaptiveWorkbenchLayout(ActualWidth);
             AttachGalleryVirtualizationPanel();
             if (CardsList.Items.Count > 0)
                 CardsList.SelectedIndex = 0;
@@ -567,12 +577,14 @@ public partial class MainWindow : Window
         ScheduleModalFitUpdate();
         if (!e.WidthChanged && !e.HeightChanged)
             return;
-        ScheduleGridGeometryAnchorRestore(_lastStableGridViewportAnchor);
+        GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
+        ApplyAdaptiveWorkbenchLayout(e.NewSize.Width, preserveGridAnchor: false);
+        ScheduleGridGeometryAnchorRestore(anchor);
     }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     {
-        GridZoomAnchor? anchor = _lastStableGridViewportAnchor ?? CaptureGridZoomAnchor();
+        GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
         base.OnDpiChanged(oldDpi, newDpi);
         PreserveGridAnchorAfterDpiChange(anchor);
     }
@@ -2646,6 +2658,28 @@ public partial class MainWindow : Window
     private static string ResolvedManagedEnhancementOutputsRoot
         => Path.Combine(Path.GetDirectoryName(ResolvedEnhancementJobsPath)!, "outputs");
 
+    private bool TryResolveEnhancementSourceIdentity(string? path, out string identity)
+    {
+        identity = "";
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            return false;
+
+        try
+        {
+            string lexical = Path.GetFullPath(path);
+            string canonical = Path.GetFullPath(_resolveFinalPath(lexical));
+            if (!Path.IsPathFullyQualified(canonical))
+                return false;
+
+            identity = canonical;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private bool TryBuildManagedEnhancedOutput(
         JsonElement job,
         out string resolvedSource,
@@ -2668,9 +2702,9 @@ public partial class MainWindow : Window
 
         try
         {
-            string resolvedSourcePath = _resolveFinalPath(Path.GetFullPath(sourcePath!));
-            string resolvedSourceId = _resolveFinalPath(Path.GetFullPath(sourceId!));
-            if (!string.Equals(resolvedSourcePath, resolvedSourceId, StringComparison.OrdinalIgnoreCase)
+            if (!TryResolveEnhancementSourceIdentity(sourcePath, out string resolvedSourcePath)
+                || !TryResolveEnhancementSourceIdentity(sourceId, out string resolvedSourceId)
+                || !EnhancementSourceIdentityComparer.Equals(resolvedSourcePath, resolvedSourceId)
                 || !File.Exists(resolvedSourcePath))
             {
                 return false;
@@ -2693,7 +2727,7 @@ public partial class MainWindow : Window
                 return false;
             }
 
-            resolvedSource = NormalizeFavoritePath(resolvedSourcePath);
+            resolvedSource = resolvedSourcePath;
             managedOutput = new ManagedEnhancedOutput(canonicalOutput, sourceSize, sourceMtimeMs);
             return true;
         }
@@ -2705,13 +2739,27 @@ public partial class MainWindow : Window
 
     private bool TryGetEnhancedOutputForPath(string path, out string? outputPath)
     {
-        if (_enhancedOutputs.TryGetValue(NormalizeFavoritePath(path), out ManagedEnhancedOutput? output))
+        if (TryGetManagedEnhancedOutputForPath(path, out ManagedEnhancedOutput output))
         {
             outputPath = output.OutputPath;
             return true;
         }
         outputPath = null;
         return false;
+    }
+
+    private bool TryGetManagedEnhancedOutputForPath(string path, out ManagedEnhancedOutput output)
+    {
+        output = null!;
+        if (_enhancedOutputs.Count == 0
+            || !TryResolveEnhancementSourceIdentity(path, out string identity)
+            || !_enhancedOutputs.TryGetValue(identity, out ManagedEnhancedOutput? stored))
+        {
+            return false;
+        }
+
+        output = stored;
+        return true;
     }
 
     private static bool TryWriteAtomicText(string path, string text)
@@ -8011,10 +8059,26 @@ public partial class MainWindow : Window
         RestoreGridZoomAnchorAfterLayout(resolved);
     }
 
+    private GridZoomAnchor? PreferredGridGeometryAnchor()
+    {
+        string? selectedPath = SelectedTile() is { IsRealFile: true } selectedTile
+            ? selectedTile.Path
+            : _primarySelectedPath;
+        if (!string.IsNullOrWhiteSpace(selectedPath)
+            && _lastRequestedGridGeometryAnchor is { } requested
+            && string.Equals(requested.Path, selectedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return requested;
+        }
+
+        return _lastStableGridViewportAnchor ?? CaptureGridZoomAnchor();
+    }
+
     private void RestoreGridZoomAnchorAfterLayout(GridZoomAnchor? anchor)
     {
         if (anchor is null)
             return;
+        _lastRequestedGridGeometryAnchor = anchor;
         _lastGridZoomAnchorPath = anchor.Value.Path;
         _lastGridZoomAnchorDrift = double.PositiveInfinity;
         _restoringGridZoomAnchor = true;
@@ -8460,11 +8524,26 @@ public partial class MainWindow : Window
         GridZoomAnchor? anchor = CaptureGridZoomAnchor();
         bool show = Sidebar.Visibility != Visibility.Visible;
         Sidebar.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        SidebarCol.Width = show ? new GridLength(240) : new GridLength(0);
+        if (_adaptiveWorkbench)
+        {
+            NarrowSidebarRail.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+            SidebarCol.Width = show ? new GridLength(240) : new GridLength(44);
+            _sidebarVisibleBeforeAdaptive = show;
+        }
+        else
+        {
+            SidebarCol.Width = show ? new GridLength(240) : new GridLength(0);
+        }
         ToggleSidebar.Style = (Style)FindResource(show ? "IconButtonActive" : "IconButton");
         ToggleSidebar.ToolTip = show ? "Hide sidebar" : "Show sidebar";
         ScheduleGridGeometryAnchorRestore(anchor);
     }
+
+    private void NarrowGrid_Click(object sender, RoutedEventArgs e)
+        => ModeGrid.IsChecked = true;
+
+    private void NarrowList_Click(object sender, RoutedEventArgs e)
+        => ModeList.IsChecked = true;
 
     private void ToggleRight_Click(object sender, RoutedEventArgs e)
     {
@@ -8477,30 +8556,101 @@ public partial class MainWindow : Window
 
     private void ApplyRightPanelState(bool open)
     {
+        if (!open && !_adaptiveWorkbench && RightCol.ActualWidth >= MinRightPanelWidth)
+            _rightPanelWidth = NormalizeRightPanelWidth(RightCol.ActualWidth);
+
         if (open)
-        {
             _rightPanelWidth = NormalizeRightPanelWidth(_rightPanelWidth);
-            RightPanel.Visibility = Visibility.Visible;
-            RightPanelSplitter.Visibility = Visibility.Visible;
-            RightSplitterCol.Width = new GridLength(6);
-            RightCol.MinWidth = MinRightPanelWidth;
+
+        RightPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        RightPanelSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        ApplyRightPanelPlacement(open);
+        ToggleRight.Style = (Style)FindResource(open ? "IconButtonActive" : "IconButton");
+        ToggleRight.ToolTip = open ? "Hide right panel" : "Show right panel";
+    }
+
+    private void ApplyRightPanelPlacement(bool open)
+    {
+        if (_adaptiveWorkbench)
+        {
+            Grid.SetRow(RightPanelSplitter, 1);
+            Grid.SetColumn(RightPanelSplitter, 1);
+            Grid.SetColumnSpan(RightPanelSplitter, 3);
+            RightPanelSplitter.Width = double.NaN;
+            RightPanelSplitter.Height = 6;
+            RightPanelSplitter.HorizontalAlignment = HorizontalAlignment.Stretch;
+            RightPanelSplitter.VerticalAlignment = VerticalAlignment.Stretch;
+            RightPanelSplitter.ResizeDirection = GridResizeDirection.Rows;
+            RightPanelSplitter.ResizeBehavior = GridResizeBehavior.PreviousAndNext;
+
+            Grid.SetRow(RightPanel, 2);
+            Grid.SetColumn(RightPanel, 1);
+            Grid.SetColumnSpan(RightPanel, 3);
+            RightPanel.BorderThickness = new Thickness(0, 1, 0, 0);
+            WorkbenchPreviewSplitterRow.Height = open ? new GridLength(6) : new GridLength(0);
+            WorkbenchPreviewRow.Height = open ? new GridLength(AdaptivePreviewHeight) : new GridLength(0);
+            RightSplitterCol.Width = new GridLength(0);
+            RightCol.MinWidth = 0;
             RightCol.MaxWidth = MaxRightPanelWidth;
-            RightCol.Width = new GridLength(_rightPanelWidth);
-            ToggleRight.Style = (Style)FindResource("IconButtonActive");
-            ToggleRight.ToolTip = "Hide right panel";
+            RightCol.Width = new GridLength(0);
+            PreviewImageCanvas.Height = 180;
+            return;
+        }
+
+        Grid.SetRow(RightPanelSplitter, 0);
+        Grid.SetColumn(RightPanelSplitter, 2);
+        Grid.SetColumnSpan(RightPanelSplitter, 1);
+        RightPanelSplitter.Width = 6;
+        RightPanelSplitter.Height = double.NaN;
+        RightPanelSplitter.HorizontalAlignment = HorizontalAlignment.Stretch;
+        RightPanelSplitter.VerticalAlignment = VerticalAlignment.Stretch;
+        RightPanelSplitter.ResizeDirection = GridResizeDirection.Columns;
+        RightPanelSplitter.ResizeBehavior = GridResizeBehavior.PreviousAndNext;
+
+        Grid.SetRow(RightPanel, 0);
+        Grid.SetColumn(RightPanel, 3);
+        Grid.SetColumnSpan(RightPanel, 1);
+        RightPanel.BorderThickness = new Thickness(1, 0, 0, 0);
+        WorkbenchPreviewSplitterRow.Height = new GridLength(0);
+        WorkbenchPreviewRow.Height = new GridLength(0);
+        RightSplitterCol.Width = open ? new GridLength(6) : new GridLength(0);
+        RightCol.MinWidth = open ? MinRightPanelWidth : 0;
+        RightCol.MaxWidth = MaxRightPanelWidth;
+        RightCol.Width = open ? new GridLength(_rightPanelWidth) : new GridLength(0);
+        PreviewImageCanvas.Height = 320;
+    }
+
+    private void ApplyAdaptiveWorkbenchLayout(double width, bool preserveGridAnchor = true)
+    {
+        bool adaptive = double.IsFinite(width) && width <= AdaptiveWorkbenchThreshold;
+        if (adaptive == _adaptiveWorkbench)
+            return;
+
+        GridZoomAnchor? anchor = preserveGridAnchor ? CaptureGridZoomAnchor() : null;
+        if (adaptive)
+        {
+            _sidebarVisibleBeforeAdaptive = Sidebar.Visibility == Visibility.Visible;
+            _adaptiveWorkbench = true;
+            Sidebar.Visibility = Visibility.Collapsed;
+            NarrowSidebarRail.Visibility = Visibility.Visible;
+            SidebarCol.Width = new GridLength(44);
+            SearchBoxContainer.MaxWidth = 300;
         }
         else
         {
-            if (RightCol.ActualWidth >= MinRightPanelWidth)
-                _rightPanelWidth = NormalizeRightPanelWidth(RightCol.ActualWidth);
-            RightPanel.Visibility = Visibility.Collapsed;
-            RightPanelSplitter.Visibility = Visibility.Collapsed;
-            RightSplitterCol.Width = new GridLength(0);
-            RightCol.MinWidth = 0;
-            RightCol.Width = new GridLength(0);
-            ToggleRight.Style = (Style)FindResource("IconButton");
-            ToggleRight.ToolTip = "Show right panel";
+            _adaptiveWorkbench = false;
+            NarrowSidebarRail.Visibility = Visibility.Collapsed;
+            Sidebar.Visibility = _sidebarVisibleBeforeAdaptive ? Visibility.Visible : Visibility.Collapsed;
+            SidebarCol.Width = _sidebarVisibleBeforeAdaptive ? new GridLength(240) : new GridLength(0);
+            SearchBoxContainer.MaxWidth = 720;
         }
+
+        bool rightOpen = RightPanel.Visibility == Visibility.Visible;
+        ApplyRightPanelPlacement(rightOpen);
+        ToggleSidebar.Style = (Style)FindResource(Sidebar.Visibility == Visibility.Visible ? "IconButtonActive" : "IconButton");
+        ToggleSidebar.ToolTip = Sidebar.Visibility == Visibility.Visible ? "Hide sidebar" : "Show sidebar";
+        if (preserveGridAnchor)
+            ScheduleGridGeometryAnchorRestore(anchor);
     }
 
     private static double NormalizeRightPanelWidth(double width)
@@ -8511,7 +8661,7 @@ public partial class MainWindow : Window
         double normalized = NormalizeRightPanelWidth(width);
         bool changed = Math.Abs(normalized - _rightPanelWidth) >= 0.5;
         _rightPanelWidth = normalized;
-        if (RightPanel.Visibility == Visibility.Visible)
+        if (!_adaptiveWorkbench && RightPanel.Visibility == Visibility.Visible)
             RightCol.Width = new GridLength(_rightPanelWidth);
         return changed;
     }
@@ -8520,6 +8670,13 @@ public partial class MainWindow : Window
     {
         if (RightPanel.Visibility != Visibility.Visible)
             return;
+
+        if (_adaptiveWorkbench)
+        {
+            ScheduleGridGeometryAnchorRestore(_rightPanelResizeAnchor);
+            _rightPanelResizeAnchor = null;
+            return;
+        }
 
         SetRightPanelWidth(RightCol.ActualWidth);
         ScheduleGridGeometryAnchorRestore(_rightPanelResizeAnchor);
@@ -8539,6 +8696,8 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             if (RightPanel.Visibility != Visibility.Visible)
+                return;
+            if (_adaptiveWorkbench)
                 return;
             SetRightPanelWidth(RightCol.ActualWidth);
             ScheduleGridGeometryAnchorRestore(anchor);
@@ -9323,7 +9482,7 @@ public partial class MainWindow : Window
         if (!tile.IsRealFile
             || !tile.Enhanced
             || string.IsNullOrWhiteSpace(tile.EnhancedOutputPath)
-            || !_enhancedOutputs.TryGetValue(NormalizeFavoritePath(tile.Path), out ManagedEnhancedOutput? stored)
+            || !TryGetManagedEnhancedOutputForPath(tile.Path, out ManagedEnhancedOutput stored)
             || !TryCreateManagedEnhancedOutput(tile, stored.OutputPath, stored.SourceSize, stored.SourceMtimeMs, out ManagedEnhancedOutput current)
             || !string.Equals(current.OutputPath, tile.EnhancedOutputPath, StringComparison.OrdinalIgnoreCase))
         {
@@ -9606,7 +9765,7 @@ public partial class MainWindow : Window
                 false,
                 0,
                 null,
-                $"Browser AI engine is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start Aibos in the Browser, then retry.");
+                $"The optional Browser Enhancement companion is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start the H25 Browser application, then retry.");
         }
     }
 
@@ -9663,7 +9822,15 @@ public partial class MainWindow : Window
 
     private async Task RefreshModalEnhancementStateAsync(string sourcePath, long generation, bool showUnavailableError)
     {
-        string encodedSource = Uri.EscapeDataString(sourcePath);
+        if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity))
+        {
+            if (showUnavailableError)
+                _modalEnhancementError = "The selected source path could not be resolved for Enhancement.";
+            UpdateModalEnhancementActionControls();
+            return;
+        }
+
+        string encodedSource = Uri.EscapeDataString(sourceIdentity);
         EnhancementApiResponse response = await SendEnhancementApiAsync(HttpMethod.Get, $"api/enhance/jobs?sourceId={encodedSource}");
         if (generation != _modalEnhancementGeneration
             || Modal.Visibility != Visibility.Visible
@@ -9696,9 +9863,13 @@ public partial class MainWindow : Window
         // A filtered endpoint should only return jobs for the requested image,
         // but keep the desktop client defensive: never attach another image's
         // job/output to the currently selected tile.
+        string? tileIdentity = null;
         if (job is not null
-            && (!string.Equals(NormalizeFavoritePath(job.SourcePath), NormalizeFavoritePath(tile.Path), StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(NormalizeFavoritePath(job.SourceId), NormalizeFavoritePath(tile.Path), StringComparison.OrdinalIgnoreCase)))
+            && (!TryResolveEnhancementSourceIdentity(tile.Path, out tileIdentity)
+                || !TryResolveEnhancementSourceIdentity(job.SourcePath, out string jobSourcePathIdentity)
+                || !TryResolveEnhancementSourceIdentity(job.SourceId, out string jobSourceIdIdentity)
+                || !EnhancementSourceIdentityComparer.Equals(jobSourcePathIdentity, tileIdentity)
+                || !EnhancementSourceIdentityComparer.Equals(jobSourceIdIdentity, tileIdentity)))
         {
             return;
         }
@@ -9714,7 +9885,7 @@ public partial class MainWindow : Window
             bool newlyAvailable = !TryGetModalEnhancedOutput(tile, out _);
             tile.Enhanced = true;
             tile.EnhancedOutputPath = managedOutput.OutputPath;
-            _enhancedOutputs[NormalizeFavoritePath(tile.Path)] = managedOutput;
+            _enhancedOutputs[tileIdentity!] = managedOutput;
             UpdateModalEnhancedControls(canShowEnhanced: true);
             if (newlyAvailable
                 && Modal.Visibility == Visibility.Visible
@@ -9750,7 +9921,8 @@ public partial class MainWindow : Window
         managedOutput = null!;
         try
         {
-            string canonicalSource = _resolveFinalPath(Path.GetFullPath(tile.Path));
+            if (!TryResolveEnhancementSourceIdentity(tile.Path, out string canonicalSource))
+                return false;
             var sourceInfo = new FileInfo(canonicalSource);
             double currentMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
             if (!sourceInfo.Exists
@@ -9816,6 +9988,14 @@ public partial class MainWindow : Window
 
         long requestGeneration = _modalEnhancementGeneration;
         string sourcePath = tile.Path;
+        if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity)
+            || !File.Exists(sourceIdentity))
+        {
+            _modalEnhancementError = "The selected source path could not be resolved for Enhancement.";
+            SetStatusToast(_modalEnhancementError);
+            UpdateModalEnhancementActionControls();
+            return;
+        }
         string? requestJobId = _modalEnhancementJobId;
         _modalEnhancementRequestPending = true;
         _modalEnhancementError = null;
@@ -9828,10 +10008,10 @@ public partial class MainWindow : Window
                 ? await SendEnhancementApiAsync(HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId!)}/retry")
                 : await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
                 {
-                    sourceId = sourcePath,
-                    presetId = "anime-sharp-x2",
-                    adapterId = "realesrgan-ncnn",
-                    scale = 2,
+                    sourceId = sourceIdentity,
+                    presetId = _modalEnhancementPresetId,
+                    adapterId = _modalEnhancementAdapterId,
+                    scale = _modalEnhancementScale,
                 });
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
@@ -9854,10 +10034,10 @@ public partial class MainWindow : Window
                 {
                     response = await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
                     {
-                        sourceId = sourcePath,
-                        presetId = "anime-sharp-x2",
-                        adapterId = "realesrgan-ncnn",
-                        scale = 2,
+                        sourceId = sourceIdentity,
+                        presetId = _modalEnhancementPresetId,
+                        adapterId = _modalEnhancementAdapterId,
+                        scale = _modalEnhancementScale,
                         confirmLargeJob = true,
                     });
                     if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
@@ -9962,7 +10142,8 @@ public partial class MainWindow : Window
             _modalShowingEnhanced = false;
             tile.Enhanced = false;
             tile.EnhancedOutputPath = null;
-            _enhancedOutputs.Remove(NormalizeFavoritePath(tile.Path));
+            if (TryResolveEnhancementSourceIdentity(tile.Path, out string sourceIdentity))
+                _enhancedOutputs.Remove(sourceIdentity);
             _modalEnhancementJobId = null;
             _modalEnhancementJobStatus = null;
             _modalEnhancementProgress = 0;
@@ -11212,11 +11393,12 @@ public partial class MainWindow : Window
         DiagnosticsText.Text = BuildDiagnosticsText();
         DiagnosticsStatusText.Text = "Read-only diagnostics. Copy excludes paths, image metadata, prompts, and personal state.";
         AppSettingsDialog.Visibility = Visibility.Visible;
+        SelectAppSettingsSection(focusShortcuts ? "keyboard" : "general", bringIntoView: false);
         Dispatcher.BeginInvoke(() =>
         {
+            SelectAppSettingsSection(focusShortcuts ? "keyboard" : "general", bringIntoView: true);
             if (focusShortcuts)
             {
-                KeyBindingsHeading.BringIntoView();
                 Button? firstBinding = KeyBindingSettings.Definitions
                     .Select(definition => _keyBindingButtons.TryGetValue(definition.Action, out Button? button) ? button : null)
                     .FirstOrDefault(static button => button is not null);
@@ -11226,6 +11408,32 @@ public partial class MainWindow : Window
             }
             ConfirmBeforeDeleteCheckBox.Focus();
         }, DispatcherPriority.Input);
+    }
+
+    private void AppSettingsNavigation_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string section })
+            SelectAppSettingsSection(section, bringIntoView: true);
+    }
+
+    private void SelectAppSettingsSection(string section, bool bringIntoView)
+    {
+        (FrameworkElement Target, RadioButton Navigation) selection = section switch
+        {
+            "display" => (DisplaySettingsHeading, SettingsDisplayNav),
+            "thumbnails" => (ThumbnailSettingsHeading, SettingsThumbnailsNav),
+            "keyboard" => (KeyBindingsHeading, SettingsKeyboardNav),
+            "about" => (AboutSettingsHeading, SettingsAboutNav),
+            _ => (GeneralSettingsHeading, SettingsGeneralNav),
+        };
+
+        selection.Navigation.IsChecked = true;
+        if (!bringIntoView)
+            return;
+        if (ReferenceEquals(selection.Target, GeneralSettingsHeading))
+            AppSettingsScrollViewer.ScrollToTop();
+        else
+            selection.Target.BringIntoView();
     }
 
     private void AppSettingsBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -13952,6 +14160,7 @@ public partial class MainWindow : Window
     public bool FocusAppSettingsButtonForSmoke() => OpenAppSettingsButton.Focus();
     public bool IsGlobalShortcutInputFocusedForSmoke => IsGlobalShortcutInputFocused(Keyboard.FocusedElement);
     public bool IsGlobalShortcutSuppressedForSmoke(IInputElement focused) => IsGlobalShortcutInputFocused(focused);
+    public bool SearchInputSuppressesGlobalShortcutForSmoke => IsGlobalShortcutInputFocused(SearchInput);
 
     public bool InvokePreviewKeyForSmoke(Key key)
     {
@@ -13964,6 +14173,19 @@ public partial class MainWindow : Window
             RoutedEvent = Keyboard.PreviewKeyDownEvent,
         };
         OnPreviewKeyDown(args);
+        return args.Handled;
+    }
+    public bool InvokePreviewKeyFromSearchInputForSmoke(Key key)
+    {
+        var source = PresentationSource.FromVisual(this);
+        if (source is null)
+            return false;
+
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+        };
+        SearchInput.RaiseEvent(args);
         return args.Handled;
     }
     public bool InvokePreviewKeyForSmoke(Key key, ModifierKeys modifiers)
@@ -14372,6 +14594,13 @@ public partial class MainWindow : Window
     }
     public double SidebarWidthForSmoke => Sidebar.ActualWidth;
     public bool SidebarVisibleForSmoke => Sidebar.Visibility == Visibility.Visible;
+    public bool AdaptiveWorkbenchForSmoke => _adaptiveWorkbench;
+    public bool NarrowSidebarRailVisibleForSmoke => NarrowSidebarRail.Visibility == Visibility.Visible;
+    public bool RightPanelDockedBelowForSmoke
+        => Grid.GetRow(RightPanel) == 2
+            && Grid.GetColumn(RightPanel) == 1
+            && Grid.GetColumnSpan(RightPanel) == 3
+            && WorkbenchPreviewRow.ActualHeight > 0;
     public double RightPanelWidthForSmoke => RightPanel.ActualWidth;
     public double RightPanelStoredWidthForSmoke => _rightPanelWidth;
     public bool RightPanelOpenForSmoke => RightPanel.Visibility == Visibility.Visible;
@@ -14385,6 +14614,8 @@ public partial class MainWindow : Window
     public void CommitRightPanelWidthForSmoke() => SaveState();
     public void ToggleRightPanelForSmoke() => ToggleRight_Click(this, new RoutedEventArgs());
     public string? LastGridZoomAnchorPathForSmoke => _lastGridZoomAnchorPath;
+    public string? LastStableGridViewportAnchorPathForSmoke => _lastStableGridViewportAnchor?.Path;
+    public string? LastRequestedGridGeometryAnchorPathForSmoke => _lastRequestedGridGeometryAnchor?.Path;
     public double LastGridZoomAnchorDriftForSmoke => _lastGridZoomAnchorDrift;
     public int GridColumnCountForSmoke => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.ColumnCount ?? 0;
     public bool GridForcesSingleColumnForSmoke => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.ForceSingleColumn == true;
@@ -14614,7 +14845,7 @@ public partial class MainWindow : Window
 
     public void SimulateDpiGeometryChangeForSmoke(double width, double height)
     {
-        GridZoomAnchor? anchor = CaptureGridZoomAnchor();
+        GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
         Width = Math.Max(MinWidth, width);
         Height = Math.Max(MinHeight, height);
         PreserveGridAnchorAfterDpiChange(anchor);
@@ -14796,15 +15027,28 @@ public partial class MainWindow : Window
         => ModalFilmstripOverlay.Visibility == Visibility.Visible;
     public bool ModalFilmstripPinnedForSmoke => _modalFilmstripOpen;
     public double ModalImageAreaHeightForSmoke => ModalImageArea.ActualHeight;
+    public double ModalImageAreaWidthForSmoke => ModalImageArea.ActualWidth;
+    public double ModalHeightForSmoke => Modal.ActualHeight;
+    public double ModalWidthForSmoke => Modal.ActualWidth;
+    public double ModalImageHeightForSmoke => ModalImage.ActualHeight;
+    public double ModalImageWidthForSmoke => ModalImage.ActualWidth;
+    public bool ModalFitSurfaceVisibleForSmoke => Modal.Visibility == Visibility.Visible;
+    public bool ModalFitStretchUniformForSmoke => ModalBitmap.Stretch == Stretch.Uniform;
+    public bool ModalImageAreaCoversWindowForSmoke
+        => ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
+            && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2);
+    public bool ModalImageWithinAreaForSmoke
+        => ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 0.5
+            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 0.5;
+    public bool ModalImageTouchesFitEdgeForSmoke
+        => Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 0.5
+            || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 0.5;
     public bool ModalFullWindowFitContractForSmoke
-        => Modal.Visibility == Visibility.Visible
-            && ModalBitmap.Stretch == Stretch.Uniform
-            && ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
-            && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2)
-            && ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 0.5
-            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 0.5
-            && (Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 0.5
-                || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 0.5);
+        => ModalFitSurfaceVisibleForSmoke
+            && ModalFitStretchUniformForSmoke
+            && ModalImageAreaCoversWindowForSmoke
+            && ModalImageWithinAreaForSmoke
+            && ModalImageTouchesFitEdgeForSmoke;
     public bool ModalWindowCaptionControlsContractForSmoke
         => Modal.Visibility == Visibility.Visible
             && ModalWindowCaptionControls.Visibility == Visibility.Visible
@@ -14895,14 +15139,19 @@ public partial class MainWindow : Window
         => ModalZoomIndicator.VerticalAlignment == VerticalAlignment.Top
             && Grid.GetRowSpan(ModalZoomIndicator) == 3
             && ModalZoomIndicator.Margin.Top <= 2
-            && ModalZoomIndicator.Opacity <= 0.65
+            && ModalZoomIndicator.Opacity >= 0.9
+            && ModalZoomIndicator.CornerRadius.TopLeft <= 4
             && ModalZoomLabel.FontSize <= 10;
     public bool ModalSingleZoomReadoutForSmoke
         => ModalZoomIndicator.Visibility == (ModalChromeEffectivelyVisible ? Visibility.Visible : Visibility.Collapsed)
             && !ModalInteractionFeedbackText.Text.StartsWith("Zoom", StringComparison.OrdinalIgnoreCase);
     public void RevealModalChromeTransientForSmoke() => RevealModalChromeTransient();
     public void ExpireModalChromeTransientForSmoke() => ExpireModalChromeTransient();
-    public void SetModalChromeVisibleForSmoke(bool visible) => SetModalChromeVisible(visible, showFeedback: false);
+    public void SetModalChromeVisibleForSmoke(bool visible)
+    {
+        CancelPendingModalSingleClick();
+        SetModalChromeVisible(visible, showFeedback: false);
+    }
     public void SetModalBottomHoverForSmoke(bool visible) => SetModalFilmstripHoverVisible(visible);
     public bool ToggleModalFilmstripForSmoke() => ToggleModalFilmstrip();
     public bool FocusModalFavoriteIncreaseForSmoke() => ModalFavoriteIncreaseButton.Focus();
@@ -14930,7 +15179,6 @@ public partial class MainWindow : Window
         string expectedFeedback = expectedVisible ? "shown" : "hidden";
         return _modalManualChromeVisible == expectedVisible
             && ModalChromeEffectivelyVisible == expectedVisible
-            && ModalInteractionFeedback.Visibility == Visibility.Visible
             && ModalInteractionFeedbackText.Text.Contains(expectedFeedback, StringComparison.OrdinalIgnoreCase);
     }
     public async Task<bool> WaitForModalChromeTransientExpirationForSmokeAsync(int timeoutMilliseconds = 5000)
@@ -14979,6 +15227,7 @@ public partial class MainWindow : Window
     public string? ModalEnhancementJobIdForSmoke => _modalEnhancementJobId;
     public string? ModalEnhancementStatusForSmoke => _modalEnhancementJobStatus;
     public int ModalEnhancementProgressForSmoke => _modalEnhancementProgress;
+    public string? ModalEnhancementErrorForSmoke => _modalEnhancementError;
     public string ModalEnhancementMessageForSmoke => ModalEnhancementStatusText.Text;
     public bool ModalEnhancementCancelVisibleForSmoke => ModalEnhanceCancelButton.Visibility == Visibility.Visible;
     public bool ModalEnhancedDeleteVisibleForSmoke => ModalEnhancedDeleteButton.Visibility == Visibility.Visible;
@@ -14989,6 +15238,27 @@ public partial class MainWindow : Window
         bool confirmOutputDelete = true)
     {
         _modalEnhancementSender = sender;
+        _confirmLargeEnhancementForSmoke = () => confirmLargeJob;
+        _confirmEnhancedOutputDeleteForSmoke = () => confirmOutputDelete;
+    }
+
+    public void ConfigureModalEnhancementRequestProfileForSmoke(string presetId, string adapterId, int scale)
+    {
+        if (string.IsNullOrWhiteSpace(presetId))
+            throw new ArgumentException("presetId is required", nameof(presetId));
+        if (string.IsNullOrWhiteSpace(adapterId))
+            throw new ArgumentException("adapterId is required", nameof(adapterId));
+        if (scale is < 1 or > 8)
+            throw new ArgumentOutOfRangeException(nameof(scale));
+        _modalEnhancementPresetId = presetId;
+        _modalEnhancementAdapterId = adapterId;
+        _modalEnhancementScale = scale;
+    }
+
+    public void ConfigureModalEnhancementConfirmationsForSmoke(
+        bool confirmLargeJob = true,
+        bool confirmOutputDelete = true)
+    {
         _confirmLargeEnhancementForSmoke = () => confirmLargeJob;
         _confirmEnhancedOutputDeleteForSmoke = () => confirmOutputDelete;
     }

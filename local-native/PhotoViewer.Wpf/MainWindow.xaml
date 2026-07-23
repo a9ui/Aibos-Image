@@ -5,7 +5,8 @@
         Title="Aibos" Height="820" Width="1280" MinHeight="560" MinWidth="900"
         WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize"
         Background="{StaticResource BgPrimary}" Foreground="{StaticResource TextPrimary}"
-        FontFamily="Segoe UI" TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True">
+        FontFamily="Segoe UI" TextOptions.TextFormattingMode="Display" TextOptions.TextRenderingMode="ClearType"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
 
   <WindowChrome.WindowChrome>
     <WindowChrome CaptionHeight="52" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
@@ -24,12 +25,12 @@
     <Grid.RowDefinitions>
       <RowDefinition Height="52"/>
       <RowDefinition Height="*"/>
-      <RowDefinition Height="40"/>
+      <RowDefinition Height="28"/>
     </Grid.RowDefinitions>
 
     <!-- ═══════════════ Header ═══════════════ -->
     <Border Grid.Row="0" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,0,1">
-      <Grid Margin="14,0">
+      <Grid Margin="10,0">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
@@ -52,8 +53,8 @@
         </StackPanel>
 
         <!-- search -->
-        <Border x:Name="SearchBoxContainer" Grid.Column="1" Height="40" MaxWidth="720" HorizontalAlignment="Stretch" Margin="10,0"
-                CornerRadius="999" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
+        <Border x:Name="SearchBoxContainer" Grid.Column="1" Height="32" MaxWidth="720" HorizontalAlignment="Stretch" Margin="10,0"
+                CornerRadius="4" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                 WindowChrome.IsHitTestVisibleInChrome="True">
           <DockPanel Margin="12,0,10,0" LastChildFill="True">
             <Path DockPanel.Dock="Left" Data="M11,11 m-8,0 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 M21,21 l-4.3,-4.3" Stroke="{StaticResource TextTertiary}" StrokeThickness="1.8" Stretch="Uniform" Width="15" Height="15" Margin="0,0,8,0" VerticalAlignment="Center"/>
@@ -72,7 +73,7 @@
                AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False">
           <Border Width="{Binding PlacementTarget.ActualWidth, ElementName=SearchHistoryPopup}" MaxHeight="320" Margin="0,5,0,0"
                   Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
-                  CornerRadius="10" Padding="0,6,0,6">
+                  CornerRadius="6" Padding="0,6,0,6">
             <DockPanel LastChildFill="True">
               <Grid DockPanel.Dock="Top" Margin="12,0,6,5">
                 <Grid.ColumnDefinitions>
@@ -161,7 +162,12 @@
     </Border>
 
     <!-- ═══════════════ Body ═══════════════ -->
-    <Grid Grid.Row="1">
+    <Grid x:Name="WorkbenchLayout" Grid.Row="1">
+      <Grid.RowDefinitions>
+        <RowDefinition x:Name="WorkbenchMainRow" Height="*"/>
+        <RowDefinition x:Name="WorkbenchPreviewSplitterRow" Height="0"/>
+        <RowDefinition x:Name="WorkbenchPreviewRow" Height="0"/>
+      </Grid.RowDefinitions>
       <Grid.ColumnDefinitions>
         <ColumnDefinition x:Name="SidebarCol" Width="240"/>
         <ColumnDefinition Width="*" MinWidth="320"/>
@@ -170,7 +176,7 @@
       </Grid.ColumnDefinitions>
 
       <!-- ─────── Sidebar ─────── -->
-      <Border Grid.Column="0" x:Name="Sidebar" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,1,0">
+      <Border Grid.Row="0" Grid.Column="0" Grid.RowSpan="3" x:Name="Sidebar" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,1,0">
         <Grid>
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -363,12 +369,39 @@
         </Grid>
       </Border>
 
+      <!-- The narrow layout keeps core navigation available without duplicating viewer state. -->
+      <Border x:Name="NarrowSidebarRail" Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" Visibility="Collapsed"
+              Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,1,0">
+        <DockPanel LastChildFill="False" Margin="0,8">
+          <Button DockPanel.Dock="Top" Style="{StaticResource IconButtonActive}" Margin="5,0,5,6" Click="ToggleSidebar_Click"
+                  ToolTip="Open filters and folders" AutomationProperties.Name="Open filters and folders">
+            <Path Data="M3,4 h18 v16 h-18 z M9,4 v16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Stretch="Uniform" Width="17" Height="17"/>
+          </Button>
+          <Button DockPanel.Dock="Top" Style="{StaticResource IconButton}" Margin="5,0,5,6" Click="OpenAlbums_Click"
+                  ToolTip="Open shared Albums" AutomationProperties.Name="Open shared Albums">
+            <Path Data="M4,6 h6 l2,2 h8 v11 h-16 z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Stretch="Uniform" Width="17" Height="17"/>
+          </Button>
+          <Button DockPanel.Dock="Top" Style="{StaticResource IconButton}" Margin="5,0,5,6" Click="NarrowGrid_Click"
+                  ToolTip="Grid view" AutomationProperties.Name="Show image grid">
+            <Path Data="M3,3 h7 v7 h-7 z M14,3 h7 v7 h-7 z M3,14 h7 v7 h-7 z M14,14 h7 v7 h-7 z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform" Width="16" Height="16"/>
+          </Button>
+          <Button DockPanel.Dock="Top" Style="{StaticResource IconButton}" Margin="5,0,5,6" Click="NarrowList_Click"
+                  ToolTip="List view" AutomationProperties.Name="Show image list">
+            <Path Data="M4,5 h16 M4,12 h16 M4,19 h16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.7" Stretch="Uniform" Width="17" Height="17"/>
+          </Button>
+          <Button DockPanel.Dock="Bottom" Style="{StaticResource IconButton}" Margin="5,6,5,0" Click="OpenAppSettings_Click"
+                  ToolTip="App Settings" AutomationProperties.Name="Open app settings">
+            <Path Data="M12,8 a4,4 0 1 0 0,8 a4,4 0 1 0 0,-8 M12,2 v3 M12,19 v3 M2,12 h3 M19,12 h3 M4.9,4.9 l2.1,2.1 M17,17 l2.1,2.1 M19.1,4.9 l-2.1,2.1 M7,17 l-2.1,2.1" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform" Width="17" Height="17"/>
+          </Button>
+        </DockPanel>
+      </Border>
+
       <!-- ─────── Main grid ─────── -->
-      <Border Grid.Column="1" x:Name="ViewerFolderDropTarget" Background="{StaticResource BgPrimary}" AllowDrop="True"
+      <Border Grid.Row="0" Grid.Column="1" x:Name="ViewerFolderDropTarget" Background="{StaticResource BgPrimary}" AllowDrop="True"
               DragEnter="FolderDropTarget_DragEnter" DragOver="FolderDropTarget_DragOver" DragLeave="FolderDropTarget_DragLeave" Drop="FolderDropTarget_Drop"
               AutomationProperties.Name="Image viewer folder drop target" AutomationProperties.HelpText="Drop existing folders from Explorer to add them to the current folder set. Files are never copied or moved.">
        <Grid>
-        <ListBox x:Name="CardsList" Background="Transparent" BorderThickness="0" Padding="20,16,12,24"
+        <ListBox x:Name="CardsList" Background="Transparent" BorderThickness="0" Padding="14,12,10,18"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                  ItemsPanel="{StaticResource VirtualizedCardItemsPanel}"
@@ -437,14 +470,14 @@
        </Grid>
       </Border>
 
-      <GridSplitter Grid.Column="2" x:Name="RightPanelSplitter" Width="6" HorizontalAlignment="Stretch"
+      <GridSplitter Grid.Row="0" Grid.Column="2" x:Name="RightPanelSplitter" Width="6" HorizontalAlignment="Stretch"
                     Background="Transparent" Focusable="True" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext"
                     KeyboardIncrement="20" ShowsPreview="True" PreviewKeyDown="RightPanelSplitter_PreviewKeyDown"
                     DragStarted="RightPanelSplitter_DragStarted" DragCompleted="RightPanelSplitter_DragCompleted"
                     ToolTip="Resize right preview panel" AutomationProperties.Name="Resize right preview panel"/>
 
       <!-- ─────── Right preview ─────── -->
-      <Border Grid.Column="3" x:Name="RightPanel" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1,0,0,0">
+      <Border Grid.Row="0" Grid.Column="3" x:Name="RightPanel" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1,0,0,0">
         <Grid>
           <Grid.RowDefinitions>
             <RowDefinition Height="38"/>
@@ -462,11 +495,10 @@
           <ScrollViewer x:Name="RightPreviewContent" Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14">
               <!-- image -->
-              <Border x:Name="PreviewImageDragSurface" CornerRadius="12" ClipToBounds="True" Cursor="Hand" MouseLeftButtonUp="PreviewImage_Click"
+              <Border x:Name="PreviewImageDragSurface" CornerRadius="4" ClipToBounds="True" Cursor="Hand" MouseLeftButtonUp="PreviewImage_Click"
                       PreviewMouseLeftButtonDown="FileDragSurface_PreviewMouseLeftButtonDown" PreviewMouseMove="FileDragSurface_PreviewMouseMove" PreviewMouseLeftButtonUp="FileDragSurface_PreviewMouseLeftButtonUp"
                       ToolTip="Click to open. Drag the current image to Explorer to copy it." AutomationProperties.Name="Preview image" AutomationProperties.HelpText="Click to open the modal. Drag beyond the system threshold to copy the current real file to Explorer." Margin="0,0,0,12">
-                <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="0" Opacity="0.5" Color="Black"/></Border.Effect>
-                <Grid Height="380">
+                <Grid x:Name="PreviewImageCanvas" Height="320">
                   <Rectangle x:Name="PreviewArtBase"/>
                   <Rectangle x:Name="PreviewArtGlow"/>
                   <Image x:Name="PreviewBitmap" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"/>
@@ -662,23 +694,12 @@
     <Grid x:Name="Landing" Grid.RowSpan="3" Visibility="Collapsed" Background="{StaticResource BgPrimary}" AllowDrop="True"
           DragEnter="FolderDropTarget_DragEnter" DragOver="FolderDropTarget_DragOver" DragLeave="FolderDropTarget_DragLeave" Drop="FolderDropTarget_Drop"
           AutomationProperties.Name="Folder selection landing drop target" AutomationProperties.HelpText="Drop existing folders from Explorer to add them to the folder set. Files are never copied or moved.">
-      <Rectangle HorizontalAlignment="Left" Width="700" Height="520" VerticalAlignment="Center" Margin="-160,0,0,0">
-        <Rectangle.Fill>
-          <RadialGradientBrush><GradientStop Color="#1A6366F1" Offset="0"/><GradientStop Color="#006366F1" Offset="1"/></RadialGradientBrush>
-        </Rectangle.Fill>
-      </Rectangle>
-      <Rectangle HorizontalAlignment="Right" Width="720" Height="520" VerticalAlignment="Center" Margin="0,0,-180,0">
-        <Rectangle.Fill>
-          <RadialGradientBrush><GradientStop Color="#14A855F7" Offset="0"/><GradientStop Color="#00A855F7" Offset="1"/></RadialGradientBrush>
-        </Rectangle.Fill>
-      </Rectangle>
-
       <Button x:Name="LandingShortcutsButton" Style="{StaticResource GhostButton}" Panel.ZIndex="20"
-              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,9,260,0" Height="34" MinWidth="88" Padding="10,0"
+              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,10,248,0" Height="32" MinWidth="76" Padding="9,0"
               Content="Shortcuts" Click="OpenShortcuts_Click" ToolTip="View and edit keyboard shortcuts" AutomationProperties.Name="Open keyboard shortcuts"
               WindowChrome.IsHitTestVisibleInChrome="True"/>
       <Button x:Name="LandingAppSettingsButton" Style="{StaticResource GhostButton}" Panel.ZIndex="20"
-              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,9,154,0" Height="34" Padding="10,0"
+              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,10,144,0" Height="32" Padding="9,0"
               Click="OpenAppSettings_Click" ToolTip="App Settings" AutomationProperties.Name="App settings" WindowChrome.IsHitTestVisibleInChrome="True">
         <StackPanel Orientation="Horizontal">
           <Path Data="M12,8 a4,4 0 1 0 0,8 a4,4 0 1 0 0,-8 M12,2 v3 M12,19 v3 M2,12 h3 M19,12 h3 M4.9,4.9 l2.1,2.1 M17,17 l2.1,2.1 M19.1,4.9 l-2.1,2.1 M7,17 l-2.1,2.1"
@@ -698,10 +719,13 @@
         </Button>
       </StackPanel>
 
-      <StackPanel Width="760" VerticalAlignment="Center" HorizontalAlignment="Center">
-        <TextBlock Text="Aibos" FontSize="52" FontWeight="Bold" HorizontalAlignment="Center" Foreground="{StaticResource LogoBrush}"/>
+      <StackPanel Width="560" VerticalAlignment="Center" HorizontalAlignment="Center">
+        <Border Width="34" Height="34" CornerRadius="4" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Margin="0,0,0,10">
+          <Path Data="M3,4 h18 v16 h-18 z M9,4 v16" Stroke="{StaticResource AccentLight}" StrokeThickness="1.8" Stretch="Uniform" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <TextBlock Text="Aibos" FontSize="32" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{StaticResource LogoBrush}"/>
         <TextBlock Text="Index and search Stable Diffusion PNG metadata locally" HorizontalAlignment="Center"
-                   Foreground="{StaticResource TextSecondary}" FontSize="15" Margin="0,6,0,34"/>
+                   Foreground="{StaticResource TextTertiary}" FontSize="12" Margin="0,5,0,24"/>
 
         <!-- folder set panel -->
         <StackPanel x:Name="LandingPanel">
@@ -716,14 +740,14 @@
             <Button Grid.Column="1" x:Name="OpenFolderSetButton" Style="{StaticResource PrimaryButton}" Content="Open folder set" Click="StartScan_Click"/>
           </Grid>
 
-          <Border CornerRadius="8" Background="#09FFFFFF" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="12,9" Margin="0,0,0,6" Visibility="Collapsed">
+          <Border CornerRadius="4" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="12,9" Margin="0,0,0,6" Visibility="Collapsed">
             <DockPanel>
               <TextBlock DockPanel.Dock="Left" Text="・" Foreground="{StaticResource TextTertiary}" VerticalAlignment="Center" Margin="0,0,8,0"/>
               <TextBlock DockPanel.Dock="Right" Text="✕" Foreground="{StaticResource TextTertiary}" VerticalAlignment="Center" Margin="8,0,0,0"/>
               <TextBlock Text="D:\SD\outputs\txt2img" Foreground="{StaticResource TextPrimary}" FontSize="13.5" TextTrimming="CharacterEllipsis"/>
             </DockPanel>
           </Border>
-          <Border CornerRadius="8" Background="#09FFFFFF" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="12,9" Margin="0,0,0,12" Visibility="Collapsed">
+          <Border CornerRadius="4" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="12,9" Margin="0,0,0,12" Visibility="Collapsed">
             <DockPanel>
               <TextBlock DockPanel.Dock="Left" Text="・" Foreground="{StaticResource TextTertiary}" VerticalAlignment="Center" Margin="0,0,8,0"/>
               <TextBlock DockPanel.Dock="Right" Text="✕" Foreground="{StaticResource TextTertiary}" VerticalAlignment="Center" Margin="8,0,0,0"/>
@@ -731,7 +755,7 @@
             </DockPanel>
           </Border>
 
-          <Border CornerRadius="8" Background="#09FFFFFF" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="8,7" Margin="0,0,0,12">
+          <Border CornerRadius="4" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="8,7" Margin="0,0,0,12">
             <ItemsControl x:Name="LandingFolderSetList" MaxHeight="118">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
@@ -746,7 +770,7 @@
 
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Height="72" CornerRadius="12" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="10,7" Margin="0,0,12,0">
+            <Border Grid.Column="0" Height="72" CornerRadius="4" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="10,7" Margin="0,0,12,0">
               <TextBlock Text="Paste one absolute path per line…" Foreground="{StaticResource TextTertiary}" FontSize="13"/>
             </Border>
             <TextBox Grid.Column="0" x:Name="PastedFoldersInput" Margin="10,7,22,7" AcceptsReturn="True" TextWrapping="NoWrap" BorderThickness="0" Background="{StaticResource BgSecondary}"
@@ -756,7 +780,7 @@
           <TextBlock x:Name="LandingFolderStatusText" Text="No folders selected yet." Foreground="{StaticResource TextTertiary}" FontSize="12" Margin="2,8,0,0"/>
         </StackPanel>
 
-        <Button Style="{StaticResource BrowseButton}" Height="46" HorizontalAlignment="Stretch" Margin="0,14,0,0" Click="OpenLastFolder_Click">
+        <Button Style="{StaticResource BrowseButton}" Height="40" HorizontalAlignment="Stretch" Margin="0,12,0,0" Click="OpenLastFolder_Click">
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="Open last folder set" Foreground="{StaticResource TextPrimary}" FontWeight="Medium"/>
             <TextBlock x:Name="LastFolderSetText" Text="  No saved folder set" Foreground="{StaticResource TextTertiary}" FontSize="12" VerticalAlignment="Center"/>
@@ -812,7 +836,7 @@
           <Button x:Name="CancelScanButton" Style="{StaticResource GhostButton}" Content="Cancel scan" Click="CancelScan_Click" Visibility="Collapsed" IsEnabled="False" HorizontalAlignment="Center" MinWidth="112" Margin="0,10,0,0" AutomationProperties.Name="Cancel scan" AutomationProperties.HelpText="Cancel only the active scan and keep the ordered folder draft."/>
         </StackPanel>
       </StackPanel>
-      <Border x:Name="LandingFolderDropOverlay" Visibility="Collapsed" IsHitTestVisible="False" Margin="28" CornerRadius="14"
+      <Border x:Name="LandingFolderDropOverlay" Visibility="Collapsed" IsHitTestVisible="False" Margin="28" CornerRadius="6"
               Background="#D9101018" BorderBrush="{StaticResource AccentLight}" BorderThickness="2">
         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
           <TextBlock Text="Add folders to the folder set" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center"/>
@@ -826,19 +850,29 @@
     <Grid x:Name="AppSettingsDialog" Grid.RowSpan="3" Panel.ZIndex="500" Visibility="Collapsed" Background="#B8040407"
           MouseLeftButtonDown="AppSettingsBackdrop_MouseLeftButtonDown" PreviewMouseWheel="AppSettingsDialog_PreviewMouseWheel"
           AutomationProperties.Name="App settings dialog" AutomationProperties.HelpText="Change local safety settings and keyboard shortcuts. Escape or a backdrop click closes this dialog.">
-      <Border x:Name="AppSettingsDialogSurface" Width="440" MaxHeight="620" Padding="22" CornerRadius="12" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
+      <Border x:Name="AppSettingsDialogSurface" Width="560" MaxHeight="660" CornerRadius="6" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
         <Grid>
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-          <DockPanel Grid.Row="0" Margin="0,0,0,14"><TextBlock Text="App Settings" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/><Button x:Name="AppSettingsCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseAppSettings_Click" ToolTip="Close" AutomationProperties.Name="Close app settings"><Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/></Button></DockPanel>
-          <ScrollViewer x:Name="AppSettingsScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" Padding="0,0,8,0" AutomationProperties.Name="App settings content">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="132"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <DockPanel Grid.Row="0" Grid.ColumnSpan="2" Margin="16,12,12,10"><TextBlock Text="Settings" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/><Button x:Name="AppSettingsCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseAppSettings_Click" ToolTip="Close" AutomationProperties.Name="Close app settings"><Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/></Button></DockPanel>
+          <Border Grid.Row="1" Grid.RowSpan="2" Grid.Column="0" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,1,0" Padding="10,11">
+            <StackPanel>
+              <RadioButton x:Name="SettingsGeneralNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="General" Tag="general" IsChecked="True" Click="AppSettingsNavigation_Click" AutomationProperties.Name="General settings"/>
+              <RadioButton x:Name="SettingsDisplayNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="Display" Tag="display" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Display settings"/>
+              <RadioButton x:Name="SettingsThumbnailsNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="Thumbnails" Tag="thumbnails" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Thumbnail settings"/>
+              <RadioButton x:Name="SettingsKeyboardNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="Keyboard" Tag="keyboard" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Keyboard settings"/>
+              <RadioButton x:Name="SettingsAboutNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="About" Tag="about" Click="AppSettingsNavigation_Click" AutomationProperties.Name="About and diagnostics"/>
+            </StackPanel>
+          </Border>
+          <ScrollViewer x:Name="AppSettingsScrollViewer" Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" Padding="18,10,10,0" AutomationProperties.Name="App settings content">
           <StackPanel>
-          <TextBlock Text="SAFETY" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
+          <TextBlock x:Name="GeneralSettingsHeading" Text="GENERAL" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,8" AutomationProperties.Name="General settings section"/>
           <CheckBox x:Name="ConfirmBeforeDeleteCheckBox" Content="Confirm before delete" Foreground="{StaticResource TextSecondary}" Checked="ConfirmBeforeDelete_Changed" Unchecked="ConfirmBeforeDelete_Changed" AutomationProperties.Name="Confirm before delete"/>
           <TextBlock Text="Moves source images to the Windows Recycle Bin; it never uses a hard-delete fallback." Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,18"/>
-          <TextBlock Text="DISPLAY" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
+          <TextBlock x:Name="DisplaySettingsHeading" Text="DISPLAY" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Display settings section"/>
           <CheckBox x:Name="AppSettingsUnseenDotsCheckBox" Content="Unseen dots" Foreground="{StaticResource TextSecondary}" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="Changes dot visibility only. Seen history is not changed."/>
           <TextBlock Text="Shows a dot on images that have not been viewed. This display option never changes seen history." Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,18"/>
-          <TextBlock Text="THUMBNAIL STATUS BORDERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
+          <TextBlock x:Name="ThumbnailSettingsHeading" Text="THUMBNAIL STATUS BORDERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Thumbnail settings section"/>
           <Grid Margin="0,0,0,6">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="142"/><ColumnDefinition Width="28"/></Grid.ColumnDefinitions>
@@ -864,8 +898,8 @@
             <Button x:Name="SaveKeyBindingsButton" Style="{StaticResource GhostButton}" Content="Save key bindings" Click="SaveKeyBindings_Click" MinWidth="126" AutomationProperties.Name="Save key bindings"/>
           </StackPanel>
           <TextBlock x:Name="KeyBindingsStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,18" AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="Key binding status"/>
-          <TextBlock Text="ABOUT / DIAGNOSTICS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
-          <Border Background="#161820" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="7" Padding="10" Margin="0,0,0,8">
+          <TextBlock x:Name="AboutSettingsHeading" Text="ABOUT / DIAGNOSTICS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="About and diagnostics section"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,8">
             <StackPanel>
               <TextBlock x:Name="DiagnosticsText" Foreground="{StaticResource TextSecondary}" FontSize="11" TextWrapping="Wrap" AutomationProperties.Name="Read-only application diagnostics"/>
               <Button x:Name="CopyDiagnosticsButton" Style="{StaticResource GhostButton}" Content="Copy diagnostics" Click="CopyDiagnostics_Click" HorizontalAlignment="Left" Margin="0,8,0,0" MinWidth="132" AutomationProperties.Name="Copy safe diagnostics" AutomationProperties.HelpText="Copies product, build, runtime, counts, and safety flags only. No paths or image metadata."/>
@@ -874,7 +908,7 @@
           </Border>
           </StackPanel>
           </ScrollViewer>
-          <Button x:Name="AppSettingsDoneButton" Grid.Row="2" Style="{StaticResource GhostButton}" Content="Done" Click="CloseAppSettings_Click" HorizontalAlignment="Right" MinWidth="82" Margin="0,14,0,0" AutomationProperties.Name="Done with app settings"/>
+          <Button x:Name="AppSettingsDoneButton" Grid.Row="2" Grid.Column="1" Style="{StaticResource PrimaryButton}" Content="Done" Click="CloseAppSettings_Click" HorizontalAlignment="Right" MinWidth="82" Margin="0,10,16,12" AutomationProperties.Name="Done with app settings"/>
         </Grid>
       </Border>
     </Grid>
@@ -895,7 +929,7 @@
     </Grid>
 
     <Grid x:Name="DeleteStatusToast" Grid.RowSpan="3" Panel.ZIndex="400" Visibility="Collapsed" IsHitTestVisible="True" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,66,0,0" AutomationProperties.Name="Aibos status notification">
-      <Border Width="560" Padding="12,9" CornerRadius="9" Background="#EE1A1A24" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
+      <Border Width="560" Padding="12,9" CornerRadius="4" Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
         <DockPanel LastChildFill="True">
           <Button x:Name="DeleteStatusDismissButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="DismissDeleteStatus_Click" ToolTip="Dismiss" AutomationProperties.Name="Dismiss status notification" Width="28" Height="28"><Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="13" Height="13"/></Button>
           <Button x:Name="DeleteStatusRetryButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Retry" Click="RetryDelete_Click" Visibility="Collapsed" MinWidth="58" Height="28" Margin="0,0,8,0" AutomationProperties.Name="Retry the last recoverable action"/>
@@ -926,7 +960,7 @@
           <Setter Property="Template">
             <Setter.Value>
               <ControlTemplate TargetType="ListBoxItem">
-                <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" ClipToBounds="True"><ContentPresenter/></Border>
+                <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" ClipToBounds="True"><ContentPresenter/></Border>
                 <ControlTemplate.Triggers>
                   <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ItemBorder" Property="BorderBrush" Value="#7AFFFFFF"/></Trigger>
                   <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="BorderBrush" Value="#FF818CF8"/><Setter TargetName="ItemBorder" Property="Background" Value="#306366F1"/></Trigger>
@@ -946,14 +980,14 @@
         <ColumnDefinition Width="*"/>
       </Grid.ColumnDefinitions>
 
-      <Border x:Name="ModalZoomIndicator" Grid.RowSpan="3" Grid.ColumnSpan="2" VerticalAlignment="Top" HorizontalAlignment="Center" CornerRadius="999" Background="#42000000" Padding="7,1" Margin="0,2,0,0" Opacity="0.52" IsHitTestVisible="False" Panel.ZIndex="36">
+      <Border x:Name="ModalZoomIndicator" Grid.RowSpan="3" Grid.ColumnSpan="2" VerticalAlignment="Top" HorizontalAlignment="Center" CornerRadius="4" Background="#E61C202A" Padding="7,1" Margin="0,2,0,0" Opacity="0.9" IsHitTestVisible="False" Panel.ZIndex="36">
         <TextBlock x:Name="ModalZoomLabel" Text="100%" Foreground="#88FFFFFF" FontSize="9.5" MinWidth="36" TextAlignment="Center" VerticalAlignment="Center"/>
       </Border>
 
       <!-- Keep native window controls available even when preview chrome is hidden. -->
       <Border x:Name="ModalWindowCaptionControls" Grid.RowSpan="3" Grid.ColumnSpan="2"
-              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,8,0" Padding="2"
-              CornerRadius="9" Background="#B8040407" BorderBrush="#24FFFFFF" BorderThickness="1"
+              HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0" Padding="0"
+              CornerRadius="4" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
               Panel.ZIndex="80" WindowChrome.IsHitTestVisibleInChrome="True">
         <StackPanel Orientation="Horizontal">
           <Button x:Name="ModalMinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click"
@@ -975,50 +1009,51 @@
       </Border>
 
       <!-- topbar -->
-      <DockPanel x:Name="ModalTopBar" Grid.Row="0" Grid.ColumnSpan="2" Margin="16,12,152,12" LastChildFill="False" Panel.ZIndex="35" WindowChrome.IsHitTestVisibleInChrome="True">
+      <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,0,1" Panel.ZIndex="30"/>
+      <DockPanel x:Name="ModalTopBar" Grid.Row="0" Grid.ColumnSpan="2" Margin="12,7,150,7" LastChildFill="False" Panel.ZIndex="35" WindowChrome.IsHitTestVisibleInChrome="True">
         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
           <TextBlock x:Name="ModalTitle" Text="00427-portrait.png · 832 × 1216 · animagineXL_v31" Foreground="{StaticResource TextSecondary}" FontSize="13" VerticalAlignment="Center"/>
           <TextBlock x:Name="ModalSourceLabel" Text="Original" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="10,0,0,0" VerticalAlignment="Center"/>
           <TextBlock x:Name="ModalFileSizeText" Text="--" AutomationProperties.Name="Displayed file size" Foreground="{StaticResource TextSecondary}" FontSize="11.5" Margin="10,0,0,0" VerticalAlignment="Center"/>
           <TextBlock x:Name="ModalEnhancementStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" TextTrimming="CharacterEllipsis" MaxWidth="240"/>
         </StackPanel>
-        <Button DockPanel.Dock="Right" x:Name="ModalCloseBtn" Style="{StaticResource IconButton}" Click="CloseModal_Click" ToolTip="Close (Esc)" AutomationProperties.Name="Close image preview" Width="38" Height="38">
+        <Button DockPanel.Dock="Right" x:Name="ModalCloseBtn" Style="{StaticResource IconButton}" Click="CloseModal_Click" ToolTip="Close (Esc)" AutomationProperties.Name="Close image preview" Width="32" Height="32">
           <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="16" Height="16"/>
         </Button>
-        <Button x:Name="ModalShortcutsButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="38" MinWidth="66" Padding="8,0" Margin="0,0,4,0"
+        <Button x:Name="ModalShortcutsButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="32" MinWidth="66" Padding="8,0" Margin="0,0,4,0"
                 Content="Shortcuts" Click="OpenShortcuts_Click" ToolTip="View and edit keyboard shortcuts" AutomationProperties.Name="Open keyboard shortcuts"/>
-        <Button x:Name="ModalDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" Click="DeleteSelected_Click" ToolTip="Move source to Recycle Bin (Delete)" AutomationProperties.Name="Move selected image to Recycle Bin" Width="38" Height="38" Margin="0,0,4,0">
+        <Button x:Name="ModalDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" Click="DeleteSelected_Click" ToolTip="Move source to Recycle Bin (Delete)" AutomationProperties.Name="Move selected image to Recycle Bin" Width="32" Height="32" Margin="0,0,4,0">
           <Path Data="M3,6 h18 M8,6 V4 a2,2 0 0 1 2,-2 h4 a2,2 0 0 1 2,2 v2 M19,6 l-1,14 a2,2 0 0 1 -2,2 H8 a2,2 0 0 1 -2,-2 L5,6" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="14" Height="14"/>
         </Button>
-        <Button x:Name="ModalMetadataSidebarToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="ToggleModalMetadataSidebar_Click" ToolTip="Show metadata sidebar" AutomationProperties.Name="Toggle metadata sidebar" Width="38" Height="38">
+        <Button x:Name="ModalMetadataSidebarToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="ToggleModalMetadataSidebar_Click" ToolTip="Show metadata sidebar" AutomationProperties.Name="Toggle metadata sidebar" Width="32" Height="32">
           <TextBlock x:Name="ModalMetadataSidebarToggleLabel" Text="&lt;" Foreground="{StaticResource TextSecondary}" FontSize="15" FontWeight="SemiBold"/>
         </Button>
-        <Button x:Name="ModalFilmstripToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="ToggleModalFilmstrip_Click" ToolTip="Hide image filmstrip (T)" AutomationProperties.Name="Hide image filmstrip" Width="42" Height="38">
+        <Button x:Name="ModalFilmstripToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="ToggleModalFilmstrip_Click" ToolTip="Hide image filmstrip (T)" AutomationProperties.Name="Hide image filmstrip" Width="38" Height="32">
           <TextBlock x:Name="ModalFilmstripToggleLabel" Text="FS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" FontWeight="SemiBold"/>
         </Button>
-        <Button x:Name="ModalOpenExternalButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Open externally" AutomationProperties.Name="Open selected image externally" Width="38" Height="38" Click="OpenSelectedExternally_Click">
+        <Button x:Name="ModalOpenExternalButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Open externally" AutomationProperties.Name="Open selected image externally" Width="32" Height="32" Click="OpenSelectedExternally_Click">
           <Path Data="M18,13 v6 a2,2 0 0 1 -2,2 H5 a2,2 0 0 1 -2,-2 V8 a2,2 0 0 1 2,-2 h6 M15,3 h6 v6 M10,14 L21,3" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="15" Height="15"/>
         </Button>
-        <Button x:Name="ModalRevealButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Show selected source in folder" AutomationProperties.Name="Show selected source in folder" Width="46" Height="38" Click="ShowSelectedInFolder_Click"><TextBlock Text="Folder" Foreground="{StaticResource TextSecondary}" FontSize="10"/></Button>
-        <Button x:Name="ModalEnhancedDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" ToolTip="Delete only the enhanced output; keep the original" AutomationProperties.Name="Delete selected enhanced output" Width="48" Height="38" Click="DeleteModalEnhancedOutput_Click" Visibility="Collapsed"><TextBlock Text="Del AI" Foreground="{StaticResource TextSecondary}" FontSize="9.5"/></Button>
-        <Button x:Name="ModalEnhanceCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Cancel the running enhancement job" AutomationProperties.Name="Cancel image enhancement" MinWidth="54" Height="38" Padding="8,0" Click="CancelModalEnhancement_Click" Visibility="Collapsed"><TextBlock Text="Cancel" FontSize="10"/></Button>
-        <Button x:Name="ModalEnhanceButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Enhance with the local Browser AI engine" AutomationProperties.Name="Enhance selected image" MinWidth="54" Height="38" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="AI x2" FontSize="10" FontWeight="SemiBold"/></Button>
-        <Button x:Name="ModalEnhancedToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Toggle enhanced image output" Width="42" Height="38" Click="ToggleModalEnhanced_Click" IsEnabled="False">
+        <Button x:Name="ModalRevealButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Show selected source in folder" AutomationProperties.Name="Show selected source in folder" Width="44" Height="32" Click="ShowSelectedInFolder_Click"><TextBlock Text="Folder" Foreground="{StaticResource TextSecondary}" FontSize="10"/></Button>
+        <Button x:Name="ModalEnhancedDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" ToolTip="Delete only the enhanced output; keep the original" AutomationProperties.Name="Delete selected enhanced output" Width="48" Height="32" Click="DeleteModalEnhancedOutput_Click" Visibility="Collapsed"><TextBlock Text="Del AI" Foreground="{StaticResource TextSecondary}" FontSize="9.5"/></Button>
+        <Button x:Name="ModalEnhanceCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Cancel the running enhancement job" AutomationProperties.Name="Cancel image enhancement" MinWidth="54" Height="32" Padding="8,0" Click="CancelModalEnhancement_Click" Visibility="Collapsed"><TextBlock Text="Cancel" FontSize="10"/></Button>
+        <Button x:Name="ModalEnhanceButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Enhance with the optional local Browser companion" AutomationProperties.Name="Enhance selected image" MinWidth="54" Height="32" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="AI x2" FontSize="10" FontWeight="SemiBold"/></Button>
+        <Button x:Name="ModalEnhancedToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Toggle enhanced image output" Width="38" Height="32" Click="ToggleModalEnhanced_Click" IsEnabled="False">
           <TextBlock x:Name="ModalEnhancedToggleLabel" Text="OR" Foreground="{StaticResource TextSecondary}" FontSize="10.5" FontWeight="SemiBold"/>
         </Button>
-        <Button x:Name="ModalFlipButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Flip horizontal (H)" AutomationProperties.Name="Flip image horizontally" Width="38" Height="38" Click="ToggleModalFlip_Click">
+        <Button x:Name="ModalFlipButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Flip horizontal (H)" AutomationProperties.Name="Flip image horizontally" Width="32" Height="32" Click="ToggleModalFlip_Click">
           <Path Data="M12,3 v18 M6,8 l-4,4 l4,4 M18,8 l4,4 l-4,4" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="16" Height="16"/>
         </Button>
-        <Button x:Name="ModalFavoriteDecreaseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Favorite -1 (U)" AutomationProperties.Name="Decrease favorite level" Width="38" Height="38" Click="ModalFavoriteDecrease_Click">
+        <Button x:Name="ModalFavoriteDecreaseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Favorite -1 (U)" AutomationProperties.Name="Decrease favorite level" Width="32" Height="32" Click="ModalFavoriteDecrease_Click">
           <TextBlock Text="−" Foreground="{StaticResource TextSecondary}" FontSize="16"/>
         </Button>
-        <Button x:Name="ModalFavoriteIncreaseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Favorite +1" AutomationProperties.Name="Increase favorite level" Width="46" Height="38" Click="ModalFavoriteIncrease_Click">
+        <Button x:Name="ModalFavoriteIncreaseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Favorite +1" AutomationProperties.Name="Increase favorite level" Width="44" Height="32" Click="ModalFavoriteIncrease_Click">
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="F" Foreground="{StaticResource FavoriteText}" FontWeight="Bold"/>
             <TextBlock x:Name="ModalFavoriteLevelText" Text="0" Foreground="{StaticResource FavoriteText}" FontSize="11" FontWeight="Bold" Margin="4,0,0,0"/>
           </StackPanel>
         </Button>
-        <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Show image at 1:1 pixels" AutomationProperties.Name="Show image at 1 to 1 pixels" Width="42" Height="38" Click="ModalOneToOne_Click">
+        <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Show image at 1:1 pixels" AutomationProperties.Name="Show image at 1 to 1 pixels" Width="38" Height="32" Click="ModalOneToOne_Click">
           <TextBlock Text="1:1" Foreground="{StaticResource TextSecondary}" FontSize="12"/>
         </Button>
       </DockPanel>
@@ -1068,11 +1103,11 @@
         </Button>
 
         <Border x:Name="ModalMetadataSidebar" Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Center" Width="300" MaxHeight="640" Visibility="Collapsed"
-                Margin="0,0,84,0" CornerRadius="10" Background="#E6121218" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="12"
+                Margin="0,0,84,0" CornerRadius="6" Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="12"
                 AutomationProperties.Name="Image metadata sidebar" AutomationProperties.HelpText="Review prompt, negative prompt, generation settings, and PNG metadata.">
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
-              <Border Background="{StaticResource SoftFill}" CornerRadius="7" Padding="3" Margin="0,0,0,12">
+              <Border Background="{StaticResource SoftFill}" CornerRadius="4" Padding="3" Margin="0,0,0,12">
                 <UniformGrid Columns="3">
                   <RadioButton x:Name="ModalPromptTabButton" Style="{StaticResource Seg}" GroupName="ModalMetadataTabs"
                                Content="Prompt" Tag="prompt" IsChecked="True" Click="ModalMetadataTab_Click"
@@ -1126,7 +1161,7 @@
           </ScrollViewer>
         </Border>
 
-        <Border x:Name="ModalFooter" Grid.ColumnSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Center" CornerRadius="999" Background="#B0000000" Padding="7,4" Margin="0,0,0,10">
+        <Border x:Name="ModalFooter" Grid.ColumnSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Center" CornerRadius="4" Background="#F212151D" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="7,4" Margin="0,0,0,10">
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <Button x:Name="ModalZoomOutButton" Style="{StaticResource GhostButton}" Content="−" ToolTip="Zoom out (-)" AutomationProperties.Name="Zoom image out" Height="26" MinWidth="32" Padding="6,0" Click="ModalZoomOut_Click"/>
             <Button x:Name="ModalZoomResetButton" Style="{StaticResource GhostButton}" Content="Fit" ToolTip="Reset to fit (0)" AutomationProperties.Name="Fit image to preview" Height="26" MinWidth="42" Padding="7,0" Margin="4,0" Click="ModalFit_Click"/>
@@ -1134,16 +1169,16 @@
             <TextBlock x:Name="ModalShortcutHintText" Text="   ← → navigate   ·   Esc close" Foreground="{StaticResource TextTertiary}" FontSize="11" VerticalAlignment="Center" Margin="6,0,4,0"/>
           </StackPanel>
         </Border>
-        <Border x:Name="ModalFilmstripOverlay" Grid.ColumnSpan="3" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Height="126" Margin="14,0,14,14" Padding="8,7" CornerRadius="12" Background="#E606080F" BorderBrush="#24FFFFFF" BorderThickness="1" Visibility="Collapsed" Panel.ZIndex="28">
+        <Border x:Name="ModalFilmstripOverlay" Grid.ColumnSpan="3" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Height="126" Margin="14,0,14,14" Padding="8,7" CornerRadius="4" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Visibility="Collapsed" Panel.ZIndex="28">
           <ListBox x:Name="ModalFilmstripOverlayList" Background="Transparent" BorderThickness="0" ItemTemplate="{StaticResource ModalFilmstripItemTemplate}" ItemContainerStyle="{StaticResource ModalFilmstripItemStyle}" SelectionMode="Single" SelectionChanged="ModalFilmstrip_SelectionChanged" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Transient bottom portrait image filmstrip">
             <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
           </ListBox>
         </Border>
-        <Border x:Name="ModalInteractionFeedback" Grid.ColumnSpan="3" VerticalAlignment="Top" HorizontalAlignment="Center" CornerRadius="999" Background="{StaticResource AccentGlass}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" Padding="12,5" Margin="0,18,0,0" Visibility="Collapsed" IsHitTestVisible="False" Panel.ZIndex="20">
+        <Border x:Name="ModalInteractionFeedback" Grid.ColumnSpan="3" VerticalAlignment="Top" HorizontalAlignment="Center" CornerRadius="4" Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" Padding="10,4" Margin="0,18,0,0" Visibility="Collapsed" IsHitTestVisible="False" Panel.ZIndex="20">
           <TextBlock x:Name="ModalInteractionFeedbackText" Foreground="{StaticResource TextPrimary}" FontSize="12" FontWeight="SemiBold"/>
         </Border>
       </Grid>
-      <Border x:Name="ModalFilmstripLayout" Grid.RowSpan="3" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Height="126" Margin="14,0,14,14" Padding="8,7" CornerRadius="12" Background="#D906080F" BorderBrush="#24FFFFFF" BorderThickness="1" Visibility="Collapsed" Panel.ZIndex="28">
+      <Border x:Name="ModalFilmstripLayout" Grid.RowSpan="3" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Height="126" Margin="14,0,14,14" Padding="8,7" CornerRadius="4" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Visibility="Collapsed" Panel.ZIndex="28">
         <ListBox x:Name="ModalFilmstripLayoutList" Background="Transparent" BorderThickness="0" ItemTemplate="{StaticResource ModalFilmstripItemTemplate}" ItemContainerStyle="{StaticResource ModalFilmstripItemStyle}" SelectionMode="Single" SelectionChanged="ModalFilmstrip_SelectionChanged" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" AutomationProperties.Name="Bottom portrait image filmstrip">
           <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
         </ListBox>
