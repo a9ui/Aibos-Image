@@ -2325,6 +2325,7 @@ public partial class App : Application
             bool ok = false;
             object result;
             string sourceAfterInjectedDelete = "";
+            bool enhancementStateInjectedAfterSnapshot = false;
             try
             {
                 await window.LoadFolderAsync(folder);
@@ -2346,6 +2347,8 @@ public partial class App : Application
 
                 window.SetBeforeMaterializeFilesForSmoke(() =>
                 {
+                    enhancementStateInjectedAfterSnapshot =
+                        window.InjectCatalogEnhancedStateForSmoke("alpha.png");
                     File.Delete(bravoPath);
                     sourceAfterInjectedDelete = FolderFingerprint(folder);
                 });
@@ -2383,11 +2386,15 @@ public partial class App : Application
                     && string.Equals(jobsBefore, FileFingerprint(jobsPath), StringComparison.Ordinal);
                 bool sourcesReadOnly = !string.IsNullOrWhiteSpace(sourceAfterInjectedDelete)
                     && string.Equals(sourceAfterInjectedDelete, FolderFingerprint(folder), StringComparison.Ordinal);
+                bool enhancementSnapshotDetached = enhancementStateInjectedAfterSnapshot
+                    && window.EnhancedStoreCountForSmoke == 1
+                    && !window.EnhancedForFileForSmoke("alpha.png");
                 bool isolated = new[] { statePath, favoritesPath, seenPath, recentPath, jobsPath, alphaPath, bravoPath, charliePath }
                     .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(smokeRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
                 bool residueFree = NoPersistenceResidue(smokeRoot);
                 ok = vanishedSourceSkipped && recoverableWarning && validSelectionAndModal
-                    && stateReconciled && storesUnchanged && sourcesReadOnly && isolated && residueFree;
+                    && stateReconciled && storesUnchanged && sourcesReadOnly
+                    && enhancementSnapshotDetached && isolated && residueFree;
                 result = new
                 {
                     ok,
@@ -2401,6 +2408,7 @@ public partial class App : Application
                     stateReconciled,
                     storesUnchanged,
                     sourcesReadOnly,
+                    enhancementSnapshotDetached,
                     isolated,
                     residueFree,
                     catalog,
@@ -2559,7 +2567,6 @@ public partial class App : Application
                 try { window.Close(); } catch { }
             }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
             File.WriteAllText(resultFullPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
             Shutdown(ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);
@@ -2569,8 +2576,7 @@ public partial class App : Application
     {
         ValidateAutomationPathArguments(args);
 
-        string root = Path.Combine(Path.GetTempPath(), "photoviewer-wpf-automation", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        string root = ResolveAutomationStorageRoot(args);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", Path.Combine(root, "state.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", Path.Combine(root, "favorites.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", Path.Combine(root, "seen.json"));
@@ -2580,6 +2586,34 @@ public partial class App : Application
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", Path.Combine(root, "settings.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH", Path.Combine(root, "albums.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY", Path.Combine(root, "metadata-index"));
+    }
+
+    private static string ResolveAutomationStorageRoot(IReadOnlyList<string> args)
+    {
+        string? requestedSlot = ArgValue(args.ToArray(), "--automation-storage-slot");
+        if (string.IsNullOrWhiteSpace(requestedSlot))
+        {
+            return Path.Combine(
+                Path.GetTempPath(),
+                "photoviewer-wpf-automation",
+                Guid.NewGuid().ToString("N"));
+        }
+
+        if (!string.Equals(
+                requestedSlot,
+                "metadata-index-cross-process-v1",
+                StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "Automation storage slot is unsupported.");
+        }
+
+        // This fixed slot is safe to reuse because the verifier gives both
+        // child processes the same unique TEMP root. No caller-provided path
+        // reaches a filesystem operation.
+        return Path.Combine(
+            Path.GetTempPath(),
+            "photoviewer-wpf-automation-metadata-index-cross-process-v1");
     }
 
     private static string ResolveLegacySharedDataRootForActivation()
@@ -9590,6 +9624,8 @@ public partial class App : Application
                         LoadMetricsTotalElapsedMs = warmLoadMetrics?.TotalMs,
                         ScanElapsedMs = warmLoadMetrics?.ScanMs,
                         MaterializeElapsedMs = warmLoadMetrics?.MaterializeMs,
+                        CatalogPreparationParallelized = warmLoadMetrics?.CatalogPreparationParallelized ?? false,
+                        CatalogPreparationWorkers = warmLoadMetrics?.CatalogPreparationWorkers ?? 0,
                         CatalogReadyElapsedMs = warmLoadMetrics?.CatalogReadyMs,
                         FirstUsableViewportElapsedMs = warmLoadMetrics?.FirstUsableViewportMs,
                         MetadataElapsedMs = warmLoadMetrics?.MetadataMs,
@@ -9761,6 +9797,8 @@ public partial class App : Application
                     LoadMetricsTotalElapsedMs = loadMetrics?.TotalMs,
                     ScanElapsedMs = loadMetrics?.ScanMs,
                     MaterializeElapsedMs = loadMetrics?.MaterializeMs,
+                    CatalogPreparationParallelized = loadMetrics?.CatalogPreparationParallelized ?? false,
+                    CatalogPreparationWorkers = loadMetrics?.CatalogPreparationWorkers ?? 0,
                     CatalogPrepareElapsedMs = loadMetrics?.CatalogPrepareMs,
                     CatalogPublishOtherElapsedMs = loadMetrics?.CatalogPublishOtherMs,
                     FolderBucketViewElapsedMs = loadMetrics?.FolderBucketViewMs,
@@ -22803,6 +22841,8 @@ public partial class App : Application
         public double? LoadMetricsTotalElapsedMs { get; set; }
         public double? ScanElapsedMs { get; set; }
         public double? MaterializeElapsedMs { get; set; }
+        public bool CatalogPreparationParallelized { get; set; }
+        public int CatalogPreparationWorkers { get; set; }
         public double? CatalogPrepareElapsedMs { get; set; }
         public double? CatalogPublishOtherElapsedMs { get; set; }
         public double? FolderBucketViewElapsedMs { get; set; }
@@ -22938,6 +22978,8 @@ public partial class App : Application
         public double? LoadMetricsTotalElapsedMs { get; set; }
         public double? ScanElapsedMs { get; set; }
         public double? MaterializeElapsedMs { get; set; }
+        public bool CatalogPreparationParallelized { get; set; }
+        public int CatalogPreparationWorkers { get; set; }
         public double? CatalogReadyElapsedMs { get; set; }
         public double? FirstUsableViewportElapsedMs { get; set; }
         public double? MetadataElapsedMs { get; set; }
