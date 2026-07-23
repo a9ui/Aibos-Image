@@ -17724,33 +17724,54 @@ public partial class MainWindow : Window
                 ModalImageArea.ActualHeight);
             previousRegion.Intersect(imageRectangle);
             nextRegion.Intersect(imageRectangle);
-            bool previousMatches = previousRegion.IsEmpty
-                || ResolveModalEdgeTarget(new Point(
-                    previousRegion.Left + (previousRegion.Width / 2),
-                    previousRegion.Top + (previousRegion.Height / 2))) == ModalEdgeTarget.Previous;
-            bool nextMatches = nextRegion.IsEmpty
-                || ResolveModalEdgeTarget(new Point(
-                    nextRegion.Left + (nextRegion.Width / 2),
-                    nextRegion.Top + (nextRegion.Height / 2))) == ModalEdgeTarget.Next;
-            bool centerRejected = ResolveModalEdgeTarget(new Point(
-                imageRectangle.Left + (imageRectangle.Width / 2),
-                imageRectangle.Top + (imageRectangle.Height / 2))) == ModalEdgeTarget.None;
-            bool blackCanvasRejected = TryFindModalBlackCanvasPoint(out Point blackCanvas)
-                && ResolveModalEdgeTarget(blackCanvas) == ModalEdgeTarget.None;
-            bool hitSurfacesBounded = ModalPreviousButton.VerticalAlignment == VerticalAlignment.Top
-                && ModalNextButton.VerticalAlignment == VerticalAlignment.Top
-                && double.IsFinite(ModalPreviousButton.Height)
-                && double.IsFinite(ModalNextButton.Height)
-                && ModalPreviousButton.Margin.Top >= imageRectangle.Top - 1
-                && ModalNextButton.Margin.Top >= imageRectangle.Top - 1
-                && ModalPreviousButton.Margin.Top + ModalPreviousButton.Height <= imageRectangle.Bottom + 1
-                && ModalNextButton.Margin.Top + ModalNextButton.Height <= imageRectangle.Bottom + 1;
-            return (!previousRegion.IsEmpty || !nextRegion.IsEmpty)
-                && previousMatches
-                && nextMatches
-                && centerRejected
-                && blackCanvasRejected
-                && hitSurfacesBounded;
+
+            bool previousPointerAvailable = _modalHasPointerPosition;
+            Point previousPointer = _modalLastPointerPosition;
+            ModalEdgeTarget previousPressedTarget = _modalPressedEdgeTarget;
+            try
+            {
+                bool VerifyRegion(Rect region, ModalEdgeTarget expected)
+                {
+                    if (region.IsEmpty)
+                        return true;
+                    _modalHasPointerPosition = true;
+                    _modalLastPointerPosition = new Point(
+                        region.Left + (region.Width / 2),
+                        region.Top + (region.Height / 2));
+                    UpdateModalEdgeNavigationPresentation();
+                    return expected == ModalEdgeTarget.Previous
+                        ? ModalPreviousButton.IsHitTestVisible && !ModalNextButton.IsHitTestVisible
+                        : ModalNextButton.IsHitTestVisible && !ModalPreviousButton.IsHitTestVisible;
+                }
+
+                bool VerifyNoRegion(Point point)
+                {
+                    _modalHasPointerPosition = true;
+                    _modalLastPointerPosition = point;
+                    UpdateModalEdgeNavigationPresentation();
+                    return !ModalPreviousButton.IsHitTestVisible && !ModalNextButton.IsHitTestVisible;
+                }
+
+                _modalPressedEdgeTarget = ModalEdgeTarget.None;
+                bool previousMatches = VerifyRegion(previousRegion, ModalEdgeTarget.Previous);
+                bool nextMatches = VerifyRegion(nextRegion, ModalEdgeTarget.Next);
+                bool centerRejected = VerifyNoRegion(new Point(
+                    imageRectangle.Left + (imageRectangle.Width / 2),
+                    imageRectangle.Top + (imageRectangle.Height / 2)));
+                bool blackCanvasRejected = TryFindModalBlackCanvasPoint(out Point blackCanvas)
+                    && VerifyNoRegion(blackCanvas);
+                return previousMatches
+                    && nextMatches
+                    && centerRejected
+                    && blackCanvasRejected;
+            }
+            finally
+            {
+                _modalHasPointerPosition = previousPointerAvailable;
+                _modalLastPointerPosition = previousPointer;
+                _modalPressedEdgeTarget = previousPressedTarget;
+                UpdateModalEdgeNavigationPresentation();
+            }
         }
     }
     public bool ActivateModalContextFavoriteForSmoke(int delta)
