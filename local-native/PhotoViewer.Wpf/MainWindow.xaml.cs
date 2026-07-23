@@ -17737,16 +17737,20 @@ public partial class MainWindow : Window
                 imageRectangle.Top + (imageRectangle.Height / 2))) == ModalEdgeTarget.None;
             bool blackCanvasRejected = TryFindModalBlackCanvasPoint(out Point blackCanvas)
                 && ResolveModalEdgeTarget(blackCanvas) == ModalEdgeTarget.None;
-            bool heightMatches = Math.Abs(ModalPreviousButton.Height - imageRectangle.Height) < 0.5
-                && Math.Abs(ModalNextButton.Height - imageRectangle.Height) < 0.5
-                && Math.Abs(ModalPreviousButton.Margin.Top - imageRectangle.Top) < 0.5
-                && Math.Abs(ModalNextButton.Margin.Top - imageRectangle.Top) < 0.5;
+            bool hitSurfacesBounded = ModalPreviousButton.VerticalAlignment == VerticalAlignment.Top
+                && ModalNextButton.VerticalAlignment == VerticalAlignment.Top
+                && double.IsFinite(ModalPreviousButton.Height)
+                && double.IsFinite(ModalNextButton.Height)
+                && ModalPreviousButton.Margin.Top >= imageRectangle.Top - 1
+                && ModalNextButton.Margin.Top >= imageRectangle.Top - 1
+                && ModalPreviousButton.Margin.Top + ModalPreviousButton.Height <= imageRectangle.Bottom + 1
+                && ModalNextButton.Margin.Top + ModalNextButton.Height <= imageRectangle.Bottom + 1;
             return (!previousRegion.IsEmpty || !nextRegion.IsEmpty)
                 && previousMatches
                 && nextMatches
                 && centerRejected
                 && blackCanvasRejected
-                && heightMatches;
+                && hitSurfacesBounded;
         }
     }
     public bool ActivateModalContextFavoriteForSmoke(int delta)

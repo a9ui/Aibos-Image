@@ -2625,12 +2625,19 @@ public partial class App : Application
     }
 
     // Automation fixtures never inherit CLI, result-file, TEMP, or shared-state
-    // paths. Keeping their write root under the executable-owned test output
-    // prevents a smoke argument from becoming a filesystem authority.
+    // paths. A GUID-named sibling of the executable output is writable in the
+    // verifier while staying outside the product's protected executable root.
     private static string CreateManagedAutomationRoot()
-        => Path.Combine(
-            AppContext.BaseDirectory,
+    {
+        string executableRoot = Path.GetFullPath(AppContext.BaseDirectory);
+        string managedParent = Directory.GetParent(executableRoot.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar))?.FullName
+            ?? executableRoot;
+        return Path.Combine(
+            managedParent,
             ".aibos-automation-" + Guid.NewGuid().ToString("N"));
+    }
 
     private static string ResolveLegacySharedDataRootForActivation()
     {
