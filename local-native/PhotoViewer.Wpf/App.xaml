@@ -12,44 +12,72 @@
     <Color x:Key="AccentColor">#4E57CF</Color>
     <Color x:Key="AccentLightColor">#7B83FF</Color>
     <Color x:Key="FavoriteColor">#FF5C7A</Color>
+    <Color x:Key="HeaderBgColor">#0E1016</Color>
+    <Color x:Key="TextPrimaryColor">#F4F6FB</Color>
+    <Color x:Key="TextSecondaryColor">#C5CAD5</Color>
+    <Color x:Key="TextTertiaryColor">#929AA9</Color>
+    <Color x:Key="TextDisabledColor">#788192</Color>
+    <Color x:Key="SelectionTextColor">#FFFFFF</Color>
+    <Color x:Key="FocusColor">#B7E4FF</Color>
+    <Color x:Key="FavoriteTextColor">#FFD7E0</Color>
+    <Color x:Key="FavoriteThumbnailStatusBorderColor">#F4C45B</Color>
+    <Color x:Key="EnhancedThumbnailStatusBorderColor">#38BDF8</Color>
+    <Color x:Key="SuccessColor">#4DD4A3</Color>
+    <Color x:Key="WarningColor">#F4C45B</Color>
+    <Color x:Key="DangerColor">#FF687F</Color>
+    <Color x:Key="DangerTextColor">#FFD7DE</Color>
+    <Color x:Key="GlassBorderColor">#252A36</Color>
+    <Color x:Key="GlassBorderHoverColor">#343B4B</Color>
+    <Color x:Key="BorderStrongColor">#59637B</Color>
+    <Color x:Key="HoverFillColor">#202532</Color>
+    <Color x:Key="PressedFillColor">#262C3A</Color>
+    <Color x:Key="SoftFillColor">#171B24</Color>
+    <Color x:Key="AccentSoftColor">#1C2343</Color>
+    <Color x:Key="AccentGlassColor">#1C2343</Color>
+    <Color x:Key="FavoriteSoftColor">#33202A</Color>
+    <Color x:Key="SuccessSoftColor">#173128</Color>
+    <Color x:Key="SuccessBorderColor">#356D5B</Color>
+    <Color x:Key="LogoColor">#7B83FF</Color>
+    <Color x:Key="FavStepColor">#4E57CF</Color>
 
     <!-- Lightweight opaque workbench tokens: square, quiet, and fast. -->
-    <SolidColorBrush x:Key="BgPrimary" Color="#0B0C11"/>
-    <SolidColorBrush x:Key="BgSecondary" Color="#12151D"/>
-    <SolidColorBrush x:Key="BgTertiary" Color="#171B24"/>
-    <SolidColorBrush x:Key="BgElevated" Color="#1C202A"/>
-    <SolidColorBrush x:Key="HeaderBg" Color="#0E1016"/>
-    <SolidColorBrush x:Key="TextPrimary" Color="#F4F6FB"/>
-    <SolidColorBrush x:Key="TextSecondary" Color="#C5CAD5"/>
-    <SolidColorBrush x:Key="TextTertiary" Color="#929AA9"/>
-    <SolidColorBrush x:Key="TextDisabled" Color="#788192"/>
-    <SolidColorBrush x:Key="Accent" Color="#4E57CF"/>
-    <SolidColorBrush x:Key="AccentLight" Color="#7B83FF"/>
-    <SolidColorBrush x:Key="Focus" Color="#B7E4FF"/>
-    <SolidColorBrush x:Key="Favorite" Color="#FF5C7A"/>
-    <SolidColorBrush x:Key="FavoriteText" Color="#FFD7E0"/>
-    <SolidColorBrush x:Key="FavoriteThumbnailStatusBorderBrush" Color="#F4C45B"/>
-    <SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="#38BDF8"/>
-    <SolidColorBrush x:Key="Success" Color="#4DD4A3"/>
-    <SolidColorBrush x:Key="Warning" Color="#F4C45B"/>
-    <SolidColorBrush x:Key="Danger" Color="#FF687F"/>
-    <SolidColorBrush x:Key="DangerText" Color="#FFD7DE"/>
-    <SolidColorBrush x:Key="GlassBorder" Color="#252A36"/>
-    <SolidColorBrush x:Key="GlassBorderHover" Color="#343B4B"/>
-    <SolidColorBrush x:Key="BorderStrong" Color="#59637B"/>
-    <SolidColorBrush x:Key="HoverFill" Color="#202532"/>
-    <SolidColorBrush x:Key="PressedFill" Color="#262C3A"/>
-    <SolidColorBrush x:Key="SoftFill" Color="#171B24"/>
-    <SolidColorBrush x:Key="AccentSoft" Color="#1C2343"/>
-    <SolidColorBrush x:Key="AccentGlass" Color="#1C2343"/>
-    <SolidColorBrush x:Key="FavoriteSoft" Color="#33202A"/>
-    <SolidColorBrush x:Key="SuccessSoft" Color="#173128"/>
-    <SolidColorBrush x:Key="SuccessBorder" Color="#356D5B"/>
+    <SolidColorBrush x:Key="BgPrimary" Color="{DynamicResource BgPrimaryColor}"/>
+    <SolidColorBrush x:Key="BgSecondary" Color="{DynamicResource BgSecondaryColor}"/>
+    <SolidColorBrush x:Key="BgTertiary" Color="{DynamicResource BgTertiaryColor}"/>
+    <SolidColorBrush x:Key="BgElevated" Color="{DynamicResource BgElevatedColor}"/>
+    <SolidColorBrush x:Key="HeaderBg" Color="{DynamicResource HeaderBgColor}"/>
+    <SolidColorBrush x:Key="TextPrimary" Color="{DynamicResource TextPrimaryColor}"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="{DynamicResource TextSecondaryColor}"/>
+    <SolidColorBrush x:Key="TextTertiary" Color="{DynamicResource TextTertiaryColor}"/>
+    <SolidColorBrush x:Key="TextDisabled" Color="{DynamicResource TextDisabledColor}"/>
+    <SolidColorBrush x:Key="SelectionText" Color="{DynamicResource SelectionTextColor}"/>
+    <SolidColorBrush x:Key="Accent" Color="{DynamicResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentLight" Color="{DynamicResource AccentLightColor}"/>
+    <SolidColorBrush x:Key="Focus" Color="{DynamicResource FocusColor}"/>
+    <SolidColorBrush x:Key="Favorite" Color="{DynamicResource FavoriteColor}"/>
+    <SolidColorBrush x:Key="FavoriteText" Color="{DynamicResource FavoriteTextColor}"/>
+    <SolidColorBrush x:Key="FavoriteThumbnailStatusBorderBrush" Color="{DynamicResource FavoriteThumbnailStatusBorderColor}"/>
+    <SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="{DynamicResource EnhancedThumbnailStatusBorderColor}"/>
+    <SolidColorBrush x:Key="Success" Color="{DynamicResource SuccessColor}"/>
+    <SolidColorBrush x:Key="Warning" Color="{DynamicResource WarningColor}"/>
+    <SolidColorBrush x:Key="Danger" Color="{DynamicResource DangerColor}"/>
+    <SolidColorBrush x:Key="DangerText" Color="{DynamicResource DangerTextColor}"/>
+    <SolidColorBrush x:Key="GlassBorder" Color="{DynamicResource GlassBorderColor}"/>
+    <SolidColorBrush x:Key="GlassBorderHover" Color="{DynamicResource GlassBorderHoverColor}"/>
+    <SolidColorBrush x:Key="BorderStrong" Color="{DynamicResource BorderStrongColor}"/>
+    <SolidColorBrush x:Key="HoverFill" Color="{DynamicResource HoverFillColor}"/>
+    <SolidColorBrush x:Key="PressedFill" Color="{DynamicResource PressedFillColor}"/>
+    <SolidColorBrush x:Key="SoftFill" Color="{DynamicResource SoftFillColor}"/>
+    <SolidColorBrush x:Key="AccentSoft" Color="{DynamicResource AccentSoftColor}"/>
+    <SolidColorBrush x:Key="AccentGlass" Color="{DynamicResource AccentGlassColor}"/>
+    <SolidColorBrush x:Key="FavoriteSoft" Color="{DynamicResource FavoriteSoftColor}"/>
+    <SolidColorBrush x:Key="SuccessSoft" Color="{DynamicResource SuccessSoftColor}"/>
+    <SolidColorBrush x:Key="SuccessBorder" Color="{DynamicResource SuccessBorderColor}"/>
 
     <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, monospace</FontFamily>
 
-    <SolidColorBrush x:Key="LogoBrush" Color="#7B83FF"/>
-    <SolidColorBrush x:Key="FavStepGradient" Color="#4E57CF"/>
+    <SolidColorBrush x:Key="LogoBrush" Color="{DynamicResource LogoColor}"/>
+    <SolidColorBrush x:Key="FavStepGradient" Color="{DynamicResource FavStepColor}"/>
 
     <!-- ═══════════ Converters ═══════════ -->
     <local:MultiplyConverter x:Key="Multiply"/>
@@ -172,7 +200,7 @@
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border x:Name="bd" CornerRadius="4" Background="Transparent" BorderBrush="Transparent" BorderThickness="1">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
             </Border>
             <ControlTemplate.Triggers>
               <MultiTrigger>
@@ -198,12 +226,12 @@
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border x:Name="bd" CornerRadius="4" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource Accent}" BorderThickness="1">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
             </Border>
             <ControlTemplate.Triggers>
               <MultiTrigger>
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
-                <Setter TargetName="bd" Property="Background" Value="#356366F1"/>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentGlass}"/>
               </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
             </ControlTemplate.Triggers>
@@ -214,7 +242,7 @@
 
     <!-- Full-height modal edge zones: tint the edge and brighten the chevron without circular chrome. -->
     <Style x:Key="ModalEdgeButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
-      <Setter Property="Foreground" Value="#66FFFFFF"/>
+      <Setter Property="Foreground" Value="{StaticResource TextDisabled}"/>
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="Cursor" Value="Hand"/>
@@ -227,12 +255,12 @@
             <ControlTemplate.Triggers>
               <MultiTrigger>
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
-                <Setter TargetName="edgeTint" Property="Background" Value="#0FFFFFFF"/>
-                <Setter Property="Foreground" Value="#E6FFFFFF"/>
+                <Setter TargetName="edgeTint" Property="Background" Value="{StaticResource HoverFill}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </MultiTrigger>
               <Trigger Property="IsKeyboardFocused" Value="True">
-                <Setter TargetName="edgeTint" Property="Background" Value="#186366F1"/>
-                <Setter Property="Foreground" Value="White"/>
+                <Setter TargetName="edgeTint" Property="Background" Value="{StaticResource AccentSoft}"/>
+                <Setter Property="Foreground" Value="{StaticResource AccentLight}"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
             </ControlTemplate.Triggers>
@@ -276,8 +304,8 @@
             <ControlTemplate.Triggers>
               <MultiTrigger>
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
-                <Setter TargetName="bd" Property="Background" Value="#E5EF4444"/>
-                <Setter Property="Foreground" Value="White"/>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource Danger}"/>
+                <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
               </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
             </ControlTemplate.Triggers>
@@ -308,7 +336,7 @@
               </MultiTrigger>
               <Trigger Property="IsChecked" Value="True">
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
-                <Setter TargetName="bd" Property="BorderBrush" Value="#806366F1"/>
+                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
                 <Setter Property="Foreground" Value="{StaticResource AccentLight}"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
@@ -387,7 +415,7 @@
               </MultiTrigger>
               <Trigger Property="IsChecked" Value="True">
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource Accent}"/>
-                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
                 <Setter Property="FontWeight" Value="SemiBold"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
@@ -469,8 +497,8 @@
             <ControlTemplate.Triggers>
               <MultiTrigger>
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
-                <Setter TargetName="bd" Property="BorderBrush" Value="#99EF4444"/>
-                <Setter TargetName="bd" Property="Background" Value="#24EF4444"/>
+                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Danger}"/>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource FavoriteSoft}"/>
                 <Setter Property="Foreground" Value="{StaticResource DangerText}"/>
               </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
@@ -609,13 +637,13 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" Background="#1AF43F5E">
+            <Border x:Name="bd" Background="{StaticResource FavoriteSoft}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <MultiTrigger>
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
-                <Setter TargetName="bd" Property="Background" Value="#38F43F5E"/>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
               </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
             </ControlTemplate.Triggers>
@@ -626,7 +654,7 @@
 
     <!-- ═══════════ Image card (ListBoxItem) ═══════════ -->
     <Style x:Key="CompactCardFavoriteButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
-      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
       <Setter Property="Background" Value="#B8000000"/>
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="Padding" Value="0"/>
@@ -842,7 +870,7 @@
 
     <!-- ═══════════ Landing primary/browse buttons ═══════════ -->
     <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
-      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Height" Value="40"/>
       <Setter Property="FontSize" Value="13"/>
@@ -850,8 +878,11 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
+            <ControlTemplate.Resources>
+              <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource SelectionText}"/></Style>
+            </ControlTemplate.Resources>
             <Border x:Name="bd" CornerRadius="4" Padding="22,0" Background="{StaticResource Accent}">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
             </Border>
             <ControlTemplate.Triggers>
               <MultiTrigger>
@@ -893,7 +924,7 @@
     </Style>
 
     <Style x:Key="DangerFilled" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
-      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Height" Value="32"/>
       <Setter Property="FontSize" Value="13"/>
@@ -901,8 +932,11 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
+            <ControlTemplate.Resources>
+              <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource SelectionText}"/></Style>
+            </ControlTemplate.Resources>
             <Border x:Name="bd" CornerRadius="4" Padding="14,0" Background="{StaticResource Danger}">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
             </Border>
             <ControlTemplate.Triggers>
               <MultiTrigger>

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -15,6 +16,62 @@ namespace PhotoViewer.Wpf;
 
 public partial class App : Application
 {
+    private static readonly string[] ThemeColorResourceKeys =
+    [
+        "BgPrimaryColor", "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
+        "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor", "TextDisabledColor", "SelectionTextColor",
+        "AccentColor", "AccentLightColor", "FocusColor", "FavoriteColor", "FavoriteTextColor",
+        "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
+        "SuccessColor", "WarningColor", "DangerColor", "DangerTextColor",
+        "GlassBorderColor", "GlassBorderHoverColor", "BorderStrongColor",
+        "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
+        "FavoriteSoftColor", "SuccessSoftColor", "SuccessBorderColor", "LogoColor", "FavStepColor",
+    ];
+    private static readonly IReadOnlyDictionary<string, string> ThemeBrushResourceByColorKey =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["BgPrimaryColor"] = "BgPrimary",
+            ["BgSecondaryColor"] = "BgSecondary",
+            ["BgTertiaryColor"] = "BgTertiary",
+            ["BgElevatedColor"] = "BgElevated",
+            ["HeaderBgColor"] = "HeaderBg",
+            ["TextPrimaryColor"] = "TextPrimary",
+            ["TextSecondaryColor"] = "TextSecondary",
+            ["TextTertiaryColor"] = "TextTertiary",
+            ["TextDisabledColor"] = "TextDisabled",
+            ["SelectionTextColor"] = "SelectionText",
+            ["AccentColor"] = "Accent",
+            ["AccentLightColor"] = "AccentLight",
+            ["FocusColor"] = "Focus",
+            ["FavoriteColor"] = "Favorite",
+            ["FavoriteTextColor"] = "FavoriteText",
+            ["FavoriteThumbnailStatusBorderColor"] = "FavoriteThumbnailStatusBorderBrush",
+            ["EnhancedThumbnailStatusBorderColor"] = "EnhancedThumbnailStatusBorderBrush",
+            ["SuccessColor"] = "Success",
+            ["WarningColor"] = "Warning",
+            ["DangerColor"] = "Danger",
+            ["DangerTextColor"] = "DangerText",
+            ["GlassBorderColor"] = "GlassBorder",
+            ["GlassBorderHoverColor"] = "GlassBorderHover",
+            ["BorderStrongColor"] = "BorderStrong",
+            ["HoverFillColor"] = "HoverFill",
+            ["PressedFillColor"] = "PressedFill",
+            ["SoftFillColor"] = "SoftFill",
+            ["AccentSoftColor"] = "AccentSoft",
+            ["AccentGlassColor"] = "AccentGlass",
+            ["FavoriteSoftColor"] = "FavoriteSoft",
+            ["SuccessSoftColor"] = "SuccessSoft",
+            ["SuccessBorderColor"] = "SuccessBorder",
+            ["LogoColor"] = "LogoBrush",
+            ["FavStepColor"] = "FavStepGradient",
+        };
+
+    private readonly Dictionary<string, Color> _standardColorPalette = new(StringComparer.Ordinal);
+    private bool _accessibilityPaletteInitialized;
+    private bool _highContrastPaletteApplied;
+    internal bool HighContrastPaletteApplied => _highContrastPaletteApplied;
+    internal event EventHandler? AccessibilityPaletteChanged;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         int parityContractSmokeIdx = Array.IndexOf(e.Args, "--parity-contract-smoke");
@@ -76,6 +133,14 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+        InitializeAccessibilityPalette(e.Args.Contains("--force-high-contrast", StringComparer.OrdinalIgnoreCase));
+
+        int highContrastSmokeIdx = Array.IndexOf(e.Args, "--high-contrast-smoke");
+        if (highContrastSmokeIdx >= 0 && highContrastSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureHighContrastSmoke(e.Args[highContrastSmokeIdx + 1]);
+            return;
+        }
 
         if (parityContractSmokeIdx >= 0)
         {
@@ -781,6 +846,13 @@ public partial class App : Application
             return;
         }
 
+        int albumLibraryShotIdx = Array.IndexOf(e.Args, "--album-library-shot");
+        if (albumLibraryShotIdx >= 0 && albumLibraryShotIdx + 1 < e.Args.Length)
+        {
+            CaptureAlbumLibraryShot(e.Args[albumLibraryShotIdx + 1], e.Args);
+            return;
+        }
+
         new MainWindow().Show();
     }
 
@@ -788,6 +860,8 @@ public partial class App : Application
     {
         try
         {
+            if (_accessibilityPaletteInitialized)
+                SystemParameters.StaticPropertyChanged -= SystemParameters_StaticPropertyChanged;
             base.OnExit(e);
         }
         finally
@@ -796,9 +870,200 @@ public partial class App : Application
         }
     }
 
+    private void InitializeAccessibilityPalette(bool forceHighContrast)
+    {
+        if (_accessibilityPaletteInitialized)
+            return;
+
+        foreach (string key in ThemeColorResourceKeys)
+        {
+            if (Resources[key] is not Color color)
+                throw new InvalidOperationException($"Theme color resource is missing: {key}");
+            _standardColorPalette[key] = color;
+        }
+
+        _accessibilityPaletteInitialized = true;
+        SystemParameters.StaticPropertyChanged += SystemParameters_StaticPropertyChanged;
+        ApplyHighContrastPalette(forceHighContrast || SystemParameters.HighContrast);
+    }
+
+    private void SystemParameters_StaticPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!string.Equals(e.PropertyName, nameof(SystemParameters.HighContrast), StringComparison.Ordinal))
+            return;
+        Dispatcher.BeginInvoke(
+            () => ApplyHighContrastPalette(SystemParameters.HighContrast),
+            DispatcherPriority.Send);
+    }
+
+    private void ApplyHighContrastPalette(bool enabled)
+    {
+        if (!_accessibilityPaletteInitialized)
+            return;
+
+        if (!enabled)
+        {
+            foreach ((string key, Color color) in _standardColorPalette)
+                SetThemeColor(key, color);
+            bool changed = _highContrastPaletteApplied;
+            _highContrastPaletteApplied = false;
+            if (changed)
+                AccessibilityPaletteChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        SetThemeColors(SystemColors.WindowColor, "BgPrimaryColor");
+        SetThemeColors(SystemColors.ControlColor,
+            "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
+            "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
+            "FavoriteSoftColor", "SuccessSoftColor");
+        SetThemeColors(SystemColors.WindowTextColor,
+            "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor",
+            "FavoriteTextColor", "SuccessColor", "DangerTextColor", "LogoColor");
+        SetThemeColors(SystemColors.GrayTextColor, "TextDisabledColor");
+        SetThemeColors(SystemColors.HighlightTextColor, "SelectionTextColor");
+        SetThemeColors(SystemColors.HotTrackColor,
+            "AccentColor", "AccentLightColor", "FavoriteColor",
+            "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
+            "WarningColor", "DangerColor", "SuccessBorderColor", "FavStepColor");
+        SetThemeColors(SystemColors.HighlightColor, "FocusColor");
+        SetThemeColors(SystemColors.ActiveBorderColor, "GlassBorderColor");
+        SetThemeColors(SystemColors.WindowTextColor, "GlassBorderHoverColor", "BorderStrongColor");
+        bool paletteChanged = !_highContrastPaletteApplied;
+        _highContrastPaletteApplied = true;
+        if (paletteChanged)
+            AccessibilityPaletteChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void SetThemeColors(Color color, params string[] keys)
+    {
+        foreach (string key in keys)
+            SetThemeColor(key, color);
+    }
+
+    private void SetThemeColor(string colorKey, Color color)
+    {
+        Resources[colorKey] = color;
+        if (!ThemeBrushResourceByColorKey.TryGetValue(colorKey, out string? brushKey)
+            || Resources[brushKey] is not SolidColorBrush brush)
+        {
+            return;
+        }
+
+        if (brush.IsFrozen)
+            Resources[brushKey] = new SolidColorBrush(color);
+        else
+            brush.Color = color;
+    }
+
+    private void CaptureHighContrastSmoke(string resultPath)
+    {
+        string resultFullPath = Path.GetFullPath(resultPath);
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        Dispatcher.InvokeAsync(async () =>
+        {
+            object result;
+            bool succeeded = false;
+            MainWindow? window = null;
+            bool restoreHighContrast = SystemParameters.HighContrast;
+            try
+            {
+                Dictionary<string, Color> standard = ThemeColorResourceKeys.ToDictionary(
+                    static key => key,
+                    key => _standardColorPalette[key],
+                    StringComparer.Ordinal);
+                ApplyHighContrastPalette(true);
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+
+                window = HiddenWindow();
+                window.Show();
+                await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+
+                bool colorResources = ResourceColor("BgPrimaryColor") == SystemColors.WindowColor
+                    && ResourceColor("BgSecondaryColor") == SystemColors.ControlColor
+                    && ResourceColor("TextPrimaryColor") == SystemColors.WindowTextColor
+                    && ResourceColor("TextDisabledColor") == SystemColors.GrayTextColor
+                    && ResourceColor("AccentColor") == SystemColors.HotTrackColor
+                    && ResourceColor("FocusColor") == SystemColors.HighlightColor
+                    && ResourceColor("GlassBorderColor") == SystemColors.ActiveBorderColor;
+                bool liveBrushes = ResourceBrushColor("BgPrimary") == SystemColors.WindowColor
+                    && ResourceBrushColor("TextPrimary") == SystemColors.WindowTextColor
+                    && ResourceBrushColor("Accent") == SystemColors.HotTrackColor
+                    && ResourceBrushColor("Focus") == SystemColors.HighlightColor;
+                bool paletteFlag = _highContrastPaletteApplied;
+                bool actionAccessibility = window.RightPreviewActionAccessibilityForSmoke;
+                bool dialogFocusContracts = window.SettingsFocusTrapConfiguredForSmoke
+                    && window.DeleteFocusTrapConfiguredForSmoke
+                    && window.ModalFocusTrapConfiguredForSmoke;
+
+                ApplyHighContrastPalette(false);
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+                string[] unrestoredColors = standard
+                    .Where(pair => ResourceColor(pair.Key) != pair.Value)
+                    .Select(static pair => pair.Key)
+                    .ToArray();
+                bool brushesRestored = ResourceBrushColor("BgPrimary") == standard["BgPrimaryColor"]
+                    && ResourceBrushColor("TextPrimary") == standard["TextPrimaryColor"];
+                bool restored = unrestoredColors.Length == 0 && brushesRestored && !_highContrastPaletteApplied;
+                bool ok = colorResources
+                    && liveBrushes
+                    && paletteFlag
+                    && actionAccessibility
+                    && dialogFocusContracts
+                    && restored;
+                succeeded = ok;
+                result = new
+                {
+                    ok,
+                    message = ok
+                        ? "system high-contrast palette, live brushes, action accessibility, and focus traps passed"
+                        : "high-contrast or keyboard accessibility contract did not match expectations",
+                    colorResources,
+                    liveBrushes,
+                    paletteFlag,
+                    actionAccessibility,
+                    dialogFocusContracts,
+                    restored,
+                    brushesRestored,
+                    unrestoredColors,
+                    restoredBackgroundBrush = ResourceBrushColor("BgPrimary").ToString(),
+                    restoredForegroundBrush = ResourceBrushColor("TextPrimary").ToString(),
+                    systemHighContrast = SystemParameters.HighContrast,
+                    background = ResourceColor("BgPrimaryColor").ToString(),
+                    foreground = ResourceColor("TextPrimaryColor").ToString(),
+                };
+            }
+            catch (Exception ex)
+            {
+                result = new { ok = false, message = ex.Message };
+            }
+            finally
+            {
+                window?.Close();
+                ApplyHighContrastPalette(restoreHighContrast);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
+            File.WriteAllText(resultFullPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+            Shutdown(succeeded ? 0 : 1);
+        }, DispatcherPriority.ContextIdle);
+    }
+
+    private Color ResourceColor(string key)
+        => Resources[key] is Color color
+            ? color
+            : throw new InvalidOperationException($"Theme color resource is unavailable: {key}");
+
+    private Color ResourceBrushColor(string key)
+        => Resources[key] is SolidColorBrush brush
+            ? brush.Color
+            : throw new InvalidOperationException($"Theme brush resource is unavailable: {key}");
+
     private static bool IsAutomationInvocation(IReadOnlyList<string> args)
         => args.Any(static arg => arg.StartsWith("--", StringComparison.Ordinal)
             && (string.Equals(arg, "--shot", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(arg, "--album-library-shot", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase)
                  || arg.EndsWith("-smoke", StringComparison.OrdinalIgnoreCase)));
 
@@ -4210,6 +4475,134 @@ public partial class App : Application
 
             win.Close();
             Shutdown();
+        }, DispatcherPriority.ContextIdle);
+    }
+
+    /// <summary>Render a populated, isolated Album Library window to PNG and exit.</summary>
+    private void CaptureAlbumLibraryShot(string path, IReadOnlyList<string> args)
+    {
+        string outputPath = Path.GetFullPath(path);
+        string outputDirectory = Path.GetDirectoryName(outputPath) ?? Path.GetTempPath();
+        int shotWidth = Math.Clamp(ArgInt(args.ToArray(), "--shot-width", 1120), 980, 3840);
+        int shotHeight = Math.Clamp(ArgInt(args.ToArray(), "--shot-height", 760), 560, 2160);
+        string smokeRoot = Path.Combine(
+            outputDirectory,
+            $".{Path.GetFileNameWithoutExtension(outputPath)}-{Guid.NewGuid():N}");
+        string albumPath = Path.Combine(smokeRoot, "albums.json");
+        string catalogPath = Path.Combine(smokeRoot, "catalog");
+        string? previousAlbumPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH");
+
+        Directory.CreateDirectory(catalogPath);
+        string[] images =
+        [
+            Path.Combine(catalogPath, "mountain-study.png"),
+            Path.Combine(catalogPath, "forest-light.png"),
+            Path.Combine(catalogPath, "coast-sunset.png"),
+            Path.Combine(catalogPath, "neon-rain.png"),
+            Path.Combine(catalogPath, "autumn-detail.png"),
+        ];
+        WriteSmokePng(images[0], 96, 72, Color.FromRgb(48, 126, 190));
+        WriteSmokePng(images[1], 96, 72, Color.FromRgb(48, 146, 92));
+        WriteSmokePng(images[2], 96, 72, Color.FromRgb(226, 126, 66));
+        WriteSmokePng(images[3], 96, 72, Color.FromRgb(172, 62, 144));
+        WriteSmokePng(images[4], 96, 72, Color.FromRgb(218, 178, 64));
+        Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH", albumPath);
+
+        AlbumMutationResult studies = AlbumStore.Create(albumPath, "Studio references", 0, "album-shot-studies");
+        AlbumMutationResult studiesMembers = AlbumStore.AddMembers(
+            albumPath,
+            "album-shot-studies",
+            images[..3],
+            studies.Document?.Revision);
+        string coverId = studiesMembers.Album?.Members.FirstOrDefault()?.Id
+            ?? throw new InvalidOperationException("Album screenshot fixture could not create a cover member.");
+        AlbumMutationResult studiesPinned = AlbumStore.Update(
+            albumPath,
+            "album-shot-studies",
+            studiesMembers.Document?.Revision,
+            pinned: true,
+            coverMemberId: coverId,
+            updateCover: true);
+        AlbumMutationResult review = AlbumStore.Create(
+            albumPath,
+            "Favorites for review",
+            studiesPinned.Document?.Revision,
+            "album-shot-review");
+        AlbumMutationResult reviewMembers = AlbumStore.AddMembers(
+            albumPath,
+            "album-shot-review",
+            [images[3], images[4], Path.Combine(catalogPath, "offline-reference.png")],
+            review.Document?.Revision);
+        if (!studies.Ok || !studiesMembers.Ok || !studiesPinned.Ok || !review.Ok || !reviewMembers.Ok)
+            throw new InvalidOperationException("Album screenshot fixture could not be populated.");
+
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var owner = new Window
+        {
+            Width = 2,
+            Height = 2,
+            Left = -20_000,
+            Top = -20_000,
+            ShowInTaskbar = false,
+            WindowStyle = WindowStyle.None,
+            ShowActivated = false,
+            Opacity = 0,
+        };
+        owner.Show();
+        var library = new AlbumLibraryWindow(
+            owner,
+            images[..2],
+            images,
+            static _ => Task.CompletedTask,
+            static () => Task.CompletedTask)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = -20_000,
+            Top = -20_000,
+            Width = shotWidth,
+            Height = shotHeight,
+            ShowActivated = false,
+        };
+        library.Show();
+        library.Dispatcher.InvokeAsync(async () =>
+        {
+            bool ok = false;
+            try
+            {
+                await library.WaitForIdleForSmokeAsync();
+                if (!library.SelectAlbumForSmoke("album-shot-studies"))
+                    throw new InvalidOperationException("Populated Album was not selectable for screenshot capture.");
+                await library.WaitForIdleForSmokeAsync();
+
+                var root = (FrameworkElement)library.Content;
+                root.Measure(new Size(shotWidth, shotHeight));
+                root.Arrange(new Rect(0, 0, shotWidth, shotHeight));
+                root.UpdateLayout();
+                var bitmap = new RenderTargetBitmap(shotWidth, shotHeight, 96, 96, PixelFormats.Pbgra32);
+                bitmap.Render(root);
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                Directory.CreateDirectory(outputDirectory);
+                using (var stream = File.Create(outputPath))
+                    encoder.Save(stream);
+                ok = new FileInfo(outputPath).Length > 0;
+            }
+            finally
+            {
+                library.Close();
+                owner.Close();
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH", previousAlbumPath);
+                try
+                {
+                    if (Directory.Exists(smokeRoot))
+                        Directory.Delete(smokeRoot, recursive: true);
+                }
+                catch
+                {
+                    ok = false;
+                }
+                Shutdown(ok ? 0 : 1);
+            }
         }, DispatcherPriority.ContextIdle);
     }
 
@@ -13008,6 +13401,12 @@ public partial class App : Application
                 bool wideLayoutRestored = !third.AdaptiveWorkbenchForSmoke
                     && !third.NarrowSidebarRailVisibleForSmoke
                     && !third.RightPanelDockedBelowForSmoke;
+                RightPreviewActionLayoutSmokeSnapshot narrowActions = third.MeasureRightPreviewActionLayoutForSmoke(240);
+                RightPreviewActionLayoutSmokeSnapshot wideActions = third.MeasureRightPreviewActionLayoutForSmoke(380);
+                bool responsiveActions = narrowActions.Fits
+                    && narrowActions.RowCount == 2
+                    && wideActions.Fits
+                    && wideActions.RowCount == 1;
                 bool selectionProjection = selected
                     && initialSelection.CanonicalSelected
                     && initialSelection.CanonicalMarkerVisible
@@ -13044,6 +13443,7 @@ public partial class App : Application
                     && Nearly(maxWidth, 900)
                     && adaptiveLayout
                     && wideLayoutRestored
+                    && responsiveActions
                     && selectionProjection;
                 result = new RightPanelSmokeResult
                 {
@@ -13066,6 +13466,9 @@ public partial class App : Application
                     MaxWidth = maxWidth,
                     AdaptiveLayout = adaptiveLayout,
                     WideLayoutRestored = wideLayoutRestored,
+                    ResponsiveActions = responsiveActions,
+                    NarrowActionRows = narrowActions.RowCount,
+                    WideActionRows = wideActions.RowCount,
                     SelectionProjection = selectionProjection,
                     SelectionPath = restoredSelection.CanonicalPath,
                 };
@@ -22131,6 +22534,9 @@ public partial class App : Application
         public double MaxWidth { get; init; }
         public bool AdaptiveLayout { get; init; }
         public bool WideLayoutRestored { get; init; }
+        public bool ResponsiveActions { get; init; }
+        public int NarrowActionRows { get; init; }
+        public int WideActionRows { get; init; }
         public bool SelectionProjection { get; init; }
         public string? SelectionPath { get; init; }
     }
