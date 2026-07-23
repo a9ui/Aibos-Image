@@ -50,16 +50,29 @@ Renderer-local presentation state, including WPF window geometry, panel sizes,
 keyboard bindings, current selection, and preview layout, stays local. In
 particular, the existing WPF `state.json` is not shared wholesale.
 
-The current public-foundation milestone does not choose a shared root and does
-not move, merge, initialize, rewrite, or delete existing state. A read-only
-ledger and a versioned, repository-independent locator will be introduced in
-separate reviewed changes before either application changes its write target.
+The public-foundation milestone did not choose a shared root and did not move,
+merge, initialize, rewrite, or delete existing state. The locator v1
+protocol remains reader-first and never creates its locator, shared root,
+durable-data directories, or stores. Its only startup write is an empty lock
+file under the operating-system temporary directory. The WPF application now
+fixes the seven durable-store paths from one validated root for the process
+lifetime while preserving explicit per-store test overrides. Shared settings
+protect unsupported or unreadable documents, fail safe to delete confirmation
+enabled, and preserve unknown fields; a supported shared recent-folder document
+is authoritative, including an explicit empty folder set. The exact H25 Browser
+reader and cross-repository TEMP matrix must remain green; locator creation and
+data migration are still separate reviewed operations.
 
 ## Verification
 
 ```powershell
 dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-parity-foundation.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-thumbnail-status-borders.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-recent.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-cross-repo-shared-root-paths.ps1 -LegacyRepo <path> -BrowserCommit <sha>
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-album-library-hardening.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-enhancement-actions.ps1
 ```

@@ -29,7 +29,7 @@
     <SolidColorBrush x:Key="Favorite" Color="#FF5C7A"/>
     <SolidColorBrush x:Key="FavoriteText" Color="#FFD7E0"/>
     <SolidColorBrush x:Key="FavoriteThumbnailStatusBorderBrush" Color="#F4C45B"/>
-    <SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="#42C6FF"/>
+    <SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="#38BDF8"/>
     <SolidColorBrush x:Key="Success" Color="#4DD4A3"/>
     <SolidColorBrush x:Key="Warning" Color="#F4C45B"/>
     <SolidColorBrush x:Key="Danger" Color="#FF687F"/>
@@ -685,6 +685,10 @@
           <Setter TargetName="compactRing" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
           <Setter TargetName="compactRing" Property="BorderThickness" Value="2"/>
         </Trigger>
+        <DataTrigger Binding="{Binding IsCanonicalSelected}" Value="True">
+          <Setter TargetName="compactRing" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+          <Setter TargetName="compactRing" Property="BorderThickness" Value="2"/>
+        </DataTrigger>
       </ControlTemplate.Triggers>
     </ControlTemplate>
 
@@ -761,6 +765,10 @@
                 <Setter TargetName="ring" Property="Background" Value="{StaticResource AccentLight}"/>
                 <Setter TargetName="overlay" Property="Opacity" Value="1"/>
               </Trigger>
+              <DataTrigger Binding="{Binding IsCanonicalSelected}" Value="True">
+                <Setter TargetName="ring" Property="Background" Value="{StaticResource AccentLight}"/>
+                <Setter TargetName="overlay" Property="Opacity" Value="1"/>
+              </DataTrigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -822,6 +830,10 @@
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
                 <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
               </Trigger>
+              <DataTrigger Binding="{Binding IsCanonicalSelected}" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
+                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              </DataTrigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>

@@ -124,6 +124,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _hiddenFolderBuckets = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _selectedFolderBucketKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<Tile> _canonicalSelectionMarkers = [];
     private readonly HashSet<string> _activeAlbumMemberPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _activeAlbumMemberOrder = new(StringComparer.OrdinalIgnoreCase);
     private string? _activeAlbumId;
@@ -354,6 +355,7 @@ public partial class MainWindow : Window
     private double _modalPanY;
     private bool _modalShowingEnhanced;
     private bool _confirmBeforeDelete = true;
+    private bool _syncingConfirmBeforeDelete;
     private Dictionary<ViewerKeyAction, KeyChord> _keyBindings = KeyBindingSettings.CreateDefaults();
     private Dictionary<ViewerKeyAction, KeyChord> _draftKeyBindings = KeyBindingSettings.CreateDefaults();
     private Dictionary<string, JsonElement>? _keyBindingUnknownEntries;
@@ -1931,7 +1933,8 @@ public partial class MainWindow : Window
         var read = ReadSharedRecentFolders();
         if (!read.Ok)
             ReportPersistenceRefusal("Recent folder history", ResolvedSharedRecentPath, protectedFile: true);
-        _lastFolderSet = read.Recent.LastFolderSet;
+        if (read.Ok && read.Exists)
+            _lastFolderSet = read.Recent.LastFolderSet;
         if (LastFolderSetText is not null)
             LastFolderSetText.Text = _lastFolderSet.Count == 0
                 ? "  No saved folder set"
@@ -2787,6 +2790,49 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool TryWriteAtomicSharedJson(
+        string path,
+        string json,
+        out string? error)
+    {
+        if (!SharedJsonDocumentReader.TryEncodeCanonical(
+                json,
+                out byte[] bytes,
+                out error))
+            return false;
+        if (TryWriteAtomicBytes(path, bytes))
+            return true;
+        error = "Windows did not allow the atomic shared JSON replacement.";
+        return false;
+    }
+
+    private static bool TryWriteAtomicBytes(string path, byte[] bytes)
+    {
+        string? tempPath = null;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            tempPath = Path.Combine(
+                Path.GetDirectoryName(path)!,
+                $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            File.WriteAllBytes(tempPath, bytes);
+            File.Move(tempPath, path, overwrite: true);
+            tempPath = null;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (tempPath is not null)
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
+        }
+    }
+
     private static bool TryWithPersistenceLock(string targetPath, Func<bool> operation)
     {
         // Interactive handlers take one create-new attempt and yield on contention;
@@ -3478,7 +3524,9 @@ public partial class MainWindow : Window
         _seenDirtyPaths.Clear();
         _seenWriteBlocked = false;
 
-        if (!string.IsNullOrWhiteSpace(SeenPathOverride))
+        if (!string.IsNullOrWhiteSpace(SeenPathOverride)
+            && SharedDataRootActivation.WasExplicitStoreOverride(
+                SharedDataRootActivation.SeenEnvironmentVariable))
         {
             string overridePath = ResolvedSeenPath;
             _seenWriteBlocked = !TryLoadSeenFile(overridePath, _seenPaths);
@@ -5149,6 +5197,7 @@ public partial class MainWindow : Window
             List<Tile>? materializedSelections = sparseVisuals
                 ? null
                 : _tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList();
+            SynchronizeCanonicalSelectionMarkers(materializedSelections);
             var cardsWatch = Stopwatch.StartNew();
             if (sparseVisuals)
                 SynchronizeRealizedSelectionControl(CardsList);
@@ -5167,6 +5216,26 @@ public partial class MainWindow : Window
         finally
         {
             _syncingSelection = false;
+        }
+    }
+
+    private void SynchronizeCanonicalSelectionMarkers(IReadOnlyCollection<Tile>? selectedTiles)
+    {
+        HashSet<Tile>? next = selectedTiles is null ? null : [.. selectedTiles];
+        foreach (Tile tile in _canonicalSelectionMarkers)
+        {
+            if (next?.Contains(tile) != true)
+                tile.IsCanonicalSelected = false;
+        }
+
+        _canonicalSelectionMarkers.Clear();
+        if (next is null)
+            return;
+
+        foreach (Tile tile in next)
+        {
+            tile.IsCanonicalSelected = true;
+            _canonicalSelectionMarkers.Add(tile);
         }
     }
 
@@ -9054,9 +9123,7 @@ public partial class MainWindow : Window
 
     private async void OpenLastFolder_Click(object sender, RoutedEventArgs e)
     {
-        var lastFolderSet = _lastFolderSet.Count > 0
-            ? _lastFolderSet
-            : ReadSharedRecentFolders().Recent.LastFolderSet;
+        var lastFolderSet = _lastFolderSet;
         if (lastFolderSet.Count > 0)
         {
             SetLandingFolderSet(lastFolderSet);
@@ -11110,6 +11177,11 @@ public partial class MainWindow : Window
         _draftThumbnailStatusBorderSettings = loaded.Settings;
         _thumbnailStatusBorderSettingsProtected = loaded.IsProtected;
         _thumbnailStatusBorderSettingsError = loaded.Error;
+        _confirmBeforeDelete =
+            ThumbnailStatusBorderSettingsStore.ResolveEffectiveConfirmBeforeDelete(
+                _confirmBeforeDelete,
+                loaded);
+        SyncConfirmBeforeDeleteCheckBox();
         ApplyThumbnailStatusBorderResources(loaded.Settings);
     }
 
@@ -11332,14 +11404,11 @@ public partial class MainWindow : Window
         bool saved = TryWithPersistenceLock(path, () =>
         {
             operationStarted = true;
-            string? existingJson;
-            try
+            if (!ThumbnailStatusBorderSettingsStore.TryReadExistingJson(
+                    path,
+                    out string? existingJson,
+                    out operationError))
             {
-                existingJson = File.Exists(path) ? File.ReadAllText(path) : null;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                operationError = $"Shared settings could not be read: {ex.Message}";
                 return false;
             }
 
@@ -11356,11 +11425,8 @@ public partial class MainWindow : Window
                 operationError = parsed.Error ?? "The merged thumbnail border settings were invalid.";
                 return false;
             }
-            if (!TryWriteAtomicText(path, mergedJson))
-            {
-                operationError = "Windows did not allow the atomic settings replacement.";
+            if (!TryWriteAtomicSharedJson(path, mergedJson, out operationError))
                 return false;
-            }
             mergedSettings = parsed.Settings;
             return true;
         });
@@ -11469,8 +11535,114 @@ public partial class MainWindow : Window
 
     private void ConfirmBeforeDelete_Changed(object sender, RoutedEventArgs e)
     {
-        _confirmBeforeDelete = ConfirmBeforeDeleteCheckBox.IsChecked == true;
+        if (_initializing || _syncingConfirmBeforeDelete)
+            return;
+
+        bool requested = ConfirmBeforeDeleteCheckBox.IsChecked == true;
+        if (requested == _confirmBeforeDelete)
+            return;
+        if (!TrySetConfirmBeforeDelete(requested, out string? error))
+        {
+            SetStatusToast($"Shared delete confirmation was not changed. {error}");
+            return;
+        }
+    }
+
+    private bool TrySetConfirmBeforeDelete(bool value, out string? error)
+    {
+        error = null;
+        if (value != _confirmBeforeDelete
+            && !TryPersistSharedConfirmBeforeDelete(value, out error))
+        {
+            SyncConfirmBeforeDeleteCheckBox();
+            return false;
+        }
+
+        _confirmBeforeDelete = value;
+        SyncConfirmBeforeDeleteCheckBox();
         SaveState();
+        return true;
+    }
+
+    private void SyncConfirmBeforeDeleteCheckBox()
+    {
+        _syncingConfirmBeforeDelete = true;
+        try
+        {
+            ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
+        }
+        finally
+        {
+            _syncingConfirmBeforeDelete = false;
+        }
+    }
+
+    private static bool TryPersistSharedConfirmBeforeDelete(bool value, out string? error)
+    {
+        error = null;
+        string path;
+        try
+        {
+            path = ThumbnailStatusBorderSettingsPath;
+        }
+        catch (Exception ex)
+        {
+            error = $"Shared settings path is unavailable: {ex.Message}";
+            return false;
+        }
+
+        string? operationError = null;
+        bool operationStarted = false;
+        bool saved = TryWithPersistenceLock(path, () =>
+        {
+            operationStarted = true;
+            if (!ThumbnailStatusBorderSettingsStore.TryReadExistingJson(
+                    path,
+                    out string? existingJson,
+                    out operationError))
+            {
+                return false;
+            }
+
+            ThumbnailStatusBorderLoadResult existing =
+                ThumbnailStatusBorderSettingsStore.Parse(existingJson ?? "{}");
+            if (existing.IsProtected)
+            {
+                operationError = existing.Error ?? "The shared settings file is protected.";
+                return false;
+            }
+            if (existing.ConfirmBeforeDelete == value)
+                return true;
+
+            if (!ThumbnailStatusBorderSettingsStore.TryMergeConfirmBeforeDelete(
+                    existingJson,
+                    value,
+                    out string mergedJson,
+                    out operationError))
+            {
+                return false;
+            }
+
+            ThumbnailStatusBorderLoadResult merged =
+                ThumbnailStatusBorderSettingsStore.Parse(mergedJson);
+            if (merged.IsProtected || merged.ConfirmBeforeDelete != value)
+            {
+                operationError = merged.Error
+                    ?? "The merged shared delete confirmation setting was invalid.";
+                return false;
+            }
+
+            if (!TryWriteAtomicSharedJson(path, mergedJson, out operationError))
+                return false;
+            return true;
+        });
+
+        if (saved)
+            return true;
+        error = operationError ?? (operationStarted
+            ? "The shared settings write failed."
+            : "The shared settings file is busy. Try again.");
+        return false;
     }
 
     private string BuildDiagnosticsText()
@@ -11612,15 +11784,19 @@ public partial class MainWindow : Window
         Tile? tile = _pendingDeleteTile;
         DeleteSnapshot? bulkSnapshot = _pendingBulkDeleteSnapshot;
         bool favoriteProtected = _favoriteDeleteConfirmationRequired;
+        if (!favoriteProtected && DoNotAskAgainCheckBox.IsChecked == true)
+        {
+            if (!TrySetConfirmBeforeDelete(false, out string? error))
+            {
+                DoNotAskAgainCheckBox.IsChecked = false;
+                SetStatusToast($"Delete confirmation stays enabled. {error}");
+            }
+        }
+
         _pendingDeleteTile = null;
         _pendingBulkDeleteSnapshot = null;
         _favoriteDeleteConfirmationRequired = false;
         DeleteConfirmationDialog.Visibility = Visibility.Collapsed;
-        if (!favoriteProtected && DoNotAskAgainCheckBox.IsChecked == true)
-        {
-            _confirmBeforeDelete = false;
-            SaveState();
-        }
         if (bulkSnapshot is not null)
             ExecuteBulkDelete(bulkSnapshot, favoriteConfirmed: favoriteProtected);
         else if (tile is not null)
@@ -12249,11 +12425,12 @@ public partial class MainWindow : Window
     private void RestoreState()
     {
         var state = ReadState();
-        var lastFolderSet = NormalizeFolderSet(state?.LastFolderSet ?? []);
-        if (lastFolderSet.Count == 0 && !string.IsNullOrWhiteSpace(state?.LastFolder))
-            lastFolderSet = NormalizeFolderSet([state.LastFolder]);
-        if (lastFolderSet.Count == 0)
-            lastFolderSet = ReadSharedRecentFolders().Recent.LastFolderSet;
+        SharedRecentReadResult sharedRecent = ReadSharedRecentFolders();
+        var lastFolderSet = ResolveStartupFolderSet(
+            state?.LastFolderSet ?? [],
+            state?.LastFolder,
+            sharedRecent);
+        _lastFolderSet = lastFolderSet.ToList();
 
         if (lastFolderSet.Count > 0)
         {
@@ -12491,21 +12668,61 @@ public partial class MainWindow : Window
 
     private static SharedRecentReadResult ReadSharedRecentFolders(string path)
     {
-        if (!File.Exists(path))
-            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(null), null);
+        SharedJsonDocumentReadResult read = SharedJsonDocumentReader.Read(path);
+        if (!read.Ok)
+        {
+            return new SharedRecentReadResult(
+                false,
+                NormalizeSharedRecentFolders(null),
+                read.Error,
+                true);
+        }
+        if (!read.Exists)
+        {
+            return new SharedRecentReadResult(
+                true,
+                NormalizeSharedRecentFolders(null),
+                null,
+                false);
+        }
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            using var document = JsonDocument.Parse(read.Json!);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
-                return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), "shared recent root is not an object");
-            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(document.RootElement), null);
+                return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), "shared recent root is not an object", true);
+            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(document.RootElement), null, true);
         }
         catch (Exception ex)
         {
-            return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), ex.Message);
+            return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), ex.Message, true);
         }
     }
+
+    private static List<string> ResolveStartupFolderSet(
+        IEnumerable<string> localLastFolderSet,
+        string? localLastFolder,
+        SharedRecentReadResult sharedRecent)
+    {
+        var local = NormalizeFolderSet(localLastFolderSet);
+        if (local.Count == 0 && !string.IsNullOrWhiteSpace(localLastFolder))
+            local = NormalizeFolderSet([localLastFolder]);
+        return sharedRecent.Ok && sharedRecent.Exists
+            ? sharedRecent.Recent.LastFolderSet.ToList()
+            : local;
+    }
+
+    internal static IReadOnlyList<string> ResolveStartupFolderSetForSmoke(
+        string sharedRecentPath,
+        IEnumerable<string> localLastFolderSet,
+        string? localLastFolder)
+        => ResolveStartupFolderSet(
+            localLastFolderSet,
+            localLastFolder,
+            ReadSharedRecentFolders(sharedRecentPath));
+
+    internal static SharedRecentReadResult ReadSharedRecentFoldersForSmoke(string path)
+        => ReadSharedRecentFolders(path);
 
     private static SharedRecentFoldersState NormalizeSharedRecentFolders(JsonElement? root)
     {
@@ -12683,7 +12900,15 @@ public partial class MainWindow : Window
                     ExtensionData = CloneExtensionData(current.Recent.ExtensionData),
                 };
                 var json = JsonSerializer.Serialize(next, SharedRecentJsonOptions);
-                return TryWriteAtomicText(path, json);
+                if (!SharedJsonDocumentReader.TryEncodeCanonical(
+                        json,
+                        out byte[] bytes,
+                        out _))
+                {
+                    malformed = true;
+                    return false;
+                }
+                return TryWriteAtomicBytes(path, bytes);
             });
             if (!saved)
                 ReportPersistenceRefusal("Recent folder history", path, malformed, malformed ? null : () => SaveSharedRecentFolderSet(folderSet));
@@ -13246,6 +13471,17 @@ public partial class MainWindow : Window
     public string SeenPathForSmoke => ResolvedSeenPath;
     public string SharedRecentPathForSmoke => ResolvedSharedRecentPath;
     public string SearchHistoryPathForSmoke => SearchHistoryStore.ResolvePath();
+    internal static IReadOnlyDictionary<string, string> ResolveSharedDurableStorePathsForSmoke()
+        => new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [SharedDataRootActivation.FavoritesEnvironmentVariable] = ResolvedFavoritesPath,
+            [SharedDataRootActivation.SeenEnvironmentVariable] = ResolvedSeenPath,
+            [SharedDataRootActivation.SettingsEnvironmentVariable] = ThumbnailStatusBorderSettingsPath,
+            [SharedDataRootActivation.AlbumsEnvironmentVariable] = AlbumStore.ResolvePath(),
+            [SharedDataRootActivation.SearchHistoryEnvironmentVariable] = SearchHistoryStore.ResolvePath(),
+            [SharedDataRootActivation.RecentFoldersEnvironmentVariable] = ResolvedSharedRecentPath,
+            [SharedDataRootActivation.EnhancementJobsEnvironmentVariable] = ResolvedEnhancementJobsPath,
+        };
     public bool SearchHistoryPopupOpenForSmoke => SearchHistoryPopup.IsOpen;
     public List<string> SearchHistoryEntriesForSmoke => _searchHistoryEntries.Select(static item => item.Query).ToList();
     public string SearchHistoryStatusForSmoke => SearchHistoryStatusText.Text;
@@ -13560,6 +13796,11 @@ public partial class MainWindow : Window
     public void ResetProtectedDeleteRootsForSmoke() => _protectedDeleteRoots = ResolveProtectedDeleteRoots;
 
     public void SetConfirmBeforeDeleteForSmoke(bool value) => _confirmBeforeDelete = value;
+    public bool PersistConfirmBeforeDeleteForSmoke(bool value)
+    {
+        return TrySetConfirmBeforeDelete(value, out _)
+            && _confirmBeforeDelete == value;
+    }
     public void FlushStateForSmoke()
     {
         _searchStateSaveTimer.Stop();
@@ -14005,7 +14246,8 @@ public partial class MainWindow : Window
             gridWindowContains,
             selectedItemsContains,
             container is not null,
-            container?.IsSelected == true);
+            container?.IsSelected == true,
+            HasCanonicalSelectionMarkerForSmoke(container, tile, grid: true));
     }
     public async Task<ListSelectionVisualSmokeSnapshot> WaitForListSelectionVisualForSmokeAsync(string fileName)
     {
@@ -14027,7 +14269,28 @@ public partial class MainWindow : Window
             canonicalSelected,
             selectedItemsContains,
             container is not null,
-            container?.IsSelected == true);
+            container?.IsSelected == true,
+            HasCanonicalSelectionMarkerForSmoke(container, tile, grid: false));
+    }
+
+    private static bool HasCanonicalSelectionMarkerForSmoke(ListBoxItem? container, Tile? tile, bool grid)
+    {
+        if (container is null || tile?.IsCanonicalSelected != true)
+            return false;
+
+        container.ApplyTemplate();
+        string partName = grid
+            ? tile.UseCompactCardTemplate ? "compactRing" : "ring"
+            : "bd";
+        if (container.Template.FindName(partName, container) is not Border marker)
+            return false;
+
+        static bool Visible(Brush? brush)
+            => brush is not null
+                && brush.Opacity > 0
+                && (brush is not SolidColorBrush solid || solid.Color.A > 0);
+
+        return Visible(marker.BorderBrush) || Visible(marker.Background);
     }
     public int SelectedFavoriteLevelForSmoke => SelectedTile()?.Fav ?? 0;
     public bool AdjustGalleryFavoriteForSmoke(string fileName, int delta)
@@ -14150,6 +14413,7 @@ public partial class MainWindow : Window
         && string.Equals(AutomationProperties.GetName(DateToInput), "To date", StringComparison.Ordinal);
     public bool FocusCardsListForSmoke() => CardsList.Focus();
     public bool FocusRowsListForSmoke() => RowsList.Focus();
+    public bool FocusRightPreviewActionForSmoke() => FavoriteIncreaseButton.Focus();
     public bool FocusSelectedGalleryItemForSmoke() => TryFocusPrimaryGalleryItem();
     public bool FocusDateFromInputForSmoke()
     {
@@ -14539,7 +14803,12 @@ public partial class MainWindow : Window
                 UpdatedAtUtc = DateTime.UtcNow.ToString("O"),
                 ExtensionData = CloneExtensionData(current.Recent.ExtensionData),
             };
-            return TryWriteAtomicText(path, JsonSerializer.Serialize(next, SharedRecentJsonOptions));
+            string json = JsonSerializer.Serialize(next, SharedRecentJsonOptions);
+            return SharedJsonDocumentReader.TryEncodeCanonical(
+                    json,
+                    out byte[] bytes,
+                    out _)
+                && TryWriteAtomicBytes(path, bytes);
         });
     }
 
@@ -16013,7 +16282,8 @@ public sealed class SharedRecentFoldersState
 public sealed record SharedRecentReadResult(
     bool Ok,
     SharedRecentFoldersState Recent,
-    string? Error);
+    string? Error,
+    bool Exists);
 
 public sealed record FavoriteImportSummary(
     bool Ok,
@@ -16129,14 +16399,16 @@ public sealed record GridSelectionVisualSmokeSnapshot(
     bool GridWindowContains,
     bool SelectedItemsContains,
     bool ContainerRealized,
-    bool ContainerSelected);
+    bool ContainerSelected,
+    bool CanonicalMarkerVisible);
 
 public sealed record ListSelectionVisualSmokeSnapshot(
     string? CanonicalPath,
     bool CanonicalSelected,
     bool SelectedItemsContains,
     bool ContainerRealized,
-    bool ContainerSelected);
+    bool ContainerSelected,
+    bool CanonicalMarkerVisible);
 
 public sealed record PreviewDecodeSmokeSnapshot(
     bool Selected,
@@ -16351,6 +16623,18 @@ public sealed class Tile : INotifyPropertyChanged
     private bool _enhanced;
     private bool _showCardDetails = true;
     private bool _showCardStatusBadge = true;
+    private bool _isCanonicalSelected;
+
+    public bool IsCanonicalSelected
+    {
+        get => _isCanonicalSelected;
+        internal set
+        {
+            if (_isCanonicalSelected == value) return;
+            _isCanonicalSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCanonicalSelected)));
+        }
+    }
 
     public bool Enhanced
     {

@@ -8,6 +8,8 @@
 - Implementation screenshot paths:
   - `private-evidence://aibos/grid-wide.png` — 1600 x 900, SHA-256 `8f16b88aa18f535006a006e66d654df64fa99695364f92a088b5bdae798e610e`
   - `private-evidence://aibos/grid-narrow.png` — 900 x 820, SHA-256 `319b5de25786755dac398ba373b101019f463b180768945592a6f84f3263339c`
+  - `private-evidence://aibos/grid-wide-final.png` — 1600 x 900, SHA-256 `7c72967dda774a4927252a43c0ee54860e6fff4f3475bf993c206a45ec1af465`
+  - `private-evidence://aibos/grid-narrow-final.png` — 900 x 820, SHA-256 `2cdc3ade67543a4de7e49fe38645d46406596556b70e71e33d790d088b19ead0`
   - `private-evidence://aibos/settings.png` — 900 x 700, SHA-256 `7c12723af1bf1a23ec62996bc2afe861eebcea11459fde797c6412cad6371979`
   - `private-evidence://aibos/modal-wide.png` — 1280 x 820, SHA-256 `cd6490a4df436d46c477b4b32f7f7c91ef76ede0f2b4162c9934bf89cca9d178`
 - Local filesystem paths are deliberately omitted because this report is intended for a public repository and the captures contain private workstation path text.
@@ -23,6 +25,7 @@ The source board and each rendered implementation capture were opened together i
 - Settings: compared left navigation, selected state, content column, form density, fixed footer action, borders, and radii at readable scale.
 - Modal: compared top toolbar density, image fit, navigation edge zones, bottom filmstrip, footer controls, opaque surfaces, and window controls at readable scale.
 - Narrow workbench: compared the 44-DIP navigation rail, gallery region, bottom preview, and persistent header at 900 x 820.
+- Selection projection: compared the selected gallery card against the source board in both 1600-DIP wide and 900-DIP adaptive layouts. The final captures show the same persistent accent outline after focus moves to the Preview action surface.
 
 ## Required fidelity surfaces
 
@@ -38,6 +41,7 @@ The source board and each rendered implementation capture were opened together i
 2. Initial P1: the 900-DIP layout did not match the selected adaptive workbench. Fix: added a 44-DIP navigation rail, moved the same preview instance below the gallery, and preserved wide-layout restoration. Post-fix evidence: `grid-narrow.png`; right-panel and zoom-anchor smokes pass.
 3. Initial P2: Settings was one long undifferentiated scroll surface. Fix: added functional General, Display, Thumbnails, Keyboard, and About navigation with a fixed footer. Post-fix evidence: `settings.png`; settings/unseen-state smoke passes without changing Seen or cache data.
 4. Initial P2: Album and modal chrome retained large radii, capsule badges, and the default context-menu treatment. Fix: reduced radii, removed the fake Album text mark, compacted modal controls, and added an opaque lightweight context-menu surface. Post-fix evidence: `modal-wide.png`; modal interaction and Album hardening smokes pass.
+5. PRO High: gallery selection was represented in the header and Preview but was not durable enough visually after keyboard focus moved away from the gallery. Fix: projected canonical selection state into compact Grid, standard Grid, and List templates independently of transient WPF focus selection. Post-fix evidence: `grid-wide-final.png` and `grid-narrow-final.png`; the Grid → narrow Grid → List → wide Grid smoke preserves the same canonical path, visible marker, and source bytes.
 
 ## Findings
 
@@ -54,6 +58,7 @@ No actionable P0, P1, or P2 visual mismatch remains for this implementation batc
 - [x] Wide workbench and 900-DIP adaptive layout.
 - [x] Functional Settings category navigation.
 - [x] Modal, filmstrip, context menu, and Album chrome alignment.
+- [x] Persistent canonical selection marker in compact Grid, standard Grid, and List across focus and wide/narrow mode changes.
 - [x] .NET 10 Release build with zero warnings and zero errors.
 - [x] Focused UI, state-isolation, modal, Album, zoom-anchor, and rapid-churn gates.
 
