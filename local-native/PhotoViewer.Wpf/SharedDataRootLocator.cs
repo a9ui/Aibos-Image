@@ -330,19 +330,9 @@ internal static class SharedDataRootLocator
         string? candidate,
         out string normalized)
     {
-        if (!TryNormalizeAbsolutePath(candidate, out normalized))
-            return false;
-
-        try
-        {
-            FileAttributes attributes = File.GetAttributes(normalized);
-            return attributes.HasFlag(FileAttributes.Directory);
-        }
-        catch
-        {
-            normalized = "";
-            return false;
-        }
+        return WindowsPathIdentity.TryResolveExistingDirectory(
+            candidate,
+            out normalized);
     }
 
     private static FileProbe ProbeFile(string path)

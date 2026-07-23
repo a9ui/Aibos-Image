@@ -76,7 +76,7 @@ try {
     if ($result.ok -ne $true -or
         $result.activation -ne 'reader-only' -or
         $result.defaultPathShapeOk -ne $true -or
-        $result.caseCount -ne 22 -or
+        $result.caseCount -ne 23 -or
         $failedCases.Count -ne 0) {
         $failedIds = @($failedCases | ForEach-Object { $_.id }) -join ', '
         throw "Shared root locator contract failed. Failed cases: $failedIds"
@@ -141,13 +141,19 @@ try {
     New-Item -ItemType Directory -Path $legacyRoot, $dataRootA, $dataRootB -Force | Out-Null
 
     $invokeWriter = {
-        param([string]$Mode, [string]$Result, [string]$DataRoot)
+        param(
+            [string]$Mode,
+            [string]$Result,
+            [string]$DataRoot,
+            [string]$SelectedLeaseDirectory = $leaseDirectory,
+            [string]$SelectedLocatorPath = $locatorPath
+        )
         & dotnet $dll --shared-root-lease-writer-smoke $Result `
             --mode $Mode `
             --temp-root $leaseProofRoot `
-            --locator-path $locatorPath `
+            --locator-path $SelectedLocatorPath `
             --shared-data-root $DataRoot `
-            --lease-directory $leaseDirectory
+            --lease-directory $SelectedLeaseDirectory
         if ($LASTEXITCODE -ne 0) {
             throw "Locator writer smoke '$Mode' failed with exit $LASTEXITCODE."
         }
@@ -155,6 +161,21 @@ try {
             throw "Locator writer smoke '$Mode' produced no result."
         }
         return Get-Content -Raw -LiteralPath $Result | ConvertFrom-Json
+    }
+
+    $redirectedLeaseTarget = Join-Path $leaseProofRoot 'redirected-lease-target'
+    $redirectedLeaseDirectory = Join-Path $leaseProofRoot 'redirected-leases'
+    New-Item -ItemType Directory -Path $redirectedLeaseTarget -Force | Out-Null
+    New-Item -ItemType Junction -Path $redirectedLeaseDirectory -Target $redirectedLeaseTarget | Out-Null
+    $redirectedLocatorPath = Join-Path $leaseProofRoot 'redirected-shared-root.v1.json'
+    $redirectedResultPath = Join-Path $leaseProofRoot 'redirected-lease-result.json'
+    $redirected = & $invokeWriter 'create' $redirectedResultPath $dataRootA $redirectedLeaseDirectory $redirectedLocatorPath
+    if ($redirected.ok -ne $true -or
+        $redirected.acquired -ne $false -or
+        $redirected.errorCode -ne 'locator-writer-lease-unavailable' -or
+        $redirected.locatorChanged -ne $false -or
+        (Test-Path -LiteralPath $redirectedLocatorPath)) {
+        throw 'A redirected locator lease directory did not fail closed.'
     }
 
     $startHolder = {
@@ -248,7 +269,7 @@ try {
     $finalHolder = & $startHolder 'resolved-b'
     $null = & $releaseHolder $finalHolder $dataRootB
 
-    Write-Host "Shared root locator PASS: $($result.caseCount)/$($result.caseCount) reader cases; $($activationResults.Count)/$($activationResults.Count) WPF activation cases; two-process missing/create/replace lease proof; fixture bytes unchanged."
+    Write-Host "Shared root locator PASS: $($result.caseCount)/$($result.caseCount) reader cases; $($activationResults.Count)/$($activationResults.Count) WPF activation cases; redirected lease rejection; two-process missing/create/replace lease proof; fixture bytes unchanged."
 }
 finally {
     foreach ($holder in $holderProcesses) {

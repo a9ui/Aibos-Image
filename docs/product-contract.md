@@ -133,9 +133,11 @@ without copying or rewriting any durable data.
 - Both required fields occur exactly once. Duplicate required fields,
   malformed JSON, unsupported versions, relative roots, unavailable roots, and
   file-valued roots are rejected.
-- Readers apply ordinary absolute-path normalization and remove a trailing
-  directory separator except at the volume root, so independent application
-  locations resolve the same locator to the same lexical root.
+- Readers resolve an existing root to its canonical final filesystem target
+  and remove a trailing directory separator except at the volume root. WPF
+  fixes that canonical target and all seven store paths for the process
+  lifetime, so later redirection of a junction or symbolic-link spelling does
+  not redirect active durable state.
 - Unknown fields in a supported version are ignored by readers.
 - Existing per-store test overrides retain highest precedence. The locator-path
   override is next, followed by the default locator. The legacy repository
@@ -175,8 +177,12 @@ spelled locator paths. Readers open or create the file with read access and
 creator/replacer opens the same file with read/write access and `FileShare.None`
 for the entire same-volume create or atomic-replace operation. A sharing
 violation is contention and fails closed; other lease failures are unavailable,
-not contention. The lease may create only this TEMP coordination directory/file,
-never the locator, shared root, store directories, or stores.
+not contention. The lease directory must resolve to the same relative path
+below the canonical OS temporary root; a redirected descendant is rejected.
+After opening, the lock handle's final path must equal that canonical fixed
+path and the file must be empty. The lease may create only this TEMP
+coordination directory/file, never the locator, shared root, store directories,
+or stores.
 
 ### `PV-SET-001` — Shared settings protection
 

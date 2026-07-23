@@ -18,6 +18,7 @@
       "schemaVersion": 1,
       "sharedDataRoot": "fully-qualified existing directory"
     },
+    "resolvedRootIdentity": "canonical final filesystem target fixed for the process lifetime",
     "unknownFields": "ignored",
     "duplicateRequiredFields": "rejected"
   },
@@ -27,7 +28,8 @@
       "specialFolder": "Temporary",
       "relativeSegments": [
         "aibos-shared-root-locator-leases-v1"
-      ]
+      ],
+      "pathIdentity": "same relative path below the canonical temporary root; redirected descendants rejected"
     },
     "identity": {
       "scope": "protocol-global within the temporary directory",
@@ -47,6 +49,7 @@
       "lifetime": "create-or-replace-operation"
     },
     "contents": "empty",
+    "openedFileIdentity": "final handle path equals the canonical fixed lock path",
     "runtimeDeletion": "never"
   },
   "dataLayout": [
@@ -79,6 +82,14 @@
     {
       "id": "normalized-existing-root",
       "mode": "normalized-existing-root",
+      "expected": {
+        "status": "Resolved",
+        "root": "data"
+      }
+    },
+    {
+      "id": "linked-existing-root-resolves-final-target",
+      "mode": "linked-existing-root",
       "expected": {
         "status": "Resolved",
         "root": "data"

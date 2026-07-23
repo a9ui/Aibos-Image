@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -110,6 +111,7 @@ internal static class SharedDataRootLocatorContractRunner
         string caseRoot = Path.Combine(fixtureRoot, id);
         string legacyRoot = Path.Combine(caseRoot, "legacy");
         string dataRoot = Path.Combine(caseRoot, "data");
+        string linkedDataRoot = Path.Combine(caseRoot, "data-link");
         string secondDataRoot = Path.Combine(caseRoot, "data-b");
         string missingDataRoot = Path.Combine(caseRoot, "missing-data");
         string secondLegacyRoot = Path.Combine(caseRoot, "legacy-b");
@@ -141,6 +143,15 @@ internal static class SharedDataRootLocatorContractRunner
                 lockDuringRead = mode == "locked-valid";
                 if (mode == "same-locator-different-legacy-roots")
                     Directory.CreateDirectory(secondLegacyRoot);
+                break;
+            case "linked-existing-root":
+                Directory.CreateDirectory(dataRoot);
+                CreateJunction(linkedDataRoot, dataRoot);
+                WriteLocator(
+                    locatorPath,
+                    1,
+                    linkedDataRoot,
+                    includeUnknownField: true);
                 break;
             case "malformed":
                 File.WriteAllText(
@@ -354,6 +365,35 @@ internal static class SharedDataRootLocatorContractRunner
                 new JsonSerializerOptions { WriteIndented = true }));
     }
 
+    private static void CreateJunction(string linkPath, string targetPath)
+    {
+        string commandInterpreter = Path.Combine(
+            Environment.SystemDirectory,
+            "cmd.exe");
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = commandInterpreter,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("/d");
+        startInfo.ArgumentList.Add("/c");
+        startInfo.ArgumentList.Add("mklink");
+        startInfo.ArgumentList.Add("/J");
+        startInfo.ArgumentList.Add(linkPath);
+        startInfo.ArgumentList.Add(targetPath);
+        using Process process = Process.Start(startInfo)
+            ?? throw new IOException("junction helper did not start");
+        process.WaitForExit();
+        if (process.ExitCode != 0 || !Directory.Exists(linkPath))
+        {
+            throw new IOException(
+                "junction helper failed: " + process.StandardError.ReadToEnd());
+        }
+    }
+
     private static IReadOnlyDictionary<string, string> SnapshotTree(string root)
     {
         var snapshot = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -480,6 +520,8 @@ internal static class SharedDataRootLocatorContractRunner
                 ],
                 StringComparer.Ordinal)
             && document.GetProperty("encoding").GetString() == "UTF-8"
+            && document.GetProperty("resolvedRootIdentity").GetString()
+                == "canonical final filesystem target fixed for the process lifetime"
             && requiredFields.GetProperty("schemaVersion").GetInt32()
                 == SharedDataRootLocator.SchemaVersion
             && requiredFields.GetProperty("sharedDataRoot").GetString()
@@ -489,6 +531,8 @@ internal static class SharedDataRootLocatorContractRunner
                 == "rejected"
             && leaseDirectory.GetProperty("specialFolder").GetString()
                 == "Temporary"
+            && leaseDirectory.GetProperty("pathIdentity").GetString()
+                == "same relative path below the canonical temporary root; redirected descendants rejected"
             && leaseRelativeSegments.SequenceEqual(
                 [SharedDataRootLocatorLease.DefaultLeaseDirectoryName],
                 StringComparer.Ordinal)
@@ -508,6 +552,8 @@ internal static class SharedDataRootLocatorContractRunner
             && writerLease.GetProperty("lifetime").GetString()
                 == "create-or-replace-operation"
             && locatorLease.GetProperty("contents").GetString() == "empty"
+            && locatorLease.GetProperty("openedFileIdentity").GetString()
+                == "final handle path equals the canonical fixed lock path"
             && locatorLease.GetProperty("runtimeDeletion").GetString() == "never"
             && actualLayout.SequenceEqual(expectedLayout, StringComparer.Ordinal);
     }
