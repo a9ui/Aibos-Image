@@ -674,6 +674,13 @@ public partial class App : Application
             return;
         }
 
+        int catalogInteractionSmokeIdx = Array.IndexOf(e.Args, "--catalog-interaction-smoke");
+        if (catalogInteractionSmokeIdx >= 0 && catalogInteractionSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureCatalogInteractionSmoke(e.Args[catalogInteractionSmokeIdx + 1], e.Args);
+            return;
+        }
+
         int p1bSmokeIdx = Array.IndexOf(e.Args, "--p1b-smoke");
         if (p1bSmokeIdx >= 0 && p1bSmokeIdx + 1 < e.Args.Length)
         {
@@ -8695,18 +8702,264 @@ public partial class App : Application
         }, DispatcherPriority.ContextIdle);
     }
 
+    private void CaptureCatalogInteractionSmoke(string resultPath, string[] args)
+    {
+        string resultFullPath = Path.GetFullPath(resultPath);
+        int count = ArgInt(args, "--count", 100_000);
+        if (count < 10_000 || count > 250_000)
+        {
+            WriteCatalogInteractionSmokeResult(resultFullPath, new CatalogInteractionSmokeResult
+            {
+                RequestedCount = count,
+                Message = "--count must be between 10,000 and 250,000",
+            });
+            Shutdown(1);
+            return;
+        }
+
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var window = HiddenWindow();
+        window.Show();
+        window.SuppressStatePersistence();
+
+        window.Dispatcher.InvokeAsync(async () =>
+        {
+            CatalogInteractionSmokeResult result;
+            var heartbeat = new DispatcherTimer(DispatcherPriority.Input)
+            {
+                Interval = TimeSpan.FromMilliseconds(15),
+            };
+            var heartbeatWatch = Stopwatch.StartNew();
+            long lastHeartbeatMs = 0;
+            long maxHeartbeatGapMs = 0;
+            int heartbeatCount = 0;
+            string activeOperation = "startup";
+            var heartbeatGapSamples = new List<string>();
+            heartbeat.Tick += (_, _) =>
+            {
+                long now = heartbeatWatch.ElapsedMilliseconds;
+                long gap = now - lastHeartbeatMs;
+                maxHeartbeatGapMs = Math.Max(maxHeartbeatGapMs, gap);
+                if (gap > 100)
+                    heartbeatGapSamples.Add($"{activeOperation}@{now}ms:{gap}ms");
+                lastHeartbeatMs = now;
+                heartbeatCount++;
+            };
+
+            try
+            {
+                var seedWatch = Stopwatch.StartNew();
+                window.SeedLargeInteractionCatalogForSmoke(count);
+                window.UpdateLayout();
+                seedWatch.Stop();
+
+                string selectedName = $"interaction-smoke-{50_000:D6}-needle.png";
+                bool selected = count > 50_000 && window.SelectFileNameForSmoke(selectedName);
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+
+                var process = Process.GetCurrentProcess();
+                long managedMemoryBefore = GC.GetTotalMemory(forceFullCollection: true);
+                process.Refresh();
+                long workingSetBefore = process.WorkingSet64;
+                int gen2Before = GC.CollectionCount(2);
+                var searchSamples = new List<long>();
+                var searchPhaseSamples = new List<MainWindow.SearchFilterCompletion>();
+                var filterSamples = new List<long>();
+                var sortSamples = new List<long>();
+                bool countsExact = true;
+                bool completionsApplied = true;
+                heartbeatWatch.Restart();
+                lastHeartbeatMs = 0;
+                heartbeat.Start();
+
+                for (int iteration = 0; iteration < 6; iteration++)
+                {
+                    activeOperation = $"search-match-{iteration + 1}";
+                    var watch = Stopwatch.StartNew();
+                    MainWindow.SearchFilterCompletion match = await window.SetSearchInputForSmokeAsync("needle");
+                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    watch.Stop();
+                    searchSamples.Add(watch.ElapsedMilliseconds);
+                    searchPhaseSamples.Add(match);
+                    completionsApplied &= match.Applied && !match.Discarded;
+                    countsExact &= window.FilteredCountForSmoke == count / 100;
+
+                    activeOperation = $"search-clear-{iteration + 1}";
+                    watch.Restart();
+                    MainWindow.SearchFilterCompletion clear = await window.SetSearchInputForSmokeAsync("");
+                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    watch.Stop();
+                    searchSamples.Add(watch.ElapsedMilliseconds);
+                    searchPhaseSamples.Add(clear);
+                    completionsApplied &= clear.Applied && !clear.Discarded;
+                    countsExact &= window.FilteredCountForSmoke == count;
+                }
+
+                for (int iteration = 0; iteration < 6; iteration++)
+                {
+                    activeOperation = $"filter-on-{iteration + 1}";
+                    var watch = Stopwatch.StartNew();
+                    window.SetFavoriteOnlyFilterForSmoke(true);
+                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    watch.Stop();
+                    filterSamples.Add(watch.ElapsedMilliseconds);
+                    countsExact &= window.FilteredCountForSmoke == count / 10;
+
+                    activeOperation = $"filter-clear-{iteration + 1}";
+                    watch.Restart();
+                    window.ClearFavoriteFiltersForSmoke();
+                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    watch.Stop();
+                    filterSamples.Add(watch.ElapsedMilliseconds);
+                    countsExact &= window.FilteredCountForSmoke == count;
+                }
+
+                string[] sortModes =
+                [
+                    "name",
+                    "created-oldest",
+                    "modified-oldest",
+                    "created-newest",
+                    "modified-newest",
+                    "name",
+                ];
+                foreach (string sortMode in sortModes)
+                {
+                    activeOperation = $"sort-{sortMode}";
+                    var watch = Stopwatch.StartNew();
+                    bool changed = await window.SetSortByInteractiveForSmokeAsync(sortMode);
+                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    watch.Stop();
+                    sortSamples.Add(watch.ElapsedMilliseconds);
+                    countsExact &= changed && window.FilteredCountForSmoke == count;
+                }
+
+                activeOperation = "final-layout";
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                activeOperation = "final-settle";
+                await Task.Delay(250);
+                heartbeat.Stop();
+                process.Refresh();
+                long workingSetAfter = process.WorkingSet64;
+                long managedMemoryAfter = GC.GetTotalMemory(forceFullCollection: false);
+                long managedMemoryAfterFullGc = GC.GetTotalMemory(forceFullCollection: true);
+                process.Refresh();
+                long workingSetAfterFullGc = process.WorkingSet64;
+                double workingSetRegressionPercent = workingSetBefore <= 0
+                    ? 0
+                    : ((workingSetAfter - workingSetBefore) * 100d) / workingSetBefore;
+                double normalizedWorkingSetRegressionPercent = workingSetBefore <= 0
+                    ? 0
+                    : ((workingSetAfterFullGc - workingSetBefore) * 100d) / workingSetBefore;
+                double liveManagedMemoryRegressionPercent = managedMemoryBefore <= 0
+                    ? 0
+                    : ((managedMemoryAfterFullGc - managedMemoryBefore) * 100d) / managedMemoryBefore;
+                double searchP95 = SmokePercentile(searchSamples, 0.95);
+                double filterP95 = SmokePercentile(filterSamples, 0.95);
+                double sortP95 = SmokePercentile(sortSamples, 0.95);
+                bool selectionStable = selected
+                    && string.Equals(window.SelectedFileNameForSmoke, selectedName, StringComparison.OrdinalIgnoreCase);
+                bool bounded = window.GridItemsSourceCountForSmoke == count
+                    && window.GridUsesFullExtentVirtualizationForSmoke
+                    && window.GridRealizedCountForSmoke <= window.GridMaxRealizationCountForSmoke;
+                bool ok = window.CatalogCountForSmoke == count
+                    && countsExact
+                    && completionsApplied
+                    && selectionStable
+                    && bounded
+                    && searchP95 <= 250
+                    && filterP95 <= 250
+                    && sortP95 <= 500
+                    && maxHeartbeatGapMs <= 250
+                    // Rapid churn leaves dead WPF generator/layout objects in
+                    // young generations and committed pages in the process
+                    // working set. Gate the collectible live graph tightly and
+                    // keep a separate normalized native/committed-page ceiling.
+                    && liveManagedMemoryRegressionPercent <= 15
+                    && normalizedWorkingSetRegressionPercent <= 35;
+                result = new CatalogInteractionSmokeResult
+                {
+                    Ok = ok,
+                    RequestedCount = count,
+                    CatalogCount = window.CatalogCountForSmoke,
+                    FilteredCount = window.FilteredCountForSmoke,
+                    SeedElapsedMs = seedWatch.ElapsedMilliseconds,
+                    SearchP95Ms = searchP95,
+                    FilterP95Ms = filterP95,
+                    SortP95Ms = sortP95,
+                    SearchSamplesMs = searchSamples,
+                    SearchPhaseSamples = searchPhaseSamples,
+                    FilterSamplesMs = filterSamples,
+                    SortSamplesMs = sortSamples,
+                    CountsExact = countsExact,
+                    SearchCompletionsApplied = completionsApplied,
+                    SelectionStable = selectionStable,
+                    SelectedFileName = window.SelectedFileNameForSmoke,
+                    GridItemsSourceCount = window.GridItemsSourceCountForSmoke,
+                    GridRealizedCount = window.GridRealizedCountForSmoke,
+                    GridRealizationLimit = window.GridMaxRealizationCountForSmoke,
+                    GridUsesFullExtentVirtualization = window.GridUsesFullExtentVirtualizationForSmoke,
+                    HeartbeatCount = heartbeatCount,
+                    DispatcherHeartbeatMaxGapMs = maxHeartbeatGapMs,
+                    HeartbeatGapSamples = heartbeatGapSamples,
+                    WorkingSetBeforeBytes = workingSetBefore,
+                    WorkingSetAfterBytes = workingSetAfter,
+                    WorkingSetRegressionPercent = workingSetRegressionPercent,
+                    NormalizedWorkingSetRegressionPercent = normalizedWorkingSetRegressionPercent,
+                    ManagedMemoryBeforeBytes = managedMemoryBefore,
+                    ManagedMemoryAfterBytes = managedMemoryAfter,
+                    ManagedMemoryAfterFullGcBytes = managedMemoryAfterFullGc,
+                    WorkingSetAfterFullGcBytes = workingSetAfterFullGc,
+                    LiveManagedMemoryRegressionPercent = liveManagedMemoryRegressionPercent,
+                    Gen2Collections = GC.CollectionCount(2) - gen2Before,
+                    Message = ok
+                        ? $"{count:N0}-item logical catalog search/filter/sort stayed exact, bounded, and responsive"
+                        : "logical catalog interaction gate did not meet the expected result",
+                };
+            }
+            catch (Exception ex)
+            {
+                heartbeat.Stop();
+                result = new CatalogInteractionSmokeResult
+                {
+                    RequestedCount = count,
+                    Message = ex.Message,
+                };
+            }
+            finally
+            {
+                heartbeat.Stop();
+                window.Close();
+            }
+
+            WriteCatalogInteractionSmokeResult(resultFullPath, result);
+            Shutdown(result.Ok ? 0 : 1);
+        }, DispatcherPriority.ContextIdle);
+    }
+
+    private static void WriteCatalogInteractionSmokeResult(
+        string resultFullPath,
+        CatalogInteractionSmokeResult result)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
+        File.WriteAllText(
+            resultFullPath,
+            JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
     private void CaptureCatalogStressSmoke(string resultPath, string[] args)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
         int count = ArgInt(args, "--count", 20_000);
         int folderCount = ArgInt(args, "--folder-count", 1);
-        if (count < 2 || folderCount < 1 || folderCount > count)
+        int viewportChurnSeconds = ArgInt(args, "--viewport-churn-seconds", 0);
+        if (count < 2 || folderCount < 1 || folderCount > count || viewportChurnSeconds < 0 || viewportChurnSeconds > 120)
         {
             WriteCatalogStressSmokeResult(resultFullPath, new CatalogStressSmokeResult
             {
                 RequestedCount = count,
                 RequestedFolderCount = folderCount,
-                Message = "--count must be at least 2 and --folder-count must be 1..count",
+                Message = "--count must be at least 2, --folder-count must be 1..count, and --viewport-churn-seconds must be 0..120",
             });
             Shutdown(1);
             return;
@@ -8832,6 +9085,91 @@ public partial class App : Application
                 double gridViewportHeight = win.GridViewportHeightForSmoke;
                 int gridInitialFirstVisible = win.GridFirstVisibleIndexForSmoke;
                 int gridInitialLastVisible = win.GridLastVisibleIndexForSmoke;
+                var viewportChurn = new ViewportChurnSmokeResult
+                {
+                    RequestedSeconds = viewportChurnSeconds,
+                    Ok = viewportChurnSeconds == 0,
+                };
+                if (viewportChurnSeconds > 0)
+                {
+                    heartbeatStage = "viewport-churn";
+                    int gapStart = dispatcherGapSegments.Count;
+                    process.Refresh();
+                    long churnWorkingSetBefore = process.WorkingSet64;
+                    var selectionLatencies = new List<long>();
+                    var previewLatencies = new List<long>();
+                    int selectionLosses = 0;
+                    int stalePreviewCount = 0;
+                    int thumbnailTimeouts = 0;
+                    int iteration = 0;
+                    var churnWatch = Stopwatch.StartNew();
+                    while (churnWatch.Elapsed < TimeSpan.FromSeconds(viewportChurnSeconds))
+                    {
+                        int index = (int)(((long)iteration * 7_919) % count);
+                        string fileName = $"stress-{index:D6}.png";
+                        var selectionWatch = Stopwatch.StartNew();
+                        bool selected = win.SelectFileNameForSmoke(fileName);
+                        GridSelectionVisualSmokeSnapshot visual = await win.WaitForGridSelectionVisualForSmokeAsync(fileName);
+                        selectionWatch.Stop();
+                        selectionLatencies.Add(selectionWatch.ElapsedMilliseconds);
+                        if (!selected || !visual.CanonicalSelected || !visual.ContainerRealized || !visual.ContainerSelected)
+                            selectionLosses++;
+
+                        var previewWatch = Stopwatch.StartNew();
+                        PreviewDecodeSmokeSnapshot preview = await win.WaitForCurrentPreviewDecodeForSmokeAsync(fileName);
+                        previewWatch.Stop();
+                        previewLatencies.Add(previewWatch.ElapsedMilliseconds);
+                        if (!preview.StableLatestSelection)
+                            stalePreviewCount++;
+                        if (!await win.WaitForThumbnailForSmokeAsync(fileName, timeoutMilliseconds: 750))
+                            thumbnailTimeouts++;
+                        iteration++;
+                    }
+                    churnWatch.Stop();
+                    heartbeatStage = "viewport-churn-settle";
+                    await Task.Delay(250);
+                    process.Refresh();
+                    long churnWorkingSetAfter = process.WorkingSet64;
+                    int stallsOver250 = dispatcherGapSegments
+                        .Skip(gapStart)
+                        .Count(static gap => gap.DurationMs > 250);
+                    viewportChurn = new ViewportChurnSmokeResult
+                    {
+                        RequestedSeconds = viewportChurnSeconds,
+                        ElapsedMs = churnWatch.ElapsedMilliseconds,
+                        Iterations = iteration,
+                        SelectionLossCount = selectionLosses,
+                        StalePreviewCount = stalePreviewCount,
+                        ThumbnailTimeoutCount = thumbnailTimeouts,
+                        SelectionP95Ms = SmokePercentile(selectionLatencies, 0.95),
+                        CachedPreviewP95Ms = SmokePercentile(previewLatencies, 0.95),
+                        UiStallsOver250Ms = stallsOver250,
+                        WorkingSetBeforeBytes = churnWorkingSetBefore,
+                        WorkingSetAfterBytes = churnWorkingSetAfter,
+                        WorkingSetRegressionPercent = churnWorkingSetBefore <= 0
+                            ? 0
+                            : ((churnWorkingSetAfter / (double)churnWorkingSetBefore) - 1) * 100,
+                        ResidentThumbnailCount = win.ResidentThumbnailCountForSmoke,
+                        MaxResidentThumbnailCount = win.MaxResidentThumbnailCountForSmoke,
+                        ResidentThumbnailLimit = win.ResidentThumbnailLimitForSmoke,
+                        MaxActiveThumbnailWorkers = win.MaxActiveThumbnailDecodeWorkersForSmoke,
+                        ThumbnailWorkerLimit = win.ThumbnailDecodeWorkerLimitForSmoke,
+                        ViewportScheduleCount = win.ThumbnailViewportScheduleCountForSmoke,
+                        ViewportCancelCount = win.ThumbnailViewportCancelCountForSmoke,
+                        DuplicateScheduleSuppressedCount = win.ThumbnailViewportDuplicateSuppressedCountForSmoke,
+                    };
+                    viewportChurn.Ok = viewportChurn.Iterations >= 10
+                        && viewportChurn.SelectionLossCount == 0
+                        && viewportChurn.StalePreviewCount == 0
+                        && viewportChurn.ThumbnailTimeoutCount == 0
+                        && viewportChurn.SelectionP95Ms <= 100
+                        && viewportChurn.CachedPreviewP95Ms <= 150
+                        && viewportChurn.UiStallsOver250Ms == 0
+                        && viewportChurn.WorkingSetRegressionPercent <= 10
+                        && viewportChurn.ResidentThumbnailCount <= viewportChurn.ResidentThumbnailLimit
+                        && viewportChurn.MaxResidentThumbnailCount <= viewportChurn.ResidentThumbnailLimit
+                        && viewportChurn.MaxActiveThumbnailWorkers <= viewportChurn.ThumbnailWorkerLimit;
+                }
                 heartbeatStage = "list-switch";
                 var listSwitchWatch = Stopwatch.StartNew();
                 bool listMode = win.SetListModeForSmoke();
@@ -9153,6 +9491,7 @@ public partial class App : Application
                         ScanElapsedMs = warmLoadMetrics?.ScanMs,
                         MaterializeElapsedMs = warmLoadMetrics?.MaterializeMs,
                         CatalogReadyElapsedMs = warmLoadMetrics?.CatalogReadyMs,
+                        FirstUsableViewportElapsedMs = warmLoadMetrics?.FirstUsableViewportMs,
                         MetadataElapsedMs = warmLoadMetrics?.MetadataMs,
                         MetadataIndexReadMs = warmLoadMetrics?.MetadataIndexReadMs,
                         MetadataIndexWriteMs = warmLoadMetrics?.MetadataIndexWriteMs,
@@ -9328,6 +9667,7 @@ public partial class App : Application
                     InitialFilterElapsedMs = loadMetrics?.InitialFilterMs,
                     CatalogStatsElapsedMs = loadMetrics?.CatalogStatsMs,
                     CatalogReadyElapsedMs = loadMetrics?.CatalogReadyMs,
+                    FirstUsableViewportElapsedMs = loadMetrics?.FirstUsableViewportMs,
                     MetadataElapsedMs = loadMetrics?.MetadataMs,
                     ThumbnailElapsedMs = loadMetrics?.ThumbnailMs,
                     ListSwitchElapsedMs = listSwitchWatch.ElapsedMilliseconds,
@@ -9415,6 +9755,7 @@ public partial class App : Application
                     BrowserThumbnailCacheCandidateCount = browserCacheCandidatePaths.Count,
                     BrowserThumbnailPreciseCandidateCreated = File.Exists(browserCacheCandidatePaths[0]),
                     BrowserThumbnailCacheHits = win.ThumbnailBrowserCacheHitsForSmoke,
+                    ViewportChurn = viewportChurn,
                     Warm = warm,
                     Ok = sourceCountBefore == count
                         && sourceCountAfterCold == count
@@ -9469,6 +9810,7 @@ public partial class App : Application
                         && win.EnhancedCandidateCountForSmoke == 0
                         && browserCacheCandidatePaths.Count == 2
                         && win.ThumbnailBrowserCacheHitsForSmoke >= 1
+                        && viewportChurn.Ok
                         && warm.Ok,
                 };
                 result.Message = result.Ok
@@ -19619,6 +19961,19 @@ public partial class App : Application
         return int.TryParse(value, out int parsed) ? parsed : fallback;
     }
 
+    private static double SmokePercentile(IReadOnlyList<long> values, double percentile)
+    {
+        if (values.Count == 0)
+            return 0;
+        long[] sorted = values.OrderBy(static value => value).ToArray();
+        double rank = (sorted.Length - 1) * Math.Clamp(percentile, 0, 1);
+        int lower = (int)Math.Floor(rank);
+        int upper = (int)Math.Ceiling(rank);
+        return lower == upper
+            ? sorted[lower]
+            : sorted[lower] + ((rank - lower) * (sorted[upper] - sorted[lower]));
+    }
+
     private static int SelectFavoriteLevel(MainWindow window, string fileName)
         => window.SelectFileNameForSmoke(fileName) ? window.SelectedFavoriteLevelForSmoke : -1;
 
@@ -21992,6 +22347,44 @@ public partial class App : Application
         public bool LandingVisible { get; init; }
     }
 
+    private sealed class CatalogInteractionSmokeResult
+    {
+        public bool Ok { get; init; }
+        public string Message { get; init; } = "";
+        public int RequestedCount { get; init; }
+        public int CatalogCount { get; init; }
+        public int FilteredCount { get; init; }
+        public long SeedElapsedMs { get; init; }
+        public double SearchP95Ms { get; init; }
+        public double FilterP95Ms { get; init; }
+        public double SortP95Ms { get; init; }
+        public List<long> SearchSamplesMs { get; init; } = [];
+        public List<MainWindow.SearchFilterCompletion> SearchPhaseSamples { get; init; } = [];
+        public List<long> FilterSamplesMs { get; init; } = [];
+        public List<long> SortSamplesMs { get; init; } = [];
+        public bool CountsExact { get; init; }
+        public bool SearchCompletionsApplied { get; init; }
+        public bool SelectionStable { get; init; }
+        public string? SelectedFileName { get; init; }
+        public int GridItemsSourceCount { get; init; }
+        public int GridRealizedCount { get; init; }
+        public int GridRealizationLimit { get; init; }
+        public bool GridUsesFullExtentVirtualization { get; init; }
+        public int HeartbeatCount { get; init; }
+        public long DispatcherHeartbeatMaxGapMs { get; init; }
+        public List<string> HeartbeatGapSamples { get; init; } = [];
+        public long WorkingSetBeforeBytes { get; init; }
+        public long WorkingSetAfterBytes { get; init; }
+        public double WorkingSetRegressionPercent { get; init; }
+        public double NormalizedWorkingSetRegressionPercent { get; init; }
+        public long ManagedMemoryBeforeBytes { get; init; }
+        public long ManagedMemoryAfterBytes { get; init; }
+        public long ManagedMemoryAfterFullGcBytes { get; init; }
+        public long WorkingSetAfterFullGcBytes { get; init; }
+        public double LiveManagedMemoryRegressionPercent { get; init; }
+        public int Gen2Collections { get; init; }
+    }
+
     private sealed class CatalogStressSmokeResult
     {
         public bool Ok { get; set; }
@@ -22071,6 +22464,7 @@ public partial class App : Application
         public double? InitialFilterElapsedMs { get; set; }
         public double? CatalogStatsElapsedMs { get; set; }
         public double? CatalogReadyElapsedMs { get; set; }
+        public double? FirstUsableViewportElapsedMs { get; set; }
         public double? MetadataElapsedMs { get; set; }
         public double? ThumbnailElapsedMs { get; set; }
         public long ListSwitchElapsedMs { get; set; }
@@ -22158,7 +22552,33 @@ public partial class App : Application
         public int BrowserThumbnailCacheCandidateCount { get; set; }
         public bool BrowserThumbnailPreciseCandidateCreated { get; set; }
         public int BrowserThumbnailCacheHits { get; set; }
+        public ViewportChurnSmokeResult ViewportChurn { get; set; } = new() { Ok = true };
         public WarmCatalogStressSmokeResult Warm { get; set; } = new();
+    }
+
+    private sealed class ViewportChurnSmokeResult
+    {
+        public bool Ok { get; set; }
+        public int RequestedSeconds { get; set; }
+        public long ElapsedMs { get; set; }
+        public int Iterations { get; set; }
+        public int SelectionLossCount { get; set; }
+        public int StalePreviewCount { get; set; }
+        public int ThumbnailTimeoutCount { get; set; }
+        public double SelectionP95Ms { get; set; }
+        public double CachedPreviewP95Ms { get; set; }
+        public int UiStallsOver250Ms { get; set; }
+        public long WorkingSetBeforeBytes { get; set; }
+        public long WorkingSetAfterBytes { get; set; }
+        public double WorkingSetRegressionPercent { get; set; }
+        public int ResidentThumbnailCount { get; set; }
+        public int MaxResidentThumbnailCount { get; set; }
+        public int ResidentThumbnailLimit { get; set; }
+        public int MaxActiveThumbnailWorkers { get; set; }
+        public int ThumbnailWorkerLimit { get; set; }
+        public int ViewportScheduleCount { get; set; }
+        public int ViewportCancelCount { get; set; }
+        public int DuplicateScheduleSuppressedCount { get; set; }
     }
 
     private sealed class WarmCatalogStressSmokeResult
@@ -22174,6 +22594,7 @@ public partial class App : Application
         public double? ScanElapsedMs { get; set; }
         public double? MaterializeElapsedMs { get; set; }
         public double? CatalogReadyElapsedMs { get; set; }
+        public double? FirstUsableViewportElapsedMs { get; set; }
         public double? MetadataElapsedMs { get; set; }
         public double? MetadataIndexReadMs { get; set; }
         public double? MetadataIndexWriteMs { get; set; }

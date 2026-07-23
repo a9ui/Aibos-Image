@@ -14,10 +14,10 @@
 
   <Window.Resources>
     <ItemsPanelTemplate x:Key="VirtualizedCardItemsPanel">
-      <local:VirtualizingWrapPanel HorizontalSpacing="14" VerticalSpacing="14" OverscanRows="2"/>
+      <local:VirtualizingWrapPanel HorizontalSpacing="14" VerticalSpacing="14" OverscanRows="0"/>
     </ItemsPanelTemplate>
     <ItemsPanelTemplate x:Key="GroupedVirtualizedCardItemsPanel">
-      <local:VirtualizingWrapPanel HorizontalSpacing="14" VerticalSpacing="14" OverscanRows="2" ShowGroupHeaders="True"/>
+      <local:VirtualizingWrapPanel HorizontalSpacing="14" VerticalSpacing="14" OverscanRows="0" ShowGroupHeaders="True"/>
     </ItemsPanelTemplate>
   </Window.Resources>
 

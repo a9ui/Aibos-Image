@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.Collections.ObjectModel;
@@ -44,6 +45,10 @@ public partial class MainWindow : Window
 
     private const int MinParallelThumbnailCount = 32;
     private const int MaxThumbnailDecodeWorkers = 12;
+    private const int InitialThumbnailPrefetchCount = 16;
+    private const int MaxResidentThumbnailCount = 128;
+    private const int ImmediateViewportThumbnailCount = 1;
+    private const int ViewportThumbnailSettleDelayMilliseconds = 250;
     private const int MaxMetadataReadWorkers = 4;
     private const int MaxPngMetadataChunkBytes = 4 * 1024 * 1024;
     private const long MaxOriginalSizeDecodePixelCount = 10_000_000;
@@ -51,7 +56,7 @@ public partial class MainWindow : Window
     private const int MaxDecodedLongEdge = 16_384;
     private const int DecodePixelBudgetMultiplier = 5;
     private const int DecodeLongEdgeMultiplier = 8;
-    private const int SearchFilterDebounceMilliseconds = 150;
+    private const int SearchFilterDebounceMilliseconds = 75;
     private const int SearchStateSaveDebounceMilliseconds = 300;
     private const int MaxVirtualizedContainerSmokeCount = 512;
     private const int MaxMaterializedSelectionVisualItems = 2_048;
@@ -77,6 +82,7 @@ public partial class MainWindow : Window
     private const double ModalZoomWheelStep = 1.1;
     private const int ModalChromeTransientMilliseconds = 900;
     private const double ModalFilmstripHoverZone = 128;
+    private const int MaxModalFilmstripWindowItems = 101;
     private const string DisplayStyleStandard = "standard";
     private const string DisplayStyleCompact = "compact";
     private const string DisplayStylePoster = "poster";
@@ -104,6 +110,7 @@ public partial class MainWindow : Window
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
     private readonly ResettableObservableCollection<Tile> _tiles = new();
+    private readonly ResettableObservableCollection<Tile> _modalFilmstripTiles = new();
     private readonly ObservableCollection<string> _landingFolderSet = new();
     private readonly ObservableCollection<FolderBucketView> _folderBucketViews = new();
     private readonly ObservableCollection<RecentFolderSetView> _recentFolderSetViews = new();
@@ -149,7 +156,18 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim _thumbnailDecodeGate = new(MaxThumbnailDecodeWorkers, MaxThumbnailDecodeWorkers);
     private readonly ConcurrentDictionary<string, byte> _thumbnailLoadsInFlight = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _thumbnailDecodeFailures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<Tile> _residentThumbnailLru = new();
+    private readonly Dictionary<string, LinkedListNode<Tile>> _residentThumbnailNodes = new(StringComparer.OrdinalIgnoreCase);
+    private int _maxResidentThumbnailCount;
+    private int _activeThumbnailDecodeWorkers;
+    private int _maxActiveThumbnailDecodeWorkers;
+    private int _thumbnailViewportScheduleCount;
+    private int _thumbnailViewportCancelCount;
+    private int _thumbnailViewportDuplicateSuppressedCount;
     private CancellationTokenSource? _thumbnailViewportCts;
+    private string? _thumbnailViewportSignature;
+    private long _thumbnailViewportRevision;
+    private double _lastListThumbnailVerticalOffset;
     private VirtualizingWrapPanel? _galleryVirtualizingPanel;
     private int _thumbnailBrowserCacheHits;
     private int _lastInitialUnseenCount;
@@ -317,6 +335,8 @@ public partial class MainWindow : Window
     private long _searchFilterGeneration;
     private long _scheduledSearchFilterGeneration;
     private long _lastAppliedSearchFilterGeneration;
+    private long _catalogContentRevision;
+    private long _interactiveSortGeneration;
     private TaskCompletionSource<SearchFilterCompletion>? _pendingSearchFilterCompletion;
     private string _displayStyle = DisplayStyleStandard;
     private string _aspectMode = AspectOriginalValue;
@@ -433,13 +453,17 @@ public partial class MainWindow : Window
         RecentFolderSetList.ItemsSource = _recentFolderSetViews;
         PreviewTabList.ItemsSource = _previewTabs;
         SearchHistoryList.ItemsSource = _searchHistoryEntries;
-        ModalFilmstripLayoutList.ItemsSource = _tiles;
-        ModalFilmstripOverlayList.ItemsSource = _tiles;
+        // Keep the two normally hidden filmstrips off the complete catalog.
+        // Otherwise every search reset is observed by four ItemControls and a
+        // 100k catalog can retain large generator/view state for an invisible UI.
+        ModalFilmstripLayoutList.ItemsSource = _modalFilmstripTiles;
+        ModalFilmstripOverlayList.ItemsSource = _modalFilmstripTiles;
         RestoreState();
         LoadThumbnailStatusBorderSettings();
         BuildSampleTiles();
         _allTiles.AddRange(_tiles);
         _tiles.Clear();
+        ReorderFullCatalogForSort();
         ApplyCardLayoutToAllTiles();
 
         ConfigureGalleryItemsSources();
@@ -462,6 +486,7 @@ public partial class MainWindow : Window
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
+            _interactiveSortGeneration++;
             if (Application.Current is App app)
                 app.AccessibilityPaletteChanged -= App_AccessibilityPaletteChanged;
             Interlocked.Increment(ref _activeAlbumAsyncGeneration);
@@ -525,11 +550,26 @@ public partial class MainWindow : Window
     private void ConfigureRowsItemsSource(bool forceGroupedView)
     {
         // Group construction in WPF's stock ListBox walks the complete view.
-        // Keep the hidden List surface cheap; build its Created groups only when
-        // the user actually switches to List mode.
-        RowsList.ItemsSource = forceGroupedView && UsesDateGrouping
-            ? BuildGalleryView(_tiles, groupByDate: true)
-            : _tiles;
+        // Detach the hidden List surface entirely: even a collapsed ListBox
+        // observes every Reset and retains generator/view bookkeeping for the
+        // 100k source. Reattach and reconcile its selection when List is shown.
+        bool previousSync = _syncingSelection;
+        _syncingSelection = true;
+        try
+        {
+            if (!forceGroupedView)
+            {
+                RowsList.ItemsSource = null;
+                return;
+            }
+            RowsList.ItemsSource = UsesDateGrouping
+                ? BuildGalleryView(_tiles, groupByDate: true)
+                : _tiles;
+        }
+        finally
+        {
+            _syncingSelection = previousSync;
+        }
     }
 
     private void AttachGalleryVirtualizationPanel()
@@ -609,7 +649,11 @@ public partial class MainWindow : Window
         if (ReferenceEquals(generator, CardsList.ItemContainerGenerator))
             QueueSparseSelectionVisualSync(CardsList, grid: true);
         else if (ReferenceEquals(generator, RowsList.ItemContainerGenerator))
+        {
             QueueSparseSelectionVisualSync(RowsList, grid: false);
+            if (RowsList.Visibility == Visibility.Visible)
+                Dispatcher.BeginInvoke(ScheduleListThumbnailViewport, DispatcherPriority.Render);
+        }
     }
 
     private void ScheduleThumbnailViewportRange(
@@ -636,32 +680,46 @@ public partial class MainWindow : Window
         for (int index = firstVisible; index <= lastVisible; index++)
         {
             Tile tile = _tiles[index];
-            if (tile.IsRealFile && tile.Thumbnail is null && added.Add(tile.Path))
+            if (tile.Thumbnail is not null)
+                TouchResidentThumbnail(tile);
+            else if (tile.IsRealFile && added.Add(tile.Path))
                 candidates.Add(tile);
         }
         for (int index = firstRealized; index <= lastRealized; index++)
         {
             Tile tile = _tiles[index];
-            if (tile.IsRealFile && tile.Thumbnail is null && added.Add(tile.Path))
+            if (tile.Thumbnail is not null)
+                TouchResidentThumbnail(tile);
+            else if (tile.IsRealFile && added.Add(tile.Path))
                 candidates.Add(tile);
         }
 
         if (candidates.Count == 0)
             return;
 
-        ScheduleThumbnailCandidates(candidates);
+        string signature = $"grid|{_loadGeneration}|{_thumbnailViewportRevision}|{firstVisible}|{lastVisible}";
+        ScheduleThumbnailCandidates(candidates, signature);
     }
 
-    private void ScheduleThumbnailCandidates(IReadOnlyList<Tile> candidates)
+    private void ScheduleThumbnailCandidates(IReadOnlyList<Tile> candidates, string signature)
     {
         if (candidates.Count == 0)
             return;
+
+        if (_thumbnailViewportCts is not null
+            && string.Equals(_thumbnailViewportSignature, signature, StringComparison.Ordinal))
+        {
+            _thumbnailViewportDuplicateSuppressedCount++;
+            return;
+        }
 
         CancelThumbnailViewportLoading();
         CancellationTokenSource cts = _loadCts is { } loadCts
             ? CancellationTokenSource.CreateLinkedTokenSource(loadCts.Token)
             : new CancellationTokenSource();
         _thumbnailViewportCts = cts;
+        _thumbnailViewportSignature = signature;
+        _thumbnailViewportScheduleCount++;
         _ = LoadThumbnailViewportAsync(candidates, _loadGeneration, cts);
     }
 
@@ -683,30 +741,57 @@ public partial class MainWindow : Window
         if (viewer is null)
             return;
 
-        var candidates = new List<(Tile Tile, bool Visible, double Distance)>();
+        double currentOffset = viewer.VerticalOffset;
+        bool movingDown = currentOffset >= _lastListThumbnailVerticalOffset;
+        _lastListThumbnailVerticalOffset = currentOffset;
+        var candidates = new List<(Tile Tile, bool Visible, double Distance, double Top)>();
         foreach (ListBoxItem item in FindVisualDescendants<ListBoxItem>(RowsList))
         {
-            if (item.DataContext is not Tile { IsRealFile: true, Thumbnail: null } tile)
+            if (item.DataContext is not Tile { IsRealFile: true } tile)
                 continue;
+            if (tile.Thumbnail is not null)
+            {
+                TouchResidentThumbnail(tile);
+                continue;
+            }
             try
             {
                 double top = item.TransformToAncestor(viewer).Transform(new Point(0, 0)).Y;
                 double bottom = top + item.ActualHeight;
                 bool visible = bottom >= 0 && top <= viewer.ViewportHeight;
                 double distance = Math.Abs(((top + bottom) / 2) - (viewer.ViewportHeight / 2));
-                candidates.Add((tile, visible, distance));
+                candidates.Add((tile, visible, distance, top));
             }
             catch (InvalidOperationException)
             {
             }
         }
 
-        ScheduleThumbnailCandidates(candidates
-            .OrderByDescending(static candidate => candidate.Visible)
-            .ThenBy(static candidate => candidate.Distance)
+        List<Tile> visibleCandidates = candidates
+            .Where(static candidate => candidate.Visible)
+            .OrderBy(static candidate => candidate.Top)
             .Select(static candidate => candidate.Tile)
+            .ToList();
+        // Decode the leading edge in the current scroll direction before the
+        // quiet-period queue. Direct jumps to either end therefore cannot be
+        // starved by the intermediate layouts produced by ScrollIntoView.
+        IEnumerable<Tile> leadingEdge = movingDown
+            ? visibleCandidates.TakeLast(1)
+            : visibleCandidates.Take(1);
+        List<Tile> orderedCandidates = leadingEdge
+            .Concat(candidates
+                .OrderByDescending(static candidate => candidate.Visible)
+                .ThenBy(static candidate => candidate.Distance)
+                .Select(static candidate => candidate.Tile))
             .DistinctBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase)
-            .ToList());
+            .ToList();
+        string visibleSignature = string.Join(
+            '\u001f',
+            candidates.Where(static candidate => candidate.Visible)
+                .OrderBy(static candidate => candidate.Top)
+                .Select(static candidate => candidate.Tile.Path));
+        string signature = $"list|{_loadGeneration}|{_thumbnailViewportRevision}|{visibleSignature}";
+        ScheduleThumbnailCandidates(orderedCandidates, signature);
     }
 
     private async Task LoadThumbnailViewportAsync(
@@ -716,7 +801,33 @@ public partial class MainWindow : Window
     {
         try
         {
-            await LoadThumbnailCandidatesAsync(candidates, generation, cts.Token);
+            Tile? selected = SelectedTile();
+            List<Tile> ordered = candidates
+                .OrderByDescending(tile => ReferenceEquals(tile, selected))
+                .ToList();
+            int immediateCount = Math.Min(ImmediateViewportThumbnailCount, ordered.Count);
+            CancellationToken priorityToken = _loadCts?.Token ?? CancellationToken.None;
+            await LoadThumbnailCandidatesAsync(
+                ordered.Take(immediateCount).ToArray(),
+                generation,
+                priorityToken,
+                maxBatchConcurrency: 4);
+            cts.Token.ThrowIfCancellationRequested();
+
+            if (immediateCount < ordered.Count)
+            {
+                // During a fast scroll/selection run, keep the selected image
+                // and nearest visible cards responsive without decoding every
+                // transient overscan row. Once the viewport stays put, fill
+                // the remainder after a short quiet period.
+                await Task.Delay(ViewportThumbnailSettleDelayMilliseconds, cts.Token);
+                await LoadThumbnailCandidatesAsync(
+                    ordered.Skip(immediateCount).ToArray(),
+                    generation,
+                    cts.Token,
+                    maxBatchConcurrency: 4);
+                cts.Token.ThrowIfCancellationRequested();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -725,7 +836,10 @@ public partial class MainWindow : Window
         {
             bool wasCurrent = ReferenceEquals(_thumbnailViewportCts, cts);
             if (wasCurrent)
+            {
                 _thumbnailViewportCts = null;
+                _thumbnailViewportSignature = null;
+            }
             cts.Dispose();
             if (wasCurrent && candidates.Any(tile =>
                     tile.Thumbnail is null && !_thumbnailDecodeFailures.ContainsKey(tile.Path)))
@@ -757,6 +871,9 @@ public partial class MainWindow : Window
     {
         CancellationTokenSource? cts = _thumbnailViewportCts;
         _thumbnailViewportCts = null;
+        _thumbnailViewportSignature = null;
+        if (cts is not null && !cts.IsCancellationRequested)
+            _thumbnailViewportCancelCount++;
         cts?.Cancel();
     }
 
@@ -879,6 +996,7 @@ public partial class MainWindow : Window
 
     private sealed record FilterSnapshot(
         FilterTileSnapshot[] Tiles,
+        int TileCount,
         bool AlbumActive,
         FrozenSet<string> AlbumMemberPaths,
         FrozenDictionary<string, int> AlbumMemberOrder,
@@ -890,28 +1008,29 @@ public partial class MainWindow : Window
         FrozenSet<int> FavoriteLevels,
         FrozenSet<string> HiddenFolderBuckets,
         DateTime? DateFromLocal,
-        DateTime? DateToLocal,
-        string SortBy,
-        string RandomSortSeed);
+        DateTime? DateToLocal);
 
-    private sealed record FilterTileSnapshot(
+    private readonly record struct FilterTileSnapshot(
         Tile Tile,
-        string FileName,
         string Prompt,
-        string Path,
-        bool IsRealFile,
         int FavoriteLevel,
         bool Enhanced,
         bool Unseen,
-        string FolderBucketKey,
-        DateTime ModifiedUtc,
         DateTime CreatedUtc);
 
-    private sealed record FilterResult(List<Tile> Tiles);
+    private sealed record FilterResult(Tile[] Tiles, int Count);
 
     private sealed record FileDragSession(FrameworkElement Surface, Tile Origin, Point Start, bool OriginWasSelected);
 
-    public readonly record struct SearchFilterCompletion(bool Applied, bool Discarded, string? Error)
+    public readonly record struct SearchFilterCompletion(
+        bool Applied,
+        bool Discarded,
+        string? Error,
+        long CaptureMs = 0,
+        long ComputeMs = 0,
+        long ApplyMs = 0,
+        long CleanupMs = 0,
+        int Gen2Collections = 0)
     {
         public static SearchFilterCompletion AppliedResult => new(true, false, null);
         public static SearchFilterCompletion DiscardedResult => new(false, true, null);
@@ -1194,6 +1313,11 @@ public partial class MainWindow : Window
         _previewDeferredDecodeCount = 0;
         _previewDeferredDecodeMs = 0;
         CancelThumbnailViewportLoading();
+        ClearResidentThumbnails();
+        _maxActiveThumbnailDecodeWorkers = 0;
+        _thumbnailViewportScheduleCount = 0;
+        _thumbnailViewportCancelCount = 0;
+        _thumbnailViewportDuplicateSuppressedCount = 0;
         _thumbnailDecodeFailures.Clear();
         _thumbnailBrowserCacheHits = 0;
         // A fresh enumeration is allowed to discover a newly-created file at a
@@ -1284,8 +1408,26 @@ public partial class MainWindow : Window
                                 discovered.TryAdd(path, 0);
                             }
                         });
-                    return discovered.Keys
-                        .Select(path => new FileInfo(path))
+                    string[] discoveredPaths = discovered.Keys.ToArray();
+                    var discoveredFiles = new FileInfo[discoveredPaths.Length];
+                    Parallel.For(
+                        0,
+                        discoveredPaths.Length,
+                        new ParallelOptions
+                        {
+                            CancellationToken = cts.Token,
+                            MaxDegreeOfParallelism = Math.Max(1, Math.Min(4, Environment.ProcessorCount)),
+                        },
+                        index =>
+                        {
+                            var file = new FileInfo(discoveredPaths[index]);
+                            // Prime the FileInfo metadata cache concurrently.
+                            // Sorting and tile publication reuse the same object
+                            // instead of serializing 10k filesystem metadata reads.
+                            _ = file.LastWriteTimeUtc;
+                            discoveredFiles[index] = file;
+                        });
+                    return discoveredFiles
                         .OrderByDescending(file => file.LastWriteTimeUtc)
                         .ToList();
                 },
@@ -1340,6 +1482,9 @@ public partial class MainWindow : Window
         long initialFilterMs = 0;
         long catalogStatsMs = 0;
         long catalogReadyMs = 0;
+        long firstUsableViewportMs = 0;
+        Task<ThumbnailLoadMetrics> initialThumbnailPrefetchTask = Task.FromResult(
+            new ThumbnailLoadMetrics(0, 0, 0, 0));
         Tile? restoredActivePreviewTile = null;
         Tile? concurrentRecycleSelectionTile = null;
         bool previousSuppress = _suppressStateSave;
@@ -1419,6 +1564,18 @@ public partial class MainWindow : Window
             if (!IsCurrentLoad(generation, cts))
                 return;
 
+            // Decode a bounded likely-first viewport while the mandatory
+            // pre-publication existence snapshot runs. The post-publication
+            // viewport pass remains authoritative for restored filters and
+            // scroll positions; the in-flight map prevents duplicate reads.
+            initialThumbnailPrefetchTask = LoadThumbnailCandidatesAsync(
+                SortTiles(preparedTiles, _sortBy, _randomSortSeed)
+                    .Take(InitialThumbnailPrefetchCount)
+                    .ToArray(),
+                generation,
+                cts.Token,
+                updateProgress: false);
+
             var catalogPublishWatch = Stopwatch.StartNew();
             HashSet<string> existingPreparedPaths;
             try
@@ -1453,6 +1610,7 @@ public partial class MainWindow : Window
             SetLandingFolderSet(_currentFolderSet);
             _allTiles.Clear();
             _allTiles.AddRange(publishableTiles);
+            ReorderFullCatalogForSort();
             ReportScanPublicationWarning(BuildScanWarning(
                 scanAccessFailures.Count,
                 scanBoundarySkips.Count,
@@ -1543,6 +1701,11 @@ public partial class MainWindow : Window
         else if (restoredActivePreviewTile is not null)
             _restoredSelectedPath = restoredActivePreviewTile.Path;
         SelectRestoredOrFirst();
+        Task<ThumbnailLoadMetrics> visibleThumbnailTask = LoadThumbnailsAsync(cts.Token);
+        Task<ThumbnailLoadMetrics> thumbnailTask = MergeThumbnailLoadsAsync(
+            initialThumbnailPrefetchTask,
+            visibleThumbnailTask);
+        Task<long> firstUsableViewportTask = CaptureCompletionElapsedAsync(thumbnailTask, totalWatch);
         ReconcileOpenSurfacesAfterCatalogReload(
             modalWasVisibleBeforePublish,
             modalHadFocusBeforePublish,
@@ -1565,7 +1728,6 @@ public partial class MainWindow : Window
             generation,
             cts,
             metadataDelayForSmokeMs);
-        Task<ThumbnailLoadMetrics> thumbnailTask = LoadThumbnailsAsync(cts.Token);
 
         try
         {
@@ -1597,6 +1759,7 @@ public partial class MainWindow : Window
         }
         if (!IsCurrentLoad(generation, cts))
             return;
+        firstUsableViewportMs = Math.Max(catalogReadyMs, await firstUsableViewportTask);
         totalWatch.Stop();
         LastLoadMetrics = LoadMetrics.Create(
             resolvedFolderSummary,
@@ -1620,6 +1783,7 @@ public partial class MainWindow : Window
         LastLoadMetrics.InitialFilterMs = initialFilterMs;
         LastLoadMetrics.CatalogStatsMs = catalogStatsMs;
         LastLoadMetrics.CatalogReadyMs = catalogReadyMs;
+        LastLoadMetrics.FirstUsableViewportMs = firstUsableViewportMs;
         LastLoadMetrics.MetadataCacheHits = metadata.CacheHits;
         LastLoadMetrics.MetadataCacheMisses = metadata.CacheMisses;
         LastLoadMetrics.MetadataIndexReadMs = metadata.IndexReadMs;
@@ -1970,7 +2134,22 @@ public partial class MainWindow : Window
     private async Task<ThumbnailLoadMetrics> LoadThumbnailsAsync(CancellationToken token)
     {
         List<Tile> snapshot;
-        if (_galleryVirtualizingPanel is { FirstRealizedIndex: >= 0 } panel)
+        Tile? selected = SelectedTile();
+        int selectedIndex = selected is null ? -1 : _tiles.IndexOf(selected);
+        if (selectedIndex >= 0)
+        {
+            // A new ItemsSource can briefly retain the previous panel range.
+            // Seed around the canonical selection instead: the first item for
+            // a cold open, or the restored item for a resumed catalog.
+            int start = Math.Clamp(
+                selectedIndex - (InitialThumbnailPrefetchCount / 2),
+                0,
+                Math.Max(0, _tiles.Count - InitialThumbnailPrefetchCount));
+            snapshot = _tiles.Skip(start).Take(InitialThumbnailPrefetchCount)
+                .Where(static tile => tile.IsRealFile && tile.Thumbnail is null)
+                .ToList();
+        }
+        else if (_galleryVirtualizingPanel is { FirstRealizedIndex: >= 0 } panel)
         {
             int first = Math.Clamp(panel.FirstRealizedIndex, 0, Math.Max(0, _tiles.Count - 1));
             int last = Math.Clamp(panel.LastRealizedIndex, first, Math.Max(first, _tiles.Count - 1));
@@ -1983,7 +2162,7 @@ public partial class MainWindow : Window
             // The first layout pass has not reported its range yet. Prime one
             // viewport-sized slice; the range event immediately supersedes it
             // if the user jumps elsewhere.
-            snapshot = _tiles.Take(64)
+            snapshot = _tiles.Take(InitialThumbnailPrefetchCount)
                 .Where(static tile => tile.IsRealFile && tile.Thumbnail is null)
                 .ToList();
         }
@@ -1991,17 +2170,50 @@ public partial class MainWindow : Window
         return await LoadThumbnailCandidatesAsync(snapshot, _loadGeneration, token);
     }
 
+    private static Task<ThumbnailLoadMetrics> MergeThumbnailLoadsAsync(
+        Task<ThumbnailLoadMetrics> prefetched,
+        Task<ThumbnailLoadMetrics> visible)
+        => Task.WhenAll(prefetched, visible).ContinueWith(
+            combined =>
+            {
+                ThumbnailLoadMetrics[] completed = combined.GetAwaiter().GetResult();
+                return new ThumbnailLoadMetrics(
+                    completed.Sum(static item => item.Total),
+                    completed.Max(static item => item.Workers),
+                    completed.Sum(static item => item.Completed),
+                    completed.Max(static item => item.ElapsedMs));
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+    private static Task<long> CaptureCompletionElapsedAsync(Task task, Stopwatch watch)
+        => task.ContinueWith(
+            completed =>
+            {
+                completed.GetAwaiter().GetResult();
+                return watch.ElapsedMilliseconds;
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
     private async Task<ThumbnailLoadMetrics> LoadThumbnailCandidatesAsync(
         IReadOnlyList<Tile> candidates,
         long generation,
-        CancellationToken token)
+        CancellationToken token,
+        bool updateProgress = true,
+        int maxBatchConcurrency = MaxThumbnailDecodeWorkers)
     {
         var watch = Stopwatch.StartNew();
-        int total = candidates.Count;
+        int requested = candidates.Count;
+        int scheduled = 0;
         int completed = 0;
-        int workers = Math.Max(1, Math.Min(MaxThumbnailDecodeWorkers, total));
-        if (total == 0)
+        int batchWorkerLimit = Math.Clamp(maxBatchConcurrency, 1, MaxThumbnailDecodeWorkers);
+        int workers = Math.Max(1, Math.Min(batchWorkerLimit, requested));
+        if (requested == 0)
             return new ThumbnailLoadMetrics(0, 0, 0, 0);
+        using var batchGate = new SemaphoreSlim(batchWorkerLimit, batchWorkerLimit);
 
         try
         {
@@ -2013,29 +2225,41 @@ public partial class MainWindow : Window
                 {
                     return;
                 }
+                Interlocked.Increment(ref scheduled);
                 try
                 {
-                    await _thumbnailDecodeGate.WaitAsync(token);
-                    BitmapSource? thumbnail;
+                    await batchGate.WaitAsync(token);
                     try
                     {
-                        int decodeWidth = (int)Math.Clamp(tile.CardWidth * 1.4, 180, 520);
-                        thumbnail = await Task.Run(() => LoadThumbnailBitmap(tile, decodeWidth), token);
+                        await _thumbnailDecodeGate.WaitAsync(token);
+                        int activeWorkers = Interlocked.Increment(ref _activeThumbnailDecodeWorkers);
+                        UpdateMaximumCounter(ref _maxActiveThumbnailDecodeWorkers, activeWorkers);
+                        BitmapSource? thumbnail;
+                        try
+                        {
+                            int decodeWidth = (int)Math.Clamp(tile.CardWidth * 1.4, 180, 520);
+                            thumbnail = await Task.Run(() => LoadThumbnailBitmap(tile, decodeWidth), token);
+                        }
+                        finally
+                        {
+                            Interlocked.Decrement(ref _activeThumbnailDecodeWorkers);
+                            _thumbnailDecodeGate.Release();
+                        }
+
+                        token.ThrowIfCancellationRequested();
+                        if (generation != _loadGeneration)
+                            return;
+
+                        if (thumbnail is null)
+                            _thumbnailDecodeFailures.TryAdd(tile.Path, 0);
+                        else
+                            StoreResidentThumbnail(tile, thumbnail);
+                        Interlocked.Increment(ref completed);
                     }
                     finally
                     {
-                        _thumbnailDecodeGate.Release();
+                        batchGate.Release();
                     }
-
-                    token.ThrowIfCancellationRequested();
-                    if (generation != _loadGeneration)
-                        return;
-
-                    if (thumbnail is null)
-                        _thumbnailDecodeFailures.TryAdd(tile.Path, 0);
-                    else
-                        tile.Thumbnail = thumbnail;
-                    Interlocked.Increment(ref completed);
                 }
                 catch (OperationCanceledException)
                 {
@@ -2056,15 +2280,61 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            return new ThumbnailLoadMetrics(total, workers, completed, watch.ElapsedMilliseconds);
+            return new ThumbnailLoadMetrics(scheduled, scheduled == 0 ? 0 : workers, completed, watch.ElapsedMilliseconds);
         }
         finally
         {
             watch.Stop();
         }
 
-        UpdateThumbnailProgress(completed, total);
-        return new ThumbnailLoadMetrics(total, workers, completed, watch.ElapsedMilliseconds);
+        if (updateProgress && scheduled > 0)
+            UpdateThumbnailProgress(completed, scheduled);
+        return new ThumbnailLoadMetrics(scheduled, scheduled == 0 ? 0 : workers, completed, watch.ElapsedMilliseconds);
+    }
+
+    private void StoreResidentThumbnail(Tile tile, BitmapSource thumbnail)
+    {
+        tile.Thumbnail = thumbnail;
+        TouchResidentThumbnail(tile);
+        while (_residentThumbnailLru.Count > MaxResidentThumbnailCount)
+        {
+            LinkedListNode<Tile>? oldest = _residentThumbnailLru.First;
+            if (oldest is null)
+                break;
+            _residentThumbnailLru.RemoveFirst();
+            _residentThumbnailNodes.Remove(oldest.Value.Path);
+            oldest.Value.Thumbnail = null;
+        }
+        _maxResidentThumbnailCount = Math.Max(_maxResidentThumbnailCount, _residentThumbnailLru.Count);
+    }
+
+    private void TouchResidentThumbnail(Tile tile)
+    {
+        if (tile.Thumbnail is null)
+        {
+            if (_residentThumbnailNodes.Remove(tile.Path, out LinkedListNode<Tile>? stale))
+                _residentThumbnailLru.Remove(stale);
+            return;
+        }
+
+        if (_residentThumbnailNodes.TryGetValue(tile.Path, out LinkedListNode<Tile>? existing))
+        {
+            _residentThumbnailLru.Remove(existing);
+            _residentThumbnailLru.AddLast(existing);
+            return;
+        }
+
+        LinkedListNode<Tile> added = _residentThumbnailLru.AddLast(tile);
+        _residentThumbnailNodes[tile.Path] = added;
+    }
+
+    private void ClearResidentThumbnails()
+    {
+        foreach (Tile tile in _residentThumbnailLru)
+            tile.Thumbnail = null;
+        _residentThumbnailLru.Clear();
+        _residentThumbnailNodes.Clear();
+        _maxResidentThumbnailCount = 0;
     }
 
     private BitmapSource? LoadThumbnailBitmap(Tile tile, int decodePixelWidth)
@@ -2146,14 +2416,24 @@ public partial class MainWindow : Window
 
     private static HashSet<string> SnapshotExistingPaths(IEnumerable<string> paths, CancellationToken cancellationToken)
     {
-        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string path in paths)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (File.Exists(path))
-                existing.Add(path);
-        }
-        return existing;
+        string[] candidates = paths as string[] ?? paths.ToArray();
+        var existing = new ConcurrentDictionary<string, byte>(
+            Math.Max(1, Math.Min(4, Environment.ProcessorCount)),
+            candidates.Length,
+            StringComparer.OrdinalIgnoreCase);
+        Parallel.ForEach(
+            candidates,
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = Math.Max(1, Math.Min(4, Environment.ProcessorCount)),
+            },
+            path =>
+            {
+                if (File.Exists(path))
+                    existing.TryAdd(path, 0);
+            });
+        return existing.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<string> EnumerateImageFiles(
@@ -3448,6 +3728,8 @@ public partial class MainWindow : Window
             return;
         if (!string.Equals(_modalSourceTilePath, selected.Path, StringComparison.OrdinalIgnoreCase))
             OpenModal();
+        else
+            SyncModalFilmstripSelection(selected);
     }
 
     private bool SaveFavorites()
@@ -5342,7 +5624,14 @@ public partial class MainWindow : Window
         var cardsScrollWatch = Stopwatch.StartNew();
         if (CardsList.Visibility == Visibility.Visible)
         {
-            CardsList.ScrollIntoView(primary);
+            int index = _tiles.IndexOf(primary);
+            // ListBox.ScrollIntoView queues a second ItemContainerGenerator
+            // navigation after a Reset. At 100k items that deferred WPF path
+            // can monopolize the dispatcher seconds after filtering has already
+            // completed. The gallery panel owns the exact extent, so move its
+            // viewport directly and let the bounded realization pass follow.
+            if (index < 0 || _galleryVirtualizingPanel?.BringItemIntoView(index) != true)
+                CardsList.ScrollIntoView(primary);
             QueueGridSelectionVisualSync(primary);
         }
         cardsScrollWatch.Stop();
@@ -6354,35 +6643,74 @@ public partial class MainWindow : Window
     {
         CancellationTokenSource cts = new();
         _searchFilterCts = cts;
+        int gen2Before = GC.CollectionCount(2);
+        var captureWatch = Stopwatch.StartNew();
         FilterSnapshot snapshot = CaptureFilterSnapshot();
+        captureWatch.Stop();
+        long computeMs = 0;
+        long applyMs = 0;
+        long cleanupMs;
+        FilterResult? result = null;
+        SearchFilterCompletion outcome;
         try
         {
-            FilterResult result = await Task.Run(() => ComputeFilterResult(snapshot, cts.Token), cts.Token);
+            result = await Task.Run(() =>
+            {
+                var computeWatch = Stopwatch.StartNew();
+                try
+                {
+                    return ComputeFilterResult(snapshot, cts.Token);
+                }
+                finally
+                {
+                    computeWatch.Stop();
+                    computeMs = computeWatch.ElapsedMilliseconds;
+                }
+            }, cts.Token);
             if (cts.IsCancellationRequested || generation != _searchFilterGeneration)
             {
-                completion?.TrySetResult(SearchFilterCompletion.DiscardedResult);
-                return;
+                outcome = SearchFilterCompletion.DiscardedResult;
             }
-
-            ApplyFilterResult(result, selectFirst: true);
-            _lastAppliedSearchFilterGeneration = generation;
-            completion?.TrySetResult(SearchFilterCompletion.AppliedResult);
+            else
+            {
+                var applyWatch = Stopwatch.StartNew();
+                ApplyFilterResult(result, selectFirst: true);
+                applyWatch.Stop();
+                applyMs = applyWatch.ElapsedMilliseconds;
+                _lastAppliedSearchFilterGeneration = generation;
+                outcome = SearchFilterCompletion.AppliedResult;
+            }
         }
         catch (OperationCanceledException)
         {
-            completion?.TrySetResult(SearchFilterCompletion.DiscardedResult);
+            outcome = SearchFilterCompletion.DiscardedResult;
         }
         catch (Exception ex)
         {
-            completion?.TrySetResult(new SearchFilterCompletion(false, false, ex.Message));
+            outcome = new SearchFilterCompletion(false, false, ex.Message);
             SetStatusToast("Search could not be updated. Retry the query.");
         }
         finally
         {
+            var cleanupWatch = Stopwatch.StartNew();
+            if (result is not null)
+                ReturnFilterResult(result);
+            ReturnFilterSnapshot(snapshot);
             if (ReferenceEquals(_searchFilterCts, cts))
                 _searchFilterCts = null;
             cts.Dispose();
+            cleanupWatch.Stop();
+            cleanupMs = cleanupWatch.ElapsedMilliseconds;
         }
+
+        completion?.TrySetResult(outcome with
+        {
+            CaptureMs = captureWatch.ElapsedMilliseconds,
+            ComputeMs = computeMs,
+            ApplyMs = applyMs,
+            CleanupMs = cleanupMs,
+            Gen2Collections = GC.CollectionCount(2) - gen2Before,
+        });
     }
 
     private void CancelPendingSearchFilter(bool completePending)
@@ -7608,100 +7936,123 @@ public partial class MainWindow : Window
 
         ++_searchFilterGeneration;
         CancelPendingSearchFilter(completePending: true);
-        ApplyFilterResult(ComputeFilterResult(CaptureFilterSnapshot(), CancellationToken.None), selectFirst);
+        FilterSnapshot snapshot = CaptureFilterSnapshot();
+        FilterResult? result = null;
+        try
+        {
+            result = ComputeFilterResult(snapshot, CancellationToken.None);
+            ApplyFilterResult(result, selectFirst);
+        }
+        finally
+        {
+            if (result is not null)
+                ReturnFilterResult(result);
+            ReturnFilterSnapshot(snapshot);
+        }
     }
 
     private FilterSnapshot CaptureFilterSnapshot()
     {
         string query = SearchInput?.Text?.Trim() ?? "";
-        return new FilterSnapshot(
-            _allTiles.Select(static tile => new FilterTileSnapshot(
-                tile,
-                tile.FileName,
-                tile.Prompt,
-                tile.Path,
-                tile.IsRealFile,
-                tile.Fav,
-                tile.Enhanced,
-                tile.Unseen,
-                tile.FolderBucketKey,
-                tile.ModifiedUtc,
-                tile.CreatedUtc)).ToArray(),
-            _activeAlbumId is not null,
-            _activeAlbumMemberPaths.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
-            _activeAlbumMemberOrder.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
-            query.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-            FavoriteOnlyFilter?.IsChecked == true,
-            UnfavoriteOnlyFilter?.IsChecked == true,
-            EnhancedOnlyFilter?.IsChecked == true,
-            UnseenOnlyFilter?.IsChecked == true,
-            _favoriteFilterLevels.ToFrozenSet(),
-            _hiddenFolderBuckets.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
-            _dateFromLocal,
-            _dateToLocal,
-            _sortBy,
-            _randomSortSeed);
+        int tileCount = _allTiles.Count;
+        FilterTileSnapshot[] tiles = ArrayPool<FilterTileSnapshot>.Shared.Rent(tileCount);
+        try
+        {
+            for (int index = 0; index < tileCount; index++)
+            {
+                Tile tile = _allTiles[index];
+                tiles[index] = new FilterTileSnapshot(
+                    tile,
+                    tile.Prompt,
+                    tile.Fav,
+                    tile.Enhanced,
+                    tile.Unseen,
+                    tile.CreatedUtc);
+            }
+
+            return new FilterSnapshot(
+                tiles,
+                tileCount,
+                _activeAlbumId is not null,
+                _activeAlbumMemberPaths.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+                _activeAlbumMemberOrder.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
+                query.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                FavoriteOnlyFilter?.IsChecked == true,
+                UnfavoriteOnlyFilter?.IsChecked == true,
+                EnhancedOnlyFilter?.IsChecked == true,
+                UnseenOnlyFilter?.IsChecked == true,
+                _favoriteFilterLevels.ToFrozenSet(),
+                _hiddenFolderBuckets.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+                _dateFromLocal,
+                _dateToLocal);
+        }
+        catch
+        {
+            ArrayPool<FilterTileSnapshot>.Shared.Return(tiles, clearArray: true);
+            throw;
+        }
     }
+
+    private static void ReturnFilterSnapshot(FilterSnapshot snapshot)
+        => ArrayPool<FilterTileSnapshot>.Shared.Return(snapshot.Tiles, clearArray: true);
+
+    private static void ReturnFilterResult(FilterResult result)
+        => ArrayPool<Tile>.Shared.Return(result.Tiles, clearArray: true);
 
     private static FilterResult ComputeFilterResult(FilterSnapshot snapshot, CancellationToken cancellationToken)
     {
-        var filtered = new List<FilterTileSnapshot>(snapshot.Tiles.Length);
-        for (int index = 0; index < snapshot.Tiles.Length; index++)
+        Tile[] filtered = ArrayPool<Tile>.Shared.Rent(snapshot.TileCount);
+        int filteredCount = 0;
+        try
         {
-            if ((index & 63) == 0)
-                cancellationToken.ThrowIfCancellationRequested();
-
-            FilterTileSnapshot tile = snapshot.Tiles[index];
-            if (!MatchesFilterSnapshot(tile, snapshot))
-                continue;
-            filtered.Add(tile);
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        IEnumerable<FilterTileSnapshot> ordered;
-        if (snapshot.AlbumActive)
-        {
-            ordered = filtered.OrderBy(tile => snapshot.AlbumMemberOrder.TryGetValue(tile.Path, out int index) ? index : int.MaxValue);
-        }
-        else
-        {
-            ordered = snapshot.SortBy switch
+            for (int index = 0; index < snapshot.TileCount; index++)
             {
-            SortModifiedOldestValue => filtered
-                .OrderBy(static tile => tile.ModifiedUtc)
-                .ThenBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            SortCreatedNewestValue => filtered
-                .OrderByDescending(static tile => tile.CreatedUtc)
-                .ThenBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            SortCreatedOldestValue => filtered
-                .OrderBy(static tile => tile.CreatedUtc)
-                .ThenBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            SortRandomValue => filtered
-                .OrderBy(tile => StableRandomSortKey(snapshot.RandomSortSeed, tile.Path))
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            SortNameValue => filtered
-                .OrderBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenByDescending(static tile => tile.ModifiedUtc)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            _ => filtered
-                .OrderByDescending(static tile => tile.ModifiedUtc)
-                .ThenBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            };
+                if ((index & 63) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                FilterTileSnapshot tile = snapshot.Tiles[index];
+                if (!MatchesFilterSnapshot(tile, snapshot))
+                    continue;
+                filtered[filteredCount++] = tile.Tile;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (snapshot.AlbumActive)
+            {
+                Array.Sort(
+                    filtered,
+                    0,
+                    filteredCount,
+                    Comparer<Tile>.Create((left, right) =>
+                    {
+                        int leftIndex = snapshot.AlbumMemberOrder.TryGetValue(left.Path, out int leftOrder)
+                            ? leftOrder
+                            : int.MaxValue;
+                        int rightIndex = snapshot.AlbumMemberOrder.TryGetValue(right.Path, out int rightOrder)
+                            ? rightOrder
+                            : int.MaxValue;
+                        return leftIndex.CompareTo(rightIndex);
+                    }));
+            }
+            // _allTiles is maintained in the active product sort order. A
+            // query/filter therefore only removes entries and keeps that
+            // stable order instead of re-sorting 100k items on every keypress.
+            return new FilterResult(filtered, filteredCount);
         }
-        return new FilterResult(ordered.Select(static tile => tile.Tile).ToList());
+        catch
+        {
+            ArrayPool<Tile>.Shared.Return(filtered, clearArray: true);
+            throw;
+        }
     }
 
     private static bool MatchesFilterSnapshot(FilterTileSnapshot tile, FilterSnapshot snapshot)
     {
-        if (snapshot.AlbumActive && (!tile.IsRealFile || !snapshot.AlbumMemberPaths.Contains(tile.Path)))
+        if (snapshot.AlbumActive && (!tile.Tile.IsRealFile || !snapshot.AlbumMemberPaths.Contains(tile.Tile.Path)))
             return false;
         foreach (string token in snapshot.QueryTokens)
         {
-            if (!ContainsText(tile.FileName, token) && !ContainsText(tile.Prompt, token))
+            if (!ContainsText(tile.Tile.FileName, token) && !ContainsText(tile.Prompt, token))
                 return false;
         }
 
@@ -7713,9 +8064,11 @@ public partial class MainWindow : Window
             return false;
         if (snapshot.UnseenOnly && !tile.Unseen)
             return false;
-        if (tile.IsRealFile && !string.IsNullOrWhiteSpace(tile.FolderBucketKey) && snapshot.HiddenFolderBuckets.Contains(tile.FolderBucketKey))
+        if (tile.Tile.IsRealFile
+            && !string.IsNullOrWhiteSpace(tile.Tile.FolderBucketKey)
+            && snapshot.HiddenFolderBuckets.Contains(tile.Tile.FolderBucketKey))
             return false;
-        if (!tile.IsRealFile || (!snapshot.DateFromLocal.HasValue && !snapshot.DateToLocal.HasValue))
+        if (!tile.Tile.IsRealFile || (!snapshot.DateFromLocal.HasValue && !snapshot.DateToLocal.HasValue))
             return true;
 
         DateTime createdDate = tile.CreatedUtc.ToLocalTime().Date;
@@ -7726,19 +8079,41 @@ public partial class MainWindow : Window
     private void ApplyFilterResult(FilterResult filterResult, bool selectFirst)
     {
         var previous = SelectedTile();
-        List<Tile> filtered = filterResult.Tiles;
+        Tile[] filtered = filterResult.Tiles;
+        int filteredCount = filterResult.Count;
 
         if (_selectedPaths.Count > 0)
         {
-            var availablePaths = new HashSet<string>(filtered.Select(static tile => tile.Path), StringComparer.OrdinalIgnoreCase);
-            _selectedPaths.IntersectWith(availablePaths);
+            if (_selectedPaths.Count <= 64)
+            {
+                var remaining = new HashSet<string>(_selectedPaths, StringComparer.OrdinalIgnoreCase);
+                var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int index = 0; index < filteredCount; index++)
+                {
+                    Tile tile = filtered[index];
+                    if (remaining.Remove(tile.Path))
+                        available.Add(tile.Path);
+                    if (remaining.Count == 0)
+                        break;
+                }
+                _selectedPaths.IntersectWith(available);
+            }
+            else
+            {
+                var availablePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int index = 0; index < filteredCount; index++)
+                    availablePaths.Add(filtered[index].Path);
+                _selectedPaths.IntersectWith(availablePaths);
+            }
         }
 
         bool wasSyncingSelection = _syncingSelection;
         _syncingSelection = true;
         try
         {
-            _tiles.ReplaceAll(filtered);
+            CancelThumbnailViewportLoading();
+            _thumbnailViewportRevision++;
+            _tiles.ReplaceAll(filtered, filteredCount);
         }
         finally
         {
@@ -7748,8 +8123,17 @@ public partial class MainWindow : Window
         Tile? preferred = !string.IsNullOrWhiteSpace(_primarySelectedPath)
             ? _tiles.FirstOrDefault(tile => string.Equals(tile.Path, _primarySelectedPath, StringComparison.OrdinalIgnoreCase))
             : null;
-        preferred ??= previous is not null && filtered.Contains(previous) ? previous : null;
-        preferred ??= SelectedTiles().LastOrDefault();
+        preferred ??= previous is not null && _tiles.Contains(previous) ? previous : null;
+        if (preferred is null && _selectedPaths.Count > 0)
+        {
+            for (int index = _tiles.Count - 1; index >= 0; index--)
+            {
+                if (!_selectedPaths.Contains(_tiles[index].Path))
+                    continue;
+                preferred = _tiles[index];
+                break;
+            }
+        }
         preferred ??= selectFirst && _tiles.Count > 0 ? _tiles[0] : null;
         _galleryVirtualizingPanel?.InvalidateItemLayout();
         UpdateFolderStats();
@@ -7758,9 +8142,12 @@ public partial class MainWindow : Window
         {
             if (_selectedPaths.Count == 0)
                 _selectedPaths.Add(preferred.Path);
-            SetSelection(SelectedTiles(), preferred);
+            _primarySelectedPath = preferred.Path;
+            _selectionVisualSyncGeneration++;
+            SynchronizeSelectionControls();
+            ApplyPrimarySelection(preferred);
         }
-        else if (filtered.Count == 0)
+        else if (filteredCount == 0)
             SelectTile(null);
 
         ReconcileOpenSurfacesAfterFilterChange();
@@ -8363,45 +8750,105 @@ public partial class MainWindow : Window
         if (changed && !_initializing)
         {
             ConfigureGalleryItemsSources();
-            // A sort change cannot alter filter membership. Reorder the already
-            // filtered Tile references directly instead of rebuilding 100k
-            // filter snapshots and evaluating every predicate again.
-            ApplyFilterResult(new FilterResult(SortTiles(_tiles, _sortBy, _randomSortSeed)), selectFirst: true);
+            // Keep the complete catalog in product sort order. Subsequent
+            // searches and filters can then preserve this order in O(n)
+            // instead of re-sorting 100k entries after every query.
+            ReorderFullCatalogForSort();
+            ApplyFilters();
             SaveState();
         }
 
         return changed;
     }
 
+    private async Task<bool> SetSortByInteractiveAsync(string sortBy)
+    {
+        string normalized = NormalizeSortBy(sortBy);
+        bool changed = !string.Equals(_sortBy, normalized, StringComparison.Ordinal);
+        _sortBy = normalized;
+        SyncSortButtons();
+        if (!changed || _initializing)
+            return changed;
+
+        return await ApplyCurrentSortInteractiveAsync();
+    }
+
+    private async Task<bool> ApplyCurrentSortInteractiveAsync()
+    {
+        ConfigureGalleryItemsSources();
+        long generation = ++_interactiveSortGeneration;
+        long catalogRevision = _catalogContentRevision;
+        string sortBy = _sortBy;
+        string randomSortSeed = _randomSortSeed;
+        Tile[] ordered = _allTiles.ToArray();
+
+        await Task.Run(() => Array.Sort(
+            ordered,
+            (left, right) => CompareTilesForSort(left, right, sortBy, randomSortSeed)));
+
+        if (generation != _interactiveSortGeneration
+            || catalogRevision != _catalogContentRevision
+            || !string.Equals(sortBy, _sortBy, StringComparison.Ordinal)
+            || !string.Equals(randomSortSeed, _randomSortSeed, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _allTiles.Clear();
+        _allTiles.AddRange(ordered);
+        _catalogContentRevision++;
+        ApplyFilters();
+        SaveState();
+        return true;
+    }
+
     private static List<Tile> SortTiles(IEnumerable<Tile> tiles, string sortBy, string randomSortSeed)
     {
-        IEnumerable<Tile> ordered = sortBy switch
+        var ordered = tiles.ToList();
+        ordered.Sort((left, right) => CompareTilesForSort(left, right, sortBy, randomSortSeed));
+        return ordered;
+    }
+
+    private void ReorderFullCatalogForSort()
+    {
+        if (_allTiles.Count < 2)
+            return;
+        // List.Sort works in place. LINQ OrderBy materializes several 100k
+        // key/index buffers for every mode change and leaves tens of MB for a
+        // later full GC during rapid interaction.
+        _allTiles.Sort((left, right) => CompareTilesForSort(left, right, _sortBy, _randomSortSeed));
+        _catalogContentRevision++;
+    }
+
+    private static int CompareTilesForSort(Tile left, Tile right, string sortBy, string randomSortSeed)
+    {
+        int primary = sortBy switch
         {
-            SortModifiedOldestValue => tiles
-                .OrderBy(static tile => tile.ModifiedUtc)
-                .ThenBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            SortCreatedNewestValue => tiles
-                .OrderByDescending(static tile => tile.CreatedUtc)
-                .ThenBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            SortCreatedOldestValue => tiles
-                .OrderBy(static tile => tile.CreatedUtc)
-                .ThenBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            SortRandomValue => tiles
-                .OrderBy(tile => StableRandomSortKey(randomSortSeed, tile.Path))
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            SortNameValue => tiles
-                .OrderBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenByDescending(static tile => tile.ModifiedUtc)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
-            _ => tiles
-                .OrderByDescending(static tile => tile.ModifiedUtc)
-                .ThenBy(static tile => tile.FileName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase),
+            SortModifiedOldestValue => left.ModifiedUtc.CompareTo(right.ModifiedUtc),
+            SortCreatedNewestValue => right.CreatedUtc.CompareTo(left.CreatedUtc),
+            SortCreatedOldestValue => left.CreatedUtc.CompareTo(right.CreatedUtc),
+            SortRandomValue => StableRandomSortKey(randomSortSeed, left.Path)
+                .CompareTo(StableRandomSortKey(randomSortSeed, right.Path)),
+            SortNameValue => StringComparer.OrdinalIgnoreCase.Compare(left.FileName, right.FileName),
+            _ => right.ModifiedUtc.CompareTo(left.ModifiedUtc),
         };
-        return ordered.ToList();
+        if (primary != 0)
+            return primary;
+
+        if (sortBy == SortNameValue)
+        {
+            int modified = right.ModifiedUtc.CompareTo(left.ModifiedUtc);
+            if (modified != 0)
+                return modified;
+        }
+        else if (sortBy != SortRandomValue)
+        {
+            int fileName = StringComparer.OrdinalIgnoreCase.Compare(left.FileName, right.FileName);
+            if (fileName != 0)
+                return fileName;
+        }
+
+        return StringComparer.OrdinalIgnoreCase.Compare(left.Path, right.Path);
     }
 
     private void SyncSortButtons()
@@ -8422,7 +8869,14 @@ public partial class MainWindow : Window
         const ulong offset = 14695981039346656037;
         const ulong prime = 1099511628211;
         ulong hash = offset;
-        foreach (char value in seed + "\0" + path)
+        foreach (char value in seed)
+        {
+            hash ^= value;
+            hash *= prime;
+        }
+        hash ^= 0;
+        hash *= prime;
+        foreach (char value in path)
         {
             hash ^= value;
             hash *= prime;
@@ -8438,10 +8892,21 @@ public partial class MainWindow : Window
         SyncSortButtons();
         if (!_initializing)
         {
+            ReorderFullCatalogForSort();
             ApplyFilters();
             SaveState();
         }
         return true;
+    }
+
+    private async Task<bool> ReshuffleRandomSortInteractiveAsync()
+    {
+        _randomSortSeed = Guid.NewGuid().ToString("N");
+        _sortBy = SortRandomValue;
+        SyncSortButtons();
+        if (_initializing)
+            return true;
+        return await ApplyCurrentSortInteractiveAsync();
     }
 
     private static string NormalizeDatePreset(string? preset)
@@ -8822,43 +9287,44 @@ public partial class MainWindow : Window
     private void AspectOriginal_Checked(object sender, RoutedEventArgs e) => SetAspectMode(AspectOriginalValue);
     private void AspectSquare_Checked(object sender, RoutedEventArgs e) => SetAspectMode(AspectSquareValue);
     private void AspectPortrait_Checked(object sender, RoutedEventArgs e) => SetAspectMode(AspectPortraitValue);
-    private void SortModifiedNewest_Checked(object sender, RoutedEventArgs e)
+    private async void SortModifiedNewest_Checked(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
-            SetSortBy(SortModifiedNewestValue);
+            await SetSortByInteractiveAsync(SortModifiedNewestValue);
     }
 
-    private void SortModifiedOldest_Checked(object sender, RoutedEventArgs e)
+    private async void SortModifiedOldest_Checked(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
-            SetSortBy(SortModifiedOldestValue);
+            await SetSortByInteractiveAsync(SortModifiedOldestValue);
     }
 
-    private void SortName_Checked(object sender, RoutedEventArgs e)
+    private async void SortName_Checked(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
-            SetSortBy(SortNameValue);
+            await SetSortByInteractiveAsync(SortNameValue);
     }
 
-    private void SortCreatedNewest_Checked(object sender, RoutedEventArgs e)
+    private async void SortCreatedNewest_Checked(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
-            SetSortBy(SortCreatedNewestValue);
+            await SetSortByInteractiveAsync(SortCreatedNewestValue);
     }
 
-    private void SortCreatedOldest_Checked(object sender, RoutedEventArgs e)
+    private async void SortCreatedOldest_Checked(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
-            SetSortBy(SortCreatedOldestValue);
+            await SetSortByInteractiveAsync(SortCreatedOldestValue);
     }
 
-    private void SortRandom_Checked(object sender, RoutedEventArgs e)
+    private async void SortRandom_Checked(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
-            SetSortBy(SortRandomValue);
+            await SetSortByInteractiveAsync(SortRandomValue);
     }
 
-    private void ReshuffleSort_Click(object sender, RoutedEventArgs e) => ReshuffleRandomSort();
+    private async void ReshuffleSort_Click(object sender, RoutedEventArgs e)
+        => await ReshuffleRandomSortInteractiveAsync();
 
     private void ManualDateRange_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -10688,6 +11154,7 @@ public partial class MainWindow : Window
         _syncingModalFilmstripSelection = true;
         try
         {
+            RefreshModalFilmstripWindow(tile);
             ModalFilmstripLayoutList.SelectedItem = tile;
             ModalFilmstripOverlayList.SelectedItem = tile;
             if (ModalFilmstripLayout.Visibility == Visibility.Visible)
@@ -10699,6 +11166,33 @@ public partial class MainWindow : Window
         {
             _syncingModalFilmstripSelection = false;
         }
+    }
+
+    private void RefreshModalFilmstripWindow(Tile selected)
+    {
+        int selectedIndex = _tiles.IndexOf(selected);
+        if (selectedIndex < 0)
+        {
+            _modalFilmstripTiles.ReplaceAll(Array.Empty<Tile>());
+            return;
+        }
+
+        int count = Math.Min(MaxModalFilmstripWindowItems, _tiles.Count);
+        int start = Math.Clamp(
+            selectedIndex - (count / 2),
+            0,
+            Math.Max(0, _tiles.Count - count));
+
+        bool unchanged = _modalFilmstripTiles.Count == count;
+        for (int index = 0; unchanged && index < count; index++)
+            unchanged = ReferenceEquals(_modalFilmstripTiles[index], _tiles[start + index]);
+        if (unchanged)
+            return;
+
+        var window = new Tile[count];
+        for (int index = 0; index < count; index++)
+            window[index] = _tiles[start + index];
+        _modalFilmstripTiles.ReplaceAll(window, count);
     }
 
     private void UpdateModalFilmstripPresentation()
@@ -12073,7 +12567,8 @@ public partial class MainWindow : Window
         if (_hoverPreviewTabPath is not null && deletedPaths.Contains(_hoverPreviewTabPath))
             HidePreviewTabHover();
 
-        _allTiles.RemoveAll(tile => deletedPaths.Contains(tile.Path));
+        if (_allTiles.RemoveAll(tile => deletedPaths.Contains(tile.Path)) > 0)
+            _catalogContentRevision++;
         _selectedPaths.RemoveWhere(deletedPaths.Contains);
         if (_primarySelectedPath is not null && deletedPaths.Contains(_primarySelectedPath))
             _primarySelectedPath = null;
@@ -13770,7 +14265,10 @@ public partial class MainWindow : Window
     {
         var tile = new Tile { Path = path, FileName = Path.GetFileName(path), IsRealFile = isRealFile };
         if (includeInCatalog)
+        {
             _allTiles.Add(tile);
+            _catalogContentRevision++;
+        }
         try
         {
             bool accepted = TryValidateFileDropTile(tile, out string canonical, out string reason);
@@ -13778,7 +14276,8 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _allTiles.Remove(tile);
+            if (_allTiles.Remove(tile))
+                _catalogContentRevision++;
         }
     }
 
@@ -13940,7 +14439,10 @@ public partial class MainWindow : Window
     {
         var tile = new Tile { Path = path, FileName = Path.GetFileName(path), IsRealFile = true };
         if (includeInCatalog)
+        {
             _allTiles.Add(tile);
+            _catalogContentRevision++;
+        }
         if (includeInFiltered)
             _tiles.Add(tile);
         try
@@ -13949,7 +14451,8 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _allTiles.Remove(tile);
+            if (_allTiles.Remove(tile))
+                _catalogContentRevision++;
             _tiles.Remove(tile);
         }
     }
@@ -14223,6 +14726,7 @@ public partial class MainWindow : Window
             return false;
         Tile tile = _tiles[index];
         tile.Thumbnail = null;
+        TouchResidentThumbnail(tile);
         _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
         RowsList.ScrollIntoView(tile);
         Dispatcher.BeginInvoke(ScheduleListThumbnailViewport, DispatcherPriority.Render);
@@ -14244,6 +14748,22 @@ public partial class MainWindow : Window
         }
         return tile.Thumbnail is not null;
     }
+    public async Task<bool> WaitForThumbnailForSmokeAsync(string fileName, int timeoutMilliseconds = 1_000)
+    {
+        Tile? tile = _tiles.FirstOrDefault(candidate =>
+            string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+        if (tile is null)
+            return false;
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < timeoutMilliseconds)
+        {
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+            if (tile.Thumbnail is not null)
+                return true;
+            await Task.Delay(10);
+        }
+        return tile.Thumbnail is not null;
+    }
 
     public bool SetGridModeForSmoke()
     {
@@ -14255,7 +14775,7 @@ public partial class MainWindow : Window
         // Let the production Render-priority resync run. This probe only reads
         // the resulting canonical and visual states; it does not scroll or
         // mutate selection and therefore cannot make a broken path pass.
-        await Dispatcher.Yield(DispatcherPriority.ContextIdle);
+        await Dispatcher.Yield(DispatcherPriority.Render);
 
         Tile? tile = _tiles.FirstOrDefault(candidate => string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
         string? canonicalPath = SelectedTile()?.Path;
@@ -14413,6 +14933,15 @@ public partial class MainWindow : Window
     public int GridRealizedCountForSmoke
         => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.RealizedItemCount ?? 0;
     public int ThumbnailBrowserCacheHitsForSmoke => _thumbnailBrowserCacheHits;
+    public int ResidentThumbnailCountForSmoke => _residentThumbnailLru.Count;
+    public int MaxResidentThumbnailCountForSmoke => _maxResidentThumbnailCount;
+    public int ResidentThumbnailLimitForSmoke => MaxResidentThumbnailCount;
+    public int ActiveThumbnailDecodeWorkersForSmoke => Volatile.Read(ref _activeThumbnailDecodeWorkers);
+    public int MaxActiveThumbnailDecodeWorkersForSmoke => Volatile.Read(ref _maxActiveThumbnailDecodeWorkers);
+    public int ThumbnailDecodeWorkerLimitForSmoke => MaxThumbnailDecodeWorkers;
+    public int ThumbnailViewportScheduleCountForSmoke => _thumbnailViewportScheduleCount;
+    public int ThumbnailViewportCancelCountForSmoke => _thumbnailViewportCancelCount;
+    public int ThumbnailViewportDuplicateSuppressedCountForSmoke => _thumbnailViewportDuplicateSuppressedCount;
     public static IReadOnlyList<string> BrowserThumbnailCachePathsForSmoke(string path, DateTime modifiedUtc)
         => GetBrowserThumbnailCachePaths(new Tile { Path = Path.GetFullPath(path), ModifiedUtc = modifiedUtc });
     public int GridItemsSourceCountForSmoke => CardsList.Items.Count;
@@ -14641,13 +15170,57 @@ public partial class MainWindow : Window
             });
         }
 
+        PublishLogicalCatalogForSmoke(tiles);
+    }
+
+    public void SeedLargeInteractionCatalogForSmoke(int count)
+    {
+        if (count <= 0)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        Tile template = _allTiles.FirstOrDefault() ?? new Tile();
+        string root = Path.GetDirectoryName(template.Path) ?? Path.GetTempPath();
+        DateTime epoch = new(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var tiles = new List<Tile>(count);
+        for (int index = 0; index < count; index++)
+        {
+            bool nameMatch = index % 100 == 0;
+            string suffix = nameMatch ? "-needle" : "";
+            tiles.Add(new Tile
+            {
+                Path = Path.Combine(root, $".interaction-smoke-{index:D6}{suffix}.png"),
+                FileName = $"interaction-smoke-{index:D6}{suffix}.png",
+                Prompt = index % 250 == 0 ? "aurora interaction target" : "",
+                IsRealFile = false,
+                Group = "Logical 100k",
+                FolderBucketKey = $"logical-{index % 4}",
+                FolderBucketLabel = $"Logical {index % 4}",
+                ModifiedUtc = epoch.AddSeconds(count - index),
+                CreatedUtc = epoch.AddSeconds(index),
+                ModifiedText = "logical",
+                SizeText = "0.00 MB",
+                Thumbnail = null,
+                ArtBase = template.ArtBase,
+                ArtGlow = template.ArtGlow,
+                Fav = index % 10 == 0 ? 5 : 0,
+                Enhanced = index % 20 == 0,
+                Unseen = index % 3 != 0,
+            });
+        }
+
+        PublishLogicalCatalogForSmoke(tiles);
+    }
+
+    private void PublishLogicalCatalogForSmoke(List<Tile> tiles)
+    {
         bool wasSyncingSelection = _syncingSelection;
         _syncingSelection = true;
         try
         {
             _allTiles.Clear();
             _allTiles.AddRange(tiles);
-            _tiles.ReplaceAll(tiles);
+            ReorderFullCatalogForSort();
+            _tiles.ReplaceAll(_allTiles);
             _selectedPaths.Clear();
             _primarySelectedPath = null;
         }
@@ -15229,6 +15802,7 @@ public partial class MainWindow : Window
     public bool SetDisplayStyleForSmoke(string style) => SetDisplayStyle(style);
     public bool SetAspectModeForSmoke(string aspectMode) => SetAspectMode(aspectMode);
     public bool SetSortByForSmoke(string sortBy) => SetSortBy(sortBy);
+    public Task<bool> SetSortByInteractiveForSmokeAsync(string sortBy) => SetSortByInteractiveAsync(sortBy);
     public bool ReshuffleRandomSortForSmoke() => ReshuffleRandomSort();
     public string RandomSortSeedForSmoke => _randomSortSeed;
     public bool ClearManualDateRangeForSmoke() => SetManualDateRange(null, null);
@@ -16414,6 +16988,7 @@ public sealed class LoadMetrics
     public long InitialFilterMs { get; set; }
     public long CatalogStatsMs { get; set; }
     public long CatalogReadyMs { get; set; }
+    public long FirstUsableViewportMs { get; set; }
     public long MetadataMs { get; set; }
     public int MetadataWorkers { get; set; }
     public int MetadataCompleted { get; set; }
@@ -16673,11 +17248,47 @@ internal sealed class ResettableObservableCollection<T> : ObservableCollection<T
     {
         ArgumentNullException.ThrowIfNull(items);
         CheckReentrancy();
-        Items.Clear();
         if (Items is List<T> list)
+        {
+            list.Clear();
             list.EnsureCapacity(items.Count);
-        for (int index = 0; index < items.Count; index++)
-            Items.Add(items[index]);
+            if (items is List<T> sourceList)
+                list.AddRange(sourceList);
+            else
+            {
+                for (int index = 0; index < items.Count; index++)
+                    list.Add(items[index]);
+            }
+        }
+        else
+        {
+            Items.Clear();
+            for (int index = 0; index < items.Count; index++)
+                Items.Add(items[index]);
+        }
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    public void ReplaceAll(T[] items, int count)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (count < 0 || count > items.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        CheckReentrancy();
+        if (Items is List<T> list)
+        {
+            list.Clear();
+            list.EnsureCapacity(count);
+            list.AddRange(items.AsSpan(0, count));
+        }
+        else
+        {
+            Items.Clear();
+            for (int index = 0; index < count; index++)
+                Items.Add(items[index]);
+        }
         OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
         OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
         OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));

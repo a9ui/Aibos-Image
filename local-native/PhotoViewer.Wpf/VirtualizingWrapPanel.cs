@@ -31,7 +31,12 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     // Extreme thumbnail zoom can expose hundreds of cards at once. Preparing
     // them in bounded Dispatcher slices keeps input and native window messages
     // responsive while the same visible + overscan range fills progressively.
-    private const int MaxNewContainersPerMeasure = 96;
+    // A card template is materially more expensive than the panel's row math.
+    // At minimum zoom a single viewport can contain hundreds of cards, and a
+    // 96-container slice held the dispatcher for more than 750 ms on the 10k
+    // catalog gate. Keep each realization slice below one input-stall budget;
+    // the remaining viewport is already represented by progressive placeholders.
+    private const int MaxNewContainersPerMeasure = 24;
     private static readonly Brush ProgressivePlaceholderBrush = CreateProgressivePlaceholderBrush();
 
     public static readonly DependencyProperty ItemWidthProperty = DependencyProperty.Register(
@@ -203,6 +208,21 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         return true;
     }
 
+    public bool BringItemIntoView(int index)
+    {
+        ItemsControl? owner = ItemsControl.GetItemsOwner(this);
+        int count = owner?.Items.Count ?? 0;
+        if (index < 0 || index >= count)
+            return false;
+
+        EnsureLayout(owner, count, ResolveViewportLength(_viewport.Width, ActualWidth, 1));
+        int row = index < _itemRows.Length ? _itemRows[index] : -1;
+        if (row < 0 || row >= _rowTops.Count)
+            return false;
+        BringRowIntoView(row);
+        return true;
+    }
+
     private static void OnLayoutPropertyChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs _)
     {
         if (dependencyObject is not VirtualizingWrapPanel panel)
@@ -350,7 +370,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         _rowFirstIndices.Clear();
         _rowItemCounts.Clear();
         _rowHeaders.Clear();
-        _itemRows = itemCount == 0 ? [] : new int[itemCount];
+        if (itemCount > _itemRows.Length)
+            _itemRows = new int[itemCount];
 
         double spacingX = Math.Max(0, HorizontalSpacing);
         double spacingY = Math.Max(0, VerticalSpacing);
