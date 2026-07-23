@@ -15112,6 +15112,9 @@ public partial class MainWindow : Window
         ScheduleGridGeometryAnchorRestore(anchor);
     }
 
+    public void ApplyWorkbenchLayoutWidthForSmoke(double width)
+        => ApplyAdaptiveWorkbenchLayout(Math.Max(MinWidth, width), preserveGridAnchor: false);
+
     public void SimulateDpiGeometryChangeForSmoke(double width, double height)
     {
         GridZoomAnchor? anchor = PreferredGridGeometryAnchor();

@@ -12950,10 +12950,10 @@ public partial class App : Application
             {
                 await first.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 bool defaultOpen = first.RightPanelOpenForSmoke;
-                double defaultWidth = first.RightPanelWidthForSmoke;
+                double defaultWidth = first.RightPanelStoredWidthForSmoke;
                 bool resized = first.SetRightPanelWidthForSmoke(520);
                 await first.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
-                double resizedWidth = first.RightPanelWidthForSmoke;
+                double resizedWidth = first.RightPanelStoredWidthForSmoke;
                 first.FlushStateForSmoke();
                 first.Close();
 
@@ -12961,7 +12961,7 @@ public partial class App : Application
                 second.Show();
                 await second.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 bool restoredOpen = second.RightPanelOpenForSmoke;
-                double restoredWidth = second.RightPanelWidthForSmoke;
+                double restoredWidth = second.RightPanelStoredWidthForSmoke;
                 second.ToggleRightPanelForSmoke();
                 bool closed = !second.RightPanelOpenForSmoke;
                 double storedWhileClosed = second.RightPanelStoredWidthForSmoke;
@@ -12976,7 +12976,7 @@ public partial class App : Application
                 third.ToggleRightPanelForSmoke();
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 bool reopened = third.RightPanelOpenForSmoke;
-                double reopenedWidth = third.RightPanelWidthForSmoke;
+                double reopenedWidth = third.RightPanelStoredWidthForSmoke;
                 await third.LoadFolderAsync(selectionFolder);
                 bool selected = third.SelectFileNameForSmoke(selectedFileName);
                 GridSelectionVisualSmokeSnapshot initialSelection = await third.WaitForGridSelectionVisualForSmokeAsync(selectedFileName);
@@ -12985,11 +12985,11 @@ public partial class App : Application
                 GridSelectionVisualSmokeSnapshot previewFocusSelection = await third.WaitForGridSelectionVisualForSmokeAsync(selectedFileName);
                 bool minClamped = third.SetRightPanelWidthForSmoke(100);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
-                double minWidth = third.RightPanelWidthForSmoke;
+                double minWidth = third.RightPanelStoredWidthForSmoke;
                 bool maxClamped = third.SetRightPanelWidthForSmoke(1200);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
-                double maxWidth = third.RightPanelWidthForSmoke;
-                third.ResizeWindowForSmoke(900, 820);
+                double maxWidth = third.RightPanelStoredWidthForSmoke;
+                third.ApplyWorkbenchLayoutWidthForSmoke(900);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 GridSelectionVisualSmokeSnapshot narrowSelection = await third.WaitForGridSelectionVisualForSmokeAsync(selectedFileName);
@@ -12999,7 +12999,7 @@ public partial class App : Application
                 bool listMode = third.SetListModeForSmoke();
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 ListSelectionVisualSmokeSnapshot listSelection = await third.WaitForListSelectionVisualForSmokeAsync(selectedFileName);
-                third.ResizeWindowForSmoke(1280, 820);
+                third.ApplyWorkbenchLayoutWidthForSmoke(1280);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 bool gridMode = third.SetGridModeForSmoke();
