@@ -12435,10 +12435,11 @@ public partial class MainWindow : Window
 
         try
         {
-            var startInfo = new ProcessStartInfo(_sharedDataLocation.RootPath)
+            var startInfo = new ProcessStartInfo("explorer.exe")
             {
                 UseShellExecute = true,
             };
+            startInfo.ArgumentList.Add(_sharedDataLocation.RootPath);
             if (!_explorerLauncher(startInfo))
             {
                 SharedDataStatusText.Text = "The data folder could not be opened. Check folder access and try again.";

@@ -2739,8 +2739,9 @@ public partial class App : Application
                 && shared.OpenEnabled
                 && shared.Opened
                 && shared.LauncherInvoked
-                && string.Equals(shared.FileName, existingRoot, StringComparison.OrdinalIgnoreCase)
-                && shared.Arguments.Count == 0
+                && string.Equals(shared.FileName, "explorer.exe", StringComparison.OrdinalIgnoreCase)
+                && shared.Arguments.Count == 1
+                && string.Equals(shared.Arguments[0], existingRoot, StringComparison.OrdinalIgnoreCase)
                 && string.IsNullOrEmpty(shared.ArgumentsText)
                 && shared.UseShellExecute
                 && shared.Status.Contains("No shared data was changed", StringComparison.Ordinal)
