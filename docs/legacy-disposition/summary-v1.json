@@ -1,0 +1,61 @@
+{
+  "summaryVersion": 1,
+  "hashDomain": "aibos-m2-disposition-summary/v1",
+  "m1CutoffId": "M1-20260723T172645Z",
+  "m1ManifestSha256": "d265e7559f42784121d464843398b59221158a546fe8fdd209e1f9d421653b09",
+  "overlaySha256": "49ad6f9966fffc8340f55607c78d6b0462ecd3a3235f2c9452fa56490394d476",
+  "rowCount": 507,
+  "terminalCount": 507,
+  "transientCount": 0,
+  "duplicateAssetIds": 0,
+  "orphanRows": 0,
+  "missingAssets": 0,
+  "privateSurfaceFindings": 0,
+  "dispositionCounts": {
+    "ADOPT_BASELINE": 6,
+    "ADOPT_FOUNDATION": 0,
+    "KEEP_H25": 30,
+    "MERGED_H25": 171,
+    "DEFER_M6": 0,
+    "CLOSE_SUPERSEDED": 13,
+    "HISTORICAL_PROVENANCE": 286,
+    "REJECT": 1
+  },
+  "ownerCounts": {
+    "M1-SU-001": 4,
+    "M1-SU-002": 4,
+    "M1-SU-003": 3,
+    "M1-SU-004": 4,
+    "M1-SU-005": 6,
+    "M1-SU-006": 3,
+    "M1-SU-007": 3,
+    "M1-SU-008": 316,
+    "M1-SU-009": 136,
+    "M1-SU-010": 28
+  },
+  "targetSemanticUnitCounts": {
+    "M1-SU-001": 6,
+    "M1-SU-002": 4,
+    "M1-SU-003": 3,
+    "M1-SU-004": 4,
+    "M1-SU-005": 6,
+    "M1-SU-006": 3,
+    "M1-SU-007": 3,
+    "M1-SU-008": 316,
+    "M1-SU-009": 134,
+    "M1-SU-010": 28
+  },
+  "su008PublicEvidenceCounts": {
+    "HISTORICAL_PROVENANCE": 144,
+    "KEEP_H25": 1,
+    "MERGED_H25": 169,
+    "CLOSE_SUPERSEDED": 2
+  },
+  "verification": {
+    "authoritativeBuilder": "python",
+    "independentVerifiersRequired": [
+      "powershell",
+      "python"
+    ]
+  }
+}
