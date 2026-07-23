@@ -74,6 +74,7 @@ green.
 ```powershell
 dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-setup.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-legacy-asset-ledger.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-parity-foundation.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1

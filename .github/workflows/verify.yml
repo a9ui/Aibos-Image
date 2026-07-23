@@ -27,6 +27,10 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-public-surface.ps1 -FullTree
 
+      - name: Verify legacy asset ledger
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-legacy-asset-ledger.ps1
+
   wpf:
     name: WPF verification
     runs-on: windows-latest

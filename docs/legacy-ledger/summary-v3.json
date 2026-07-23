@@ -1,0 +1,85 @@
+{
+    "manifestVersion":  3,
+    "hashDomain":  "aibos-m1-ledger/v3",
+    "cutoffId":  "M1-20260723T172645Z",
+    "capturedAtUtc":  "2026-07-23T17:26:45Z",
+    "aibosBaseSha":  "a0208ad4511fdd482d0c0498a42124426753ba98",
+    "h25DefaultSha":  "0d451cadfe47433fdb45f00bc78168965955fe2d",
+    "recordCount":  507,
+    "manifestSha256":  "d265e7559f42784121d464843398b59221158a546fe8fdd209e1f9d421653b09",
+    "sourceSetSha256":  "5d801dc263a39ee52badfe725dce3367ed570278c2f3f2a4b233343d9c59667d",
+    "sourceStateSha256":  "1889a84bc760a649762cf35bb3998c0f56db8bec66e465dffec30e3094556f58",
+    "githubStateSha256":  "edfc6353110fbb395d8337bd830c73650d1eeca7e50ecd67b0f2e1eb3cb24929",
+    "localStateSha256":  "2368ab704e0101b933871ce75c19ed18833ae0565bcf3be26830dfd7cf93a81c",
+    "categoryCounts":  {
+                           "gh_branch":  3,
+                           "gh_issue":  157,
+                           "gh_pr":  186,
+                           "gh_tag":  1,
+                           "local_ref":  132,
+                           "staged_path":  0,
+                           "stash":  1,
+                           "unstaged_path":  0,
+                           "untracked_path":  21,
+                           "worktree":  6
+                       },
+    "categorySha256":  {
+                           "gh_branch":  "3d961bbdc8c4c4c42cf01d55c99e67ebf13697ae35f67301efefd90197d25322",
+                           "gh_issue":  "bc0ee3c58325f8c3f5c86acbece06e8fbd81de49247944cf70d4a06c142dd9f1",
+                           "gh_pr":  "2e46caa941d67984dca1d493b05d331152edd2d2c7b800b96c11f5948eb804df",
+                           "gh_tag":  "22ab529e6cc8faf45ae4a68d45121d6fb9fb94ec2b6962e3d668c8c8ef0790db",
+                           "local_ref":  "ffb4bd5b62691642559476b7c6f69bf5175be3650ca10d3d0951c09db7950099",
+                           "staged_path":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                           "stash":  "6359bb73a7e111323681f684e4c6e3fbfc30dae809d79bc08920638a83b30092",
+                           "unstaged_path":  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                           "untracked_path":  "208c75a7a1316c8941082e85d04f68cf6374927a415429c15ea150df7f817fcb",
+                           "worktree":  "ef08a0b9956f5b951678ca338882243cb9bfa0fa61c704fb6b55db80d1adcef5"
+                       },
+    "categorySummarySha256":  "bf71dfce101f852fe14fb6a6d24058cc3750f225a6226af6ab666befeeb2ea34",
+    "ownershipCounts":  {
+                            "M1-SU-001":  4,
+                            "M1-SU-002":  4,
+                            "M1-SU-003":  3,
+                            "M1-SU-004":  4,
+                            "M1-SU-005":  6,
+                            "M1-SU-006":  3,
+                            "M1-SU-007":  3,
+                            "M1-SU-008":  316,
+                            "M1-SU-009":  136,
+                            "M1-SU-010":  28
+                        },
+    "ownershipSha256":  {
+                            "M1-SU-001":  "44134c3774839e2356bc7dfacd3c77c892780b70a90922bd202bd17847a2e4fa",
+                            "M1-SU-002":  "021a192654d34ea28cc8348b8692aa47d8459ca56269a5974ff39253c6cf2fdc",
+                            "M1-SU-003":  "ec81bdd6f010e012a556859c16a2bc0ae3cb7890382ab8c47c5415dd47871260",
+                            "M1-SU-004":  "2684c3fa137691aede8a3c0f6b4f495bce0f8b190fe009dc9efc4a8b25d41dda",
+                            "M1-SU-005":  "8be384857919a3a4f553ca1f0314ecf9d4e53f36f1346b1fe809e2cb86c17c1d",
+                            "M1-SU-006":  "3b55b9e692d13c84e6a829f331d62ed1fd8003e205325991a1877b41e9f8689a",
+                            "M1-SU-007":  "f7d20f4332b441d45907405ec5dc067a9ddfdf0f1a467fda11a7bf348cc3c74d",
+                            "M1-SU-008":  "0cd8ff3101d9323b672e9292666c1857d87806b2380d612c2bf4e9033b60c4be",
+                            "M1-SU-009":  "512e4c745db9dc53556c59eccbcb64b908f8412950139d83f3502d6d25faabb5",
+                            "M1-SU-010":  "05a584a39ae618976b27c9bcef7940c2235abe0a030c088e755a12dde0cd3f7c"
+                        },
+    "ownershipSummarySha256":  "b64e6927041aae1c86a2333cb2a21572a7f34f17e1baeeb85373a8e53b872e58",
+    "sourceUnchanged":  {
+                            "powershellBeforeAfterMatch":  true,
+                            "pythonBeforeAfterMatch":  true,
+                            "crossImplementationSourceMatch":  true
+                        },
+    "independentRecomputation":  {
+                                     "status":  "MATCH",
+                                     "primary":  "powershell-standard-library-v1",
+                                     "independent":  "python-standard-library-v1",
+                                     "manifestBytesMatch":  true,
+                                     "identitySetMatch":  true,
+                                     "ownershipMatch":  true,
+                                     "categoryMatch":  true
+                                 },
+    "privacy":  {
+                    "opaqueLocalIdentities":  true,
+                    "rawPathsPresent":  false,
+                    "issueOrPullTitlesPresent":  false,
+                    "dirtyContentPresent":  false,
+                    "credentialsPresent":  false
+                }
+}
