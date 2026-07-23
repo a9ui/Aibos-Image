@@ -1505,6 +1505,17 @@ public partial class MainWindow : Window
             if (seenReady)
                 LoadSeenState();
             LoadEnhancedState();
+            // Tile preparation can move to worker threads for large catalogs.
+            // Keep those workers off UI-owned mutable stores: modal polling,
+            // Enhance completion, and deletion may update the live enhancement
+            // map while a reload is preparing the replacement catalog.
+            var catalogSharedState = new CatalogSharedStateSnapshot(
+                new Dictionary<string, int>(_favorites, StringComparer.OrdinalIgnoreCase),
+                _seenPaths.ToHashSet(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, ManagedEnhancedOutput>(
+                    _enhancedOutputs,
+                    EnhancementSourceIdentityComparer),
+                _resolveFinalPath);
             CatalogCardLayoutContext cardLayout = CaptureCardLayoutContext();
             bool showUnseenDots = _showUnseenDots;
             IReadOnlyDictionary<string, ImageDimensions> emptyDimensions =
@@ -1524,6 +1535,7 @@ public partial class MainWindow : Window
                     emptyDimensions,
                     emptyPrompts,
                     requestedFolderSet,
+                    catalogSharedState,
                     cardLayout,
                     showUnseenDots,
                     scanAccessFailures,
@@ -1738,6 +1750,12 @@ public partial class MainWindow : Window
         // dimension indexing remains a lower-priority progressive phase and
         // starts only after the bounded initial thumbnail load is complete.
         _loadPhase = "background-metadata";
+        // Let pending input/render work run before background indexing starts.
+        // This keeps the first usable catalog interactive even when a cold
+        // metadata pass is about to saturate slow storage.
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        if (!IsCurrentLoad(generation, cts))
+            return;
         Task<ImageMetadataLoadMetrics> metadataTask = LoadImageMetadataProgressivelyAsync(
             _allTiles.ToList(),
             unavailableFolderSet,
@@ -2556,6 +2574,7 @@ public partial class MainWindow : Window
         IReadOnlyDictionary<string, ImageDimensions> dimensions,
         IReadOnlyDictionary<string, string> prompts,
         IReadOnlyList<string> folderSet,
+        CatalogSharedStateSnapshot sharedState,
         CatalogCardLayoutContext cardLayout,
         bool showUnseenDots,
         ConcurrentQueue<string> accessFailures,
@@ -2583,6 +2602,7 @@ public partial class MainWindow : Window
                         prompts,
                         folderSet,
                         folderBucketCache,
+                        sharedState,
                         cardLayout,
                         showUnseenDots));
                 }
@@ -2634,6 +2654,7 @@ public partial class MainWindow : Window
                                 prompts,
                                 folderSet,
                                 folderBucketCache,
+                                sharedState,
                                 cardLayout,
                                 showUnseenDots);
                         }
@@ -2662,12 +2683,13 @@ public partial class MainWindow : Window
         return new CatalogTilePreparationResult(parallelPrepared, true, workers);
     }
 
-    private Tile MakeFileTile(
+    private static Tile MakeFileTile(
         FileInfo file,
         IReadOnlyDictionary<string, ImageDimensions> dimensions,
         IReadOnlyDictionary<string, string> prompts,
         IReadOnlyList<string> folderSet,
         IDictionary<string, FolderBucketIdentity> folderBucketCache,
+        CatalogSharedStateSnapshot sharedState,
         CatalogCardLayoutContext cardLayout,
         bool showUnseenDots)
     {
@@ -2675,7 +2697,7 @@ public partial class MainWindow : Window
         var modified = file.LastWriteTime;
         var created = file.CreationTime;
         int paletteIndex = path.GetHashCode(StringComparison.OrdinalIgnoreCase) & int.MaxValue;
-        bool enhanced = TryGetEnhancedOutputForPath(path, out string? enhancedOutputPath);
+        bool enhanced = TryGetEnhancedOutputForPath(path, sharedState, out string? enhancedOutputPath);
         dimensions.TryGetValue(path, out var imageSize);
         prompts.TryGetValue(path, out string? indexedPrompt);
         string folderBucketCacheKey = file.DirectoryName ?? path;
@@ -2684,13 +2706,16 @@ public partial class MainWindow : Window
             folderBucket = ResolveFolderBucket(path, folderSet);
             folderBucketCache[folderBucketCacheKey] = folderBucket;
         }
-        bool seen = SeenStateContains(path);
+        string normalizedPath = NormalizeFavoritePath(path);
+        bool seen = sharedState.SeenPaths.Contains(normalizedPath);
         var tile = new Tile
         {
             ArtBase = MakeBaseBrush(paletteIndex),
             ArtGlow = MakeGlowBrush(paletteIndex),
             FileName = file.Name,
-            Fav = FavoriteLevelForPath(path),
+            Fav = sharedState.Favorites.TryGetValue(normalizedPath, out int favoriteLevel)
+                ? Math.Clamp(favoriteLevel, 0, 5)
+                : 0,
             Unseen = !seen,
             ShowUnseenDot = showUnseenDots && !seen,
             // Date sections are enabled only for Created sorts, so their label
@@ -3071,6 +3096,12 @@ public partial class MainWindow : Window
         => Path.Combine(Path.GetDirectoryName(ResolvedEnhancementJobsPath)!, "outputs");
 
     private bool TryResolveEnhancementSourceIdentity(string? path, out string identity)
+        => TryResolveEnhancementSourceIdentity(path, _resolveFinalPath, out identity);
+
+    private static bool TryResolveEnhancementSourceIdentity(
+        string? path,
+        Func<string, string> resolveFinalPath,
+        out string identity)
     {
         identity = "";
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
@@ -3079,7 +3110,7 @@ public partial class MainWindow : Window
         try
         {
             string lexical = Path.GetFullPath(path);
-            string canonical = Path.GetFullPath(_resolveFinalPath(lexical));
+            string canonical = Path.GetFullPath(resolveFinalPath(lexical));
             if (!Path.IsPathFullyQualified(canonical))
                 return false;
 
@@ -3158,6 +3189,26 @@ public partial class MainWindow : Window
         }
         outputPath = null;
         return false;
+    }
+
+    private static bool TryGetEnhancedOutputForPath(
+        string path,
+        CatalogSharedStateSnapshot sharedState,
+        out string? outputPath)
+    {
+        outputPath = null;
+        if (sharedState.EnhancedOutputs.Count == 0
+            || !TryResolveEnhancementSourceIdentity(
+                path,
+                sharedState.ResolveFinalPath,
+                out string identity)
+            || !sharedState.EnhancedOutputs.TryGetValue(identity, out ManagedEnhancedOutput? stored))
+        {
+            return false;
+        }
+
+        outputPath = stored.OutputPath;
+        return true;
     }
 
     private bool TryGetManagedEnhancedOutputForPath(string path, out ManagedEnhancedOutput output)
@@ -4894,7 +4945,10 @@ public partial class MainWindow : Window
         int decodeFailures = 0;
         int cacheHits = 0;
         int cacheMisses = 0;
-        int uiBatchSize = Math.Clamp(tiles.Count / 128, 96, 512);
+        // Each item applies three observable properties on the UI thread.
+        // Bound batches so 10k/100k cold indexes cannot monopolize input while
+        // workers are publishing progressive metadata.
+        const int uiBatchSize = 64;
 
         await Parallel.ForEachAsync(
             tiles,
@@ -8800,6 +8854,12 @@ public partial class MainWindow : Window
         double MaximumWidth,
         string DisplayStyle,
         string AspectMode);
+
+    private sealed record CatalogSharedStateSnapshot(
+        IReadOnlyDictionary<string, int> Favorites,
+        IReadOnlySet<string> SeenPaths,
+        IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs,
+        Func<string, string> ResolveFinalPath);
 
     private readonly record struct CatalogTilePreparationResult(
         List<Tile> Tiles,
@@ -15019,6 +15079,35 @@ public partial class MainWindow : Window
     public int FavoriteStoreCountForSmoke => _favorites.Count(static item => item.Value > 0);
     public int SeenStoreCountForSmoke => _seenPaths.Count;
     public int EnhancedStoreCountForSmoke => _enhancedOutputs.Count;
+    internal bool InjectCatalogEnhancedStateForSmoke(string sourcePath, string outputPath)
+    {
+        try
+        {
+            if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity))
+                return false;
+
+            string canonicalOutput = Path.GetFullPath(_resolveFinalPath(Path.GetFullPath(outputPath)));
+            string canonicalTempRoot = Path.GetFullPath(_resolveFinalPath(Path.GetFullPath(Path.GetTempPath())));
+            var sourceInfo = new FileInfo(sourceIdentity);
+            if (!sourceInfo.Exists
+                || !File.Exists(canonicalOutput)
+                || !IsPathInside(sourceIdentity, canonicalTempRoot)
+                || !IsPathInside(canonicalOutput, canonicalTempRoot))
+            {
+                return false;
+            }
+
+            _enhancedOutputs[sourceIdentity] = new ManagedEnhancedOutput(
+                canonicalOutput,
+                sourceInfo.Length,
+                new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds());
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
     public int FavoriteLevelForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Fav ?? -1;
     public bool UnseenForFileForSmoke(string fileName)

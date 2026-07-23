@@ -2302,11 +2302,14 @@ public partial class App : Application
         string alphaPath = Path.Combine(folder, "alpha.png");
         string bravoPath = Path.Combine(folder, "bravo.png");
         string charliePath = Path.Combine(folder, "charlie.png");
+        string injectedEnhancedOutputPath = Path.Combine(smokeRoot, "enhance", "outputs", "alpha-enhanced.png");
         Directory.CreateDirectory(folder);
         Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(injectedEnhancedOutputPath)!);
         WriteSmokePng(alphaPath, 96, 72, Color.FromRgb(65, 125, 195));
         WriteSmokePng(bravoPath, 96, 72, Color.FromRgb(195, 95, 85));
         WriteSmokePng(charliePath, 96, 72, Color.FromRgb(85, 175, 115));
+        File.Copy(alphaPath, injectedEnhancedOutputPath, overwrite: true);
         DateTime fixtureTime = new(2026, 7, 18, 2, 0, 0, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(alphaPath, fixtureTime.AddMinutes(2));
         File.SetLastWriteTimeUtc(bravoPath, fixtureTime.AddMinutes(1));
@@ -2325,6 +2328,7 @@ public partial class App : Application
             bool ok = false;
             object result;
             string sourceAfterInjectedDelete = "";
+            bool enhancementStateInjectedAfterSnapshot = false;
             try
             {
                 await window.LoadFolderAsync(folder);
@@ -2346,6 +2350,9 @@ public partial class App : Application
 
                 window.SetBeforeMaterializeFilesForSmoke(() =>
                 {
+                    enhancementStateInjectedAfterSnapshot = window.InjectCatalogEnhancedStateForSmoke(
+                        alphaPath,
+                        injectedEnhancedOutputPath);
                     File.Delete(bravoPath);
                     sourceAfterInjectedDelete = FolderFingerprint(folder);
                 });
@@ -2383,11 +2390,15 @@ public partial class App : Application
                     && string.Equals(jobsBefore, FileFingerprint(jobsPath), StringComparison.Ordinal);
                 bool sourcesReadOnly = !string.IsNullOrWhiteSpace(sourceAfterInjectedDelete)
                     && string.Equals(sourceAfterInjectedDelete, FolderFingerprint(folder), StringComparison.Ordinal);
-                bool isolated = new[] { statePath, favoritesPath, seenPath, recentPath, jobsPath, alphaPath, bravoPath, charliePath }
+                bool enhancementSnapshotDetached = enhancementStateInjectedAfterSnapshot
+                    && window.EnhancedStoreCountForSmoke == 1
+                    && !window.EnhancedForFileForSmoke("alpha.png");
+                bool isolated = new[] { statePath, favoritesPath, seenPath, recentPath, jobsPath, alphaPath, bravoPath, charliePath, injectedEnhancedOutputPath }
                     .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(smokeRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
                 bool residueFree = NoPersistenceResidue(smokeRoot);
                 ok = vanishedSourceSkipped && recoverableWarning && validSelectionAndModal
-                    && stateReconciled && storesUnchanged && sourcesReadOnly && isolated && residueFree;
+                    && stateReconciled && storesUnchanged && sourcesReadOnly
+                    && enhancementSnapshotDetached && isolated && residueFree;
                 result = new
                 {
                     ok,
@@ -2401,6 +2412,7 @@ public partial class App : Application
                     stateReconciled,
                     storesUnchanged,
                     sourcesReadOnly,
+                    enhancementSnapshotDetached,
                     isolated,
                     residueFree,
                     catalog,

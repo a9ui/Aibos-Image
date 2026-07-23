@@ -10,6 +10,7 @@ param(
     [string]$BaselineTree = "",
     [string]$CandidateLabel = "working-tree",
     [string]$OutputRoot = (Join-Path $env:TEMP ("aibos-wpf-catalog-ab-" + [guid]::NewGuid().ToString('N'))),
+    [switch]$ReuseExistingRuns,
     [double]$MinimumP95ImprovementPercent = 15,
     [double]$MaximumLatencyRegressionPercent = 5,
     [double]$MaximumResourceRegressionPercent = 10
@@ -32,6 +33,14 @@ if (-not (Test-Path -LiteralPath $baselineExe -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $candidateExe -PathType Leaf)) {
     throw "Candidate executable was not found: $candidateExe"
 }
+$baselineAssembly = [IO.Path]::ChangeExtension($baselineExe, '.dll')
+$candidateAssembly = [IO.Path]::ChangeExtension($candidateExe, '.dll')
+if (-not (Test-Path -LiteralPath $baselineAssembly -PathType Leaf)) {
+    throw "Baseline managed assembly was not found: $baselineAssembly"
+}
+if (-not (Test-Path -LiteralPath $candidateAssembly -PathType Leaf)) {
+    throw "Candidate managed assembly was not found: $candidateAssembly"
+}
 
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempRootPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
@@ -42,9 +51,16 @@ if (-not $outputRootFull.StartsWith($tempRootPrefix, [StringComparison]::Ordinal
     throw "OutputRoot must be a dedicated aibos-wpf-catalog-ab-* directory under TEMP: $outputRootFull"
 }
 if (Test-Path -LiteralPath $outputRootFull) {
-    throw "OutputRoot already exists; choose a fresh exact directory: $outputRootFull"
+    if (-not $ReuseExistingRuns) {
+        throw "OutputRoot already exists; choose a fresh exact directory: $outputRootFull"
+    }
 }
-[IO.Directory]::CreateDirectory($outputRootFull) | Out-Null
+elseif ($ReuseExistingRuns) {
+    throw "ReuseExistingRuns requires an existing exact OutputRoot: $outputRootFull"
+}
+else {
+    [IO.Directory]::CreateDirectory($outputRootFull) | Out-Null
+}
 
 function Get-PercentileInc {
     param(
@@ -141,11 +157,27 @@ try {
             }
 
             $wallWatch = [Diagnostics.Stopwatch]::StartNew()
-            & $verifier @arguments | Out-Null
+            if ($ReuseExistingRuns) {
+                if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
+                    throw "existing result was not found: $outputPath"
+                }
+            }
+            else {
+                & $verifier @arguments | Out-Null
+            }
             $wallWatch.Stop()
             $data = Get-Content -Raw -LiteralPath $outputPath | ConvertFrom-Json
             if ($data.ok -ne $true) {
                 throw "$variant round $round returned ok=false"
+            }
+
+            [double]$loadDispatcherGapMs = 0
+            foreach ($segment in @($data.dispatcherGapSegments)) {
+                if ($segment.stageBefore -eq 'load' -or $segment.stageAfter -eq 'load') {
+                    $loadDispatcherGapMs = [Math]::Max(
+                        $loadDispatcherGapMs,
+                        [double]$segment.durationMs)
+                }
             }
 
             $rows.Add([pscustomobject]@{
@@ -158,6 +190,7 @@ try {
                 scanMs = [double]$data.scanElapsedMs
                 materializeMs = [double]$data.materializeElapsedMs
                 metadataMs = [double]$data.metadataElapsedMs
+                loadDispatcherGapMs = $loadDispatcherGapMs
                 dispatcherGapMs = [double]$data.dispatcherHeartbeatMaxGapMs
                 workingSetAfterBytes = [double]$data.workingSetAfterBytes
                 workingSetDeltaBytes = [double]$data.workingSetAfterBytes - [double]$data.workingSetBeforeBytes
@@ -198,6 +231,7 @@ $metricNames = @(
     'scanMs',
     'materializeMs',
     'metadataMs',
+    'loadDispatcherGapMs',
     'dispatcherGapMs',
     'workingSetAfterBytes',
     'workingSetDeltaBytes',
@@ -232,7 +266,12 @@ else {
     # prefetched and visible thumbnail loads. thumbnailMs is their internal
     # component duration and remains diagnostic; gating it again would double
     # count the same work while ignoring the much earlier catalog start.
-    foreach ($metricName in @('totalMs', 'scanMs', 'materializeMs', 'metadataMs', 'dispatcherGapMs')) {
+    # Every run already fails closed when the whole-session internal heartbeat
+    # or the external WM_NULL probe exceeds the verifier's absolute 750 ms
+    # bound. For the relative A/B gate, compare only heartbeat gaps that cross
+    # the catalog load stage; later zoom/sidebar interaction jitter is outside
+    # this load optimization and remains protected by that per-run bound.
+    foreach ($metricName in @('totalMs', 'scanMs', 'materializeMs', 'metadataMs', 'loadDispatcherGapMs')) {
         $change = [double]$summaryMetrics[$metricName].p95ChangePercent
         if ($change -gt $MaximumLatencyRegressionPercent) {
             $gateFailures.Add("$metricName p95 regressed $change%; limit $MaximumLatencyRegressionPercent%")
@@ -252,11 +291,16 @@ $summary = [ordered]@{
     baselineTree = $BaselineTree
     baselineExecutable = $baselineExe
     baselineExecutableSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $baselineExe).Hash.ToLowerInvariant()
+    baselineAssembly = $baselineAssembly
+    baselineAssemblySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $baselineAssembly).Hash.ToLowerInvariant()
     candidateLabel = $CandidateLabel
     candidateExecutable = $candidateExe
     candidateExecutableSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidateExe).Hash.ToLowerInvariant()
+    candidateAssembly = $candidateAssembly
+    candidateAssemblySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidateAssembly).Hash.ToLowerInvariant()
     count = $Count
     runsPerVariant = $RunsPerVariant
+    reusedExistingRuns = [bool]$ReuseExistingRuns
     order = 'odd rounds baseline,candidate; even rounds candidate,baseline'
     percentileMethod = 'PERCENTILE.INC'
     minimumP95ImprovementPercent = $MinimumP95ImprovementPercent

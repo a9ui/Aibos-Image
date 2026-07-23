@@ -41,6 +41,7 @@ if ($result.ok -ne $true `
     -or $result.stateReconciled -ne $true `
     -or $result.storesUnchanged -ne $true `
     -or $result.sourcesReadOnly -ne $true `
+    -or $result.enhancementSnapshotDetached -ne $true `
     -or $result.isolated -ne $true `
     -or $result.residueFree -ne $true `
     -or $result.fileCountMetric -ne 2) {
