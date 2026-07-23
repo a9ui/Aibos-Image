@@ -17,6 +17,9 @@ internal sealed record SharedDataRootActivationResult(
     string? ErrorCode,
     string? Error)
 {
+    internal string? LocatorPath { get; init; }
+    internal SharedDataRootResolutionStatus? ResolutionStatus { get; init; }
+
     internal bool IsAvailable
         => Status is SharedDataRootActivationStatus.Activated
             or SharedDataRootActivationStatus.OverridesOnly
@@ -200,12 +203,25 @@ internal static class SharedDataRootActivation
                 sharedDataRoot,
                 paths,
                 null,
-                null);
+                null)
+            {
+                LocatorPath = rootResolution.LocatorPath,
+                ResolutionStatus = rootResolution.Status,
+            };
         }
     }
 
     internal static IReadOnlyList<string> StoreEnvironmentVariables
         => Stores.Select(static store => store.EnvironmentVariable).ToArray();
+
+    internal static SharedDataRootActivationResult? Current
+    {
+        get
+        {
+            lock (ActivationGate)
+                return _current;
+        }
+    }
 
     internal static bool WasExplicitStoreOverride(string environmentVariable)
     {

@@ -101,13 +101,38 @@ the smallest defined semantic unit. Malformed and unsupported future state is
 rejected without changing its bytes. A reader must not rewrite state merely by
 opening it.
 
-The public-foundation change did not select or activate a shared root and did
-not move, merge, initialize, rewrite, or delete existing user state. The WPF
-activation now resolves the root once at process startup and routes only the
-durable set named above. It does not create a locator, shared root, durable-data
-directory, or store; locator creation and any data migration remain separate
-reviewed changes. The only startup write this activation may make is the empty
-TEMP coordination directory/file defined by the lease protocol below.
+The WPF activation resolves the root once at process startup and routes only
+the durable set named above. Normal application startup remains reader-only and
+does not create a locator, shared root, durable-data directory, or store. The
+only startup write this activation may make is the empty TEMP coordination
+directory/file defined by the lease protocol below.
+WPF Settings may display that process-fixed data location and open it in the
+Windows shell only when the directory already exists. Merely opening Settings,
+viewing the location, or pressing the disabled open action never creates a
+locator, root, directory, or store. Per-store overrides are reported as having
+no single data folder rather than inferring a false shared authority.
+
+The dedicated `.NET 10` `Aibos.SharedRootSetup` process owns the separately
+reviewed one-time setup operation. Its default action is inspection only. Apply
+requires both `--apply` and the exact `--confirm CREATE` token. The production
+surface always targets the default locator; arbitrary locator paths are
+available only to a TEMP-bounded smoke fixture.
+
+- The requested root must already exist and resolve to a canonical directory.
+- Every present durable JSON store must be readable, unambiguous, and supported;
+  missing stores are allowed. Managed Enhancement outputs are inspected without
+  modifying or opening them as images.
+- Apply holds the protocol-global exclusive writer lease, repeats the
+  preflight, content-hashes managed outputs, creates a sibling temporary
+  locator with write-through flush, and moves it into place without overwrite.
+- A supported existing locator for the same canonical root is idempotent and
+  byte-identical. A different, invalid, unavailable, or concurrently appearing
+  locator is rejected without replacement.
+- Apply compares all store fingerprints plus the managed-output tree before
+  and after creation. A mismatch removes only the exact locator payload created
+  by that invocation; no durable-state file is repaired or deleted.
+- Root migration, store copy/merge, store initialization, locator replacement,
+  and automatic setup during either product's startup remain disabled.
 
 ### `PV-ROOT-001` — Shared data root locator
 
@@ -153,18 +178,16 @@ without copying or rewriting any durable data.
 - The locator contains no credentials, network endpoint, dynamic companion
   port, renderer state, index path, thumbnail cache, or migration instruction.
 
-The canonical fixture is contracts/shared-root-locator-v1.json. The first
-rollout implemented and verified readers only. WPF production routing is now
-enabled only through that reader contract after exact Aibos and H25 revisions
-passed the fixture and cross-repository activation matrix; locator writing and
-data migration remain disabled.
-Any later locator writer must preserve supported unknown fields and use the
-shared lock plus same-volume atomic replacement; application startup never
-writes the locator.
-Activation additionally requires a process-lifetime reader lease and exclusive
-writer lease, plus a two-process missing/create/replace test. Until that gate is
-green, the locator is not created or changed while either application is
-running.
+The canonical reader fixture is contracts/shared-root-locator-v1.json. WPF
+production routing is enabled only through that reader contract after exact
+Aibos and H25 revisions passed the fixture and cross-repository activation
+matrix. The reviewed setup tool may create a genuinely missing default locator
+only; it never replaces an existing document, so supported unknown locator
+fields remain byte-identical. Data migration remains disabled and application
+startup never writes the locator.
+Activation requires a process-lifetime reader lease. The setup tool requires
+the corresponding exclusive writer lease and therefore cannot create the
+locator while either compliant application is running.
 
 The v1 lease is an empty operational file under
 `%TEMP%\aibos-shared-root-locator-leases-v1`; it is not durable state and is
