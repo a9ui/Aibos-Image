@@ -43,11 +43,18 @@ try {
         'README.md',
         'SECURITY.md',
         'docs/product-contract.md',
+        'docs/legacy-ledger/README.md',
+        'docs/legacy-ledger/manifest-v3.json',
+        'docs/legacy-ledger/summary-v3.json',
         'contracts/parity-v1.json',
         'local-native/PhotoViewer.Wpf/PhotoViewer.Wpf.csproj',
         'start_aibos.bat',
         'start_wpf.bat',
-        'scripts/verify-public-surface.ps1'
+        'scripts/verify-public-surface.ps1',
+        'scripts/verify-legacy-asset-ledger.ps1',
+        'scripts/build-legacy-asset-ledger.ps1',
+        'scripts/capture-legacy-asset-ledger.ps1',
+        'scripts/capture_legacy_asset_ledger.py'
     )
     foreach ($path in $required) {
         if ($path -notin $tracked -and -not (Test-Path -LiteralPath (Join-Path $repoRoot $path) -PathType Leaf)) {
