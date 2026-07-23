@@ -723,6 +723,13 @@ public partial class App : Application
             return;
         }
 
+        int enhancementJobsWorkspaceSmokeIdx = Array.IndexOf(e.Args, "--enhancement-jobs-workspace-smoke");
+        if (enhancementJobsWorkspaceSmokeIdx >= 0 && enhancementJobsWorkspaceSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureEnhancementJobsWorkspaceSmoke(e.Args[enhancementJobsWorkspaceSmokeIdx + 1]);
+            return;
+        }
+
         if (h25EnhancementCompanionSmokeIdx >= 0 && h25EnhancementCompanionSmokeIdx + 1 < e.Args.Length)
         {
             CaptureH25EnhancementCompanionSmoke(e.Args[h25EnhancementCompanionSmokeIdx + 1], e.Args);
@@ -4439,6 +4446,61 @@ public partial class App : Application
                 await win.WaitForPreviewPngMetadataForSmokeAsync(win.SelectedFileNameForSmoke!);
 
             win.ShowScreen(screen);
+            if (args.Contains("--show-enhancement-jobs"))
+            {
+                List<string> sources = win.EnhancementWorkspaceCatalogPathsForSmoke.Take(5).ToList();
+                object VisualJob(string id, string status, int progress, int sourceIndex, string? error = null)
+                {
+                    string sourcePath = sources[Math.Min(sourceIndex, sources.Count - 1)];
+                    var sourceInfo = new FileInfo(sourcePath);
+                    double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+                    string? outputPath = status == "succeeded"
+                        ? Path.Combine(Path.GetDirectoryName(win.EnhancementJobsPathForSmoke)!, "outputs", $"{id}.webp")
+                        : null;
+                    return new
+                    {
+                        id,
+                        sourceId = sourcePath,
+                        sourcePath,
+                        sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
+                        presetId = sourceIndex % 2 == 0 ? "anime-sharp-x2" : "photo-natural-x2",
+                        adapterId = "realesrgan-ncnn",
+                        status,
+                        progress,
+                        outputPath,
+                        errorMessage = error,
+                        createdAt = "2026-07-23T06:20:00.000Z",
+                        updatedAt = $"2026-07-23T06:2{sourceIndex}:30.000Z",
+                    };
+                }
+
+                if (sources.Count > 0)
+                {
+                    object[] visualJobs =
+                    [
+                        VisualJob("visual-running", "running", 68, 0),
+                        VisualJob("visual-queued", "queued", 0, 1),
+                        VisualJob("visual-done", "succeeded", 100, 2),
+                        VisualJob("visual-failed", "failed", 31, 3, "GPU backend stopped; retry when the companion is ready."),
+                        VisualJob("visual-canceled", "canceled", 14, 4),
+                    ];
+                    win.ConfigureModalEnhancementForSmoke((request, _) =>
+                    {
+                        HttpResponseMessage response = request.Method == HttpMethod.Get
+                            ? new HttpResponseMessage(HttpStatusCode.OK)
+                            {
+                                Content = new StringContent(JsonSerializer.Serialize(new { jobs = visualJobs }), Encoding.UTF8, "application/json"),
+                            }
+                            : new HttpResponseMessage(HttpStatusCode.MethodNotAllowed)
+                            {
+                                Content = new StringContent("{\"error\":\"visual fixture is read-only\"}", Encoding.UTF8, "application/json"),
+                            };
+                        return Task.FromResult(response);
+                    });
+                    await win.OpenEnhancementJobsForSmokeAsync();
+                    await Task.Delay(180);
+                }
+            }
             if (args.Contains("--clear-selection"))
                 win.ClearSelectionForSmoke();
             if (args.Contains("--folders-collapsed") && win.FoldersSectionExpandedForSmoke)
@@ -14239,6 +14301,251 @@ public partial class App : Application
 
             WriteModalEnhancedSmokeResult(resultFullPath, result);
             Shutdown(result.Ok ? 0 : 1);
+        }, DispatcherPriority.ContextIdle);
+    }
+
+    private void CaptureEnhancementJobsWorkspaceSmoke(string resultPath)
+    {
+        string resultFullPath = Path.GetFullPath(resultPath);
+        string smokeRoot = Directory.CreateTempSubdirectory("aibos-enhancement-jobs-workspace-").FullName;
+        string sourcePath = Path.Combine(smokeRoot, "images", "workspace-source.png");
+        string outputPath = Path.Combine(smokeRoot, "stores", "enhance", "outputs", "workspace-output.webp");
+        string statePath = Path.Combine(smokeRoot, "stores", "state.json");
+        string favoritesPath = Path.Combine(smokeRoot, "stores", "favorites.json");
+        string seenPath = Path.Combine(smokeRoot, "stores", "seen.json");
+        string recentPath = Path.Combine(smokeRoot, "stores", "recent-folders.json");
+        string settingsPath = Path.Combine(smokeRoot, "stores", "settings.json");
+        string albumsPath = Path.Combine(smokeRoot, "stores", "albums.json");
+        string searchHistoryPath = Path.Combine(smokeRoot, "stores", "search-history.json");
+        string metadataIndexDirectory = Path.Combine(smokeRoot, "stores", "metadata-index");
+        string jobsPath = Path.Combine(smokeRoot, "stores", "enhance", "jobs.json");
+        var previousEnvironment = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["PHOTOVIEWER_WPF_STATE_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH"),
+            ["PHOTOVIEWER_WPF_FAVORITES_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH"),
+            ["PHOTOVIEWER_WPF_SEEN_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH"),
+            ["PHOTOVIEWER_WPF_RECENT_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH"),
+            ["PHOTOVIEWER_WPF_SETTINGS_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH"),
+            ["PHOTOVIEWER_WPF_ALBUMS_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH"),
+            ["PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH"),
+            ["PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY"),
+            ["PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"),
+        };
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["PHOTOVIEWER_WPF_STATE_PATH"] = statePath,
+            ["PHOTOVIEWER_WPF_FAVORITES_PATH"] = favoritesPath,
+            ["PHOTOVIEWER_WPF_SEEN_PATH"] = seenPath,
+            ["PHOTOVIEWER_WPF_RECENT_PATH"] = recentPath,
+            ["PHOTOVIEWER_WPF_SETTINGS_PATH"] = settingsPath,
+            ["PHOTOVIEWER_WPF_ALBUMS_PATH"] = albumsPath,
+            ["PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH"] = searchHistoryPath,
+            ["PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY"] = metadataIndexDirectory,
+            ["PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"] = jobsPath,
+        };
+
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        _ = Dispatcher.InvokeAsync(async () =>
+        {
+            MainWindow? window = null;
+            object result;
+            bool ok = false;
+            var requests = new List<string>();
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
+                Directory.CreateDirectory(metadataIndexDirectory);
+                WriteSmokePng(sourcePath, 96, 72, Color.FromRgb(78, 128, 214));
+                WriteSmokePng(outputPath, 192, 144, Color.FromRgb(86, 180, 214));
+                File.WriteAllText(statePath, "{\"version\":2}");
+                File.WriteAllText(favoritesPath, "{}");
+                File.WriteAllText(seenPath, "{}");
+                File.WriteAllText(recentPath, "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"updatedAtUtc\":\"\"}");
+                File.WriteAllText(settingsPath, "{\"version\":1,\"smokeMarker\":\"keep-settings\"}");
+                File.WriteAllText(albumsPath, "{\"version\":1,\"revision\":0,\"albums\":[],\"recentAlbumIds\":[],\"smokeMarker\":\"keep-albums\"}");
+                File.WriteAllText(searchHistoryPath, "{\"version\":1,\"entries\":[],\"smokeMarker\":\"keep-search-history\"}");
+                File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[],\"smokeMarker\":\"keep-jobs\"}");
+                foreach ((string key, string value) in environment)
+                    Environment.SetEnvironmentVariable(key, value);
+
+                string sourceBefore = FileFingerprint(sourcePath);
+                var storesBefore = environment
+                    .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
+                    .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
+                bool activeCanceled = false;
+                bool retryCreated = false;
+                bool outputDeleted = false;
+                string? openedOutput = null;
+                var sourceInfo = new FileInfo(sourcePath);
+                double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+
+                object Job(string id, string status, int progress, string? output = null, string? error = null) => new
+                {
+                    id,
+                    sourceId = sourcePath,
+                    sourcePath,
+                    sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
+                    presetId = "anime-sharp-x2",
+                    adapterId = "realesrgan-ncnn",
+                    status,
+                    progress,
+                    outputPath = output,
+                    errorMessage = error,
+                    createdAt = "2026-07-23T00:00:00.000Z",
+                    updatedAt = "2026-07-23T00:00:01.000Z",
+                };
+
+                object[] CurrentJobs()
+                {
+                    var jobs = new List<object>
+                    {
+                        Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42),
+                        Job("failed-job", "failed", 18, error: "GPU backend stopped"),
+                        Job("done-job", outputDeleted ? "deleted" : "succeeded", 100, outputDeleted ? null : outputPath),
+                    };
+                    if (retryCreated)
+                        jobs.Insert(0, Job("retry-job", "queued", 0));
+                    return jobs.ToArray();
+                }
+
+                static HttpResponseMessage JsonResponse(HttpStatusCode status, object payload)
+                    => new(status) { Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json") };
+
+                window = HiddenWindow();
+                window.SuppressStatePersistence();
+                window.ConfigureEnhancementWorkspaceExternalOpenForSmoke(startInfo =>
+                {
+                    openedOutput = startInfo.FileName;
+                    return true;
+                });
+                window.ConfigureModalEnhancementForSmoke((request, _) =>
+                {
+                    string route = request.RequestUri?.AbsolutePath ?? "";
+                    requests.Add($"{request.Method.Method} {route}");
+                    if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/jobs", StringComparison.Ordinal))
+                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { jobs = CurrentJobs() }));
+                    if (request.Method == HttpMethod.Post && route.EndsWith("/active-job/cancel", StringComparison.Ordinal))
+                    {
+                        activeCanceled = true;
+                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { job = Job("active-job", "canceled", 43) }));
+                    }
+                    if (request.Method == HttpMethod.Post && route.EndsWith("/failed-job/retry", StringComparison.Ordinal))
+                    {
+                        retryCreated = true;
+                        return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new { job = Job("retry-job", "queued", 0) }));
+                    }
+                    if (request.Method == HttpMethod.Delete && route.EndsWith("/done-job/output", StringComparison.Ordinal))
+                    {
+                        if (File.Exists(outputPath))
+                            File.Delete(outputPath);
+                        outputDeleted = true;
+                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { job = Job("done-job", "deleted", 100) }));
+                    }
+                    return Task.FromResult(JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected workspace smoke route" }));
+                }, confirmOutputDelete: true);
+                window.Show();
+
+                int requestsBeforeOpen = requests.Count;
+                await window.OpenEnhancementJobsForSmokeAsync();
+                window.UpdateLayout();
+                EnhancementJobsWorkspaceSmokeSnapshot initial = window.EnhancementJobsWorkspaceForSmoke();
+                bool passiveOpen = requests.Skip(requestsBeforeOpen).All(static request => request == "GET /api/enhance/jobs");
+                window.SelectEnhancementJobsFilterForSmoke("active");
+                EnhancementJobsWorkspaceSmokeSnapshot active = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("failed");
+                EnhancementJobsWorkspaceSmokeSnapshot failed = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("completed");
+                EnhancementJobsWorkspaceSmokeSnapshot completed = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("all");
+
+                bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job");
+                EnhancementJobsWorkspaceSmokeSnapshot afterCancel = window.EnhancementJobsWorkspaceForSmoke();
+                bool retryIssued = await window.RetryEnhancementJobForSmokeAsync("failed-job");
+                EnhancementJobsWorkspaceSmokeSnapshot afterRetry = window.EnhancementJobsWorkspaceForSmoke();
+                bool outputOpened = window.OpenEnhancementJobOutputForSmoke("done-job");
+                bool deleteIssued = await window.DeleteEnhancementJobOutputForSmokeAsync("done-job");
+                EnhancementJobsWorkspaceSmokeSnapshot afterDelete = window.EnhancementJobsWorkspaceForSmoke();
+                int getsBeforeClose = requests.Count(static request => request == "GET /api/enhance/jobs");
+                window.CloseEnhancementJobsForSmoke();
+                await Task.Delay(1200);
+                int getsAfterClose = requests.Count(static request => request == "GET /api/enhance/jobs");
+
+                string sourceAfter = FileFingerprint(sourcePath);
+                var storesAfter = environment
+                    .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
+                    .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
+                bool storesUnchanged = storesBefore.All(pair => storesAfter.TryGetValue(pair.Key, out string? fingerprint) && fingerprint == pair.Value);
+                bool routesOk = requests.Contains("POST /api/enhance/jobs/active-job/cancel", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/failed-job/retry", StringComparer.Ordinal)
+                    && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal);
+                ok = initial.Visible
+                    && initial.Total == 3
+                    && initial.Active == 1
+                    && initial.Polling
+                    && passiveOpen
+                    && active.Filtered == 1
+                    && failed.Filtered == 1
+                    && completed.Filtered == 1
+                    && cancelIssued
+                    && afterCancel.Active == 0
+                    && !afterCancel.Polling
+                    && retryIssued
+                    && afterRetry.Active == 1
+                    && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
+                    && outputOpened
+                    && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
+                    && deleteIssued
+                    && outputDeleted
+                    && !File.Exists(outputPath)
+                    && afterDelete.VisibleIds.Contains("done-job", StringComparer.Ordinal)
+                    && getsAfterClose == getsBeforeClose
+                    && routesOk
+                    && sourceBefore == sourceAfter
+                    && storesUnchanged;
+                result = new
+                {
+                    ok,
+                    passiveOpen,
+                    initial,
+                    active,
+                    failed,
+                    completed,
+                    afterCancel,
+                    afterRetry,
+                    afterDelete,
+                    outputOpened,
+                    openedOutput,
+                    routesOk,
+                    requests,
+                    pollingStoppedOnClose = getsAfterClose == getsBeforeClose,
+                    sourceUnchanged = sourceBefore == sourceAfter,
+                    storesUnchanged,
+                    outputDeleted,
+                };
+            }
+            catch (Exception ex)
+            {
+                result = new { ok = false, message = ex.ToString(), requests };
+            }
+            finally
+            {
+                window?.Close();
+                foreach ((string key, string? value) in previousEnvironment)
+                    Environment.SetEnvironmentVariable(key, value);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
+            File.WriteAllText(resultFullPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+            try
+            {
+                Directory.Delete(smokeRoot, recursive: true);
+            }
+            catch
+            {
+            }
+            Shutdown(ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);
     }
 

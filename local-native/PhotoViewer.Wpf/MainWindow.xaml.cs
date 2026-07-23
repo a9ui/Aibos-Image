@@ -412,6 +412,7 @@ public partial class MainWindow : Window
         if (Application.Current is App app)
             app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
         InitializeKeyBindingEditor();
+        InitializeEnhancementJobsWorkspace();
         _currentMonitorWorkArea = ResolveCurrentMonitorWorkArea;
         _searchFilterTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -498,6 +499,9 @@ public partial class MainWindow : Window
             _modalChromeTransientTimer.Stop();
             _modalEnhancementPollTimer.Stop();
             _modalEnhancementGeneration++;
+            _enhancementWorkspacePollTimer.Stop();
+            _enhancementWorkspaceGeneration++;
+            Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
         };
         CardsList.MouseDoubleClick += (_, _) => OpenModal();
         RowsList.MouseDoubleClick += (_, _) => OpenModal();
@@ -13478,6 +13482,12 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (EnhancementJobsDialog.Visibility == Visibility.Visible)
+        {
+            CloseEnhancementJobsWorkspace(restoreFocus: true);
+            return true;
+        }
+
         if (Modal.Visibility != Visibility.Visible)
             return false;
 
@@ -13495,7 +13505,9 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (DeleteConfirmationDialog.Visibility == Visibility.Visible || AppSettingsDialog.Visibility == Visibility.Visible)
+        if (DeleteConfirmationDialog.Visibility == Visibility.Visible
+            || AppSettingsDialog.Visibility == Visibility.Visible
+            || EnhancementJobsDialog.Visibility == Visibility.Visible)
         {
             if (AppSettingsDialog.Visibility == Visibility.Visible
                 && _recordingKeyAction is not null
