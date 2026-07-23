@@ -2584,8 +2584,8 @@ public partial class App : Application
 
     private static string ResolveAutomationStorageRoot(IReadOnlyList<string> args)
     {
-        string? requestedRoot = ArgValue(args.ToArray(), "--automation-storage-root");
-        if (string.IsNullOrWhiteSpace(requestedRoot))
+        string? requestedSlot = ArgValue(args.ToArray(), "--automation-storage-slot");
+        if (string.IsNullOrWhiteSpace(requestedSlot))
         {
             return Path.Combine(
                 Path.GetTempPath(),
@@ -2593,34 +2593,21 @@ public partial class App : Application
                 Guid.NewGuid().ToString("N"));
         }
 
-        string root;
-        string finalTempRoot;
-        string finalRoot;
-        try
-        {
-            root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(requestedRoot));
-            string tempRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
-            finalTempRoot = ResolveFinalPathForSmoke(tempRoot);
-            finalRoot = ResolveFinalPathForSmoke(root);
-        }
-        catch (Exception ex) when (ex is ArgumentException
-            or IOException
-            or NotSupportedException
-            or UnauthorizedAccessException
-            or System.Security.SecurityException)
-        {
-            throw new ArgumentException($"Automation storage root is invalid: {ex.Message}");
-        }
-
-        string leaf = Path.GetFileName(root);
-        if (string.Equals(finalRoot, finalTempRoot, StringComparison.OrdinalIgnoreCase)
-            || !IsPathInsideForSmoke(finalRoot, finalTempRoot)
-            || !leaf.StartsWith("photoviewer-wpf-automation-", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(
+                requestedSlot,
+                "metadata-index-cross-process-v1",
+                StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                "Automation storage root must be a dedicated photoviewer-wpf-automation-* directory inside TEMP.");
+                "Automation storage slot is unsupported.");
         }
-        return root;
+
+        // This fixed slot is safe to reuse because the verifier gives both
+        // child processes the same unique TEMP root. No caller-provided path
+        // reaches a filesystem operation.
+        return Path.Combine(
+            Path.GetTempPath(),
+            "photoviewer-wpf-automation-metadata-index-cross-process-v1");
     }
 
     private static string ResolveLegacySharedDataRootForActivation()

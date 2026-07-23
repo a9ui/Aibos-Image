@@ -145,7 +145,7 @@ try {
     # Keep the process TEMP short enough that Windows PowerShell can hash and
     # stat the 64-character index filename without crossing MAX_PATH.
     $crossProcessTemp = Join-Path $runRoot 't'
-    $crossAutomationRoot = Join-Path $crossProcessTemp ('photoviewer-wpf-automation-' + [guid]::NewGuid().ToString('N'))
+    $crossAutomationRoot = Join-Path $crossProcessTemp 'photoviewer-wpf-automation-metadata-index-cross-process-v1'
     $crossIndexDirectory = Join-Path $crossAutomationRoot 'metadata-index'
     $crossFolder = Join-Path $runRoot 'fixture\images-00'
     $coldShotPath = Join-Path $crossProjectRoot 'cold.png'
@@ -193,7 +193,7 @@ try {
                     '--shot', ('"{0}"' -f $ShotPath),
                     '--folder', ('"{0}"' -f $crossFolder),
                     '--perf-log', ('"{0}"' -f $PerfPath),
-                    '--automation-storage-root', ('"{0}"' -f $crossAutomationRoot),
+                    '--automation-storage-slot', 'metadata-index-cross-process-v1',
                     '--screen', 'viewer'
                 ) `
                 -WindowStyle Hidden -PassThru
