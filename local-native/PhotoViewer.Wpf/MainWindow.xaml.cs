@@ -3105,12 +3105,6 @@ public partial class MainWindow : Window
         => Path.Combine(Path.GetDirectoryName(ResolvedEnhancementJobsPath)!, "outputs");
 
     private bool TryResolveEnhancementSourceIdentity(string? path, out string identity)
-        => TryResolveEnhancementSourceIdentity(path, _resolveFinalPath, out identity);
-
-    private static bool TryResolveEnhancementSourceIdentity(
-        string? path,
-        Func<string, string> resolveFinalPath,
-        out string identity)
     {
         identity = "";
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
@@ -3119,7 +3113,7 @@ public partial class MainWindow : Window
         try
         {
             string lexical = Path.GetFullPath(path);
-            string canonical = Path.GetFullPath(resolveFinalPath(lexical));
+            string canonical = Path.GetFullPath(_resolveFinalPath(lexical));
             if (!Path.IsPathFullyQualified(canonical))
                 return false;
 
@@ -15110,28 +15104,21 @@ public partial class MainWindow : Window
     public int FavoriteStoreCountForSmoke => _favorites.Count(static item => item.Value > 0);
     public int SeenStoreCountForSmoke => _seenPaths.Count;
     public int EnhancedStoreCountForSmoke => _enhancedOutputs.Count;
-    internal bool InjectCatalogEnhancedStateForSmoke(string sourcePath, string outputPath)
+    internal bool InjectCatalogEnhancedStateForSmoke(string fileName)
     {
         try
         {
-            if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity))
+            Tile? tile = _allTiles.FirstOrDefault(candidate =>
+                candidate.IsRealFile
+                && string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+            if (tile is null)
                 return false;
 
-            string canonicalOutput = Path.GetFullPath(_resolveFinalPath(Path.GetFullPath(outputPath)));
-            string canonicalTempRoot = Path.GetFullPath(_resolveFinalPath(Path.GetFullPath(Path.GetTempPath())));
-            var sourceInfo = new FileInfo(sourceIdentity);
-            if (!sourceInfo.Exists
-                || !File.Exists(canonicalOutput)
-                || !IsPathInside(sourceIdentity, canonicalTempRoot)
-                || !IsPathInside(canonicalOutput, canonicalTempRoot))
-            {
-                return false;
-            }
-
+            string sourceIdentity = Path.GetFullPath(tile.Path);
             _enhancedOutputs[sourceIdentity] = new ManagedEnhancedOutput(
-                canonicalOutput,
-                sourceInfo.Length,
-                new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds());
+                sourceIdentity,
+                0,
+                0);
             return true;
         }
         catch

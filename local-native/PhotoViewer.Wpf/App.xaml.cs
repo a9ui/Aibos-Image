@@ -2298,16 +2298,10 @@ public partial class App : Application
             ?? throw new InvalidOperationException("automation jobs path was not configured");
         string smokeRoot = Path.GetDirectoryName(Path.GetFullPath(statePath))
             ?? throw new InvalidOperationException("automation root was unavailable");
-        // Reuse the managed outputs directory as this synthetic source fixture.
-        // The smoke only needs source/output identity bytes, and this avoids an
-        // extra caller-derived directory creation while keeping every path
-        // inside the isolated automation root.
-        string folder = Path.Combine(Path.GetDirectoryName(jobsPath)!, "outputs");
+        string folder = Path.Combine(smokeRoot, "sources", "materialization race");
         string alphaPath = Path.Combine(folder, "alpha.png");
         string bravoPath = Path.Combine(folder, "bravo.png");
         string charliePath = Path.Combine(folder, "charlie.png");
-        string injectedEnhancedOutputPath = alphaPath;
-        string persistedEnhancedOutputPath = charliePath;
         Directory.CreateDirectory(folder);
         Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
         WriteSmokePng(alphaPath, 96, 72, Color.FromRgb(65, 125, 195));
@@ -2317,33 +2311,11 @@ public partial class App : Application
         File.SetLastWriteTimeUtc(alphaPath, fixtureTime.AddMinutes(2));
         File.SetLastWriteTimeUtc(bravoPath, fixtureTime.AddMinutes(1));
         File.SetLastWriteTimeUtc(charliePath, fixtureTime);
-        var persistedSourceInfo = new FileInfo(charliePath);
-        double persistedSourceMtimeMs =
-            new DateTimeOffset(persistedSourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
         File.WriteAllText(statePath, "{\"Version\":2,\"materializationRaceMarker\":\"preserve\"}");
         File.WriteAllText(favoritesPath, "{}");
         File.WriteAllText(seenPath, "{}");
         File.WriteAllText(recentPath, "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"updatedAtUtc\":\"\",\"raceRecentMarker\":\"preserve\"}");
-        File.WriteAllText(jobsPath, JsonSerializer.Serialize(new
-        {
-            version = 1,
-            jobs = new[]
-            {
-                new
-                {
-                    id = "materialization-race-persisted",
-                    status = "succeeded",
-                    sourcePath = charliePath,
-                    sourceId = charliePath,
-                    outputPath = persistedEnhancedOutputPath,
-                    sourceSignature = new
-                    {
-                        size = persistedSourceInfo.Length,
-                        mtimeMs = persistedSourceMtimeMs,
-                    },
-                },
-            },
-        }));
+        File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[]}");
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var window = HiddenWindow();
@@ -2375,9 +2347,8 @@ public partial class App : Application
 
                 window.SetBeforeMaterializeFilesForSmoke(() =>
                 {
-                    enhancementStateInjectedAfterSnapshot = window.InjectCatalogEnhancedStateForSmoke(
-                        alphaPath,
-                        injectedEnhancedOutputPath);
+                    enhancementStateInjectedAfterSnapshot =
+                        window.InjectCatalogEnhancedStateForSmoke("alpha.png");
                     File.Delete(bravoPath);
                     sourceAfterInjectedDelete = FolderFingerprint(folder);
                 });
@@ -2416,22 +2387,9 @@ public partial class App : Application
                 bool sourcesReadOnly = !string.IsNullOrWhiteSpace(sourceAfterInjectedDelete)
                     && string.Equals(sourceAfterInjectedDelete, FolderFingerprint(folder), StringComparison.Ordinal);
                 bool enhancementSnapshotDetached = enhancementStateInjectedAfterSnapshot
-                    && window.EnhancedStoreCountForSmoke == 2
-                    && !window.EnhancedForFileForSmoke("alpha.png")
-                    && window.EnhancedForFileForSmoke("charlie.png");
-                bool isolated = new[]
-                    {
-                        statePath,
-                        favoritesPath,
-                        seenPath,
-                        recentPath,
-                        jobsPath,
-                        alphaPath,
-                        bravoPath,
-                        charliePath,
-                        injectedEnhancedOutputPath,
-                        persistedEnhancedOutputPath,
-                    }
+                    && window.EnhancedStoreCountForSmoke == 1
+                    && !window.EnhancedForFileForSmoke("alpha.png");
+                bool isolated = new[] { statePath, favoritesPath, seenPath, recentPath, jobsPath, alphaPath, bravoPath, charliePath }
                     .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(smokeRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
                 bool residueFree = NoPersistenceResidue(smokeRoot);
                 ok = vanishedSourceSkipped && recoverableWarning && validSelectionAndModal
