@@ -4483,11 +4483,23 @@ public partial class App : Application
     {
         string outputPath = Path.GetFullPath(path);
         string outputDirectory = Path.GetDirectoryName(outputPath) ?? Path.GetTempPath();
+        string tempDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+        string relativeOutput = Path.GetRelativePath(tempDirectory, outputPath);
+        string outputFileName = Path.GetFileName(outputPath);
+        bool outputIsInsideTemp = !Path.IsPathRooted(relativeOutput)
+            && !relativeOutput.Equals("..", StringComparison.Ordinal)
+            && !relativeOutput.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            && !relativeOutput.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
+        if (!outputIsInsideTemp
+            || !outputFileName.StartsWith("aibos-album-library-", StringComparison.OrdinalIgnoreCase)
+            || !Path.GetExtension(outputPath).Equals(".png", StringComparison.OrdinalIgnoreCase)
+            || !Directory.Exists(outputDirectory))
+        {
+            throw new InvalidOperationException("Album Library audit captures require an existing TEMP directory and an aibos-album-library-*.png filename.");
+        }
         int shotWidth = Math.Clamp(ArgInt(args.ToArray(), "--shot-width", 1120), 980, 3840);
         int shotHeight = Math.Clamp(ArgInt(args.ToArray(), "--shot-height", 760), 560, 2160);
-        string smokeRoot = Path.Combine(
-            outputDirectory,
-            $".{Path.GetFileNameWithoutExtension(outputPath)}-{Guid.NewGuid():N}");
+        string smokeRoot = Directory.CreateTempSubdirectory("aibos-album-library-").FullName;
         string albumPath = Path.Combine(smokeRoot, "albums.json");
         string catalogPath = Path.Combine(smokeRoot, "catalog");
         string? previousAlbumPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH");
@@ -4582,7 +4594,6 @@ public partial class App : Application
                 bitmap.Render(root);
                 var encoder = new PngBitmapEncoder();
                 encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                Directory.CreateDirectory(outputDirectory);
                 using (var stream = File.Create(outputPath))
                     encoder.Save(stream);
                 ok = new FileInfo(outputPath).Length > 0;
