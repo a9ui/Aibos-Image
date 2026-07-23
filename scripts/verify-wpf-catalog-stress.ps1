@@ -7,7 +7,9 @@ param(
     [int]$ViewportChurnSeconds = 0,
     [string]$OutputPath = (Join-Path $env:TEMP ("photoviewer-wpf-catalog-stress-" + [guid]::NewGuid().ToString('N') + ".json")),
     [int]$UnresponsiveStreakLimitMs = 750,
-    [int]$OverallTimeoutSeconds = 90
+    [int]$OverallTimeoutSeconds = 90,
+    [switch]$RequireParallelCatalogPreparation,
+    [switch]$RequireProcessResourceCounters
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,12 +38,22 @@ if (-not $SkipBuild) {
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "WPF executable was not found: $exe" }
 
 Remove-Item -LiteralPath $outputFullPath -Force -ErrorAction SilentlyContinue
-if (-not ('PhotoViewerWmNullProbe' -as [type])) {
+if (-not ('PhotoViewerCatalogStressProbeV2' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
-public static class PhotoViewerWmNullProbe
+public struct PhotoViewerCatalogStressIoCounters
+{
+    public ulong ReadOperationCount;
+    public ulong WriteOperationCount;
+    public ulong OtherOperationCount;
+    public ulong ReadTransferCount;
+    public ulong WriteTransferCount;
+    public ulong OtherTransferCount;
+}
+
+public static class PhotoViewerCatalogStressProbeV2
 {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr SendMessageTimeout(
@@ -52,6 +64,12 @@ public static class PhotoViewerWmNullProbe
         uint fuFlags,
         uint uTimeout,
         out IntPtr lpdwResult);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetProcessIoCounters(
+        IntPtr hProcess,
+        out PhotoViewerCatalogStressIoCounters counters);
 }
 '@
 }
@@ -71,6 +89,14 @@ $probeTimeoutCount = 0
 $currentUnresponsiveStartMs = $null
 $longestUnresponsiveStreakMs = 0L
 $unresponsiveSegments = [Collections.Generic.List[object]]::new()
+$processResourceCountersCaptured = $false
+$processReadOperationCount = $null
+$processWriteOperationCount = $null
+$processOtherOperationCount = $null
+$processReadBytes = $null
+$processWriteBytes = $null
+$processOtherBytes = $null
+$processPeakWorkingSetBytes = $null
 $overallTimeoutMs = [int64]$OverallTimeoutSeconds * 1000
 try {
     $process = Start-Process -FilePath $exe `
@@ -85,6 +111,19 @@ try {
         $hasExited = $process.HasExited
         if (Test-Path -LiteralPath $outputFullPath) {
             $resultObservedBeforeExit = -not $hasExited
+            if (-not $hasExited) {
+                $ioCounters = [PhotoViewerCatalogStressIoCounters]::new()
+                if ([PhotoViewerCatalogStressProbeV2]::GetProcessIoCounters($process.Handle, [ref]$ioCounters)) {
+                    $processResourceCountersCaptured = $true
+                    $processReadOperationCount = [uint64]$ioCounters.ReadOperationCount
+                    $processWriteOperationCount = [uint64]$ioCounters.WriteOperationCount
+                    $processOtherOperationCount = [uint64]$ioCounters.OtherOperationCount
+                    $processReadBytes = [uint64]$ioCounters.ReadTransferCount
+                    $processWriteBytes = [uint64]$ioCounters.WriteTransferCount
+                    $processOtherBytes = [uint64]$ioCounters.OtherTransferCount
+                }
+                $processPeakWorkingSetBytes = [uint64]$process.PeakWorkingSet64
+            }
             break
         }
         if ($hasExited) {
@@ -104,7 +143,7 @@ try {
             $probeStartMs = $probeWatch.ElapsedMilliseconds
             $messageResult = [IntPtr]::Zero
             # WM_NULL + SMTO_BLOCK | SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT.
-            $responsive = [PhotoViewerWmNullProbe]::SendMessageTimeout(
+            $responsive = [PhotoViewerCatalogStressProbeV2]::SendMessageTimeout(
                 $windowHandle,
                 0,
                 [IntPtr]::Zero,
@@ -216,6 +255,14 @@ $result | Add-Member -Force -NotePropertyName wmNullTimeoutCount -NotePropertyVa
 $result | Add-Member -Force -NotePropertyName maxUnresponsiveStreakMs -NotePropertyValue $longestUnresponsiveStreakMs
 $result | Add-Member -Force -NotePropertyName maxAllowedUnresponsiveStreakMs -NotePropertyValue $UnresponsiveStreakLimitMs
 $result | Add-Member -Force -NotePropertyName unresponsiveSegments -NotePropertyValue @($unresponsiveSegments)
+$result | Add-Member -Force -NotePropertyName processResourceCountersCaptured -NotePropertyValue $processResourceCountersCaptured
+$result | Add-Member -Force -NotePropertyName processReadOperationCount -NotePropertyValue $processReadOperationCount
+$result | Add-Member -Force -NotePropertyName processWriteOperationCount -NotePropertyValue $processWriteOperationCount
+$result | Add-Member -Force -NotePropertyName processOtherOperationCount -NotePropertyValue $processOtherOperationCount
+$result | Add-Member -Force -NotePropertyName processReadBytes -NotePropertyValue $processReadBytes
+$result | Add-Member -Force -NotePropertyName processWriteBytes -NotePropertyValue $processWriteBytes
+$result | Add-Member -Force -NotePropertyName processOtherBytes -NotePropertyValue $processOtherBytes
+$result | Add-Member -Force -NotePropertyName processPeakWorkingSetBytes -NotePropertyValue $processPeakWorkingSetBytes
 $structuralFailures = @()
 if ($timedOut) { $structuralFailures += "overall deadline of $OverallTimeoutSeconds seconds expired" }
 if ($null -ne $monitorError) { $structuralFailures += "monitor failed: $monitorError" }
@@ -281,6 +328,30 @@ foreach ($driftName in @('endpointMinimumDrift','endpointMaximumDrift','endpoint
 if ($result.staleCancelled -ne $true -or $result.heartbeatCount -lt 4) { $structuralFailures += 'rapid-query cancellation or dispatcher heartbeat failed' }
 if ($result.sourceCountAfter -ne $Count) { $structuralFailures += "source count changed to $($result.sourceCountAfter)" }
 if ($result.enhancementJobsRead -ne 0 -or $result.enhancementCandidates -ne 0) { $structuralFailures += 'enhancement state was touched' }
+if ($RequireParallelCatalogPreparation) {
+    if ([Environment]::ProcessorCount -gt 1) {
+        if ($result.catalogPreparationParallelized -ne $true `
+            -or $result.catalogPreparationWorkers -lt 2 `
+            -or $result.catalogPreparationWorkers -gt [Math]::Min(4, [Environment]::ProcessorCount)) {
+            $structuralFailures += "parallel catalog preparation was $($result.catalogPreparationParallelized) with $($result.catalogPreparationWorkers) workers on $([Environment]::ProcessorCount) processors"
+        }
+        if ($result.warm.catalogPreparationParallelized -ne $true `
+            -or $result.warm.catalogPreparationWorkers -lt 2 `
+            -or $result.warm.catalogPreparationWorkers -gt [Math]::Min(4, [Environment]::ProcessorCount)) {
+            $structuralFailures += "warm parallel catalog preparation was $($result.warm.catalogPreparationParallelized) with $($result.warm.catalogPreparationWorkers) workers on $([Environment]::ProcessorCount) processors"
+        }
+    }
+    elseif ($result.catalogPreparationParallelized -ne $false -or $result.catalogPreparationWorkers -ne 1) {
+        $structuralFailures += "single-processor catalog preparation was $($result.catalogPreparationParallelized) with $($result.catalogPreparationWorkers) workers"
+    }
+}
+if ($RequireProcessResourceCounters `
+    -and (-not $processResourceCountersCaptured `
+        -or $null -eq $processReadBytes `
+        -or $null -eq $processWriteBytes `
+        -or $null -eq $processPeakWorkingSetBytes)) {
+    $structuralFailures += 'process I/O and peak working-set counters were not captured at the pre-cleanup result boundary'
+}
 if ($result.browserThumbnailCacheCandidateCount -ne 2 -or $result.browserThumbnailPreciseCandidateCreated -ne $true -or $result.browserThumbnailCacheHits -lt 1) { $structuralFailures += "precise/integer Browser thumbnail cache fallback or fake-cache hit failed ($($result.browserThumbnailCacheCandidateCount)/$($result.browserThumbnailCacheHits))" }
 if ($null -eq $result.warm) {
     $structuralFailures += 'warm separate-MainWindow result was missing'

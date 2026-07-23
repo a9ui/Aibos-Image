@@ -47,6 +47,8 @@ public partial class MainWindow : Window
     private const int MaxThumbnailDecodeWorkers = 12;
     private const int InitialThumbnailPrefetchCount = 16;
     private const int MaxResidentThumbnailCount = 128;
+    private const int MinParallelCatalogPreparationCount = 512;
+    private const int MaxCatalogPreparationWorkers = 4;
     private const int ImmediateViewportThumbnailCount = 1;
     private const int ViewportThumbnailSettleDelayMilliseconds = 250;
     private const int MaxMetadataReadWorkers = 4;
@@ -1393,48 +1395,35 @@ public partial class MainWindow : Window
                     if (enumerationDelayForSmokeMs > 0)
                         Thread.Sleep(enumerationDelayForSmokeMs);
                     cts.Token.ThrowIfCancellationRequested();
-                    var discovered = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
-                    int rootWorkers = Math.Max(1, Math.Min(4, existingFolderSet.Count));
+                    if (existingFolderSet.Count == 1)
+                    {
+                        return EnumerateImageFiles(
+                            existingFolderSet[0],
+                            scanAccessFailures,
+                            scanBoundarySkips,
+                            cts.Token);
+                    }
+
+                    var discovered = new ConcurrentDictionary<string, FileInfo>(StringComparer.OrdinalIgnoreCase);
                     Parallel.ForEach(
                         existingFolderSet,
                         new ParallelOptions
                         {
                             CancellationToken = cts.Token,
-                            MaxDegreeOfParallelism = rootWorkers,
+                            MaxDegreeOfParallelism = Math.Max(1, Math.Min(4, existingFolderSet.Count)),
                         },
                         folder =>
                         {
-                            foreach (string path in EnumerateImageFiles(
+                            foreach (FileInfo file in EnumerateImageFiles(
                                 folder,
                                 scanAccessFailures,
                                 scanBoundarySkips,
                                 cts.Token))
                             {
-                                discovered.TryAdd(path, 0);
+                                discovered.TryAdd(file.FullName, file);
                             }
                         });
-                    string[] discoveredPaths = discovered.Keys.ToArray();
-                    var discoveredFiles = new FileInfo[discoveredPaths.Length];
-                    Parallel.For(
-                        0,
-                        discoveredPaths.Length,
-                        new ParallelOptions
-                        {
-                            CancellationToken = cts.Token,
-                            MaxDegreeOfParallelism = Math.Max(1, Math.Min(4, Environment.ProcessorCount)),
-                        },
-                        index =>
-                        {
-                            var file = new FileInfo(discoveredPaths[index]);
-                            // Prime the FileInfo metadata cache concurrently.
-                            // Sorting and tile publication reuse the same object
-                            // instead of serializing 10k filesystem metadata reads.
-                            _ = file.LastWriteTimeUtc;
-                            discoveredFiles[index] = file;
-                        });
-                    return discoveredFiles
-                        .OrderByDescending(file => file.LastWriteTimeUtc)
-                        .ToList();
+                    return discovered.Values.ToList();
                 },
                 cts.Token);
         }
@@ -1480,8 +1469,10 @@ public partial class MainWindow : Window
         ScanLabel.Text = $"Preparing 0 / {files.Count:N0} catalog entries";
 
         var materializeWatch = Stopwatch.StartNew();
-        var preparedTiles = new List<Tile>(files.Count);
+        List<Tile> preparedTiles = [];
         long catalogPrepareMs = 0;
+        bool catalogPreparationParallelized = false;
+        int catalogPreparationWorkers = 1;
         long catalogPublishOtherMs = 0;
         long folderBucketViewMs = 0;
         long initialFilterMs = 0;
@@ -1514,69 +1505,62 @@ public partial class MainWindow : Window
             if (seenReady)
                 LoadSeenState();
             LoadEnhancedState();
-            double width = SizeSlider?.Value ?? 190;
+            CatalogCardLayoutContext cardLayout = CaptureCardLayoutContext();
+            bool showUnseenDots = _showUnseenDots;
             IReadOnlyDictionary<string, ImageDimensions> emptyDimensions =
                 new Dictionary<string, ImageDimensions>(StringComparer.OrdinalIgnoreCase);
             IReadOnlyDictionary<string, string> emptyPrompts =
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var folderBucketCache = new Dictionary<string, FolderBucketIdentity>(StringComparer.OrdinalIgnoreCase);
             Action? beforeMaterialize = _beforeMaterializeFilesForSmoke;
             _beforeMaterializeFilesForSmoke = null;
             beforeMaterialize?.Invoke();
             var catalogPrepareWatch = Stopwatch.StartNew();
-            for (int index = 0; index < files.Count; index++)
+            Action<string, int>? catalogPreparationHook = _catalogPreparationBatchHookForSmoke;
+            int catalogPreparationBatchSize = Math.Max(1, _catalogPreparationBatchSizeForSmoke);
+            try
             {
-                FileInfo file = files[index];
-                try
-                {
-                    // The source can disappear or become inaccessible after the
-                    // background existence snapshot. FileInfo access is guarded,
-                    // and a second background snapshot immediately before commit
-                    // removes paths that disappeared during preparation.
-                    preparedTiles.Add(MakeFileTile(
-                        file,
-                        width,
-                        emptyDimensions,
-                        emptyPrompts,
-                        requestedFolderSet,
-                        folderBucketCache));
-                }
-                catch (Exception ex) when (ex is IOException
-                    or UnauthorizedAccessException
-                    or ArgumentException
-                    or NotSupportedException
-                    or System.Security.SecurityException)
-                {
-                    scanAccessFailures.Enqueue(file.FullName);
-                }
-
-                int processed = index + 1;
-                int batchSize = Math.Max(1, _catalogPreparationBatchSizeForSmoke);
-                if (processed % batchSize == 0 || processed == files.Count)
-                {
-                    UpdateCatalogPreparationProgress(processed, files.Count);
-                    _catalogPreparationBatchHookForSmoke?.Invoke(file.FullName, processed);
-                    if (processed < files.Count)
-                    {
-                        await Dispatcher.Yield(DispatcherPriority.Background);
-                        if (!IsCurrentLoad(generation, cts))
-                            return;
-                    }
-                }
+                CatalogTilePreparationResult preparation = await PrepareCatalogTilesAsync(
+                    files,
+                    emptyDimensions,
+                    emptyPrompts,
+                    requestedFolderSet,
+                    cardLayout,
+                    showUnseenDots,
+                    scanAccessFailures,
+                    catalogPreparationBatchSize,
+                    catalogPreparationHook,
+                    cts.Token);
+                preparedTiles = preparation.Tiles;
+                catalogPreparationParallelized = preparation.Parallelized;
+                catalogPreparationWorkers = preparation.Workers;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
             catalogPrepareWatch.Stop();
             catalogPrepareMs = catalogPrepareWatch.ElapsedMilliseconds;
             if (!IsCurrentLoad(generation, cts))
                 return;
 
+            string preparedSortBy = _sortBy;
+            string preparedRandomSortSeed = _randomSortSeed;
+            if (preparedTiles.Count > 1)
+            {
+                preparedTiles.Sort(
+                    (left, right) => CompareTilesForSort(
+                        left,
+                        right,
+                        preparedSortBy,
+                        preparedRandomSortSeed));
+            }
+
             // Decode a bounded likely-first viewport while the mandatory
             // pre-publication existence snapshot runs. The post-publication
             // viewport pass remains authoritative for restored filters and
             // scroll positions; the in-flight map prevents duplicate reads.
             initialThumbnailPrefetchTask = LoadThumbnailCandidatesAsync(
-                SortTiles(preparedTiles, _sortBy, _randomSortSeed)
-                    .Take(InitialThumbnailPrefetchCount)
-                    .ToArray(),
+                preparedTiles.Take(InitialThumbnailPrefetchCount).ToArray(),
                 generation,
                 cts.Token,
                 updateProgress: false);
@@ -1610,12 +1594,20 @@ public partial class MainWindow : Window
                 }
                 publishableTiles.Add(tile);
             }
+            if (publishableTiles.Count > 1
+                && (!string.Equals(preparedSortBy, _sortBy, StringComparison.Ordinal)
+                    || !string.Equals(preparedRandomSortSeed, _randomSortSeed, StringComparison.Ordinal)))
+            {
+                publishableTiles.Sort(
+                    (left, right) => CompareTilesForSort(left, right, _sortBy, _randomSortSeed));
+            }
             _currentFolderSet = requestedFolderSet;
             _currentFolder = existingFolderSet.FirstOrDefault();
             SetLandingFolderSet(_currentFolderSet);
             _allTiles.Clear();
             _allTiles.AddRange(publishableTiles);
-            ReorderFullCatalogForSort();
+            if (_allTiles.Count > 1)
+                _catalogContentRevision++;
             ReportScanPublicationWarning(BuildScanWarning(
                 scanAccessFailures.Count,
                 scanBoundarySkips.Count,
@@ -1685,6 +1677,8 @@ public partial class MainWindow : Window
                 previewDeferredDecodeCount: _previewDeferredDecodeCount,
                 totalWatch.ElapsedMilliseconds);
             LastLoadMetrics.CatalogPrepareMs = catalogPrepareMs;
+            LastLoadMetrics.CatalogPreparationParallelized = catalogPreparationParallelized;
+            LastLoadMetrics.CatalogPreparationWorkers = catalogPreparationWorkers;
             LastLoadMetrics.CatalogPublishOtherMs = catalogPublishOtherMs;
             LastLoadMetrics.FolderBucketViewMs = folderBucketViewMs;
             LastLoadMetrics.InitialFilterMs = initialFilterMs;
@@ -1719,7 +1713,7 @@ public partial class MainWindow : Window
         if (commitRecent)
             CommitSharedRecentFolderSet(_currentFolderSet);
 
-        _loadPhase = "background-metadata";
+        _loadPhase = "initial-thumbnails";
         // Do not keep the 100k FileInfo staging catalog alive throughout the
         // lower-priority metadata pass. The Tile catalog now owns every value
         // the viewer needs after publication.
@@ -1727,6 +1721,23 @@ public partial class MainWindow : Window
         preparedTiles.Clear();
         preparedTiles.TrimExcess();
 
+        ThumbnailLoadMetrics thumbnails;
+        try
+        {
+            thumbnails = await thumbnailTask;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (!IsCurrentLoad(generation, cts))
+            return;
+        firstUsableViewportMs = Math.Max(catalogReadyMs, await firstUsableViewportTask);
+
+        // Give the first visible viewport uncontested priority. Prompt and
+        // dimension indexing remains a lower-priority progressive phase and
+        // starts only after the bounded initial thumbnail load is complete.
+        _loadPhase = "background-metadata";
         Task<ImageMetadataLoadMetrics> metadataTask = LoadImageMetadataProgressivelyAsync(
             _allTiles.ToList(),
             unavailableFolderSet,
@@ -1753,18 +1764,6 @@ public partial class MainWindow : Window
                 metadata.DecodeFailures));
         }
 
-        ThumbnailLoadMetrics thumbnails;
-        try
-        {
-            thumbnails = await thumbnailTask;
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-        if (!IsCurrentLoad(generation, cts))
-            return;
-        firstUsableViewportMs = Math.Max(catalogReadyMs, await firstUsableViewportTask);
         totalWatch.Stop();
         LastLoadMetrics = LoadMetrics.Create(
             resolvedFolderSummary,
@@ -1783,6 +1782,8 @@ public partial class MainWindow : Window
             _previewDeferredDecodeCount,
             totalWatch.ElapsedMilliseconds);
         LastLoadMetrics.CatalogPrepareMs = catalogPrepareMs;
+        LastLoadMetrics.CatalogPreparationParallelized = catalogPreparationParallelized;
+        LastLoadMetrics.CatalogPreparationWorkers = catalogPreparationWorkers;
         LastLoadMetrics.CatalogPublishOtherMs = catalogPublishOtherMs;
         LastLoadMetrics.FolderBucketViewMs = folderBucketViewMs;
         LastLoadMetrics.InitialFilterMs = initialFilterMs;
@@ -2422,33 +2423,37 @@ public partial class MainWindow : Window
     private static HashSet<string> SnapshotExistingPaths(IEnumerable<string> paths, CancellationToken cancellationToken)
     {
         string[] candidates = paths as string[] ?? paths.ToArray();
-        var existing = new ConcurrentDictionary<string, byte>(
-            Math.Max(1, Math.Min(4, Environment.ProcessorCount)),
+        var pathExists = new bool[candidates.Length];
+        Parallel.For(
+            0,
             candidates.Length,
-            StringComparer.OrdinalIgnoreCase);
-        Parallel.ForEach(
-            candidates,
             new ParallelOptions
             {
                 CancellationToken = cancellationToken,
                 MaxDegreeOfParallelism = Math.Max(1, Math.Min(4, Environment.ProcessorCount)),
             },
-            path =>
+            index =>
             {
-                if (File.Exists(path))
-                    existing.TryAdd(path, 0);
+                pathExists[index] = File.Exists(candidates[index]);
             });
-        return existing.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var existing = new HashSet<string>(candidates.Length, StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < candidates.Length; index++)
+        {
+            if (pathExists[index])
+                existing.Add(candidates[index]);
+        }
+        return existing;
     }
 
-    private static IEnumerable<string> EnumerateImageFiles(
+    private static List<FileInfo> EnumerateImageFiles(
         string root,
         ConcurrentQueue<string>? accessFailures = null,
         ConcurrentQueue<string>? boundarySkips = null,
         CancellationToken cancellationToken = default)
     {
         var pending = new Stack<string>();
-        var images = new List<string>();
+        var images = new List<FileInfo>();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string scanRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         pending.Push(scanRoot);
@@ -2476,25 +2481,25 @@ public partial class MainWindow : Window
 
             try
             {
-                foreach (var file in Directory.EnumerateFiles(folder))
+                foreach (FileInfo file in new DirectoryInfo(folder).EnumerateFiles())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!SupportedImageExtensions.Contains(Path.GetExtension(file)))
+                    if (!SupportedImageExtensions.Contains(file.Extension))
                         continue;
                     try
                     {
-                        string filePath = Path.GetFullPath(file);
-                        FileAttributes attributes = File.GetAttributes(filePath);
+                        string filePath = Path.GetFullPath(file.FullName);
+                        FileAttributes attributes = file.Attributes;
                         if ((attributes & FileAttributes.ReparsePoint) != 0 || !IsPathInside(filePath, scanRoot))
                         {
                             boundarySkips?.Enqueue(filePath);
                             continue;
                         }
-                        images.Add(filePath);
+                        images.Add(file);
                     }
                     catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ArgumentException or NotSupportedException)
                     {
-                        accessFailures?.Enqueue(file);
+                        accessFailures?.Enqueue(file.FullName);
                     }
                 }
             }
@@ -2504,13 +2509,13 @@ public partial class MainWindow : Window
             }
             try
             {
-                foreach (var child in Directory.EnumerateDirectories(folder))
+                foreach (DirectoryInfo child in new DirectoryInfo(folder).EnumerateDirectories())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     try
                     {
-                        string childPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(child));
-                        FileAttributes attributes = File.GetAttributes(childPath);
+                        string childPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(child.FullName));
+                        FileAttributes attributes = child.Attributes;
                         if ((attributes & FileAttributes.ReparsePoint) != 0 || !IsPathInside(childPath, scanRoot))
                         {
                             boundarySkips?.Enqueue(childPath);
@@ -2520,7 +2525,7 @@ public partial class MainWindow : Window
                     }
                     catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ArgumentException or NotSupportedException)
                     {
-                        accessFailures?.Enqueue(child);
+                        accessFailures?.Enqueue(child.FullName);
                     }
                 }
             }
@@ -2539,51 +2544,166 @@ public partial class MainWindow : Window
         var boundarySkips = new ConcurrentQueue<string>();
         var watch = Stopwatch.StartNew();
         List<string> images = EnumerateImageFiles(root, accessFailures, boundarySkips)
+            .Select(static file => file.FullName)
             .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
         watch.Stop();
         return new ScanBoundarySmokeSnapshot(images, accessFailures.ToList(), boundarySkips.ToList(), watch.ElapsedMilliseconds);
     }
 
-    private Tile MakeFileTile(
-        FileInfo file,
-        double width,
+    private async Task<CatalogTilePreparationResult> PrepareCatalogTilesAsync(
+        IReadOnlyList<FileInfo> files,
         IReadOnlyDictionary<string, ImageDimensions> dimensions,
         IReadOnlyDictionary<string, string> prompts,
         IReadOnlyList<string> folderSet,
-        IDictionary<string, FolderBucketIdentity> folderBucketCache)
+        CatalogCardLayoutContext cardLayout,
+        bool showUnseenDots,
+        ConcurrentQueue<string> accessFailures,
+        int batchSize,
+        Action<string, int>? batchHook,
+        CancellationToken cancellationToken)
     {
+        int workers = Math.Max(1, Math.Min(MaxCatalogPreparationWorkers, Environment.ProcessorCount));
+        bool parallelized = batchHook is null
+            && files.Count >= MinParallelCatalogPreparationCount
+            && workers > 1;
+        if (!parallelized)
+        {
+            var prepared = new List<Tile>(files.Count);
+            var folderBucketCache = new Dictionary<string, FolderBucketIdentity>(StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < files.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                FileInfo file = files[index];
+                try
+                {
+                    prepared.Add(MakeFileTile(
+                        file,
+                        dimensions,
+                        prompts,
+                        folderSet,
+                        folderBucketCache,
+                        cardLayout,
+                        showUnseenDots));
+                }
+                catch (Exception ex) when (ex is IOException
+                    or UnauthorizedAccessException
+                    or ArgumentException
+                    or NotSupportedException
+                    or System.Security.SecurityException)
+                {
+                    accessFailures.Enqueue(file.FullName);
+                }
+
+                int processed = index + 1;
+                if (processed % batchSize == 0 || processed == files.Count)
+                {
+                    UpdateCatalogPreparationProgress(processed, files.Count);
+                    batchHook?.Invoke(file.FullName, processed);
+                    if (processed < files.Count)
+                    {
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                }
+            }
+            return new CatalogTilePreparationResult(prepared, false, 1);
+        }
+
+        List<Tile> parallelPrepared = await Task.Run(
+            () =>
+            {
+                var prepared = new Tile?[files.Count];
+                Parallel.For(
+                    0,
+                    files.Count,
+                    new ParallelOptions
+                    {
+                        CancellationToken = cancellationToken,
+                        MaxDegreeOfParallelism = workers,
+                    },
+                    () => new Dictionary<string, FolderBucketIdentity>(StringComparer.OrdinalIgnoreCase),
+                    (index, _, folderBucketCache) =>
+                    {
+                        FileInfo file = files[index];
+                        try
+                        {
+                            prepared[index] = MakeFileTile(
+                                file,
+                                dimensions,
+                                prompts,
+                                folderSet,
+                                folderBucketCache,
+                                cardLayout,
+                                showUnseenDots);
+                        }
+                        catch (Exception ex) when (ex is IOException
+                            or UnauthorizedAccessException
+                            or ArgumentException
+                            or NotSupportedException
+                            or System.Security.SecurityException)
+                        {
+                            accessFailures.Enqueue(file.FullName);
+                        }
+                        return folderBucketCache;
+                    },
+                    static _ => { });
+
+                var result = new List<Tile>(prepared.Length);
+                foreach (Tile? tile in prepared)
+                {
+                    if (tile is not null)
+                        result.Add(tile);
+                }
+                return result;
+            },
+            cancellationToken);
+        UpdateCatalogPreparationProgress(files.Count, files.Count);
+        return new CatalogTilePreparationResult(parallelPrepared, true, workers);
+    }
+
+    private Tile MakeFileTile(
+        FileInfo file,
+        IReadOnlyDictionary<string, ImageDimensions> dimensions,
+        IReadOnlyDictionary<string, string> prompts,
+        IReadOnlyList<string> folderSet,
+        IDictionary<string, FolderBucketIdentity> folderBucketCache,
+        CatalogCardLayoutContext cardLayout,
+        bool showUnseenDots)
+    {
+        string path = file.FullName;
         var modified = file.LastWriteTime;
         var created = file.CreationTime;
-        int paletteIndex = file.FullName.GetHashCode(StringComparison.OrdinalIgnoreCase) & int.MaxValue;
-        bool enhanced = TryGetEnhancedOutputForPath(file.FullName, out string? enhancedOutputPath);
-        dimensions.TryGetValue(file.FullName, out var imageSize);
-        prompts.TryGetValue(file.FullName, out string? indexedPrompt);
-        string folderBucketCacheKey = file.DirectoryName ?? file.FullName;
+        int paletteIndex = path.GetHashCode(StringComparison.OrdinalIgnoreCase) & int.MaxValue;
+        bool enhanced = TryGetEnhancedOutputForPath(path, out string? enhancedOutputPath);
+        dimensions.TryGetValue(path, out var imageSize);
+        prompts.TryGetValue(path, out string? indexedPrompt);
+        string folderBucketCacheKey = file.DirectoryName ?? path;
         if (!folderBucketCache.TryGetValue(folderBucketCacheKey, out FolderBucketIdentity folderBucket))
         {
-            folderBucket = ResolveFolderBucket(file.FullName, folderSet);
+            folderBucket = ResolveFolderBucket(path, folderSet);
             folderBucketCache[folderBucketCacheKey] = folderBucket;
         }
+        bool seen = SeenStateContains(path);
         var tile = new Tile
         {
             ArtBase = MakeBaseBrush(paletteIndex),
             ArtGlow = MakeGlowBrush(paletteIndex),
             FileName = file.Name,
-            Fav = FavoriteLevelForPath(file.FullName),
-            Unseen = !SeenStateContains(file.FullName),
-            ShowUnseenDot = _showUnseenDots && !SeenStateContains(file.FullName),
+            Fav = FavoriteLevelForPath(path),
+            Unseen = !seen,
+            ShowUnseenDot = showUnseenDots && !seen,
             // Date sections are enabled only for Created sorts, so their label
             // must use the same timestamp as the Created order/filter.
             Group = FormatGroup(created),
-            CardWidth = width,
+            CardWidth = cardLayout.BaseWidth,
             ModifiedUtc = file.LastWriteTimeUtc,
             CreatedUtc = file.CreationTimeUtc,
             SourceLength = file.Length,
             SourceLastWriteUtcTicks = file.LastWriteTimeUtc.Ticks,
             SourceCreationUtcTicks = file.CreationTimeUtc.Ticks,
             Prompt = indexedPrompt ?? "",
-            Path = file.FullName,
+            Path = path,
             IsRealFile = true,
             FolderBucketKey = folderBucket.Key,
             FolderBucketLabel = folderBucket.Label,
@@ -2594,7 +2714,7 @@ public partial class MainWindow : Window
             SizeText = FormatBytes(file.Length),
             ModifiedText = modified.ToString("yyyy-MM-dd HH:mm"),
         };
-        ApplyCardLayout(tile);
+        ApplyCardLayout(tile, cardLayout);
         return tile;
     }
 
@@ -8626,19 +8746,27 @@ public partial class MainWindow : Window
     }
 
     private void ApplyCardLayout(Tile tile)
+        => ApplyCardLayout(tile, CaptureCardLayoutContext());
+
+    private CatalogCardLayoutContext CaptureCardLayoutContext()
+        => new(
+            SizeSlider?.Value ?? DefaultCardWidth,
+            SizeSlider?.Minimum ?? 130,
+            SizeSlider?.Maximum ?? 280,
+            _displayStyle,
+            _aspectMode);
+
+    private static void ApplyCardLayout(Tile tile, CatalogCardLayoutContext context)
     {
-        double baseWidth = SizeSlider?.Value ?? DefaultCardWidth;
-        double minWidth = SizeSlider?.Minimum ?? 130;
-        double maxWidth = SizeSlider?.Maximum ?? 280;
-        (double widthFactor, double listThumbnailBase) = _displayStyle switch
+        (double widthFactor, double listThumbnailBase) = context.DisplayStyle switch
         {
             DisplayStyleCompact => (0.82, 42),
             DisplayStylePoster => (1.12, 64),
             _ => (1.0, 52),
         };
 
-        double width = Math.Clamp(baseWidth * widthFactor, minWidth, maxWidth);
-        double aspectHeightFactor = AspectHeightFactor(tile);
+        double width = Math.Clamp(context.BaseWidth * widthFactor, context.MinimumWidth, context.MaximumWidth);
+        double aspectHeightFactor = AspectHeightFactor(tile, context.AspectMode);
         // At icon-size zoom levels, extreme source ratios make cards look like
         // vertical slivers. Keep the media cell square while preserving the
         // complete source inside it through Stretch.Uniform.
@@ -8647,7 +8775,7 @@ public partial class MainWindow : Window
         tile.ApplyCardLayout(
             width,
             height,
-            _aspectMode == AspectOriginalValue ? Stretch.Uniform : Stretch.UniformToFill,
+            context.AspectMode == AspectOriginalValue ? Stretch.Uniform : Stretch.UniformToFill,
             showDetails: width >= 96,
             showStatusBadge: width >= 72,
             listThumbnailBase,
@@ -8655,9 +8783,9 @@ public partial class MainWindow : Window
             Math.Max(listThumbnailBase, listThumbnailHeight));
     }
 
-    private double AspectHeightFactor(Tile tile)
+    private static double AspectHeightFactor(Tile tile, string aspectMode)
     {
-        return _aspectMode switch
+        return aspectMode switch
         {
             AspectSquareValue => 1.0,
             AspectOriginalValue when tile.ImagePixelWidth > 0 && tile.ImagePixelHeight > 0
@@ -8665,6 +8793,18 @@ public partial class MainWindow : Window
             _ => 1.5,
         };
     }
+
+    private readonly record struct CatalogCardLayoutContext(
+        double BaseWidth,
+        double MinimumWidth,
+        double MaximumWidth,
+        string DisplayStyle,
+        string AspectMode);
+
+    private readonly record struct CatalogTilePreparationResult(
+        List<Tile> Tiles,
+        bool Parallelized,
+        int Workers);
 
     private static string NormalizeDisplayStyle(string? style)
     {
@@ -17003,6 +17143,8 @@ public sealed class LoadMetrics
     public long ScanMs { get; set; }
     public long MaterializeMs { get; set; }
     public long CatalogPrepareMs { get; set; }
+    public bool CatalogPreparationParallelized { get; set; }
+    public int CatalogPreparationWorkers { get; set; }
     public long CatalogPublishOtherMs { get; set; }
     public long FolderBucketViewMs { get; set; }
     public long InitialFilterMs { get; set; }

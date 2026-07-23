@@ -2569,7 +2569,7 @@ public partial class App : Application
     {
         ValidateAutomationPathArguments(args);
 
-        string root = Path.Combine(Path.GetTempPath(), "photoviewer-wpf-automation", Guid.NewGuid().ToString("N"));
+        string root = ResolveAutomationStorageRoot(args);
         Directory.CreateDirectory(root);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", Path.Combine(root, "state.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", Path.Combine(root, "favorites.json"));
@@ -2580,6 +2580,47 @@ public partial class App : Application
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", Path.Combine(root, "settings.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ALBUMS_PATH", Path.Combine(root, "albums.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY", Path.Combine(root, "metadata-index"));
+    }
+
+    private static string ResolveAutomationStorageRoot(IReadOnlyList<string> args)
+    {
+        string? requestedRoot = ArgValue(args.ToArray(), "--automation-storage-root");
+        if (string.IsNullOrWhiteSpace(requestedRoot))
+        {
+            return Path.Combine(
+                Path.GetTempPath(),
+                "photoviewer-wpf-automation",
+                Guid.NewGuid().ToString("N"));
+        }
+
+        string root;
+        string finalTempRoot;
+        string finalRoot;
+        try
+        {
+            root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(requestedRoot));
+            string tempRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+            finalTempRoot = ResolveFinalPathForSmoke(tempRoot);
+            finalRoot = ResolveFinalPathForSmoke(root);
+        }
+        catch (Exception ex) when (ex is ArgumentException
+            or IOException
+            or NotSupportedException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
+        {
+            throw new ArgumentException($"Automation storage root is invalid: {ex.Message}");
+        }
+
+        string leaf = Path.GetFileName(root);
+        if (string.Equals(finalRoot, finalTempRoot, StringComparison.OrdinalIgnoreCase)
+            || !IsPathInsideForSmoke(finalRoot, finalTempRoot)
+            || !leaf.StartsWith("photoviewer-wpf-automation-", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                "Automation storage root must be a dedicated photoviewer-wpf-automation-* directory inside TEMP.");
+        }
+        return root;
     }
 
     private static string ResolveLegacySharedDataRootForActivation()
@@ -9590,6 +9631,8 @@ public partial class App : Application
                         LoadMetricsTotalElapsedMs = warmLoadMetrics?.TotalMs,
                         ScanElapsedMs = warmLoadMetrics?.ScanMs,
                         MaterializeElapsedMs = warmLoadMetrics?.MaterializeMs,
+                        CatalogPreparationParallelized = warmLoadMetrics?.CatalogPreparationParallelized ?? false,
+                        CatalogPreparationWorkers = warmLoadMetrics?.CatalogPreparationWorkers ?? 0,
                         CatalogReadyElapsedMs = warmLoadMetrics?.CatalogReadyMs,
                         FirstUsableViewportElapsedMs = warmLoadMetrics?.FirstUsableViewportMs,
                         MetadataElapsedMs = warmLoadMetrics?.MetadataMs,
@@ -9761,6 +9804,8 @@ public partial class App : Application
                     LoadMetricsTotalElapsedMs = loadMetrics?.TotalMs,
                     ScanElapsedMs = loadMetrics?.ScanMs,
                     MaterializeElapsedMs = loadMetrics?.MaterializeMs,
+                    CatalogPreparationParallelized = loadMetrics?.CatalogPreparationParallelized ?? false,
+                    CatalogPreparationWorkers = loadMetrics?.CatalogPreparationWorkers ?? 0,
                     CatalogPrepareElapsedMs = loadMetrics?.CatalogPrepareMs,
                     CatalogPublishOtherElapsedMs = loadMetrics?.CatalogPublishOtherMs,
                     FolderBucketViewElapsedMs = loadMetrics?.FolderBucketViewMs,
@@ -22803,6 +22848,8 @@ public partial class App : Application
         public double? LoadMetricsTotalElapsedMs { get; set; }
         public double? ScanElapsedMs { get; set; }
         public double? MaterializeElapsedMs { get; set; }
+        public bool CatalogPreparationParallelized { get; set; }
+        public int CatalogPreparationWorkers { get; set; }
         public double? CatalogPrepareElapsedMs { get; set; }
         public double? CatalogPublishOtherElapsedMs { get; set; }
         public double? FolderBucketViewElapsedMs { get; set; }
@@ -22938,6 +22985,8 @@ public partial class App : Application
         public double? LoadMetricsTotalElapsedMs { get; set; }
         public double? ScanElapsedMs { get; set; }
         public double? MaterializeElapsedMs { get; set; }
+        public bool CatalogPreparationParallelized { get; set; }
+        public int CatalogPreparationWorkers { get; set; }
         public double? CatalogReadyElapsedMs { get; set; }
         public double? FirstUsableViewportElapsedMs { get; set; }
         public double? MetadataElapsedMs { get; set; }

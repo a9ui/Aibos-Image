@@ -142,8 +142,11 @@ try {
 
     $crossRoot = Join-Path $runRoot 'cross-process'
     $crossProjectRoot = Join-Path $crossRoot 'project-root'
-    $crossIndexDirectory = Join-Path $crossProjectRoot 'metadata-index'
-    $crossProcessTemp = Join-Path $crossProjectRoot 'process-temp'
+    # Keep the process TEMP short enough that Windows PowerShell can hash and
+    # stat the 64-character index filename without crossing MAX_PATH.
+    $crossProcessTemp = Join-Path $runRoot 't'
+    $crossAutomationRoot = Join-Path $crossProcessTemp ('photoviewer-wpf-automation-' + [guid]::NewGuid().ToString('N'))
+    $crossIndexDirectory = Join-Path $crossAutomationRoot 'metadata-index'
     $crossFolder = Join-Path $runRoot 'fixture\images-00'
     $coldShotPath = Join-Path $crossProjectRoot 'cold.png'
     $coldPerfPath = Join-Path $crossProjectRoot 'cold-perf.json'
@@ -190,6 +193,7 @@ try {
                     '--shot', ('"{0}"' -f $ShotPath),
                     '--folder', ('"{0}"' -f $crossFolder),
                     '--perf-log', ('"{0}"' -f $PerfPath),
+                    '--automation-storage-root', ('"{0}"' -f $crossAutomationRoot),
                     '--screen', 'viewer'
                 ) `
                 -WindowStyle Hidden -PassThru
@@ -276,6 +280,15 @@ finally {
         if (-not $resolvedRunRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to clean a verifier path outside TEMP: $resolvedRunRoot"
         }
-        Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
+        # Windows PowerShell's Remove-Item still fails once the nested
+        # automation/index path exceeds MAX_PATH. Keep the exact TEMP boundary
+        # above and use the Windows extended-length prefix for recursive cleanup.
+        $deleteRoot = if ($resolvedRunRoot.StartsWith('\\', [StringComparison]::Ordinal)) {
+            '\\?\UNC\' + $resolvedRunRoot.Substring(2)
+        }
+        else {
+            '\\?\' + $resolvedRunRoot
+        }
+        [IO.Directory]::Delete($deleteRoot, $true)
     }
 }
