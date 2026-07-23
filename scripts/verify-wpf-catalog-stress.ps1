@@ -18,7 +18,7 @@ if ($OverallTimeoutSeconds -lt 1) { throw 'OverallTimeoutSeconds must be positiv
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$defaultExe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net8.0-windows\PhotoViewer.Wpf.exe"
+$defaultExe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
 $exe = if ([string]::IsNullOrWhiteSpace($ExecutablePath)) { $defaultExe } else { [IO.Path]::GetFullPath($ExecutablePath) }
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempRootPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar

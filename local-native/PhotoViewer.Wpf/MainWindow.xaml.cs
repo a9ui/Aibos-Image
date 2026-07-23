@@ -27,6 +27,7 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow : Window
 {
+    private static readonly StringComparer EnhancementSourceIdentityComparer = StringComparer.OrdinalIgnoreCase;
     private static readonly HttpClient ModalEnhancementHttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(5),
@@ -67,6 +68,8 @@ public partial class MainWindow : Window
     private const double DefaultRightPanelWidth = 340;
     private const double MinRightPanelWidth = 240;
     private const double MaxRightPanelWidth = 900;
+    private const double AdaptiveWorkbenchThreshold = 1080;
+    private const double AdaptivePreviewHeight = 280;
     private const double ModalZoomMin = 0.25;
     private const double ModalZoomMax = 10;
     private const string EnhancedStatusBorderDefaultColor = "#38BDF8";
@@ -121,6 +124,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _hiddenFolderBuckets = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _selectedFolderBucketKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<Tile> _canonicalSelectionMarkers = [];
     private readonly HashSet<string> _activeAlbumMemberPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _activeAlbumMemberOrder = new(StringComparer.OrdinalIgnoreCase);
     private string? _activeAlbumId;
@@ -140,7 +144,7 @@ public partial class MainWindow : Window
     private int _activeAlbumAvailabilityDelayForSmokeMs;
     private int _activeAlbumSourceApplyCount;
     private bool _lastActiveAlbumAvailabilityOffDispatcher;
-    private readonly Dictionary<string, ManagedEnhancedOutput> _enhancedOutputs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ManagedEnhancedOutput> _enhancedOutputs = new(EnhancementSourceIdentityComparer);
     private readonly List<string> _restoredPreviewTabPaths = [];
     private readonly SemaphoreSlim _thumbnailDecodeGate = new(MaxThumbnailDecodeWorkers, MaxThumbnailDecodeWorkers);
     private readonly ConcurrentDictionary<string, byte> _thumbnailLoadsInFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -184,6 +188,8 @@ public partial class MainWindow : Window
     private int _failNextSeenWriterForSmoke;
     private bool _stateWriteBlocked;
     private double _rightPanelWidth = DefaultRightPanelWidth;
+    private bool _adaptiveWorkbench;
+    private bool _sidebarVisibleBeforeAdaptive = true;
     private Dictionary<string, JsonElement>? _stateExtensionData;
     private bool _syncingSelection;
     private long _selectionVisualSyncGeneration;
@@ -249,6 +255,9 @@ public partial class MainWindow : Window
     private long _modalEnhancementGeneration;
     private Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _modalEnhancementSender
         = static (request, token) => ModalEnhancementHttpClient.SendAsync(request, token);
+    private string _modalEnhancementPresetId = "anime-sharp-x2";
+    private string _modalEnhancementAdapterId = "realesrgan-ncnn";
+    private int _modalEnhancementScale = 2;
     private Func<bool>? _confirmLargeEnhancementForSmoke;
     private Func<bool>? _confirmEnhancedOutputDeleteForSmoke;
     private CancellationTokenSource? _loadCts;
@@ -334,6 +343,7 @@ public partial class MainWindow : Window
     private string? _lastGridZoomAnchorPath;
     private double _lastGridZoomAnchorDrift;
     private GridZoomAnchor? _lastStableGridViewportAnchor;
+    private GridZoomAnchor? _lastRequestedGridGeometryAnchor;
     private long _gridAnchorRememberGeneration;
     private GridZoomAnchor? _rightPanelResizeAnchor;
     private bool _cardWidthMigrationPending;
@@ -345,6 +355,7 @@ public partial class MainWindow : Window
     private double _modalPanY;
     private bool _modalShowingEnhanced;
     private bool _confirmBeforeDelete = true;
+    private bool _syncingConfirmBeforeDelete;
     private Dictionary<ViewerKeyAction, KeyChord> _keyBindings = KeyBindingSettings.CreateDefaults();
     private Dictionary<ViewerKeyAction, KeyChord> _draftKeyBindings = KeyBindingSettings.CreateDefaults();
     private Dictionary<string, JsonElement>? _keyBindingUnknownEntries;
@@ -440,6 +451,7 @@ public partial class MainWindow : Window
 
         Loaded += (_, _) =>
         {
+            ApplyAdaptiveWorkbenchLayout(ActualWidth);
             AttachGalleryVirtualizationPanel();
             if (CardsList.Items.Count > 0)
                 CardsList.SelectedIndex = 0;
@@ -567,12 +579,14 @@ public partial class MainWindow : Window
         ScheduleModalFitUpdate();
         if (!e.WidthChanged && !e.HeightChanged)
             return;
-        ScheduleGridGeometryAnchorRestore(_lastStableGridViewportAnchor);
+        GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
+        ApplyAdaptiveWorkbenchLayout(e.NewSize.Width, preserveGridAnchor: false);
+        ScheduleGridGeometryAnchorRestore(anchor);
     }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     {
-        GridZoomAnchor? anchor = _lastStableGridViewportAnchor ?? CaptureGridZoomAnchor();
+        GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
         base.OnDpiChanged(oldDpi, newDpi);
         PreserveGridAnchorAfterDpiChange(anchor);
     }
@@ -1919,7 +1933,8 @@ public partial class MainWindow : Window
         var read = ReadSharedRecentFolders();
         if (!read.Ok)
             ReportPersistenceRefusal("Recent folder history", ResolvedSharedRecentPath, protectedFile: true);
-        _lastFolderSet = read.Recent.LastFolderSet;
+        if (read.Ok && read.Exists)
+            _lastFolderSet = read.Recent.LastFolderSet;
         if (LastFolderSetText is not null)
             LastFolderSetText.Text = _lastFolderSet.Count == 0
                 ? "  No saved folder set"
@@ -2646,6 +2661,28 @@ public partial class MainWindow : Window
     private static string ResolvedManagedEnhancementOutputsRoot
         => Path.Combine(Path.GetDirectoryName(ResolvedEnhancementJobsPath)!, "outputs");
 
+    private bool TryResolveEnhancementSourceIdentity(string? path, out string identity)
+    {
+        identity = "";
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            return false;
+
+        try
+        {
+            string lexical = Path.GetFullPath(path);
+            string canonical = Path.GetFullPath(_resolveFinalPath(lexical));
+            if (!Path.IsPathFullyQualified(canonical))
+                return false;
+
+            identity = canonical;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private bool TryBuildManagedEnhancedOutput(
         JsonElement job,
         out string resolvedSource,
@@ -2668,9 +2705,9 @@ public partial class MainWindow : Window
 
         try
         {
-            string resolvedSourcePath = _resolveFinalPath(Path.GetFullPath(sourcePath!));
-            string resolvedSourceId = _resolveFinalPath(Path.GetFullPath(sourceId!));
-            if (!string.Equals(resolvedSourcePath, resolvedSourceId, StringComparison.OrdinalIgnoreCase)
+            if (!TryResolveEnhancementSourceIdentity(sourcePath, out string resolvedSourcePath)
+                || !TryResolveEnhancementSourceIdentity(sourceId, out string resolvedSourceId)
+                || !EnhancementSourceIdentityComparer.Equals(resolvedSourcePath, resolvedSourceId)
                 || !File.Exists(resolvedSourcePath))
             {
                 return false;
@@ -2693,7 +2730,7 @@ public partial class MainWindow : Window
                 return false;
             }
 
-            resolvedSource = NormalizeFavoritePath(resolvedSourcePath);
+            resolvedSource = resolvedSourcePath;
             managedOutput = new ManagedEnhancedOutput(canonicalOutput, sourceSize, sourceMtimeMs);
             return true;
         }
@@ -2705,13 +2742,27 @@ public partial class MainWindow : Window
 
     private bool TryGetEnhancedOutputForPath(string path, out string? outputPath)
     {
-        if (_enhancedOutputs.TryGetValue(NormalizeFavoritePath(path), out ManagedEnhancedOutput? output))
+        if (TryGetManagedEnhancedOutputForPath(path, out ManagedEnhancedOutput output))
         {
             outputPath = output.OutputPath;
             return true;
         }
         outputPath = null;
         return false;
+    }
+
+    private bool TryGetManagedEnhancedOutputForPath(string path, out ManagedEnhancedOutput output)
+    {
+        output = null!;
+        if (_enhancedOutputs.Count == 0
+            || !TryResolveEnhancementSourceIdentity(path, out string identity)
+            || !_enhancedOutputs.TryGetValue(identity, out ManagedEnhancedOutput? stored))
+        {
+            return false;
+        }
+
+        output = stored;
+        return true;
     }
 
     private static bool TryWriteAtomicText(string path, string text)
@@ -2722,6 +2773,49 @@ public partial class MainWindow : Window
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             tempPath = Path.Combine(Path.GetDirectoryName(path)!, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
             File.WriteAllText(tempPath, text);
+            File.Move(tempPath, path, overwrite: true);
+            tempPath = null;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (tempPath is not null)
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
+        }
+    }
+
+    private static bool TryWriteAtomicSharedJson(
+        string path,
+        string json,
+        out string? error)
+    {
+        if (!SharedJsonDocumentReader.TryEncodeCanonical(
+                json,
+                out byte[] bytes,
+                out error))
+            return false;
+        if (TryWriteAtomicBytes(path, bytes))
+            return true;
+        error = "Windows did not allow the atomic shared JSON replacement.";
+        return false;
+    }
+
+    private static bool TryWriteAtomicBytes(string path, byte[] bytes)
+    {
+        string? tempPath = null;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            tempPath = Path.Combine(
+                Path.GetDirectoryName(path)!,
+                $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            File.WriteAllBytes(tempPath, bytes);
             File.Move(tempPath, path, overwrite: true);
             tempPath = null;
             return true;
@@ -3430,7 +3524,9 @@ public partial class MainWindow : Window
         _seenDirtyPaths.Clear();
         _seenWriteBlocked = false;
 
-        if (!string.IsNullOrWhiteSpace(SeenPathOverride))
+        if (!string.IsNullOrWhiteSpace(SeenPathOverride)
+            && SharedDataRootActivation.WasExplicitStoreOverride(
+                SharedDataRootActivation.SeenEnvironmentVariable))
         {
             string overridePath = ResolvedSeenPath;
             _seenWriteBlocked = !TryLoadSeenFile(overridePath, _seenPaths);
@@ -5101,6 +5197,7 @@ public partial class MainWindow : Window
             List<Tile>? materializedSelections = sparseVisuals
                 ? null
                 : _tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList();
+            SynchronizeCanonicalSelectionMarkers(materializedSelections);
             var cardsWatch = Stopwatch.StartNew();
             if (sparseVisuals)
                 SynchronizeRealizedSelectionControl(CardsList);
@@ -5119,6 +5216,26 @@ public partial class MainWindow : Window
         finally
         {
             _syncingSelection = false;
+        }
+    }
+
+    private void SynchronizeCanonicalSelectionMarkers(IReadOnlyCollection<Tile>? selectedTiles)
+    {
+        HashSet<Tile>? next = selectedTiles is null ? null : [.. selectedTiles];
+        foreach (Tile tile in _canonicalSelectionMarkers)
+        {
+            if (next?.Contains(tile) != true)
+                tile.IsCanonicalSelected = false;
+        }
+
+        _canonicalSelectionMarkers.Clear();
+        if (next is null)
+            return;
+
+        foreach (Tile tile in next)
+        {
+            tile.IsCanonicalSelected = true;
+            _canonicalSelectionMarkers.Add(tile);
         }
     }
 
@@ -8011,10 +8128,26 @@ public partial class MainWindow : Window
         RestoreGridZoomAnchorAfterLayout(resolved);
     }
 
+    private GridZoomAnchor? PreferredGridGeometryAnchor()
+    {
+        string? selectedPath = SelectedTile() is { IsRealFile: true } selectedTile
+            ? selectedTile.Path
+            : _primarySelectedPath;
+        if (!string.IsNullOrWhiteSpace(selectedPath)
+            && _lastRequestedGridGeometryAnchor is { } requested
+            && string.Equals(requested.Path, selectedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return requested;
+        }
+
+        return _lastStableGridViewportAnchor ?? CaptureGridZoomAnchor();
+    }
+
     private void RestoreGridZoomAnchorAfterLayout(GridZoomAnchor? anchor)
     {
         if (anchor is null)
             return;
+        _lastRequestedGridGeometryAnchor = anchor;
         _lastGridZoomAnchorPath = anchor.Value.Path;
         _lastGridZoomAnchorDrift = double.PositiveInfinity;
         _restoringGridZoomAnchor = true;
@@ -8460,11 +8593,26 @@ public partial class MainWindow : Window
         GridZoomAnchor? anchor = CaptureGridZoomAnchor();
         bool show = Sidebar.Visibility != Visibility.Visible;
         Sidebar.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        SidebarCol.Width = show ? new GridLength(240) : new GridLength(0);
+        if (_adaptiveWorkbench)
+        {
+            NarrowSidebarRail.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+            SidebarCol.Width = show ? new GridLength(240) : new GridLength(44);
+            _sidebarVisibleBeforeAdaptive = show;
+        }
+        else
+        {
+            SidebarCol.Width = show ? new GridLength(240) : new GridLength(0);
+        }
         ToggleSidebar.Style = (Style)FindResource(show ? "IconButtonActive" : "IconButton");
         ToggleSidebar.ToolTip = show ? "Hide sidebar" : "Show sidebar";
         ScheduleGridGeometryAnchorRestore(anchor);
     }
+
+    private void NarrowGrid_Click(object sender, RoutedEventArgs e)
+        => ModeGrid.IsChecked = true;
+
+    private void NarrowList_Click(object sender, RoutedEventArgs e)
+        => ModeList.IsChecked = true;
 
     private void ToggleRight_Click(object sender, RoutedEventArgs e)
     {
@@ -8477,30 +8625,101 @@ public partial class MainWindow : Window
 
     private void ApplyRightPanelState(bool open)
     {
+        if (!open && !_adaptiveWorkbench && RightCol.ActualWidth >= MinRightPanelWidth)
+            _rightPanelWidth = NormalizeRightPanelWidth(RightCol.ActualWidth);
+
         if (open)
-        {
             _rightPanelWidth = NormalizeRightPanelWidth(_rightPanelWidth);
-            RightPanel.Visibility = Visibility.Visible;
-            RightPanelSplitter.Visibility = Visibility.Visible;
-            RightSplitterCol.Width = new GridLength(6);
-            RightCol.MinWidth = MinRightPanelWidth;
+
+        RightPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        RightPanelSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        ApplyRightPanelPlacement(open);
+        ToggleRight.Style = (Style)FindResource(open ? "IconButtonActive" : "IconButton");
+        ToggleRight.ToolTip = open ? "Hide right panel" : "Show right panel";
+    }
+
+    private void ApplyRightPanelPlacement(bool open)
+    {
+        if (_adaptiveWorkbench)
+        {
+            Grid.SetRow(RightPanelSplitter, 1);
+            Grid.SetColumn(RightPanelSplitter, 1);
+            Grid.SetColumnSpan(RightPanelSplitter, 3);
+            RightPanelSplitter.Width = double.NaN;
+            RightPanelSplitter.Height = 6;
+            RightPanelSplitter.HorizontalAlignment = HorizontalAlignment.Stretch;
+            RightPanelSplitter.VerticalAlignment = VerticalAlignment.Stretch;
+            RightPanelSplitter.ResizeDirection = GridResizeDirection.Rows;
+            RightPanelSplitter.ResizeBehavior = GridResizeBehavior.PreviousAndNext;
+
+            Grid.SetRow(RightPanel, 2);
+            Grid.SetColumn(RightPanel, 1);
+            Grid.SetColumnSpan(RightPanel, 3);
+            RightPanel.BorderThickness = new Thickness(0, 1, 0, 0);
+            WorkbenchPreviewSplitterRow.Height = open ? new GridLength(6) : new GridLength(0);
+            WorkbenchPreviewRow.Height = open ? new GridLength(AdaptivePreviewHeight) : new GridLength(0);
+            RightSplitterCol.Width = new GridLength(0);
+            RightCol.MinWidth = 0;
             RightCol.MaxWidth = MaxRightPanelWidth;
-            RightCol.Width = new GridLength(_rightPanelWidth);
-            ToggleRight.Style = (Style)FindResource("IconButtonActive");
-            ToggleRight.ToolTip = "Hide right panel";
+            RightCol.Width = new GridLength(0);
+            PreviewImageCanvas.Height = 180;
+            return;
+        }
+
+        Grid.SetRow(RightPanelSplitter, 0);
+        Grid.SetColumn(RightPanelSplitter, 2);
+        Grid.SetColumnSpan(RightPanelSplitter, 1);
+        RightPanelSplitter.Width = 6;
+        RightPanelSplitter.Height = double.NaN;
+        RightPanelSplitter.HorizontalAlignment = HorizontalAlignment.Stretch;
+        RightPanelSplitter.VerticalAlignment = VerticalAlignment.Stretch;
+        RightPanelSplitter.ResizeDirection = GridResizeDirection.Columns;
+        RightPanelSplitter.ResizeBehavior = GridResizeBehavior.PreviousAndNext;
+
+        Grid.SetRow(RightPanel, 0);
+        Grid.SetColumn(RightPanel, 3);
+        Grid.SetColumnSpan(RightPanel, 1);
+        RightPanel.BorderThickness = new Thickness(1, 0, 0, 0);
+        WorkbenchPreviewSplitterRow.Height = new GridLength(0);
+        WorkbenchPreviewRow.Height = new GridLength(0);
+        RightSplitterCol.Width = open ? new GridLength(6) : new GridLength(0);
+        RightCol.MinWidth = open ? MinRightPanelWidth : 0;
+        RightCol.MaxWidth = MaxRightPanelWidth;
+        RightCol.Width = open ? new GridLength(_rightPanelWidth) : new GridLength(0);
+        PreviewImageCanvas.Height = 320;
+    }
+
+    private void ApplyAdaptiveWorkbenchLayout(double width, bool preserveGridAnchor = true)
+    {
+        bool adaptive = double.IsFinite(width) && width <= AdaptiveWorkbenchThreshold;
+        if (adaptive == _adaptiveWorkbench)
+            return;
+
+        GridZoomAnchor? anchor = preserveGridAnchor ? CaptureGridZoomAnchor() : null;
+        if (adaptive)
+        {
+            _sidebarVisibleBeforeAdaptive = Sidebar.Visibility == Visibility.Visible;
+            _adaptiveWorkbench = true;
+            Sidebar.Visibility = Visibility.Collapsed;
+            NarrowSidebarRail.Visibility = Visibility.Visible;
+            SidebarCol.Width = new GridLength(44);
+            SearchBoxContainer.MaxWidth = 300;
         }
         else
         {
-            if (RightCol.ActualWidth >= MinRightPanelWidth)
-                _rightPanelWidth = NormalizeRightPanelWidth(RightCol.ActualWidth);
-            RightPanel.Visibility = Visibility.Collapsed;
-            RightPanelSplitter.Visibility = Visibility.Collapsed;
-            RightSplitterCol.Width = new GridLength(0);
-            RightCol.MinWidth = 0;
-            RightCol.Width = new GridLength(0);
-            ToggleRight.Style = (Style)FindResource("IconButton");
-            ToggleRight.ToolTip = "Show right panel";
+            _adaptiveWorkbench = false;
+            NarrowSidebarRail.Visibility = Visibility.Collapsed;
+            Sidebar.Visibility = _sidebarVisibleBeforeAdaptive ? Visibility.Visible : Visibility.Collapsed;
+            SidebarCol.Width = _sidebarVisibleBeforeAdaptive ? new GridLength(240) : new GridLength(0);
+            SearchBoxContainer.MaxWidth = 720;
         }
+
+        bool rightOpen = RightPanel.Visibility == Visibility.Visible;
+        ApplyRightPanelPlacement(rightOpen);
+        ToggleSidebar.Style = (Style)FindResource(Sidebar.Visibility == Visibility.Visible ? "IconButtonActive" : "IconButton");
+        ToggleSidebar.ToolTip = Sidebar.Visibility == Visibility.Visible ? "Hide sidebar" : "Show sidebar";
+        if (preserveGridAnchor)
+            ScheduleGridGeometryAnchorRestore(anchor);
     }
 
     private static double NormalizeRightPanelWidth(double width)
@@ -8511,7 +8730,7 @@ public partial class MainWindow : Window
         double normalized = NormalizeRightPanelWidth(width);
         bool changed = Math.Abs(normalized - _rightPanelWidth) >= 0.5;
         _rightPanelWidth = normalized;
-        if (RightPanel.Visibility == Visibility.Visible)
+        if (!_adaptiveWorkbench && RightPanel.Visibility == Visibility.Visible)
             RightCol.Width = new GridLength(_rightPanelWidth);
         return changed;
     }
@@ -8520,6 +8739,13 @@ public partial class MainWindow : Window
     {
         if (RightPanel.Visibility != Visibility.Visible)
             return;
+
+        if (_adaptiveWorkbench)
+        {
+            ScheduleGridGeometryAnchorRestore(_rightPanelResizeAnchor);
+            _rightPanelResizeAnchor = null;
+            return;
+        }
 
         SetRightPanelWidth(RightCol.ActualWidth);
         ScheduleGridGeometryAnchorRestore(_rightPanelResizeAnchor);
@@ -8539,6 +8765,8 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             if (RightPanel.Visibility != Visibility.Visible)
+                return;
+            if (_adaptiveWorkbench)
                 return;
             SetRightPanelWidth(RightCol.ActualWidth);
             ScheduleGridGeometryAnchorRestore(anchor);
@@ -8895,9 +9123,7 @@ public partial class MainWindow : Window
 
     private async void OpenLastFolder_Click(object sender, RoutedEventArgs e)
     {
-        var lastFolderSet = _lastFolderSet.Count > 0
-            ? _lastFolderSet
-            : ReadSharedRecentFolders().Recent.LastFolderSet;
+        var lastFolderSet = _lastFolderSet;
         if (lastFolderSet.Count > 0)
         {
             SetLandingFolderSet(lastFolderSet);
@@ -9323,7 +9549,7 @@ public partial class MainWindow : Window
         if (!tile.IsRealFile
             || !tile.Enhanced
             || string.IsNullOrWhiteSpace(tile.EnhancedOutputPath)
-            || !_enhancedOutputs.TryGetValue(NormalizeFavoritePath(tile.Path), out ManagedEnhancedOutput? stored)
+            || !TryGetManagedEnhancedOutputForPath(tile.Path, out ManagedEnhancedOutput stored)
             || !TryCreateManagedEnhancedOutput(tile, stored.OutputPath, stored.SourceSize, stored.SourceMtimeMs, out ManagedEnhancedOutput current)
             || !string.Equals(current.OutputPath, tile.EnhancedOutputPath, StringComparison.OrdinalIgnoreCase))
         {
@@ -9606,7 +9832,7 @@ public partial class MainWindow : Window
                 false,
                 0,
                 null,
-                $"Browser AI engine is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start Aibos in the Browser, then retry.");
+                $"The optional Browser Enhancement companion is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start the H25 Browser application, then retry.");
         }
     }
 
@@ -9663,7 +9889,15 @@ public partial class MainWindow : Window
 
     private async Task RefreshModalEnhancementStateAsync(string sourcePath, long generation, bool showUnavailableError)
     {
-        string encodedSource = Uri.EscapeDataString(sourcePath);
+        if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity))
+        {
+            if (showUnavailableError)
+                _modalEnhancementError = "The selected source path could not be resolved for Enhancement.";
+            UpdateModalEnhancementActionControls();
+            return;
+        }
+
+        string encodedSource = Uri.EscapeDataString(sourceIdentity);
         EnhancementApiResponse response = await SendEnhancementApiAsync(HttpMethod.Get, $"api/enhance/jobs?sourceId={encodedSource}");
         if (generation != _modalEnhancementGeneration
             || Modal.Visibility != Visibility.Visible
@@ -9696,9 +9930,13 @@ public partial class MainWindow : Window
         // A filtered endpoint should only return jobs for the requested image,
         // but keep the desktop client defensive: never attach another image's
         // job/output to the currently selected tile.
+        string? tileIdentity = null;
         if (job is not null
-            && (!string.Equals(NormalizeFavoritePath(job.SourcePath), NormalizeFavoritePath(tile.Path), StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(NormalizeFavoritePath(job.SourceId), NormalizeFavoritePath(tile.Path), StringComparison.OrdinalIgnoreCase)))
+            && (!TryResolveEnhancementSourceIdentity(tile.Path, out tileIdentity)
+                || !TryResolveEnhancementSourceIdentity(job.SourcePath, out string jobSourcePathIdentity)
+                || !TryResolveEnhancementSourceIdentity(job.SourceId, out string jobSourceIdIdentity)
+                || !EnhancementSourceIdentityComparer.Equals(jobSourcePathIdentity, tileIdentity)
+                || !EnhancementSourceIdentityComparer.Equals(jobSourceIdIdentity, tileIdentity)))
         {
             return;
         }
@@ -9714,7 +9952,7 @@ public partial class MainWindow : Window
             bool newlyAvailable = !TryGetModalEnhancedOutput(tile, out _);
             tile.Enhanced = true;
             tile.EnhancedOutputPath = managedOutput.OutputPath;
-            _enhancedOutputs[NormalizeFavoritePath(tile.Path)] = managedOutput;
+            _enhancedOutputs[tileIdentity!] = managedOutput;
             UpdateModalEnhancedControls(canShowEnhanced: true);
             if (newlyAvailable
                 && Modal.Visibility == Visibility.Visible
@@ -9750,7 +9988,8 @@ public partial class MainWindow : Window
         managedOutput = null!;
         try
         {
-            string canonicalSource = _resolveFinalPath(Path.GetFullPath(tile.Path));
+            if (!TryResolveEnhancementSourceIdentity(tile.Path, out string canonicalSource))
+                return false;
             var sourceInfo = new FileInfo(canonicalSource);
             double currentMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
             if (!sourceInfo.Exists
@@ -9816,6 +10055,14 @@ public partial class MainWindow : Window
 
         long requestGeneration = _modalEnhancementGeneration;
         string sourcePath = tile.Path;
+        if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity)
+            || !File.Exists(sourceIdentity))
+        {
+            _modalEnhancementError = "The selected source path could not be resolved for Enhancement.";
+            SetStatusToast(_modalEnhancementError);
+            UpdateModalEnhancementActionControls();
+            return;
+        }
         string? requestJobId = _modalEnhancementJobId;
         _modalEnhancementRequestPending = true;
         _modalEnhancementError = null;
@@ -9828,10 +10075,10 @@ public partial class MainWindow : Window
                 ? await SendEnhancementApiAsync(HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId!)}/retry")
                 : await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
                 {
-                    sourceId = sourcePath,
-                    presetId = "anime-sharp-x2",
-                    adapterId = "realesrgan-ncnn",
-                    scale = 2,
+                    sourceId = sourceIdentity,
+                    presetId = _modalEnhancementPresetId,
+                    adapterId = _modalEnhancementAdapterId,
+                    scale = _modalEnhancementScale,
                 });
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
@@ -9854,10 +10101,10 @@ public partial class MainWindow : Window
                 {
                     response = await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
                     {
-                        sourceId = sourcePath,
-                        presetId = "anime-sharp-x2",
-                        adapterId = "realesrgan-ncnn",
-                        scale = 2,
+                        sourceId = sourceIdentity,
+                        presetId = _modalEnhancementPresetId,
+                        adapterId = _modalEnhancementAdapterId,
+                        scale = _modalEnhancementScale,
                         confirmLargeJob = true,
                     });
                     if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
@@ -9962,7 +10209,8 @@ public partial class MainWindow : Window
             _modalShowingEnhanced = false;
             tile.Enhanced = false;
             tile.EnhancedOutputPath = null;
-            _enhancedOutputs.Remove(NormalizeFavoritePath(tile.Path));
+            if (TryResolveEnhancementSourceIdentity(tile.Path, out string sourceIdentity))
+                _enhancedOutputs.Remove(sourceIdentity);
             _modalEnhancementJobId = null;
             _modalEnhancementJobStatus = null;
             _modalEnhancementProgress = 0;
@@ -10929,6 +11177,11 @@ public partial class MainWindow : Window
         _draftThumbnailStatusBorderSettings = loaded.Settings;
         _thumbnailStatusBorderSettingsProtected = loaded.IsProtected;
         _thumbnailStatusBorderSettingsError = loaded.Error;
+        _confirmBeforeDelete =
+            ThumbnailStatusBorderSettingsStore.ResolveEffectiveConfirmBeforeDelete(
+                _confirmBeforeDelete,
+                loaded);
+        SyncConfirmBeforeDeleteCheckBox();
         ApplyThumbnailStatusBorderResources(loaded.Settings);
     }
 
@@ -11151,14 +11404,11 @@ public partial class MainWindow : Window
         bool saved = TryWithPersistenceLock(path, () =>
         {
             operationStarted = true;
-            string? existingJson;
-            try
+            if (!ThumbnailStatusBorderSettingsStore.TryReadExistingJson(
+                    path,
+                    out string? existingJson,
+                    out operationError))
             {
-                existingJson = File.Exists(path) ? File.ReadAllText(path) : null;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                operationError = $"Shared settings could not be read: {ex.Message}";
                 return false;
             }
 
@@ -11175,11 +11425,8 @@ public partial class MainWindow : Window
                 operationError = parsed.Error ?? "The merged thumbnail border settings were invalid.";
                 return false;
             }
-            if (!TryWriteAtomicText(path, mergedJson))
-            {
-                operationError = "Windows did not allow the atomic settings replacement.";
+            if (!TryWriteAtomicSharedJson(path, mergedJson, out operationError))
                 return false;
-            }
             mergedSettings = parsed.Settings;
             return true;
         });
@@ -11212,11 +11459,12 @@ public partial class MainWindow : Window
         DiagnosticsText.Text = BuildDiagnosticsText();
         DiagnosticsStatusText.Text = "Read-only diagnostics. Copy excludes paths, image metadata, prompts, and personal state.";
         AppSettingsDialog.Visibility = Visibility.Visible;
+        SelectAppSettingsSection(focusShortcuts ? "keyboard" : "general", bringIntoView: false);
         Dispatcher.BeginInvoke(() =>
         {
+            SelectAppSettingsSection(focusShortcuts ? "keyboard" : "general", bringIntoView: true);
             if (focusShortcuts)
             {
-                KeyBindingsHeading.BringIntoView();
                 Button? firstBinding = KeyBindingSettings.Definitions
                     .Select(definition => _keyBindingButtons.TryGetValue(definition.Action, out Button? button) ? button : null)
                     .FirstOrDefault(static button => button is not null);
@@ -11226,6 +11474,32 @@ public partial class MainWindow : Window
             }
             ConfirmBeforeDeleteCheckBox.Focus();
         }, DispatcherPriority.Input);
+    }
+
+    private void AppSettingsNavigation_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string section })
+            SelectAppSettingsSection(section, bringIntoView: true);
+    }
+
+    private void SelectAppSettingsSection(string section, bool bringIntoView)
+    {
+        (FrameworkElement Target, RadioButton Navigation) selection = section switch
+        {
+            "display" => (DisplaySettingsHeading, SettingsDisplayNav),
+            "thumbnails" => (ThumbnailSettingsHeading, SettingsThumbnailsNav),
+            "keyboard" => (KeyBindingsHeading, SettingsKeyboardNav),
+            "about" => (AboutSettingsHeading, SettingsAboutNav),
+            _ => (GeneralSettingsHeading, SettingsGeneralNav),
+        };
+
+        selection.Navigation.IsChecked = true;
+        if (!bringIntoView)
+            return;
+        if (ReferenceEquals(selection.Target, GeneralSettingsHeading))
+            AppSettingsScrollViewer.ScrollToTop();
+        else
+            selection.Target.BringIntoView();
     }
 
     private void AppSettingsBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -11261,8 +11535,114 @@ public partial class MainWindow : Window
 
     private void ConfirmBeforeDelete_Changed(object sender, RoutedEventArgs e)
     {
-        _confirmBeforeDelete = ConfirmBeforeDeleteCheckBox.IsChecked == true;
+        if (_initializing || _syncingConfirmBeforeDelete)
+            return;
+
+        bool requested = ConfirmBeforeDeleteCheckBox.IsChecked == true;
+        if (requested == _confirmBeforeDelete)
+            return;
+        if (!TrySetConfirmBeforeDelete(requested, out string? error))
+        {
+            SetStatusToast($"Shared delete confirmation was not changed. {error}");
+            return;
+        }
+    }
+
+    private bool TrySetConfirmBeforeDelete(bool value, out string? error)
+    {
+        error = null;
+        if (value != _confirmBeforeDelete
+            && !TryPersistSharedConfirmBeforeDelete(value, out error))
+        {
+            SyncConfirmBeforeDeleteCheckBox();
+            return false;
+        }
+
+        _confirmBeforeDelete = value;
+        SyncConfirmBeforeDeleteCheckBox();
         SaveState();
+        return true;
+    }
+
+    private void SyncConfirmBeforeDeleteCheckBox()
+    {
+        _syncingConfirmBeforeDelete = true;
+        try
+        {
+            ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
+        }
+        finally
+        {
+            _syncingConfirmBeforeDelete = false;
+        }
+    }
+
+    private static bool TryPersistSharedConfirmBeforeDelete(bool value, out string? error)
+    {
+        error = null;
+        string path;
+        try
+        {
+            path = ThumbnailStatusBorderSettingsPath;
+        }
+        catch (Exception ex)
+        {
+            error = $"Shared settings path is unavailable: {ex.Message}";
+            return false;
+        }
+
+        string? operationError = null;
+        bool operationStarted = false;
+        bool saved = TryWithPersistenceLock(path, () =>
+        {
+            operationStarted = true;
+            if (!ThumbnailStatusBorderSettingsStore.TryReadExistingJson(
+                    path,
+                    out string? existingJson,
+                    out operationError))
+            {
+                return false;
+            }
+
+            ThumbnailStatusBorderLoadResult existing =
+                ThumbnailStatusBorderSettingsStore.Parse(existingJson ?? "{}");
+            if (existing.IsProtected)
+            {
+                operationError = existing.Error ?? "The shared settings file is protected.";
+                return false;
+            }
+            if (existing.ConfirmBeforeDelete == value)
+                return true;
+
+            if (!ThumbnailStatusBorderSettingsStore.TryMergeConfirmBeforeDelete(
+                    existingJson,
+                    value,
+                    out string mergedJson,
+                    out operationError))
+            {
+                return false;
+            }
+
+            ThumbnailStatusBorderLoadResult merged =
+                ThumbnailStatusBorderSettingsStore.Parse(mergedJson);
+            if (merged.IsProtected || merged.ConfirmBeforeDelete != value)
+            {
+                operationError = merged.Error
+                    ?? "The merged shared delete confirmation setting was invalid.";
+                return false;
+            }
+
+            if (!TryWriteAtomicSharedJson(path, mergedJson, out operationError))
+                return false;
+            return true;
+        });
+
+        if (saved)
+            return true;
+        error = operationError ?? (operationStarted
+            ? "The shared settings write failed."
+            : "The shared settings file is busy. Try again.");
+        return false;
     }
 
     private string BuildDiagnosticsText()
@@ -11404,15 +11784,19 @@ public partial class MainWindow : Window
         Tile? tile = _pendingDeleteTile;
         DeleteSnapshot? bulkSnapshot = _pendingBulkDeleteSnapshot;
         bool favoriteProtected = _favoriteDeleteConfirmationRequired;
+        if (!favoriteProtected && DoNotAskAgainCheckBox.IsChecked == true)
+        {
+            if (!TrySetConfirmBeforeDelete(false, out string? error))
+            {
+                DoNotAskAgainCheckBox.IsChecked = false;
+                SetStatusToast($"Delete confirmation stays enabled. {error}");
+            }
+        }
+
         _pendingDeleteTile = null;
         _pendingBulkDeleteSnapshot = null;
         _favoriteDeleteConfirmationRequired = false;
         DeleteConfirmationDialog.Visibility = Visibility.Collapsed;
-        if (!favoriteProtected && DoNotAskAgainCheckBox.IsChecked == true)
-        {
-            _confirmBeforeDelete = false;
-            SaveState();
-        }
         if (bulkSnapshot is not null)
             ExecuteBulkDelete(bulkSnapshot, favoriteConfirmed: favoriteProtected);
         else if (tile is not null)
@@ -12041,11 +12425,12 @@ public partial class MainWindow : Window
     private void RestoreState()
     {
         var state = ReadState();
-        var lastFolderSet = NormalizeFolderSet(state?.LastFolderSet ?? []);
-        if (lastFolderSet.Count == 0 && !string.IsNullOrWhiteSpace(state?.LastFolder))
-            lastFolderSet = NormalizeFolderSet([state.LastFolder]);
-        if (lastFolderSet.Count == 0)
-            lastFolderSet = ReadSharedRecentFolders().Recent.LastFolderSet;
+        SharedRecentReadResult sharedRecent = ReadSharedRecentFolders();
+        var lastFolderSet = ResolveStartupFolderSet(
+            state?.LastFolderSet ?? [],
+            state?.LastFolder,
+            sharedRecent);
+        _lastFolderSet = lastFolderSet.ToList();
 
         if (lastFolderSet.Count > 0)
         {
@@ -12283,21 +12668,61 @@ public partial class MainWindow : Window
 
     private static SharedRecentReadResult ReadSharedRecentFolders(string path)
     {
-        if (!File.Exists(path))
-            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(null), null);
+        SharedJsonDocumentReadResult read = SharedJsonDocumentReader.Read(path);
+        if (!read.Ok)
+        {
+            return new SharedRecentReadResult(
+                false,
+                NormalizeSharedRecentFolders(null),
+                read.Error,
+                true);
+        }
+        if (!read.Exists)
+        {
+            return new SharedRecentReadResult(
+                true,
+                NormalizeSharedRecentFolders(null),
+                null,
+                false);
+        }
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            using var document = JsonDocument.Parse(read.Json!);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
-                return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), "shared recent root is not an object");
-            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(document.RootElement), null);
+                return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), "shared recent root is not an object", true);
+            return new SharedRecentReadResult(true, NormalizeSharedRecentFolders(document.RootElement), null, true);
         }
         catch (Exception ex)
         {
-            return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), ex.Message);
+            return new SharedRecentReadResult(false, NormalizeSharedRecentFolders(null), ex.Message, true);
         }
     }
+
+    private static List<string> ResolveStartupFolderSet(
+        IEnumerable<string> localLastFolderSet,
+        string? localLastFolder,
+        SharedRecentReadResult sharedRecent)
+    {
+        var local = NormalizeFolderSet(localLastFolderSet);
+        if (local.Count == 0 && !string.IsNullOrWhiteSpace(localLastFolder))
+            local = NormalizeFolderSet([localLastFolder]);
+        return sharedRecent.Ok && sharedRecent.Exists
+            ? sharedRecent.Recent.LastFolderSet.ToList()
+            : local;
+    }
+
+    internal static IReadOnlyList<string> ResolveStartupFolderSetForSmoke(
+        string sharedRecentPath,
+        IEnumerable<string> localLastFolderSet,
+        string? localLastFolder)
+        => ResolveStartupFolderSet(
+            localLastFolderSet,
+            localLastFolder,
+            ReadSharedRecentFolders(sharedRecentPath));
+
+    internal static SharedRecentReadResult ReadSharedRecentFoldersForSmoke(string path)
+        => ReadSharedRecentFolders(path);
 
     private static SharedRecentFoldersState NormalizeSharedRecentFolders(JsonElement? root)
     {
@@ -12475,7 +12900,15 @@ public partial class MainWindow : Window
                     ExtensionData = CloneExtensionData(current.Recent.ExtensionData),
                 };
                 var json = JsonSerializer.Serialize(next, SharedRecentJsonOptions);
-                return TryWriteAtomicText(path, json);
+                if (!SharedJsonDocumentReader.TryEncodeCanonical(
+                        json,
+                        out byte[] bytes,
+                        out _))
+                {
+                    malformed = true;
+                    return false;
+                }
+                return TryWriteAtomicBytes(path, bytes);
             });
             if (!saved)
                 ReportPersistenceRefusal("Recent folder history", path, malformed, malformed ? null : () => SaveSharedRecentFolderSet(folderSet));
@@ -13038,6 +13471,17 @@ public partial class MainWindow : Window
     public string SeenPathForSmoke => ResolvedSeenPath;
     public string SharedRecentPathForSmoke => ResolvedSharedRecentPath;
     public string SearchHistoryPathForSmoke => SearchHistoryStore.ResolvePath();
+    internal static IReadOnlyDictionary<string, string> ResolveSharedDurableStorePathsForSmoke()
+        => new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [SharedDataRootActivation.FavoritesEnvironmentVariable] = ResolvedFavoritesPath,
+            [SharedDataRootActivation.SeenEnvironmentVariable] = ResolvedSeenPath,
+            [SharedDataRootActivation.SettingsEnvironmentVariable] = ThumbnailStatusBorderSettingsPath,
+            [SharedDataRootActivation.AlbumsEnvironmentVariable] = AlbumStore.ResolvePath(),
+            [SharedDataRootActivation.SearchHistoryEnvironmentVariable] = SearchHistoryStore.ResolvePath(),
+            [SharedDataRootActivation.RecentFoldersEnvironmentVariable] = ResolvedSharedRecentPath,
+            [SharedDataRootActivation.EnhancementJobsEnvironmentVariable] = ResolvedEnhancementJobsPath,
+        };
     public bool SearchHistoryPopupOpenForSmoke => SearchHistoryPopup.IsOpen;
     public List<string> SearchHistoryEntriesForSmoke => _searchHistoryEntries.Select(static item => item.Query).ToList();
     public string SearchHistoryStatusForSmoke => SearchHistoryStatusText.Text;
@@ -13352,6 +13796,11 @@ public partial class MainWindow : Window
     public void ResetProtectedDeleteRootsForSmoke() => _protectedDeleteRoots = ResolveProtectedDeleteRoots;
 
     public void SetConfirmBeforeDeleteForSmoke(bool value) => _confirmBeforeDelete = value;
+    public bool PersistConfirmBeforeDeleteForSmoke(bool value)
+    {
+        return TrySetConfirmBeforeDelete(value, out _)
+            && _confirmBeforeDelete == value;
+    }
     public void FlushStateForSmoke()
     {
         _searchStateSaveTimer.Stop();
@@ -13797,7 +14246,8 @@ public partial class MainWindow : Window
             gridWindowContains,
             selectedItemsContains,
             container is not null,
-            container?.IsSelected == true);
+            container?.IsSelected == true,
+            HasCanonicalSelectionMarkerForSmoke(container, tile, grid: true));
     }
     public async Task<ListSelectionVisualSmokeSnapshot> WaitForListSelectionVisualForSmokeAsync(string fileName)
     {
@@ -13819,7 +14269,28 @@ public partial class MainWindow : Window
             canonicalSelected,
             selectedItemsContains,
             container is not null,
-            container?.IsSelected == true);
+            container?.IsSelected == true,
+            HasCanonicalSelectionMarkerForSmoke(container, tile, grid: false));
+    }
+
+    private static bool HasCanonicalSelectionMarkerForSmoke(ListBoxItem? container, Tile? tile, bool grid)
+    {
+        if (container is null || tile?.IsCanonicalSelected != true)
+            return false;
+
+        container.ApplyTemplate();
+        string partName = grid
+            ? tile.UseCompactCardTemplate ? "compactRing" : "ring"
+            : "bd";
+        if (container.Template.FindName(partName, container) is not Border marker)
+            return false;
+
+        static bool Visible(Brush? brush)
+            => brush is not null
+                && brush.Opacity > 0
+                && (brush is not SolidColorBrush solid || solid.Color.A > 0);
+
+        return Visible(marker.BorderBrush) || Visible(marker.Background);
     }
     public int SelectedFavoriteLevelForSmoke => SelectedTile()?.Fav ?? 0;
     public bool AdjustGalleryFavoriteForSmoke(string fileName, int delta)
@@ -13942,6 +14413,7 @@ public partial class MainWindow : Window
         && string.Equals(AutomationProperties.GetName(DateToInput), "To date", StringComparison.Ordinal);
     public bool FocusCardsListForSmoke() => CardsList.Focus();
     public bool FocusRowsListForSmoke() => RowsList.Focus();
+    public bool FocusRightPreviewActionForSmoke() => FavoriteIncreaseButton.Focus();
     public bool FocusSelectedGalleryItemForSmoke() => TryFocusPrimaryGalleryItem();
     public bool FocusDateFromInputForSmoke()
     {
@@ -13952,6 +14424,7 @@ public partial class MainWindow : Window
     public bool FocusAppSettingsButtonForSmoke() => OpenAppSettingsButton.Focus();
     public bool IsGlobalShortcutInputFocusedForSmoke => IsGlobalShortcutInputFocused(Keyboard.FocusedElement);
     public bool IsGlobalShortcutSuppressedForSmoke(IInputElement focused) => IsGlobalShortcutInputFocused(focused);
+    public bool SearchInputSuppressesGlobalShortcutForSmoke => IsGlobalShortcutInputFocused(SearchInput);
 
     public bool InvokePreviewKeyForSmoke(Key key)
     {
@@ -13964,6 +14437,19 @@ public partial class MainWindow : Window
             RoutedEvent = Keyboard.PreviewKeyDownEvent,
         };
         OnPreviewKeyDown(args);
+        return args.Handled;
+    }
+    public bool InvokePreviewKeyFromSearchInputForSmoke(Key key)
+    {
+        var source = PresentationSource.FromVisual(this);
+        if (source is null)
+            return false;
+
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+        };
+        SearchInput.RaiseEvent(args);
         return args.Handled;
     }
     public bool InvokePreviewKeyForSmoke(Key key, ModifierKeys modifiers)
@@ -14317,7 +14803,12 @@ public partial class MainWindow : Window
                 UpdatedAtUtc = DateTime.UtcNow.ToString("O"),
                 ExtensionData = CloneExtensionData(current.Recent.ExtensionData),
             };
-            return TryWriteAtomicText(path, JsonSerializer.Serialize(next, SharedRecentJsonOptions));
+            string json = JsonSerializer.Serialize(next, SharedRecentJsonOptions);
+            return SharedJsonDocumentReader.TryEncodeCanonical(
+                    json,
+                    out byte[] bytes,
+                    out _)
+                && TryWriteAtomicBytes(path, bytes);
         });
     }
 
@@ -14372,6 +14863,13 @@ public partial class MainWindow : Window
     }
     public double SidebarWidthForSmoke => Sidebar.ActualWidth;
     public bool SidebarVisibleForSmoke => Sidebar.Visibility == Visibility.Visible;
+    public bool AdaptiveWorkbenchForSmoke => _adaptiveWorkbench;
+    public bool NarrowSidebarRailVisibleForSmoke => NarrowSidebarRail.Visibility == Visibility.Visible;
+    public bool RightPanelDockedBelowForSmoke
+        => Grid.GetRow(RightPanel) == 2
+            && Grid.GetColumn(RightPanel) == 1
+            && Grid.GetColumnSpan(RightPanel) == 3
+            && WorkbenchPreviewRow.ActualHeight > 0;
     public double RightPanelWidthForSmoke => RightPanel.ActualWidth;
     public double RightPanelStoredWidthForSmoke => _rightPanelWidth;
     public bool RightPanelOpenForSmoke => RightPanel.Visibility == Visibility.Visible;
@@ -14385,6 +14883,8 @@ public partial class MainWindow : Window
     public void CommitRightPanelWidthForSmoke() => SaveState();
     public void ToggleRightPanelForSmoke() => ToggleRight_Click(this, new RoutedEventArgs());
     public string? LastGridZoomAnchorPathForSmoke => _lastGridZoomAnchorPath;
+    public string? LastStableGridViewportAnchorPathForSmoke => _lastStableGridViewportAnchor?.Path;
+    public string? LastRequestedGridGeometryAnchorPathForSmoke => _lastRequestedGridGeometryAnchor?.Path;
     public double LastGridZoomAnchorDriftForSmoke => _lastGridZoomAnchorDrift;
     public int GridColumnCountForSmoke => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.ColumnCount ?? 0;
     public bool GridForcesSingleColumnForSmoke => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.ForceSingleColumn == true;
@@ -14612,9 +15112,12 @@ public partial class MainWindow : Window
         ScheduleGridGeometryAnchorRestore(anchor);
     }
 
+    public void ApplyWorkbenchLayoutWidthForSmoke(double width)
+        => ApplyAdaptiveWorkbenchLayout(Math.Max(MinWidth, width), preserveGridAnchor: false);
+
     public void SimulateDpiGeometryChangeForSmoke(double width, double height)
     {
-        GridZoomAnchor? anchor = CaptureGridZoomAnchor();
+        GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
         Width = Math.Max(MinWidth, width);
         Height = Math.Max(MinHeight, height);
         PreserveGridAnchorAfterDpiChange(anchor);
@@ -14796,15 +15299,28 @@ public partial class MainWindow : Window
         => ModalFilmstripOverlay.Visibility == Visibility.Visible;
     public bool ModalFilmstripPinnedForSmoke => _modalFilmstripOpen;
     public double ModalImageAreaHeightForSmoke => ModalImageArea.ActualHeight;
+    public double ModalImageAreaWidthForSmoke => ModalImageArea.ActualWidth;
+    public double ModalHeightForSmoke => Modal.ActualHeight;
+    public double ModalWidthForSmoke => Modal.ActualWidth;
+    public double ModalImageHeightForSmoke => ModalImage.ActualHeight;
+    public double ModalImageWidthForSmoke => ModalImage.ActualWidth;
+    public bool ModalFitSurfaceVisibleForSmoke => Modal.Visibility == Visibility.Visible;
+    public bool ModalFitStretchUniformForSmoke => ModalBitmap.Stretch == Stretch.Uniform;
+    public bool ModalImageAreaCoversWindowForSmoke
+        => ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
+            && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2);
+    public bool ModalImageWithinAreaForSmoke
+        => ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 0.5
+            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 0.5;
+    public bool ModalImageTouchesFitEdgeForSmoke
+        => Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 0.5
+            || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 0.5;
     public bool ModalFullWindowFitContractForSmoke
-        => Modal.Visibility == Visibility.Visible
-            && ModalBitmap.Stretch == Stretch.Uniform
-            && ModalImageArea.ActualHeight >= Math.Max(1, Modal.ActualHeight - 2)
-            && ModalImageArea.ActualWidth >= Math.Max(1, Modal.ActualWidth - 2)
-            && ModalImage.ActualWidth <= ModalImageArea.ActualWidth + 0.5
-            && ModalImage.ActualHeight <= ModalImageArea.ActualHeight + 0.5
-            && (Math.Abs(ModalImage.ActualWidth - ModalImageArea.ActualWidth) < 0.5
-                || Math.Abs(ModalImage.ActualHeight - ModalImageArea.ActualHeight) < 0.5);
+        => ModalFitSurfaceVisibleForSmoke
+            && ModalFitStretchUniformForSmoke
+            && ModalImageAreaCoversWindowForSmoke
+            && ModalImageWithinAreaForSmoke
+            && ModalImageTouchesFitEdgeForSmoke;
     public bool ModalWindowCaptionControlsContractForSmoke
         => Modal.Visibility == Visibility.Visible
             && ModalWindowCaptionControls.Visibility == Visibility.Visible
@@ -14895,14 +15411,19 @@ public partial class MainWindow : Window
         => ModalZoomIndicator.VerticalAlignment == VerticalAlignment.Top
             && Grid.GetRowSpan(ModalZoomIndicator) == 3
             && ModalZoomIndicator.Margin.Top <= 2
-            && ModalZoomIndicator.Opacity <= 0.65
+            && ModalZoomIndicator.Opacity >= 0.9
+            && ModalZoomIndicator.CornerRadius.TopLeft <= 4
             && ModalZoomLabel.FontSize <= 10;
     public bool ModalSingleZoomReadoutForSmoke
         => ModalZoomIndicator.Visibility == (ModalChromeEffectivelyVisible ? Visibility.Visible : Visibility.Collapsed)
             && !ModalInteractionFeedbackText.Text.StartsWith("Zoom", StringComparison.OrdinalIgnoreCase);
     public void RevealModalChromeTransientForSmoke() => RevealModalChromeTransient();
     public void ExpireModalChromeTransientForSmoke() => ExpireModalChromeTransient();
-    public void SetModalChromeVisibleForSmoke(bool visible) => SetModalChromeVisible(visible, showFeedback: false);
+    public void SetModalChromeVisibleForSmoke(bool visible)
+    {
+        CancelPendingModalSingleClick();
+        SetModalChromeVisible(visible, showFeedback: false);
+    }
     public void SetModalBottomHoverForSmoke(bool visible) => SetModalFilmstripHoverVisible(visible);
     public bool ToggleModalFilmstripForSmoke() => ToggleModalFilmstrip();
     public bool FocusModalFavoriteIncreaseForSmoke() => ModalFavoriteIncreaseButton.Focus();
@@ -14930,7 +15451,6 @@ public partial class MainWindow : Window
         string expectedFeedback = expectedVisible ? "shown" : "hidden";
         return _modalManualChromeVisible == expectedVisible
             && ModalChromeEffectivelyVisible == expectedVisible
-            && ModalInteractionFeedback.Visibility == Visibility.Visible
             && ModalInteractionFeedbackText.Text.Contains(expectedFeedback, StringComparison.OrdinalIgnoreCase);
     }
     public async Task<bool> WaitForModalChromeTransientExpirationForSmokeAsync(int timeoutMilliseconds = 5000)
@@ -14979,6 +15499,7 @@ public partial class MainWindow : Window
     public string? ModalEnhancementJobIdForSmoke => _modalEnhancementJobId;
     public string? ModalEnhancementStatusForSmoke => _modalEnhancementJobStatus;
     public int ModalEnhancementProgressForSmoke => _modalEnhancementProgress;
+    public string? ModalEnhancementErrorForSmoke => _modalEnhancementError;
     public string ModalEnhancementMessageForSmoke => ModalEnhancementStatusText.Text;
     public bool ModalEnhancementCancelVisibleForSmoke => ModalEnhanceCancelButton.Visibility == Visibility.Visible;
     public bool ModalEnhancedDeleteVisibleForSmoke => ModalEnhancedDeleteButton.Visibility == Visibility.Visible;
@@ -14989,6 +15510,27 @@ public partial class MainWindow : Window
         bool confirmOutputDelete = true)
     {
         _modalEnhancementSender = sender;
+        _confirmLargeEnhancementForSmoke = () => confirmLargeJob;
+        _confirmEnhancedOutputDeleteForSmoke = () => confirmOutputDelete;
+    }
+
+    public void ConfigureModalEnhancementRequestProfileForSmoke(string presetId, string adapterId, int scale)
+    {
+        if (string.IsNullOrWhiteSpace(presetId))
+            throw new ArgumentException("presetId is required", nameof(presetId));
+        if (string.IsNullOrWhiteSpace(adapterId))
+            throw new ArgumentException("adapterId is required", nameof(adapterId));
+        if (scale is < 1 or > 8)
+            throw new ArgumentOutOfRangeException(nameof(scale));
+        _modalEnhancementPresetId = presetId;
+        _modalEnhancementAdapterId = adapterId;
+        _modalEnhancementScale = scale;
+    }
+
+    public void ConfigureModalEnhancementConfirmationsForSmoke(
+        bool confirmLargeJob = true,
+        bool confirmOutputDelete = true)
+    {
         _confirmLargeEnhancementForSmoke = () => confirmLargeJob;
         _confirmEnhancedOutputDeleteForSmoke = () => confirmOutputDelete;
     }
@@ -15743,7 +16285,8 @@ public sealed class SharedRecentFoldersState
 public sealed record SharedRecentReadResult(
     bool Ok,
     SharedRecentFoldersState Recent,
-    string? Error);
+    string? Error,
+    bool Exists);
 
 public sealed record FavoriteImportSummary(
     bool Ok,
@@ -15859,14 +16402,16 @@ public sealed record GridSelectionVisualSmokeSnapshot(
     bool GridWindowContains,
     bool SelectedItemsContains,
     bool ContainerRealized,
-    bool ContainerSelected);
+    bool ContainerSelected,
+    bool CanonicalMarkerVisible);
 
 public sealed record ListSelectionVisualSmokeSnapshot(
     string? CanonicalPath,
     bool CanonicalSelected,
     bool SelectedItemsContains,
     bool ContainerRealized,
-    bool ContainerSelected);
+    bool ContainerSelected,
+    bool CanonicalMarkerVisible);
 
 public sealed record PreviewDecodeSmokeSnapshot(
     bool Selected,
@@ -16081,6 +16626,18 @@ public sealed class Tile : INotifyPropertyChanged
     private bool _enhanced;
     private bool _showCardDetails = true;
     private bool _showCardStatusBadge = true;
+    private bool _isCanonicalSelected;
+
+    public bool IsCanonicalSelected
+    {
+        get => _isCanonicalSelected;
+        internal set
+        {
+            if (_isCanonicalSelected == value) return;
+            _isCanonicalSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCanonicalSelected)));
+        }
+    }
 
     public bool Enhanced
     {

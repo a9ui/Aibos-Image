@@ -1,82 +1,77 @@
 # Aibos Image Agent Guide
 
 This file contains public repository instructions for automated coding agents.
-It must not depend on a private workspace, private issue tracker, personal
-machine state, or a particular AI product.
+It must not depend on a private workspace, private tracker, personal machine
+state, or a particular AI product.
 
 ## Read first
 
 Before changing code, read:
 
-1. `README.md`
-2. `SECURITY.md`
-3. `docs/product-contract.md`
-4. `contracts/parity-v1.json` when changing a registered shared behavior
-5. any more specific `AGENTS.md` closer to the files being changed
+1. `README.md`;
+2. `SECURITY.md`;
+3. `docs/product-contract.md`;
+4. `contracts/parity-v1.json` when changing a registered shared-state meaning;
+5. `contracts/shared-root-locator-v1.json` when changing shared-root discovery;
+6. any more specific `AGENTS.md` closer to the files being changed.
 
-`docs/product-contract.md` is the normative source for product behavior shared
-by the Browser and WPF renderers. Historical documents, screenshots, tests, and
-the current behavior of only one renderer do not override it.
+`docs/product-contract.md` is normative for this WPF application and for the
+cross-repository durable-state boundary. Historical documents, screenshots,
+tests, and the behavior of only one application do not override it.
 
-## Product scope
+## Repository authority
 
-- Maintain one Aibos Image product with two independent renderers: Browser and
-  WPF.
+- Maintain the native WPF application in this repository.
+- The independent Browser application is maintained in
+  <https://github.com/a9ui/tools-h000025-photoviewer>. Do not add its Next.js
+  UI, API implementation, Node.js toolchain, or Browser tests here.
+- WPF product work does not require Browser UI or runtime parity.
+- A shared-state schema or meaning change does require versioned fixtures and
+  compatibility evidence from an exact H25 Browser revision. Make Browser
+  implementation changes in that repository through its own issue and pull
+  request.
 - Treat `Aibos Image` as the public product name and `Aibos` as its compact UI
   label. Legacy `PhotoViewer` assembly, namespace, cache, and persistence names
   are compatibility identifiers; do not rename them without a tested migration.
-- Keep ordinary WPF viewing independent of the Browser server.
-- Do not introduce, restore, or extend the legacy WinForms renderer; it is not
-  included in this public repository.
-- Prefer the smallest compatible change over a rewrite or framework migration.
-- Preserve existing user workflows unless the product contract and regression
-  coverage intentionally change them.
+- Do not introduce or extend the legacy WinForms renderer. It is frozen and is
+  not included in this repository.
 
 ## Non-negotiable safety boundaries
 
-The following is a non-exhaustive operational summary. The exact shared product
-semantics remain in `docs/product-contract.md`.
-
-- Keep the Browser runtime bound to `127.0.0.1`. Do not add LAN, tunnel,
-  reverse-proxy, hosted, or Internet deployment support.
 - Normal viewing and state changes must not rewrite source images.
-- Source deletion is explicit and uses the operating system Recycle Bin. Do not
-  add a permanent-delete fallback.
+- Source deletion is explicit and uses the operating system Recycle Bin. Do
+  not add a permanent-delete fallback.
 - Enhancement starts only from an explicit user action. Browsing, preview,
   search, modal navigation, and state hydration must not enqueue jobs or start
   workers.
-- Treat file paths, process arguments, image metadata, network responses, and
-  shared-state files as untrusted input. Keep validation and resource bounds in
-  place.
-- Preserve unrelated and unknown fields in shared state when the format permits
-  it. Mutations must use the latest on-disk state and remain non-destructive on
-  malformed or unsupported future versions.
-- Do not delete or reset user caches, settings, state databases, or source
-  images as a repair strategy.
+- Ordinary WPF viewing must not require a Browser or Node.js runtime. The
+  optional H25 Browser Enhancement companion is loopback-only and must remain
+  bound to `127.0.0.1`.
+- Treat file paths, process arguments, image metadata, loopback responses, and
+  durable-state files as untrusted input. Preserve validation and resource
+  bounds.
+- Preserve unrelated and unknown fields where the format permits it. Mutations
+  must use the latest on-disk state and remain non-destructive on malformed or
+  unsupported future versions.
+- Never delete or reset user images, caches, settings, Albums, Search History,
+  Favorites, Seen state, Enhancement jobs/outputs, or other persistence as a
+  repair strategy.
 
-## Browser/WPF parity
+## Shared-state changes
 
-For behavior owned by both renderers:
+The WPF and Browser applications are independently versioned. Only their
+durable-state protocol is shared. Use reader-first rollout:
 
-1. state the product-contract decision, or state that the contract is unchanged;
-2. inspect both Browser and WPF implementations;
-3. update both when the product meaning changes;
-4. add shared or equivalent regression coverage for both;
-5. record an explicit reason when one renderer is not applicable.
+1. define the versioned contract and synthetic fixtures here;
+2. prove both readers against the same exact fixture revision;
+3. preserve unknown fields and reject future or malformed state without writes;
+4. enable a new writer in one application only after both readers are green;
+5. enable the second writer after cross-repository simultaneous-writer tests.
 
-A one-renderer patch is not a complete shared-behavior fix merely because its
-local tests pass.
-
-Stable `PV-*` identifiers live in the normative product contract. The shared
-vectors in `contracts/parity-v1.json` must be consumed by parity runners that
-exercise each renderer's production behavior implementation. Do not copy their
-expected results into renderer-owned fixtures or change only one consumer to
-make a parity failure green.
-
-Share meanings, schemas, fixtures, action identifiers, and design tokens where
-useful. Do not make WPF depend on Node.js, force both renderers through one
-runtime, or duplicate renderer-specific UI code merely to make files look
-similar.
+Do not treat a vendored H25 fixture as a second source of truth. It must identify
+this canonical repository, path, contract version, and source commit SHA.
+Renderer-local presentation state remains local; do not share WPF `state.json`
+wholesale.
 
 ## Privacy-safe development
 
@@ -85,7 +80,7 @@ similar.
   unredacted home-directory paths, email addresses, credentials, cookies,
   private URLs, cache/state files, databases, logs, environment files, scanner
   reports, or generated build output.
-- Redact machine-specific paths from test output and issue text.
+- Redact machine-specific paths from test output and public issue text.
 - Do not publish a vulnerability, proof of concept, secret, or private path in
   a public issue. Follow `SECURITY.md`.
 
@@ -93,47 +88,30 @@ similar.
 
 - Inspect `git status` before editing and preserve unrelated user changes.
 - Do not use destructive reset or checkout commands to discard work.
-- Keep changes reviewable and avoid mixing behavior changes, broad file moves,
-  dependency migrations, and visual redesign in one patch.
-- Do not commit `node_modules`, `.next`, WPF `bin`/`obj`, caches, reports, or
-  local runtime artifacts.
+- Keep changes reviewable. Do not combine repository-boundary work,
+  shared-state migration, framework migration, structural refactoring, and
+  visual redesign in one patch.
+- Do not commit WPF `bin`/`obj`, caches, reports, or local runtime artifacts.
 - Do not change or add a repository license without an explicit owner decision.
   Until a `LICENSE` file exists, do not describe this repository as open source.
 
 ## Verification
 
-Use Corepack for JavaScript commands:
-
-```powershell
-corepack pnpm install --frozen-lockfile
-corepack pnpm test:unit
-corepack pnpm typecheck
-corepack pnpm lint
-corepack pnpm build
-corepack pnpm verify:contracts
-```
-
 Build WPF without relying on a previously built executable:
 
 ```powershell
-$artifacts = Join-Path $env:TEMP ("photoviewer-wpf-agent-build-" + [guid]::NewGuid().ToString("N"))
+$artifacts = Join-Path $env:TEMP ("aibos-wpf-agent-build-" + [guid]::NewGuid().ToString("N"))
 dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj `
   -c Release `
   --artifacts-path $artifacts `
   --nologo
 ```
 
-Run relevant focused verifiers from `scripts/` when changing shared state,
-deletion, external actions, decode/metadata handling, Albums, navigation, or
-other covered behavior. Use isolated temporary fixtures and do not overwrite a
-running Browser `.next` directory or WPF executable.
+Run the smallest relevant focused verifier from `scripts/`, then the aggregate
+GitHub Actions gate once for the candidate SHA. All destructive, malformed,
+concurrent-writer, and persistence tests must use isolated TEMP fixtures. Do
+not start the real H25 Browser application or touch its user state for a test;
+use the bounded fake loopback server in the existing Enhancement verifier.
 
-On Windows, run the executable cross-runtime vectors when a registered shared
-contract or either of its consumers changes:
-
-```powershell
-corepack pnpm verify:parity
-```
-
-Report the exact commands run, their results, and anything not verified. Do not
-call work complete based only on documentation or one renderer's behavior.
+Report completion in this order: meaning, evidence, remaining risk, then the
+relevant Issue or pull request.

@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $projectPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$executablePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\bin\Release\net8.0-windows\PhotoViewer.Wpf.exe'
+$executablePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.exe'
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $albumUiRoot = Join-Path $tempBase ('pvu-album-ui-' + [Guid]::NewGuid().ToString('N'))
 $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -12,16 +12,6 @@ try {
     & dotnet build $projectPath -c Release --nologo
     if ($LASTEXITCODE -ne 0) {
         throw "WPF Album store Release build failed with exit code $LASTEXITCODE"
-    }
-
-    & corepack pnpm vitest run `
-        src/lib/albums.test.ts `
-        src/lib/albums.scale.test.ts `
-        src/lib/albumSource.test.ts `
-        src/app/api/albums/route.test.ts `
-        src/lib/albums.crossRuntime.test.ts
-    if ($LASTEXITCODE -ne 0) {
-        throw "Browser/WPF Album store verifier failed with exit code $LASTEXITCODE"
     }
 
     New-Item -ItemType Directory -Path $albumUiRoot | Out-Null
@@ -51,12 +41,8 @@ finally {
 [pscustomobject]@{
     ok = $true
     releaseBuild = $true
-    browserWpfInterleaving = $true
-    simultaneousBrowserWpfWriters = $true
-    malformedAndFutureProtected = $true
-    revisionConflictProtected = $true
-    unknownFieldsPreserved = $true
-    lockAndTempResidueAbsent = $true
+    runtime = 'wpf'
+    browserCompatibilityNotRun = $true
     wpfUiContract = [bool]$albumUiResult.uiContract
     wpfCurrentOutsideMissing = [bool]$albumUiResult.unavailableExplicit
     activeAvailabilityCancellation = [bool]$albumUiResult.activeAvailabilityCancellation

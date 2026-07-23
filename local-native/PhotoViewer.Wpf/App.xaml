@@ -5,52 +5,51 @@
   <Application.Resources>
 
     <!-- ═══════════ Design tokens (source of truth: browser globals.css) ═══════════ -->
-    <Color x:Key="BgPrimaryColor">#08080C</Color>
-    <Color x:Key="BgSecondaryColor">#101018</Color>
-    <Color x:Key="BgTertiaryColor">#181824</Color>
-    <Color x:Key="BgElevatedColor">#1C1C2E</Color>
-    <Color x:Key="AccentColor">#6366F1</Color>
-    <Color x:Key="AccentLightColor">#818CF8</Color>
-    <Color x:Key="FavoriteColor">#F43F5E</Color>
+    <Color x:Key="BgPrimaryColor">#0B0C11</Color>
+    <Color x:Key="BgSecondaryColor">#12151D</Color>
+    <Color x:Key="BgTertiaryColor">#171B24</Color>
+    <Color x:Key="BgElevatedColor">#1C202A</Color>
+    <Color x:Key="AccentColor">#4E57CF</Color>
+    <Color x:Key="AccentLightColor">#7B83FF</Color>
+    <Color x:Key="FavoriteColor">#FF5C7A</Color>
 
-    <SolidColorBrush x:Key="BgPrimary" Color="#08080C"/>
-    <SolidColorBrush x:Key="BgSecondary" Color="#101018"/>
-    <SolidColorBrush x:Key="BgTertiary" Color="#181824"/>
-    <SolidColorBrush x:Key="BgElevated" Color="#1C1C2E"/>
-    <SolidColorBrush x:Key="HeaderBg" Color="#0B0B12"/>
-    <SolidColorBrush x:Key="TextPrimary" Color="#EEF0F6"/>
-    <SolidColorBrush x:Key="TextSecondary" Color="#7A7F9A"/>
-    <SolidColorBrush x:Key="TextTertiary" Color="#50546E"/>
-    <SolidColorBrush x:Key="Accent" Color="#6366F1"/>
-    <SolidColorBrush x:Key="AccentLight" Color="#818CF8"/>
-    <SolidColorBrush x:Key="Favorite" Color="#F43F5E"/>
-    <SolidColorBrush x:Key="FavoriteText" Color="#FECDD3"/>
-    <SolidColorBrush x:Key="FavoriteThumbnailStatusBorderBrush" Color="#FACC15"/>
+    <!-- Lightweight opaque workbench tokens: square, quiet, and fast. -->
+    <SolidColorBrush x:Key="BgPrimary" Color="#0B0C11"/>
+    <SolidColorBrush x:Key="BgSecondary" Color="#12151D"/>
+    <SolidColorBrush x:Key="BgTertiary" Color="#171B24"/>
+    <SolidColorBrush x:Key="BgElevated" Color="#1C202A"/>
+    <SolidColorBrush x:Key="HeaderBg" Color="#0E1016"/>
+    <SolidColorBrush x:Key="TextPrimary" Color="#F4F6FB"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#C5CAD5"/>
+    <SolidColorBrush x:Key="TextTertiary" Color="#929AA9"/>
+    <SolidColorBrush x:Key="TextDisabled" Color="#788192"/>
+    <SolidColorBrush x:Key="Accent" Color="#4E57CF"/>
+    <SolidColorBrush x:Key="AccentLight" Color="#7B83FF"/>
+    <SolidColorBrush x:Key="Focus" Color="#B7E4FF"/>
+    <SolidColorBrush x:Key="Favorite" Color="#FF5C7A"/>
+    <SolidColorBrush x:Key="FavoriteText" Color="#FFD7E0"/>
+    <SolidColorBrush x:Key="FavoriteThumbnailStatusBorderBrush" Color="#F4C45B"/>
     <SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="#38BDF8"/>
-    <SolidColorBrush x:Key="Success" Color="#10B981"/>
-    <SolidColorBrush x:Key="Danger" Color="#EF4444"/>
-    <SolidColorBrush x:Key="DangerText" Color="#FECACA"/>
-    <SolidColorBrush x:Key="GlassBorder" Color="#18FFFFFF"/>
-    <SolidColorBrush x:Key="GlassBorderHover" Color="#26FFFFFF"/>
-    <SolidColorBrush x:Key="HoverFill" Color="#14FFFFFF"/>
-    <SolidColorBrush x:Key="SoftFill" Color="#0AFFFFFF"/>
-    <SolidColorBrush x:Key="AccentSoft" Color="#1A6366F1"/>
-    <SolidColorBrush x:Key="AccentGlass" Color="#296366F1"/>
-    <SolidColorBrush x:Key="FavoriteSoft" Color="#1FF43F5E"/>
-    <SolidColorBrush x:Key="SuccessSoft" Color="#1410B981"/>
-    <SolidColorBrush x:Key="SuccessBorder" Color="#5710B981"/>
+    <SolidColorBrush x:Key="Success" Color="#4DD4A3"/>
+    <SolidColorBrush x:Key="Warning" Color="#F4C45B"/>
+    <SolidColorBrush x:Key="Danger" Color="#FF687F"/>
+    <SolidColorBrush x:Key="DangerText" Color="#FFD7DE"/>
+    <SolidColorBrush x:Key="GlassBorder" Color="#252A36"/>
+    <SolidColorBrush x:Key="GlassBorderHover" Color="#343B4B"/>
+    <SolidColorBrush x:Key="BorderStrong" Color="#59637B"/>
+    <SolidColorBrush x:Key="HoverFill" Color="#202532"/>
+    <SolidColorBrush x:Key="PressedFill" Color="#262C3A"/>
+    <SolidColorBrush x:Key="SoftFill" Color="#171B24"/>
+    <SolidColorBrush x:Key="AccentSoft" Color="#1C2343"/>
+    <SolidColorBrush x:Key="AccentGlass" Color="#1C2343"/>
+    <SolidColorBrush x:Key="FavoriteSoft" Color="#33202A"/>
+    <SolidColorBrush x:Key="SuccessSoft" Color="#173128"/>
+    <SolidColorBrush x:Key="SuccessBorder" Color="#356D5B"/>
 
     <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, monospace</FontFamily>
 
-    <LinearGradientBrush x:Key="LogoBrush" StartPoint="0,0" EndPoint="1,1">
-      <GradientStop Color="#818CF8" Offset="0"/>
-      <GradientStop Color="#C084FC" Offset="1"/>
-    </LinearGradientBrush>
-
-    <LinearGradientBrush x:Key="FavStepGradient" StartPoint="0,0" EndPoint="1,1">
-      <GradientStop Color="#818CF8" Offset="0"/>
-      <GradientStop Color="#6366F1" Offset="1"/>
-    </LinearGradientBrush>
+    <SolidColorBrush x:Key="LogoBrush" Color="#7B83FF"/>
+    <SolidColorBrush x:Key="FavStepGradient" Color="#4E57CF"/>
 
     <!-- ═══════════ Converters ═══════════ -->
     <local:MultiplyConverter x:Key="Multiply"/>
@@ -60,7 +59,7 @@
     <!-- ═══════════ Base text ═══════════ -->
     <Style TargetType="TextBlock">
       <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-      <Setter Property="TextOptions.TextFormattingMode" Value="Ideal"/>
+      <Setter Property="TextOptions.TextFormattingMode" Value="Display"/>
       <Setter Property="TextOptions.TextRenderingMode" Value="ClearType"/>
     </Style>
 
@@ -69,14 +68,14 @@
       <Setter Property="Background" Value="{StaticResource BgElevated}"/>
       <Setter Property="BorderBrush" Value="{StaticResource GlassBorderHover}"/>
       <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="Padding" Value="9,6"/>
-      <Setter Property="FontSize" Value="11.5"/>
-      <Setter Property="HasDropShadow" Value="True"/>
+      <Setter Property="Padding" Value="8,4"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="HasDropShadow" Value="False"/>
       <Setter Property="MaxWidth" Value="420"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ToolTip">
-            <Border CornerRadius="7" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+            <Border CornerRadius="4" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
               <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}" TextElement.FontSize="{TemplateBinding FontSize}"/>
             </Border>
           </ControlTemplate>
@@ -88,11 +87,63 @@
       </Style.Triggers>
     </Style>
 
+    <Style TargetType="ContextMenu">
+      <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+      <Setter Property="Background" Value="{StaticResource BgElevated}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource GlassBorderHover}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="4"/>
+      <Setter Property="HasDropShadow" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ContextMenu">
+            <Border CornerRadius="4" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+              <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style TargetType="MenuItem">
+      <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Padding" Value="10,6"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="MenuItem">
+            <Border x:Name="bd" CornerRadius="3" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+              <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource HoverFill}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style TargetType="Separator">
+      <Setter Property="Margin" Value="6,4"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Separator">
+            <Border Height="1" Background="{StaticResource GlassBorder}"/>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="CommonButtonFocusVisual" TargetType="Control">
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Control">
-            <Border Margin="-2" CornerRadius="7" BorderBrush="{StaticResource AccentLight}" BorderThickness="2" IsHitTestVisible="False"/>
+            <Border Margin="-2" CornerRadius="4" BorderBrush="{StaticResource Focus}" BorderThickness="2" IsHitTestVisible="False"/>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
@@ -113,14 +164,14 @@
 
     <!-- ═══════════ Icon button (36x36) ═══════════ -->
     <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
-      <Setter Property="Width" Value="36"/>
-      <Setter Property="Height" Value="36"/>
+      <Setter Property="Width" Value="32"/>
+      <Setter Property="Height" Value="32"/>
       <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="8" Background="Transparent">
+            <Border x:Name="bd" CornerRadius="4" Background="Transparent" BorderBrush="Transparent" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -131,6 +182,9 @@
               </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.4"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource PressedFill}"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -143,7 +197,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="8" Background="{StaticResource AccentGlass}">
+            <Border x:Name="bd" CornerRadius="4" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource Accent}" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -189,14 +243,14 @@
 
     <!-- ═══════════ Window caption buttons ═══════════ -->
     <Style x:Key="CaptionButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
-      <Setter Property="Width" Value="44"/>
-      <Setter Property="Height" Value="34"/>
+      <Setter Property="Width" Value="40"/>
+      <Setter Property="Height" Value="32"/>
       <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="7" Background="Transparent">
+            <Border x:Name="bd" CornerRadius="3" Background="Transparent">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -216,7 +270,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="7" Background="Transparent">
+            <Border x:Name="bd" CornerRadius="3" Background="Transparent">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -240,7 +294,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ToggleButton">
-            <Border x:Name="bd" CornerRadius="999" Padding="11,5"
+            <Border x:Name="bd" CornerRadius="4" Padding="7,3"
                     Background="{StaticResource BgTertiary}"
                     BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -296,7 +350,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="6" Padding="{TemplateBinding Padding}"
+            <Border x:Name="bd" CornerRadius="4" Padding="{TemplateBinding Padding}"
                     Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
               <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
             </Border>
@@ -323,7 +377,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
-            <Border x:Name="bd" CornerRadius="6" Padding="10,5" Background="Transparent">
+            <Border x:Name="bd" CornerRadius="3" Padding="8,4" Background="Transparent">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -343,16 +397,48 @@
       </Setter>
     </Style>
 
+    <Style x:Key="SettingsNavItem" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="Margin" Value="0,1"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border x:Name="bd" CornerRadius="3" Padding="10,0" Background="Transparent" BorderBrush="Transparent" BorderThickness="2,0,0,0">
+              <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <MultiTrigger>
+                <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource HoverFill}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+              </MultiTrigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
+                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                <Setter Property="Foreground" Value="{StaticResource AccentLight}"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- ═══════════ Ghost / danger action buttons ═══════════ -->
     <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
       <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FontSize" Value="12"/>
-      <Setter Property="Height" Value="34"/>
+      <Setter Property="Height" Value="32"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="8" Padding="10,0"
+            <Border x:Name="bd" CornerRadius="4" Padding="10,0"
                     Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -599,6 +685,10 @@
           <Setter TargetName="compactRing" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
           <Setter TargetName="compactRing" Property="BorderThickness" Value="2"/>
         </Trigger>
+        <DataTrigger Binding="{Binding IsCanonicalSelected}" Value="True">
+          <Setter TargetName="compactRing" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+          <Setter TargetName="compactRing" Property="BorderThickness" Value="2"/>
+        </DataTrigger>
       </ControlTemplate.Triggers>
     </ControlTemplate>
 
@@ -675,6 +765,10 @@
                 <Setter TargetName="ring" Property="Background" Value="{StaticResource AccentLight}"/>
                 <Setter TargetName="overlay" Property="Opacity" Value="1"/>
               </Trigger>
+              <DataTrigger Binding="{Binding IsCanonicalSelected}" Value="True">
+                <Setter TargetName="ring" Property="Background" Value="{StaticResource AccentLight}"/>
+                <Setter TargetName="overlay" Property="Opacity" Value="1"/>
+              </DataTrigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -736,6 +830,10 @@
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
                 <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
               </Trigger>
+              <DataTrigger Binding="{Binding IsCanonicalSelected}" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
+                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              </DataTrigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -746,13 +844,13 @@
     <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Height" Value="50"/>
-      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Height" Value="40"/>
+      <Setter Property="FontSize" Value="13"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="12" Padding="26,0" Background="{StaticResource Accent}">
+            <Border x:Name="bd" CornerRadius="4" Padding="22,0" Background="{StaticResource Accent}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -775,7 +873,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="12" Padding="20,0" Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
+            <Border x:Name="bd" CornerRadius="4" Padding="18,0" Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <ContentPresenter/>
               </StackPanel>
@@ -797,13 +895,13 @@
     <Style x:Key="DangerFilled" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Height" Value="40"/>
+      <Setter Property="Height" Value="32"/>
       <Setter Property="FontSize" Value="13"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="10" Padding="18,0" Background="{StaticResource Danger}">
+            <Border x:Name="bd" CornerRadius="4" Padding="14,0" Background="{StaticResource Danger}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>

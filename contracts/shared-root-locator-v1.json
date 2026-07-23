@@ -1,0 +1,269 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ROOT-001",
+  "protocol": "aibos.shared-root-locator/v1",
+  "activation": "reader-only",
+  "wpfProductionRouting": "process-lifetime-reader-lease-candidate",
+  "environmentVariable": "AIBOS_SHARED_ROOT_LOCATOR_PATH",
+  "defaultLocator": {
+    "specialFolder": "LocalApplicationData",
+    "relativeSegments": [
+      "Aibos Image",
+      "shared-root.v1.json"
+    ]
+  },
+  "document": {
+    "encoding": "UTF-8",
+    "requiredFields": {
+      "schemaVersion": 1,
+      "sharedDataRoot": "fully-qualified existing directory"
+    },
+    "resolvedRootIdentity": "canonical final filesystem target fixed for the process lifetime",
+    "unknownFields": "ignored",
+    "duplicateRequiredFields": "rejected"
+  },
+  "maxLocatorBytes": 65536,
+  "locatorLease": {
+    "directory": {
+      "specialFolder": "Temporary",
+      "relativeSegments": [
+        "aibos-shared-root-locator-leases-v1"
+      ],
+      "pathIdentity": "same relative path below the canonical temporary root; redirected descendants rejected"
+    },
+    "identity": {
+      "scope": "protocol-global within the temporary directory",
+      "fileName": "locator.lock",
+      "locatorPathEncoding": "none"
+    },
+    "reader": {
+      "fileMode": "OpenOrCreate",
+      "fileAccess": "Read",
+      "fileShare": "Read",
+      "lifetime": "process"
+    },
+    "writer": {
+      "fileMode": "OpenOrCreate",
+      "fileAccess": "ReadWrite",
+      "fileShare": "None",
+      "lifetime": "create-or-replace-operation"
+    },
+    "contents": "empty",
+    "openedFileIdentity": "final handle path equals the canonical fixed lock path",
+    "runtimeDeletion": "never"
+  },
+  "dataLayout": [
+    "favorites.json",
+    "seen.json",
+    "settings.json",
+    "albums.json",
+    "search-history.json",
+    "recent-folders.json",
+    "enhance/jobs.json",
+    "enhance/outputs/**"
+  ],
+  "cases": [
+    {
+      "id": "missing-locator-uses-legacy-root",
+      "mode": "missing",
+      "expected": {
+        "status": "LegacyFallback",
+        "root": "legacy"
+      }
+    },
+    {
+      "id": "valid-existing-root",
+      "mode": "valid",
+      "expected": {
+        "status": "Resolved",
+        "root": "data"
+      }
+    },
+    {
+      "id": "normalized-existing-root",
+      "mode": "normalized-existing-root",
+      "expected": {
+        "status": "Resolved",
+        "root": "data"
+      }
+    },
+    {
+      "id": "linked-existing-root-resolves-final-target",
+      "mode": "linked-existing-root",
+      "expected": {
+        "status": "Resolved",
+        "root": "data"
+      }
+    },
+    {
+      "id": "same-locator-different-legacy-roots",
+      "mode": "same-locator-different-legacy-roots",
+      "expected": {
+        "status": "Resolved",
+        "root": "data"
+      }
+    },
+    {
+      "id": "environment-override",
+      "mode": "environment-valid",
+      "expected": {
+        "status": "Resolved",
+        "root": "data"
+      }
+    },
+    {
+      "id": "malformed-json-fails-closed",
+      "mode": "malformed",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-malformed",
+        "root": "none"
+      }
+    },
+    {
+      "id": "future-schema-fails-closed",
+      "mode": "future",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "schema-unsupported",
+        "root": "none"
+      }
+    },
+    {
+      "id": "relative-data-root-fails-closed",
+      "mode": "relative-data-root",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "data-root-invalid",
+        "root": "none"
+      }
+    },
+    {
+      "id": "invalid-data-root-character-fails-closed",
+      "mode": "invalid-data-root-character",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "data-root-invalid",
+        "root": "none"
+      }
+    },
+    {
+      "id": "missing-data-root-fails-closed",
+      "mode": "missing-data-root",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "data-root-unavailable",
+        "root": "none"
+      }
+    },
+    {
+      "id": "file-data-root-fails-closed",
+      "mode": "file-data-root",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "data-root-unavailable",
+        "root": "none"
+      }
+    },
+    {
+      "id": "duplicate-required-field-fails-closed",
+      "mode": "duplicate-required-field",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-ambiguous",
+        "root": "none"
+      }
+    },
+    {
+      "id": "duplicate-shared-data-root-fails-closed",
+      "mode": "duplicate-shared-data-root",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-ambiguous",
+        "root": "none"
+      }
+    },
+    {
+      "id": "locked-locator-fails-closed",
+      "mode": "locked-valid",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-unreadable",
+        "root": "none"
+      }
+    },
+    {
+      "id": "oversized-locator-fails-closed",
+      "mode": "oversized",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-too-large",
+        "root": "none"
+      }
+    },
+    {
+      "id": "relative-locator-path-fails-closed",
+      "mode": "relative-locator-path",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-path-invalid",
+        "root": "none"
+      }
+    },
+    {
+      "id": "invalid-locator-character-fails-closed",
+      "mode": "invalid-locator-character",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-path-invalid",
+        "root": "none"
+      }
+    },
+    {
+      "id": "invalid-environment-override-fails-closed",
+      "mode": "environment-relative-locator",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-path-invalid",
+        "root": "none"
+      }
+    },
+    {
+      "id": "whitespace-environment-override-fails-closed",
+      "mode": "environment-whitespace-locator",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-path-invalid",
+        "root": "none"
+      }
+    },
+    {
+      "id": "unavailable-volume-does-not-fallback",
+      "mode": "unavailable-volume-locator",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-unreadable",
+        "root": "none"
+      }
+    },
+    {
+      "id": "non-directory-parent-does-not-fallback",
+      "mode": "non-directory-locator-parent",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "locator-unreadable",
+        "root": "none"
+      }
+    },
+    {
+      "id": "missing-legacy-root-fails-closed",
+      "mode": "missing",
+      "legacyRoot": "missing",
+      "expected": {
+        "status": "Unavailable",
+        "errorCode": "legacy-root-unavailable",
+        "root": "none"
+      }
+    }
+  ]
+}

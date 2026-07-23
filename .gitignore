@@ -1,13 +1,7 @@
-node_modules/
-.next/
 dist/
 build/
-coverage/
-playwright-report/
-test-results/
 .grok/
 .cache/
-.playwright-cli/
 .codex/
 .claude/
 CLAUDE.local.md
@@ -22,10 +16,7 @@ CLAUDE.local.md
 *.db
 *.db-wal
 *.db-shm
-*.tsbuildinfo
 tmp/
-artifacts/perf/*.json
-!artifacts/perf/.gitkeep
 artifacts/
 exports/
 output/

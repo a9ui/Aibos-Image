@@ -82,7 +82,7 @@ internal sealed class AlbumLibraryWindow : Window
         WindowChrome.SetWindowChrome(this, new WindowChrome
         {
             CaptionHeight = 0,
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(6),
             GlassFrameThickness = new Thickness(0),
             ResizeBorderThickness = new Thickness(7),
             UseAeroCaptionButtons = false,
@@ -125,15 +125,15 @@ internal sealed class AlbumLibraryWindow : Window
         Grid.SetRow(header, 0);
         frameGrid.Children.Add(header);
 
-        var body = new Grid { Margin = new Thickness(22, 18, 22, 18) };
+        var body = new Grid { Margin = new Thickness(14, 12, 14, 12) };
         body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(14) });
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) });
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         body.Children.Add(BuildCreateCard());
 
         var columns = new Grid();
         columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.44, GridUnitType.Star), MinWidth = 300 });
-        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.56, GridUnitType.Star), MinWidth = 330 });
         Grid.SetRow(columns, 2);
         body.Children.Add(columns);
@@ -156,7 +156,7 @@ internal sealed class AlbumLibraryWindow : Window
         var frame = new Border
         {
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(6),
             Child = frameGrid,
             ClipToBounds = true,
         };
@@ -168,47 +168,27 @@ internal sealed class AlbumLibraryWindow : Window
     private Border BuildHeader()
     {
         var headerGrid = new Grid();
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var logo = new Border
-        {
-            Width = 46,
-            Height = 46,
-            CornerRadius = new CornerRadius(13),
-            Margin = new Thickness(0, 0, 14, 0),
-            Child = new TextBlock
-            {
-                Text = "AL",
-                FontSize = 13,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            },
-        };
-        logo.SetResourceReference(Border.BackgroundProperty, "LogoBrush");
-        headerGrid.Children.Add(logo);
-
         var titleStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        var title = new TextBlock { Text = "Albums", FontSize = 25, FontWeight = FontWeights.SemiBold };
+        var title = new TextBlock { Text = "Albums", FontSize = 18, FontWeight = FontWeights.SemiBold };
         title.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
         var subtitle = new TextBlock
         {
-            Text = "Shared by Browser and WPF  ·  one library, safe operations",
-            FontSize = 11.5,
-            Margin = new Thickness(0, 3, 0, 0),
+            Text = "Shared by Browser and WPF - one library, safe operations",
+            FontSize = 11,
+            Margin = new Thickness(0, 2, 0, 0),
         };
         subtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
         titleStack.Children.Add(title);
         titleStack.Children.Add(subtitle);
         titleStack.MouseLeftButtonDown += DragHeader_MouseLeftButtonDown;
-        Grid.SetColumn(titleStack, 1);
+        Grid.SetColumn(titleStack, 0);
         headerGrid.Children.Add(titleStack);
 
         var headerActions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        headerActions.Children.Add(BuildHeaderChip("BROWSER + WPF"));
+        headerActions.Children.Add(BuildHeaderChip("SHARED STATE"));
         headerActions.Children.Add(BuildHeaderChip($"{_selectedPaths.Count:N0} SELECTED"));
         var closeGlyph = new System.Windows.Shapes.Path
         {
@@ -230,12 +210,12 @@ internal sealed class AlbumLibraryWindow : Window
         AutomationProperties.SetHelpText(close, "Close the Album library without changing shared state");
         close.Click += (_, _) => Close();
         headerActions.Children.Add(close);
-        Grid.SetColumn(headerActions, 2);
+        Grid.SetColumn(headerActions, 1);
         headerGrid.Children.Add(headerActions);
 
         var header = new Border
         {
-            Padding = new Thickness(22, 17, 16, 17),
+            Padding = new Thickness(14, 10, 10, 10),
             BorderThickness = new Thickness(0, 0, 0, 1),
             Child = headerGrid,
         };
@@ -256,8 +236,8 @@ internal sealed class AlbumLibraryWindow : Window
         label.SetResourceReference(TextBlock.ForegroundProperty, "AccentLight");
         var chip = new Border
         {
-            CornerRadius = new CornerRadius(999),
-            Padding = new Thickness(9, 5, 9, 5),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(8, 4, 8, 4),
             Margin = new Thickness(0, 0, 7, 0),
             BorderThickness = new Thickness(1),
             Child = label,
@@ -277,8 +257,8 @@ internal sealed class AlbumLibraryWindow : Window
         var inputStack = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
         var label = SectionLabel("ALBUM NAME", "Create a new shared Album or rename the selected one.");
         inputStack.Children.Add(label);
-        _name.Height = 42;
-        _name.Padding = new Thickness(12, 0, 12, 0);
+        _name.Height = 32;
+        _name.Padding = new Thickness(10, 0, 10, 0);
         _name.BorderThickness = new Thickness(0);
         _name.Background = Brushes.Transparent;
         _name.VerticalContentAlignment = VerticalAlignment.Center;
@@ -289,8 +269,8 @@ internal sealed class AlbumLibraryWindow : Window
         AutomationProperties.SetHelpText(_name, "Enter a name to create an Album or rename the selected Album");
         var inputBorder = new Border
         {
-            Height = 42,
-            CornerRadius = new CornerRadius(10),
+            Height = 32,
+            CornerRadius = new CornerRadius(4),
             BorderThickness = new Thickness(1),
             Child = _name,
             Style = BuildInputBorderStyle(),
@@ -299,14 +279,14 @@ internal sealed class AlbumLibraryWindow : Window
         grid.Children.Add(inputStack);
 
         Button create = ActionButton("Create", "Create a shared Album", async (_, _) => await CreateAlbumAsync(), "PrimaryButton");
-        create.Height = 42;
+        create.Height = 32;
         create.MinWidth = 90;
         create.Margin = new Thickness(0, 20, 8, 0);
         Grid.SetColumn(create, 1);
         grid.Children.Add(create);
 
         Button refresh = ActionButton("Refresh", "Reload the shared Album library", async (_, _) => await ReloadAsync());
-        refresh.Height = 42;
+        refresh.Height = 32;
         refresh.MinWidth = 82;
         refresh.Margin = new Thickness(0, 20, 0, 0);
         Grid.SetColumn(refresh, 2);
@@ -336,7 +316,7 @@ internal sealed class AlbumLibraryWindow : Window
         var actions = new StackPanel { Margin = new Thickness(0, 13, 0, 0) };
         var primary = new WrapPanel();
         Button open = ActionButton("Open in gallery", "Open the selected Album in the gallery", async (_, _) => await OpenAlbumAsync(), "PrimaryButton");
-        open.Height = 38;
+        open.Height = 32;
         open.MinWidth = 125;
         primary.Children.Add(open);
         primary.Children.Add(ActionButton("Add selection", "Add supported selected images to this Album", async (_, _) => await AddSelectionAsync()));
@@ -414,7 +394,7 @@ internal sealed class AlbumLibraryWindow : Window
         var card = new Border
         {
             Padding = padding,
-            CornerRadius = new CornerRadius(14),
+            CornerRadius = new CornerRadius(4),
             BorderThickness = new Thickness(1),
             Child = child,
         };
@@ -430,7 +410,7 @@ internal sealed class AlbumLibraryWindow : Window
         grid.Children.Add(empty);
         var surface = new Border
         {
-            CornerRadius = new CornerRadius(11),
+            CornerRadius = new CornerRadius(4),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(8),
             Child = grid,
@@ -503,8 +483,8 @@ internal sealed class AlbumLibraryWindow : Window
     private static Style BuildListItemStyle()
     {
         var card = new FrameworkElementFactory(typeof(Border), "Card");
-        card.SetValue(Border.CornerRadiusProperty, new CornerRadius(11));
-        card.SetValue(Border.PaddingProperty, new Thickness(12));
+        card.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
+        card.SetValue(Border.PaddingProperty, new Thickness(10));
         card.SetValue(Border.MarginProperty, new Thickness(0, 0, 0, 7));
         card.SetValue(Border.BorderThicknessProperty, new Thickness(1));
         card.SetValue(Border.BackgroundProperty, ResourceBrush("BgTertiary"));
@@ -569,7 +549,7 @@ internal sealed class AlbumLibraryWindow : Window
 
         var pin = new FrameworkElementFactory(typeof(Border));
         pin.SetValue(DockPanel.DockProperty, Dock.Right);
-        pin.SetValue(Border.CornerRadiusProperty, new CornerRadius(999));
+        pin.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
         pin.SetValue(Border.PaddingProperty, new Thickness(8, 4, 8, 4));
         pin.SetValue(Border.MarginProperty, new Thickness(8, 0, 0, 0));
         pin.SetValue(Border.BackgroundProperty, ResourceBrush("AccentSoft"));
@@ -588,7 +568,7 @@ internal sealed class AlbumLibraryWindow : Window
         badge.SetValue(DockPanel.DockProperty, Dock.Left);
         badge.SetValue(FrameworkElement.WidthProperty, 40.0);
         badge.SetValue(FrameworkElement.HeightProperty, 40.0);
-        badge.SetValue(Border.CornerRadiusProperty, new CornerRadius(10));
+        badge.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
         badge.SetValue(Border.MarginProperty, new Thickness(0, 0, 11, 0));
         badge.SetValue(Border.BackgroundProperty, ResourceBrush("AccentGlass"));
         badge.SetValue(Border.BorderBrushProperty, ResourceBrush("AccentLight"));
@@ -630,7 +610,7 @@ internal sealed class AlbumLibraryWindow : Window
 
         var status = new FrameworkElementFactory(typeof(Border), "StatusBadge");
         status.SetValue(DockPanel.DockProperty, Dock.Right);
-        status.SetValue(Border.CornerRadiusProperty, new CornerRadius(999));
+        status.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
         status.SetValue(Border.PaddingProperty, new Thickness(8, 4, 8, 4));
         status.SetValue(Border.MarginProperty, new Thickness(8, 0, 0, 0));
         status.SetValue(Border.BackgroundProperty, ResourceBrush("AccentSoft"));
@@ -646,7 +626,7 @@ internal sealed class AlbumLibraryWindow : Window
         badge.SetValue(DockPanel.DockProperty, Dock.Left);
         badge.SetValue(FrameworkElement.WidthProperty, 38.0);
         badge.SetValue(FrameworkElement.HeightProperty, 38.0);
-        badge.SetValue(Border.CornerRadiusProperty, new CornerRadius(9));
+        badge.SetValue(Border.CornerRadiusProperty, new CornerRadius(4));
         badge.SetValue(Border.MarginProperty, new Thickness(0, 0, 11, 0));
         badge.SetValue(Border.BackgroundProperty, ResourceBrush("SoftFill"));
         badge.SetValue(Border.BorderBrushProperty, ResourceBrush("GlassBorder"));

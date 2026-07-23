@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 set "PROJECT=local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
 set "CONFIG=Release"
-set "TARGET=local-native\PhotoViewer.Wpf\bin\%CONFIG%\net8.0-windows\PhotoViewer.Wpf.exe"
+set "TARGET=local-native\PhotoViewer.Wpf\bin\%CONFIG%\net10.0-windows\PhotoViewer.Wpf.exe"
 
 if not exist "%PROJECT%" (
     echo [Aibos WPF] Project not found: %PROJECT%

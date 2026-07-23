@@ -17,7 +17,7 @@ try {
     $resultPath = Join-Path $fullRoot 'result.json'
     $historyPath = Join-Path $fullRoot 'search-history.json'
     $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-    $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net8.0-windows\PhotoViewer.Wpf.exe"
+    $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
     dotnet build $project -c $Configuration --nologo
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
