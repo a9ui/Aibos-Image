@@ -92,8 +92,8 @@ unreadable existing document can never be replaced as though it were absent.
 Derived thumbnails, indexes, and metadata caches are rebuildable data and do
 not receive the same retention semantics as the durable set. Renderer-local
 presentation state remains local. WPF window geometry, panels, card width,
-keybindings, selection, modal chrome, preview layout, and similar fields in the
-existing WPF `state.json` must not be shared wholesale.
+interface language, keybindings, selection, modal chrome, preview layout, and
+similar fields in the existing WPF `state.json` must not be shared wholesale.
 
 Shared writers preserve unrelated and unknown fields when the format permits
 it, acquire the contract lock, reread the latest on-disk document, and merge at

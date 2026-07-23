@@ -83,9 +83,27 @@ No actionable P0, P1, or P2 visual mismatch remains for this implementation batc
 - [x] .NET 10 Release build with zero warnings and zero errors.
 - [x] Focused UI, state-isolation, modal, Album, zoom-anchor, rapid-churn, batch, and real-HTTP gates.
 
+## English/Japanese and adaptive-preview follow-up
+
+- Additional exact captures:
+  - `private-evidence://aibos/locale-landing-final.png` — 1280 x 820, SHA-256 `8537abdf8ff78982859b74601c58d47028b5e304a580388eb00d5dee3d8bef0`
+  - `private-evidence://aibos/locale-grid-wide-final.png` — 1580 x 920, SHA-256 `b0e1522afa743a9243dec54f6d7a04e1fb98b4b6470e50ff6f108fa38cc1751c`
+  - `private-evidence://aibos/locale-settings-ja-final.png` — 1280 x 820, SHA-256 `84f8fcda5fa651d20826c0b8c73a76dfc5848d291a4c1e08f605662db64f7341`
+  - `private-evidence://aibos/locale-modal-final.png` — 1280 x 820, SHA-256 `daebc2475e98c242b566b5550a241cd3a3bd4976ba538b89ea56b6a5ab717b17`
+  - `private-evidence://aibos/locale-grid-narrow-ja-final.png` — 900 x 820, SHA-256 `21e14f2effbbb4afe24306a59af6de7648aa57342ccb702a0c383ea868b932ea`
+  - `private-evidence://aibos/locale-source-comparison-final.png` — 1586 x 2020, SHA-256 `aa8710be666792bb4822f794ed3acf1448d738b606749b903b2c8b753c0a14d3`
+- The source and exact candidate contact sheets were opened together in the same comparison input. Each implementation state was also inspected at its native 96-DPI viewport before contact-sheet fitting.
+- P2 fixed: the empty Landing previously appeared as an unexplained thin blank surface. It now exposes the selected direction's bounded folder-drop target with explicit non-destructive copy.
+- P2 fixed: the 900-DIP Preview previously pushed Favorite, AI, Open, Album, and overflow actions below the visible pane. Its image height is now derived from the bounded adaptive row and uses aspect-preserving `Uniform`; the image and primary actions remain visible.
+- P2 fixed: Japanese switching previously left the thumbnail-border save label and idle status in English. Dynamic border status now uses the same live language resources.
+- English/Japanese switching is WPF-local presentation state. Captures and the dedicated gate prove that it does not write Browser `settings.json`, source images, or user state outside isolated TEMP fixtures.
+- The post-fix pass found no actionable P0, P1, or P2 difference in Landing, wide Grid, Japanese Settings, full-canvas Modal, or the 900-DIP Japanese adaptive state.
+
 ## Follow-up polish
 
 - P3: add optional monochrome category icons to Settings only if a licensed, consistent icon source is adopted; text navigation is currently clearer than placeholder glyphs.
 - P3: the large-image consent label is accurate but slightly mechanical; a later copy-only pass may shorten it to “Allow very large images when warned.”
+- P3: the adaptive Preview can become a true two-column thumbnail/details composition if hands-on testing shows that metadata must remain above the fold.
+- P3: static surface opacity can be tuned after hands-on testing; blur or shaders are not required for that refinement.
 
 final result: passed

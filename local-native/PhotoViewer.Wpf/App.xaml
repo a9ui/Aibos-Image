@@ -5,36 +5,36 @@
   <Application.Resources>
 
     <!-- ═══════════ Design tokens (source of truth: browser globals.css) ═══════════ -->
-    <Color x:Key="BgPrimaryColor">#0B0C11</Color>
-    <Color x:Key="BgSecondaryColor">#12151D</Color>
-    <Color x:Key="BgTertiaryColor">#171B24</Color>
-    <Color x:Key="BgElevatedColor">#1C202A</Color>
-    <Color x:Key="AccentColor">#4E57CF</Color>
-    <Color x:Key="AccentLightColor">#7B83FF</Color>
-    <Color x:Key="FavoriteColor">#FF5C7A</Color>
-    <Color x:Key="HeaderBgColor">#0E1016</Color>
-    <Color x:Key="TextPrimaryColor">#F4F6FB</Color>
-    <Color x:Key="TextSecondaryColor">#C5CAD5</Color>
-    <Color x:Key="TextTertiaryColor">#929AA9</Color>
-    <Color x:Key="TextDisabledColor">#788192</Color>
+    <Color x:Key="BgPrimaryColor">#FF080A0F</Color>
+    <Color x:Key="BgSecondaryColor">#F20E121A</Color>
+    <Color x:Key="BgTertiaryColor">#E6121721</Color>
+    <Color x:Key="BgElevatedColor">#F2181D27</Color>
+    <Color x:Key="AccentColor">#FF7A82FF</Color>
+    <Color x:Key="AccentLightColor">#FF9AA0FF</Color>
+    <Color x:Key="FavoriteColor">#FFFF4D73</Color>
+    <Color x:Key="HeaderBgColor">#EB0B0F16</Color>
+    <Color x:Key="TextPrimaryColor">#F2FFFFFF</Color>
+    <Color x:Key="TextSecondaryColor">#B8C4CAD8</Color>
+    <Color x:Key="TextTertiaryColor">#8FAAB3C4</Color>
+    <Color x:Key="TextDisabledColor">#66FFFFFF</Color>
     <Color x:Key="SelectionTextColor">#FFFFFF</Color>
     <Color x:Key="FocusColor">#B7E4FF</Color>
-    <Color x:Key="FavoriteTextColor">#FFD7E0</Color>
+    <Color x:Key="FavoriteTextColor">#FFFF4D73</Color>
     <Color x:Key="FavoriteThumbnailStatusBorderColor">#F4C45B</Color>
     <Color x:Key="EnhancedThumbnailStatusBorderColor">#38BDF8</Color>
     <Color x:Key="SuccessColor">#4DD4A3</Color>
     <Color x:Key="WarningColor">#F4C45B</Color>
     <Color x:Key="DangerColor">#FF687F</Color>
     <Color x:Key="DangerTextColor">#FFD7DE</Color>
-    <Color x:Key="GlassBorderColor">#252A36</Color>
-    <Color x:Key="GlassBorderHoverColor">#343B4B</Color>
-    <Color x:Key="BorderStrongColor">#59637B</Color>
-    <Color x:Key="HoverFillColor">#202532</Color>
-    <Color x:Key="PressedFillColor">#262C3A</Color>
-    <Color x:Key="SoftFillColor">#171B24</Color>
-    <Color x:Key="AccentSoftColor">#1C2343</Color>
-    <Color x:Key="AccentGlassColor">#1C2343</Color>
-    <Color x:Key="FavoriteSoftColor">#33202A</Color>
+    <Color x:Key="GlassBorderColor">#24FFFFFF</Color>
+    <Color x:Key="GlassBorderHoverColor">#3DFFFFFF</Color>
+    <Color x:Key="BorderStrongColor">#52FFFFFF</Color>
+    <Color x:Key="HoverFillColor">#14FFFFFF</Color>
+    <Color x:Key="PressedFillColor">#24FFFFFF</Color>
+    <Color x:Key="SoftFillColor">#12FFFFFF</Color>
+    <Color x:Key="AccentSoftColor">#267A82FF</Color>
+    <Color x:Key="AccentGlassColor">#207A82FF</Color>
+    <Color x:Key="FavoriteSoftColor">#2AFF4D73</Color>
     <Color x:Key="SuccessSoftColor">#173128</Color>
     <Color x:Key="SuccessBorderColor">#356D5B</Color>
     <Color x:Key="LogoColor">#7B83FF</Color>
@@ -726,10 +726,10 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBoxItem">
-            <Border x:Name="ring" CornerRadius="13" Padding="2" Background="Transparent"
+            <Border x:Name="ring" CornerRadius="5" Padding="2" Background="Transparent"
                     RenderTransformOrigin="0.5,0.5">
               <Grid>
-                <Border CornerRadius="12" ClipToBounds="True" Background="{StaticResource BgSecondary}"
+                <Border CornerRadius="4" ClipToBounds="True" Background="{StaticResource BgSecondary}"
                         Width="{Binding CardWidth}" Height="{Binding CardHeight}">
                   <Grid>
                     <Rectangle Fill="{StaticResource BgTertiary}"/>
@@ -745,31 +745,36 @@
                       <Button Style="{StaticResource IconButton}" Width="{Binding CardFavoriteButtonSize}" Height="{Binding CardFavoriteButtonSize}"
                               CommandParameter="decrease" Tag="{Binding}" Margin="0,0,2,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"
                               ToolTip="Decrease favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Decrease favorite level for {0}}">
-                        <TextBlock Text="−" Foreground="{StaticResource FavoriteText}" FontWeight="Bold"/>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource Favorite}" FontSize="14"/>
                       </Button>
                       <Button Style="{StaticResource IconButton}" Width="{Binding CardFavoriteButtonSize}" Height="{Binding CardFavoriteButtonSize}"
                               CommandParameter="increase" Tag="{Binding}" ToolTip="Increase favorite level"
                               AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="♥" Foreground="{StaticResource Favorite}" FontSize="10"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource FavoriteText}" FontSize="9" Margin="2,0,0,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="14"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"/></StackPanel>
                       </Button>
                     </StackPanel>
 
-                    <!-- hover overlay + filename -->
-                    <Border x:Name="overlay" VerticalAlignment="Bottom" Height="90" Opacity="0" Padding="10,0,10,10" Visibility="{Binding ShowCardDetails, Converter={StaticResource BoolToVis}}">
+                    <!-- Stable concise identity: filename and dimensions stay
+                         readable without adding prompt text or changing card geometry. -->
+                    <Border x:Name="overlay" VerticalAlignment="Bottom" Height="58" Opacity="1" Padding="10,0,10,8" Visibility="{Binding ShowCardDetails, Converter={StaticResource BoolToVis}}">
                       <Border.Background>
                         <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
-                          <GradientStop Color="#B8000000" Offset="0"/>
+                          <GradientStop Color="#D0000000" Offset="0"/>
                           <GradientStop Color="#00000000" Offset="1"/>
                         </LinearGradientBrush>
                       </Border.Background>
-                      <TextBlock Text="{Binding FileName}" VerticalAlignment="Bottom" Foreground="#EAFFFFFF"
-                                 FontSize="12" TextTrimming="CharacterEllipsis"/>
+                      <StackPanel VerticalAlignment="Bottom">
+                        <TextBlock Text="{Binding FileName}" Foreground="#F2FFFFFF"
+                                   FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding SizeText}" Foreground="{StaticResource TextTertiary}"
+                                   FontSize="10.5" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                      </StackPanel>
                     </Border>
 
                     <!-- Status borders stay above hover chrome and bind to the tile's existing O(1) state. -->
-                    <Border CornerRadius="11" BorderBrush="{DynamicResource EnhancedThumbnailStatusBorderBrush}" BorderThickness="2"
+                    <Border CornerRadius="3" BorderBrush="{DynamicResource EnhancedThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Enhanced, Converter={StaticResource BoolToVis}}"/>
-                    <Border CornerRadius="8" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
+                    <Border CornerRadius="2" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
                     <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="5" Padding="4,1" CornerRadius="4"
                             Background="#D9142630" BorderBrush="#FF38BDF8" BorderThickness="1"
@@ -783,11 +788,6 @@
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="overlay" Property="Opacity" Value="1"/>
-                <Setter TargetName="ring" Property="RenderTransform">
-                  <Setter.Value>
-                    <TranslateTransform Y="-2"/>
-                  </Setter.Value>
-                </Setter>
               </Trigger>
               <Trigger Property="IsSelected" Value="True">
                 <Setter TargetName="ring" Property="Background" Value="{StaticResource AccentLight}"/>
@@ -836,16 +836,15 @@
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                   <TextBlock Text="{Binding FileName}" Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="Medium" TextTrimming="CharacterEllipsis"/>
                   <TextBlock Text="{Binding Path}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontFamily="{StaticResource MonoFont}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
-                  <TextBlock Text="{Binding Prompt}" Foreground="{StaticResource TextSecondary}" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
                   <Button Style="{StaticResource IconButton}" Width="28" Height="28" CommandParameter="decrease" Tag="{Binding}"
                           ToolTip="Decrease favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Decrease favorite level for {0}}">
-                    <TextBlock Text="−" Foreground="{StaticResource FavoriteText}" FontWeight="Bold"/>
+                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource Favorite}" FontSize="14"/>
                   </Button>
                   <Button Style="{StaticResource IconButton}" MinWidth="34" Width="Auto" Height="28" Padding="5,0" CommandParameter="increase" Tag="{Binding}"
                           ToolTip="Increase favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="♥" Foreground="{StaticResource Favorite}"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource FavoriteText}" FontSize="10" Margin="3,0,0,0"/></StackPanel>
+                    <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="14"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0"/></StackPanel>
                   </Button>
                 </StackPanel>
               </Grid>

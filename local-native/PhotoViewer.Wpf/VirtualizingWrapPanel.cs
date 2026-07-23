@@ -174,13 +174,17 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             return;
         _layoutSource = source;
         _layoutDirty = true;
+        _realizationContinuationPending = false;
         InvalidateMeasure();
+        InvalidateVisual();
     }
 
     public void InvalidateItemLayout()
     {
         _layoutDirty = true;
+        _realizationContinuationPending = false;
         InvalidateMeasure();
+        InvalidateVisual();
     }
 
     public double GetItemViewportTop(int index)
@@ -228,13 +232,17 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         if (dependencyObject is not VirtualizingWrapPanel panel)
             return;
         panel._layoutDirty = true;
+        panel._realizationContinuationPending = false;
         panel.InvalidateMeasure();
+        panel.InvalidateVisual();
     }
 
     protected override void OnItemsChanged(object sender, ItemsChangedEventArgs args)
     {
         _layoutDirty = true;
+        _realizationContinuationPending = false;
         base.OnItemsChanged(sender, args);
+        InvalidateVisual();
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -273,6 +281,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         UpdateScrollInfo();
         if (!realizationComplete)
             ScheduleRealizationContinuation();
+        else if (_realizationContinuationPending)
+        {
+            _realizationContinuationPending = false;
+            InvalidateVisual();
+        }
         return availableSize;
     }
 
@@ -361,6 +374,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         }
 
         _layoutDirty = false;
+        _realizationContinuationPending = false;
         _layoutItemCount = itemCount;
         _layoutWidth = availableWidth;
         _layoutItemWidthSignature = itemWidthSignature;
@@ -413,6 +427,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
         _extent = new Size(Math.Max(availableWidth, _columns * _cellWidth), y);
         ScrollOwner?.InvalidateScrollInfo();
+        InvalidateVisual();
     }
 
     private void AddRow(int firstIndex, int itemCount, double top, double height, GroupHeaderInfo? header)
@@ -525,9 +540,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         if (_realizationContinuationPending)
             return;
         _realizationContinuationPending = true;
+        InvalidateVisual();
         Dispatcher.BeginInvoke(() =>
         {
             _realizationContinuationPending = false;
+            InvalidateVisual();
             if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
                 // Re-measure from current items/viewport state instead of
                 // retaining a range that may have gone stale after input.
@@ -612,6 +629,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         _lastVisibleIndex = lastVisible;
         _firstRealizedIndex = firstRealized;
         _lastRealizedIndex = lastRealized;
+        InvalidateVisual();
         RealizedRangeChanged?.Invoke(
             this,
             new VirtualizingWrapPanelRangeChangedEventArgs(firstVisible, lastVisible, firstRealized, lastRealized));

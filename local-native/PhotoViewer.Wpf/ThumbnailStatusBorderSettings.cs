@@ -33,6 +33,7 @@ internal readonly record struct ThumbnailStatusBorderLoadResult(
     string? Error)
 {
     internal bool? ConfirmBeforeDelete { get; init; }
+    internal IReadOnlyDictionary<string, string>? BrowserKeyBindings { get; init; }
 }
 
 internal static class ThumbnailStatusBorderSettingsStore
@@ -50,6 +51,7 @@ internal static class ThumbnailStatusBorderSettingsStore
         "flipHorizontal",
         "enhanceImage",
         "toggleFilmstrip",
+        "addToAlbum",
         "zoomIn",
         "zoomOut",
         "zoomReset",
@@ -104,11 +106,13 @@ internal static class ThumbnailStatusBorderSettingsStore
                     root,
                     out ThumbnailStatusBorderSettings settings,
                     out bool? confirmBeforeDelete,
+                    out Dictionary<string, string>? browserKeyBindings,
                     out string? error))
                 return Protected(error ?? "Shared thumbnail border settings do not match the supported schema.");
             return new ThumbnailStatusBorderLoadResult(settings, false, null)
             {
                 ConfirmBeforeDelete = confirmBeforeDelete,
+                BrowserKeyBindings = browserKeyBindings,
             };
         }
         catch (JsonException ex)
@@ -159,7 +163,7 @@ internal static class ThumbnailStatusBorderSettingsStore
                     return false;
                 }
                 root = parsedRoot;
-                if (!TryReadSettings(root, out _, out _, out error))
+                if (!TryReadSettings(root, out _, out _, out _, out error))
                     return false;
             }
 
@@ -226,7 +230,7 @@ internal static class ThumbnailStatusBorderSettingsStore
                     return false;
                 }
                 root = parsedRoot;
-                if (!TryReadSettings(root, out _, out _, out error))
+                if (!TryReadSettings(root, out _, out _, out _, out error))
                     return false;
             }
 
@@ -236,6 +240,69 @@ internal static class ThumbnailStatusBorderSettingsStore
                     mergedJson,
                     out _,
                     out error))
+                return true;
+            mergedJson = "";
+            return false;
+        }
+        catch (JsonException ex)
+        {
+            error = $"Shared settings JSON is malformed: {ex.Message}";
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    public static bool TryMergeBrowserKeyBindings(
+        string? existingJson,
+        IReadOnlyDictionary<string, string> keyBindings,
+        out string mergedJson,
+        out string? error)
+    {
+        mergedJson = "";
+        error = null;
+        try
+        {
+            JsonObject root;
+            if (existingJson is null)
+            {
+                root = new JsonObject();
+            }
+            else
+            {
+                JsonNode? parsed = JsonNode.Parse(existingJson, documentOptions: new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                });
+                if (parsed is not JsonObject parsedRoot)
+                {
+                    error = "Shared settings JSON must contain an object.";
+                    return false;
+                }
+                root = parsedRoot;
+                if (!TryReadSettings(root, out _, out _, out _, out error))
+                    return false;
+            }
+
+            JsonObject bindings = GetOrCreateObject(root, "keyBindings");
+            foreach (string name in BrowserKeyBindingNames)
+            {
+                if (!keyBindings.TryGetValue(name, out string? value)
+                    || string.IsNullOrEmpty(value)
+                    || value.Length > 64)
+                {
+                    error = $"keyBindings.{name} must be a non-empty bounded string.";
+                    return false;
+                }
+                bindings[name] = value;
+            }
+
+            mergedJson = root.ToJsonString(IndentedJson) + Environment.NewLine;
+            if (SharedJsonDocumentReader.TryEncodeCanonical(mergedJson, out _, out error))
                 return true;
             mergedJson = "";
             return false;
@@ -288,10 +355,12 @@ internal static class ThumbnailStatusBorderSettingsStore
         JsonObject root,
         out ThumbnailStatusBorderSettings settings,
         out bool? confirmBeforeDelete,
+        out Dictionary<string, string>? browserKeyBindings,
         out string? error)
     {
         settings = ThumbnailStatusBorderSettings.Default;
         confirmBeforeDelete = null;
+        browserKeyBindings = null;
         error = null;
         if (root.TryGetPropertyValue("version", out JsonNode? versionNode))
         {
@@ -336,6 +405,8 @@ internal static class ThumbnailStatusBorderSettingsStore
                     error = $"keyBindings.{name} must be a non-empty bounded string.";
                     return false;
                 }
+                browserKeyBindings ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                browserKeyBindings[name] = binding;
             }
         }
         if (!root.TryGetPropertyValue("thumbnailStatusBorders", out JsonNode? bordersNode))

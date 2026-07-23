@@ -44,9 +44,10 @@ try {
 
     $writeRequired = @(
         'defaultsLoaded', 'persistedInvalidFallback', 'exhaustedMigrationProtected', 'exhaustedMigrationRepairable',
+        'sharedCollisionRepaired', 'sharedCollisionRejected',
         'surfaceContract', 'settingsWheelSuppressed',
         'modifierRejected', 'reservedRejected', 'winShiftTRejected', 'recordingCanceled',
-        'overlappingConflictRejected', 'contextAwareReuseAllowed', 'saved', 'hintsHot',
+        'overlappingConflictRejected', 'contextAwareReuseAllowed', 'saved', 'hintsHot', 'sharedBindingsSaved',
         'inputWheelSuppressed', 'inputVisualChildWheelSuppressed', 'buttonVisualChildWheelSuppressed',
         'oldFavoriteDisabled', 'newFavoriteHot', 'exactFavoriteHot',
         'selectAllHot', 'clearSelectionHot', 'staleHiddenSelectionSuppressed',
@@ -75,7 +76,7 @@ try {
     $reloadRequired = @(
         'persistedBindingsReloaded', 'persistedHintsReloaded', 'reloadHotApplied', 'reloadExactApplied',
         'reloadNextApplied', 'reloadCloseApplied', 'settingsEscapeRescue',
-        'deleteOpened', 'deleteWheelSuppressed', 'deleteEscapeRescue', 'resetDraft', 'resetSaved', 'resetHints',
+        'deleteOpened', 'deleteWheelSuppressed', 'deleteEscapeRescue', 'resetDraft', 'resetSaved', 'resetHints', 'sharedDefaultsSaved',
         'customKeyDisabledAfterReset', 'defaultKeyHotAfterReset',
         'landingShortcutsSuppressed', 'unknownMergeReloaded',
         'sourceUntouched', 'enhancementPassive', 'residueFree'
@@ -92,10 +93,16 @@ try {
     Assert-True ($null -eq $state.KeyBindings.futureAction) 'An externally deleted nested unknown field was resurrected.'
     Assert-True ($state.KeyBindings.externalAdded.mode -eq 'exact' -and $state.KeyBindings.externalAdded.count -eq 7) 'An externally added nested unknown field was not preserved exactly.'
     Assert-True ($null -eq $state.KeyBindings.reopenLastClosedPreviewTabAlternate) 'The unreliable Win+Shift+T alternate is still advertised or persisted as a default.'
+    $sharedSettings = Get-Content -Raw -LiteralPath (Join-Path $keyRoot 'settings.json') | ConvertFrom-Json
+    Assert-True ($sharedSettings.keyBindings.nextImage -eq 'ArrowRight') 'Shared Browser Next binding was not reset.'
+    Assert-True ($sharedSettings.keyBindings.toggleFavorite -eq 'f') 'Shared Browser Favorite binding was not reset.'
+    Assert-True ($sharedSettings.keyBindings.enhanceImage -eq 'a') 'Shared Browser Enhancement binding was not preserved.'
+    Assert-True ($sharedSettings.keyBindings.futureBrowserAction -eq 'x') 'Unknown future Browser binding was not preserved.'
+    Assert-True ($sharedSettings.futureSetting.mode -eq 'preserve') 'Unknown shared settings field was not preserved.'
 
     [pscustomobject]@{
         allPassed = $true
-        message = 'Editable WPF key bindings passed collision-exhaustion protection, conflict, wheel isolation, 100k selection, landing isolation, hot-apply, two-process reload, reset, rescue-key, and passive-enhancement checks.'
+        message = 'Editable WPF key bindings passed shared Browser settings, collision protection, wheel isolation, 100k selection, hot-apply, two-process reload, reset, rescue-key, and passive-enhancement checks.'
         writeProcessId = $writeProcess.Id
         reloadProcessId = $reloadProcess.Id
         separateProcesses = $writeProcess.Id -ne $reloadProcess.Id
