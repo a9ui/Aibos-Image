@@ -312,6 +312,11 @@ public partial class MainWindow : Window
     private string? _currentPreviewMetadataPath;
     private string _lastMetadataCopyText = "";
     private Action<string> _diagnosticsClipboardWriter = Clipboard.SetText;
+    private Func<SharedDataRootActivationResult?> _sharedDataRootActivationProvider =
+        static () => SharedDataRootActivation.Current;
+    private Func<string, bool> _sharedDataRootDirectoryExists = Directory.Exists;
+    private SharedDataLocationView _sharedDataLocation =
+        SharedDataLocationView.Unavailable("Shared data has not been resolved for this process.");
     private Func<ProcessStartInfo, bool> _explorerLauncher = static startInfo =>
     {
         Process.Start(startInfo);
@@ -3910,7 +3915,13 @@ public partial class MainWindow : Window
     private void RefreshFavoriteMutationSurface()
     {
         if (FavoriteOnlyFilter?.IsChecked == true || UnfavoriteOnlyFilter?.IsChecked == true)
-            ApplyFilters();
+        {
+            Tile? selected = SelectedTile();
+            int selectedIndex = selected is null ? -1 : _tiles.IndexOf(selected);
+            ApplyFilters(
+                selectFirst: true,
+                selectionFallbackIndex: selectedIndex >= 0 ? selectedIndex : null);
+        }
         SyncSelectionActionSurface();
         RefreshModalFavoriteSurface();
     }
@@ -7229,6 +7240,46 @@ public partial class MainWindow : Window
         AdjustSelectedFavorite(1);
     }
 
+    private void RightPreviewMore_Click(object sender, RoutedEventArgs e)
+    {
+        RightPreviewMorePopup.PlacementTarget = RightPreviewMoreButton;
+        RightPreviewMorePopup.IsOpen = !RightPreviewMorePopup.IsOpen;
+        if (RightPreviewMorePopup.IsOpen)
+        {
+            Dispatcher.BeginInvoke(
+                () => RightPreviewRevealButton.Focus(),
+                DispatcherPriority.Input);
+        }
+    }
+
+    private void RightPreviewMorePopup_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape)
+            return;
+
+        RightPreviewMorePopup.IsOpen = false;
+        RightPreviewMoreButton.Focus();
+        e.Handled = true;
+    }
+
+    private void RightPreviewRevealOverflow_Click(object sender, RoutedEventArgs e)
+    {
+        RightPreviewMorePopup.IsOpen = false;
+        ShowSelectedInFolder_Click(sender, e);
+    }
+
+    private void RightPreviewTabOverflow_Click(object sender, RoutedEventArgs e)
+    {
+        RightPreviewMorePopup.IsOpen = false;
+        OpenSelectedPreviewTab_Click(sender, e);
+    }
+
+    private void RightPreviewDeleteOverflow_Click(object sender, RoutedEventArgs e)
+    {
+        RightPreviewMorePopup.IsOpen = false;
+        DeleteSelected_Click(sender, e);
+    }
+
     private void BulkFavoriteLevel_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: string rawLevel }
@@ -8135,7 +8186,7 @@ public partial class MainWindow : Window
         _suppressStateSave = true;
     }
 
-    private void ApplyFilters(bool selectFirst = true)
+    private void ApplyFilters(bool selectFirst = true, int? selectionFallbackIndex = null)
     {
         if (CardsList is null || RowsList is null) return;
 
@@ -8146,7 +8197,7 @@ public partial class MainWindow : Window
         try
         {
             result = ComputeFilterResult(snapshot, CancellationToken.None);
-            ApplyFilterResult(result, selectFirst);
+            ApplyFilterResult(result, selectFirst, selectionFallbackIndex);
         }
         finally
         {
@@ -8281,7 +8332,10 @@ public partial class MainWindow : Window
             && (!snapshot.DateToLocal.HasValue || createdDate <= snapshot.DateToLocal.Value.Date);
     }
 
-    private void ApplyFilterResult(FilterResult filterResult, bool selectFirst)
+    private void ApplyFilterResult(
+        FilterResult filterResult,
+        bool selectFirst,
+        int? selectionFallbackIndex = null)
     {
         var previous = SelectedTile();
         Tile[] filtered = filterResult.Tiles;
@@ -8339,6 +8393,8 @@ public partial class MainWindow : Window
                 break;
             }
         }
+        if (preferred is null && selectionFallbackIndex.HasValue && _tiles.Count > 0)
+            preferred = _tiles[Math.Clamp(selectionFallbackIndex.Value, 0, _tiles.Count - 1)];
         preferred ??= selectFirst && _tiles.Count > 0 ? _tiles[0] : null;
         _galleryVirtualizingPanel?.InvalidateItemLayout();
         UpdateFolderStats();
@@ -12209,6 +12265,7 @@ public partial class MainWindow : Window
         BeginThumbnailStatusBorderEdit();
         ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
+        RefreshSharedDataSettings();
         DiagnosticsText.Text = BuildDiagnosticsText();
         DiagnosticsStatusText.Text = "Read-only diagnostics. Copy excludes paths, image metadata, prompts, and personal state.";
         AppSettingsDialog.Visibility = Visibility.Visible;
@@ -12237,11 +12294,15 @@ public partial class MainWindow : Window
 
     private void SelectAppSettingsSection(string section, bool bringIntoView)
     {
+        if (string.Equals(section, "storage", StringComparison.Ordinal))
+            RefreshSharedDataSettings();
+
         (FrameworkElement Target, RadioButton Navigation) selection = section switch
         {
             "display" => (DisplaySettingsHeading, SettingsDisplayNav),
             "thumbnails" => (ThumbnailSettingsHeading, SettingsThumbnailsNav),
             "keyboard" => (KeyBindingsHeading, SettingsKeyboardNav),
+            "storage" => (SharedDataSettingsHeading, SettingsStorageNav),
             "about" => (AboutSettingsHeading, SettingsAboutNav),
             _ => (GeneralSettingsHeading, SettingsGeneralNav),
         };
@@ -12252,7 +12313,153 @@ public partial class MainWindow : Window
         if (ReferenceEquals(selection.Target, GeneralSettingsHeading))
             AppSettingsScrollViewer.ScrollToTop();
         else
-            selection.Target.BringIntoView();
+        {
+            AppSettingsDialog.UpdateLayout();
+            Point targetInViewport = selection.Target.TranslatePoint(
+                new Point(0, 0),
+                AppSettingsScrollViewer);
+            AppSettingsScrollViewer.ScrollToVerticalOffset(
+                Math.Max(
+                    0,
+                    AppSettingsScrollViewer.VerticalOffset
+                        + targetInViewport.Y
+                        - AppSettingsScrollViewer.Padding.Top));
+        }
+    }
+
+    private static SharedDataLocationView BuildSharedDataLocationView(
+        SharedDataRootActivationResult? activation,
+        Func<string, bool> directoryExists)
+    {
+        if (activation is null)
+            return SharedDataLocationView.Unavailable("Shared data has not been resolved for this process.");
+
+        if (activation.Status == SharedDataRootActivationStatus.OverridesOnly)
+        {
+            return new SharedDataLocationView(
+                "overrides",
+                "Individual store overrides",
+                "Advanced per-store paths are active, so this process has no single data folder.",
+                "No single data folder",
+                null,
+                false,
+                "Nothing was opened or changed.");
+        }
+
+        string? normalizedRoot = null;
+        if (!string.IsNullOrWhiteSpace(activation.SharedDataRoot))
+        {
+            try
+            {
+                string candidate = Path.GetFullPath(activation.SharedDataRoot);
+                if (Path.IsPathFullyQualified(candidate))
+                    normalizedRoot = candidate;
+            }
+            catch
+            {
+                normalizedRoot = null;
+            }
+        }
+
+        if (normalizedRoot is null)
+            return SharedDataLocationView.Unavailable("The fixed data location is unavailable. No files were changed.");
+
+        bool exists;
+        try
+        {
+            exists = directoryExists(normalizedRoot);
+        }
+        catch
+        {
+            exists = false;
+        }
+
+        if (activation.Status == SharedDataRootActivationStatus.LegacyUninitialized)
+        {
+            return new SharedDataLocationView(
+                "legacy-uninitialized",
+                "Local data not initialized",
+                "No shared-root locator is active. Aibos will create its local data folder only after an explicit state change.",
+                normalizedRoot,
+                normalizedRoot,
+                exists,
+                exists
+                    ? "The local data folder already exists and can be opened."
+                    : "The folder does not exist yet. Opening Settings did not create it.");
+        }
+
+        bool sharedByLocator =
+            activation.Status == SharedDataRootActivationStatus.Activated
+            && activation.ResolutionStatus == SharedDataRootResolutionStatus.Resolved;
+        string title = sharedByLocator ? "Shared with Browser" : "Local Aibos data";
+        string description = sharedByLocator
+            ? "Aibos and the Browser app use this location for Favorites, Seen, shared settings, Albums, Search History, Recent folders, and Enhancement data."
+            : "No shared-root locator is active. Aibos is using its existing local durable-data folder.";
+        return new SharedDataLocationView(
+            sharedByLocator ? "shared" : "legacy",
+            title,
+            description,
+            normalizedRoot,
+            normalizedRoot,
+            exists,
+            exists
+                ? "The existing folder can be opened without changing shared data."
+                : "The configured folder is currently unavailable. No folder was created.");
+    }
+
+    private void RefreshSharedDataSettings()
+    {
+        _sharedDataLocation = BuildSharedDataLocationView(
+            _sharedDataRootActivationProvider(),
+            _sharedDataRootDirectoryExists);
+        SharedDataModeText.Text = _sharedDataLocation.Title;
+        SharedDataDescriptionText.Text = _sharedDataLocation.Description;
+        SharedDataRootTextBox.Text = _sharedDataLocation.DisplayPath;
+        SharedDataRootTextBox.ToolTip = _sharedDataLocation.DisplayPath;
+        OpenSharedDataFolderButton.IsEnabled = _sharedDataLocation.CanOpen;
+        SharedDataStatusText.Text = _sharedDataLocation.Status;
+    }
+
+    private void OpenSharedDataFolder_Click(object sender, RoutedEventArgs e)
+        => TryOpenSharedDataFolder();
+
+    private bool TryOpenSharedDataFolder()
+    {
+        RefreshSharedDataSettings();
+        if (!_sharedDataLocation.CanOpen
+            || string.IsNullOrWhiteSpace(_sharedDataLocation.RootPath))
+        {
+            SharedDataStatusText.Text = _sharedDataLocation.Status;
+            return false;
+        }
+
+        try
+        {
+            var startInfo = new ProcessStartInfo(_sharedDataLocation.RootPath)
+            {
+                UseShellExecute = true,
+            };
+            if (!_explorerLauncher(startInfo))
+            {
+                SharedDataStatusText.Text = "The data folder could not be opened. Check folder access and try again.";
+                return false;
+            }
+
+            SharedDataStatusText.Text = "Opened the data folder. No shared data was changed.";
+            return true;
+        }
+        catch (Exception ex) when (ex is Win32Exception
+            or IOException
+            or UnauthorizedAccessException
+            or InvalidOperationException
+            or ArgumentException
+            or NotSupportedException
+            or System.Security.SecurityException)
+        {
+            Trace.TraceWarning($"Shared data folder open failed: {ex.GetType().Name}");
+            SharedDataStatusText.Text = "The data folder could not be opened. Check folder access and try again.";
+            return false;
+        }
     }
 
     private void AppSettingsBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -14318,6 +14525,8 @@ public partial class MainWindow : Window
         return cleaned;
     }
     public bool AppSettingsVisibleForSmoke => AppSettingsDialog.Visibility == Visibility.Visible;
+    public void SelectAppSettingsSectionForSmoke(string section)
+        => SelectAppSettingsSection(section, bringIntoView: true);
     public bool LandingCaptionControlsContractForSmoke
         => new[] { LandingMinimizeButton, LandingMaximizeButton, LandingCloseButton }.All(button =>
             button.Style is not null
@@ -14412,6 +14621,135 @@ public partial class MainWindow : Window
     }
     public bool FocusDiagnosticsForSmoke() => CopyDiagnosticsButton.Focus();
     public bool FocusAppSettingsDoneForSmoke() => AppSettingsDoneButton.Focus();
+    public bool SharedDataLocationSurfaceContractForSmoke
+        => string.Equals(SettingsStorageNav.Tag?.ToString(), "storage", StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(SettingsStorageNav),
+                "Shared data storage",
+                StringComparison.Ordinal)
+            && SharedDataRootTextBox.IsReadOnly
+            && string.Equals(
+                AutomationProperties.GetName(SharedDataRootTextBox),
+                "Current shared data location",
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(OpenSharedDataFolderButton),
+                "Open current shared data folder",
+                StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(OpenSharedDataFolderButton.ToolTip?.ToString()
+                ?? AutomationProperties.GetHelpText(OpenSharedDataFolderButton))
+            && AutomationProperties.GetLiveSetting(SharedDataStatusText) == AutomationLiveSetting.Polite;
+
+    public SharedDataLocationSmokeSnapshot CaptureSharedDataLocationForSmoke(
+        string scenario,
+        string rootPath,
+        bool directoryExists,
+        string launcherBehavior)
+    {
+        Func<SharedDataRootActivationResult?> previousActivationProvider =
+            _sharedDataRootActivationProvider;
+        Func<string, bool> previousDirectoryExists = _sharedDataRootDirectoryExists;
+        Func<ProcessStartInfo, bool> previousLauncher = _explorerLauncher;
+        ProcessStartInfo? captured = null;
+        string normalizedRoot = Path.GetFullPath(rootPath);
+        SharedDataRootActivationResult activation = scenario switch
+        {
+            "shared" => new SharedDataRootActivationResult(
+                SharedDataRootActivationStatus.Activated,
+                normalizedRoot,
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                null,
+                null)
+            {
+                LocatorPath = Path.Combine(normalizedRoot, "shared-root.v1.json"),
+                ResolutionStatus = SharedDataRootResolutionStatus.Resolved,
+            },
+            "legacy" => new SharedDataRootActivationResult(
+                SharedDataRootActivationStatus.Activated,
+                normalizedRoot,
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                null,
+                null)
+            {
+                LocatorPath = Path.Combine(normalizedRoot, "missing-shared-root.v1.json"),
+                ResolutionStatus = SharedDataRootResolutionStatus.LegacyFallback,
+            },
+            "legacy-uninitialized" => new SharedDataRootActivationResult(
+                SharedDataRootActivationStatus.LegacyUninitialized,
+                normalizedRoot,
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                null,
+                null)
+            {
+                LocatorPath = Path.Combine(normalizedRoot, "missing-shared-root.v1.json"),
+                ResolutionStatus = SharedDataRootResolutionStatus.Unavailable,
+            },
+            "overrides" => new SharedDataRootActivationResult(
+                SharedDataRootActivationStatus.OverridesOnly,
+                null,
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                null,
+                null),
+            _ => new SharedDataRootActivationResult(
+                SharedDataRootActivationStatus.Unavailable,
+                null,
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                "shared-root-unavailable",
+                "injected unavailable state"),
+        };
+
+        _sharedDataRootActivationProvider = () => activation;
+        _sharedDataRootDirectoryExists = path =>
+            directoryExists
+            && string.Equals(
+                Path.GetFullPath(path),
+                normalizedRoot,
+                StringComparison.OrdinalIgnoreCase);
+        _explorerLauncher = info =>
+        {
+            captured = info;
+            return launcherBehavior switch
+            {
+                "success" => true,
+                "failure" => false,
+                "throw" => throw new InvalidOperationException("injected shared data shell failure"),
+                _ => throw new ArgumentOutOfRangeException(nameof(launcherBehavior)),
+            };
+        };
+
+        try
+        {
+            if (AppSettingsDialog.Visibility != Visibility.Visible)
+                OpenAppSettingsForSmoke();
+            SelectAppSettingsSection("storage", bringIntoView: true);
+            bool openEnabled = OpenSharedDataFolderButton.IsEnabled;
+            bool opened = TryOpenSharedDataFolder();
+            return new SharedDataLocationSmokeSnapshot(
+                scenario,
+                _sharedDataLocation.Kind,
+                SharedDataModeText.Text,
+                SharedDataDescriptionText.Text,
+                SharedDataRootTextBox.Text,
+                openEnabled,
+                opened,
+                captured is not null,
+                captured?.FileName ?? "",
+                captured?.ArgumentList.ToList() ?? [],
+                captured?.Arguments ?? "",
+                captured?.UseShellExecute ?? false,
+                SharedDataStatusText.Text,
+                SharedDataLocationSurfaceContractForSmoke,
+                IsSettingsDialogFocusedForSmoke);
+        }
+        finally
+        {
+            _sharedDataRootActivationProvider = previousActivationProvider;
+            _sharedDataRootDirectoryExists = previousDirectoryExists;
+            _explorerLauncher = previousLauncher;
+            RefreshSharedDataSettings();
+        }
+    }
+
     public ExternalOpenSmokeSnapshot ActivateExternalOpenForSmoke(string launcherBehavior)
     {
         ProcessStartInfo? captured = null;
@@ -14485,6 +14823,8 @@ public partial class MainWindow : Window
                 : RightPreviewRevealButton;
             if (ReferenceEquals(button, ModalRevealButton) && Modal.Visibility != Visibility.Visible)
                 OpenModal();
+            if (ReferenceEquals(button, RightPreviewRevealButton))
+                RightPreviewMorePopup.IsOpen = true;
             bool focused = button.Focus();
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             bool launched = captured is not null
@@ -15750,7 +16090,10 @@ public partial class MainWindow : Window
             [
                 FavoriteDecreaseButton,
                 FavoriteIncreaseButton,
+                RightPreviewEnhanceButton,
                 RightPreviewOpenButton,
+                RightPreviewAlbumButton,
+                RightPreviewMoreButton,
                 RightPreviewRevealButton,
                 RightPreviewTabButton,
                 RightPreviewDeleteButton,
@@ -15760,10 +16103,10 @@ public partial class MainWindow : Window
                     && action.FocusVisualStyle is not null
                     && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(action)))
                 && SingleSelectionActions.Children.Count == 5
-                && ReferenceEquals(SingleSelectionActions.Children[1], RightPreviewOpenButton)
-                && ReferenceEquals(SingleSelectionActions.Children[2], RightPreviewRevealButton)
-                && ReferenceEquals(SingleSelectionActions.Children[3], RightPreviewTabButton)
-                && ReferenceEquals(SingleSelectionActions.Children[4], RightPreviewDeleteButton);
+                && ReferenceEquals(SingleSelectionActions.Children[1], RightPreviewEnhanceButton)
+                && ReferenceEquals(SingleSelectionActions.Children[2], RightPreviewOpenButton)
+                && ReferenceEquals(SingleSelectionActions.Children[3], RightPreviewAlbumButton)
+                && SingleSelectionActions.Children[4] is Grid;
         }
     }
     public RightPreviewActionLayoutSmokeSnapshot MeasureRightPreviewActionLayoutForSmoke(double panelWidth)
@@ -15983,6 +16326,23 @@ public partial class MainWindow : Window
 
     public bool ToggleSelectedFavoriteForSmoke() => ToggleSelectedFavorite();
     public bool AdjustSelectedFavoriteForSmoke(int delta) => AdjustSelectedFavorite(delta);
+    public bool MarkSelectedTileRealForSmoke()
+    {
+        if (SelectedTile() is not Tile tile)
+            return false;
+
+        tile.IsRealFile = true;
+        return true;
+    }
+    public bool RaiseFavoriteDecreaseForSmoke()
+    {
+        if (SelectedTile() is not Tile tile)
+            return false;
+
+        int before = tile.Fav;
+        FavoriteDecreaseButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, FavoriteDecreaseButton));
+        return tile.Fav == Math.Clamp(before - 1, 0, 5);
+    }
     public bool AdjustModalFavoriteForSmoke(int delta)
     {
         if (Modal.Visibility != Visibility.Visible || delta == 0)
@@ -17374,6 +17734,43 @@ public sealed record MetadataCopySmokeSnapshot(
     string? SelectedPath,
     string? MetadataPath,
     string CopyText);
+
+public sealed record SharedDataLocationView(
+    string Kind,
+    string Title,
+    string Description,
+    string DisplayPath,
+    string? RootPath,
+    bool CanOpen,
+    string Status)
+{
+    public static SharedDataLocationView Unavailable(string status)
+        => new(
+            "unavailable",
+            "Shared data unavailable",
+            "Aibos could not provide a safe shared-data location for this process.",
+            "Unavailable",
+            null,
+            false,
+            status);
+}
+
+public sealed record SharedDataLocationSmokeSnapshot(
+    string Scenario,
+    string Kind,
+    string ModeText,
+    string Description,
+    string DisplayPath,
+    bool OpenEnabled,
+    bool Opened,
+    bool LauncherInvoked,
+    string FileName,
+    List<string> Arguments,
+    string ArgumentsText,
+    bool UseShellExecute,
+    string Status,
+    bool SurfaceContract,
+    bool SettingsFocused);
 
 public sealed record DiagnosticsSmokeSnapshot(
     bool Copied,

@@ -2695,6 +2695,34 @@ public partial class App : Application
             win.OpenAppSettingsForSmoke();
             win.Dispatcher.BeginInvoke(() =>
             {
+            string existingRoot = Path.GetDirectoryName(Path.GetFullPath(win.StatePathForSmoke))
+                ?? throw new InvalidOperationException("diagnostics automation root was unavailable");
+            string missingRoot = Path.Combine(existingRoot, "shared-data-location-not-created");
+            SharedDataLocationSmokeSnapshot shared = win.CaptureSharedDataLocationForSmoke(
+                "shared",
+                existingRoot,
+                directoryExists: true,
+                launcherBehavior: "success");
+            SharedDataLocationSmokeSnapshot legacy = win.CaptureSharedDataLocationForSmoke(
+                "legacy",
+                existingRoot,
+                directoryExists: true,
+                launcherBehavior: "success");
+            SharedDataLocationSmokeSnapshot uninitialized = win.CaptureSharedDataLocationForSmoke(
+                "legacy-uninitialized",
+                missingRoot,
+                directoryExists: false,
+                launcherBehavior: "success");
+            SharedDataLocationSmokeSnapshot overrides = win.CaptureSharedDataLocationForSmoke(
+                "overrides",
+                existingRoot,
+                directoryExists: false,
+                launcherBehavior: "success");
+            SharedDataLocationSmokeSnapshot shellFailure = win.CaptureSharedDataLocationForSmoke(
+                "shared",
+                existingRoot,
+                directoryExists: true,
+                launcherBehavior: "throw");
             win.FocusDiagnosticsForSmoke();
             DiagnosticsSmokeSnapshot success = win.CopyDiagnosticsForSmoke(injectClipboardFailure: false);
             DiagnosticsSmokeSnapshot failure = win.CopyDiagnosticsForSmoke(injectClipboardFailure: true);
@@ -2705,11 +2733,65 @@ public partial class App : Application
                 && !payload.Contains(win.SeenPathForSmoke, StringComparison.OrdinalIgnoreCase)
                 && !payload.Contains("\\", StringComparison.Ordinal)
                 && !payload.Contains("prompt", StringComparison.OrdinalIgnoreCase);
+            bool sharedLocation = shared.Kind == "shared"
+                && shared.ModeText.Contains("Shared with Browser", StringComparison.Ordinal)
+                && string.Equals(shared.DisplayPath, existingRoot, StringComparison.OrdinalIgnoreCase)
+                && shared.OpenEnabled
+                && shared.Opened
+                && shared.LauncherInvoked
+                && string.Equals(shared.FileName, existingRoot, StringComparison.OrdinalIgnoreCase)
+                && shared.Arguments.Count == 0
+                && string.IsNullOrEmpty(shared.ArgumentsText)
+                && shared.UseShellExecute
+                && shared.Status.Contains("No shared data was changed", StringComparison.Ordinal)
+                && shared.SurfaceContract
+                && shared.SettingsFocused;
+            bool legacyLocation = legacy.Kind == "legacy"
+                && legacy.ModeText.Contains("Local Aibos data", StringComparison.Ordinal)
+                && string.Equals(legacy.DisplayPath, existingRoot, StringComparison.OrdinalIgnoreCase)
+                && legacy.Opened
+                && legacy.UseShellExecute;
+            bool uninitializedSafe = uninitialized.Kind == "legacy-uninitialized"
+                && string.Equals(uninitialized.DisplayPath, missingRoot, StringComparison.OrdinalIgnoreCase)
+                && !uninitialized.OpenEnabled
+                && !uninitialized.Opened
+                && !uninitialized.LauncherInvoked
+                && uninitialized.Status.Contains("did not create", StringComparison.OrdinalIgnoreCase)
+                && !Directory.Exists(missingRoot);
+            bool overridesSafe = overrides.Kind == "overrides"
+                && string.Equals(overrides.DisplayPath, "No single data folder", StringComparison.Ordinal)
+                && !overrides.OpenEnabled
+                && !overrides.Opened
+                && !overrides.LauncherInvoked;
+            bool shellFailureSafe = shellFailure.OpenEnabled
+                && !shellFailure.Opened
+                && shellFailure.LauncherInvoked
+                && shellFailure.UseShellExecute
+                && shellFailure.Status.Contains("could not be opened", StringComparison.OrdinalIgnoreCase);
             bool ok = success.Copied && !failure.Copied && failure.Status.Contains("could not be copied", StringComparison.OrdinalIgnoreCase) && doneReachable
                 && success.SurfaceContract && success.SettingsFocused && privateDataAbsent
                 && payload.Contains("PhotoViewer.Wpf", StringComparison.Ordinal) && payload.Contains("Build:", StringComparison.Ordinal)
-                && payload.Contains("Process:", StringComparison.Ordinal) && payload.Contains("Catalog:", StringComparison.Ordinal);
-            WriteCrossRuntimeSharedStateResult(resultPath, new { ok, success, failure, privateDataAbsent, doneReachable, payload });
+                && payload.Contains("Process:", StringComparison.Ordinal) && payload.Contains("Catalog:", StringComparison.Ordinal)
+                && sharedLocation && legacyLocation && uninitializedSafe && overridesSafe && shellFailureSafe;
+            WriteCrossRuntimeSharedStateResult(resultPath, new
+            {
+                ok,
+                success,
+                failure,
+                privateDataAbsent,
+                doneReachable,
+                sharedLocation,
+                legacyLocation,
+                uninitializedSafe,
+                overridesSafe,
+                shellFailureSafe,
+                shared,
+                legacy,
+                uninitialized,
+                overrides,
+                shellFailure,
+                payload,
+            });
             win.Close();
             Shutdown(ok ? 0 : 1);
             }, DispatcherPriority.Input);
@@ -4580,7 +4662,16 @@ public partial class App : Application
             if (args.Contains("--show-unseen-dots"))
                 win.SetShowUnseenDotsForSmoke(true);
             if (args.Contains("--show-app-settings"))
+            {
                 win.OpenAppSettingsForSmoke();
+                string? settingsSection = ArgValue(args.ToArray(), "--settings-section");
+                if (!string.IsNullOrWhiteSpace(settingsSection))
+                {
+                    await win.Dispatcher.InvokeAsync(
+                        () => win.SelectAppSettingsSectionForSmoke(settingsSection),
+                        DispatcherPriority.Input);
+                }
+            }
             if (args.Contains("--show-folder-drop-affordance"))
                 win.SetFolderDropAffordanceForSmoke(screen.Equals("landing", StringComparison.OrdinalIgnoreCase), visible: true);
             if (screen.Equals("modal", StringComparison.OrdinalIgnoreCase) && args.Contains("--show-modal-metadata"))
@@ -8902,6 +8993,14 @@ public partial class App : Application
                 var sortSamples = new List<long>();
                 bool countsExact = true;
                 bool completionsApplied = true;
+                bool favoriteEvictionExact = false;
+                long favoriteEvictionElapsedMs = 0;
+                string? favoriteEvictionSelected = null;
+                int favoriteEvictionNeighborIndex = count > 50_010 ? 50_010 : 49_990;
+                string favoriteEvictionNeighborSuffix =
+                    favoriteEvictionNeighborIndex % 100 == 0 ? "-needle" : "";
+                string favoriteEvictionExpectedNeighbor =
+                    $"interaction-smoke-{favoriteEvictionNeighborIndex:D6}{favoriteEvictionNeighborSuffix}.png";
                 heartbeatWatch.Restart();
                 lastHeartbeatMs = 0;
                 heartbeat.Start();
@@ -8947,6 +9046,42 @@ public partial class App : Application
                     filterSamples.Add(watch.ElapsedMilliseconds);
                     countsExact &= window.FilteredCountForSmoke == count;
                 }
+
+                activeOperation = "favorite-eviction-prepare";
+                bool favoriteEvictionPrepared = window.SelectFileNameForSmoke(selectedName)
+                    && window.MarkSelectedTileRealForSmoke();
+                window.ForceSharedStoreWritersForSmoke();
+                favoriteEvictionPrepared &= window.SetSelectedFavoriteLevelForSmoke(1);
+                SharedWriteStatus[] preparedWrites = await window.DrainSharedStoreWritersForSmokeAsync();
+                favoriteEvictionPrepared &= preparedWrites.All(static status => status == SharedWriteStatus.Succeeded);
+                window.SetFavoriteOnlyFilterForSmoke(true);
+                favoriteEvictionPrepared &= window.FilteredCountForSmoke == count / 10
+                    && string.Equals(window.SelectedFileNameForSmoke, selectedName, StringComparison.OrdinalIgnoreCase);
+
+                activeOperation = "favorite-eviction";
+                var favoriteEvictionWatch = Stopwatch.StartNew();
+                bool favoriteEvicted = window.RaiseFavoriteDecreaseForSmoke();
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                favoriteEvictionWatch.Stop();
+                favoriteEvictionElapsedMs = favoriteEvictionWatch.ElapsedMilliseconds;
+                favoriteEvictionSelected = window.SelectedFileNameForSmoke;
+                favoriteEvictionExact = favoriteEvictionPrepared
+                    && favoriteEvicted
+                    && window.FilteredCountForSmoke == (count / 10) - 1
+                    && string.Equals(
+                        favoriteEvictionSelected,
+                        favoriteEvictionExpectedNeighbor,
+                        StringComparison.OrdinalIgnoreCase);
+                countsExact &= favoriteEvictionExact;
+
+                activeOperation = "favorite-eviction-restore";
+                window.ClearFavoriteFiltersForSmoke();
+                bool favoriteEvictionRestored = window.SelectFileNameForSmoke(selectedName)
+                    && window.SetSelectedFavoriteLevelForSmoke(5);
+                SharedWriteStatus[] restoredWrites = await window.DrainSharedStoreWritersForSmokeAsync();
+                countsExact &= favoriteEvictionRestored
+                    && restoredWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && window.FilteredCountForSmoke == count;
 
                 string[] sortModes =
                 [
@@ -9004,6 +9139,7 @@ public partial class App : Application
                     && searchP95 <= 250
                     && filterP95 <= 250
                     && sortP95 <= 500
+                    && favoriteEvictionElapsedMs <= 250
                     && maxHeartbeatGapMs <= 250
                     // Rapid churn leaves dead WPF generator/layout objects in
                     // young generations and committed pages in the process
@@ -9021,6 +9157,10 @@ public partial class App : Application
                     SearchP95Ms = searchP95,
                     FilterP95Ms = filterP95,
                     SortP95Ms = sortP95,
+                    FavoriteEvictionElapsedMs = favoriteEvictionElapsedMs,
+                    FavoriteEvictionExact = favoriteEvictionExact,
+                    FavoriteEvictionSelectedFileName = favoriteEvictionSelected,
+                    FavoriteEvictionExpectedNeighbor = favoriteEvictionExpectedNeighbor,
                     SearchSamplesMs = searchSamples,
                     SearchPhaseSamples = searchPhaseSamples,
                     FilterSamplesMs = filterSamples,
@@ -22741,6 +22881,10 @@ public partial class App : Application
         public double SearchP95Ms { get; init; }
         public double FilterP95Ms { get; init; }
         public double SortP95Ms { get; init; }
+        public long FavoriteEvictionElapsedMs { get; init; }
+        public bool FavoriteEvictionExact { get; init; }
+        public string? FavoriteEvictionSelectedFileName { get; init; }
+        public string? FavoriteEvictionExpectedNeighbor { get; init; }
         public List<long> SearchSamplesMs { get; init; } = [];
         public List<MainWindow.SearchFilterCompletion> SearchPhaseSamples { get; init; } = [];
         public List<long> FilterSamplesMs { get; init; } = [];

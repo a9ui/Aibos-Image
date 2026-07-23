@@ -489,7 +489,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="8" Padding="10,0"
+            <Border x:Name="bd" CornerRadius="4" Padding="10,0"
                     Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>

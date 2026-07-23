@@ -239,6 +239,31 @@ internal static class SharedDataRootActivationSmokeRunner
                 && pathCountMatches
                 && productionResolversMatch
                 && pathsMatchEnvironment;
+            bool sourceMetadataMatches = caseId switch
+            {
+                "valid" or "store-override" =>
+                    activation.ResolutionStatus == SharedDataRootResolutionStatus.Resolved
+                    && string.Equals(
+                        activation.LocatorPath,
+                        Path.GetFullPath(locatorPath),
+                        StringComparison.OrdinalIgnoreCase),
+                "legacy" =>
+                    activation.ResolutionStatus == SharedDataRootResolutionStatus.LegacyFallback
+                    && string.Equals(
+                        activation.LocatorPath,
+                        Path.GetFullPath(locatorPath),
+                        StringComparison.OrdinalIgnoreCase),
+                "legacy-uninitialized" =>
+                    activation.ResolutionStatus == SharedDataRootResolutionStatus.Unavailable
+                    && string.Equals(
+                        activation.LocatorPath,
+                        Path.GetFullPath(locatorPath),
+                        StringComparison.OrdinalIgnoreCase),
+                "invalid" or "overrides-only" =>
+                    activation.ResolutionStatus is null
+                    && activation.LocatorPath is null,
+                _ => false,
+            };
 
             ok = expectedStatus
                 && rootMatches
@@ -251,12 +276,15 @@ internal static class SharedDataRootActivationSmokeRunner
                 && productionLeasePathMatches
                 && nonSharedUntouched
                 && treeUnchanged
-                && fixedForLifetime;
+                && fixedForLifetime
+                && sourceMetadataMatches;
             result = new
             {
                 ok,
                 caseId,
                 status = activation.Status.ToString(),
+                resolutionStatus = activation.ResolutionStatus?.ToString(),
+                locatorPath = activation.LocatorPath,
                 errorCode = activation.ErrorCode,
                 pathCount = activation.Paths.Count,
                 expectedPathCount,
@@ -273,6 +301,7 @@ internal static class SharedDataRootActivationSmokeRunner
                 nonSharedUntouched,
                 treeUnchanged,
                 fixedForLifetime,
+                sourceMetadataMatches,
                 message = ok
                     ? "shared durable-store routing is fixed, leased, isolated, and byte-preserving"
                     : "shared durable-store routing contract failed",

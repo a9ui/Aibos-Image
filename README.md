@@ -50,23 +50,30 @@ Renderer-local presentation state, including WPF window geometry, panel sizes,
 keyboard bindings, current selection, and preview layout, stays local. In
 particular, the existing WPF `state.json` is not shared wholesale.
 
-The public-foundation milestone did not choose a shared root and did not move,
-merge, initialize, rewrite, or delete existing state. The locator v1
-protocol remains reader-first and never creates its locator, shared root,
-durable-data directories, or stores. Its only startup write is an empty lock
-file under the operating-system temporary directory. The WPF application now
-fixes the seven durable-store paths from one validated root for the process
-lifetime while preserving explicit per-store test overrides. Shared settings
-protect unsupported or unreadable documents, fail safe to delete confirmation
-enabled, and preserve unknown fields; a supported shared recent-folder document
-is authoritative, including an explicit empty folder set. The exact H25 Browser
-reader and cross-repository TEMP matrix must remain green; locator creation and
-data migration are still separate reviewed operations.
+Normal application startup remains reader-only: it never creates a locator,
+shared root, durable-data directory, or store. Its only operational write is an
+empty lock file under the operating-system temporary directory. A separate
+`.NET 10` command-line tool, `Aibos.SharedRootSetup`, can perform the reviewed
+one-time creation of the default locator after an inspection-only preflight and
+an explicit `--apply --confirm CREATE`. It is create-only, requires the
+protocol-global writer lease, and refuses malformed, future, unreadable,
+ambiguous, redirected, or conflicting state. It does not copy, merge,
+initialize, rewrite, or delete durable state; root migration and locator
+replacement remain disabled.
+
+The WPF application fixes the seven durable-store paths from one validated root
+for the process lifetime while preserving explicit per-store test overrides.
+Shared settings protect unsupported or unreadable documents, fail safe to
+delete confirmation enabled, and preserve unknown fields; a supported shared
+recent-folder document is authoritative, including an explicit empty folder
+set. The exact H25 Browser reader and cross-repository TEMP matrix must remain
+green.
 
 ## Verification
 
 ```powershell
 dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-setup.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-parity-foundation.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1
