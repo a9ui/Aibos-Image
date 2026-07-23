@@ -532,6 +532,11 @@
                     <Button x:Name="BulkFavoriteIncreaseButton" Style="{StaticResource GhostButton}" Content="Increase all" Click="FavoriteIncrease_Click"
                             ToolTip="Increase favorite level for selected images" AutomationProperties.Name="Increase favorite level for selected images" Margin="4,0,0,0"/>
                   </UniformGrid>
+                  <Button x:Name="BulkEnhanceSelectedButton" Style="{StaticResource GhostButton}" Content="Enhance selected" Click="OpenBatchEnhancement_Click"
+                          ToolTip="Review and create one optional local enhancement job per selected image"
+                          AutomationProperties.Name="Enhance selected images"
+                          AutomationProperties.HelpText="Opens a review first. Opening or closing the review creates no enhancement jobs."
+                          Margin="0,8,0,0"/>
                   <Button x:Name="BulkDeleteButton" Style="{StaticResource DangerButton}" Content="Move selected to Recycle Bin" Click="BulkDeleteSelected_Click"
                           ToolTip="Move every selected source image to the Windows Recycle Bin" AutomationProperties.Name="Move selected images to Recycle Bin" Margin="0,8,0,0"/>
                 </StackPanel>
@@ -849,6 +854,135 @@
       </Border>
     </Grid>
 
+    <!-- Explicit selected-image enhancement review. Opening and closing this overlay never enqueue work. -->
+    <Grid x:Name="BatchEnhancementDialog" Grid.RowSpan="3" Panel.ZIndex="530" Visibility="Collapsed" Background="#D20A0C12"
+          MouseLeftButtonDown="BatchEnhancementBackdrop_MouseLeftButtonDown"
+          AutomationProperties.Name="Enhance selected images review"
+          AutomationProperties.HelpText="Review eligible and skipped images before creating enhancement jobs. Escape closes this review when submission is idle.">
+      <Border x:Name="BatchEnhancementDialogSurface" MaxWidth="920" MaxHeight="700" Margin="28" CornerRadius="6"
+              Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
+              HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+              KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="54"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="38"/>
+            <RowDefinition Height="52"/>
+          </Grid.RowDefinitions>
+
+          <DockPanel Grid.Row="0" Margin="16,0,10,0" LastChildFill="True">
+            <Button x:Name="BatchEnhancementCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                    Click="CancelBatchEnhancement_Click" ToolTip="Close review" AutomationProperties.Name="Close enhancement review">
+              <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
+            </Button>
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock Text="Enhance selected" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/>
+              <TextBlock Text="Review first; jobs start only after the explicit action below." Foreground="{StaticResource TextTertiary}" FontSize="10.8" Margin="0,2,0,0"/>
+            </StackPanel>
+          </DockPanel>
+
+          <Border Grid.Row="1" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,0,1" Padding="16,12">
+            <StackPanel>
+              <TextBlock x:Name="BatchEnhancementCountsText" Text="0 selected · checking eligibility"
+                         Foreground="{StaticResource TextPrimary}" FontSize="13" FontWeight="SemiBold"
+                         AutomationProperties.Name="Batch enhancement selection summary" AutomationProperties.LiveSetting="Polite"/>
+              <WrapPanel Margin="0,9,0,0">
+                <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,7,6">
+                  <TextBlock Text="Preset  Anime clean x2" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                </Border>
+                <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,7,6">
+                  <TextBlock Text="Scale  2×" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                </Border>
+                <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,7,6">
+                  <TextBlock Text="Format  WebP" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                </Border>
+                <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8,5" Margin="0,0,0,6">
+                  <TextBlock Text="Requests  up to 4 at once" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
+                </Border>
+              </WrapPanel>
+              <TextBlock x:Name="BatchEnhancementCompanionStatusText" Text="Checking the local companion..."
+                         Foreground="{StaticResource TextSecondary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,3,0,0"
+                         AutomationProperties.Name="Local enhancement companion availability" AutomationProperties.LiveSetting="Polite"/>
+              <TextBlock x:Name="BatchEnhancementAdapterStatusText" Text="Real-ESRGAN fast GPU · checking local installation"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextWrapping="Wrap" Margin="0,3,0,0"
+                         AutomationProperties.Name="Enhancement adapter availability"/>
+              <Border x:Name="BatchEnhancementWarningBorder" Visibility="Collapsed" Background="{StaticResource BgTertiary}"
+                      BorderBrush="{StaticResource Warning}" BorderThickness="1" CornerRadius="4" Padding="9,7" Margin="0,9,0,0">
+                <TextBlock Text="Large batch: jobs are created individually. Stop affects only images not yet sent; already created jobs keep running."
+                           Foreground="{StaticResource Warning}" FontSize="11" TextWrapping="Wrap"/>
+              </Border>
+              <CheckBox x:Name="BatchEnhancementAllowLargeCheckBox"
+                        Content="Allow image-specific large jobs when the companion warns"
+                        Foreground="{StaticResource TextSecondary}" FontSize="11.5" Margin="0,9,0,0"
+                        AutomationProperties.Name="Allow large enhancement jobs"
+                        AutomationProperties.HelpText="When off, sources that require large-job confirmation fail without creating a job and can be retried after enabling this option."/>
+            </StackPanel>
+          </Border>
+
+          <Grid Grid.Row="2" Margin="12,10">
+            <TextBlock x:Name="BatchEnhancementEmptyText" Text="No selected images to review." Foreground="{StaticResource TextTertiary}" FontSize="13"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+            <ListBox x:Name="BatchEnhancementItemsList" Background="Transparent" BorderThickness="0" Padding="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
+                     AutomationProperties.Name="Selected images enhancement review list">
+              <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+              <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                  <Setter Property="Padding" Value="0"/>
+                  <Setter Property="Margin" Value="0,0,0,6"/>
+                  <Setter Property="Background" Value="Transparent"/>
+                  <Setter Property="BorderThickness" Value="0"/>
+                  <Setter Property="Focusable" Value="False"/>
+                </Style>
+              </ListBox.ItemContainerStyle>
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10,8"
+                          AutomationProperties.Name="{Binding AccessibleName}">
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <StackPanel>
+                        <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource TextPrimary}" FontSize="12.5" FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis" ToolTip="{Binding SourcePath}"/>
+                        <TextBlock Text="{Binding DetailText}" Foreground="{StaticResource TextTertiary}" FontSize="10.8"
+                                   TextTrimming="CharacterEllipsis" Margin="0,3,10,0"/>
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </Grid>
+
+          <Border Grid.Row="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,0,0" Padding="14,0">
+            <TextBlock x:Name="BatchEnhancementStatusText" Text="Review only. No enhancement jobs have been created."
+                       Foreground="{StaticResource TextTertiary}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                       AutomationProperties.Name="Batch enhancement status" AutomationProperties.LiveSetting="Polite"/>
+          </Border>
+
+          <DockPanel Grid.Row="4" Margin="12,9" LastChildFill="False">
+            <Button x:Name="BatchEnhancementCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Close"
+                    Click="CancelBatchEnhancement_Click" Height="32" MinWidth="82" Margin="7,0,0,0"
+                    AutomationProperties.Name="Close or stop batch enhancement"/>
+            <Button x:Name="BatchEnhancementStartButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Enhance selected"
+                    Click="StartBatchEnhancement_Click" Height="32" MinWidth="132" Margin="7,0,0,0"
+                    AutomationProperties.Name="Start enhancement for eligible selected images"/>
+            <Button x:Name="BatchEnhancementRetryFailedButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Retry failed"
+                    Click="RetryFailedBatchEnhancement_Click" Height="32" MinWidth="108" Margin="7,0,0,0" Visibility="Collapsed"
+                    AutomationProperties.Name="Retry failed batch enhancement sources"/>
+            <Button x:Name="BatchEnhancementViewJobsButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="View active jobs"
+                    Click="ViewBatchEnhancementJobs_Click" Height="32" MinWidth="112" Visibility="Collapsed"
+                    AutomationProperties.Name="View newly created enhancement jobs"/>
+          </DockPanel>
+        </Grid>
+      </Border>
+    </Grid>
+
     <!-- AI Enhancement jobs: passive until explicitly opened; polling stops when hidden. -->
     <Grid x:Name="EnhancementJobsDialog" Grid.RowSpan="3" Panel.ZIndex="520" Visibility="Collapsed" Background="#D20A0C12"
           MouseLeftButtonDown="EnhancementJobsBackdrop_MouseLeftButtonDown"
@@ -906,8 +1040,20 @@
                 </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                   <DataTemplate>
-                    <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10"
-                            AutomationProperties.Name="{Binding AccessibleName}">
+                    <Border CornerRadius="4" Padding="10" AutomationProperties.Name="{Binding AccessibleName}">
+                      <Border.Style>
+                        <Style TargetType="Border">
+                          <Setter Property="Background" Value="{StaticResource BgTertiary}"/>
+                          <Setter Property="BorderBrush" Value="{StaticResource GlassBorder}"/>
+                          <Setter Property="BorderThickness" Value="1"/>
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                              <Setter Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+                              <Setter Property="BorderThickness" Value="2"/>
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Border.Style>
                       <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Border Width="68" Height="68" CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" VerticalAlignment="Top">

@@ -18,6 +18,7 @@ public partial class MainWindow
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private readonly List<EnhancementWorkspaceJobView> _enhancementWorkspaceJobs = [];
     private readonly Dictionary<string, BitmapSource> _enhancementWorkspaceThumbnailCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _enhancementWorkspaceHighlightedJobIds = new(StringComparer.Ordinal);
     private DispatcherTimer _enhancementWorkspacePollTimer = null!;
     private CancellationTokenSource? _enhancementWorkspaceThumbnailCts;
     private bool _enhancementWorkspaceRefreshPending;
@@ -25,6 +26,7 @@ public partial class MainWindow
     private bool _enhancementWorkspaceMutationPending;
     private long _enhancementWorkspaceGeneration;
     private string _enhancementWorkspaceFilter = "all";
+    private DateTimeOffset _enhancementWorkspaceHighlightExpiresAt;
     private IInputElement? _enhancementWorkspaceFocusBeforeDialog;
     private int _enhancementWorkspaceGetCount;
     private int _enhancementWorkspacePollCount;
@@ -39,15 +41,36 @@ public partial class MainWindow
     }
 
     private async void OpenEnhancementJobs_Click(object sender, RoutedEventArgs e)
+        => await OpenEnhancementJobsWorkspaceAsync("all");
+
+    private async Task OpenEnhancementJobsWorkspaceAsync(
+        string initialFilter,
+        IReadOnlyCollection<string>? highlightedJobIds = null,
+        IInputElement? focusToRestore = null)
     {
         if (EnhancementJobsDialog.Visibility == Visibility.Visible)
             return;
 
         StopGalleryAutoScroll();
         SearchHistoryPopup.IsOpen = false;
-        _enhancementWorkspaceFocusBeforeDialog = Keyboard.FocusedElement;
-        _enhancementWorkspaceFilter = "all";
-        EnhancementJobsAllFilter.IsChecked = true;
+        _enhancementWorkspaceFocusBeforeDialog = focusToRestore ?? Keyboard.FocusedElement;
+        _enhancementWorkspaceFilter = initialFilter is "active" or "failed" or "completed"
+            ? initialFilter
+            : "all";
+        EnhancementJobsAllFilter.IsChecked = _enhancementWorkspaceFilter == "all";
+        EnhancementJobsActiveFilter.IsChecked = _enhancementWorkspaceFilter == "active";
+        EnhancementJobsFailedFilter.IsChecked = _enhancementWorkspaceFilter == "failed";
+        EnhancementJobsCompletedFilter.IsChecked = _enhancementWorkspaceFilter == "completed";
+        _enhancementWorkspaceHighlightedJobIds.Clear();
+        if (highlightedJobIds is not null)
+        {
+            _enhancementWorkspaceHighlightedJobIds.UnionWith(highlightedJobIds.Where(static id => !string.IsNullOrWhiteSpace(id)));
+            _enhancementWorkspaceHighlightExpiresAt = DateTimeOffset.UtcNow.AddSeconds(20);
+        }
+        else
+        {
+            _enhancementWorkspaceHighlightExpiresAt = default;
+        }
         EnhancementJobsDialog.Visibility = Visibility.Visible;
         EnhancementJobsStatusText.Text = "Loading jobs from the local companion...";
         EnhancementJobsEmptyText.Visibility = Visibility.Collapsed;
@@ -128,8 +151,18 @@ public partial class MainWindow
                 return;
             }
 
+            ApplyEnhancementWorkspaceHighlights(jobs);
             _enhancementWorkspaceJobs.Clear();
             _enhancementWorkspaceJobs.AddRange(jobs);
+            bool highlightedBatchAlreadyTerminal = _enhancementWorkspaceFilter == "active"
+                && jobs.Any(static job => job.IsHighlighted)
+                && !jobs.Any(static job => job.IsHighlighted && job.IsActive);
+            if (highlightedBatchAlreadyTerminal)
+            {
+                _enhancementWorkspaceFilter = "all";
+                EnhancementJobsAllFilter.IsChecked = true;
+                EnhancementJobsActiveFilter.IsChecked = false;
+            }
             ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
             int activeCount = jobs.Count(static job => job.IsActive);
             int completedCount = jobs.Count(static job => job.Status is "succeeded" or "deleted");
@@ -137,6 +170,8 @@ public partial class MainWindow
             EnhancementJobsStatusText.Text = activeCount > 0
                 ? $"{activeCount:N0} active job{(activeCount == 1 ? "" : "s")}. Refreshing once per second while this workspace is visible."
                 : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
+            if (highlightedBatchAlreadyTerminal)
+                EnhancementJobsStatusText.Text += " The new batch already finished, so all highlighted jobs are shown.";
             if (activeCount > 0)
                 _enhancementWorkspacePollTimer.Start();
             else
@@ -151,6 +186,17 @@ public partial class MainWindow
                     EnhancementJobsRefreshButton.IsEnabled = true;
             }
         }
+    }
+
+    private void ApplyEnhancementWorkspaceHighlights(IReadOnlyList<EnhancementWorkspaceJobView> jobs)
+    {
+        if (_enhancementWorkspaceHighlightExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            _enhancementWorkspaceHighlightedJobIds.Clear();
+            _enhancementWorkspaceHighlightExpiresAt = default;
+        }
+        foreach (EnhancementWorkspaceJobView job in jobs)
+            job.IsHighlighted = _enhancementWorkspaceHighlightedJobIds.Contains(job.Id);
     }
 
     private static bool TryParseEnhancementWorkspaceJobs(
@@ -555,6 +601,7 @@ public partial class MainWindow
             _enhancementWorkspaceJobs.Count,
             visible.Length,
             _enhancementWorkspaceJobs.Count(static job => job.IsActive),
+            visible.Count(static job => job.IsHighlighted),
             _enhancementWorkspacePollTimer.IsEnabled,
             _enhancementWorkspaceGetCount,
             _enhancementWorkspacePollCount,
@@ -613,6 +660,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
 {
     private BitmapSource? _thumbnail;
     private bool _isBusy;
+    private bool _isHighlighted;
 
     public EnhancementWorkspaceJobView(
         string id,
@@ -685,6 +733,18 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : $"Updated {UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
     public string AccessibleName => $"{SourceName}, {StatusLabel}, {PresetId}";
 
+    public bool IsHighlighted
+    {
+        get => _isHighlighted;
+        set
+        {
+            if (_isHighlighted == value)
+                return;
+            _isHighlighted = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsHighlighted)));
+        }
+    }
+
     public BitmapSource? Thumbnail
     {
         get => _thumbnail;
@@ -720,6 +780,7 @@ public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     int Total,
     int Filtered,
     int Active,
+    int Highlighted,
     bool Polling,
     int GetRequests,
     int PollRequests,

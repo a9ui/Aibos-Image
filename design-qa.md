@@ -14,13 +14,18 @@
   - `private-evidence://aibos/modal-wide.png` — 1280 x 820, SHA-256 `cd6490a4df436d46c477b4b32f7f7c91ef76ede0f2b4162c9934bf89cca9d178`
   - `private-evidence://aibos/album-library-populated.png` — 1120 x 760, SHA-256 `25a795f85c075e926e578d0834e571f146d95d7be4b6834c45d9974fd1298715`
   - `private-evidence://aibos/settings-high-contrast.png` — 1280 x 820, SHA-256 `acbf9eb9e820a40218c5e7ab631b518691f91c9ca9fee719f3a0782f5102272d`
+  - `private-evidence://aibos/selected-batch-wide.png` — 1280 x 820, SHA-256 `3f0f343c887b9e5874d70f434d4b5095043c234e113fc5a084d7994c770f2abb`
+  - `private-evidence://aibos/selected-batch-900px.png` — 900 x 620, SHA-256 `21d5822c9906cf5cef1bac5a1fbc3ad72fe58645ea591cf0bbc283c32fbb7dda`
+  - `private-evidence://aibos/selected-batch-comparison.png` — 2591 x 820, SHA-256 `f85bf355e0b243b300bb9c5051149800fec42d01b0bda1047cd1f6bf434397cd`
 - Local filesystem paths are deliberately omitted because this report is intended for a public repository and the captures contain private workstation path text.
 - WPF captures used 96 DPI at 1.0 density. Pixel dimensions equal the arranged WPF DIP viewport. The composite source board contains several differently sized states, so each implementation capture was compared to its corresponding source region rather than scaled as one full frame.
-- State: dark theme; synthetic TEMP image fixture; landing/grid/settings/modal/populated-Album states; wide and 900-DIP adaptive layouts. No user image, cache, history, or shared state was used.
+- State: dark theme; synthetic TEMP image fixture; landing/grid/settings/modal/populated-Album/selected-batch states; wide and 900-DIP adaptive layouts. No user image, cache, history, or shared state was used.
 
 ## Full-view comparison evidence
 
-The source board and each rendered implementation capture were opened together in the same comparison input. Wide workbench composition, 900-DIP adaptive composition, Settings, modal-with-filmstrip, and the populated Album Library were reviewed against the same token, density, border, and control language. The implementation retains the product's real portrait-filmstrip and complete toolbar semantics where the visual board was illustrative rather than exhaustive.
+The source board and each rendered implementation capture were opened together in the same comparison input. Wide workbench composition, 900-DIP adaptive composition, Settings, modal-with-filmstrip, the populated Album Library, and the selected-batch review were reviewed against the same token, density, border, and control language. The implementation retains the product's real portrait-filmstrip and complete toolbar semantics where the visual board was illustrative rather than exhaustive.
+
+The selected-batch source comparison is intentionally language-based rather than a pixel-equality claim: the source board does not contain the new overlay. The review preserves the near-black workbench, violet primary action, thin cool-gray separators, compact hierarchy, flat rectangular controls, and low-radius opaque surfaces. At 900 x 620 the heading, configuration summary, virtualized source list, status strip, and persistent actions remain visible without horizontal clipping.
 
 ## Focused region comparison evidence
 
@@ -30,14 +35,16 @@ The source board and each rendered implementation capture were opened together i
 - Selection projection: compared the selected gallery card against the source board in both 1600-DIP wide and 900-DIP adaptive layouts. The final captures show the same persistent accent outline after focus moves to the Preview action surface.
 - Album Library: compared its populated library/member columns, selected state, compact actions, status strip, borders, radii, and typography against the selected workbench language. The source board has no standalone Album surface, so the comparison is token- and density-based rather than pixel-fidelity based.
 - High Contrast: inspected the Settings surface under the live Windows system palette. This accessibility mode intentionally replaces the dark visual direction rather than claiming pixel fidelity; the evidence confirms opaque system backgrounds, system text, highlight/focus color, readable primary action text, and preserved control hierarchy.
+- Selected batch: inspected the full 1280 x 820 capture at original pixels, where its 11–17 px text, four-to-six-pixel radii, one-pixel borders, checkbox, status copy, bounded list, and footer actions remain readable. The 900 x 620 capture separately verifies the responsive boundary.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: Segoe UI/system WPF text is retained for native rendering. Sizes, weights, truncation, and hierarchy now follow the compact source rhythm; small status text remains readable and modal filenames truncate rather than moving controls off-screen.
-- Spacing and layout rhythm: large capsules and decorative spacing were removed. The wide layout uses sidebar/gallery/preview columns; the narrow layout uses rail/gallery/bottom-preview rows. Settings uses a stable 132-DIP navigation column. Modal and Album surfaces use 3–6 DIP radii and solid borders.
+- Fonts and typography: Segoe UI/system WPF text is retained for native rendering. Sizes, weights, truncation, and hierarchy follow the compact source rhythm; small status text remains readable and modal filenames truncate rather than moving controls off-screen.
+- Spacing and layout rhythm: large capsules and decorative spacing were removed. The wide layout uses sidebar/gallery/preview columns; the narrow layout uses rail/gallery/bottom-preview rows. Settings uses a stable 132-DIP navigation column. Modal, Album, and selected-batch surfaces use 3–6 DIP radii and solid borders.
 - Colors and visual tokens: background, elevated surface, border, accent, favorite, enhanced, focus, hover, pressed, warning, and danger colors are centralized in WPF resources. Gradients, blur, refraction, parallax, and shadows are absent from the selected direction.
-- Image quality and asset fidelity: production images remain decoded by the existing WPF pipeline. QA uses synthetic flat-color fixtures to preserve the user-data boundary, so subject matter differs intentionally from the illustrative source board. No visible source asset was replaced with emoji, text-glyph art, CSS art, or a handcrafted decorative asset.
-- Copy and content: labels reflect the implemented Aibos functions. Existing safety, shared-state, enhancement, Album, keyboard, and Recycle Bin semantics are retained even when the visual board used shorter illustrative labels.
+- Image quality and asset fidelity: production images remain decoded by the existing WPF pipeline. QA uses synthetic fixtures to preserve the user-data boundary, so subject matter differs intentionally from the illustrative source board. The selected-batch overlay introduces no new image asset, logo, illustration, decorative mark, custom SVG, or placeholder art.
+- Copy and content: labels reflect the implemented Aibos functions. Existing safety, shared-state, enhancement, Album, keyboard, and Recycle Bin semantics are retained even when the visual board used shorter illustrative labels. The batch review explicitly states selected, eligible, skipped, preset, scale, format, request bound, companion and adapter availability, large-job consent, and the no-job-created state before the primary action.
+- States and accessibility: review, checking, ready, skipped, submitting, created, failed, stopped, retry, and Jobs handoff states exist. Focus cycles in the batch dialog, the primary action receives initial focus after checking, Escape closes an idle review, and controls expose automation names/help text.
 
 ## Comparison history
 
@@ -48,6 +55,7 @@ The source board and each rendered implementation capture were opened together i
 5. PRO High: gallery selection was represented in the header and Preview but was not durable enough visually after keyboard focus moved away from the gallery. Fix: projected canonical selection state into compact Grid, standard Grid, and List templates independently of transient WPF focus selection. Post-fix evidence: `grid-wide-final.png` and `grid-narrow-final.png`; the Grid → narrow Grid → List → wide Grid smoke preserves the same canonical path, visible marker, and source bytes.
 6. Follow-up polish: the Right Preview action row overflowed at its minimum width and the Album Library lacked populated visual evidence. Fix: replaced the fixed action grid with an ordered wrapping surface (240 DIP = two rows, 380 DIP = one row) and added an isolated secondary-window capture using a synthetic populated Album store. Post-fix evidence: right-panel smoke and `album-library-populated.png`.
 7. Accessibility pass: the static dark palette did not follow Windows High Contrast and several Right Preview actions depended on tooltip-only names. Fix: routed opaque color tokens through live system colors, restored the standard palette without restarting, preserved user-configured thumbnail-border semantics, and added explicit automation names/focus/tab-order checks. Post-fix evidence: `settings-high-contrast.png`; accessibility, keyboard, modal-focus, Album-focus, and DPI-anchor gates pass.
+8. Selected-batch pass: the new state was compared once at 1280 x 820 and 900 x 620 against the selected workbench language. No actionable P0/P1/P2 difference was found, so no visual correction loop was required.
 
 ## Findings
 
@@ -55,7 +63,7 @@ No actionable P0, P1, or P2 visual mismatch remains for this implementation batc
 
 ## Open questions
 
-- The source board does not define a standalone Album Library window. The Album window therefore follows the same tokens and density without claiming pixel fidelity to a missing source state.
+- The source board does not define a standalone Album Library window or selected-batch review. Those states therefore follow the same tokens and density without claiming pixel fidelity to missing source states.
 - The source board shows landscape filmstrip samples, while the product contract deliberately keeps a portrait-oriented horizontally virtualized filmstrip. This is an intentional product constraint, not unresolved visual drift.
 
 ## Implementation checklist
@@ -70,11 +78,14 @@ No actionable P0, P1, or P2 visual mismatch remains for this implementation batc
 - [x] Live Windows High Contrast palette with standard-theme restoration.
 - [x] Right Preview automation names, focus visuals, and logical Tab order.
 - [x] DPI anchor, editable keyboard, modal focus, and Album focus regression gates.
+- [x] Selected-batch review with bounded virtualized list and fixed footer at 900 DIP.
+- [x] Review-only no-POST state, large-job consent, keyboard focus cycle, and Jobs handoff.
 - [x] .NET 10 Release build with zero warnings and zero errors.
-- [x] Focused UI, state-isolation, modal, Album, zoom-anchor, and rapid-churn gates.
+- [x] Focused UI, state-isolation, modal, Album, zoom-anchor, rapid-churn, batch, and real-HTTP gates.
 
 ## Follow-up polish
 
 - P3: add optional monochrome category icons to Settings only if a licensed, consistent icon source is adopted; text navigation is currently clearer than placeholder glyphs.
+- P3: the large-image consent label is accurate but slightly mechanical; a later copy-only pass may shorten it to “Allow very large images when warned.”
 
 final result: passed
