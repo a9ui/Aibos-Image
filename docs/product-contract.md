@@ -281,6 +281,14 @@ or stores.
   overwritten.
 - The H25 Browser companion owns the current local Enhancement API and worker.
   WPF owns its loopback client and must keep the API optional.
+- The WPF Enhancement Jobs workspace is a virtualized client view over that
+  API. Opening it performs a passive jobs read only. It polls once per second
+  only while the workspace is visible and at least one job is queued or
+  running, and stops polling when hidden or when all jobs are terminal.
+- Cancel, Retry, Open output, and Delete output remain explicit user actions.
+  WPF validates source identity, source signature, and managed-output ownership
+  before opening or deleting an output. The workspace does not change the
+  `enhance/jobs.json` schema and never starts a worker from ordinary browsing.
 - Removing the in-repository Browser backend is not merge-ready until a named
   H25 commit passes an isolated TEMP compatibility test against the exact WPF
   candidate. That test must prove request and response compatibility, one
