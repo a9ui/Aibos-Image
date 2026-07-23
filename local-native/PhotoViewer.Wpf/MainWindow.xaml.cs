@@ -413,6 +413,7 @@ public partial class MainWindow : Window
             app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
         InitializeKeyBindingEditor();
         InitializeEnhancementJobsWorkspace();
+        InitializeBatchEnhancementWorkflow();
         _currentMonitorWorkArea = ResolveCurrentMonitorWorkArea;
         _searchFilterTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -13476,6 +13477,12 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (BatchEnhancementDialog.Visibility == Visibility.Visible)
+        {
+            CloseBatchEnhancementDialog(restoreFocus: true);
+            return true;
+        }
+
         if (AppSettingsDialog.Visibility == Visibility.Visible)
         {
             CloseAppSettings_Click(this, new RoutedEventArgs());
@@ -13506,6 +13513,7 @@ public partial class MainWindow : Window
             return;
         }
         if (DeleteConfirmationDialog.Visibility == Visibility.Visible
+            || BatchEnhancementDialog.Visibility == Visibility.Visible
             || AppSettingsDialog.Visibility == Visibility.Visible
             || EnhancementJobsDialog.Visibility == Visibility.Visible)
         {

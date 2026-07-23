@@ -88,6 +88,10 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhancement-jobs-workspace.ps1
 
+      - name: Selected batch enhancement smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-selected-batch-enhancement.ps1 -SkipBuild
+
       - name: Companion smoke path boundary
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-h25-companion-path-boundary.ps1

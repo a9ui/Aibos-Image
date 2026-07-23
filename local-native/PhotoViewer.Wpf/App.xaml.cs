@@ -730,6 +730,20 @@ public partial class App : Application
             return;
         }
 
+        int selectedBatchEnhancementSmokeIdx = Array.IndexOf(e.Args, "--selected-batch-enhancement-smoke");
+        if (selectedBatchEnhancementSmokeIdx >= 0 && selectedBatchEnhancementSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureSelectedBatchEnhancementSmoke(e.Args[selectedBatchEnhancementSmokeIdx + 1]);
+            return;
+        }
+
+        int selectedBatchEnhancementHttpSmokeIdx = Array.IndexOf(e.Args, "--selected-batch-enhancement-http-smoke");
+        if (selectedBatchEnhancementHttpSmokeIdx >= 0 && selectedBatchEnhancementHttpSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureSelectedBatchEnhancementHttpSmoke(e.Args[selectedBatchEnhancementHttpSmokeIdx + 1], e.Args);
+            return;
+        }
+
         if (h25EnhancementCompanionSmokeIdx >= 0 && h25EnhancementCompanionSmokeIdx + 1 < e.Args.Length)
         {
             CaptureH25EnhancementCompanionSmoke(e.Args[h25EnhancementCompanionSmokeIdx + 1], e.Args);
@@ -4500,6 +4514,30 @@ public partial class App : Application
                     await win.OpenEnhancementJobsForSmokeAsync();
                     await Task.Delay(180);
                 }
+            }
+            if (args.Contains("--show-selected-batch-enhancement"))
+            {
+                int selectedCount = Math.Clamp(ArgInt(args, "--batch-count", 10), 1, 100);
+                int availableCount = win.EnhancementWorkspaceCatalogPathsForSmoke.Count;
+                if (availableCount == 0)
+                    throw new InvalidOperationException("Selected batch enhancement capture requires a populated --folder.");
+                selectedCount = Math.Min(selectedCount, availableCount);
+                win.SelectRangeForSmoke(0, selectedCount - 1);
+                win.ConfigureModalEnhancementForSmoke((request, _) =>
+                {
+                    HttpResponseMessage response = request.Method == HttpMethod.Get
+                        ? new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent("{\"jobs\":[]}", Encoding.UTF8, "application/json"),
+                        }
+                        : new HttpResponseMessage(HttpStatusCode.MethodNotAllowed)
+                        {
+                            Content = new StringContent("{\"error\":\"visual fixture is review-only\"}", Encoding.UTF8, "application/json"),
+                        };
+                    return Task.FromResult(response);
+                });
+                await win.OpenBatchEnhancementForSmokeAsync();
+                await Task.Delay(180);
             }
             if (args.Contains("--clear-selection"))
                 win.ClearSelectionForSmoke();
