@@ -2298,27 +2298,52 @@ public partial class App : Application
             ?? throw new InvalidOperationException("automation jobs path was not configured");
         string smokeRoot = Path.GetDirectoryName(Path.GetFullPath(statePath))
             ?? throw new InvalidOperationException("automation root was unavailable");
-        string folder = Path.Combine(smokeRoot, "sources", "materialization race");
+        // Reuse the managed outputs directory as this synthetic source fixture.
+        // The smoke only needs source/output identity bytes, and this avoids an
+        // extra caller-derived directory creation while keeping every path
+        // inside the isolated automation root.
+        string folder = Path.Combine(Path.GetDirectoryName(jobsPath)!, "outputs");
         string alphaPath = Path.Combine(folder, "alpha.png");
         string bravoPath = Path.Combine(folder, "bravo.png");
         string charliePath = Path.Combine(folder, "charlie.png");
-        string injectedEnhancedOutputPath = Path.Combine(smokeRoot, "enhance", "outputs", "alpha-enhanced.png");
+        string injectedEnhancedOutputPath = alphaPath;
+        string persistedEnhancedOutputPath = charliePath;
         Directory.CreateDirectory(folder);
         Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
-        Directory.CreateDirectory(Path.GetDirectoryName(injectedEnhancedOutputPath)!);
         WriteSmokePng(alphaPath, 96, 72, Color.FromRgb(65, 125, 195));
         WriteSmokePng(bravoPath, 96, 72, Color.FromRgb(195, 95, 85));
         WriteSmokePng(charliePath, 96, 72, Color.FromRgb(85, 175, 115));
-        File.Copy(alphaPath, injectedEnhancedOutputPath, overwrite: true);
         DateTime fixtureTime = new(2026, 7, 18, 2, 0, 0, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(alphaPath, fixtureTime.AddMinutes(2));
         File.SetLastWriteTimeUtc(bravoPath, fixtureTime.AddMinutes(1));
         File.SetLastWriteTimeUtc(charliePath, fixtureTime);
+        var persistedSourceInfo = new FileInfo(charliePath);
+        double persistedSourceMtimeMs =
+            new DateTimeOffset(persistedSourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
         File.WriteAllText(statePath, "{\"Version\":2,\"materializationRaceMarker\":\"preserve\"}");
         File.WriteAllText(favoritesPath, "{}");
         File.WriteAllText(seenPath, "{}");
         File.WriteAllText(recentPath, "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"updatedAtUtc\":\"\",\"raceRecentMarker\":\"preserve\"}");
-        File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[]}");
+        File.WriteAllText(jobsPath, JsonSerializer.Serialize(new
+        {
+            version = 1,
+            jobs = new[]
+            {
+                new
+                {
+                    id = "materialization-race-persisted",
+                    status = "succeeded",
+                    sourcePath = charliePath,
+                    sourceId = charliePath,
+                    outputPath = persistedEnhancedOutputPath,
+                    sourceSignature = new
+                    {
+                        size = persistedSourceInfo.Length,
+                        mtimeMs = persistedSourceMtimeMs,
+                    },
+                },
+            },
+        }));
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var window = HiddenWindow();
@@ -2391,9 +2416,22 @@ public partial class App : Application
                 bool sourcesReadOnly = !string.IsNullOrWhiteSpace(sourceAfterInjectedDelete)
                     && string.Equals(sourceAfterInjectedDelete, FolderFingerprint(folder), StringComparison.Ordinal);
                 bool enhancementSnapshotDetached = enhancementStateInjectedAfterSnapshot
-                    && window.EnhancedStoreCountForSmoke == 1
-                    && !window.EnhancedForFileForSmoke("alpha.png");
-                bool isolated = new[] { statePath, favoritesPath, seenPath, recentPath, jobsPath, alphaPath, bravoPath, charliePath, injectedEnhancedOutputPath }
+                    && window.EnhancedStoreCountForSmoke == 2
+                    && !window.EnhancedForFileForSmoke("alpha.png")
+                    && window.EnhancedForFileForSmoke("charlie.png");
+                bool isolated = new[]
+                    {
+                        statePath,
+                        favoritesPath,
+                        seenPath,
+                        recentPath,
+                        jobsPath,
+                        alphaPath,
+                        bravoPath,
+                        charliePath,
+                        injectedEnhancedOutputPath,
+                        persistedEnhancedOutputPath,
+                    }
                     .All(path => Path.GetFullPath(path).StartsWith(Path.GetFullPath(smokeRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
                 bool residueFree = NoPersistenceResidue(smokeRoot);
                 ok = vanishedSourceSkipped && recoverableWarning && validSelectionAndModal
@@ -2571,7 +2609,6 @@ public partial class App : Application
                 try { window.Close(); } catch { }
             }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
             File.WriteAllText(resultFullPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
             Shutdown(ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);
@@ -2582,7 +2619,6 @@ public partial class App : Application
         ValidateAutomationPathArguments(args);
 
         string root = ResolveAutomationStorageRoot(args);
-        Directory.CreateDirectory(root);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", Path.Combine(root, "state.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", Path.Combine(root, "favorites.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", Path.Combine(root, "seen.json"));

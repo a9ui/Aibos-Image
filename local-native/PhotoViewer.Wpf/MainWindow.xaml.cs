@@ -154,6 +154,8 @@ public partial class MainWindow : Window
     private int _activeAlbumSourceApplyCount;
     private bool _lastActiveAlbumAvailabilityOffDispatcher;
     private readonly Dictionary<string, ManagedEnhancedOutput> _enhancedOutputs = new(EnhancementSourceIdentityComparer);
+    private readonly Dictionary<string, ManagedEnhancedOutput> _catalogEnhancedOutputsByPath =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _restoredPreviewTabPaths = [];
     private readonly SemaphoreSlim _thumbnailDecodeGate = new(MaxThumbnailDecodeWorkers, MaxThumbnailDecodeWorkers);
     private readonly ConcurrentDictionary<string, byte> _thumbnailLoadsInFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -1513,9 +1515,8 @@ public partial class MainWindow : Window
                 new Dictionary<string, int>(_favorites, StringComparer.OrdinalIgnoreCase),
                 _seenPaths.ToHashSet(StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, ManagedEnhancedOutput>(
-                    _enhancedOutputs,
-                    EnhancementSourceIdentityComparer),
-                _resolveFinalPath);
+                    _catalogEnhancedOutputsByPath,
+                    StringComparer.OrdinalIgnoreCase));
             CatalogCardLayoutContext cardLayout = CaptureCardLayoutContext();
             bool showUnseenDots = _showUnseenDots;
             IReadOnlyDictionary<string, ImageDimensions> emptyDimensions =
@@ -3037,6 +3038,7 @@ public partial class MainWindow : Window
     private void LoadEnhancedState()
     {
         _enhancedOutputs.Clear();
+        _catalogEnhancedOutputsByPath.Clear();
         _enhancementJobsRead = 0;
         _enhancedCandidateCount = 0;
         _enhancementReadOk = true;
@@ -3066,10 +3068,16 @@ public partial class MainWindow : Window
                 if (!TryGetStringProperty(job, "status", out string? status) ||
                     !string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
                     continue;
-                if (TryBuildManagedEnhancedOutput(job, out string resolvedSource, out ManagedEnhancedOutput output)
+                if (TryBuildManagedEnhancedOutput(
+                        job,
+                        out string resolvedSource,
+                        out ManagedEnhancedOutput output,
+                        out IReadOnlyList<string> catalogAliases)
                     && !_enhancedOutputs.ContainsKey(resolvedSource))
                 {
                     _enhancedOutputs[resolvedSource] = output;
+                    foreach (string alias in catalogAliases)
+                        _catalogEnhancedOutputsByPath.TryAdd(alias, output);
                     _enhancedCandidateCount++;
                 }
             }
@@ -3077,6 +3085,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _enhancedOutputs.Clear();
+            _catalogEnhancedOutputsByPath.Clear();
             _enhancementReadOk = false;
             _enhancementReadError = ex.Message;
         }
@@ -3126,10 +3135,12 @@ public partial class MainWindow : Window
     private bool TryBuildManagedEnhancedOutput(
         JsonElement job,
         out string resolvedSource,
-        out ManagedEnhancedOutput managedOutput)
+        out ManagedEnhancedOutput managedOutput,
+        out IReadOnlyList<string> catalogAliases)
     {
         resolvedSource = "";
         managedOutput = null!;
+        catalogAliases = [];
         if (!TryGetStringProperty(job, "sourcePath", out string? sourcePath)
             || !TryGetStringProperty(job, "sourceId", out string? sourceId)
             || !TryGetStringProperty(job, "outputPath", out string? outputPath)
@@ -3172,11 +3183,32 @@ public partial class MainWindow : Window
 
             resolvedSource = resolvedSourcePath;
             managedOutput = new ManagedEnhancedOutput(canonicalOutput, sourceSize, sourceMtimeMs);
+            catalogAliases = new[] { sourcePath, sourceId, resolvedSourcePath }
+                .Select(NormalizeCatalogEnhancementPath)
+                .Where(static path => path is not null)
+                .Select(static path => path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             return true;
         }
         catch
         {
             return false;
+        }
+    }
+
+    private static string? NormalizeCatalogEnhancementPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            return null;
+
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -3197,11 +3229,11 @@ public partial class MainWindow : Window
         out string? outputPath)
     {
         outputPath = null;
-        if (sharedState.EnhancedOutputs.Count == 0
-            || !TryResolveEnhancementSourceIdentity(
-                path,
-                sharedState.ResolveFinalPath,
-                out string identity)
+        if (sharedState.EnhancedOutputs.Count == 0)
+            return false;
+
+        string? identity = NormalizeCatalogEnhancementPath(path);
+        if (identity is null
             || !sharedState.EnhancedOutputs.TryGetValue(identity, out ManagedEnhancedOutput? stored))
         {
             return false;
@@ -8858,8 +8890,7 @@ public partial class MainWindow : Window
     private sealed record CatalogSharedStateSnapshot(
         IReadOnlyDictionary<string, int> Favorites,
         IReadOnlySet<string> SeenPaths,
-        IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs,
-        Func<string, string> ResolveFinalPath);
+        IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs);
 
     private readonly record struct CatalogTilePreparationResult(
         List<Tile> Tiles,
