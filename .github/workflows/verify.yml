@@ -55,3 +55,7 @@ jobs:
       - name: Optional Enhancement bridge smoke
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-enhancement-actions.ps1
+
+      - name: Companion smoke path boundary
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-h25-companion-path-boundary.ps1

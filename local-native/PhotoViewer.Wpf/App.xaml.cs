@@ -12846,7 +12846,7 @@ public partial class App : Application
     private void CaptureModalEnhancementActionsSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string smokeRoot = Path.Combine(Path.GetTempPath(), "photoviewer-wpf-modal-enhancement-actions-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = Directory.CreateTempSubdirectory("photoviewer-wpf-modal-enhancement-actions-").FullName;
         string folder = Path.Combine(smokeRoot, "images");
         string sourcePath = Path.Combine(folder, "enhance-source.png");
         string canonicalSourceRoot = Path.Combine(smokeRoot, "canonical-source");
@@ -13336,12 +13336,60 @@ public partial class App : Application
         }, DispatcherPriority.ContextIdle);
     }
 
+    private static bool IsPathInsideForSmoke(string candidate, string root)
+    {
+        string normalizedCandidate = Path.GetFullPath(candidate);
+        string normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        string rootPrefix = normalizedRoot + Path.DirectorySeparatorChar;
+        return string.Equals(normalizedCandidate, normalizedRoot, StringComparison.OrdinalIgnoreCase)
+            || normalizedCandidate.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveFinalPathForSmoke(string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        string root = Path.GetPathRoot(fullPath) ?? throw new IOException("path root is unavailable");
+        string current = root;
+        string[] parts = fullPath[root.Length..].Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        for (int index = 0; index < parts.Length; index++)
+        {
+            string candidate = Path.Combine(current, parts[index]);
+            if (!File.Exists(candidate) && !Directory.Exists(candidate))
+            {
+                for (int remainder = index; remainder < parts.Length; remainder++)
+                    current = Path.Combine(current, parts[remainder]);
+                return Path.GetFullPath(current);
+            }
+
+            FileSystemInfo info = Directory.Exists(candidate) ? new DirectoryInfo(candidate) : new FileInfo(candidate);
+            if (info.LinkTarget is null)
+            {
+                current = candidate;
+                continue;
+            }
+
+            FileSystemInfo? resolved = info.ResolveLinkTarget(returnFinalTarget: true);
+            if (resolved is null)
+                throw new IOException($"cannot resolve link target: {candidate}");
+            current = Path.GetFullPath(resolved.FullName);
+        }
+
+        return Path.GetFullPath(current);
+    }
+
+    private static bool IsFinalPathInsideForSmoke(string candidate, string finalRoot)
+        => IsPathInsideForSmoke(ResolveFinalPathForSmoke(candidate), finalRoot);
+
     private void CaptureH25EnhancementCompanionSmoke(string resultPath, string[] args)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
         string fixtureRoot = Path.GetFullPath(ArgValue(args, "--fixture-root")
             ?? throw new ArgumentException("--fixture-root is required"));
-        string tempPrefix = Path.GetFullPath(Path.GetTempPath())
+        string tempRoot = Path.GetFullPath(Path.GetTempPath());
+        string tempPrefix = tempRoot
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
         string fixturePrefix = fixtureRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
@@ -13356,11 +13404,18 @@ public partial class App : Application
             throw new ArgumentException("H25 companion smoke paths and phase must be bounded under TEMP");
         }
 
+        string finalTempRoot = ResolveFinalPathForSmoke(tempRoot);
+        string finalFixtureRoot = ResolveFinalPathForSmoke(fixtureRoot);
+        if (!IsPathInsideForSmoke(finalFixtureRoot, finalTempRoot))
+            throw new ArgumentException("H25 companion smoke fixture escaped TEMP through a reparse point");
+
+        string sharedRoot = Path.Combine(fixtureRoot, "s");
+        string wpfLocalRoot = Path.Combine(fixtureRoot, "w");
         string imagesRoot = Path.Combine(fixtureRoot, "images");
         string sourcePath = Path.Combine(imagesRoot, sourceName);
-        string jobsPath = Path.GetFullPath(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH")
-            ?? throw new InvalidOperationException("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH is required"));
-        string metadataIndexDirectory = Path.GetFullPath(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY")
+        string jobsPath = Path.Combine(sharedRoot, "enhance", "jobs.json");
+        string metadataIndexDirectory = Path.Combine(wpfLocalRoot, "metadata-index");
+        string configuredMetadataIndexDirectory = Path.GetFullPath(Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY")
             ?? throw new InvalidOperationException("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY is required"));
         string[] fileEnvironmentNames =
         [
@@ -13373,6 +13428,17 @@ public partial class App : Application
             "PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH",
             "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH",
         ];
+        var expectedStorePaths = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["PHOTOVIEWER_WPF_STATE_PATH"] = Path.Combine(wpfLocalRoot, "state.json"),
+            ["PHOTOVIEWER_WPF_FAVORITES_PATH"] = Path.Combine(sharedRoot, "favorites.json"),
+            ["PHOTOVIEWER_WPF_SEEN_PATH"] = Path.Combine(sharedRoot, "seen.json"),
+            ["PHOTOVIEWER_WPF_RECENT_PATH"] = Path.Combine(sharedRoot, "recent-folders.json"),
+            ["PHOTOVIEWER_WPF_SETTINGS_PATH"] = Path.Combine(sharedRoot, "settings.json"),
+            ["PHOTOVIEWER_WPF_ALBUMS_PATH"] = Path.Combine(sharedRoot, "albums.json"),
+            ["PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH"] = Path.Combine(sharedRoot, "search-history.json"),
+            ["PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"] = jobsPath,
+        };
         var storePaths = fileEnvironmentNames.ToDictionary(
             static name => name,
             name => Path.GetFullPath(Environment.GetEnvironmentVariable(name)
@@ -13380,13 +13446,20 @@ public partial class App : Application
             StringComparer.Ordinal);
         var storePathIsolation = storePaths.ToDictionary(
             static pair => pair.Key,
-            pair => pair.Value.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase),
+            pair => string.Equals(pair.Value, expectedStorePaths[pair.Key], StringComparison.OrdinalIgnoreCase)
+                && IsFinalPathInsideForSmoke(expectedStorePaths[pair.Key], finalFixtureRoot),
             StringComparer.Ordinal);
-        bool metadataIndexIsolated = metadataIndexDirectory.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase);
-        bool sourcePathIsolated = sourcePath.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase);
+        bool metadataIndexIsolated = string.Equals(
+                configuredMetadataIndexDirectory,
+                metadataIndexDirectory,
+                StringComparison.OrdinalIgnoreCase)
+            && IsFinalPathInsideForSmoke(metadataIndexDirectory, finalFixtureRoot);
+        bool sourcePathIsolated = IsFinalPathInsideForSmoke(sourcePath, finalFixtureRoot);
+        bool resultPathIsolated = IsFinalPathInsideForSmoke(resultFullPath, finalFixtureRoot);
         bool pathsIsolated = storePathIsolation.Values.All(static isolated => isolated)
             && metadataIndexIsolated
-            && sourcePathIsolated;
+            && sourcePathIsolated
+            && resultPathIsolated;
         string configuredBaseUrl = Environment.GetEnvironmentVariable("PHOTOVIEWER_BROWSER_BASE_URL") ?? "";
         bool loopbackOnly = Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out Uri? companionUri)
             && companionUri.IsLoopback
@@ -13453,6 +13526,7 @@ public partial class App : Application
                         .ToArray(),
                     ["metadataIndexIsolated"] = metadataIndexIsolated,
                     ["sourcePathIsolated"] = sourcePathIsolated,
+                    ["resultPathIsolated"] = resultPathIsolated,
                     ["loopbackOnly"] = loopbackOnly,
                     ["checkpoints"] = checkpoints.ToArray(),
                     ["jobId"] = jobId,
@@ -13482,6 +13556,9 @@ public partial class App : Application
                     throw new InvalidOperationException("companion smoke did not receive TEMP-only stores and an explicit 127.0.0.1 endpoint");
                 RecordCheckpoint("isolation-accepted");
                 Directory.CreateDirectory(imagesRoot);
+                // The configured value was matched to this fixed path and its
+                // final target was proven to remain inside finalFixtureRoot.
+                // codeql[cs/path-injection]
                 Directory.CreateDirectory(metadataIndexDirectory);
                 if (!File.Exists(sourcePath))
                     WriteSmokePng(sourcePath, 320, 240, Color.FromRgb(76, 132, 196));
