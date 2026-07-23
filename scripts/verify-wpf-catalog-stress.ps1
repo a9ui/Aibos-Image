@@ -4,6 +4,7 @@ param(
     [switch]$SkipBuild,
     [int]$Count = 20000,
     [int]$FolderCount = 1,
+    [int]$ViewportChurnSeconds = 0,
     [string]$OutputPath = (Join-Path $env:TEMP ("photoviewer-wpf-catalog-stress-" + [guid]::NewGuid().ToString('N') + ".json")),
     [int]$UnresponsiveStreakLimitMs = 750,
     [int]$OverallTimeoutSeconds = 90
@@ -12,6 +13,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Count -lt 2) { throw 'Count must be at least 2.' }
 if ($FolderCount -lt 1 -or $FolderCount -gt $Count) { throw 'FolderCount must be between 1 and Count.' }
+if ($ViewportChurnSeconds -lt 0 -or $ViewportChurnSeconds -gt 120) { throw 'ViewportChurnSeconds must be between 0 and 120.' }
 if ($OutputPath.Contains('"')) { throw 'OutputPath cannot contain a double quote.' }
 if ($UnresponsiveStreakLimitMs -lt 1) { throw 'UnresponsiveStreakLimitMs must be positive.' }
 if ($OverallTimeoutSeconds -lt 1) { throw 'OverallTimeoutSeconds must be positive.' }
@@ -72,7 +74,7 @@ $unresponsiveSegments = [Collections.Generic.List[object]]::new()
 $overallTimeoutMs = [int64]$OverallTimeoutSeconds * 1000
 try {
     $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--catalog-stress-smoke', ('"{0}"' -f $outputFullPath), '--count', $Count.ToString(), '--folder-count', $FolderCount.ToString()) `
+        -ArgumentList @('--catalog-stress-smoke', ('"{0}"' -f $outputFullPath), '--count', $Count.ToString(), '--folder-count', $FolderCount.ToString(), '--viewport-churn-seconds', $ViewportChurnSeconds.ToString()) `
         -WindowStyle Hidden -PassThru
     $spawnedProcessId = $process.Id
     $overallWatch.Start()
@@ -312,7 +314,7 @@ else {
     if ($result.warm.heartbeatCount -lt 4) { $structuralFailures += "warm dispatcher heartbeat count was $($result.warm.heartbeatCount)" }
     if ($null -eq $result.warm.dispatcherHeartbeatMaxGapMs -or $result.warm.dispatcherHeartbeatMaxGapMs -gt $UnresponsiveStreakLimitMs) { $structuralFailures += "warm dispatcher heartbeat gap was $($result.warm.dispatcherHeartbeatMaxGapMs) ms (limit $UnresponsiveStreakLimitMs ms)" }
     if ($result.warm.enhancementJobsRead -ne 0 -or $result.warm.enhancementCandidates -ne 0) { $structuralFailures += 'warm load touched enhancement state' }
-    foreach ($timingName in @('loadElapsedMs', 'loadMetricsTotalElapsedMs', 'scanElapsedMs', 'materializeElapsedMs', 'catalogReadyElapsedMs', 'metadataElapsedMs', 'metadataIndexReadMs', 'metadataIndexWriteMs')) {
+    foreach ($timingName in @('loadElapsedMs', 'loadMetricsTotalElapsedMs', 'scanElapsedMs', 'materializeElapsedMs', 'catalogReadyElapsedMs', 'firstUsableViewportElapsedMs', 'metadataElapsedMs', 'metadataIndexReadMs', 'metadataIndexWriteMs')) {
         if ($null -eq $result.warm.$timingName -or [double]$result.warm.$timingName -lt 0) {
             $structuralFailures += "warm timing $timingName was missing or negative"
         }
@@ -320,6 +322,10 @@ else {
 }
 if ($null -eq $windowHandleSeenMs -or $probeCount -lt 1) { $structuralFailures += 'external WM_NULL probe never observed the WPF window' }
 if ($longestUnresponsiveStreakMs -gt $UnresponsiveStreakLimitMs) { $structuralFailures += "external WM_NULL unresponsive streak was $longestUnresponsiveStreakMs ms (limit $UnresponsiveStreakLimitMs ms)" }
+if ($null -eq $result.firstUsableViewportElapsedMs -or [double]$result.firstUsableViewportElapsedMs -lt [double]$result.catalogReadyElapsedMs) { $structuralFailures += "first usable viewport timing was invalid ($($result.firstUsableViewportElapsedMs) ms after catalog $($result.catalogReadyElapsedMs) ms)" }
+if ($ViewportChurnSeconds -gt 0 -and $result.viewportChurn.ok -ne $true) {
+    $structuralFailures += "viewport churn failed (selection loss $($result.viewportChurn.selectionLossCount), stale preview $($result.viewportChurn.stalePreviewCount), thumbnail timeout $($result.viewportChurn.thumbnailTimeoutCount), selection p95 $($result.viewportChurn.selectionP95Ms) ms, preview p95 $($result.viewportChurn.cachedPreviewP95Ms) ms, stalls $($result.viewportChurn.uiStallsOver250Ms), working-set regression $($result.viewportChurn.workingSetRegressionPercent)%, resident $($result.viewportChurn.maxResidentThumbnailCount)/$($result.viewportChurn.residentThumbnailLimit), workers $($result.viewportChurn.maxActiveThumbnailWorkers)/$($result.viewportChurn.thumbnailWorkerLimit))"
+}
 if ($null -eq $result.dispatcherHeartbeatMaxGapMs -or $result.dispatcherHeartbeatMaxGapMs -gt $UnresponsiveStreakLimitMs) { $structuralFailures += "dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms (limit $UnresponsiveStreakLimitMs ms)" }
 
 $resultJson = $result | ConvertTo-Json -Depth 8
