@@ -4484,18 +4484,13 @@ public partial class App : Application
         string outputPath = Path.GetFullPath(path);
         string outputDirectory = Path.GetDirectoryName(outputPath) ?? Path.GetTempPath();
         string tempDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
-        string relativeOutput = Path.GetRelativePath(tempDirectory, outputPath);
         string outputFileName = Path.GetFileName(outputPath);
-        bool outputIsInsideTemp = !Path.IsPathRooted(relativeOutput)
-            && !relativeOutput.Equals("..", StringComparison.Ordinal)
-            && !relativeOutput.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-            && !relativeOutput.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
-        if (!outputIsInsideTemp
+        bool outputIsDirectTempChild = outputDirectory.Equals(tempDirectory, StringComparison.OrdinalIgnoreCase);
+        if (!outputIsDirectTempChild
             || !outputFileName.StartsWith("aibos-album-library-", StringComparison.OrdinalIgnoreCase)
-            || !Path.GetExtension(outputPath).Equals(".png", StringComparison.OrdinalIgnoreCase)
-            || !Directory.Exists(outputDirectory))
+            || !Path.GetExtension(outputPath).Equals(".png", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Album Library audit captures require an existing TEMP directory and an aibos-album-library-*.png filename.");
+            throw new InvalidOperationException("Album Library audit captures require a direct OS TEMP child named aibos-album-library-*.png.");
         }
         int shotWidth = Math.Clamp(ArgInt(args.ToArray(), "--shot-width", 1120), 980, 3840);
         int shotHeight = Math.Clamp(ArgInt(args.ToArray(), "--shot-height", 760), 560, 2160);
