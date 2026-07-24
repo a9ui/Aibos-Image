@@ -1227,6 +1227,7 @@ public partial class MainWindow : Window
         double ResetGeneratorRemoveMs = 0,
         double ResetForgetDeferredMeasureMs = 0,
         double ResetRemoveInternalChildRangeMs = 0,
+        double ResetRemoveInternalChildRangeThreadCpuMs = 0,
         double ResetPanelTotalMs = 0);
 
     private sealed class CatalogLayoutCache
@@ -1299,6 +1300,9 @@ public partial class MainWindow : Window
         long ApplyMs = 0,
         long CleanupMs = 0,
         int Gen2Collections = 0,
+        int Gen0Collections = 0,
+        int Gen1Collections = 0,
+        double GcPauseMs = 0,
         long MaxApplySliceMs = 0,
         long Generation = 0,
         long PublishMs = 0,
@@ -1313,6 +1317,7 @@ public partial class MainWindow : Window
         double ResetGeneratorRemoveMs = 0,
         double ResetForgetDeferredMeasureMs = 0,
         double ResetRemoveInternalChildRangeMs = 0,
+        double ResetRemoveInternalChildRangeThreadCpuMs = 0,
         double ResetPanelTotalMs = 0,
         bool PreparedLayoutReady = false)
     {
@@ -7811,7 +7816,10 @@ public partial class MainWindow : Window
     {
         var cts = new CancellationTokenSource();
         _catalogProjectionCts = cts;
+        int gen0Before = GC.CollectionCount(0);
+        int gen1Before = GC.CollectionCount(1);
         int gen2Before = GC.CollectionCount(2);
+        TimeSpan gcPauseBefore = GC.GetTotalPauseDuration();
         var captureWatch = Stopwatch.StartNew();
         FilterSnapshot snapshot = CaptureFilterSnapshot(request);
         captureWatch.Stop();
@@ -7907,6 +7915,9 @@ public partial class MainWindow : Window
             ApplyMs = applyMs,
             CleanupMs = cleanupMs,
             Gen2Collections = GC.CollectionCount(2) - gen2Before,
+            Gen0Collections = GC.CollectionCount(0) - gen0Before,
+            Gen1Collections = GC.CollectionCount(1) - gen1Before,
+            GcPauseMs = (GC.GetTotalPauseDuration() - gcPauseBefore).TotalMilliseconds,
             MaxApplySliceMs = maxApplySliceMs,
             Generation = request.Generation,
             PublishMs = applyMetrics.PublishMs,
@@ -7921,6 +7932,8 @@ public partial class MainWindow : Window
             ResetGeneratorRemoveMs = applyMetrics.ResetGeneratorRemoveMs,
             ResetForgetDeferredMeasureMs = applyMetrics.ResetForgetDeferredMeasureMs,
             ResetRemoveInternalChildRangeMs = applyMetrics.ResetRemoveInternalChildRangeMs,
+            ResetRemoveInternalChildRangeThreadCpuMs =
+                applyMetrics.ResetRemoveInternalChildRangeThreadCpuMs,
             ResetPanelTotalMs = applyMetrics.ResetPanelTotalMs,
             PreparedLayoutReady = result?.PreparedLayout is not null,
         });
@@ -9639,6 +9652,22 @@ public partial class MainWindow : Window
         // any WPF enumerator that was already in flight.
     }
 
+    private static void CheckCatalogWorkerInputHandoff(
+        int index,
+        CancellationToken cancellationToken)
+    {
+        if ((index & 63) != 0)
+            return;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (index > 0
+            && cancellationToken.CanBeCanceled
+            && (index & 2047) == 0)
+        {
+            Thread.Yield();
+        }
+    }
+
     private static FilterResult ComputeFilterResult(FilterSnapshot snapshot, CancellationToken cancellationToken)
     {
         bool unfiltered = !snapshot.AlbumActive
@@ -9690,8 +9719,7 @@ public partial class MainWindow : Window
             : new List<int>(Math.Min(snapshot.TileCount, 4_096));
         for (int index = 0; index < snapshot.TileCount; index++)
         {
-            if ((index & 63) == 0)
-                cancellationToken.ThrowIfCancellationRequested();
+            CheckCatalogWorkerInputHandoff(index, cancellationToken);
 
             FilterTileSnapshot tile = snapshot.Tiles[index];
             if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot))
@@ -9733,8 +9761,7 @@ public partial class MainWindow : Window
         {
             for (int filteredIndex = 0; filteredIndex < filteredCount; filteredIndex++)
             {
-                if ((filteredIndex & 63) == 0)
-                    cancellationToken.ThrowIfCancellationRequested();
+                CheckCatalogWorkerInputHandoff(filteredIndex, cancellationToken);
                 FilterTileSnapshot tile = snapshot.Tiles[matchedIndices![filteredIndex]];
                 filtered[filteredIndex] = tile.Tile;
                 if (filteredLayoutItems is not null)
@@ -9745,6 +9772,7 @@ public partial class MainWindow : Window
         {
             for (int index = 0; index < snapshot.TileCount; index++)
             {
+                CheckCatalogWorkerInputHandoff(index, cancellationToken);
                 FilterTileSnapshot tile = snapshot.Tiles[index];
                 filteredLayoutItems[index] = new VirtualizingLayoutItem(tile.Group, tile.CardHeight);
             }
@@ -9795,6 +9823,7 @@ public partial class MainWindow : Window
         bool activePreviewIncluded = false;
         for (int index = 0; index < filteredCount; index++)
         {
+            CheckCatalogWorkerInputHandoff(index, cancellationToken);
             Tile tile = filtered[index];
             if (!string.IsNullOrWhiteSpace(snapshot.PrimarySelectedPath)
                 && string.Equals(tile.Path, snapshot.PrimarySelectedPath, StringComparison.OrdinalIgnoreCase))
@@ -9989,6 +10018,7 @@ public partial class MainWindow : Window
         double resetGeneratorRemoveMs = 0;
         double resetForgetDeferredMeasureMs = 0;
         double resetRemoveInternalChildRangeMs = 0;
+        double resetRemoveInternalChildRangeThreadCpuMs = 0;
         double resetPanelTotalMs = 0;
         var slice = Stopwatch.StartNew();
 
@@ -10038,6 +10068,8 @@ public partial class MainWindow : Window
                         resetGeneratorRemoveMs = resetSlice.GeneratorRemoveMs;
                         resetForgetDeferredMeasureMs = resetSlice.ForgetDeferredMeasureMs;
                         resetRemoveInternalChildRangeMs = resetSlice.RemoveInternalChildRangeMs;
+                        resetRemoveInternalChildRangeThreadCpuMs =
+                            resetSlice.RemoveInternalChildRangeThreadCpuMs;
                         resetPanelTotalMs = resetSlice.PanelTotalMs;
                     }
                     if (resetPreparationComplete)
@@ -10071,6 +10103,7 @@ public partial class MainWindow : Window
                     resetGeneratorRemoveMs,
                     resetForgetDeferredMeasureMs,
                     resetRemoveInternalChildRangeMs,
+                    resetRemoveInternalChildRangeThreadCpuMs,
                     resetPanelTotalMs);
             }
 
@@ -10211,6 +10244,7 @@ public partial class MainWindow : Window
             resetGeneratorRemoveMs,
             resetForgetDeferredMeasureMs,
             resetRemoveInternalChildRangeMs,
+            resetRemoveInternalChildRangeThreadCpuMs,
             resetPanelTotalMs);
     }
 

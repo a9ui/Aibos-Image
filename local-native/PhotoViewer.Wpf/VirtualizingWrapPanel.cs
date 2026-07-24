@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Collections.Specialized;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -28,6 +29,7 @@ internal readonly record struct ItemsResetPreparationSlice(
     double GeneratorRemoveMs,
     double ForgetDeferredMeasureMs,
     double RemoveInternalChildRangeMs,
+    double RemoveInternalChildRangeThreadCpuMs,
     double PanelTotalMs);
 
 internal readonly record struct VirtualizingLayoutContext(
@@ -77,6 +79,18 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private const int DenseContainersPerMeasure = 16;
     private const int RealizationContinuationDelayMilliseconds = 16;
     private static readonly Brush ProgressivePlaceholderBrush = CreateProgressivePlaceholderBrush();
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentThread();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetThreadTimes(
+        IntPtr thread,
+        out long creationTime,
+        out long exitTime,
+        out long kernelTime,
+        out long userTime);
 
     public static readonly DependencyProperty ItemWidthProperty = DependencyProperty.Register(
         nameof(ItemWidth),
@@ -292,6 +306,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         double generatorRemoveMs = 0;
         double forgetDeferredMeasureMs = 0;
         double removeInternalChildRangeMs = 0;
+        double removeInternalChildRangeThreadCpuMs = 0;
         long sliceStarted = Stopwatch.GetTimestamp();
         if (_itemsResetGeneratorPosition >= 0)
         {
@@ -303,7 +318,9 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             long generatorFinished = Stopwatch.GetTimestamp();
             ForgetDeferredMeasureRange(childIndex, 1);
             long forgetFinished = Stopwatch.GetTimestamp();
+            long visualCpuStarted = ReadCurrentThreadCpuTimeTicks();
             RemoveInternalChildRange(childIndex, 1);
+            long visualCpuFinished = ReadCurrentThreadCpuTimeTicks();
             long visualFinished = Stopwatch.GetTimestamp();
             generatorRemoveMs =
                 Stopwatch.GetElapsedTime(generatorStarted, generatorFinished).TotalMilliseconds;
@@ -311,6 +328,10 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 Stopwatch.GetElapsedTime(generatorFinished, forgetFinished).TotalMilliseconds;
             removeInternalChildRangeMs =
                 Stopwatch.GetElapsedTime(forgetFinished, visualFinished).TotalMilliseconds;
+            removeInternalChildRangeThreadCpuMs =
+                visualCpuStarted >= 0 && visualCpuFinished >= visualCpuStarted
+                    ? TimeSpan.FromTicks(visualCpuFinished - visualCpuStarted).TotalMilliseconds
+                    : -1;
             _itemsResetGeneratorPosition--;
         }
 
@@ -319,7 +340,20 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             generatorRemoveMs,
             forgetDeferredMeasureMs,
             removeInternalChildRangeMs,
+            removeInternalChildRangeThreadCpuMs,
             Stopwatch.GetElapsedTime(sliceStarted).TotalMilliseconds);
+    }
+
+    private static long ReadCurrentThreadCpuTimeTicks()
+    {
+        return GetThreadTimes(
+            GetCurrentThread(),
+            out _,
+            out _,
+            out long kernelTime,
+            out long userTime)
+            ? kernelTime + userTime
+            : -1;
     }
 
     internal void CompleteItemsResetPreparation()

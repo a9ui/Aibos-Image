@@ -10548,6 +10548,8 @@ public partial class App : Application
                     catalogProjectionMaxDetachSample.ResetForgetDeferredMeasureMs;
                 double catalogProjectionMaxRemoveInternalChildRangeMs =
                     catalogProjectionMaxDetachSample.ResetRemoveInternalChildRangeMs;
+                double catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs =
+                    catalogProjectionMaxDetachSample.ResetRemoveInternalChildRangeThreadCpuMs;
                 double catalogProjectionMaxResetPanelTotalMs =
                     catalogProjectionMaxDetachSample.ResetPanelTotalMs;
                 string catalogProjectionDominantResetSubstep =
@@ -10675,6 +10677,8 @@ public partial class App : Application
                         catalogProjectionMaxForgetDeferredMeasureMs,
                     CatalogProjectionMaxRemoveInternalChildRangeMs =
                         catalogProjectionMaxRemoveInternalChildRangeMs,
+                    CatalogProjectionMaxRemoveInternalChildRangeThreadCpuMs =
+                        catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs,
                     CatalogProjectionMaxResetPanelTotalMs =
                         catalogProjectionMaxResetPanelTotalMs,
                     CatalogProjectionDominantResetSubstep =
@@ -24777,6 +24781,7 @@ public partial class App : Application
         public double CatalogProjectionMaxGeneratorRemoveMs { get; init; }
         public double CatalogProjectionMaxForgetDeferredMeasureMs { get; init; }
         public double CatalogProjectionMaxRemoveInternalChildRangeMs { get; init; }
+        public double CatalogProjectionMaxRemoveInternalChildRangeThreadCpuMs { get; init; }
         public double CatalogProjectionMaxResetPanelTotalMs { get; init; }
         public string CatalogProjectionDominantResetSubstep { get; init; } = "";
         public long DispatcherHeartbeatBudgetMs { get; init; }

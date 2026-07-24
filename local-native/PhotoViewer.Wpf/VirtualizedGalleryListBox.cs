@@ -496,7 +496,15 @@ internal sealed class GalleryAutomationProjectionIndex
             for (int index = 0; index < count; index++)
             {
                 if ((index & 255) == 0)
+                {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (index > 0
+                        && cancellationToken.CanBeCanceled
+                        && (index & 2047) == 0)
+                    {
+                        Thread.Yield();
+                    }
+                }
                 Tile tile = items[index];
                 names.TryAdd(tile.FileName, index);
             }

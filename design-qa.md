@@ -166,6 +166,38 @@ No actionable P0, P1, or P2 mismatch remains in the selected five-state WPF dire
 
 final result: passed
 
+## M3 background-scan handoff and off-CPU attribution
+
+- Exact hosted diagnostic candidate
+  `35cdacdd6336b3498a17fd7d65376bc65af13424` failed only one 55 ms Input
+  heartbeat during `search-clear-2`; the unchanged budget is 50 ms. The same
+  operation had no Gen2 collection, a maximum Dispatcher-owned slice of 3 ms,
+  a 6 ms layout flush, and a 2.0927 ms reset-panel unit. Its reset sub-steps
+  were 0.2504 ms generator removal, 0.0017 ms deferred-measure cleanup, and
+  1.8393 ms visual removal.
+- Clear projections consistently spent longer in complete-catalog scans than
+  matching projections. The bounded repair retains the `Lowest` worker
+  priority and yields the worker quantum every 2,048 items only in
+  cancellation-enabled, non-sort linear scans and the Automation name-index
+  build. Synchronous compatibility paths, sort comparison, UI capture/apply,
+  and all hard limits are unchanged.
+- `RemoveInternalChildRange` attribution now also records Dispatcher-thread
+  CPU time through Windows `GetThreadTimes`. Per-projection diagnostics include
+  Gen0/Gen1/Gen2 collection deltas and `GC.GetTotalPauseDuration()` so an
+  elapsed outlier can be separated from code execution and GC suspension.
+- The first local handoff run made heartbeat green at 43 ms with
+  search/filter/sort P95 151/48/124 ms, Favorite eviction 29 ms, and exact
+  pending-broaden behavior. It failed only a 21.0821 ms reset-panel wall-time
+  sample whose visual removal accounted for 20.9669 ms.
+- With CPU and GC attribution enabled, a later local sample measured
+  27.0565 ms visual-removal wall time but 0 ms Dispatcher-thread CPU, zero
+  Gen0/Gen1/Gen2 collections, and zero GC pause for that same projection.
+  Heartbeat was green at 46 ms and every other contract passed. This proves
+  that reset outlier was an off-CPU host scheduling interval, not 27 ms of WPF
+  container teardown. The 12 ms reset limit remains unchanged.
+
+final result: pending exact hosted verification
+
 ## M3 Gallery Fold brand savepoint
 
 - The user selected Gallery Fold as the WPF brand direction.

@@ -135,11 +135,13 @@ if ($result.catalogProjectionSingleContainerDetachBudgetMs -ne 12 `
         "generator $($result.catalogProjectionMaxGeneratorRemoveMs) ms; " +
         "deferred-measure $($result.catalogProjectionMaxForgetDeferredMeasureMs) ms; " +
         "visual $($result.catalogProjectionMaxRemoveInternalChildRangeMs) ms; " +
+        "visual thread CPU $($result.catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs) ms; " +
         "panel total $($result.catalogProjectionMaxResetPanelTotalMs) ms)")
 }
 if ($result.catalogProjectionMaxSingleContainerDetachMs -gt 0 `
     -and ($result.catalogProjectionMaxResetPanelTotalMs -le 0 `
-        -or $result.catalogProjectionDominantResetSubstep -eq 'none')) {
+        -or $result.catalogProjectionDominantResetSubstep -eq 'none' `
+        -or $result.catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs -lt 0)) {
     $failures.Add('single-container reset sub-step attribution was missing')
 }
 if ($result.catalogProjectionMaxApplySliceMs -gt $result.catalogProjectionDiagnosticSliceTargetMs) {
