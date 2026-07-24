@@ -16,6 +16,8 @@ using System.Text.Json;
 using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
@@ -289,6 +291,11 @@ public partial class MainWindow : Window
     private string? _restoredSelectedPath;
     private string? _primarySelectedPath;
     private Tile? _primarySelectedTile;
+    private int _primarySelectedIndex = -1;
+    private long _galleryFocusRequestGeneration;
+    private string? _pendingGalleryFocusPath;
+    private int _pendingGalleryFocusIndex = -1;
+    private bool _pendingGalleryFocusGrid;
     private string? _activePreviewTabPath;
     private string? _restoredActivePreviewTabPath;
     private bool _previewTabsPersistenceReady = true;
@@ -720,6 +727,7 @@ public partial class MainWindow : Window
             e.FirstRealizedIndex,
             e.LastRealizedIndex);
         QueueSparseSelectionVisualSync(CardsList, grid: true);
+        TryCompletePendingGalleryFocus();
         ScheduleRememberCurrentGridViewportAnchor();
     }
 
@@ -768,10 +776,14 @@ public partial class MainWindow : Window
         }
 
         if (ReferenceEquals(generator, CardsList.ItemContainerGenerator))
+        {
             QueueSparseSelectionVisualSync(CardsList, grid: true);
+            TryCompletePendingGalleryFocus();
+        }
         else if (ReferenceEquals(generator, RowsList.ItemContainerGenerator))
         {
             QueueSparseSelectionVisualSync(RowsList, grid: false);
+            TryCompletePendingGalleryFocus();
             if (RowsList.Visibility == Visibility.Visible)
                 Dispatcher.BeginInvoke(ScheduleListThumbnailViewport, DispatcherPriority.Render);
         }
@@ -1131,6 +1143,7 @@ public partial class MainWindow : Window
         string? PrimarySelectedPath,
         string? PreviousSelectedPath,
         string? ActivePreviewTabPath,
+        bool RestoreGalleryFocus,
         bool SelectFirst,
         int? SelectionFallbackIndex,
         GridZoomAnchor? ViewportAnchor,
@@ -1174,6 +1187,7 @@ public partial class MainWindow : Window
         List<Tile>? OrderedCatalogTiles,
         Tile[] SelectedTiles,
         Tile? PreferredSelection,
+        int PreferredSelectionIndex,
         bool ActivePreviewIncluded,
         GridZoomAnchor? ViewportAnchor,
         PreparedVirtualizingLayout? PreparedLayout);
@@ -4460,6 +4474,7 @@ public partial class MainWindow : Window
                 {
                     _primarySelectedPath = null;
                     _primarySelectedTile = null;
+                    _primarySelectedIndex = -1;
                 }
                 _tiles.RemoveAt(index);
             }
@@ -6190,6 +6205,7 @@ public partial class MainWindow : Window
         if (_syncingSelection || sender is not ListBox lb)
             return;
 
+        CancelPendingGalleryFocus();
         bool collapseSparseSelection = _selectedPaths.Count > MaxMaterializedSelectionVisualItems
             && (_shortcutModifierProvider() & (ModifierKeys.Control | ModifierKeys.Shift)) == ModifierKeys.None;
         if (collapseSparseSelection)
@@ -6208,10 +6224,188 @@ public partial class MainWindow : Window
                 ?? SelectedTiles().LastOrDefault();
         _primarySelectedPath = primary?.Path;
         _primarySelectedTile = primary;
+        _primarySelectedIndex = primary is null
+            ? -1
+            : lb.SelectedIndex >= 0 && ReferenceEquals(lb.SelectedItem, primary)
+                ? lb.SelectedIndex
+                : _tiles.IndexOf(primary);
         _selectionVisualSyncGeneration++;
 
         SynchronizeSelectionControls();
-        ApplyPrimarySelection(primary);
+        ApplyPrimarySelection(primary, _primarySelectedIndex);
+    }
+
+    private void GalleryList_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not ListBox listBox
+            || listBox.Visibility != Visibility.Visible
+            || Modal.Visibility == Visibility.Visible
+            || DeleteConfirmationDialog.Visibility == Visibility.Visible
+            || BatchEnhancementDialog.Visibility == Visibility.Visible
+            || AppSettingsDialog.Visibility == Visibility.Visible
+            || EnhancementJobsDialog.Visibility == Visibility.Visible
+            || IsGlobalShortcutInputFocused(e.OriginalSource)
+            || _shortcutModifierProvider() != ModifierKeys.None)
+        {
+            return;
+        }
+
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        bool grid = ReferenceEquals(listBox, CardsList);
+        bool recognized = key is Key.Home or Key.End or Key.PageUp or Key.PageDown
+            || grid && key is Key.Left or Key.Right or Key.Up or Key.Down
+            || !grid && key is Key.Up or Key.Down;
+        if (!recognized)
+            return;
+
+        int currentIndex = ResolvePrimarySelectionIndex();
+        int targetIndex = ResolveGalleryNavigationTarget(listBox, key, currentIndex);
+        if (targetIndex < 0 || targetIndex >= _tiles.Count)
+            return;
+
+        if (targetIndex != currentIndex)
+        {
+            Tile target = _tiles[targetIndex];
+            CancelPendingGalleryFocus();
+            SetSelection([target], target, targetIndex);
+            QueuePrimaryGalleryFocus(target, targetIndex, grid);
+        }
+        e.Handled = true;
+    }
+
+    private int ResolveGalleryNavigationTarget(ListBox listBox, Key key, int currentIndex)
+    {
+        if (_tiles.Count == 0)
+            return -1;
+
+        int safeCurrent = currentIndex >= 0
+            ? Math.Clamp(currentIndex, 0, _tiles.Count - 1)
+            : key is Key.End or Key.PageUp or Key.Left or Key.Up
+                ? _tiles.Count - 1
+                : 0;
+        bool grid = ReferenceEquals(listBox, CardsList);
+        int columns = grid
+            ? Math.Max(1, _galleryVirtualizingPanel?.ColumnCount ?? 1)
+            : 1;
+        int pageSize;
+        if (grid)
+        {
+            int visible = Math.Max(
+                columns,
+                (_galleryVirtualizingPanel?.LastVisibleIndex ?? -1)
+                    - (_galleryVirtualizingPanel?.FirstVisibleIndex ?? 0)
+                    + 1);
+            pageSize = Math.Max(columns, visible);
+        }
+        else
+        {
+            int first = int.MaxValue;
+            int last = -1;
+            foreach (ListBoxItem container in FindVisualDescendants<ListBoxItem>(RowsList))
+            {
+                int index = RowsList.ItemContainerGenerator.IndexFromContainer(container);
+                if (index < 0)
+                    continue;
+                first = Math.Min(first, index);
+                last = Math.Max(last, index);
+            }
+            pageSize = first <= last ? Math.Max(1, last - first + 1) : 10;
+        }
+
+        int target = key switch
+        {
+            Key.Home => 0,
+            Key.End => _tiles.Count - 1,
+            Key.PageUp => safeCurrent - pageSize,
+            Key.PageDown => safeCurrent + pageSize,
+            Key.Left when grid => safeCurrent - 1,
+            Key.Right when grid => safeCurrent + 1,
+            Key.Up => safeCurrent - columns,
+            Key.Down => safeCurrent + columns,
+            _ => safeCurrent,
+        };
+        return Math.Clamp(target, 0, _tiles.Count - 1);
+    }
+
+    private int ResolvePrimarySelectionIndex()
+    {
+        Tile? primary = SelectedTile();
+        if (primary is null)
+            return -1;
+        if (_primarySelectedIndex >= 0
+            && _primarySelectedIndex < _tiles.Count
+            && ReferenceEquals(_tiles[_primarySelectedIndex], primary))
+        {
+            return _primarySelectedIndex;
+        }
+
+        _primarySelectedIndex = _tiles.IndexOf(primary);
+        return _primarySelectedIndex;
+    }
+
+    private void QueuePrimaryGalleryFocus(Tile tile, int index, bool grid)
+    {
+        if (index < 0
+            || index >= _tiles.Count
+            || !ReferenceEquals(_tiles[index], tile))
+        {
+            return;
+        }
+
+        _galleryFocusRequestGeneration++;
+        _pendingGalleryFocusPath = tile.Path;
+        _pendingGalleryFocusIndex = index;
+        _pendingGalleryFocusGrid = grid;
+        if (grid)
+        {
+            _galleryVirtualizingPanel?.BringItemIntoView(index);
+        }
+        else
+        {
+            RowsList.ScrollIntoView(tile);
+        }
+
+        long generation = _galleryFocusRequestGeneration;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (generation == _galleryFocusRequestGeneration)
+                TryCompletePendingGalleryFocus();
+        }, DispatcherPriority.Render);
+    }
+
+    private void TryCompletePendingGalleryFocus()
+    {
+        int index = _pendingGalleryFocusIndex;
+        string? path = _pendingGalleryFocusPath;
+        if (index < 0 || string.IsNullOrWhiteSpace(path))
+            return;
+
+        ListBox listBox = _pendingGalleryFocusGrid ? CardsList : RowsList;
+        if (listBox.Visibility != Visibility.Visible
+            || index >= _tiles.Count
+            || !string.Equals(_tiles[index].Path, path, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(_primarySelectedPath, path, StringComparison.OrdinalIgnoreCase)
+            || listBox.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem container
+            || !container.IsMeasureValid
+            || !container.IsVisible
+            || !container.IsEnabled)
+        {
+            return;
+        }
+
+        SelectRealizedContainer(listBox, _tiles[index]);
+        if (!container.Focus())
+            return;
+
+        _pendingGalleryFocusPath = null;
+        _pendingGalleryFocusIndex = -1;
+    }
+
+    private void CancelPendingGalleryFocus()
+    {
+        _galleryFocusRequestGeneration++;
+        _pendingGalleryFocusPath = null;
+        _pendingGalleryFocusIndex = -1;
     }
 
     private IReadOnlyList<Tile> SelectedTiles()
@@ -6223,8 +6417,12 @@ public partial class MainWindow : Window
         return _tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList();
     }
 
-    private void SetSelection(IEnumerable<Tile> selectedTiles, Tile? primary)
+    private void SetSelection(
+        IEnumerable<Tile> selectedTiles,
+        Tile? primary,
+        int? primaryIndex = null)
     {
+        CancelPendingGalleryFocus();
         _selectedPaths.Clear();
         if (selectedTiles is IReadOnlyCollection<Tile> collection
             && collection.Count > MaxMaterializedSelectionVisualItems)
@@ -6249,10 +6447,17 @@ public partial class MainWindow : Window
             : SelectedTiles().LastOrDefault();
         _primarySelectedPath = effectivePrimary?.Path;
         _primarySelectedTile = effectivePrimary;
+        _primarySelectedIndex = effectivePrimary is null
+            ? -1
+            : primaryIndex is >= 0
+                && primaryIndex < _tiles.Count
+                && ReferenceEquals(_tiles[primaryIndex.Value], effectivePrimary)
+                    ? primaryIndex.Value
+                    : _tiles.IndexOf(effectivePrimary);
         _selectionVisualSyncGeneration++;
 
         SynchronizeSelectionControls();
-        ApplyPrimarySelection(effectivePrimary);
+        ApplyPrimarySelection(effectivePrimary, _primarySelectedIndex);
     }
 
     private void SynchronizeSelectionControls(IReadOnlyList<Tile>? knownMaterializedSelection = null)
@@ -6397,7 +6602,7 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Render);
     }
 
-    private void ApplyPrimarySelection(Tile? primary)
+    private void ApplyPrimarySelection(Tile? primary, int projectedIndex = -1)
     {
         if (primary is null)
         {
@@ -6409,7 +6614,11 @@ public partial class MainWindow : Window
         var cardsScrollWatch = Stopwatch.StartNew();
         if (CardsList.Visibility == Visibility.Visible)
         {
-            int index = _tiles.IndexOf(primary);
+            int index = projectedIndex >= 0
+                && projectedIndex < _tiles.Count
+                && ReferenceEquals(_tiles[projectedIndex], primary)
+                    ? projectedIndex
+                    : _tiles.IndexOf(primary);
             // ListBox.ScrollIntoView queues a second ItemContainerGenerator
             // navigation after a Reset. At 100k items that deferred WPF path
             // can monopolize the dispatcher seconds after filtering has already
@@ -9230,6 +9439,9 @@ public partial class MainWindow : Window
                 _primarySelectedPath,
                 previous?.Path,
                 _activePreviewTabPath,
+                Keyboard.FocusedElement is DependencyObject focused
+                    && (IsDescendantOrSelf(focused, CardsList)
+                        || IsDescendantOrSelf(focused, RowsList)),
                 request?.SelectFirst ?? selectFirst,
                 request?.SelectionFallbackIndex ?? selectionFallbackIndex,
                 request?.ViewportAnchor,
@@ -9466,6 +9678,9 @@ public partial class MainWindow : Window
         preferred ??= snapshot.SelectFirst && filteredCount > 0 ? filtered[0] : null;
         if (preferred is not null && survivingSelected.Count == 0)
             survivingSelected.Add(preferred);
+        int preferredIndex = preferred is null
+            ? -1
+            : Array.IndexOf(filtered, preferred, 0, filteredCount);
 
         PreparedVirtualizingLayout? preparedLayout = null;
         if (layoutContext is { } resolvedLayoutContext)
@@ -9499,6 +9714,7 @@ public partial class MainWindow : Window
             orderedCatalog,
             survivingSelected.ToArray(),
             preferred,
+            preferredIndex,
             activePreviewIncluded,
             snapshot.ViewportAnchor,
             preparedLayout);
@@ -9734,11 +9950,13 @@ public partial class MainWindow : Window
                 _selectedPaths.Add(preferred.Path);
             _primarySelectedPath = preferred.Path;
             _primarySelectedTile = preferred;
+            _primarySelectedIndex = filterResult.PreferredSelectionIndex;
         }
         else if (filterResult.Count == 0)
         {
             _primarySelectedPath = null;
             _primarySelectedTile = null;
+            _primarySelectedIndex = -1;
         }
         if (filterResult.PreparedLayout is null)
             _galleryVirtualizingPanel?.InvalidateItemLayout();
@@ -9764,7 +9982,7 @@ public partial class MainWindow : Window
                 preferred.Path,
                 StringComparison.OrdinalIgnoreCase);
         if (preferred is not null && !primarySelectionUnchanged)
-            ApplyPrimarySelection(preferred);
+            ApplyPrimarySelection(preferred, filterResult.PreferredSelectionIndex);
         else if (filterResult.Count == 0)
             SelectTile(null);
 
@@ -9776,6 +9994,15 @@ public partial class MainWindow : Window
         ReconcileOpenSurfacesAfterFilterChange(filterResult.ActivePreviewIncluded);
         if (filterResult.ViewportAnchor is not null)
             ScheduleGridGeometryAnchorRestore(filterResult.ViewportAnchor);
+        if (snapshot.RestoreGalleryFocus
+            && preferred is not null
+            && filterResult.PreferredSelectionIndex >= 0)
+        {
+            QueuePrimaryGalleryFocus(
+                preferred,
+                filterResult.PreferredSelectionIndex,
+                RowsList.Visibility != Visibility.Visible);
+        }
         ScheduleCatalogStatsUpdate(generation);
         reconcileMs = FinishSlice();
         return new CatalogProjectionApplyMetrics(
@@ -9883,6 +10110,7 @@ public partial class MainWindow : Window
                 _selectedPaths.Add(preferred.Path);
             _primarySelectedPath = preferred.Path;
             _primarySelectedTile = preferred;
+            _primarySelectedIndex = _tiles.IndexOf(preferred);
             _selectionVisualSyncGeneration++;
             SynchronizeSelectionControls();
             ApplyPrimarySelection(preferred);
@@ -10034,9 +10262,9 @@ public partial class MainWindow : Window
         SelectTile(restored ?? (_tiles.Count > 0 ? _tiles[0] : null));
     }
 
-    private void SelectTile(Tile? tile)
+    private void SelectTile(Tile? tile, int projectedIndex = -1)
     {
-        SetSelection(tile is null ? [] : [tile], tile);
+        SetSelection(tile is null ? [] : [tile], tile, projectedIndex);
     }
 
     private void ClearPreview()
@@ -11119,6 +11347,8 @@ public partial class MainWindow : Window
     private void ModeGrid_Checked(object sender, RoutedEventArgs e)
     {
         if (CardsList is null || RowsList is null) return;
+        bool restoreGalleryFocus = Keyboard.FocusedElement is DependencyObject focused
+            && IsDescendantOrSelf(focused, RowsList);
         Tile? selected = SelectedTile();
         CardsList.Visibility = Visibility.Visible;
         RowsList.Visibility = Visibility.Collapsed;
@@ -11128,6 +11358,8 @@ public partial class MainWindow : Window
             SynchronizeSelectionControls();
             CardsList.ScrollIntoView(selected);
             QueueGridSelectionVisualSync(selected);
+            if (restoreGalleryFocus)
+                QueuePrimaryGalleryFocus(selected, ResolvePrimarySelectionIndex(), grid: true);
         }
         else
             SynchronizeSelectionControls();
@@ -11137,6 +11369,8 @@ public partial class MainWindow : Window
     private void ModeList_Checked(object sender, RoutedEventArgs e)
     {
         if (CardsList is null || RowsList is null) return;
+        bool restoreGalleryFocus = Keyboard.FocusedElement is DependencyObject focused
+            && IsDescendantOrSelf(focused, CardsList);
         Tile? selected = SelectedTile();
         CardsList.Visibility = Visibility.Collapsed;
         RowsList.Visibility = Visibility.Visible;
@@ -11147,6 +11381,8 @@ public partial class MainWindow : Window
             RowsList.ScrollIntoView(selected);
             SelectRealizedContainer(RowsList, selected);
             QueueListSelectionVisualSync(selected);
+            if (restoreGalleryFocus)
+                QueuePrimaryGalleryFocus(selected, ResolvePrimarySelectionIndex(), grid: false);
         }
         Dispatcher.BeginInvoke(ScheduleListThumbnailViewport, DispatcherPriority.Render);
         SizeSlider.IsEnabled = false;
@@ -13667,6 +13903,12 @@ public partial class MainWindow : Window
                 StringComparison.OrdinalIgnoreCase)
             && _selectedPaths.Contains(cachedPrimary.Path))
         {
+            if (_primarySelectedIndex < 0
+                || _primarySelectedIndex >= _tiles.Count
+                || !ReferenceEquals(_tiles[_primarySelectedIndex], cachedPrimary))
+            {
+                _primarySelectedIndex = _tiles.IndexOf(cachedPrimary);
+            }
             return cachedPrimary;
         }
 
@@ -13676,6 +13918,7 @@ public partial class MainWindow : Window
             if (primary is not null && _selectedPaths.Contains(primary.Path))
             {
                 _primarySelectedTile = primary;
+                _primarySelectedIndex = _tiles.IndexOf(primary);
                 return primary;
             }
         }
@@ -13689,6 +13932,7 @@ public partial class MainWindow : Window
             {
                 _primarySelectedTile = current;
                 _primarySelectedPath = current.Path;
+                _primarySelectedIndex = _tiles.IndexOf(current);
             }
             return current;
         }
@@ -13698,7 +13942,10 @@ public partial class MainWindow : Window
         {
             _primarySelectedTile = fallback;
             _primarySelectedPath = fallback.Path;
+            _primarySelectedIndex = _tiles.IndexOf(fallback);
         }
+        else
+            _primarySelectedIndex = -1;
         return fallback;
     }
 
@@ -15279,6 +15526,7 @@ public partial class MainWindow : Window
         {
             _primarySelectedPath = null;
             _primarySelectedTile = null;
+            _primarySelectedIndex = -1;
         }
         if (_restoredSelectedPath is not null && deletedPaths.Contains(_restoredSelectedPath))
             _restoredSelectedPath = null;
@@ -16445,6 +16693,7 @@ public partial class MainWindow : Window
 
         _primarySelectedPath = primary.Path;
         _primarySelectedTile = primary;
+        _primarySelectedIndex = _tiles.IndexOf(primary);
         _selectionVisualSyncGeneration++;
         SynchronizeSelectionControls();
         ApplyPrimarySelection(primary);
@@ -16459,6 +16708,7 @@ public partial class MainWindow : Window
         _selectedPaths.Clear();
         _primarySelectedPath = null;
         _primarySelectedTile = null;
+        _primarySelectedIndex = -1;
         _selectionVisualSyncGeneration++;
         SynchronizeSelectionControls();
         ApplyPrimarySelection(null);
@@ -16775,6 +17025,7 @@ public partial class MainWindow : Window
 
     public string? SelectedPathForSmoke => SelectedTile()?.Path;
     public string? SelectedFileNameForSmoke => SelectedTile()?.FileName;
+    public int SelectedIndexForSmoke => ResolvePrimarySelectionIndex();
     public static string BuildScanWarningForSmoke(int accessFailureCount, int boundarySkipCount, int unavailableRootCount, int decodeFailureCount)
         => BuildScanWarning(accessFailureCount, boundarySkipCount, unavailableRootCount, decodeFailureCount);
     public static List<string> SupportedImageExtensionsForSmoke
@@ -18172,6 +18423,128 @@ public partial class MainWindow : Window
             _shortcutModifierProvider = previous;
         }
     }
+
+    public bool InvokeGalleryNavigationKeyForSmoke(Key key)
+    {
+        ListBox activeList = RowsList.Visibility == Visibility.Visible ? RowsList : CardsList;
+        var source = PresentationSource.FromVisual(this);
+        if (source is null || activeList.Visibility != Visibility.Visible)
+            return false;
+
+        var args = new KeyEventArgs(Keyboard.PrimaryDevice, source, Environment.TickCount, key)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+            Source = activeList,
+        };
+        activeList.RaiseEvent(args);
+        return args.Handled;
+    }
+
+    public async Task<bool> WaitForPrimaryGalleryFocusForSmokeAsync(int timeoutMilliseconds = 2_000)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < timeoutMilliseconds)
+        {
+            TryCompletePendingGalleryFocus();
+            if (string.Equals(
+                    FocusedGalleryPathForSmoke,
+                    _primarySelectedPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            await Task.Delay(16);
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+        }
+        return false;
+    }
+
+    public string? FocusedGalleryPathForSmoke
+    {
+        get
+        {
+            for (DependencyObject? current = Keyboard.FocusedElement as DependencyObject;
+                 current is not null;
+                 current = current is Visual or System.Windows.Media.Media3D.Visual3D
+                     ? VisualTreeHelper.GetParent(current)
+                     : LogicalTreeHelper.GetParent(current))
+            {
+                if (current is ListBoxItem { DataContext: Tile tile })
+                    return tile.Path;
+            }
+            return null;
+        }
+    }
+
+    public GalleryAutomationItemSmokeSnapshot BeginGridAutomationRealizationForSmoke(int index)
+    {
+        if (index < 0 || index >= _tiles.Count)
+            return GalleryAutomationItemSmokeSnapshot.Unavailable(index);
+        if (UIElementAutomationPeer.CreatePeerForElement(CardsList)
+            is not VirtualizedGalleryListBoxAutomationPeer listPeer)
+        {
+            return GalleryAutomationItemSmokeSnapshot.Unavailable(index);
+        }
+
+        ItemAutomationPeer itemPeer = listPeer.GetOrCreateItemPeer(_tiles[index]);
+        object? virtualizedPattern = itemPeer.GetPattern(PatternInterface.VirtualizedItem);
+        object? selectionPattern = itemPeer.GetPattern(PatternInterface.SelectionItem);
+        bool virtualized = virtualizedPattern is IVirtualizedItemProvider;
+        if (virtualizedPattern is IVirtualizedItemProvider provider)
+            provider.Realize();
+        return new GalleryAutomationItemSmokeSnapshot(
+            index,
+            itemPeer.GetName(),
+            itemPeer.GetHelpText(),
+            virtualized,
+            selectionPattern is ISelectionItemProvider,
+            false,
+            false,
+            false,
+            false);
+    }
+
+    public bool SelectGridItemThroughAutomationForSmoke(int index)
+    {
+        if (index < 0
+            || index >= _tiles.Count
+            || UIElementAutomationPeer.CreatePeerForElement(CardsList)
+                is not VirtualizedGalleryListBoxAutomationPeer listPeer
+            || listPeer.GetOrCreateItemPeer(_tiles[index])
+                .GetPattern(PatternInterface.SelectionItem)
+                is not ISelectionItemProvider selectionProvider)
+        {
+            return false;
+        }
+
+        selectionProvider.Select();
+        return selectionProvider.IsSelected;
+    }
+
+    public GalleryAutomationItemSmokeSnapshot CaptureGridAutomationItemForSmoke(int index)
+    {
+        if (index < 0 || index >= _tiles.Count)
+            return GalleryAutomationItemSmokeSnapshot.Unavailable(index);
+
+        Tile tile = _tiles[index];
+        ListBoxItem? container = CardsList.ItemContainerGenerator.ContainerFromIndex(index) as ListBoxItem;
+        AutomationPeer? peer = container is null
+            ? null
+            : UIElementAutomationPeer.CreatePeerForElement(container);
+        string name = peer?.GetName() ?? (container is null ? "" : AutomationProperties.GetName(container));
+        string helpText = peer?.GetHelpText() ?? (container is null ? "" : AutomationProperties.GetHelpText(container));
+        bool selectedPattern = peer?.GetPattern(PatternInterface.SelectionItem) is ISelectionItemProvider;
+        return new GalleryAutomationItemSmokeSnapshot(
+            index,
+            name,
+            helpText,
+            false,
+            selectedPattern,
+            container is not null,
+            container?.IsSelected == true,
+            container?.IsKeyboardFocusWithin == true,
+            string.Equals(container?.DataContext is Tile bound ? bound.Path : null, tile.Path, StringComparison.OrdinalIgnoreCase));
+    }
     public bool InvokePreviewMouseWheelForSmoke(int delta, ModifierKeys modifiers)
         => InvokePreviewMouseWheelForSmoke(delta, modifiers, Keyboard.FocusedElement ?? CardsList);
 
@@ -18373,6 +18746,7 @@ public partial class MainWindow : Window
             _selectedPaths.Clear();
             _primarySelectedPath = null;
             _primarySelectedTile = null;
+            _primarySelectedIndex = -1;
         }
         finally
         {
@@ -19797,7 +20171,7 @@ public partial class MainWindow : Window
         if (index < 0 || index >= _tiles.Count)
             return false;
 
-        SelectTile(_tiles[index]);
+        SelectTile(_tiles[index], index);
         SaveState();
         return true;
     }
@@ -20479,6 +20853,21 @@ public sealed record ListSelectionVisualSmokeSnapshot(
     bool ContainerSelected,
     bool CanonicalMarkerVisible);
 
+public sealed record GalleryAutomationItemSmokeSnapshot(
+    int Index,
+    string Name,
+    string HelpText,
+    bool VirtualizedItemPatternAvailable,
+    bool SelectionItemPatternAvailable,
+    bool ContainerRealized,
+    bool ContainerSelected,
+    bool ContainerFocused,
+    bool ContainerBoundToExpectedItem)
+{
+    public static GalleryAutomationItemSmokeSnapshot Unavailable(int index)
+        => new(index, "", "", false, false, false, false, false, false);
+}
+
 public sealed record RightPreviewActionLayoutSmokeSnapshot(
     double PanelWidth,
     double AvailableWidth,
@@ -20919,6 +21308,8 @@ public sealed class Tile : INotifyPropertyChanged
     public long SourceCreationUtcTicks { get; set; }
     public string SizeText { get; set; } = "";
     public string ModifiedText { get; set; } = "";
+    public string AutomationHelpText
+        => $"{SizeText}. Favorite level {_fav}. {(_enhanced ? "AI-enhanced" : "Original")}. {(_unseen ? "Unseen" : "Seen")}.";
 
     private string _prompt = "";
     private int _imagePixelWidth;
@@ -20948,6 +21339,7 @@ public sealed class Tile : INotifyPropertyChanged
             _enhanced = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Enhanced)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowEnhancedBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
 
@@ -21041,6 +21433,7 @@ public sealed class Tile : INotifyPropertyChanged
             if (_unseen == value) return;
             _unseen = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Unseen)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
 
@@ -21068,6 +21461,7 @@ public sealed class Tile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Fav)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FavoriteGlyph)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
 

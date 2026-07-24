@@ -66,6 +66,31 @@ if ($result.searchP95Ms -gt 250 -or $result.filterP95Ms -gt 250 -or $result.sort
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")
 }
 if ($result.selectionStable -ne $true) { $failures.Add('selection did not survive search/filter/sort churn') }
+if ($result.keyboardNavigationExact -ne $true `
+    -or $result.keyboardEndExact -ne $true `
+    -or $result.keyboardBoundaryEndExact -ne $true `
+    -or $result.keyboardLetterIgnored -ne $true `
+    -or $result.keyboardHomeExact -ne $true `
+    -or $result.keyboardRightExact -ne $true `
+    -or $result.keyboardDownExact -ne $true `
+    -or $result.keyboardPageDownExact -ne $true) {
+    $failures.Add('100k keyboard Home/End/Page/arrow navigation was not exact')
+}
+if ($result.projectionFocusRestored -ne $true) {
+    $failures.Add('logical gallery focus was not restored after projection publication')
+}
+if ($result.automationVirtualizedItemExact -ne $true `
+    -or $result.automationRealizePreservedSelection -ne $true `
+    -or $result.automationSelectionExact -ne $true) {
+    $failures.Add('off-screen UI Automation realization/selection contract failed')
+}
+if ($result.recycledContainerStateReset -ne $true) {
+    $failures.Add('recycled gallery container retained stale automation, selection, or focus state')
+}
+if ($result.keyboardAccessibilityBounded -ne $true `
+    -or $result.keyboardAccessibilityMaxRealized -gt $result.gridRealizationLimit) {
+    $failures.Add('keyboard/UI Automation navigation exceeded the realized-container bound')
+}
 if ($result.gridItemsSourceCount -ne $Count -or $result.gridUsesFullExtentVirtualization -ne $true -or $result.gridRealizedCount -gt $result.gridRealizationLimit) {
     $failures.Add('100k gallery containers were not bounded by full-extent virtualization')
 }

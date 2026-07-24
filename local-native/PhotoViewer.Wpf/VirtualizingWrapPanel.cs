@@ -752,20 +752,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     }
 
     protected override void BringIndexIntoView(int index)
-    {
-        if (_itemsResetPreparationActive)
-            return;
-        ItemsControl? owner = ItemsControl.GetItemsOwner(this);
-        int count = owner?.Items.Count ?? 0;
-        if (index < 0 || index >= count)
-            return;
-
-        EnsureLayout(owner, count, ResolveViewportLength(_viewport.Width, ActualWidth, 1));
-        int row = index < _itemRows.Length ? _itemRows[index] : -1;
-        if (row < 0 || row >= _rowTops.Count)
-            return;
-        BringRowIntoView(row);
-    }
+        => BringItemIntoView(index);
 
     public Rect MakeVisible(Visual visual, Rect rectangle)
     {

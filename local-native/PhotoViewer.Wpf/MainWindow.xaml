@@ -417,11 +417,12 @@
               DragEnter="FolderDropTarget_DragEnter" DragOver="FolderDropTarget_DragOver" DragLeave="FolderDropTarget_DragLeave" Drop="FolderDropTarget_Drop"
               AutomationProperties.Name="Image viewer folder drop target" AutomationProperties.HelpText="Drop existing folders from Explorer to add them to the current folder set. Files are never copied or moved.">
        <Grid>
-        <ListBox x:Name="CardsList" Background="Transparent" BorderThickness="0" Padding="14,12,10,18"
+        <local:VirtualizedGalleryListBox x:Name="CardsList" Background="Transparent" BorderThickness="0" Padding="14,12,10,18"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                  ItemsPanel="{StaticResource VirtualizedCardItemsPanel}"
                  ItemContainerStyle="{StaticResource CardItem}" SelectionMode="Extended" SelectionChanged="CardsList_SelectionChanged"
+                 PreviewKeyDown="GalleryList_PreviewKeyDown"
                  PreviewMouseDown="GalleryAutoScroll_PreviewMouseDown" PreviewMouseUp="GalleryAutoScroll_PreviewMouseUp" LostMouseCapture="GalleryAutoScroll_LostMouseCapture"
                  PreviewMouseLeftButtonDown="FileDragSurface_PreviewMouseLeftButtonDown" PreviewMouseMove="FileDragSurface_PreviewMouseMove" PreviewMouseLeftButtonUp="FileDragSurface_PreviewMouseLeftButtonUp"
                  ToolTip="Drag images to Explorer to copy file paths" AutomationProperties.Name="Image grid" AutomationProperties.HelpText="Select images, then drag beyond the system threshold to copy the real files to Explorer.">
@@ -445,11 +446,12 @@
               </GroupStyle.HeaderTemplate>
             </GroupStyle>
           </ListBox.GroupStyle>
-        </ListBox>
+        </local:VirtualizedGalleryListBox>
 
         <!-- List mode -->
-        <ListBox x:Name="RowsList" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="8,8,4,24"
+        <local:VirtualizedGalleryListBox x:Name="RowsList" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="8,8,4,24"
                  ItemContainerStyle="{StaticResource ListRowItem}" SelectionMode="Extended" SelectionChanged="CardsList_SelectionChanged"
+                 PreviewKeyDown="GalleryList_PreviewKeyDown"
                  PreviewMouseDown="GalleryAutoScroll_PreviewMouseDown" PreviewMouseUp="GalleryAutoScroll_PreviewMouseUp" LostMouseCapture="GalleryAutoScroll_LostMouseCapture"
                  PreviewMouseLeftButtonDown="FileDragSurface_PreviewMouseLeftButtonDown" PreviewMouseMove="FileDragSurface_PreviewMouseMove" PreviewMouseLeftButtonUp="FileDragSurface_PreviewMouseLeftButtonUp"
                  ToolTip="Drag images to Explorer to copy file paths" AutomationProperties.Name="Image list" AutomationProperties.HelpText="Select images, then drag beyond the system threshold to copy the real files to Explorer."
@@ -475,7 +477,7 @@
               </GroupStyle.HeaderTemplate>
             </GroupStyle>
           </ListBox.GroupStyle>
-        </ListBox>
+        </local:VirtualizedGalleryListBox>
         <Border x:Name="ViewerFolderDropOverlay" Visibility="Collapsed" IsHitTestVisible="False" Margin="18" CornerRadius="12"
                 Background="{DynamicResource DropOverlayBrush}" BorderBrush="{StaticResource AccentLight}" BorderThickness="2">
           <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
