@@ -9765,6 +9765,43 @@ public partial class App : Application
                 bool selected = count > 50_000 && window.SelectFileNameForSmoke(selectedName);
                 await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
 
+                // Prime each measured interaction path before taking the memory
+                // baseline. This keeps the gate focused on repeated catalog
+                // churn instead of one-time WPF generator/JIT page commitment.
+                ReportProgress("warmup");
+                MainWindow.SearchFilterCompletion warmSearch =
+                    await window.SetSearchInputForSmokeAsync("needle");
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                MainWindow.SearchFilterCompletion warmClear =
+                    await window.SetSearchInputForSmokeAsync("");
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                window.SetFavoriteOnlyFilterForSmoke(true);
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                bool warmFavoriteCountExact = window.FilteredCountForSmoke == count / 10;
+                window.ClearFavoriteFiltersForSmoke();
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                bool warmSortOldest =
+                    await window.SetSortByInteractiveForSmokeAsync("modified-oldest");
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                bool warmSortName =
+                    await window.SetSortByInteractiveForSmokeAsync("name");
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                bool warmSortRestored =
+                    await window.SetSortByInteractiveForSmokeAsync("modified-newest");
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                selected &= window.SelectFileNameForSmoke(selectedName);
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                bool warmupComplete = warmSearch.Applied
+                    && !warmSearch.Discarded
+                    && warmClear.Applied
+                    && !warmClear.Discarded
+                    && warmFavoriteCountExact
+                    && window.FilteredCountForSmoke == count
+                    && warmSortOldest
+                    && warmSortName
+                    && warmSortRestored
+                    && selected;
+
                 var process = Process.GetCurrentProcess();
                 long managedMemoryBefore = GC.GetTotalMemory(forceFullCollection: true);
                 process.Refresh();
@@ -9918,6 +9955,7 @@ public partial class App : Application
                     && window.GridUsesFullExtentVirtualizationForSmoke
                     && window.GridRealizedCountForSmoke <= window.GridMaxRealizationCountForSmoke;
                 bool ok = window.CatalogCountForSmoke == count
+                    && warmupComplete
                     && countsExact
                     && completionsApplied
                     && selectionStable
@@ -9940,6 +9978,7 @@ public partial class App : Application
                     CatalogCount = window.CatalogCountForSmoke,
                     FilteredCount = window.FilteredCountForSmoke,
                     SeedElapsedMs = seedWatch.ElapsedMilliseconds,
+                    WarmupComplete = warmupComplete,
                     SearchP95Ms = searchP95,
                     FilterP95Ms = filterP95,
                     SortP95Ms = sortP95,
@@ -14845,7 +14884,7 @@ public partial class App : Application
                 third.Close();
 
                 bool ok = defaultOpen
-                    && Nearly(defaultWidth, PhotoViewer.Wpf.MainWindow.DefaultRightPanelWidthForSmoke)
+                    && Nearly(defaultWidth, 340)
                     && resized
                     && Nearly(resizedWidth, 400)
                     && restoredOpen
@@ -23793,6 +23832,7 @@ public partial class App : Application
         public int CatalogCount { get; init; }
         public int FilteredCount { get; init; }
         public long SeedElapsedMs { get; init; }
+        public bool WarmupComplete { get; init; }
         public double SearchP95Ms { get; init; }
         public double FilterP95Ms { get; init; }
         public double SortP95Ms { get; init; }

@@ -59,6 +59,9 @@ if ($result.requestedCount -ne $Count -or $result.catalogCount -ne $Count -or $r
 if ($result.countsExact -ne $true -or $result.searchCompletionsApplied -ne $true) {
     $failures.Add('search/filter result counts or completion ordering failed')
 }
+if ($result.warmupComplete -ne $true) {
+    $failures.Add('catalog interaction warmup did not complete')
+}
 if ($result.searchP95Ms -gt 250 -or $result.filterP95Ms -gt 250 -or $result.sortP95Ms -gt 500) {
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")
 }

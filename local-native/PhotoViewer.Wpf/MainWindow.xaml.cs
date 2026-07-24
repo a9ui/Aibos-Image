@@ -17571,7 +17571,6 @@ public partial class MainWindow : Window
             && Grid.GetColumn(RightPanel) == 1
             && Grid.GetColumnSpan(RightPanel) == 3
             && WorkbenchPreviewRow.ActualHeight > 0;
-    public static double DefaultRightPanelWidthForSmoke => DefaultRightPanelWidth;
     public double RightPanelWidthForSmoke => RightPanel.ActualWidth;
     public double RightPanelStoredWidthForSmoke => _rightPanelWidth;
     public bool RightPanelOpenForSmoke => RightPanel.Visibility == Visibility.Visible;
