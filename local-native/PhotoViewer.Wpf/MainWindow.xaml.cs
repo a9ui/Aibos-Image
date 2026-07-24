@@ -293,6 +293,8 @@ public partial class MainWindow : Window
     private Tile? _primarySelectedTile;
     private int _primarySelectedIndex = -1;
     private long _galleryFocusRequestGeneration;
+    private long _queuedGalleryFocusCompletionGeneration = -1;
+    private DispatcherOperation? _galleryFocusCompletionOperation;
     private string? _pendingGalleryFocusPath;
     private int _pendingGalleryFocusIndex = -1;
     private bool _pendingGalleryFocusGrid;
@@ -595,6 +597,10 @@ public partial class MainWindow : Window
         {
             _catalogProjectionGeneration++;
             CancelPendingCatalogProjection(completePending: true);
+            CancelPendingGalleryFocus();
+            CardsList.CancelAutomationRealization();
+            RowsList.CancelAutomationRealization();
+            _galleryVirtualizingPanel?.CancelPendingRealization();
             if (Application.Current is App app)
                 app.AccessibilityPaletteChanged -= App_AccessibilityPaletteChanged;
             Interlocked.Increment(ref _activeAlbumAsyncGeneration);
@@ -727,7 +733,7 @@ public partial class MainWindow : Window
             e.FirstRealizedIndex,
             e.LastRealizedIndex);
         QueueSparseSelectionVisualSync(CardsList, grid: true);
-        TryCompletePendingGalleryFocus();
+        QueuePendingGalleryFocusCompletion();
         ScheduleRememberCurrentGridViewportAnchor();
     }
 
@@ -778,12 +784,12 @@ public partial class MainWindow : Window
         if (ReferenceEquals(generator, CardsList.ItemContainerGenerator))
         {
             QueueSparseSelectionVisualSync(CardsList, grid: true);
-            TryCompletePendingGalleryFocus();
+            QueuePendingGalleryFocusCompletion();
         }
         else if (ReferenceEquals(generator, RowsList.ItemContainerGenerator))
         {
             QueueSparseSelectionVisualSync(RowsList, grid: false);
-            TryCompletePendingGalleryFocus();
+            QueuePendingGalleryFocusCompletion();
             if (RowsList.Visibility == Visibility.Visible)
                 Dispatcher.BeginInvoke(ScheduleListThumbnailViewport, DispatcherPriority.Render);
         }
@@ -1190,7 +1196,8 @@ public partial class MainWindow : Window
         int PreferredSelectionIndex,
         bool ActivePreviewIncluded,
         GridZoomAnchor? ViewportAnchor,
-        PreparedVirtualizingLayout? PreparedLayout);
+        PreparedVirtualizingLayout? PreparedLayout,
+        GalleryAutomationProjectionIndex AutomationProjection);
 
     private sealed record CatalogProjectionRequest(
         long Generation,
@@ -4417,9 +4424,12 @@ public partial class MainWindow : Window
     {
         if (FavoriteOnlyFilter?.IsChecked == true || UnfavoriteOnlyFilter?.IsChecked == true)
         {
-            Tile? selected = SelectedTile();
-            int selectedIndex = selected is null ? -1 : _tiles.IndexOf(selected);
-            ApplyFilters(
+            int selectedIndex = _primarySelectedIndex >= 0
+                ? _primarySelectedIndex
+                : Math.Max(CardsList.SelectedIndex, RowsList.SelectedIndex);
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
                 selectFirst: true,
                 selectionFallbackIndex: selectedIndex >= 0 ? selectedIndex : null);
         }
@@ -4449,56 +4459,34 @@ public partial class MainWindow : Window
     {
         bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
         bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
-        var removalIndices = new List<int>();
+        bool projectionChange = false;
+        int? fallbackIndex = null;
         foreach (Tile tile in changedTiles.Distinct())
         {
-            int index = _tiles.IndexOf(tile);
-            if (index >= 0 && !MatchesFavoriteFilter(tile, favoritesOnly, unfavoriteOnly))
-                removalIndices.Add(index);
+            if (MatchesFavoriteFilter(tile, favoritesOnly, unfavoriteOnly))
+                continue;
+
+            projectionChange = true;
+            if (CardsList.TryResolveAutomationItem(tile, out int index))
+                fallbackIndex = Math.Min(fallbackIndex ?? index, index);
         }
-        if (removalIndices.Count == 0)
+        if (!projectionChange)
             return;
+        int selectedIndex = _primarySelectedIndex >= 0
+            ? _primarySelectedIndex
+            : Math.Max(CardsList.SelectedIndex, RowsList.SelectedIndex);
+        if (!fallbackIndex.HasValue && selectedIndex >= 0)
+            fallbackIndex = selectedIndex;
 
-        int fallbackIndex = removalIndices.Min();
-        bool wasSyncingSelection = _syncingSelection;
-        _syncingSelection = true;
-        try
-        {
-            CancelThumbnailViewportLoading();
-            _thumbnailViewportRevision++;
-            foreach (int index in removalIndices.Distinct().OrderByDescending(static index => index))
-            {
-                Tile removed = _tiles[index];
-                _selectedPaths.Remove(removed.Path);
-                if (string.Equals(_primarySelectedPath, removed.Path, StringComparison.OrdinalIgnoreCase))
-                {
-                    _primarySelectedPath = null;
-                    _primarySelectedTile = null;
-                    _primarySelectedIndex = -1;
-                }
-                _tiles.RemoveAt(index);
-            }
-        }
-        finally
-        {
-            _syncingSelection = wasSyncingSelection;
-        }
-
-        _galleryVirtualizingPanel?.InvalidateItemLayout();
-        Tile? preferred = !string.IsNullOrWhiteSpace(_primarySelectedPath)
-            ? _tiles.FirstOrDefault(tile => string.Equals(tile.Path, _primarySelectedPath, StringComparison.OrdinalIgnoreCase))
-            : null;
-        if (preferred is null && _selectedPaths.Count > 0)
-            preferred = _tiles.LastOrDefault(tile => _selectedPaths.Contains(tile.Path));
-        if (preferred is null && _tiles.Count > 0)
-            preferred = _tiles[Math.Clamp(fallbackIndex, 0, _tiles.Count - 1)];
-
-        if (_selectedPaths.Count > 0)
-            SetSelection(_tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList(), preferred);
-        else
-            SelectTile(preferred);
-        UpdateFolderStats();
-        ReconcileOpenSurfacesAfterFilterChange();
+        // Keep every projection mutation on the scheduler path. It computes
+        // the replacement and its UI Automation index off the dispatcher, then
+        // publishes them together in one Reset. Direct RemoveAt invalidated the
+        // index and left external UIA lookup on a 100k fallback scan.
+        _ = QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: true,
+            selectionFallbackIndex: fallbackIndex);
     }
 
     private void RefreshModalFavoriteSurface(Tile? knownSelected = null)
@@ -6273,7 +6261,15 @@ public partial class MainWindow : Window
         {
             Tile target = _tiles[targetIndex];
             CancelPendingGalleryFocus();
-            SetSelection([target], target, targetIndex);
+            // Keep the key event itself bounded. The viewport/focus jump is
+            // queued below; preview/seen presentation follows at Background
+            // priority so Input gets a turn between the distant container
+            // realization and the right-panel layout.
+            SetSelection(
+                [target],
+                target,
+                targetIndex,
+                deferPrimaryPresentation: true);
             QueuePrimaryGalleryFocus(target, targetIndex, grid);
         }
         e.Handled = true;
@@ -6371,12 +6367,33 @@ public partial class MainWindow : Window
             RowsList.ScrollIntoView(tile);
         }
 
+        QueuePendingGalleryFocusCompletion();
+    }
+
+    private void QueuePendingGalleryFocusCompletion()
+    {
         long generation = _galleryFocusRequestGeneration;
-        Dispatcher.BeginInvoke(() =>
+        if (_pendingGalleryFocusIndex < 0
+            || string.IsNullOrWhiteSpace(_pendingGalleryFocusPath)
+            || _queuedGalleryFocusCompletionGeneration == generation
+                && _galleryFocusCompletionOperation is { Status: DispatcherOperationStatus.Pending })
         {
+            return;
+        }
+
+        if (_galleryFocusCompletionOperation is { Status: DispatcherOperationStatus.Pending } staleOperation)
+            staleOperation.Abort();
+        _queuedGalleryFocusCompletionGeneration = generation;
+        _galleryFocusCompletionOperation = Dispatcher.BeginInvoke(() =>
+        {
+            if (_queuedGalleryFocusCompletionGeneration == generation)
+            {
+                _queuedGalleryFocusCompletionGeneration = -1;
+                _galleryFocusCompletionOperation = null;
+            }
             if (generation == _galleryFocusRequestGeneration)
                 TryCompletePendingGalleryFocus();
-        }, DispatcherPriority.Render);
+        }, DispatcherPriority.Background);
     }
 
     private void TryCompletePendingGalleryFocus()
@@ -6410,6 +6427,10 @@ public partial class MainWindow : Window
     private void CancelPendingGalleryFocus()
     {
         _galleryFocusRequestGeneration++;
+        if (_galleryFocusCompletionOperation is { Status: DispatcherOperationStatus.Pending } operation)
+            operation.Abort();
+        _galleryFocusCompletionOperation = null;
+        _queuedGalleryFocusCompletionGeneration = -1;
         _pendingGalleryFocusPath = null;
         _pendingGalleryFocusIndex = -1;
     }
@@ -6426,7 +6447,8 @@ public partial class MainWindow : Window
     private void SetSelection(
         IEnumerable<Tile> selectedTiles,
         Tile? primary,
-        int? primaryIndex = null)
+        int? primaryIndex = null,
+        bool deferPrimaryPresentation = false)
     {
         CancelPendingGalleryFocus();
         _selectedPaths.Clear();
@@ -6479,7 +6501,32 @@ public partial class MainWindow : Window
         _selectionVisualSyncGeneration++;
 
         SynchronizeSelectionControls(materializedSelection);
-        ApplyPrimarySelection(effectivePrimary, _primarySelectedIndex);
+        if (deferPrimaryPresentation && effectivePrimary is not null)
+            QueuePrimarySelectionPresentation(effectivePrimary, _primarySelectedIndex);
+        else
+            ApplyPrimarySelection(effectivePrimary, _primarySelectedIndex);
+    }
+
+    private void QueuePrimarySelectionPresentation(Tile primary, int projectedIndex)
+    {
+        long generation = _selectionVisualSyncGeneration;
+        string path = primary.Path;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (generation != _selectionVisualSyncGeneration
+                || projectedIndex < 0
+                || projectedIndex >= _tiles.Count
+                || !ReferenceEquals(_tiles[projectedIndex], primary)
+                || !string.Equals(_primarySelectedPath, path, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            // QueuePrimaryGalleryFocus already owns viewport realization for
+            // keyboard navigation. Repeating ScrollIntoView here would merge
+            // gallery and preview layout into one long dispatcher interval.
+            ApplyPrimarySelection(primary, projectedIndex, ensureSelectionVisible: false);
+        }, DispatcherPriority.ContextIdle);
     }
 
     private void SynchronizeSelectionControls(IReadOnlyList<Tile>? knownMaterializedSelection = null)
@@ -6624,7 +6671,10 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Render);
     }
 
-    private void ApplyPrimarySelection(Tile? primary, int projectedIndex = -1)
+    private void ApplyPrimarySelection(
+        Tile? primary,
+        int projectedIndex = -1,
+        bool ensureSelectionVisible = true)
     {
         if (primary is null)
         {
@@ -6634,7 +6684,7 @@ public partial class MainWindow : Window
 
         _lastEnsureGridSelectionMs = 0;
         var cardsScrollWatch = Stopwatch.StartNew();
-        if (CardsList.Visibility == Visibility.Visible)
+        if (ensureSelectionVisible && CardsList.Visibility == Visibility.Visible)
         {
             int index = projectedIndex >= 0
                 && projectedIndex < _tiles.Count
@@ -6653,7 +6703,7 @@ public partial class MainWindow : Window
         cardsScrollWatch.Stop();
         _lastCardsScrollSelectionMs = cardsScrollWatch.ElapsedMilliseconds;
         var rowsScrollWatch = Stopwatch.StartNew();
-        if (RowsList.Visibility == Visibility.Visible)
+        if (ensureSelectionVisible && RowsList.Visibility == Visibility.Visible)
         {
             RowsList.ScrollIntoView(primary);
             SelectRealizedContainer(RowsList, primary);
@@ -7768,6 +7818,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            result?.AutomationProjection.ReleaseCreator();
             var cleanupWatch = Stopwatch.StartNew();
             if (result is not null)
                 ReturnFilterResult(result);
@@ -9729,6 +9780,11 @@ public partial class MainWindow : Window
                     cancellationToken);
             }
         }
+        GalleryAutomationProjectionIndex automationProjection =
+            GalleryAutomationProjectionIndex.Create(
+                filtered,
+                filteredCount,
+                cancellationToken);
 
         return new FilterResult(
             filtered,
@@ -9739,7 +9795,22 @@ public partial class MainWindow : Window
             preferredIndex,
             activePreviewIncluded,
             snapshot.ViewportAnchor,
-            preparedLayout);
+            preparedLayout,
+            automationProjection);
+    }
+
+    private void StageGalleryAutomationProjection(
+        GalleryAutomationProjectionIndex projection)
+    {
+        try
+        {
+            CardsList.StageAutomationProjection(projection);
+            RowsList.StageAutomationProjection(projection);
+        }
+        finally
+        {
+            projection.ReleaseCreator();
+        }
     }
 
     private static int CompareFilterTilesForSort(
@@ -9932,6 +10003,7 @@ public partial class MainWindow : Window
                 panelCommitMs = phase.ElapsedMilliseconds;
 
                 phase.Restart();
+                StageGalleryAutomationProjection(filterResult.AutomationProjection);
                 _tiles.ReplaceAll(filterResult.Tiles, filterResult.Count);
                 phase.Stop();
                 resetMs = phase.ElapsedMilliseconds;
@@ -10014,14 +10086,18 @@ public partial class MainWindow : Window
         slice.Restart();
 
         ReconcileOpenSurfacesAfterFilterChange(filterResult.ActivePreviewIncluded);
-        if (filterResult.ViewportAnchor is not null)
-            ScheduleGridGeometryAnchorRestore(filterResult.ViewportAnchor);
-        if (snapshot.RestoreGalleryFocus
+        bool restoreGalleryFocus = snapshot.RestoreGalleryFocus
             && preferred is not null
-            && filterResult.PreferredSelectionIndex >= 0)
+            && filterResult.PreferredSelectionIndex >= 0;
+        // A focused selection is the viewport authority. Scheduling the old
+        // viewport anchor and then immediately bringing the focused item into
+        // view caused two competing render/layout passes after a Reset.
+        if (filterResult.ViewportAnchor is not null && !restoreGalleryFocus)
+            ScheduleGridGeometryAnchorRestore(filterResult.ViewportAnchor);
+        if (restoreGalleryFocus)
         {
             QueuePrimaryGalleryFocus(
-                preferred,
+                preferred!,
                 filterResult.PreferredSelectionIndex,
                 RowsList.Visibility != Visibility.Visible);
         }
@@ -10099,6 +10175,7 @@ public partial class MainWindow : Window
         {
             CancelThumbnailViewportLoading();
             _thumbnailViewportRevision++;
+            StageGalleryAutomationProjection(filterResult.AutomationProjection);
             _tiles.ReplaceAll(filtered, filteredCount);
         }
         finally
@@ -18194,7 +18271,12 @@ public partial class MainWindow : Window
         QueueCardFavoriteButtonActivation(button);
         bool routeWasAllowedToUnwind = tile.Fav == before;
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
-        return routeWasAllowedToUnwind && tile.Fav == expected;
+        SearchFilterCompletion? projection = _pendingSearchFilterCompletion is { } completion
+            ? await completion.Task
+            : null;
+        return routeWasAllowedToUnwind
+            && tile.Fav == expected
+            && (projection is null || (projection.Value.Applied && !projection.Value.Discarded));
     }
     public bool SelectedUnseenForSmoke => SelectedTile()?.Unseen == true;
     public int FavoriteStoreCountForSmoke => _favorites.Count(static item => item.Value > 0);
@@ -18467,7 +18549,8 @@ public partial class MainWindow : Window
         var watch = Stopwatch.StartNew();
         while (watch.ElapsedMilliseconds < timeoutMilliseconds)
         {
-            TryCompletePendingGalleryFocus();
+            QueuePendingGalleryFocusCompletion();
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
             if (string.Equals(
                     FocusedGalleryPathForSmoke,
                     _primarySelectedPath,
@@ -18525,6 +18608,29 @@ public partial class MainWindow : Window
             false,
             false);
     }
+
+    public GalleryAutomationPeerSmokeLease? CreateGridAutomationPeerLeaseForSmoke(int index)
+    {
+        if (index < 0
+            || index >= _tiles.Count
+            || UIElementAutomationPeer.CreatePeerForElement(CardsList)
+                is not VirtualizedGalleryListBoxAutomationPeer listPeer
+            || listPeer.GetOrCreateItemPeer(_tiles[index])
+                is not VirtualizedGalleryListBoxItemAutomationPeer itemPeer)
+        {
+            return null;
+        }
+        return new GalleryAutomationPeerSmokeLease(itemPeer);
+    }
+
+    public int GridAutomationRealizeDispatchCountForSmoke
+        => CardsList.AutomationRealizeDispatchCount;
+    public int GridAutomationRealizeCoalescedCountForSmoke
+        => CardsList.AutomationRealizeCoalescedCount;
+    public bool GridAutomationRealizePendingForSmoke
+        => CardsList.AutomationRealizePending;
+    public long GridAutomationLookupMaxMsForSmoke
+        => CardsList.AutomationLookupMaxMilliseconds;
 
     public bool SelectGridItemThroughAutomationForSmoke(int index)
     {
@@ -18764,6 +18870,12 @@ public partial class MainWindow : Window
             _allTiles.Clear();
             _allTiles.AddRange(tiles);
             ReorderFullCatalogForSort();
+            GalleryAutomationProjectionIndex automationProjection =
+                GalleryAutomationProjectionIndex.Create(
+                    _allTiles,
+                    _allTiles.Count,
+                    CancellationToken.None);
+            StageGalleryAutomationProjection(automationProjection);
             _tiles.ReplaceAll(_allTiles);
             _selectedPaths.Clear();
             _primarySelectedPath = null;
@@ -20888,6 +21000,32 @@ public sealed record GalleryAutomationItemSmokeSnapshot(
 {
     public static GalleryAutomationItemSmokeSnapshot Unavailable(int index)
         => new(index, "", "", false, false, false, false, false, false);
+}
+
+public sealed class GalleryAutomationPeerSmokeLease(
+    VirtualizedGalleryListBoxItemAutomationPeer peer)
+{
+    public string Name => peer.GetName();
+
+    public void Realize()
+    {
+        if (peer.GetPattern(PatternInterface.VirtualizedItem)
+            is not IVirtualizedItemProvider provider)
+        {
+            throw new InvalidOperationException("VirtualizedItem pattern is not available.");
+        }
+        provider.Realize();
+    }
+
+    public void Select()
+    {
+        if (peer.GetPattern(PatternInterface.SelectionItem)
+            is not ISelectionItemProvider provider)
+        {
+            throw new InvalidOperationException("SelectionItem pattern is not available.");
+        }
+        provider.Select();
+    }
 }
 
 public sealed record RightPreviewActionLayoutSmokeSnapshot(

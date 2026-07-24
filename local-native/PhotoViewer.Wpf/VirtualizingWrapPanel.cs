@@ -154,6 +154,18 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     public event EventHandler<VirtualizingWrapPanelRangeChangedEventArgs>? RealizedRangeChanged;
 
+    public VirtualizingWrapPanel()
+        => Unloaded += (_, _) => CancelPendingRealization();
+
+    internal void CancelPendingRealization()
+    {
+        _layoutGeneration++;
+        _realizationContinuationPending = false;
+        _priorityRealizationIndex = -1;
+        _deferredMeasureContainers.Clear();
+        InvalidateVisual();
+    }
+
     public double ItemWidth
     {
         get => (double)GetValue(ItemWidthProperty);
@@ -697,7 +709,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             && _priorityRealizationIndex <= lastRealizedIndex)
         {
             int priorityIndex = _priorityRealizationIndex;
-            if (!RealizePriorityItem(priorityIndex))
+            if (!RealizePriorityItem(priorityIndex, out bool consumedPrioritySlice))
             {
                 UpdateRange(
                     firstVisibleIndex,
@@ -709,6 +721,21 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 return CompleteMeasure(availableSize);
             }
             _priorityRealizationIndex = -1;
+            if (consumedPrioritySlice)
+            {
+                // A distant Home/End jump first prepares the target container,
+                // then measures it on this pass. Do not also generate another
+                // visible card in the same Render frame; let Input run before
+                // the continuation fills the rest of the viewport.
+                UpdateRange(
+                    firstVisibleIndex,
+                    lastVisibleIndex,
+                    priorityIndex,
+                    priorityIndex);
+                UpdateScrollInfo();
+                ScheduleRealizationContinuation();
+                return CompleteMeasure(availableSize);
+            }
         }
         bool realizationComplete = RealizeItems(
             firstRealizedIndex,
@@ -1045,8 +1072,9 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         return true;
     }
 
-    private bool RealizePriorityItem(int index)
+    private bool RealizePriorityItem(int index, out bool consumedMeasureSlice)
     {
+        consumedMeasureSlice = false;
         if (index < 0)
             return false;
 
@@ -1065,11 +1093,13 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                     InsertInternalChild(childIndex, child);
                 generator.PrepareItemContainer(child);
                 _deferredMeasureContainers.Add(child);
+                consumedMeasureSlice = true;
                 return false;
             }
 
             int row = index < _itemRows.Length ? _itemRows[index] : -1;
             double height = row >= 0 && row < _rowHeights.Count ? _rowHeights[row] : DefaultItemHeight;
+            consumedMeasureSlice = !child.IsMeasureValid;
             child.Measure(new Size(_cellWidth, height));
             _deferredMeasureContainers.Remove(child);
             return true;
