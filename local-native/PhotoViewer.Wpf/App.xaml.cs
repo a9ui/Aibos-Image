@@ -19,9 +19,19 @@ namespace PhotoViewer.Wpf;
 
 public partial class App : Application
 {
+    // M3 catalog-interaction contract. The 4 ms value remains a diagnostic
+    // target for code-owned slices. A WPF generator/visual-tree reset removes
+    // exactly one realized container per dispatcher turn and is separately
+    // bounded below the 60 Hz frame budget.
+    private const long CatalogProjectionDiagnosticSliceTargetMs = 4;
+    private const long CatalogProjectionSingleContainerDetachBudgetMs = 12;
+    private const long CatalogInteractionDispatcherHeartbeatBudgetMs = 50;
+    private const long CatalogFavoriteEvictionBudgetMs = 100;
+
     private static readonly string[] ThemeColorResourceKeys =
     [
         "BgPrimaryColor", "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
+        "GlassChromeTopColor", "GlassChromeBottomColor",
         "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor", "TextDisabledColor", "SelectionTextColor",
         "AccentColor", "AccentLightColor", "FocusColor", "FavoriteColor", "FavoriteTextColor",
         "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
@@ -1051,6 +1061,7 @@ public partial class App : Application
         SetThemeColors(SystemColors.WindowColor, "BgPrimaryColor");
         SetThemeColors(SystemColors.ControlColor,
             "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
+            "GlassChromeTopColor", "GlassChromeBottomColor",
             "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
             "FavoriteSoftColor", "SuccessSoftColor",
             "OverlaySoftColor", "OverlayStrongColor", "DropOverlayColor",
@@ -9054,12 +9065,16 @@ public partial class App : Application
             try
             {
                 await first.LoadFolderAsync(aspectFolder);
+                bool metadataReady = await first.WaitForCatalogImageDimensionsForSmokeAsync();
                 int filtered = first.FilteredCountForSmoke;
                 List<string> initialOrder = first.FilteredFileNamesForSmoke(3);
                 bool selectedBravo = first.SelectFileNameForSmoke("bravo-square.png");
                 string? selectedBefore = first.SelectedFileNameForSmoke;
 
-                DisplayStyleMetrics original = first.DisplayStyleMetricsForSmoke();
+                DisplayStyleMetrics originalLandscape = first.DisplayStyleMetricsForSmoke("alpha-landscape.png");
+                DisplayStyleMetrics originalSquare = first.DisplayStyleMetricsForSmoke("bravo-square.png");
+                DisplayStyleMetrics originalPortrait = first.DisplayStyleMetricsForSmoke("charlie-portrait.png");
+                DisplayStyleMetrics original = originalLandscape;
                 bool squareChanged = first.SetAspectModeForSmoke("square");
                 DisplayStyleMetrics square = first.DisplayStyleMetricsForSmoke();
                 List<string> squareOrder = first.FilteredFileNamesForSmoke(3);
@@ -9094,11 +9109,16 @@ public partial class App : Application
                     && portrait.ListThumbnailHeight > square.ListThumbnailHeight
                     && Math.Abs((portrait.CardHeight / portrait.CardWidth) - 1.5) < 0.03
                     && string.Equals(portrait.CardThumbnailStretch, "UniformToFill", StringComparison.Ordinal);
-                bool originalShape = original.CardHeight > square.CardHeight
-                    && original.ListThumbnailHeight > square.ListThumbnailHeight
-                    && Math.Abs((original.CardHeight / original.CardWidth) - 1.5) < 0.03
-                    && string.Equals(original.AspectMode, "original", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(original.CardThumbnailStretch, "Uniform", StringComparison.Ordinal);
+                bool originalShape = metadataReady
+                    && Math.Abs((originalLandscape.CardHeight / originalLandscape.CardWidth) - (2d / 3d)) < 0.03
+                    && Math.Abs((originalSquare.CardHeight / originalSquare.CardWidth) - 1d) < 0.03
+                    && Math.Abs((originalPortrait.CardHeight / originalPortrait.CardWidth) - 1.5d) < 0.03
+                    && originalLandscape.ListThumbnailHeight < originalSquare.ListThumbnailHeight
+                    && originalSquare.ListThumbnailHeight < originalPortrait.ListThumbnailHeight
+                    && string.Equals(originalLandscape.AspectMode, "original", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(originalLandscape.CardThumbnailStretch, "Uniform", StringComparison.Ordinal)
+                    && string.Equals(originalSquare.CardThumbnailStretch, "Uniform", StringComparison.Ordinal)
+                    && string.Equals(originalPortrait.CardThumbnailStretch, "Uniform", StringComparison.Ordinal);
                 bool orderStable = SameNameOrder(squareOrder, initialOrder)
                     && SameNameOrder(portraitOrder, initialOrder)
                     && SameNameOrder(restoredOrder, initialOrder);
@@ -9116,7 +9136,7 @@ public partial class App : Application
                     && restored.CardHeight > restored.CardWidth;
                 bool runtimeRestore = originalChanged
                     && string.Equals(restoredOriginalRuntime.AspectMode, "original", StringComparison.OrdinalIgnoreCase)
-                    && Math.Abs((restoredOriginalRuntime.CardHeight / restoredOriginalRuntime.CardWidth) - 1.5) < 0.03
+                    && Math.Abs((restoredOriginalRuntime.CardHeight / restoredOriginalRuntime.CardWidth) - (2d / 3d)) < 0.03
                     && string.Equals(restoredOriginalRuntime.CardThumbnailStretch, "Uniform", StringComparison.Ordinal);
 
                 bool ok = filtered == 3
@@ -9136,7 +9156,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "aspect controls changed deterministic grid/list dimensions, preserved order/selection, composed with zoom, and restored from WPF state"
+                        ? "late metadata reflowed Original cards to source geometry; aspect controls preserved order/selection, composed with zoom, and restored from WPF state"
                         : "aspect smoke did not meet dimension/order/selection/persistence expectations",
                     Folder = aspectFolder,
                     ProjectRoot = smokeRoot,
@@ -9147,6 +9167,9 @@ public partial class App : Application
                     PortraitOrder = portraitOrder,
                     RestoredOrder = restoredOrder,
                     Original = original,
+                    OriginalLandscape = originalLandscape,
+                    OriginalSquare = originalSquare,
+                    OriginalPortrait = originalPortrait,
                     Square = square,
                     Portrait = portrait,
                     PortraitZoomed = portraitZoomed,
@@ -9161,6 +9184,7 @@ public partial class App : Application
                     OriginalChanged = originalChanged,
                     Zoomed = zoomed,
                     PersistedTargetSet = persistedTargetSet,
+                    MetadataReady = metadataReady,
                     SquareShape = squareShape,
                     PortraitShape = portraitShape,
                     OriginalShape = originalShape,
@@ -9794,7 +9818,7 @@ public partial class App : Application
                     maxHeartbeatGapMs = gap;
                     maxHeartbeatGapSample = $"{activeOperation}@{now}ms:{gap}ms";
                 }
-                if (gap > 50)
+                if (gap > CatalogInteractionDispatcherHeartbeatBudgetMs)
                     heartbeatGapSamples.Add($"{activeOperation}@{now}ms:{gap}ms");
                 lastHeartbeatMs = now;
                 heartbeatCount++;
@@ -10365,6 +10389,19 @@ public partial class App : Application
                     filterPhaseSamples.Count == 0
                         ? 0
                         : filterPhaseSamples.Max(static sample => sample.MaxApplySliceMs));
+                long catalogProjectionMaxSingleContainerDetachMs = Math.Max(
+                    searchPhaseSamples.Count == 0
+                        ? 0
+                        : searchPhaseSamples.Max(static sample => sample.PreResetMs),
+                    filterPhaseSamples.Count == 0
+                        ? 0
+                        : filterPhaseSamples.Max(static sample => sample.PreResetMs));
+                string catalogProjectionMaxApplySliceOperation =
+                    catalogProjectionMaxApplySliceMs <= CatalogProjectionDiagnosticSliceTargetMs
+                        ? "within-diagnostic-target"
+                        : catalogProjectionMaxSingleContainerDetachMs == catalogProjectionMaxApplySliceMs
+                            ? "single-container-reset-unit"
+                            : "code-owned-apply-slice";
                 bool ok = window.CatalogCountForSmoke == count
                     && warmupComplete
                     && countsExact
@@ -10383,9 +10420,12 @@ public partial class App : Application
                     && searchP95 <= 250
                     && filterP95 <= 250
                     && sortP95 <= 500
-                    && favoriteEvictionElapsedMs <= 250
-                    && catalogProjectionMaxApplySliceMs <= 4
-                    && maxHeartbeatGapMs <= 50
+                    && favoriteEvictionExact
+                    && favoriteEvictionAutomationExact
+                    && favoriteEvictionElapsedMs <= CatalogFavoriteEvictionBudgetMs
+                    && catalogProjectionMaxSingleContainerDetachMs <= CatalogProjectionSingleContainerDetachBudgetMs
+                    && maxHeartbeatGapMs <= CatalogInteractionDispatcherHeartbeatBudgetMs
+                    && heartbeatGapSamples.Count == 0
                     // Rapid churn leaves dead WPF generator/layout objects in
                     // young generations and committed pages in the process
                     // working set. Gate the collectible live graph tightly and
@@ -10455,6 +10495,14 @@ public partial class App : Application
                     DispatcherHeartbeatMaxGapMs = maxHeartbeatGapMs,
                     DispatcherHeartbeatMaxGapSample = maxHeartbeatGapSample,
                     CatalogProjectionMaxApplySliceMs = catalogProjectionMaxApplySliceMs,
+                    CatalogProjectionMaxApplySliceOperation = catalogProjectionMaxApplySliceOperation,
+                    CatalogProjectionDiagnosticSliceTargetMs = CatalogProjectionDiagnosticSliceTargetMs,
+                    CatalogProjectionSingleContainerDetachBudgetMs =
+                        CatalogProjectionSingleContainerDetachBudgetMs,
+                    CatalogProjectionMaxSingleContainerDetachMs =
+                        catalogProjectionMaxSingleContainerDetachMs,
+                    DispatcherHeartbeatBudgetMs = CatalogInteractionDispatcherHeartbeatBudgetMs,
+                    FavoriteEvictionBudgetMs = CatalogFavoriteEvictionBudgetMs,
                     CatalogProjectionDiscardedCount = window.CatalogProjectionDiscardedCountForSmoke,
                     PreparedCatalogLayoutAppliedCount = window.PreparedCatalogLayoutAppliedCountForSmoke,
                     PreparedCatalogLayoutRejectedCount = window.PreparedCatalogLayoutRejectedCountForSmoke,
@@ -17528,6 +17576,13 @@ public partial class App : Application
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
                     && win.ModalContextMenuContractForSmoke;
+                bool lightweightGlass = win.ModalLightweightGlassContractForSmoke;
+                bool actualPixelsControl = win.ModalActualPixelsControlContractForSmoke;
+                bool favoriteLevelReadoutInitial = win.ModalFavoriteLevelReadoutContractForSmoke;
+                bool adaptiveToolbar = win.ApplyModalToolbarWidthForSmoke(900)
+                    && win.ModalCompactToolbarContractForSmoke
+                    && win.ApplyModalToolbarWidthForSmoke(1280)
+                    && win.ModalWideToolbarContractForSmoke;
                 bool windowCaptionControls = win.ModalWindowCaptionControlsContractForSmoke
                     && win.ActivateModalMinimizeForSmoke()
                     && win.ActivateModalMaximizeForSmoke();
@@ -17574,9 +17629,18 @@ public partial class App : Application
                     && filmstripItemContract
                     && modalFullWindowFit;
                 int contextFavoriteBefore = win.SelectedFavoriteLevelForSmoke;
-                bool contextMenuAction = win.ActivateModalContextFavoriteForSmoke(1)
-                    && win.ActivateModalContextFavoriteForSmoke(-1)
+                bool contextFavoriteRaised = win.ActivateModalContextFavoriteForSmoke(1);
+                bool favoriteLevelReadoutRaised = contextFavoriteRaised
+                    && win.ModalFavoriteLevelReadoutContractForSmoke;
+                bool contextFavoriteLowered = win.ActivateModalContextFavoriteForSmoke(-1);
+                bool favoriteLevelReadoutLowered = contextFavoriteLowered
+                    && win.ModalFavoriteLevelReadoutContractForSmoke;
+                bool contextMenuAction = contextFavoriteRaised
+                    && contextFavoriteLowered
                     && win.SelectedFavoriteLevelForSmoke == contextFavoriteBefore;
+                bool favoriteLevelReadout = favoriteLevelReadoutInitial
+                    && favoriteLevelReadoutRaised
+                    && favoriteLevelReadoutLowered;
 
                 win.SetModalChromeVisibleForSmoke(true);
                 await Task.Delay(1050);
@@ -17855,7 +17919,9 @@ public partial class App : Application
                     && !win.ModalVisibleForSmoke;
 
                 bool ok = fullMotionMode
-                    && selected && opened && accessibility && windowCaptionControls && edgeChrome
+                    && selected && opened && accessibility && lightweightGlass
+                    && actualPixelsControl && favoriteLevelReadout && adaptiveToolbar
+                    && windowCaptionControls && edgeChrome
                     && edgePercentageSetting && edgeImageIntersection
                     && zoomIndicator && filmstripLayout && contextMenuAction && manualVisiblePersistent
                     && filmstripButtonStableGeometry
@@ -17877,6 +17943,10 @@ public partial class App : Application
                     Message = ok ? "modal pointer states, transformed-image edge zones, full-canvas fit, immediate chrome hide, black-canvas gallery return, fixed filmstrip controls, and hidden-state parity passed" : "modal interaction parity did not meet the expected contract",
                     FullMotionMode = fullMotionMode,
                     Accessibility = accessibility,
+                    LightweightGlass = lightweightGlass,
+                    ActualPixelsControl = actualPixelsControl,
+                    FavoriteLevelReadout = favoriteLevelReadout,
+                    AdaptiveToolbar = adaptiveToolbar,
                     WindowCaptionControls = windowCaptionControls,
                     EdgeChrome = edgeChrome,
                     EdgePercentageSetting = edgePercentageSetting,
@@ -17996,6 +18066,8 @@ public partial class App : Application
                 bool shortcutZoomed = win.ModalZoomShortcutForSmoke("plus");
                 var afterShortcut = win.ModalTransformForSmoke();
                 bool zoomMotionActive = win.ModalTransformAnimationActiveForSmoke;
+                bool fineWheelZoomed = win.ModalZoomWheelForSmoke(30);
+                var afterFineWheel = win.ModalTransformForSmoke();
                 bool wheelZoomed = win.ModalZoomWheelForSmoke(120);
                 var afterWheel = win.ModalTransformForSmoke();
                 bool interactiveScaling = win.ModalInteractiveScalingForSmoke;
@@ -18009,6 +18081,9 @@ public partial class App : Application
                 bool modalVisibleBeforeClose = win.ModalVisibleForSmoke;
                 bool closed = win.CloseTopmostOverlayForSmoke();
                 var afterClose = win.ModalTransformForSmoke();
+                double fineWheelFactor = afterFineWheel.Zoom / afterShortcut.Zoom;
+                double standardWheelFactor = afterWheel.Zoom / afterFineWheel.Zoom;
+                double expectedFineWheelFactor = Math.Pow(1.08, 0.25);
 
                 bool ok = selected
                     && modalVisibleBeforeClose
@@ -18021,8 +18096,14 @@ public partial class App : Application
                     && shortcutZoomed
                     && afterShortcut.Zoom > 1
                     && zoomMotionActive
+                    && fineWheelZoomed
+                    && afterFineWheel.Zoom > afterShortcut.Zoom
+                    && fineWheelFactor > 1
+                    && fineWheelFactor < standardWheelFactor
+                    && Math.Abs(fineWheelFactor - expectedFineWheelFactor) < 0.0001
                     && wheelZoomed
-                    && afterWheel.Zoom > afterShortcut.Zoom
+                    && afterWheel.Zoom > afterFineWheel.Zoom
+                    && Math.Abs(standardWheelFactor - 1.08) < 0.0001
                     && interactiveScaling
                     && settledScaling
                     && reset
@@ -18043,7 +18124,7 @@ public partial class App : Application
 
                 result = new ModalTransformSmokeResult(
                     ok,
-                    ok ? "modal flip, keyboard/wheel zoom, reset, and navigation reset passed" : "modal transform smoke did not meet expected behavior",
+                    ok ? "modal flip, proportional high-resolution wheel zoom, reset, and navigation reset passed" : "modal transform smoke did not meet expected behavior",
                     folder,
                     selectIndex,
                     selected,
@@ -18053,8 +18134,12 @@ public partial class App : Application
                     afterFlip,
                     shortcutZoomed,
                     afterShortcut,
+                    fineWheelZoomed,
+                    afterFineWheel,
+                    fineWheelFactor,
                     wheelZoomed,
                     afterWheel,
+                    standardWheelFactor,
                     reset,
                     afterReset,
                     movedNext,
@@ -18108,6 +18193,7 @@ public partial class App : Application
                 var afterPositivePan = win.ModalTransformForSmoke();
                 bool pannedNegative = win.SetModalPanForSmoke(double.MinValue, double.MaxValue);
                 var afterNegativePan = win.ModalTransformForSmoke();
+                ModalPanCadenceSnapshot cadence = await win.RunCoalescedModalPanForSmokeAsync(48);
                 bool reset = win.ResetModalTransformForSmoke();
                 var afterReset = win.ModalTransformForSmoke();
                 string? startPath = win.SelectedPathForSmoke;
@@ -18133,6 +18219,17 @@ public partial class App : Application
                     && afterNegativePan.PanY > 0
                     && Math.Abs(afterNegativePan.PanX) <= afterNegativePan.MaxPanX + epsilon
                     && Math.Abs(afterNegativePan.PanY) <= afterNegativePan.MaxPanY + epsilon
+                    && cadence.Available
+                    && cadence.RequestedUpdates == 48
+                    && cadence.AcceptedUpdates == 48
+                    && cadence.InputUpdates == cadence.AcceptedUpdates
+                    && cadence.QueuedBeforeYield
+                    && !cadence.QueuedAfterYield
+                    && cadence.VisualUpdates >= 1
+                    && cadence.VisualUpdates <= 2
+                    && cadence.VisualUpdates < cadence.InputUpdates
+                    && Math.Abs(cadence.ModelPanX - cadence.VisualPanX) < epsilon
+                    && Math.Abs(cadence.ModelPanY - cadence.VisualPanY) < epsilon
                     && reset
                     && Math.Abs(afterReset.Zoom - 1) < epsilon
                     && Math.Abs(afterReset.PanX) < epsilon
@@ -18144,7 +18241,7 @@ public partial class App : Application
 
                 result = new ModalPanSmokeResult(
                     ok,
-                    ok ? "modal pan clamps after zoom and resets on reset/navigation" : "modal pan smoke did not meet expected behavior",
+                    ok ? "modal pan clamps, coalesces raw drag input to render cadence, and resets on reset/navigation" : "modal pan smoke did not meet expected behavior",
                     folder,
                     selectIndex,
                     selected,
@@ -18154,6 +18251,7 @@ public partial class App : Application
                     afterPositivePan,
                     pannedNegative,
                     afterNegativePan,
+                    cadence,
                     reset,
                     afterReset,
                     movedNext,
@@ -23556,8 +23654,12 @@ public partial class App : Application
         ModalTransformSnapshot AfterFlip = default,
         bool ShortcutZoomed = false,
         ModalTransformSnapshot AfterShortcut = default,
+        bool FineWheelZoomed = false,
+        ModalTransformSnapshot AfterFineWheel = default,
+        double FineWheelFactor = 0,
         bool WheelZoomed = false,
         ModalTransformSnapshot AfterWheel = default,
+        double StandardWheelFactor = 0,
         bool Reset = false,
         ModalTransformSnapshot AfterReset = default,
         bool MovedNext = false,
@@ -23576,6 +23678,10 @@ public partial class App : Application
         public string Message { get; init; } = "";
         public bool FullMotionMode { get; init; }
         public bool Accessibility { get; init; }
+        public bool LightweightGlass { get; init; }
+        public bool ActualPixelsControl { get; init; }
+        public bool FavoriteLevelReadout { get; init; }
+        public bool AdaptiveToolbar { get; init; }
         public bool WindowCaptionControls { get; init; }
         public bool EdgeChrome { get; init; }
         public bool EdgePercentageSetting { get; init; }
@@ -23658,6 +23764,7 @@ public partial class App : Application
         ModalTransformSnapshot AfterPositivePan = default,
         bool PannedNegative = false,
         ModalTransformSnapshot AfterNegativePan = default,
+        ModalPanCadenceSnapshot Cadence = default,
         bool Reset = false,
         ModalTransformSnapshot AfterReset = default,
         bool MovedNext = false,
@@ -24215,6 +24322,9 @@ public partial class App : Application
         public List<string> PortraitOrder { get; init; } = [];
         public List<string> RestoredOrder { get; init; } = [];
         public DisplayStyleMetrics? Original { get; init; }
+        public DisplayStyleMetrics? OriginalLandscape { get; init; }
+        public DisplayStyleMetrics? OriginalSquare { get; init; }
+        public DisplayStyleMetrics? OriginalPortrait { get; init; }
         public DisplayStyleMetrics? Square { get; init; }
         public DisplayStyleMetrics? Portrait { get; init; }
         public DisplayStyleMetrics? PortraitZoomed { get; init; }
@@ -24229,6 +24339,7 @@ public partial class App : Application
         public bool OriginalChanged { get; init; }
         public bool Zoomed { get; init; }
         public bool PersistedTargetSet { get; init; }
+        public bool MetadataReady { get; init; }
         public bool SquareShape { get; init; }
         public bool PortraitShape { get; init; }
         public bool OriginalShape { get; init; }
@@ -24480,6 +24591,12 @@ public partial class App : Application
         public long DispatcherHeartbeatMaxGapMs { get; init; }
         public string DispatcherHeartbeatMaxGapSample { get; init; } = "";
         public long CatalogProjectionMaxApplySliceMs { get; init; }
+        public string CatalogProjectionMaxApplySliceOperation { get; init; } = "";
+        public long CatalogProjectionDiagnosticSliceTargetMs { get; init; }
+        public long CatalogProjectionSingleContainerDetachBudgetMs { get; init; }
+        public long CatalogProjectionMaxSingleContainerDetachMs { get; init; }
+        public long DispatcherHeartbeatBudgetMs { get; init; }
+        public long FavoriteEvictionBudgetMs { get; init; }
         public int CatalogProjectionDiscardedCount { get; init; }
         public int PreparedCatalogLayoutAppliedCount { get; init; }
         public int PreparedCatalogLayoutRejectedCount { get; init; }

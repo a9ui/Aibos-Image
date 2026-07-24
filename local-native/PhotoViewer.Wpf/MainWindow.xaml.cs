@@ -108,6 +108,7 @@ public partial class MainWindow : Window
     private const double MinRightPanelWidth = 320;
     private const double MaxRightPanelWidth = 420;
     private const double AdaptiveWorkbenchThreshold = 1180;
+    private const double ModalCompactToolbarThreshold = 1080;
     private const double AdaptivePreviewMinHeight = 168;
     private const double AdaptivePreviewMaxHeight = 232;
     private const double AdaptivePreviewHeightRatio = 0.30;
@@ -458,6 +459,10 @@ public partial class MainWindow : Window
     private bool _modalFlipped;
     private double _modalPanX;
     private double _modalPanY;
+    private bool _modalPanRenderQueued;
+    private long _modalPanRenderGeneration;
+    private int _modalPanInputUpdateCount;
+    private int _modalPanVisualUpdateCount;
     private bool _modalShowingEnhanced;
     private bool _confirmBeforeDelete = true;
     private bool _syncingConfirmBeforeDelete;
@@ -4499,13 +4504,21 @@ public partial class MainWindow : Window
             return;
         }
 
-        FavoriteLevelText.Text = selected.Fav.ToString(CultureInfo.InvariantCulture);
+        SyncFavoriteLevelReadouts(selected.Fav);
         if (Modal.Visibility != Visibility.Visible)
             return;
         if (!string.Equals(_modalSourceTilePath, selected.Path, StringComparison.OrdinalIgnoreCase))
             OpenModal();
         else
             SyncModalFilmstripSelection(selected);
+    }
+
+    private void SyncFavoriteLevelReadouts(int level)
+    {
+        string text = Math.Clamp(level, 0, 5).ToString(CultureInfo.InvariantCulture);
+        FavoriteLevelText.Text = text;
+        ModalFavoriteLevelText.Text = text;
+        AutomationProperties.SetName(ModalFavoriteLevelText, $"Favorite level {text}");
     }
 
     private bool SaveFavorites()
@@ -6008,13 +6021,51 @@ public partial class MainWindow : Window
     {
         string? selectedPath = SelectedTile()?.Path;
         bool selectedMetadataArrived = false;
+        bool reflowOriginalAspect = string.Equals(
+            _aspectMode,
+            AspectOriginalValue,
+            StringComparison.Ordinal);
+        CatalogCardLayoutContext? cardLayout = reflowOriginalAspect
+            ? CaptureCardLayoutContext()
+            : null;
+        GridZoomAnchor? viewportAnchor = reflowOriginalAspect
+            ? PreferredGridGeometryAnchor()
+            : null;
+        bool cardLayoutChanged = false;
         while (decoded.TryDequeue(out DecodedImageMetadata item))
         {
+            int previousWidth = item.Tile.ImagePixelWidth;
+            int previousHeight = item.Tile.ImagePixelHeight;
             item.Tile.ImagePixelWidth = item.Dimensions.Width;
             item.Tile.ImagePixelHeight = item.Dimensions.Height;
             item.Tile.Prompt = item.Prompt;
+            if (cardLayout is { } resolvedLayout
+                && item.Dimensions.Width > 0
+                && item.Dimensions.Height > 0
+                && (previousWidth != item.Dimensions.Width
+                    || previousHeight != item.Dimensions.Height))
+            {
+                double previousCardHeight = item.Tile.CardHeight;
+                double previousListThumbnailHeight = item.Tile.ListThumbnailHeight;
+                ApplyCardLayout(item.Tile, resolvedLayout);
+                cardLayoutChanged |= Math.Abs(item.Tile.CardHeight - previousCardHeight) >= 0.01
+                    || Math.Abs(item.Tile.ListThumbnailHeight - previousListThumbnailHeight) >= 0.01;
+            }
             selectedMetadataArrived |= !string.IsNullOrWhiteSpace(selectedPath)
                 && string.Equals(item.Tile.Path, selectedPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (cardLayoutChanged)
+        {
+            // The catalog is deliberately published before the metadata scan.
+            // Original-aspect cards therefore begin with a safe fallback height.
+            // Reflow only the decoded tiles, invalidate the prepared row map once
+            // per drain, and restore the same viewport anchor after the row
+            // geometry catches up. Without this step landscape images keep the
+            // fallback portrait cell and appear as stale black rectangles.
+            SyncGalleryColumnMode();
+            _galleryVirtualizingPanel?.InvalidateItemLayout();
+            ScheduleGridGeometryAnchorRestore(viewportAnchor);
         }
 
         if (!selectedMetadataArrived
@@ -6853,7 +6904,7 @@ public partial class MainWindow : Window
             : string.IsNullOrWhiteSpace(t.Prompt)
                 ? t.Path
                 : FormatPromptTagsForDisplay(t.Prompt);
-        FavoriteLevelText.Text = t.Fav.ToString();
+        SyncFavoriteLevelReadouts(t.Fav);
         SyncSelectionActionSurface();
         UpdateHeaderStats();
         ModalTitle.Text = $"{t.FileName} - {PreviewSizeText.Text}";
@@ -10386,7 +10437,7 @@ public partial class MainWindow : Window
         PreviewPromptText.Text = "";
         RightPreviewContent.Visibility = Visibility.Collapsed;
         RightPreviewEmptyState.Visibility = Visibility.Visible;
-        FavoriteLevelText.Text = "0";
+        SyncFavoriteLevelReadouts(0);
         SyncSelectionActionSurface();
         ModalTitle.Text = "No selection";
         UpdateHeaderStats();
@@ -11327,6 +11378,7 @@ public partial class MainWindow : Window
 
     private void ApplyAdaptiveWorkbenchLayout(double width, bool preserveGridAnchor = true)
     {
+        ApplyModalToolbarLayout(width);
         bool adaptive = double.IsFinite(width) && width < AdaptiveWorkbenchThreshold;
         if (adaptive == _adaptiveWorkbench)
         {
@@ -11369,6 +11421,20 @@ public partial class MainWindow : Window
         ToggleSidebar.ToolTip = Sidebar.Visibility == Visibility.Visible ? "Hide sidebar" : "Show sidebar";
         if (preserveGridAnchor)
             ScheduleGridGeometryAnchorRestore(anchor);
+    }
+
+    private void ApplyModalToolbarLayout(double width)
+    {
+        bool compact = double.IsFinite(width) && width < ModalCompactToolbarThreshold;
+        Visibility optionalVisibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        ModalSourceLabel.Visibility = optionalVisibility;
+        ModalFileSizeText.Visibility = optionalVisibility;
+        ModalShortcutsButton.Visibility = optionalVisibility;
+        ModalDeleteButton.Visibility = optionalVisibility;
+        ModalOpenExternalButton.Visibility = optionalVisibility;
+        ModalRevealButton.Visibility = optionalVisibility;
+        ModalTitle.MaxWidth = compact ? 210 : 420;
+        ModalEnhancementStatusText.MaxWidth = compact ? 88 : 240;
     }
 
     private double CurrentAdaptivePreviewHeight()
@@ -13028,6 +13094,9 @@ public partial class MainWindow : Window
         return SetModalZoom(_modalZoom * multiplier, anchor);
     }
 
+    private static double ModalWheelZoomMultiplier(int delta)
+        => delta == 0 ? 1 : Math.Pow(ModalZoomWheelStep, delta / 120d);
+
     private bool SetModalZoom(double zoom, Point? anchor = null, bool animate = true)
     {
         double next = Math.Clamp(zoom, ModalZoomMin, ModalZoomMax);
@@ -13058,6 +13127,7 @@ public partial class MainWindow : Window
         bool changed = Math.Abs(_modalZoom - 1) >= 0.0001
             || _modalFlipped
             || !string.Equals(_modalTransformPath, path, StringComparison.OrdinalIgnoreCase);
+        CancelPendingModalPanRender();
         EndModalPan();
         _modalZoom = 1;
         _modalFlipped = false;
@@ -13081,9 +13151,56 @@ public partial class MainWindow : Window
 
         _modalPanX = nextX;
         _modalPanY = nextY;
-        BeginModalTransformInteraction();
-        UpdateModalTransform();
+        _modalPanInputUpdateCount++;
+        if (_modalPointerState == ModalPointerState.Panning && !ReducedMotionEnabled)
+        {
+            ScheduleModalPanRender();
+        }
+        else
+        {
+            BeginModalTransformInteraction();
+            ApplyModalPanVisual();
+        }
         return true;
+    }
+
+    private void ScheduleModalPanRender()
+    {
+        if (_modalPanRenderQueued || Modal.Visibility != Visibility.Visible)
+            return;
+
+        _modalPanRenderQueued = true;
+        long generation = _modalPanRenderGeneration;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!_modalPanRenderQueued || generation != _modalPanRenderGeneration)
+                return;
+
+            _modalPanRenderQueued = false;
+            if (Modal.Visibility == Visibility.Visible)
+                ApplyModalPanVisual();
+        }, DispatcherPriority.Render);
+    }
+
+    private void ApplyModalPanVisual()
+    {
+        _modalPanVisualUpdateCount++;
+        UpdateModalTransform();
+    }
+
+    private void FlushPendingModalPanRender()
+    {
+        bool apply = _modalPanRenderQueued && Modal.Visibility == Visibility.Visible;
+        _modalPanRenderGeneration++;
+        _modalPanRenderQueued = false;
+        if (apply)
+            ApplyModalPanVisual();
+    }
+
+    private void CancelPendingModalPanRender()
+    {
+        _modalPanRenderGeneration++;
+        _modalPanRenderQueued = false;
     }
 
     private (double MaxX, double MaxY) ModalPanLimits()
@@ -13265,7 +13382,9 @@ public partial class MainWindow : Window
                 BeginModalPanning();
         }
 
-        if (_modalZoom > 1 && _modalPanStartPoint.HasValue)
+        if (_modalPointerState == ModalPointerState.Panning
+            && _modalZoom > 1
+            && _modalPanStartPoint.HasValue)
         {
             Vector panDelta = current - _modalPanStartPoint.Value;
             SetModalPan(_modalPanStartOffset.X + panDelta.X, _modalPanStartOffset.Y + panDelta.Y);
@@ -13300,12 +13419,15 @@ public partial class MainWindow : Window
     private void EndModalPointerGesture()
     {
         bool wasPanning = _modalPointerState == ModalPointerState.Panning;
+        if (wasPanning)
+            FlushPendingModalPanRender();
         _modalPointerStartPoint = null;
         _modalPointerMoved = false;
         EndModalPan();
         if (wasPanning)
         {
             _modalPointerState = ModalPointerState.Hidden;
+            BeginModalTransformInteraction();
             UpdateModalChromePresentation();
         }
         else
@@ -13457,6 +13579,13 @@ public partial class MainWindow : Window
         _modalFilmstripHoverVisible = false;
         _modalPressedEdgeTarget = ModalEdgeTarget.None;
         _modalPointerState = ModalPointerState.Panning;
+        _modalTransformQualityTimer.Stop();
+        if (ModalBitmap is not null)
+        {
+            RenderOptions.SetBitmapScalingMode(
+                ModalBitmap,
+                ReducedMotionEnabled ? BitmapScalingMode.HighQuality : BitmapScalingMode.Linear);
+        }
         UpdateModalChromePresentation();
     }
 
@@ -16918,7 +17047,7 @@ public partial class MainWindow : Window
             if (IsModalImageWheelSource(e.OriginalSource as DependencyObject))
             {
                 Point anchor = e.GetPosition(ModalImage);
-                AdjustModalZoom(e.Delta > 0 ? ModalZoomWheelStep : 1 / ModalZoomWheelStep, anchor);
+                AdjustModalZoom(ModalWheelZoomMultiplier(e.Delta), anchor);
                 e.Handled = true;
             }
             else
@@ -19473,6 +19602,40 @@ public partial class MainWindow : Window
     public void ApplyWorkbenchLayoutWidthForSmoke(double width)
         => ApplyAdaptiveWorkbenchLayout(Math.Max(MinWidth, width), preserveGridAnchor: false);
 
+    public bool ApplyModalToolbarWidthForSmoke(double width)
+    {
+        ApplyModalToolbarLayout(width);
+        return true;
+    }
+
+    public bool ModalCompactToolbarContractForSmoke
+        => ModalSourceLabel.Visibility == Visibility.Collapsed
+            && ModalFileSizeText.Visibility == Visibility.Collapsed
+            && ModalShortcutsButton.Visibility == Visibility.Collapsed
+            && ModalDeleteButton.Visibility == Visibility.Collapsed
+            && ModalOpenExternalButton.Visibility == Visibility.Collapsed
+            && ModalRevealButton.Visibility == Visibility.Collapsed
+            && ModalOneToOneButton.Visibility == Visibility.Visible
+            && ModalFavoriteDecreaseButton.Visibility == Visibility.Visible
+            && ModalFavoriteIncreaseButton.Visibility == Visibility.Visible
+            && ModalFilmstripToggleButton.Visibility == Visibility.Visible
+            && ModalMetadataSidebarToggleButton.Visibility == Visibility.Visible
+            && ModalTitle.MaxWidth <= 210
+            && ModalContextMenu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(
+                    AutomationProperties.GetName(item),
+                    "Open keyboard shortcuts",
+                    StringComparison.Ordinal));
+
+    public bool ModalWideToolbarContractForSmoke
+        => ModalSourceLabel.Visibility == Visibility.Visible
+            && ModalFileSizeText.Visibility == Visibility.Visible
+            && ModalShortcutsButton.Visibility == Visibility.Visible
+            && ModalDeleteButton.Visibility == Visibility.Visible
+            && ModalOpenExternalButton.Visibility == Visibility.Visible
+            && ModalRevealButton.Visibility == Visibility.Visible
+            && ModalTitle.MaxWidth >= 420;
+
     public void SimulateDpiGeometryChangeForSmoke(double width, double height)
     {
         GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
@@ -19643,6 +19806,51 @@ public partial class MainWindow : Window
     public bool ResetModalTransformForSmoke() => ResetModalTransform(_modalTransformPath, showFeedback: true);
 
     public bool SetModalPanForSmoke(double x, double y) => SetModalPan(x, y);
+    public async Task<ModalPanCadenceSnapshot> RunCoalescedModalPanForSmokeAsync(int requestedUpdates)
+    {
+        if (Modal.Visibility != Visibility.Visible || _modalZoom <= 1 || requestedUpdates < 2)
+            return ModalPanCadenceSnapshot.Unavailable(requestedUpdates);
+
+        FlushPendingModalPanRender();
+        _modalPanInputUpdateCount = 0;
+        _modalPanVisualUpdateCount = 0;
+        BeginModalPanning();
+
+        (double maxX, double maxY) = ModalPanLimits();
+        int accepted = 0;
+        for (int index = 0; index < requestedUpdates; index++)
+        {
+            double progress = index / (double)(requestedUpdates - 1);
+            double x = maxX * (-0.75 + (1.5 * progress));
+            double y = maxY * (0.75 - (1.5 * progress));
+            if (SetModalPan(x, y))
+                accepted++;
+        }
+
+        bool queuedBeforeYield = _modalPanRenderQueued;
+        await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
+        bool queuedAfterYield = _modalPanRenderQueued;
+        double visualX = ModalPanTransform?.X ?? 0;
+        double visualY = ModalPanTransform?.Y ?? 0;
+        int inputUpdates = _modalPanInputUpdateCount;
+        int visualUpdates = _modalPanVisualUpdateCount;
+        var transform = ModalTransformForSmoke();
+        EndModalPointerGesture();
+
+        return new ModalPanCadenceSnapshot(
+            true,
+            requestedUpdates,
+            accepted,
+            inputUpdates,
+            visualUpdates,
+            queuedBeforeYield,
+            queuedAfterYield,
+            transform.PanX,
+            transform.PanY,
+            visualX,
+            visualY);
+    }
+
     public bool ModalTransformAnimationActiveForSmoke
         => (ModalVisualTransform?.HasAnimatedProperties ?? false)
             || (ModalPanTransform?.HasAnimatedProperties ?? false);
@@ -19746,8 +19954,46 @@ public partial class MainWindow : Window
         => WindowChrome.GetIsHitTestVisibleInChrome(ModalTopBar)
             && new[] { ModalCloseBtn, ModalShortcutsButton, ModalDeleteButton, ModalMetadataSidebarToggleButton,
                 ModalFilmstripToggleButton, ModalOpenExternalButton, ModalRevealButton, ModalEnhanceButton,
-                ModalEnhancedToggleButton, ModalFlipButton, ModalFavoriteDecreaseButton, ModalFavoriteIncreaseButton }
+                ModalEnhancedToggleButton, ModalFlipButton, ModalFavoriteDecreaseButton, ModalFavoriteIncreaseButton,
+                ModalOneToOneButton }
                 .All(button => IsDescendantOrSelf(button, ModalTopBar));
+    public bool ModalLightweightGlassContractForSmoke
+        => new[]
+            {
+                ModalZoomIndicator,
+                ModalWindowCaptionControls,
+                ModalTopBarSurface,
+                ModalMetadataSidebar,
+                ModalFooter,
+                ModalFilmstripOverlay,
+                ModalInteractionFeedback,
+            }
+            .All(static border =>
+                border.Background is LinearGradientBrush brush
+                && brush.GradientStops.Count >= 2
+                && brush.GradientStops.All(static stop => stop.Color.A < byte.MaxValue))
+            && ModalTopBarSurface.Effect is null
+            && ModalFooter.Effect is null
+            && ModalFilmstripOverlay.Effect is null;
+    public bool ModalActualPixelsControlContractForSmoke
+        => string.Equals(ModalOneToOneLabel.Text, "100%", StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(ModalOneToOneButton),
+                "Show actual pixels at 100 percent",
+                StringComparison.Ordinal)
+            && ModalOneToOneButton.ToolTip?.ToString()?.Contains(
+                "one image pixel per screen pixel",
+                StringComparison.OrdinalIgnoreCase) == true;
+    public bool ModalFavoriteLevelReadoutContractForSmoke
+        => SelectedTile() is Tile selected
+            && string.Equals(
+                ModalFavoriteLevelText.Text,
+                Math.Clamp(selected.Fav, 0, 5).ToString(CultureInfo.InvariantCulture),
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(ModalFavoriteLevelText),
+                $"Favorite level {Math.Clamp(selected.Fav, 0, 5)}",
+                StringComparison.Ordinal);
     public bool ModalContextMenuContractForSmoke
         => Modal.ContextMenu is null
             && ReferenceEquals(ModalImageArea.ContextMenu, ModalContextMenu)
@@ -20095,8 +20341,15 @@ public partial class MainWindow : Window
     }
 
     public DisplayStyleMetrics DisplayStyleMetricsForSmoke()
+        => DisplayStyleMetricsForTileForSmoke(_allTiles.FirstOrDefault());
+
+    public DisplayStyleMetrics DisplayStyleMetricsForSmoke(string fileName)
+        => DisplayStyleMetricsForTileForSmoke(
+            _allTiles.FirstOrDefault(tile =>
+                string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase)));
+
+    private DisplayStyleMetrics DisplayStyleMetricsForTileForSmoke(Tile? tile)
     {
-        var tile = _allTiles.FirstOrDefault();
         return new DisplayStyleMetrics(
             _displayStyle,
             _aspectMode,
@@ -20108,6 +20361,26 @@ public partial class MainWindow : Window
             tile?.ListThumbnailSize ?? 0,
             tile?.CardThumbnailStretch.ToString() ?? Stretch.Uniform.ToString(),
             _tiles.Count);
+    }
+
+    public async Task<bool> WaitForCatalogImageDimensionsForSmokeAsync(int timeoutMilliseconds = 5_000)
+    {
+        int attempts = Math.Max(1, timeoutMilliseconds / 10);
+        for (int attempt = 0; attempt < attempts; attempt++)
+        {
+            if (_allTiles
+                .Where(static tile => tile.IsRealFile)
+                .All(static tile => tile.ImagePixelWidth > 0 && tile.ImagePixelHeight > 0))
+            {
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                return true;
+            }
+            await Task.Delay(10);
+        }
+
+        return _allTiles
+            .Where(static tile => tile.IsRealFile)
+            .All(static tile => tile.ImagePixelWidth > 0 && tile.ImagePixelHeight > 0);
     }
 
     public int AppendPastedFoldersForSmoke(string folderText)
@@ -20745,6 +21018,23 @@ public readonly record struct ModalTransformSnapshot(
     double PanY,
     double MaxPanX,
     double MaxPanY);
+
+public readonly record struct ModalPanCadenceSnapshot(
+    bool Available,
+    int RequestedUpdates,
+    int AcceptedUpdates,
+    int InputUpdates,
+    int VisualUpdates,
+    bool QueuedBeforeYield,
+    bool QueuedAfterYield,
+    double ModelPanX,
+    double ModelPanY,
+    double VisualPanX,
+    double VisualPanY)
+{
+    public static ModalPanCadenceSnapshot Unavailable(int requestedUpdates)
+        => new(false, requestedUpdates, 0, 0, 0, false, false, 0, 0, 0, 0);
+}
 
 public sealed class RecentFolderSetView
 {

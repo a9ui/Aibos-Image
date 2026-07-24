@@ -114,10 +114,35 @@ if ($result.keyboardSelectionSyncMaxMs -gt 4) {
 if ($result.gridItemsSourceCount -ne $Count -or $result.gridUsesFullExtentVirtualization -ne $true -or $result.gridRealizedCount -gt $result.gridRealizationLimit) {
     $failures.Add('100k gallery containers were not bounded by full-extent virtualization')
 }
-if ($result.catalogProjectionMaxApplySliceMs -gt 4) {
-    $failures.Add("catalog projection apply slice was $($result.catalogProjectionMaxApplySliceMs) ms")
+if ($result.favoriteEvictionExact -ne $true -or $result.favoriteEvictionAutomationExact -ne $true) {
+    $failures.Add('favorite-only removal did not evict the target and preserve the exact neighboring selection/UI Automation projection')
 }
-if ($result.dispatcherHeartbeatMaxGapMs -gt 50) { $failures.Add("dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms") }
+if ($result.favoriteEvictionBudgetMs -ne 100 -or $result.favoriteEvictionElapsedMs -gt $result.favoriteEvictionBudgetMs) {
+    $failures.Add("favorite-only removal was $($result.favoriteEvictionElapsedMs) ms (budget $($result.favoriteEvictionBudgetMs) ms)")
+}
+if ($result.catalogProjectionDiagnosticSliceTargetMs -ne 4) {
+    $failures.Add("catalog projection diagnostic target was $($result.catalogProjectionDiagnosticSliceTargetMs) ms")
+}
+if ($result.catalogProjectionSingleContainerDetachBudgetMs -ne 12 `
+    -or $result.catalogProjectionMaxSingleContainerDetachMs -gt $result.catalogProjectionSingleContainerDetachBudgetMs) {
+    $failures.Add(
+        "single-container reset unit was $($result.catalogProjectionMaxSingleContainerDetachMs) ms " +
+        "(budget $($result.catalogProjectionSingleContainerDetachBudgetMs) ms)")
+}
+if ($result.catalogProjectionMaxApplySliceMs -gt $result.catalogProjectionDiagnosticSliceTargetMs) {
+    Write-Warning (
+        "catalog projection diagnostic target exceeded: " +
+        "$($result.catalogProjectionMaxApplySliceOperation) " +
+        "$($result.catalogProjectionMaxApplySliceMs) ms > " +
+        "$($result.catalogProjectionDiagnosticSliceTargetMs) ms")
+}
+if ($result.dispatcherHeartbeatBudgetMs -ne 50 `
+    -or $result.dispatcherHeartbeatMaxGapMs -gt $result.dispatcherHeartbeatBudgetMs `
+    -or @($result.heartbeatGapSamples).Count -ne 0) {
+    $failures.Add(
+        "dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms " +
+        "(budget $($result.dispatcherHeartbeatBudgetMs) ms; over-budget samples $(@($result.heartbeatGapSamples).Count))")
+}
 if ($result.mixedLatestWins -ne $true -or $result.mixedStaleSearchDiscarded -ne $true -or $result.mixedStaleFilterDiscarded -ne $true -or $result.mixedDiscardedCount -lt 1) {
     $failures.Add('mixed search/filter/sort did not discard stale generations')
 }

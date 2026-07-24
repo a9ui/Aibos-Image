@@ -56,6 +56,10 @@ try {
     $required = @(
         'fullMotionMode',
         'accessibility',
+        'lightweightGlass',
+        'actualPixelsControl',
+        'favoriteLevelReadout',
+        'adaptiveToolbar',
         'windowCaptionControls',
         'edgeChrome',
         'edgePercentageSetting',

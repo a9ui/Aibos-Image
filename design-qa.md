@@ -156,9 +156,126 @@ No actionable P0, P1, or P2 mismatch remains in the selected five-state WPF dire
 ## Follow-up polish
 
 - P3: add optional monochrome category icons to Settings only if a licensed, consistent icon source is adopted; text navigation is currently clearer than placeholder glyphs.
-- P3: produce the final Aibos app icon, logo, and wordmark through the already-agreed three-option visual selection flow; the current small header glyph is a navigation mark, not a frozen brand asset.
+- Completed in the later Gallery Fold savepoint: the user-selected mark now has
+  dedicated small optical masters, deterministic PNG exports, and a
+  multi-frame Windows icon. The generated wordmark remains excluded because its
+  font and provenance are not authoritative.
 - P3: the large-image consent label is accurate but slightly mechanical; a later copy-only pass may shorten it to “Allow very large images when warned.”
 - P3: the adaptive Preview can become a true two-column thumbnail/details composition if hands-on testing shows that metadata must remain above the fold.
 - P3: static surface opacity can be tuned after hands-on testing; blur or shaders are not required for that refinement.
+
+final result: passed
+
+## M3 Gallery Fold brand savepoint
+
+- The user selected Gallery Fold as the WPF brand direction.
+- The runtime uses dedicated 20, 24, and 64 px marks plus one embedded Windows
+  icon. It does not load brand files from disk or the network at runtime.
+- The deterministic brand gate passes with 20 PNG frames and 10 ICO frames at
+  16, 20, 24, 32, 40, 48, 64, 96, 128, and 256 px.
+- Runtime payload is 103.06 KiB. Branding adds no shader, blur, animation,
+  polling, per-frame allocation, shared-state access, or Browser dependency.
+- The 16, 20, and 24 px frames use separate optical masters so both negative
+  seams remain visible. White and black exports also pass the structural gate.
+- PRO review returned CLEAR with Critical/High blocker count 0 for the
+  pre-refactor savepoint. The raster pack is accepted until an authoritative
+  vector source exists; speculative tracing and the generated wordmark remain
+  excluded.
+- Trademark, name-clearance, and final asset-provenance approval remain human
+  release gates. This engineering savepoint is not legal clearance and does
+  not authorize deployment.
+
+## M3 catalog-interaction acceptance decision
+
+### Oracle question
+
+Should the 100,000-item WPF catalog keep every instrumented dispatcher slice at
+or below 4 ms as a Critical gate, or should one indivisible realized-container
+reset unit have a separate budget while externally observed input latency and
+end-to-end correctness remain hard gates?
+
+### Answer summary
+
+PRO returned REVISE and selected the second option. The 4 ms value remains a
+diagnostic target. The Critical contract is one realized-container reset unit
+at or below 12 ms, external Dispatcher heartbeat gap at or below 50 ms,
+Favorite-only removal at or below 100 ms, and exact eviction, neighboring
+selection, UI Automation projection, visible coverage, and stale-visual
+results.
+
+### Adjudication
+
+- ADOPT: separate the indivisible WPF generator/visual-tree reset budget from
+  code-owned diagnostic slices; keep heartbeat and end-to-end correctness as
+  hard gates.
+- PARTIAL: the recommendation asked for one cold and two warm isolated
+  processes. All three were run against the same candidate tree and all hard
+  gates passed.
+- REJECT: clearing DataContext, image bindings, or templates merely to force
+  WPF's indivisible detach below 4 ms. That would add selection, binding,
+  recycling, and layout risk without evidence of a user-visible freeze.
+- DEFER: High-DPI screen-reader combinations and independent M4 contract audit.
+  This decision does not authorize M4 or the structural refactor.
+
+### Evidence
+
+- Cold process: 100,000 catalog items, 9 realized cards, heartbeat maximum
+  44 ms, Favorite-only removal 26 ms, no over-budget heartbeat sample.
+- Warm process 1: heartbeat maximum 40 ms, Favorite-only removal 32 ms, no
+  over-budget heartbeat sample.
+- Warm process 2: heartbeat maximum 41 ms, Favorite-only removal 28 ms, no
+  over-budget heartbeat sample.
+- All three processes evicted the changed Favorite item, selected the same
+  expected neighboring logical item, preserved the exact UI Automation
+  projection, retained full-extent virtualization, and passed the complete
+  interaction gate.
+- The previously observed 10 ms reset unit was one realized container, remained
+  below the new 12 ms hard budget, and coincided with a 42 ms heartbeat maximum
+  and 51 ms exact Favorite-only removal. It is retained as diagnostic evidence,
+  not discarded as an exception.
+
+### Durable decision
+
+The M3 gate now reports its budgets in the result payload. A code-owned apply
+slice above 4 ms is named and reported as a diagnostic warning. M3 fails when a
+single-container reset exceeds 12 ms, a Dispatcher heartbeat exceeds 50 ms,
+Favorite-only removal exceeds 100 ms, or eviction/selection/UI Automation
+correctness differs. The rollback boundary is the gate classification and
+result fields only; catalog scheduling, virtualization, bindings, product
+state, source images, Browser behavior, licensing, and deployment are
+unchanged.
+
+## M3 lightweight modal-glass follow-up
+
+- The user reaffirmed `private-evidence://aibos/workbench-split-reference.png`
+  (1586 x 992, SHA-256
+  `b47ee334b70174d6640f756574a74709c6401120710807cd7e1388c00483db12`)
+  as the product direction, then asked for less matte floating chrome.
+- Exact candidate captures:
+  - `private-evidence://aibos/modal-glass-wide-final.png` — 1280 x 820,
+    SHA-256
+    `8bb8f9a323e458a3af8c36210103d9550ae6cef12fe888374910bf97c33cbeb0`.
+  - `private-evidence://aibos/modal-glass-narrow-final.png` — 900 x 700,
+    SHA-256
+    `289d141d013c59dd2047fbaed006939760f572c22db47e972a0d79ef84d63d80`.
+  - `private-evidence://aibos/modal-glass-before-after.png` — 2560 x 864,
+    SHA-256
+    `0c553768cd18028d6b56df1a3e1dd8f672e207f29cc01844da6781aaaca18782`.
+- Floating modal chrome now uses one static alpha gradient over the image.
+  There is still no blur, refraction, shader, parallax, shadow, or continuous
+  glass animation. Reduced Transparency composites both gradient colors to
+  opaque tokens, and High Contrast replaces them with the Windows system
+  palette.
+- The modal title is the last fill child in the toolbar, so commands keep their
+  stable geometry while the filename truncates. At widths below 1080 DIP,
+  duplicated Shortcuts, Delete, Open, and Reveal commands move to the existing
+  context-menu path; Actual pixels, Favorite level, Filmstrip, Details,
+  Enhancement, and native window controls remain visible.
+- The ambiguous `1:1` label is now `100%` with the explicit tooltip “one image
+  pixel per screen pixel.” The modal Favorite group displays the current
+  numeric level between its decrease/increase hearts.
+- Exact gates: .NET 10 Release warning 0/error 0; modal interaction including
+  compact-toolbar restore; reduced motion/transparency; Windows High Contrast;
+  760 x 480 and 960 x 500 work-area containment; Original-aspect reflow.
 
 final result: passed
