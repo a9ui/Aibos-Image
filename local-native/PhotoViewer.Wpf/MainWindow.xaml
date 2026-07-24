@@ -417,7 +417,8 @@
               DragEnter="FolderDropTarget_DragEnter" DragOver="FolderDropTarget_DragOver" DragLeave="FolderDropTarget_DragLeave" Drop="FolderDropTarget_Drop"
               AutomationProperties.Name="Image viewer folder drop target" AutomationProperties.HelpText="Drop existing folders from Explorer to add them to the current folder set. Files are never copied or moved.">
        <Grid>
-        <local:VirtualizedGalleryListBox x:Name="CardsList" Background="Transparent" BorderThickness="0" Padding="14,12,10,18"
+        <local:VirtualizedGalleryListBox x:Name="CardsList" AutomationProperties.AutomationId="AibosGalleryGrid"
+                 Background="Transparent" BorderThickness="0" Padding="14,12,10,18"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                  ItemsPanel="{StaticResource VirtualizedCardItemsPanel}"

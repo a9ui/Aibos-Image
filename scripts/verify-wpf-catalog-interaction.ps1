@@ -62,6 +62,10 @@ if ($result.countsExact -ne $true -or $result.searchCompletionsApplied -ne $true
 if ($result.warmupComplete -ne $true) {
     $failures.Add('catalog interaction warmup did not complete')
 }
+if ($result.favoriteEvictionExact -ne $true `
+    -or $result.favoriteEvictionAutomationExact -ne $true) {
+    $failures.Add('favorite-filter eviction did not republish an externally searchable Automation projection')
+}
 if ($result.searchP95Ms -gt 250 -or $result.filterP95Ms -gt 250 -or $result.sortP95Ms -gt 500) {
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")
 }
@@ -78,6 +82,19 @@ if ($result.keyboardNavigationExact -ne $true `
 }
 if ($result.projectionFocusRestored -ne $true) {
     $failures.Add('logical gallery focus was not restored after projection publication')
+}
+if ($result.externalAutomationExact -ne $true `
+    -or $result.externalAutomationPreservedSelection -ne $true `
+    -or $result.automationLookupMaxMs -gt 4) {
+    $failures.Add("external AutomationElement ItemContainer lookup failed or exceeded 4 ms ($($result.automationLookupMaxMs) ms provider time)")
+}
+if ($result.repeatedAutomationRealizeCoalesced -ne $true) {
+    $failures.Add('repeated UI Automation Realize requests were not coalesced')
+}
+if ($result.staleAutomationPeerLifetimeExact -ne $true `
+    -or $result.staleAutomationRealizeUnavailable -ne $true `
+    -or $result.staleAutomationSelectUnavailable -ne $true) {
+    $failures.Add('stale UI Automation peer survived projection removal or mutated selection')
 }
 if ($result.automationVirtualizedItemExact -ne $true `
     -or $result.automationRealizePreservedSelection -ne $true `
