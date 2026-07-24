@@ -9557,6 +9557,9 @@ public partial class MainWindow : Window
         bool singleLayoutGroup = true;
         double firstLayoutHeight = 0;
         string firstLayoutGroup = "";
+        List<int>? matchedIndices = unfiltered
+            ? null
+            : new List<int>(Math.Min(snapshot.TileCount, 4_096));
         for (int index = 0; index < snapshot.TileCount; index++)
         {
             if ((index & 63) == 0)
@@ -9565,6 +9568,7 @@ public partial class MainWindow : Window
             FilterTileSnapshot tile = snapshot.Tiles[index];
             if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot))
                 continue;
+            matchedIndices?.Add(index);
             if (!hasLayoutItem)
             {
                 hasLayoutItem = true;
@@ -9599,18 +9603,14 @@ public partial class MainWindow : Window
             : null;
         if (!unfiltered)
         {
-            int filteredIndex = 0;
-            for (int index = 0; index < snapshot.TileCount; index++)
+            for (int filteredIndex = 0; filteredIndex < filteredCount; filteredIndex++)
             {
-                if ((index & 63) == 0)
+                if ((filteredIndex & 63) == 0)
                     cancellationToken.ThrowIfCancellationRequested();
-                FilterTileSnapshot tile = snapshot.Tiles[index];
-                if (!MatchesFilterSnapshot(tile, snapshot))
-                    continue;
+                FilterTileSnapshot tile = snapshot.Tiles[matchedIndices![filteredIndex]];
                 filtered[filteredIndex] = tile.Tile;
                 if (filteredLayoutItems is not null)
                     filteredLayoutItems[filteredIndex] = new VirtualizingLayoutItem(tile.Group, tile.CardHeight);
-                filteredIndex++;
             }
         }
         else if (filteredLayoutItems is not null)
