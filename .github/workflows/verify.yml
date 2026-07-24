@@ -72,6 +72,18 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-right-panel.ps1 -SkipBuild
 
+      - name: Thumbnail continuity and virtualized grid smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-thumbnail-continuity.ps1 -SkipBuild
+
+      - name: Large catalog interaction smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-catalog-interaction.ps1 -SkipBuild -Count 100000
+
+      - name: Compact and high-DPI work-area smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-monitor-work-area.ps1 -SkipBuild
+
       - name: Modal interaction smoke
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1

@@ -52,6 +52,16 @@
   <sys:String x:Key="UiConfirmBeforeDeleteHelp">元画像はWindowsのごみ箱へ移動します。完全削除へ切り替えることはありません。</sys:String>
   <sys:String x:Key="UiUnseenDots">Unseen dots</sys:String>
   <sys:String x:Key="UiUnseenDotsHelp">未表示の画像にdotを出します。この設定で閲覧履歴は変わりません。</sys:String>
+  <sys:String x:Key="UiAccessibilityEffects">ACCESSIBILITY EFFECTS</sys:String>
+  <sys:String x:Key="UiReducedMotion">動きを減らす</sys:String>
+  <sys:String x:Key="UiReducedTransparency">透明効果を減らす</sys:String>
+  <sys:String x:Key="UiAccessibilitySystem">System</sys:String>
+  <sys:String x:Key="UiAccessibilityReduce">Reduce</sys:String>
+  <sys:String x:Key="UiAccessibilityFull">Full</sys:String>
+  <sys:String x:Key="UiAccessibilityReduced">Reduced</sys:String>
+  <sys:String x:Key="UiAccessibilityFullValue">Full</sys:String>
+  <sys:String x:Key="UiAccessibilityStatusFormat">Motion: {0} / Transparency: {1}</sys:String>
+  <sys:String x:Key="UiAccessibilityHelp">既定はWindowsに追従。上書きはWPFだけに保存し、Browserや共有画像データは変えません。</sys:String>
   <sys:String x:Key="UiModalEdgeNavigation">MODAL EDGE NAVIGATION</sys:String>
   <sys:String x:Key="UiModalEdgeEachSideFormat">左右 {0}%</sys:String>
   <sys:String x:Key="UiModalEdgeHelp">画像と重なる左右端だけで前後移動します。0%で無効。矢印キーは常に使えます。</sys:String>

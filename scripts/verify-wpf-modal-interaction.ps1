@@ -54,6 +54,7 @@ try {
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 8
     $required = @(
+        'fullMotionMode',
         'accessibility',
         'windowCaptionControls',
         'edgeChrome',
@@ -61,9 +62,11 @@ try {
         'edgeImageIntersection',
         'zoomIndicator',
         'filmstripLayout',
+        'filmstripButtonStableGeometry',
         'contextMenuAction',
         'manualVisiblePersistent',
         'imageClickImmediateHide',
+        'imageClickImmediateShow',
         'chromeHidden',
         'transientReveal',
         'transientRevealMotion',
@@ -76,6 +79,7 @@ try {
         'filmstripOverlayStableGeometry',
         'chromeShown',
         'detailsOverlayStableGeometry',
+        'detailsTransformStable',
         'filmstripOffSuppressesHover',
         'focusedButtonShortcuts',
         'nativeButtonKeys',

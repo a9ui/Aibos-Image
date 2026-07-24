@@ -64,7 +64,7 @@ No actionable P0, P1, or P2 visual mismatch remains for this implementation batc
 ## Open questions
 
 - The source board does not define a standalone Album Library window or selected-batch review. Those states therefore follow the same tokens and density without claiming pixel fidelity to missing source states.
-- The source board shows landscape filmstrip samples, while the product contract deliberately keeps a portrait-oriented horizontally virtualized filmstrip. This is an intentional product constraint, not unresolved visual drift.
+- The source board shows landscape filmstrip samples. The product now uses one compact, landscape, horizontally virtualized filmstrip in the modal, matching that direction without reducing the image canvas.
 
 ## Implementation checklist
 
@@ -99,9 +99,64 @@ No actionable P0, P1, or P2 visual mismatch remains for this implementation batc
 - English/Japanese switching is WPF-local presentation state. Captures and the dedicated gate prove that it does not write Browser `settings.json`, source images, or user state outside isolated TEMP fixtures.
 - The post-fix pass found no actionable P0, P1, or P2 difference in Landing, wide Grid, Japanese Settings, full-canvas Modal, or the 900-DIP Japanese adaptive state.
 
+## Repair 4 final hands-on request pass
+
+### Exact visual evidence
+
+- Source visual truth: `private-evidence://aibos/workbench-split-reference.png`
+  - 1586 x 992 pixels at 96 DPI; SHA-256 `b47ee334b70174d6640f756574a74709c6401120710807cd7e1388c00483db12`.
+- Rendered implementation:
+  - `private-evidence://aibos/repair4-landing.png` — 900 x 1068, SHA-256 `b9d9aec482aa6c84e0ef1886aa956ef4f346fc0124fe61401b158677793b8f91`
+  - `private-evidence://aibos/repair4-grid-wide.png` — 1280 x 820, SHA-256 `b85a6531665aeb6d4e10122928bac93d6dc2f4b89acadd68d92e2258406f7633`
+  - `private-evidence://aibos/repair4-settings.png` — 900 x 710, SHA-256 `c56eb86efe74cd13deeb42a4602d5c95072b7f1f9529342ed6efd64bbdd82e`
+  - `private-evidence://aibos/repair4-modal.png` — 1500 x 793, SHA-256 `151bd7e8345e40e73eba20e39e7654e029f5692a4ba4e175c5d5951f8726a24d`
+  - `private-evidence://aibos/repair4-narrow.png` — 900 x 770, SHA-256 `98910a82ffe84ce06c48d9af859ead477804ae8d6c892e3a241e94c14048f020`
+  - `private-evidence://aibos/repair4-source-vs-implementation.png` — normalized 1586 x 1984 full-view comparison, SHA-256 `88a7cb5fc891735dc6e41eca32cdb87daf90314d046f3f12e4673cdea7afe6e5`
+  - `private-evidence://aibos/repair4-grid-modal-focused.png` — 1332 x 712 focused comparison, SHA-256 `7392eff15d1c5a2cc14426d5335de51a43856e67b388bfc152b0c1e8147798ba`
+- Viewport and density: captures were rendered at the named WPF logical DIP dimensions through a 96-DPI `RenderTargetBitmap`; implementation pixels equal CSS-equivalent logical size at density 1. The composite source board contains five differently sized states, so each implementation state was normalized to its corresponding source region before the combined comparison was made.
+- State: dark theme, English UI, `Original` aspect behavior, seven Windows system sample images copied into an isolated TEMP fixture. No user image, cache, shared state, history, favorite, Album, or enhancement record was read or changed.
+
+### Full-view and focused comparison
+
+The normalized full-view comparison was opened at original pixels and reviewed for Landing, wide workbench, Settings, modal, and 900-DIP adaptive composition. The focused comparison placed the source and implementation Grid and Modal regions together at readable scale. The actual product preserves its real Jobs, Albums, enhancement, Preview, and metadata workflows where the source board used illustrative controls.
+
+### Required fidelity surfaces
+
+- Fonts and typography: native Segoe UI rendering, compact hierarchy, line height, truncation, wrapping, and optical weight remain consistent with the selected workbench. Narrow and Japanese layout gates show no clipped persistent labels.
+- Spacing and layout rhythm: the 1280-DIP workbench now reaches three columns with 10-DIP card spacing, retains a 340-DIP default Preview, and guarantees a 96-DIP draggable header region. Sidebar, scrollbar, settings action, and modal controls remain contained at compact and short work areas.
+- Colors and visual tokens: the near-black background, cool one-pixel separators, violet accent, bright favorite red, restrained cyan enhancement state, and lightweight translucent chrome map to centralized WPF resources. No backdrop blur, refraction, parallax, or continuously animated glass effect was added.
+- Image quality and asset fidelity: production decoding remains unchanged. `Stretch.Uniform` intentionally preserves the full source image, so letterboxing may appear where the illustrative board used cropped scenic thumbnails. This is accepted product behavior rather than a placeholder or missing thumbnail. All seven TEMP thumbnails settle with zero final placeholders and zero unrealized visible items.
+- Copy and content: the implementation uses real Aibos labels and commands. Grid/List cards do not add prompt text. English and Japanese resources exist for the new accessibility settings without forcing Japanese onto icon-led chrome.
+- Icons and controls: modal Favorite, folder, filmstrip, close, navigation, zoom, and fit actions use the existing licensed/native icon language. The Favorite heart is larger and brighter in gallery cards; modal Favorite is icon-only. The app close control and modal exit affordance remain spatially distinct.
+- Responsiveness: wide, 900-DIP adaptive, 760 x 480 compact, 960 x 500 short, maximize/restore, and DPI-equivalent work areas remain contained. The narrow layout keeps gallery, bottom Preview, and persistent actions reachable.
+- Accessibility and states: live Windows High Contrast, reduced motion, reduced transparency, keyboard focus, automation names, bilingual settings, hidden modal chrome, filmstrip on/off, details open/closed, zoom/pan, favorite-only eviction, loading retry, corrupt-terminal, and empty Landing states are covered.
+
+### Primary interactions tested
+
+- Favorite-only → remove favorite completes without blocking, preserves the expected neighbor selection, and keeps virtualization bounded in a 100,000-item catalog.
+- Grid zoom buttons, shortcuts, gallery wheel, scrollbar wheel, selection anchor, sidebar/right-panel resize, DPI change, and List-mode isolation pass.
+- Image click hides and shows modal chrome immediately; hidden chrome also hides the cursor and remains hidden across image navigation.
+- Filmstrip button turns the single bottom strip off and on without hover reopening it or moving the footer control under the pointer.
+- Opening Details preserves the full image canvas, zoom, and pan rather than fitting or shrinking the image.
+- Edge navigation remains configurable by percentage while its chevrons are visually subdued; the black surface outside the image exits to the gallery.
+- A transient locked thumbnail recovers without reload; corrupt input terminates after four bounded attempts; fixture source hashes remain unchanged.
+
+### Comparison history for this pass
+
+1. P1: modal chrome could only be hidden from the image, and the duplicated hover/pinned filmstrips could reopen or move controls while the pointer was pressing them. Fix: made image-click chrome toggling bidirectional, consolidated to one stable filmstrip presenter, and made its explicit off state authoritative over hover. Post-fix evidence: `repair4-modal.png` and `repair4-grid-modal-focused.png`; the expanded modal interaction gate passes.
+2. P2: opening Details scheduled a fit update and changed zoom/pan geometry. Fix: separated details visibility from image fitting. Post-fix evidence: the modal smoke records stable geometry and transform across Details open/close.
+3. P2: the initial repair capture still showed a bulky portrait filmstrip and a two-column 1280-DIP grid. Fix: changed the strip to compact landscape cells, reduced grid spacing, and tuned the default Preview width. Post-fix evidence: `repair4-grid-wide.png`, `repair4-modal.png`, and the focused comparison show three columns and the smaller landscape strip.
+4. P2: the Landing frame lacked the selected direction's persistent Aibos header identity. Fix: added the same compact icon-and-wordmark treatment used by the workbench without introducing a new final brand asset. Post-fix evidence: `repair4-landing.png`.
+5. P2: fixed minimum dimensions and header density could clip Settings, sidebars, scrollbars, buttons, or the drag surface on compact work areas. Fix: derive effective minimums from the active work area at startup, DPI transition, and custom maximize; normalize the initial bounds before first interaction; wrap sidebar content; constrain search; and preserve the drag region. Post-fix evidence: monitor-work-area smoke passes wide, 760 x 480 compact startup, compact/short maximize, Japanese, restore, and offscreen normalization cases.
+
+### Findings
+
+No actionable P0, P1, or P2 mismatch remains in the selected five-state WPF direction or the repaired interactions.
+
 ## Follow-up polish
 
 - P3: add optional monochrome category icons to Settings only if a licensed, consistent icon source is adopted; text navigation is currently clearer than placeholder glyphs.
+- P3: produce the final Aibos app icon, logo, and wordmark through the already-agreed three-option visual selection flow; the current small header glyph is a navigation mark, not a frozen brand asset.
 - P3: the large-image consent label is accurate but slightly mechanical; a later copy-only pass may shorten it to “Allow very large images when warned.”
 - P3: the adaptive Preview can become a true two-column thumbnail/details composition if hands-on testing shows that metadata must remain above the fold.
 - P3: static surface opacity can be tuned after hands-on testing; blur or shaders are not required for that refinement.

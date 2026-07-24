@@ -16,6 +16,7 @@ $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csp
 $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 $outputFullPath = [IO.Path]::GetFullPath($OutputPath)
+$progressPath = $outputFullPath + '.progress'
 if (-not $outputFullPath.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "OutputPath must stay under TEMP: $outputFullPath"
 }
@@ -27,14 +28,23 @@ if (-not $SkipBuild) {
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "WPF executable was not found: $exe" }
 
 Remove-Item -LiteralPath $outputFullPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $progressPath -Force -ErrorAction SilentlyContinue
 $process = Start-Process -FilePath $exe `
     -ArgumentList @('--catalog-interaction-smoke', ('"{0}"' -f $outputFullPath), '--count', $Count.ToString()) `
     -WindowStyle Hidden -PassThru
 $completed = $process.WaitForExit($OverallTimeoutSeconds * 1000)
 if (-not $completed) {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    throw "WPF catalog interaction smoke timed out after $OverallTimeoutSeconds seconds."
+    $progress = if (Test-Path -LiteralPath $progressPath -PathType Leaf) {
+        Get-Content -Raw -LiteralPath $progressPath
+    }
+    else {
+        'unknown'
+    }
+    Remove-Item -LiteralPath $progressPath -Force -ErrorAction SilentlyContinue
+    throw "WPF catalog interaction smoke timed out after $OverallTimeoutSeconds seconds at $progress."
 }
+Remove-Item -LiteralPath $progressPath -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path -LiteralPath $outputFullPath -PathType Leaf)) {
     throw "WPF catalog interaction smoke exited without producing $outputFullPath"
 }
@@ -48,6 +58,9 @@ if ($result.requestedCount -ne $Count -or $result.catalogCount -ne $Count -or $r
 }
 if ($result.countsExact -ne $true -or $result.searchCompletionsApplied -ne $true) {
     $failures.Add('search/filter result counts or completion ordering failed')
+}
+if ($result.warmupComplete -ne $true) {
+    $failures.Add('catalog interaction warmup did not complete')
 }
 if ($result.searchP95Ms -gt 250 -or $result.filterP95Ms -gt 250 -or $result.sortP95Ms -gt 500) {
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")

@@ -1,20 +1,39 @@
 param(
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$OutputPath = (Join-Path $env:TEMP ('photoviewer-wpf-window-work-area-' + [guid]::NewGuid().ToString('N') + '.json')),
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
-$resultPath = Join-Path $env:TEMP ('photoviewer-wpf-window-work-area-' + [guid]::NewGuid().ToString('N') + '.json')
+$resultPath = [IO.Path]::GetFullPath($OutputPath)
+$dotnet = if (
+    -not [string]::IsNullOrWhiteSpace($env:DOTNET_ROOT) -and
+    (Test-Path -LiteralPath (Join-Path $env:DOTNET_ROOT 'dotnet.exe') -PathType Leaf)
+) {
+    Join-Path $env:DOTNET_ROOT 'dotnet.exe'
+}
+else {
+    (Get-Command dotnet -ErrorAction Stop).Source
+}
 
 try {
-    dotnet build $project -c $Configuration --nologo
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if (-not $SkipBuild) {
+        & $dotnet build $project -c $Configuration --nologo
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "WPF executable was not found: $exe" }
 
     $process = Start-Process -FilePath $exe `
         -ArgumentList @('--window-work-area-smoke', ('"{0}"' -f $resultPath)) `
-        -WindowStyle Hidden -Wait -PassThru
+        -WindowStyle Hidden -PassThru
+    if (-not $process.WaitForExit(30000)) {
+        $process.Kill($true)
+        $process.WaitForExit()
+        throw 'window work-area smoke exceeded 30 seconds and was stopped'
+    }
     if (-not (Test-Path -LiteralPath $resultPath)) { throw 'window work-area smoke did not write its result' }
 
     $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
@@ -22,10 +41,13 @@ try {
     if ($process.ExitCode -ne 0) { $failures += "window work-area smoke exited with $($process.ExitCode)" }
     if ($result.ok -ne $true) { $failures += "result was not ok: $($result.message)" }
     if ($result.usedCurrentMonitor -ne $true) { $failures += 'maximize did not use the injected current monitor' }
+    if ($result.wideSidebarLayout -ne $true) { $failures += 'wide Japanese sidebar, button text, or scrollbar did not fit' }
     if ($result.restoredExactly -ne $true) { $failures += 'restore bounds changed after maximize' }
     if ($result.disconnectedContained -ne $true) { $failures += 'disconnected-monitor restore remained off-screen' }
     if ($result.oversizedContained -ne $true) { $failures += 'resolution-change restore exceeded the current work area' }
     if ($result.dpiEquivalentContained -ne $true) { $failures += 'DPI-equivalent restore exceeded the new DIP work area' }
+    if ($result.compactContained -ne $true) { $failures += 'work area below both design minimums clipped adaptive chrome' }
+    if ($result.shortContained -ne $true) { $failures += 'work area below the design minimum height clipped adaptive chrome' }
     if ($result.safeFallback -ne $true) { $failures += 'monitor lookup failure did not use a safe fallback' }
     if ($result.fallbackRestored -ne $true) { $failures += 'fallback maximize did not restore exact bounds' }
     if ($result.fallbackOffscreenContained -ne $true) { $failures += 'fallback restore did not normalize off-screen bounds' }
