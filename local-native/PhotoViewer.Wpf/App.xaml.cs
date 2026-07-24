@@ -2841,8 +2841,11 @@ public partial class App : Application
     {
         string resultFullPath = Path.GetFullPath(resultPath);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var compactStartupWorkArea = new Rect(80, 40, 760, 480);
         var window = HiddenWindow();
+        window.SetCurrentMonitorWorkAreaForSmoke(compactStartupWorkArea);
         window.Show();
+        MainWindow? wideProbe = null;
         window.Dispatcher.InvokeAsync(async () =>
         {
             bool ok = false;
@@ -2859,6 +2862,17 @@ public partial class App : Application
                         && inner.Top >= outer.Top - 0.01
                         && inner.Right <= outer.Right + 0.01
                         && inner.Bottom <= outer.Bottom + 0.01;
+                Rect desktopWorkArea = SystemParameters.WorkArea;
+                Rect LiveWorkArea(double maxWidth, double maxHeight, double margin)
+                {
+                    double width = Math.Min(maxWidth, Math.Max(1, desktopWorkArea.Width - (margin * 2)));
+                    double height = Math.Min(maxHeight, Math.Max(1, desktopWorkArea.Height - (margin * 2)));
+                    return new Rect(
+                        desktopWorkArea.Left + ((desktopWorkArea.Width - width) / 2),
+                        desktopWorkArea.Top + ((desktopWorkArea.Height - height) / 2),
+                        width,
+                        height);
+                }
 
                 async Task SettleLayoutAsync()
                 {
@@ -2866,35 +2880,40 @@ public partial class App : Application
                     await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.ContextIdle);
                 }
 
-                window.Width = 1280;
-                window.Height = 820;
-                window.SetUiLanguageForSmoke("ja");
-                await SettleLayoutAsync();
-                bool wideAdaptiveOff = !window.AdaptiveWorkbenchForSmoke;
-                bool wideSettingsPinned = window.SidebarSettingsPinnedForSmoke;
-                bool wideScrollContained = window.SidebarScrollContractForSmoke;
-                bool wideButtonTextFits = window.SidebarButtonTextFitsForSmoke;
-                List<string> wideClippedButtons = window.SidebarClippedButtonNamesForSmoke;
-                bool wideChromeContained = window.VisibleWorkbenchChromeContainedForSmoke;
-                double wideDragRegionWidth = window.HeaderDragRegionWidthForSmoke;
+                // Arrange the wide visual contract independently of the CI
+                // desktop resolution. The shown window below remains bound to
+                // the real desktop for monitor/maximize behavior.
+                wideProbe = HiddenWindow();
+                wideProbe.SuppressStatePersistence();
+                wideProbe.Show();
+                wideProbe.SetUiLanguageForSmoke("ja");
+                wideProbe.ApplyWorkbenchLayoutWidthForSmoke(1280);
+                if (wideProbe.Content is FrameworkElement wideRoot)
+                {
+                    var wideSize = new Size(1280, 820);
+                    wideRoot.Measure(wideSize);
+                    wideRoot.Arrange(new Rect(new Point(), wideSize));
+                    wideRoot.UpdateLayout();
+                }
+                bool wideAdaptiveOff = !wideProbe.AdaptiveWorkbenchForSmoke;
+                bool wideSettingsPinned = wideProbe.SidebarSettingsPinnedForSmoke;
+                bool wideScrollContained = wideProbe.SidebarScrollContractForSmoke;
+                bool wideButtonTextFits = wideProbe.SidebarButtonTextFitsForSmoke;
+                List<string> wideClippedButtons = wideProbe.SidebarClippedButtonNamesForSmoke;
+                bool wideChromeContained = wideProbe.VisibleWorkbenchChromeContainedForSmoke;
+                double wideDragRegionWidth = wideProbe.HeaderDragRegionWidthForSmoke;
                 bool wideSidebarLayout = wideAdaptiveOff
                     && wideSettingsPinned
                     && wideScrollContained
                     && wideButtonTextFits
                     && wideChromeContained
                     && wideDragRegionWidth >= 95;
-                window.SetUiLanguageForSmoke("en");
+                wideProbe.SetUiLanguageForSmoke("en");
 
                 // Startup must normalize the initial design size before the
                 // user can reach custom maximize controls on a compact work area.
-                var compactStartupWorkArea = new Rect(80, 40, 760, 480);
-                window.Left = 180;
-                window.Top = 60;
-                window.Width = 1280;
-                window.Height = 820;
-                window.SetCurrentMonitorWorkAreaForSmoke(compactStartupWorkArea);
-                Rect compactStartupBounds = window.ConstrainWindowToCurrentWorkAreaForSmoke();
                 await SettleLayoutAsync();
+                Rect compactStartupBounds = window.WindowBoundsForSmoke;
                 Size compactStartupMinimum = window.EffectiveWindowMinimumForSmoke;
                 bool compactStartupContained = !window.FakeMaximizedForSmoke
                     && SameRect(compactStartupBounds, compactStartupWorkArea)
@@ -2909,8 +2928,14 @@ public partial class App : Application
                 // physical bounds so Windows does not clamp an intentionally
                 // nonexistent monitor. Its offset/size still differs from the
                 // primary work area and proves the provider is authoritative.
-                var initial = new Rect(180, 60, 940, 570);
-                var secondMonitorWorkArea = new Rect(80, 40, 1120, 600);
+                var secondMonitorWorkArea = LiveWorkArea(960, 600, 20);
+                double initialWidth = Math.Min(900, secondMonitorWorkArea.Width);
+                double initialHeight = Math.Min(560, secondMonitorWorkArea.Height);
+                var initial = new Rect(
+                    secondMonitorWorkArea.Left + ((secondMonitorWorkArea.Width - initialWidth) / 2),
+                    secondMonitorWorkArea.Top + ((secondMonitorWorkArea.Height - initialHeight) / 2),
+                    initialWidth,
+                    initialHeight);
                 window.Left = initial.Left;
                 window.Top = initial.Top;
                 window.Width = initial.Width;
@@ -2927,7 +2952,7 @@ public partial class App : Application
                 // A disconnected monitor leaves the saved normal bounds far
                 // outside the current desktop. Restore must keep the complete
                 // window inside the new current work area.
-                var changedWorkArea = new Rect(100, 50, 1000, 600);
+                var changedWorkArea = LiveWorkArea(940, 580, 30);
                 var disconnectedBounds = new Rect(2400, 140, 940, 570);
                 window.SetCurrentMonitorWorkAreaForSmoke(changedWorkArea);
                 Rect disconnectedRestore = window.RestoreFromFakeMaximizeForSmoke(disconnectedBounds);
@@ -3003,7 +3028,9 @@ public partial class App : Application
                 Rect fallback = window.WindowBoundsForSmoke;
                 bool safeFallback = window.FakeMaximizedForSmoke && SameRect(fallback, SystemParameters.WorkArea);
                 window.ToggleMaximizeForSmoke();
-                bool fallbackRestored = !window.FakeMaximizedForSmoke && SameRect(window.WindowBoundsForSmoke, initial);
+                Rect fallbackExpected = PhotoViewer.Wpf.MainWindow.NormalizeRestoreBoundsForSmoke(initial, SystemParameters.WorkArea);
+                bool fallbackRestored = !window.FakeMaximizedForSmoke
+                    && SameRect(window.WindowBoundsForSmoke, fallbackExpected);
                 var fallbackOffscreenBounds = new Rect(5000, 5000, 1600, 900);
                 Rect fallbackNormalized = window.RestoreFromFakeMaximizeForSmoke(fallbackOffscreenBounds);
                 bool fallbackOffscreenContained = Contains(SystemParameters.WorkArea, fallbackNormalized);
@@ -3042,6 +3069,7 @@ public partial class App : Application
                     maximized,
                     restored,
                     fallback,
+                    fallbackExpected,
                     usedCurrentMonitor,
                     restoredExactly,
                     changedWorkArea,
@@ -3076,6 +3104,7 @@ public partial class App : Application
             }
             finally
             {
+                try { wideProbe?.Close(); } catch { }
                 try { window.ResetCurrentMonitorWorkAreaForSmoke(); } catch { }
                 try { window.Close(); } catch { }
             }
