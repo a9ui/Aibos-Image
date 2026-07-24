@@ -130,7 +130,17 @@ if ($result.catalogProjectionSingleContainerDetachBudgetMs -ne 12 `
     -or $result.catalogProjectionMaxSingleContainerDetachMs -gt $result.catalogProjectionSingleContainerDetachBudgetMs) {
     $failures.Add(
         "single-container reset unit was $($result.catalogProjectionMaxSingleContainerDetachMs) ms " +
-        "(budget $($result.catalogProjectionSingleContainerDetachBudgetMs) ms)")
+        "(budget $($result.catalogProjectionSingleContainerDetachBudgetMs) ms; " +
+        "dominant $($result.catalogProjectionDominantResetSubstep); " +
+        "generator $($result.catalogProjectionMaxGeneratorRemoveMs) ms; " +
+        "deferred-measure $($result.catalogProjectionMaxForgetDeferredMeasureMs) ms; " +
+        "visual $($result.catalogProjectionMaxRemoveInternalChildRangeMs) ms; " +
+        "panel total $($result.catalogProjectionMaxResetPanelTotalMs) ms)")
+}
+if ($result.catalogProjectionMaxSingleContainerDetachMs -gt 0 `
+    -and ($result.catalogProjectionMaxResetPanelTotalMs -le 0 `
+        -or $result.catalogProjectionDominantResetSubstep -eq 'none')) {
+    $failures.Add('single-container reset sub-step attribution was missing')
 }
 if ($result.catalogProjectionMaxApplySliceMs -gt $result.catalogProjectionDiagnosticSliceTargetMs) {
     Write-Warning (

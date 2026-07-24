@@ -1223,7 +1223,11 @@ public partial class MainWindow : Window
         long PanelCommitMs = 0,
         long PreResetMs = 0,
         long ResetMs = 0,
-        long SelectionCommitMs = 0);
+        long SelectionCommitMs = 0,
+        double ResetGeneratorRemoveMs = 0,
+        double ResetForgetDeferredMeasureMs = 0,
+        double ResetRemoveInternalChildRangeMs = 0,
+        double ResetPanelTotalMs = 0);
 
     private sealed class CatalogLayoutCache
     {
@@ -1306,6 +1310,10 @@ public partial class MainWindow : Window
         long PreResetMs = 0,
         long ResetMs = 0,
         long SelectionCommitMs = 0,
+        double ResetGeneratorRemoveMs = 0,
+        double ResetForgetDeferredMeasureMs = 0,
+        double ResetRemoveInternalChildRangeMs = 0,
+        double ResetPanelTotalMs = 0,
         bool PreparedLayoutReady = false)
     {
         public static SearchFilterCompletion AppliedResult => new(true, false, null);
@@ -7910,6 +7918,10 @@ public partial class MainWindow : Window
             PreResetMs = applyMetrics.PreResetMs,
             ResetMs = applyMetrics.ResetMs,
             SelectionCommitMs = applyMetrics.SelectionCommitMs,
+            ResetGeneratorRemoveMs = applyMetrics.ResetGeneratorRemoveMs,
+            ResetForgetDeferredMeasureMs = applyMetrics.ResetForgetDeferredMeasureMs,
+            ResetRemoveInternalChildRangeMs = applyMetrics.ResetRemoveInternalChildRangeMs,
+            ResetPanelTotalMs = applyMetrics.ResetPanelTotalMs,
             PreparedLayoutReady = result?.PreparedLayout is not null,
         });
         if (ReferenceEquals(_pendingSearchFilterCompletion, request.Completion))
@@ -9974,6 +9986,10 @@ public partial class MainWindow : Window
         long preResetMs = 0;
         long resetMs = 0;
         long selectionCommitMs = 0;
+        double resetGeneratorRemoveMs = 0;
+        double resetForgetDeferredMeasureMs = 0;
+        double resetRemoveInternalChildRangeMs = 0;
+        double resetPanelTotalMs = 0;
         var slice = Stopwatch.StartNew();
 
         long FinishSlice()
@@ -10012,9 +10028,18 @@ public partial class MainWindow : Window
                 do
                 {
                     phase.Restart();
-                    resetPreparationComplete = preparedPanel!.PrepareNextItemsResetSlice();
+                    ItemsResetPreparationSlice resetSlice =
+                        preparedPanel!.PrepareNextItemsResetSlice();
                     phase.Stop();
-                    preResetMs = Math.Max(preResetMs, phase.ElapsedMilliseconds);
+                    resetPreparationComplete = resetSlice.Complete;
+                    if (phase.ElapsedMilliseconds > preResetMs)
+                    {
+                        preResetMs = phase.ElapsedMilliseconds;
+                        resetGeneratorRemoveMs = resetSlice.GeneratorRemoveMs;
+                        resetForgetDeferredMeasureMs = resetSlice.ForgetDeferredMeasureMs;
+                        resetRemoveInternalChildRangeMs = resetSlice.RemoveInternalChildRangeMs;
+                        resetPanelTotalMs = resetSlice.PanelTotalMs;
+                    }
                     if (resetPreparationComplete)
                         break;
 
@@ -10042,7 +10067,11 @@ public partial class MainWindow : Window
                     panelCommitMs,
                     preResetMs,
                     resetMs,
-                    selectionCommitMs);
+                    selectionCommitMs,
+                    resetGeneratorRemoveMs,
+                    resetForgetDeferredMeasureMs,
+                    resetRemoveInternalChildRangeMs,
+                    resetPanelTotalMs);
             }
 
             bool wasSyncingSelection = _syncingSelection;
@@ -10178,7 +10207,11 @@ public partial class MainWindow : Window
             panelCommitMs,
             preResetMs,
             resetMs,
-            selectionCommitMs);
+            selectionCommitMs,
+            resetGeneratorRemoveMs,
+            resetForgetDeferredMeasureMs,
+            resetRemoveInternalChildRangeMs,
+            resetPanelTotalMs);
     }
 
     private void ScheduleCatalogStatsUpdate(long generation)

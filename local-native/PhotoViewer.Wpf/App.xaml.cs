@@ -10534,6 +10534,36 @@ public partial class App : Application
                     filterPhaseSamples.Count == 0
                         ? 0
                         : filterPhaseSamples.Max(static sample => sample.PreResetMs));
+                List<MainWindow.SearchFilterCompletion> catalogProjectionDetachSamples =
+                    searchPhaseSamples.Concat(filterPhaseSamples).ToList();
+                MainWindow.SearchFilterCompletion catalogProjectionMaxDetachSample =
+                    catalogProjectionDetachSamples.Count == 0
+                        ? default
+                        : catalogProjectionDetachSamples
+                            .OrderByDescending(static sample => sample.PreResetMs)
+                            .First();
+                double catalogProjectionMaxGeneratorRemoveMs =
+                    catalogProjectionMaxDetachSample.ResetGeneratorRemoveMs;
+                double catalogProjectionMaxForgetDeferredMeasureMs =
+                    catalogProjectionMaxDetachSample.ResetForgetDeferredMeasureMs;
+                double catalogProjectionMaxRemoveInternalChildRangeMs =
+                    catalogProjectionMaxDetachSample.ResetRemoveInternalChildRangeMs;
+                double catalogProjectionMaxResetPanelTotalMs =
+                    catalogProjectionMaxDetachSample.ResetPanelTotalMs;
+                string catalogProjectionDominantResetSubstep =
+                    catalogProjectionMaxGeneratorRemoveMs <= 0
+                    && catalogProjectionMaxForgetDeferredMeasureMs <= 0
+                    && catalogProjectionMaxRemoveInternalChildRangeMs <= 0
+                        ? "none"
+                        : catalogProjectionMaxGeneratorRemoveMs
+                            >= catalogProjectionMaxForgetDeferredMeasureMs
+                        && catalogProjectionMaxGeneratorRemoveMs
+                            >= catalogProjectionMaxRemoveInternalChildRangeMs
+                            ? "ItemContainerGenerator.Remove"
+                            : catalogProjectionMaxForgetDeferredMeasureMs
+                                >= catalogProjectionMaxRemoveInternalChildRangeMs
+                                ? "ForgetDeferredMeasureRange"
+                                : "RemoveInternalChildRange";
                 string catalogProjectionMaxApplySliceOperation =
                     catalogProjectionMaxApplySliceMs <= CatalogProjectionDiagnosticSliceTargetMs
                         ? "within-diagnostic-target"
@@ -10639,6 +10669,16 @@ public partial class App : Application
                         CatalogProjectionSingleContainerDetachBudgetMs,
                     CatalogProjectionMaxSingleContainerDetachMs =
                         catalogProjectionMaxSingleContainerDetachMs,
+                    CatalogProjectionMaxGeneratorRemoveMs =
+                        catalogProjectionMaxGeneratorRemoveMs,
+                    CatalogProjectionMaxForgetDeferredMeasureMs =
+                        catalogProjectionMaxForgetDeferredMeasureMs,
+                    CatalogProjectionMaxRemoveInternalChildRangeMs =
+                        catalogProjectionMaxRemoveInternalChildRangeMs,
+                    CatalogProjectionMaxResetPanelTotalMs =
+                        catalogProjectionMaxResetPanelTotalMs,
+                    CatalogProjectionDominantResetSubstep =
+                        catalogProjectionDominantResetSubstep,
                     DispatcherHeartbeatBudgetMs = CatalogInteractionDispatcherHeartbeatBudgetMs,
                     FavoriteEvictionBudgetMs = CatalogFavoriteEvictionBudgetMs,
                     CatalogProjectionDiscardedCount = window.CatalogProjectionDiscardedCountForSmoke,
@@ -24734,6 +24774,11 @@ public partial class App : Application
         public long CatalogProjectionDiagnosticSliceTargetMs { get; init; }
         public long CatalogProjectionSingleContainerDetachBudgetMs { get; init; }
         public long CatalogProjectionMaxSingleContainerDetachMs { get; init; }
+        public double CatalogProjectionMaxGeneratorRemoveMs { get; init; }
+        public double CatalogProjectionMaxForgetDeferredMeasureMs { get; init; }
+        public double CatalogProjectionMaxRemoveInternalChildRangeMs { get; init; }
+        public double CatalogProjectionMaxResetPanelTotalMs { get; init; }
+        public string CatalogProjectionDominantResetSubstep { get; init; } = "";
         public long DispatcherHeartbeatBudgetMs { get; init; }
         public long FavoriteEvictionBudgetMs { get; init; }
         public int CatalogProjectionDiscardedCount { get; init; }

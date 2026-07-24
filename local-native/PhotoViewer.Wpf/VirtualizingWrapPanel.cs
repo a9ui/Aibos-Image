@@ -23,6 +23,13 @@ public sealed class VirtualizingWrapPanelRangeChangedEventArgs(
 
 internal readonly record struct VirtualizingLayoutItem(string Group, double ItemHeight);
 
+internal readonly record struct ItemsResetPreparationSlice(
+    bool Complete,
+    double GeneratorRemoveMs,
+    double ForgetDeferredMeasureMs,
+    double RemoveInternalChildRangeMs,
+    double PanelTotalMs);
+
 internal readonly record struct VirtualizingLayoutContext(
     double AvailableWidth,
     double ItemWidth,
@@ -271,7 +278,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         return true;
     }
 
-    internal bool PrepareNextItemsResetSlice()
+    internal ItemsResetPreparationSlice PrepareNextItemsResetSlice()
     {
         if (!_itemsResetPreparationActive)
             throw new InvalidOperationException("Items reset preparation is not active.");
@@ -282,18 +289,37 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         // unlink a still-live container while the visual tree was changing.
         // Keep the official generator-first pair as one bounded container unit
         // and yield before the next item.
+        double generatorRemoveMs = 0;
+        double forgetDeferredMeasureMs = 0;
+        double removeInternalChildRangeMs = 0;
+        long sliceStarted = Stopwatch.GetTimestamp();
         if (_itemsResetGeneratorPosition >= 0)
         {
             int childIndex = InternalChildren.Count - 1;
+            long generatorStarted = Stopwatch.GetTimestamp();
             ItemContainerGenerator.Remove(
                 new GeneratorPosition(_itemsResetGeneratorPosition, 0),
                 1);
+            long generatorFinished = Stopwatch.GetTimestamp();
             ForgetDeferredMeasureRange(childIndex, 1);
+            long forgetFinished = Stopwatch.GetTimestamp();
             RemoveInternalChildRange(childIndex, 1);
+            long visualFinished = Stopwatch.GetTimestamp();
+            generatorRemoveMs =
+                Stopwatch.GetElapsedTime(generatorStarted, generatorFinished).TotalMilliseconds;
+            forgetDeferredMeasureMs =
+                Stopwatch.GetElapsedTime(generatorFinished, forgetFinished).TotalMilliseconds;
+            removeInternalChildRangeMs =
+                Stopwatch.GetElapsedTime(forgetFinished, visualFinished).TotalMilliseconds;
             _itemsResetGeneratorPosition--;
         }
 
-        return _itemsResetGeneratorPosition < 0;
+        return new ItemsResetPreparationSlice(
+            _itemsResetGeneratorPosition < 0,
+            generatorRemoveMs,
+            forgetDeferredMeasureMs,
+            removeInternalChildRangeMs,
+            Stopwatch.GetElapsedTime(sliceStarted).TotalMilliseconds);
     }
 
     internal void CompleteItemsResetPreparation()

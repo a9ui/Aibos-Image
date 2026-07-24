@@ -398,3 +398,25 @@ final result: passed
   and the pending-broaden Favorite regression remained exact.
 
 final result: passed
+
+## M3 reset sub-step attribution
+
+- Exact hosted attempt 2 made Dispatcher heartbeat green at 43 ms but held the
+  candidate on one 13 ms single-container reset unit against the unchanged
+  12 ms hard limit. All other correctness, latency, memory, and
+  pending-broaden contracts passed.
+- The reset unit now reports separate elapsed time for
+  `ItemContainerGenerator.Remove`, `ForgetDeferredMeasureRange`, and
+  `RemoveInternalChildRange`, plus the complete panel unit. Timestamp reads do
+  not change the generator-first order, yield boundary, selection, or reset
+  behavior.
+- The PowerShell gate requires attribution whenever a reset unit was observed
+  and includes all three sub-step values in any hard-limit failure.
+- The first local .NET 10 Release 100,000-item run passed with 44 ms heartbeat,
+  25 ms Favorite eviction, 1 ms hard-gate detach, and 8.445% normalized
+  working-set growth. Its maximum panel unit was 1.3352 ms:
+  `ItemContainerGenerator.Remove` 0.1925 ms,
+  `ForgetDeferredMeasureRange` 0.0013 ms, and
+  `RemoveInternalChildRange` 1.1410 ms.
+
+final result: passed
