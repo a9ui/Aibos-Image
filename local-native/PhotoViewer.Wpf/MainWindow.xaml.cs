@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Specialized;
 using System.Collections.ObjectModel;
@@ -149,6 +150,7 @@ public partial class MainWindow : Window
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
     private readonly ResettableObservableCollection<Tile> _tiles = new();
+    private readonly SnapshotCollectionView<Tile> _tilesView;
     private readonly ResettableObservableCollection<Tile> _modalFilmstripTiles = new();
     private readonly ObservableCollection<string> _landingFolderSet = new();
     private readonly ObservableCollection<FolderBucketView> _folderBucketViews = new();
@@ -158,7 +160,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _searchHistoryReadCts;
     private long _searchHistoryUiGeneration;
     private bool _suppressSearchHistoryFocusOpen;
-    private readonly List<Tile> _allTiles = new();
+    private List<Tile> _allTiles = new();
     private readonly List<Tile> _closedPreviewTabs = new();
     private readonly HashSet<string> _pinnedPreviewPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _favorites = new(StringComparer.OrdinalIgnoreCase);
@@ -218,6 +220,9 @@ public partial class MainWindow : Window
     private long _thumbnailViewportRevision;
     private double _lastListThumbnailVerticalOffset;
     private VirtualizingWrapPanel? _galleryVirtualizingPanel;
+    private int _retiredPreparedCatalogLayoutAppliedCount;
+    private int _retiredPreparedCatalogLayoutRejectedCount;
+    private long _retiredCatalogLayoutMaxMeasureMilliseconds;
     private int _thumbnailBrowserCacheHits;
     private int _lastInitialUnseenCount;
     private int _enhancementJobsRead;
@@ -265,6 +270,7 @@ public partial class MainWindow : Window
     private long _queuedSparseGridSelectionVisualSyncGeneration = -1;
     private long _queuedSparseListSelectionVisualSyncGeneration = -1;
     private bool _syncingFavoriteFilterControls;
+    private bool _favoriteFilterPresentationPending;
     private bool _syncingDateControls;
     private bool _dateFilterMigrationPending;
     private FileDragSession? _fileDragSession;
@@ -282,6 +288,7 @@ public partial class MainWindow : Window
     private string? _lastSuccessfulSharedRecentFolderSetKey;
     private string? _restoredSelectedPath;
     private string? _primarySelectedPath;
+    private Tile? _primarySelectedTile;
     private string? _activePreviewTabPath;
     private string? _restoredActivePreviewTabPath;
     private bool _previewTabsPersistenceReady = true;
@@ -393,13 +400,20 @@ public partial class MainWindow : Window
     private string? _previewDecodedPath;
     private readonly DispatcherTimer _searchFilterTimer;
     private readonly DispatcherTimer _searchStateSaveTimer;
-    private CancellationTokenSource? _searchFilterCts;
-    private long _searchFilterGeneration;
-    private long _scheduledSearchFilterGeneration;
-    private long _lastAppliedSearchFilterGeneration;
+    private CancellationTokenSource? _catalogProjectionCts;
+    private readonly SemaphoreSlim _catalogProjectionApplyGate = new(1, 1);
+    private long _catalogProjectionGeneration;
+    private CatalogProjectionRequest? _scheduledCatalogProjection;
+    private long _lastAppliedCatalogProjectionGeneration;
     private long _catalogContentRevision;
-    private long _interactiveSortGeneration;
+    private long _unfilteredProjectionRevision = -1;
+    private Tile[]? _unfilteredProjection;
+    private readonly CatalogLayoutCache _catalogLayoutCache = new();
     private TaskCompletionSource<SearchFilterCompletion>? _pendingSearchFilterCompletion;
+    private long _lastCatalogProjectionApplySliceMilliseconds;
+    private long _maxCatalogProjectionApplySliceMilliseconds;
+    private int _catalogProjectionDiscardedCount;
+    private long _catalogStatsPresentationGeneration;
     private string _displayStyle = DisplayStyleStandard;
     private string _aspectMode = AspectOriginalValue;
     private string _sortBy = SortModifiedNewestValue;
@@ -477,6 +491,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        _tilesView = new SnapshotCollectionView<Tile>(_tiles);
         InitializeComponent();
         if (Application.Current is App app)
             app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
@@ -517,7 +532,7 @@ public partial class MainWindow : Window
         {
             _statusToastDismissTimer.Stop();
             if (_statusRetryAction is null && !HasUnresolvedSharedFailures && DeleteStatusToast is not null)
-                DeleteStatusToast.Visibility = Visibility.Collapsed;
+                DeleteStatusToast.Visibility = Visibility.Hidden;
         };
         _modalChromeTransientTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -571,7 +586,8 @@ public partial class MainWindow : Window
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
-            _interactiveSortGeneration++;
+            _catalogProjectionGeneration++;
+            CancelPendingCatalogProjection(completePending: true);
             if (Application.Current is App app)
                 app.AccessibilityPaletteChanged -= App_AccessibilityPaletteChanged;
             Interlocked.Increment(ref _activeAlbumAsyncGeneration);
@@ -599,7 +615,7 @@ public partial class MainWindow : Window
             SaveState();
     }
 
-    private static System.ComponentModel.ICollectionView BuildGalleryView(ObservableCollection<Tile> source, bool groupByDate)
+    private static System.ComponentModel.ICollectionView BuildGalleryView(IEnumerable<Tile> source, bool groupByDate)
     {
         var cvs = new CollectionViewSource { Source = source };
         if (groupByDate)
@@ -612,20 +628,22 @@ public partial class MainWindow : Window
 
     private void ConfigureGalleryItemsSources()
     {
-        bool grouped = UsesDateGrouping;
         bool previousSync = _syncingSelection;
         _syncingSelection = true;
         try
         {
+            // Keep one panel instance across sort modes. Replacing the
+            // ItemsPanelTemplate discards the prepared 100k layout and every
+            // recycled container exactly when the user changes sort order.
             ItemsPanelTemplate cardPanel = (ItemsPanelTemplate)FindResource(
-                grouped ? "GroupedVirtualizedCardItemsPanel" : "VirtualizedCardItemsPanel");
+                "VirtualizedCardItemsPanel");
             if (!ReferenceEquals(CardsList.ItemsPanel, cardPanel))
                 CardsList.ItemsPanel = cardPanel;
             // The grid always owns the complete filtered catalog. Date sections
             // are drawn by the same virtualizing panel, so grouping never turns
             // into a capped secondary collection or a 100k-container layout.
-            if (!ReferenceEquals(CardsList.ItemsSource, _tiles))
-                CardsList.ItemsSource = _tiles;
+            if (!ReferenceEquals(CardsList.ItemsSource, _tilesView))
+                CardsList.ItemsSource = _tilesView;
             ConfigureRowsItemsSource(forceGroupedView: RowsList.Visibility == Visibility.Visible);
         }
         finally
@@ -653,7 +671,7 @@ public partial class MainWindow : Window
             }
             RowsList.ItemsSource = UsesDateGrouping
                 ? BuildGalleryView(_tiles, groupByDate: true)
-                : _tiles;
+                : _tilesView;
         }
         finally
         {
@@ -671,7 +689,14 @@ public partial class MainWindow : Window
         }
 
         if (_galleryVirtualizingPanel is not null)
+        {
+            _retiredPreparedCatalogLayoutAppliedCount += _galleryVirtualizingPanel.PreparedLayoutAppliedCount;
+            _retiredPreparedCatalogLayoutRejectedCount += _galleryVirtualizingPanel.PreparedLayoutRejectedCount;
+            _retiredCatalogLayoutMaxMeasureMilliseconds = Math.Max(
+                _retiredCatalogLayoutMaxMeasureMilliseconds,
+                _galleryVirtualizingPanel.MaxMeasureMilliseconds);
             _galleryVirtualizingPanel.RealizedRangeChanged -= GalleryVirtualizingPanel_RealizedRangeChanged;
+        }
         _galleryVirtualizingPanel = panel;
         if (_galleryVirtualizingPanel is null)
             return;
@@ -1059,7 +1084,7 @@ public partial class MainWindow : Window
         _shutdownPersistenceFlushCount++;
         _searchFilterTimer.Stop();
         _searchStateSaveTimer.Stop();
-        CancelPendingSearchFilter(completePending: true);
+        CancelPendingCatalogProjection(completePending: true);
         _loadCts?.Cancel();
         _previewCts?.Cancel();
         _previewDecodeCompletion?.TrySetResult(PreviewDecodeResult.Canceled);
@@ -1100,6 +1125,21 @@ public partial class MainWindow : Window
     private sealed record FilterSnapshot(
         FilterTileSnapshot[] Tiles,
         int TileCount,
+        long CatalogRevision,
+        long SelectionGeneration,
+        string[] SelectedPaths,
+        string? PrimarySelectedPath,
+        string? PreviousSelectedPath,
+        string? ActivePreviewTabPath,
+        bool SelectFirst,
+        int? SelectionFallbackIndex,
+        GridZoomAnchor? ViewportAnchor,
+        VirtualizingLayoutContext? LayoutContext,
+        CatalogLayoutCache LayoutCache,
+        Tile[]? UnfilteredProjection,
+        bool ReorderCatalog,
+        string SortBy,
+        string RandomSortSeed,
         bool AlbumActive,
         FrozenSet<string> AlbumMemberPaths,
         FrozenDictionary<string, int> AlbumMemberOrder,
@@ -1115,13 +1155,102 @@ public partial class MainWindow : Window
 
     private readonly record struct FilterTileSnapshot(
         Tile Tile,
+        string Path,
+        string FileName,
+        bool IsRealFile,
+        string FolderBucketKey,
+        string Group,
+        double CardHeight,
         string Prompt,
         int FavoriteLevel,
         bool Enhanced,
         bool Unseen,
+        DateTime ModifiedUtc,
         DateTime CreatedUtc);
 
-    private sealed record FilterResult(Tile[] Tiles, int Count);
+    private sealed record FilterResult(
+        Tile[] Tiles,
+        int Count,
+        List<Tile>? OrderedCatalogTiles,
+        Tile[] SelectedTiles,
+        Tile? PreferredSelection,
+        bool ActivePreviewIncluded,
+        GridZoomAnchor? ViewportAnchor,
+        PreparedVirtualizingLayout? PreparedLayout);
+
+    private sealed record CatalogProjectionRequest(
+        long Generation,
+        bool ReorderCatalog,
+        bool SelectFirst,
+        int? SelectionFallbackIndex,
+        GridZoomAnchor? ViewportAnchor,
+        TaskCompletionSource<SearchFilterCompletion>? Completion);
+
+    private readonly record struct CatalogProjectionApplyMetrics(
+        long MaxSliceMs,
+        long PublishMs,
+        long StatsMs,
+        long SelectionMs,
+        long ReconcileMs,
+        long CatalogSwapMs = 0,
+        long PanelCommitMs = 0,
+        long PreResetMs = 0,
+        long ResetMs = 0,
+        long SelectionCommitMs = 0);
+
+    private sealed class CatalogLayoutCache
+    {
+        private const int MaxEntries = 8;
+        private readonly object _gate = new();
+        private readonly Dictionary<UniformLayoutCacheKey, WeakReference<PreparedVirtualizingLayout>> _layouts = [];
+        private readonly Queue<UniformLayoutCacheKey> _insertionOrder = [];
+
+        public PreparedVirtualizingLayout GetOrCreateUniform(
+            int itemCount,
+            VirtualizingLayoutContext context,
+            string group,
+            double itemHeight,
+            CancellationToken cancellationToken)
+        {
+            var key = new UniformLayoutCacheKey(itemCount, context, group, itemHeight);
+            lock (_gate)
+            {
+                if (_layouts.TryGetValue(key, out WeakReference<PreparedVirtualizingLayout>? weak)
+                    && weak.TryGetTarget(out PreparedVirtualizingLayout? cached))
+                {
+                    return cached;
+                }
+                _layouts.Remove(key);
+            }
+
+            PreparedVirtualizingLayout created = VirtualizingWrapPanel.PrepareUniformLayout(
+                itemCount,
+                context,
+                group,
+                itemHeight,
+                cancellationToken);
+            lock (_gate)
+            {
+                if (_layouts.TryGetValue(key, out WeakReference<PreparedVirtualizingLayout>? weak)
+                    && weak.TryGetTarget(out PreparedVirtualizingLayout? cached))
+                {
+                    return cached;
+                }
+                _layouts.Remove(key);
+                while (_layouts.Count >= MaxEntries && _insertionOrder.Count > 0)
+                    _layouts.Remove(_insertionOrder.Dequeue());
+                _layouts.Add(key, new WeakReference<PreparedVirtualizingLayout>(created));
+                _insertionOrder.Enqueue(key);
+                return created;
+            }
+        }
+
+        private readonly record struct UniformLayoutCacheKey(
+            int ItemCount,
+            VirtualizingLayoutContext Context,
+            string Group,
+            double ItemHeight);
+    }
 
     private readonly record struct ThumbnailDecodeFailure(
         int AttemptCount,
@@ -1138,7 +1267,19 @@ public partial class MainWindow : Window
         long ComputeMs = 0,
         long ApplyMs = 0,
         long CleanupMs = 0,
-        int Gen2Collections = 0)
+        int Gen2Collections = 0,
+        long MaxApplySliceMs = 0,
+        long Generation = 0,
+        long PublishMs = 0,
+        long StatsMs = 0,
+        long SelectionMs = 0,
+        long ReconcileMs = 0,
+        long CatalogSwapMs = 0,
+        long PanelCommitMs = 0,
+        long PreResetMs = 0,
+        long ResetMs = 0,
+        long SelectionCommitMs = 0,
+        bool PreparedLayoutReady = false)
     {
         public static SearchFilterCompletion AppliedResult => new(true, false, null);
         public static SearchFilterCompletion DiscardedResult => new(false, true, null);
@@ -1718,8 +1859,10 @@ public partial class MainWindow : Window
             SetLandingFolderSet(_currentFolderSet);
             _allTiles.Clear();
             _allTiles.AddRange(publishableTiles);
-            if (_allTiles.Count > 1)
-                _catalogContentRevision++;
+            // A reload replaces Tile identities even for an empty or
+            // single-item catalog. Invalidate the cached unfiltered projection
+            // on every publication, not only when sorting can change order.
+            _catalogContentRevision++;
             ReportScanPublicationWarning(BuildScanWarning(
                 scanAccessFailures.Count,
                 scanBoundarySkips.Count,
@@ -3578,6 +3721,45 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool TryWriteAtomicJson(string path, Action<Utf8JsonWriter> write)
+    {
+        string? tempPath = null;
+        try
+        {
+            string directory = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(directory);
+            tempPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            using (var stream = new FileStream(
+                tempPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 64 * 1024,
+                FileOptions.SequentialScan))
+            using (var writer = new Utf8JsonWriter(
+                stream,
+                new JsonWriterOptions { Indented = true }))
+            {
+                write(writer);
+                writer.Flush();
+            }
+            File.Move(tempPath, path, overwrite: true);
+            tempPath = null;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (tempPath is not null)
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
+        }
+    }
+
     private static bool TryWriteAtomicSharedJson(
         string path,
         string json,
@@ -3815,11 +3997,15 @@ public partial class MainWindow : Window
                 merged.Remove(delta.Path);
         }
 
-        var ordered = merged
-            .OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(static item => item.Key, static item => item.Value, StringComparer.OrdinalIgnoreCase);
-        string json = JsonSerializer.Serialize(ordered, new JsonSerializerOptions { WriteIndented = true });
-        return TryWriteAtomicText(path, json)
+        string[] orderedPaths = [.. merged.Keys];
+        Array.Sort(orderedPaths, StringComparer.OrdinalIgnoreCase);
+        return TryWriteAtomicJson(path, writer =>
+        {
+            writer.WriteStartObject();
+            foreach (string mergedPath in orderedPaths)
+                writer.WriteNumber(mergedPath, merged[mergedPath]);
+            writer.WriteEndObject();
+        })
             ? new SharedWriteResult<FavoriteDelta>(SharedWriteStatus.Succeeded, batch)
             : new SharedWriteResult<FavoriteDelta>(SharedWriteStatus.Failed, batch, "Favorite atomic replacement failed");
     }
@@ -3842,11 +4028,15 @@ public partial class MainWindow : Window
         foreach (SeenDelta delta in batch)
             merged.Add(delta.Path);
 
-        var ordered = merged
-            .OrderBy(static item => item, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(static item => item, static _ => true, StringComparer.OrdinalIgnoreCase);
-        string json = JsonSerializer.Serialize(ordered, new JsonSerializerOptions { WriteIndented = true });
-        return TryWriteAtomicText(path, json)
+        string[] orderedPaths = [.. merged];
+        Array.Sort(orderedPaths, StringComparer.OrdinalIgnoreCase);
+        return TryWriteAtomicJson(path, writer =>
+        {
+            writer.WriteStartObject();
+            foreach (string mergedPath in orderedPaths)
+                writer.WriteBoolean(mergedPath, true);
+            writer.WriteEndObject();
+        })
             ? new SharedWriteResult<SeenDelta>(SharedWriteStatus.Succeeded, batch)
             : new SharedWriteResult<SeenDelta>(SharedWriteStatus.Failed, batch, "Seen atomic replacement failed");
     }
@@ -4223,7 +4413,7 @@ public partial class MainWindow : Window
         RefreshModalFavoriteSurface();
     }
 
-    private void RefreshFavoriteMutationSurface(IReadOnlyList<Tile> changedTiles)
+    private bool RefreshFavoriteMutationSurface(IReadOnlyList<Tile> changedTiles)
     {
         bool favoriteFilterActive = FavoriteOnlyFilter?.IsChecked == true
             || UnfavoriteOnlyFilter?.IsChecked == true;
@@ -4231,7 +4421,14 @@ public partial class MainWindow : Window
             RemoveChangedTilesExcludedByFavoriteFilter(changedTiles);
 
         SyncSelectionActionSurface();
-        RefreshModalFavoriteSurface();
+        Tile? knownPrimary = !string.IsNullOrWhiteSpace(_primarySelectedPath)
+            ? changedTiles.FirstOrDefault(tile => string.Equals(
+                tile.Path,
+                _primarySelectedPath,
+                StringComparison.OrdinalIgnoreCase))
+            : null;
+        RefreshModalFavoriteSurface(knownPrimary);
+        return favoriteFilterActive;
     }
 
     private void RemoveChangedTilesExcludedByFavoriteFilter(IReadOnlyList<Tile> changedTiles)
@@ -4260,7 +4457,10 @@ public partial class MainWindow : Window
                 Tile removed = _tiles[index];
                 _selectedPaths.Remove(removed.Path);
                 if (string.Equals(_primarySelectedPath, removed.Path, StringComparison.OrdinalIgnoreCase))
+                {
                     _primarySelectedPath = null;
+                    _primarySelectedTile = null;
+                }
                 _tiles.RemoveAt(index);
             }
         }
@@ -4286,9 +4486,10 @@ public partial class MainWindow : Window
         ReconcileOpenSurfacesAfterFilterChange();
     }
 
-    private void RefreshModalFavoriteSurface()
+    private void RefreshModalFavoriteSurface(Tile? knownSelected = null)
     {
-        if (SelectedTile() is not Tile selected)
+        Tile? selected = knownSelected ?? SelectedTile();
+        if (selected is null)
         {
             if (Modal.Visibility == Visibility.Visible)
                 Modal.Visibility = Visibility.Collapsed;
@@ -6006,6 +6207,7 @@ public partial class MainWindow : Window
             primary = e.AddedItems.OfType<Tile>().LastOrDefault()
                 ?? SelectedTiles().LastOrDefault();
         _primarySelectedPath = primary?.Path;
+        _primarySelectedTile = primary;
         _selectionVisualSyncGeneration++;
 
         SynchronizeSelectionControls();
@@ -6013,7 +6215,13 @@ public partial class MainWindow : Window
     }
 
     private IReadOnlyList<Tile> SelectedTiles()
-        => _tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList();
+    {
+        if (_selectedPaths.Count == 0)
+            return [];
+        if (_selectedPaths.Count == 1 && SelectedTile() is { } selected)
+            return [selected];
+        return _tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList();
+    }
 
     private void SetSelection(IEnumerable<Tile> selectedTiles, Tile? primary)
     {
@@ -6040,13 +6248,14 @@ public partial class MainWindow : Window
             ? primary
             : SelectedTiles().LastOrDefault();
         _primarySelectedPath = effectivePrimary?.Path;
+        _primarySelectedTile = effectivePrimary;
         _selectionVisualSyncGeneration++;
 
         SynchronizeSelectionControls();
         ApplyPrimarySelection(effectivePrimary);
     }
 
-    private void SynchronizeSelectionControls()
+    private void SynchronizeSelectionControls(IReadOnlyList<Tile>? knownMaterializedSelection = null)
     {
         if (_syncingSelection)
             return;
@@ -6055,9 +6264,10 @@ public partial class MainWindow : Window
         {
             _syncingSelection = true;
             bool sparseVisuals = _selectedPaths.Count > MaxMaterializedSelectionVisualItems;
-            List<Tile>? materializedSelections = sparseVisuals
+            IReadOnlyList<Tile>? materializedSelections = sparseVisuals
                 ? null
-                : _tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList();
+                : knownMaterializedSelection
+                    ?? _tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList();
             SynchronizeCanonicalSelectionMarkers(materializedSelections);
             var cardsWatch = Stopwatch.StartNew();
             if (sparseVisuals)
@@ -7137,7 +7347,9 @@ public partial class MainWindow : Window
 
     private async Task<bool> UseSearchHistoryQueryAsync(string query)
     {
-        SetSearchQuery(query);
+        SearchFilterCompletion projection = await SetSearchQueryInteractiveAsync(query);
+        if (!projection.Applied || projection.Discarded)
+            return false;
         bool committed = await CommitCurrentSearchHistoryAsync();
         CloseSearchHistoryAndFocusInput();
         return committed;
@@ -7199,30 +7411,63 @@ public partial class MainWindow : Window
 
     private void ScheduleSearchFilter()
     {
-        CancelPendingSearchFilter(completePending: true);
-        long generation = ++_searchFilterGeneration;
-        _scheduledSearchFilterGeneration = generation;
-        _pendingSearchFilterCompletion = new TaskCompletionSource<SearchFilterCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _searchFilterTimer.Stop();
-        _searchFilterTimer.Start();
+        _ = QueueCatalogProjection(
+            debounce: true,
+            reorderCatalog: false,
+            selectFirst: true);
     }
 
     private void SearchFilterTimer_Tick(object? sender, EventArgs e)
     {
         _searchFilterTimer.Stop();
-        _ = ApplySearchFilterAsync(_scheduledSearchFilterGeneration, _pendingSearchFilterCompletion);
+        if (_scheduledCatalogProjection is { } request)
+            _ = ApplyCatalogProjectionAsync(request);
     }
 
-    private async Task ApplySearchFilterAsync(long generation, TaskCompletionSource<SearchFilterCompletion>? completion)
+    private Task<SearchFilterCompletion> QueueCatalogProjection(
+        bool debounce,
+        bool reorderCatalog,
+        bool selectFirst,
+        int? selectionFallbackIndex = null,
+        GridZoomAnchor? viewportAnchor = null)
     {
-        CancellationTokenSource cts = new();
-        _searchFilterCts = cts;
+        CancelPendingCatalogProjection(completePending: true);
+        long generation = ++_catalogProjectionGeneration;
+        var completion = new TaskCompletionSource<SearchFilterCompletion>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var request = new CatalogProjectionRequest(
+            generation,
+            reorderCatalog,
+            selectFirst,
+            selectionFallbackIndex,
+            viewportAnchor ?? PreferredGridGeometryAnchor(),
+            completion);
+        _scheduledCatalogProjection = request;
+        _pendingSearchFilterCompletion = completion;
+        if (debounce)
+        {
+            _searchFilterTimer.Stop();
+            _searchFilterTimer.Start();
+        }
+        else
+        {
+            _ = ApplyCatalogProjectionAsync(request);
+        }
+        return completion.Task;
+    }
+
+    private async Task ApplyCatalogProjectionAsync(CatalogProjectionRequest request)
+    {
+        var cts = new CancellationTokenSource();
+        _catalogProjectionCts = cts;
         int gen2Before = GC.CollectionCount(2);
         var captureWatch = Stopwatch.StartNew();
-        FilterSnapshot snapshot = CaptureFilterSnapshot();
+        FilterSnapshot snapshot = CaptureFilterSnapshot(request);
         captureWatch.Stop();
         long computeMs = 0;
         long applyMs = 0;
+        long maxApplySliceMs = 0;
+        CatalogProjectionApplyMetrics applyMetrics = default;
         long cleanupMs;
         FilterResult? result = null;
         SearchFilterCompletion outcome;
@@ -7231,32 +7476,58 @@ public partial class MainWindow : Window
             result = await Task.Run(() =>
             {
                 var computeWatch = Stopwatch.StartNew();
+                Thread currentThread = Thread.CurrentThread;
+                ThreadPriority previousPriority = currentThread.Priority;
                 try
                 {
+                    if (previousPriority > ThreadPriority.BelowNormal)
+                        currentThread.Priority = ThreadPriority.BelowNormal;
                     return ComputeFilterResult(snapshot, cts.Token);
                 }
                 finally
                 {
+                    if (currentThread.Priority != previousPriority)
+                        currentThread.Priority = previousPriority;
                     computeWatch.Stop();
                     computeMs = computeWatch.ElapsedMilliseconds;
                 }
             }, cts.Token);
-            if (cts.IsCancellationRequested || generation != _searchFilterGeneration)
+            if (cts.IsCancellationRequested
+                || request.Generation != _catalogProjectionGeneration
+                || snapshot.CatalogRevision != _catalogContentRevision
+                || snapshot.SelectionGeneration != _selectionVisualSyncGeneration
+                || !string.Equals(snapshot.SortBy, _sortBy, StringComparison.Ordinal)
+                || !string.Equals(snapshot.RandomSortSeed, _randomSortSeed, StringComparison.Ordinal))
             {
+                _catalogProjectionDiscardedCount++;
                 outcome = SearchFilterCompletion.DiscardedResult;
             }
             else
             {
                 var applyWatch = Stopwatch.StartNew();
-                ApplyFilterResult(result, selectFirst: true);
+                applyMetrics = await ApplyFilterResultAsync(result, snapshot, request.Generation);
+                maxApplySliceMs = applyMetrics.MaxSliceMs;
                 applyWatch.Stop();
                 applyMs = applyWatch.ElapsedMilliseconds;
-                _lastAppliedSearchFilterGeneration = generation;
-                outcome = SearchFilterCompletion.AppliedResult;
+                _lastCatalogProjectionApplySliceMilliseconds = maxApplySliceMs;
+                _maxCatalogProjectionApplySliceMilliseconds = Math.Max(
+                    _maxCatalogProjectionApplySliceMilliseconds,
+                    maxApplySliceMs);
+                if (request.Generation == _catalogProjectionGeneration)
+                {
+                    _lastAppliedCatalogProjectionGeneration = request.Generation;
+                    outcome = SearchFilterCompletion.AppliedResult;
+                }
+                else
+                {
+                    _catalogProjectionDiscardedCount++;
+                    outcome = SearchFilterCompletion.DiscardedResult;
+                }
             }
         }
         catch (OperationCanceledException)
         {
+            _catalogProjectionDiscardedCount++;
             outcome = SearchFilterCompletion.DiscardedResult;
         }
         catch (Exception ex)
@@ -7270,31 +7541,48 @@ public partial class MainWindow : Window
             if (result is not null)
                 ReturnFilterResult(result);
             ReturnFilterSnapshot(snapshot);
-            if (ReferenceEquals(_searchFilterCts, cts))
-                _searchFilterCts = null;
+            if (ReferenceEquals(_catalogProjectionCts, cts))
+                _catalogProjectionCts = null;
             cts.Dispose();
             cleanupWatch.Stop();
             cleanupMs = cleanupWatch.ElapsedMilliseconds;
         }
 
-        completion?.TrySetResult(outcome with
+        request.Completion?.TrySetResult(outcome with
         {
             CaptureMs = captureWatch.ElapsedMilliseconds,
             ComputeMs = computeMs,
             ApplyMs = applyMs,
             CleanupMs = cleanupMs,
             Gen2Collections = GC.CollectionCount(2) - gen2Before,
+            MaxApplySliceMs = maxApplySliceMs,
+            Generation = request.Generation,
+            PublishMs = applyMetrics.PublishMs,
+            StatsMs = applyMetrics.StatsMs,
+            SelectionMs = applyMetrics.SelectionMs,
+            ReconcileMs = applyMetrics.ReconcileMs,
+            CatalogSwapMs = applyMetrics.CatalogSwapMs,
+            PanelCommitMs = applyMetrics.PanelCommitMs,
+            PreResetMs = applyMetrics.PreResetMs,
+            ResetMs = applyMetrics.ResetMs,
+            SelectionCommitMs = applyMetrics.SelectionCommitMs,
+            PreparedLayoutReady = result?.PreparedLayout is not null,
         });
+        if (ReferenceEquals(_pendingSearchFilterCompletion, request.Completion))
+            _pendingSearchFilterCompletion = null;
+        if (ReferenceEquals(_scheduledCatalogProjection, request))
+            _scheduledCatalogProjection = null;
     }
 
-    private void CancelPendingSearchFilter(bool completePending)
+    private void CancelPendingCatalogProjection(bool completePending)
     {
         _searchFilterTimer.Stop();
-        _searchFilterCts?.Cancel();
-        _searchFilterCts = null;
+        _catalogProjectionCts?.Cancel();
+        _catalogProjectionCts = null;
         if (completePending)
             _pendingSearchFilterCompletion?.TrySetResult(SearchFilterCompletion.DiscardedResult);
         _pendingSearchFilterCompletion = null;
+        _scheduledCatalogProjection = null;
     }
 
     private void ScheduleSearchStateSave()
@@ -7315,7 +7603,7 @@ public partial class MainWindow : Window
     private void Filter_Changed(object sender, RoutedEventArgs e)
     {
         if (_initializing) return;
-        ApplyFiltersForCurrentFilterChange();
+        _ = ApplyFiltersForCurrentFilterChangeAsync();
     }
 
     private void FavoriteFilter_Changed(object sender, RoutedEventArgs e)
@@ -7329,14 +7617,22 @@ public partial class MainWindow : Window
         else if (sender == UnfavoriteOnlyFilter && unfavoriteOnly)
             favoritesOnly = false;
 
-        SetFavoriteFilterState(favoritesOnly, unfavoriteOnly, apply: true, persist: true);
+        SetFavoriteFilterState(
+            favoritesOnly,
+            unfavoriteOnly,
+            apply: true,
+            persist: true,
+            asynchronous: true);
     }
 
     private void FavoriteLevelFilter_Changed(object sender, RoutedEventArgs e)
     {
         if (_initializing || _syncingFavoriteFilterControls) return;
         SyncFavoriteFilterLevelsFromControls();
-        ApplyFilters();
+        _ = QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: true);
         SaveState();
     }
 
@@ -7548,6 +7844,11 @@ public partial class MainWindow : Window
             SaveState();
     }
 
+    private void ScheduleFavoriteFilterPresentationSync()
+    {
+        _favoriteFilterPresentationPending = true;
+    }
+
     private void ToggleFoldersSection_Click(object sender, RoutedEventArgs e)
     {
         _foldersSectionExpanded = !_foldersSectionExpanded;
@@ -7612,7 +7913,7 @@ public partial class MainWindow : Window
     private void HideSelectedFolderBuckets_Click(object sender, RoutedEventArgs e)
         => SetSelectedFolderBucketsHidden(hidden: true);
 
-    private bool SetSelectedFolderBucketsHidden(bool hidden)
+    private bool SetSelectedFolderBucketsHidden(bool hidden, bool asynchronous = true)
     {
         var keys = _folderBucketViews
             .Where(bucket => _selectedFolderBucketKeys.Contains(bucket.Key))
@@ -7626,45 +7927,77 @@ public partial class MainWindow : Window
         foreach (string key in keys)
             changed |= hidden ? _hiddenFolderBuckets.Add(key) : _hiddenFolderBuckets.Remove(key);
         if (changed)
-            ApplyFolderBucketFilterChange();
+            ApplyFolderBucketFilterChange(asynchronous);
         return changed;
     }
 
-    private bool SetFolderBucketHidden(string key, bool hidden)
+    private bool SetFolderBucketHidden(string key, bool hidden, bool asynchronous = true)
     {
         if (string.IsNullOrWhiteSpace(key))
             return false;
 
         bool changed = hidden ? _hiddenFolderBuckets.Add(key) : _hiddenFolderBuckets.Remove(key);
         if (changed)
-            ApplyFolderBucketFilterChange();
+            ApplyFolderBucketFilterChange(asynchronous);
 
         return changed;
     }
 
-    private void ApplyFolderBucketFilterChange()
+    private void ApplyFolderBucketFilterChange(bool asynchronous = true)
     {
         List<string> selectedKeys = _selectedFolderBucketKeys.ToList();
         string? primaryKey = _primarySelectedFolderBucketKey;
         PruneHiddenFolderBucketsToCurrentSet();
         RefreshFolderBucketViews();
         SetFolderBucketSelection(selectedKeys, primaryKey, persist: false);
-        ApplyFilters();
+        if (asynchronous)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
+        }
+        else
+        {
+            ApplyFilters();
+        }
         SaveState();
     }
 
-    private bool SetFavoriteFilterLevels(IEnumerable<int> levels)
+    private bool SetFavoriteFilterLevels(IEnumerable<int> levels, bool asynchronous = true)
     {
         var normalized = levels.Where(level => level is >= MinFavoriteFilterLevel and <= MaxFavoriteFilterLevel).ToHashSet();
         if (_favoriteFilterLevels.SetEquals(normalized)) return false;
         _favoriteFilterLevels.Clear();
         _favoriteFilterLevels.UnionWith(normalized);
-        SyncFavoriteFilterControls();
-        if (!_initializing) { ApplyFilters(); SaveState(); }
+        if (asynchronous)
+            ScheduleFavoriteFilterPresentationSync();
+        else
+            SyncFavoriteFilterControls();
+        if (!_initializing)
+        {
+            if (asynchronous)
+            {
+                _ = QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: false,
+                    selectFirst: true);
+            }
+            else
+            {
+                ApplyFilters();
+            }
+            SaveState();
+        }
         return true;
     }
 
-    private void SetFavoriteFilterState(bool favoritesOnly, bool unfavoriteOnly, bool apply, bool persist)
+    private void SetFavoriteFilterState(
+        bool favoritesOnly,
+        bool unfavoriteOnly,
+        bool apply,
+        bool persist,
+        bool asynchronous = false)
     {
         if (favoritesOnly && unfavoriteOnly)
             unfavoriteOnly = false;
@@ -7674,8 +8007,10 @@ public partial class MainWindow : Window
             _syncingFavoriteFilterControls = true;
             try
             {
-                FavoriteOnlyFilter.IsChecked = favoritesOnly;
-                UnfavoriteOnlyFilter.IsChecked = unfavoriteOnly;
+                if (FavoriteOnlyFilter.IsChecked != favoritesOnly)
+                    FavoriteOnlyFilter.IsChecked = favoritesOnly;
+                if (UnfavoriteOnlyFilter.IsChecked != unfavoriteOnly)
+                    UnfavoriteOnlyFilter.IsChecked = unfavoriteOnly;
             }
             finally
             {
@@ -7683,10 +8018,25 @@ public partial class MainWindow : Window
             }
         }
 
-        SyncFavoriteFilterControls();
+        if (asynchronous)
+            ScheduleFavoriteFilterPresentationSync();
+        else
+            SyncFavoriteFilterControls();
 
         if (apply)
-            ApplyFilters();
+        {
+            if (asynchronous)
+            {
+                _ = QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: false,
+                    selectFirst: true);
+            }
+            else
+            {
+                ApplyFilters();
+            }
+        }
         if (persist && !_initializing)
             SaveState();
     }
@@ -7708,28 +8058,37 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
-            FavoriteLevel1Filter.IsChecked = _favoriteFilterLevels.Contains(1);
-            FavoriteLevel2Filter.IsChecked = _favoriteFilterLevels.Contains(2);
-            FavoriteLevel3Filter.IsChecked = _favoriteFilterLevels.Contains(3);
-            FavoriteLevel4Filter.IsChecked = _favoriteFilterLevels.Contains(4);
-            FavoriteLevel5Filter.IsChecked = _favoriteFilterLevels.Contains(5);
+            SetCheckBoxState(FavoriteLevel1Filter, _favoriteFilterLevels.Contains(1));
+            SetCheckBoxState(FavoriteLevel2Filter, _favoriteFilterLevels.Contains(2));
+            SetCheckBoxState(FavoriteLevel3Filter, _favoriteFilterLevels.Contains(3));
+            SetCheckBoxState(FavoriteLevel4Filter, _favoriteFilterLevels.Contains(4));
+            SetCheckBoxState(FavoriteLevel5Filter, _favoriteFilterLevels.Contains(5));
         }
         finally
         {
             _syncingFavoriteFilterControls = false;
         }
 
-        if (FavoriteLevelFilterPanel is not null)
+        if (FavoriteLevelFilterPanel is not null
+            && FavoriteLevelFilterPanel.IsEnabled != favoritesOnly)
             FavoriteLevelFilterPanel.IsEnabled = favoritesOnly;
 
         if (FavoriteFilterSummary is null)
             return;
 
-        FavoriteFilterSummary.Text = favoritesOnly
+        string summary = favoritesOnly
             ? (_favoriteFilterLevels.Count == 0 ? UiLanguageResources.Text("UiAllRatings") : string.Join(" + ", _favoriteFilterLevels.OrderBy(static level => level).Select(static level => $"Lv {level}")))
             : unfavoriteOnly
                 ? UiLanguageResources.Text("UiUnratedOnly")
                 : UiLanguageResources.Text("UiAllRatings");
+        if (!string.Equals(FavoriteFilterSummary.Text, summary, StringComparison.Ordinal))
+            FavoriteFilterSummary.Text = summary;
+    }
+
+    private static void SetCheckBoxState(CheckBox checkBox, bool value)
+    {
+        if (checkBox.IsChecked != value)
+            checkBox.IsChecked = value;
     }
 
     private void SyncFavoriteFilterLevelsFromControls()
@@ -7755,18 +8114,12 @@ public partial class MainWindow : Window
         _hiddenFolderBuckets.RemoveWhere(key => !active.Contains(key));
     }
 
-    private void ApplyFiltersForCurrentFilterChange()
+    private Task<SearchFilterCompletion> ApplyFiltersForCurrentFilterChangeAsync()
     {
-        if (UnseenOnlyFilter?.IsChecked == true)
-        {
-            var previous = SelectedTile();
-            ApplyFilters(selectFirst: false);
-            if (previous is not null && !_tiles.Contains(previous))
-                SelectTile(null);
-            return;
-        }
-
-        ApplyFilters();
+        return QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: UnseenOnlyFilter?.IsChecked != true);
     }
 
     private void FavoriteDecrease_Click(object sender, RoutedEventArgs e)
@@ -7849,7 +8202,7 @@ public partial class MainWindow : Window
 
     private bool AdjustSelectedFavorite(int delta)
     {
-        if (SelectedTiles().Count > 1)
+        if (_selectedPaths.Count > 1)
             return MutateSelectedFavorites(tile => Math.Clamp(tile.Fav + delta, 0, 5), $"Adjusted favorite for {{0:N0}} selected images.");
 
         if (SelectedTile() is not { IsRealFile: true } tile)
@@ -7912,8 +8265,8 @@ public partial class MainWindow : Window
             tile.Fav = nextLevels[key];
         }
 
-        RefreshFavoriteMutationSurface(selected);
-        SaveState();
+        if (RefreshFavoriteMutationSurface(selected))
+            SaveState();
         SetTransientStatusToast(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
         return true;
     }
@@ -7923,25 +8276,26 @@ public partial class MainWindow : Window
         if (BulkFavoritePanel is null || SingleSelectionActions is null || BulkSelectionText is null)
             return;
 
-        int selectedCount = 0;
+        int selectedCount = _selectedPaths.Count;
+        bool bulk = selectedCount > 1;
+        BulkFavoritePanel.Visibility = bulk ? Visibility.Visible : Visibility.Collapsed;
+        SingleSelectionActions.Visibility = bulk ? Visibility.Collapsed : Visibility.Visible;
+        if (!bulk)
+            return;
+
+        int materializedSelectedCount = 0;
         int firstLevel = 0;
         bool mixedLevels = false;
         foreach (Tile tile in _tiles)
         {
             if (!tile.IsRealFile || !_selectedPaths.Contains(tile.Path))
                 continue;
-            if (selectedCount == 0)
+            if (materializedSelectedCount == 0)
                 firstLevel = tile.Fav;
             else if (tile.Fav != firstLevel)
                 mixedLevels = true;
-            selectedCount++;
+            materializedSelectedCount++;
         }
-
-        bool bulk = selectedCount > 1;
-        BulkFavoritePanel.Visibility = bulk ? Visibility.Visible : Visibility.Collapsed;
-        SingleSelectionActions.Visibility = bulk ? Visibility.Collapsed : Visibility.Visible;
-        if (!bulk)
-            return;
 
         string levelSummary = mixedLevels ? "mixed levels" : $"Lv {firstLevel}";
         BulkSelectionText.Text = $"{selectedCount:N0} images selected · {levelSummary}";
@@ -7979,9 +8333,8 @@ public partial class MainWindow : Window
         }
 
         tile.Fav = clamped;
-        RefreshFavoriteMutationSurface([tile]);
-
-        SaveState();
+        if (RefreshFavoriteMutationSurface([tile]))
+            SaveState();
         return true;
     }
 
@@ -8018,8 +8371,8 @@ public partial class MainWindow : Window
             writer.Enqueue(new FavoriteDelta(key, durable, desired, generation));
         }
 
-        RefreshFavoriteMutationSurface(changedTiles);
-        SaveState();
+        if (RefreshFavoriteMutationSurface(changedTiles))
+            SaveState();
         SetTransientStatusToast($"{successMessage} Saving...");
         ScheduleFavoriteWriterPump();
         return true;
@@ -8713,6 +9066,35 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task<SearchFilterCompletion> SetSearchQueryInteractiveAsync(
+        string query,
+        bool persist = true)
+    {
+        bool previous = _suppressStateSave;
+        _suppressStateSave = !persist;
+        try
+        {
+            _settingSearchQuery = true;
+            SearchInput.Text = query;
+        }
+        finally
+        {
+            _settingSearchQuery = false;
+            _suppressStateSave = previous;
+        }
+
+        SearchFilterCompletion completion = await QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: true);
+        if (persist)
+        {
+            _searchStateSaveTimer.Stop();
+            SaveState();
+        }
+        return completion;
+    }
+
     public Task<SearchFilterCompletion> SetSearchInputForSmokeAsync(string query)
     {
         SearchInput.Text = query;
@@ -8720,7 +9102,20 @@ public partial class MainWindow : Window
             ?? Task.FromResult(new SearchFilterCompletion(false, false, "search input did not schedule a filter"));
     }
 
-    public long LastAppliedSearchFilterGenerationForSmoke => _lastAppliedSearchFilterGeneration;
+    public long LastAppliedSearchFilterGenerationForSmoke => _lastAppliedCatalogProjectionGeneration;
+    public long LastCatalogProjectionApplySliceMsForSmoke => _lastCatalogProjectionApplySliceMilliseconds;
+    public long MaxCatalogProjectionApplySliceMsForSmoke => _maxCatalogProjectionApplySliceMilliseconds;
+    public int CatalogProjectionDiscardedCountForSmoke => _catalogProjectionDiscardedCount;
+    public int PreparedCatalogLayoutAppliedCountForSmoke
+        => _retiredPreparedCatalogLayoutAppliedCount
+            + (_galleryVirtualizingPanel?.PreparedLayoutAppliedCount ?? 0);
+    public int PreparedCatalogLayoutRejectedCountForSmoke
+        => _retiredPreparedCatalogLayoutRejectedCount
+            + (_galleryVirtualizingPanel?.PreparedLayoutRejectedCount ?? 0);
+    public long CatalogLayoutMaxMeasureMsForSmoke
+        => Math.Max(
+            _retiredCatalogLayoutMaxMeasureMilliseconds,
+            _galleryVirtualizingPanel?.MaxMeasureMilliseconds ?? 0);
 
     public void SuppressStatePersistence()
     {
@@ -8731,9 +9126,15 @@ public partial class MainWindow : Window
     {
         if (CardsList is null || RowsList is null) return;
 
-        ++_searchFilterGeneration;
-        CancelPendingSearchFilter(completePending: true);
-        FilterSnapshot snapshot = CaptureFilterSnapshot();
+        ++_catalogProjectionGeneration;
+        CancelPendingCatalogProjection(completePending: true);
+        AttachGalleryVirtualizationPanel();
+        if (_galleryVirtualizingPanel is { } panel)
+            panel.ShowGroupHeaders = UsesDateGrouping;
+        FilterSnapshot snapshot = CaptureFilterSnapshot(
+            request: null,
+            selectFirst,
+            selectionFallbackIndex);
         FilterResult? result = null;
         try
         {
@@ -8748,8 +9149,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private FilterSnapshot CaptureFilterSnapshot()
+    private FilterSnapshot CaptureFilterSnapshot(
+        CatalogProjectionRequest? request = null,
+        bool selectFirst = true,
+        int? selectionFallbackIndex = null)
     {
+        AttachGalleryVirtualizationPanel();
         string query = SearchInput?.Text?.Trim() ?? "";
         int tileCount = _allTiles.Count;
         FilterTileSnapshot[] tiles = ArrayPool<FilterTileSnapshot>.Shared.Rent(tileCount);
@@ -8760,26 +9165,90 @@ public partial class MainWindow : Window
                 Tile tile = _allTiles[index];
                 tiles[index] = new FilterTileSnapshot(
                     tile,
+                    tile.Path,
+                    tile.FileName,
+                    tile.IsRealFile,
+                    tile.FolderBucketKey,
+                    tile.Group,
+                    Math.Max(1, tile.CardHeight + 4),
                     tile.Prompt,
                     tile.Fav,
                     tile.Enhanced,
                     tile.Unseen,
+                    tile.ModifiedUtc,
                     tile.CreatedUtc);
+            }
+
+            Tile? previous = SelectedTile();
+            VirtualizingLayoutContext? layoutContext =
+                _galleryVirtualizingPanel?.CaptureLayoutContext();
+            if (layoutContext is { } capturedLayoutContext)
+            {
+                layoutContext = capturedLayoutContext with
+                {
+                    ShowGroupHeaders = UsesDateGrouping,
+                };
+            }
+            bool albumActive = _activeAlbumId is not null;
+            string[] queryTokens = query.Split(
+                ',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
+            bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
+            bool enhancedOnly = EnhancedOnlyFilter?.IsChecked == true;
+            bool unseenOnly = UnseenOnlyFilter?.IsChecked == true;
+            FrozenSet<int> favoriteLevels = _favoriteFilterLevels.ToFrozenSet();
+            FrozenSet<string> hiddenFolderBuckets =
+                _hiddenFolderBuckets.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+            bool unfiltered = !albumActive
+                && queryTokens.Length == 0
+                && !favoritesOnly
+                && !unfavoriteOnly
+                && !enhancedOnly
+                && !unseenOnly
+                && hiddenFolderBuckets.Count == 0
+                && !_dateFromLocal.HasValue
+                && !_dateToLocal.HasValue;
+            Tile[]? unfilteredProjection = null;
+            if (unfiltered && request?.ReorderCatalog != true)
+            {
+                if (_unfilteredProjection is null
+                    || _unfilteredProjectionRevision != _catalogContentRevision)
+                {
+                    _unfilteredProjection = _allTiles.ToArray();
+                    _unfilteredProjectionRevision = _catalogContentRevision;
+                }
+                unfilteredProjection = _unfilteredProjection;
             }
 
             return new FilterSnapshot(
                 tiles,
                 tileCount,
-                _activeAlbumId is not null,
+                _catalogContentRevision,
+                _selectionVisualSyncGeneration,
+                _selectedPaths.ToArray(),
+                _primarySelectedPath,
+                previous?.Path,
+                _activePreviewTabPath,
+                request?.SelectFirst ?? selectFirst,
+                request?.SelectionFallbackIndex ?? selectionFallbackIndex,
+                request?.ViewportAnchor,
+                layoutContext,
+                _catalogLayoutCache,
+                unfilteredProjection,
+                request?.ReorderCatalog == true,
+                _sortBy,
+                _randomSortSeed,
+                albumActive,
                 _activeAlbumMemberPaths.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
                 _activeAlbumMemberOrder.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
-                query.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                FavoriteOnlyFilter?.IsChecked == true,
-                UnfavoriteOnlyFilter?.IsChecked == true,
-                EnhancedOnlyFilter?.IsChecked == true,
-                UnseenOnlyFilter?.IsChecked == true,
-                _favoriteFilterLevels.ToFrozenSet(),
-                _hiddenFolderBuckets.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+                queryTokens,
+                favoritesOnly,
+                unfavoriteOnly,
+                enhancedOnly,
+                unseenOnly,
+                favoriteLevels,
+                hiddenFolderBuckets,
                 _dateFromLocal,
                 _dateToLocal);
         }
@@ -8793,63 +9262,290 @@ public partial class MainWindow : Window
     private static void ReturnFilterSnapshot(FilterSnapshot snapshot)
         => ArrayPool<FilterTileSnapshot>.Shared.Return(snapshot.Tiles, clearArray: true);
 
+    private static Tile[] CopyTileProjection(FilterSnapshot snapshot)
+    {
+        var projection = new Tile[snapshot.TileCount];
+        for (int index = 0; index < projection.Length; index++)
+            projection[index] = snapshot.Tiles[index].Tile;
+        return projection;
+    }
+
     private static void ReturnFilterResult(FilterResult result)
-        => ArrayPool<Tile>.Shared.Return(result.Tiles, clearArray: true);
+    {
+        // Filter results are immutable, exactly-sized arrays. The visible
+        // collection adopts them in O(1), and old snapshots remain valid for
+        // any WPF enumerator that was already in flight.
+    }
 
     private static FilterResult ComputeFilterResult(FilterSnapshot snapshot, CancellationToken cancellationToken)
     {
-        Tile[] filtered = ArrayPool<Tile>.Shared.Rent(snapshot.TileCount);
-        int filteredCount = 0;
-        try
+        bool unfiltered = !snapshot.AlbumActive
+            && snapshot.QueryTokens.Length == 0
+            && !snapshot.FavoritesOnly
+            && !snapshot.UnfavoriteOnly
+            && !snapshot.EnhancedOnly
+            && !snapshot.UnseenOnly
+            && snapshot.HiddenFolderBuckets.Count == 0
+            && !snapshot.DateFromLocal.HasValue
+            && !snapshot.DateToLocal.HasValue;
+        if (snapshot.ReorderCatalog && snapshot.TileCount > 1)
         {
+            int comparisons = 0;
+            Array.Sort(
+                snapshot.Tiles,
+                0,
+                snapshot.TileCount,
+                Comparer<FilterTileSnapshot>.Create((left, right) =>
+                {
+                    if ((++comparisons & 1023) == 0)
+                        cancellationToken.ThrowIfCancellationRequested();
+                    return CompareFilterTilesForSort(
+                        left,
+                        right,
+                        snapshot.SortBy,
+                        snapshot.RandomSortSeed);
+                }));
+        }
+
+        Tile[]? orderedCatalogProjection = null;
+        List<Tile>? orderedCatalog = null;
+        if (snapshot.ReorderCatalog)
+        {
+            orderedCatalogProjection = new Tile[snapshot.TileCount];
+            for (int index = 0; index < snapshot.TileCount; index++)
+                orderedCatalogProjection[index] = snapshot.Tiles[index].Tile;
+            orderedCatalog = new List<Tile>(orderedCatalogProjection);
+        }
+
+        int filteredCount = 0;
+        bool hasLayoutItem = false;
+        bool uniformLayoutHeight = true;
+        bool singleLayoutGroup = true;
+        double firstLayoutHeight = 0;
+        string firstLayoutGroup = "";
+        for (int index = 0; index < snapshot.TileCount; index++)
+        {
+            if ((index & 63) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
+            FilterTileSnapshot tile = snapshot.Tiles[index];
+            if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot))
+                continue;
+            if (!hasLayoutItem)
+            {
+                hasLayoutItem = true;
+                firstLayoutHeight = tile.CardHeight;
+                firstLayoutGroup = tile.Group;
+            }
+            else
+            {
+                uniformLayoutHeight &= Math.Abs(tile.CardHeight - firstLayoutHeight) <= 0.01;
+                singleLayoutGroup &= string.Equals(
+                    tile.Group,
+                    firstLayoutGroup,
+                    StringComparison.Ordinal);
+            }
+            filteredCount++;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        VirtualizingLayoutContext? layoutContext = snapshot.LayoutContext;
+        bool fixedContextHeight = layoutContext is { ItemHeight: > 0 } contextWithHeight
+            && double.IsFinite(contextWithHeight.ItemHeight);
+        bool compactLayout = layoutContext is { } context
+            && (fixedContextHeight || uniformLayoutHeight)
+            && (!context.ShowGroupHeaders || singleLayoutGroup);
+        Tile[] filtered = unfiltered
+            ? orderedCatalogProjection
+                ?? snapshot.UnfilteredProjection
+                ?? CopyTileProjection(snapshot)
+            : new Tile[filteredCount];
+        VirtualizingLayoutItem[]? filteredLayoutItems = layoutContext is not null && !compactLayout
+            ? new VirtualizingLayoutItem[filteredCount]
+            : null;
+        if (!unfiltered)
+        {
+            int filteredIndex = 0;
             for (int index = 0; index < snapshot.TileCount; index++)
             {
                 if ((index & 63) == 0)
                     cancellationToken.ThrowIfCancellationRequested();
-
                 FilterTileSnapshot tile = snapshot.Tiles[index];
                 if (!MatchesFilterSnapshot(tile, snapshot))
                     continue;
-                filtered[filteredCount++] = tile.Tile;
+                filtered[filteredIndex] = tile.Tile;
+                if (filteredLayoutItems is not null)
+                    filteredLayoutItems[filteredIndex] = new VirtualizingLayoutItem(tile.Group, tile.CardHeight);
+                filteredIndex++;
             }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (snapshot.AlbumActive)
-            {
-                Array.Sort(
-                    filtered,
-                    0,
-                    filteredCount,
-                    Comparer<Tile>.Create((left, right) =>
-                    {
-                        int leftIndex = snapshot.AlbumMemberOrder.TryGetValue(left.Path, out int leftOrder)
-                            ? leftOrder
-                            : int.MaxValue;
-                        int rightIndex = snapshot.AlbumMemberOrder.TryGetValue(right.Path, out int rightOrder)
-                            ? rightOrder
-                            : int.MaxValue;
-                        return leftIndex.CompareTo(rightIndex);
-                    }));
-            }
-            // _allTiles is maintained in the active product sort order. A
-            // query/filter therefore only removes entries and keeps that
-            // stable order instead of re-sorting 100k items on every keypress.
-            return new FilterResult(filtered, filteredCount);
         }
-        catch
+        else if (filteredLayoutItems is not null)
         {
-            ArrayPool<Tile>.Shared.Return(filtered, clearArray: true);
-            throw;
+            for (int index = 0; index < snapshot.TileCount; index++)
+            {
+                FilterTileSnapshot tile = snapshot.Tiles[index];
+                filteredLayoutItems[index] = new VirtualizingLayoutItem(tile.Group, tile.CardHeight);
+            }
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (snapshot.AlbumActive)
+        {
+            Dictionary<Tile, VirtualizingLayoutItem>? layoutByTile = null;
+            if (filteredLayoutItems is not null)
+            {
+                layoutByTile = new Dictionary<Tile, VirtualizingLayoutItem>(
+                    filteredCount,
+                    ReferenceEqualityComparer.Instance);
+                for (int index = 0; index < filteredCount; index++)
+                    layoutByTile[filtered[index]] = filteredLayoutItems[index];
+            }
+            Array.Sort(
+                filtered,
+                0,
+                filteredCount,
+                Comparer<Tile>.Create((left, right) =>
+                {
+                    int leftIndex = snapshot.AlbumMemberOrder.TryGetValue(left.Path, out int leftOrder)
+                        ? leftOrder
+                        : int.MaxValue;
+                    int rightIndex = snapshot.AlbumMemberOrder.TryGetValue(right.Path, out int rightOrder)
+                        ? rightOrder
+                        : int.MaxValue;
+                    return leftIndex.CompareTo(rightIndex);
+                }));
+            if (filteredLayoutItems is not null && layoutByTile is not null)
+            {
+                for (int index = 0; index < filteredCount; index++)
+                    filteredLayoutItems[index] = layoutByTile[filtered[index]];
+            }
+        }
+
+        HashSet<string>? selected = snapshot.SelectedPaths.Length == 0
+            ? null
+            : snapshot.SelectedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        List<Tile> survivingSelected = selected is null
+            ? []
+            : new List<Tile>(Math.Min(selected.Count, filteredCount));
+        Tile? primary = null;
+        Tile? previous = null;
+        Tile? lastSelected = null;
+        bool activePreviewIncluded = false;
+        for (int index = 0; index < filteredCount; index++)
+        {
+            Tile tile = filtered[index];
+            if (!string.IsNullOrWhiteSpace(snapshot.PrimarySelectedPath)
+                && string.Equals(tile.Path, snapshot.PrimarySelectedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                primary = tile;
+            }
+            if (!string.IsNullOrWhiteSpace(snapshot.PreviousSelectedPath)
+                && string.Equals(tile.Path, snapshot.PreviousSelectedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                previous = tile;
+            }
+            if (selected?.Contains(tile.Path) == true)
+            {
+                survivingSelected.Add(tile);
+                lastSelected = tile;
+            }
+            if (!activePreviewIncluded
+                && !string.IsNullOrWhiteSpace(snapshot.ActivePreviewTabPath)
+                && string.Equals(
+                    tile.Path,
+                    snapshot.ActivePreviewTabPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                activePreviewIncluded = true;
+            }
+        }
+
+        Tile? preferred = primary ?? previous ?? lastSelected;
+        if (preferred is null && snapshot.SelectionFallbackIndex.HasValue && filteredCount > 0)
+            preferred = filtered[Math.Clamp(snapshot.SelectionFallbackIndex.Value, 0, filteredCount - 1)];
+        preferred ??= snapshot.SelectFirst && filteredCount > 0 ? filtered[0] : null;
+        if (preferred is not null && survivingSelected.Count == 0)
+            survivingSelected.Add(preferred);
+
+        PreparedVirtualizingLayout? preparedLayout = null;
+        if (layoutContext is { } resolvedLayoutContext)
+        {
+            if (compactLayout)
+            {
+                double uniformItemHeight = fixedContextHeight
+                    ? resolvedLayoutContext.ItemHeight
+                    : hasLayoutItem
+                        ? firstLayoutHeight
+                        : 1;
+                preparedLayout = snapshot.LayoutCache.GetOrCreateUniform(
+                    filteredCount,
+                    resolvedLayoutContext,
+                    firstLayoutGroup,
+                    uniformItemHeight,
+                    cancellationToken);
+            }
+            else
+            {
+                preparedLayout = VirtualizingWrapPanel.PrepareLayout(
+                    filteredLayoutItems!,
+                    resolvedLayoutContext,
+                    cancellationToken);
+            }
+        }
+
+        return new FilterResult(
+            filtered,
+            filteredCount,
+            orderedCatalog,
+            survivingSelected.ToArray(),
+            preferred,
+            activePreviewIncluded,
+            snapshot.ViewportAnchor,
+            preparedLayout);
+    }
+
+    private static int CompareFilterTilesForSort(
+        FilterTileSnapshot left,
+        FilterTileSnapshot right,
+        string sortBy,
+        string randomSortSeed)
+    {
+        int primary = sortBy switch
+        {
+            SortModifiedOldestValue => left.ModifiedUtc.CompareTo(right.ModifiedUtc),
+            SortCreatedNewestValue => right.CreatedUtc.CompareTo(left.CreatedUtc),
+            SortCreatedOldestValue => left.CreatedUtc.CompareTo(right.CreatedUtc),
+            SortRandomValue => StableRandomSortKey(randomSortSeed, left.Path)
+                .CompareTo(StableRandomSortKey(randomSortSeed, right.Path)),
+            SortNameValue => StringComparer.OrdinalIgnoreCase.Compare(left.FileName, right.FileName),
+            _ => right.ModifiedUtc.CompareTo(left.ModifiedUtc),
+        };
+        if (primary != 0)
+            return primary;
+
+        if (sortBy == SortNameValue)
+        {
+            int modified = right.ModifiedUtc.CompareTo(left.ModifiedUtc);
+            if (modified != 0)
+                return modified;
+        }
+        else if (sortBy != SortRandomValue)
+        {
+            int fileName = StringComparer.OrdinalIgnoreCase.Compare(left.FileName, right.FileName);
+            if (fileName != 0)
+                return fileName;
+        }
+
+        return StringComparer.OrdinalIgnoreCase.Compare(left.Path, right.Path);
     }
 
     private static bool MatchesFilterSnapshot(FilterTileSnapshot tile, FilterSnapshot snapshot)
     {
-        if (snapshot.AlbumActive && (!tile.Tile.IsRealFile || !snapshot.AlbumMemberPaths.Contains(tile.Tile.Path)))
+        if (snapshot.AlbumActive && (!tile.IsRealFile || !snapshot.AlbumMemberPaths.Contains(tile.Path)))
             return false;
         foreach (string token in snapshot.QueryTokens)
         {
-            if (!ContainsText(tile.Tile.FileName, token) && !ContainsText(tile.Prompt, token))
+            if (!ContainsText(tile.FileName, token) && !ContainsText(tile.Prompt, token))
                 return false;
         }
 
@@ -8861,16 +9557,257 @@ public partial class MainWindow : Window
             return false;
         if (snapshot.UnseenOnly && !tile.Unseen)
             return false;
-        if (tile.Tile.IsRealFile
-            && !string.IsNullOrWhiteSpace(tile.Tile.FolderBucketKey)
-            && snapshot.HiddenFolderBuckets.Contains(tile.Tile.FolderBucketKey))
+        if (tile.IsRealFile
+            && !string.IsNullOrWhiteSpace(tile.FolderBucketKey)
+            && snapshot.HiddenFolderBuckets.Contains(tile.FolderBucketKey))
             return false;
-        if (!tile.Tile.IsRealFile || (!snapshot.DateFromLocal.HasValue && !snapshot.DateToLocal.HasValue))
+        if (!tile.IsRealFile || (!snapshot.DateFromLocal.HasValue && !snapshot.DateToLocal.HasValue))
             return true;
 
         DateTime createdDate = tile.CreatedUtc.ToLocalTime().Date;
         return (!snapshot.DateFromLocal.HasValue || createdDate >= snapshot.DateFromLocal.Value.Date)
             && (!snapshot.DateToLocal.HasValue || createdDate <= snapshot.DateToLocal.Value.Date);
+    }
+
+    private async Task<CatalogProjectionApplyMetrics> ApplyFilterResultAsync(
+        FilterResult filterResult,
+        FilterSnapshot snapshot,
+        long generation)
+    {
+        await _catalogProjectionApplyGate.WaitAsync();
+        try
+        {
+            return await ApplyFilterResultCoreAsync(filterResult, snapshot, generation);
+        }
+        finally
+        {
+            _catalogProjectionApplyGate.Release();
+        }
+    }
+
+    private async Task<CatalogProjectionApplyMetrics> ApplyFilterResultCoreAsync(
+        FilterResult filterResult,
+        FilterSnapshot snapshot,
+        long generation)
+    {
+        long maxSliceMs = 0;
+        long publishMs = 0;
+        long statsMs = 0;
+        long selectionMs = 0;
+        long reconcileMs = 0;
+        long catalogSwapMs = 0;
+        long panelCommitMs = 0;
+        long preResetMs = 0;
+        long resetMs = 0;
+        long selectionCommitMs = 0;
+        var slice = Stopwatch.StartNew();
+
+        long FinishSlice()
+        {
+            slice.Stop();
+            long elapsedMs = slice.ElapsedMilliseconds;
+            maxSliceMs = Math.Max(maxSliceMs, elapsedMs);
+            return elapsedMs;
+        }
+
+        async Task<bool> YieldForInputAsync()
+        {
+            FinishSlice();
+            await Dispatcher.Yield(DispatcherPriority.Background);
+            if (generation != _catalogProjectionGeneration)
+                return false;
+            return true;
+        }
+
+        if (_galleryVirtualizingPanel is null)
+            AttachGalleryVirtualizationPanel();
+        VirtualizingWrapPanel? preparedPanel = _galleryVirtualizingPanel;
+        CancelThumbnailViewportLoading();
+        _thumbnailViewportRevision++;
+        if (!await YieldForInputAsync())
+            return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
+
+        var phase = new Stopwatch();
+        bool resetPreparationStarted = preparedPanel?.BeginItemsResetPreparation() == true;
+        try
+        {
+            if (resetPreparationStarted)
+            {
+                bool resetPreparationComplete;
+                do
+                {
+                    phase.Restart();
+                    resetPreparationComplete = preparedPanel!.PrepareNextItemsResetSlice();
+                    phase.Stop();
+                    preResetMs = Math.Max(preResetMs, phase.ElapsedMilliseconds);
+                    if (resetPreparationComplete)
+                        break;
+
+                    FinishSlice();
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                    slice.Restart();
+                }
+                while (true);
+            }
+
+            if (generation != _catalogProjectionGeneration
+                || snapshot.CatalogRevision != _catalogContentRevision
+                || snapshot.SelectionGeneration != _selectionVisualSyncGeneration
+                || !string.Equals(snapshot.SortBy, _sortBy, StringComparison.Ordinal)
+                || !string.Equals(snapshot.RandomSortSeed, _randomSortSeed, StringComparison.Ordinal))
+            {
+                FinishSlice();
+                return new CatalogProjectionApplyMetrics(
+                    maxSliceMs,
+                    publishMs,
+                    statsMs,
+                    selectionMs,
+                    reconcileMs,
+                    catalogSwapMs,
+                    panelCommitMs,
+                    preResetMs,
+                    resetMs,
+                    selectionCommitMs);
+            }
+
+            bool wasSyncingSelection = _syncingSelection;
+            _syncingSelection = true;
+            try
+            {
+                phase.Restart();
+                if (filterResult.OrderedCatalogTiles is { } orderedCatalog)
+                {
+                    _allTiles = orderedCatalog;
+                    _catalogContentRevision++;
+                }
+                phase.Stop();
+                catalogSwapMs = phase.ElapsedMilliseconds;
+
+                phase.Restart();
+                if (preparedPanel is not null
+                    && snapshot.LayoutContext is { } targetLayoutContext)
+                {
+                    preparedPanel.ShowGroupHeaders = targetLayoutContext.ShowGroupHeaders;
+                }
+                phase.Stop();
+                panelCommitMs = phase.ElapsedMilliseconds;
+
+                phase.Restart();
+                _tiles.ReplaceAll(filterResult.Tiles, filterResult.Count);
+                phase.Stop();
+                resetMs = phase.ElapsedMilliseconds;
+
+                phase.Restart();
+                if (resetPreparationStarted)
+                {
+                    preparedPanel!.CompleteItemsResetPreparation();
+                    resetPreparationStarted = false;
+                }
+                preparedPanel?.SetPreparedLayout(filterResult.PreparedLayout);
+                _selectedPaths.Clear();
+                foreach (Tile selectedTile in filterResult.SelectedTiles)
+                    _selectedPaths.Add(selectedTile.Path);
+                phase.Stop();
+                selectionCommitMs = phase.ElapsedMilliseconds;
+            }
+            finally
+            {
+                _syncingSelection = wasSyncingSelection;
+            }
+        }
+        finally
+        {
+            if (resetPreparationStarted)
+                preparedPanel?.CancelItemsResetPreparation();
+        }
+
+        publishMs = slice.ElapsedMilliseconds;
+        if (!await YieldForInputAsync())
+            return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
+
+        Tile? preferred = filterResult.PreferredSelection;
+        if (preferred is not null)
+        {
+            if (_selectedPaths.Count == 0)
+                _selectedPaths.Add(preferred.Path);
+            _primarySelectedPath = preferred.Path;
+            _primarySelectedTile = preferred;
+        }
+        else if (filterResult.Count == 0)
+        {
+            _primarySelectedPath = null;
+            _primarySelectedTile = null;
+        }
+        if (filterResult.PreparedLayout is null)
+            _galleryVirtualizingPanel?.InvalidateItemLayout();
+        statsMs = slice.ElapsedMilliseconds;
+        if (!await YieldForInputAsync())
+            return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
+
+        if (preferred is not null)
+        {
+            _selectionVisualSyncGeneration++;
+            SynchronizeSelectionControls(filterResult.SelectedTiles);
+        }
+
+        selectionMs = slice.ElapsedMilliseconds;
+        if (!await YieldForInputAsync())
+            return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
+
+        bool primarySelectionUnchanged = preferred is not null
+            && string.Equals(
+                snapshot.PreviousSelectedPath,
+                preferred.Path,
+                StringComparison.OrdinalIgnoreCase);
+        if (preferred is not null && !primarySelectionUnchanged)
+            ApplyPrimarySelection(preferred);
+        else if (filterResult.Count == 0)
+            SelectTile(null);
+
+        selectionMs += slice.ElapsedMilliseconds;
+        if (!await YieldForInputAsync())
+            return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
+
+        ReconcileOpenSurfacesAfterFilterChange(filterResult.ActivePreviewIncluded);
+        if (filterResult.ViewportAnchor is not null)
+            ScheduleGridGeometryAnchorRestore(filterResult.ViewportAnchor);
+        ScheduleCatalogStatsUpdate(generation);
+        reconcileMs = FinishSlice();
+        return new CatalogProjectionApplyMetrics(
+            maxSliceMs,
+            publishMs,
+            statsMs,
+            selectionMs,
+            reconcileMs,
+            catalogSwapMs,
+            panelCommitMs,
+            preResetMs,
+            resetMs,
+            selectionCommitMs);
+    }
+
+    private void ScheduleCatalogStatsUpdate(long generation)
+    {
+        _catalogStatsPresentationGeneration = generation;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (generation != _catalogProjectionGeneration
+                || generation != _catalogStatsPresentationGeneration)
+            {
+                return;
+            }
+            if (_favoriteFilterPresentationPending)
+            {
+                _favoriteFilterPresentationPending = false;
+                SyncFavoriteFilterControls();
+            }
+            UpdateFolderStats();
+        }, DispatcherPriority.ContextIdle);
     }
 
     private void ApplyFilterResult(
@@ -8945,6 +9882,7 @@ public partial class MainWindow : Window
             if (_selectedPaths.Count == 0)
                 _selectedPaths.Add(preferred.Path);
             _primarySelectedPath = preferred.Path;
+            _primarySelectedTile = preferred;
             _selectionVisualSyncGeneration++;
             SynchronizeSelectionControls();
             ApplyPrimarySelection(preferred);
@@ -8952,21 +9890,35 @@ public partial class MainWindow : Window
         else if (filteredCount == 0)
             SelectTile(null);
 
-        ReconcileOpenSurfacesAfterFilterChange();
+        ReconcileOpenSurfacesAfterFilterChange(filterResult.ActivePreviewIncluded);
     }
 
-    private void ReconcileOpenSurfacesAfterFilterChange()
+    private void ReconcileOpenSurfacesAfterFilterChange(bool? activePreviewIncluded = null)
     {
         Tile? selected = SelectedTile();
+        bool activePreviewIsSelected = selected is not null
+            && string.Equals(
+                _activePreviewTabPath,
+                selected.Path,
+                StringComparison.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(_activePreviewTabPath)
-            && !_tiles.Any(tile => string.Equals(tile.Path, _activePreviewTabPath, StringComparison.OrdinalIgnoreCase)))
+            && !activePreviewIsSelected
+            && !(activePreviewIncluded
+                ?? _tiles.Any(tile => string.Equals(
+                    tile.Path,
+                    _activePreviewTabPath,
+                    StringComparison.OrdinalIgnoreCase))))
         {
             // Open tabs belong to the full catalog and must survive filters, but
             // an active marker may not claim that its filtered-out image is the
             // current right-preview selection.  The tab can be activated again
             // as soon as the filter admits its path.
+            string filteredActivePath = _activePreviewTabPath;
             _activePreviewTabPath = null;
-            RefreshPreviewTabs();
+            PreviewTabView? filteredActiveTab = _previewTabs.FirstOrDefault(tab =>
+                string.Equals(tab.Path, filteredActivePath, StringComparison.OrdinalIgnoreCase));
+            if (filteredActiveTab is not null)
+                filteredActiveTab.IsActive = false;
         }
 
         if (Modal.Visibility != Visibility.Visible)
@@ -9270,6 +10222,72 @@ public partial class MainWindow : Window
         string? selectedPath = SelectedTile() is { IsRealFile: true } selectedTile
             ? selectedTile.Path
             : _primarySelectedPath;
+        VirtualizingWrapPanel? panel = _galleryVirtualizingPanel
+            ?? FindVisualDescendant<VirtualizingWrapPanel>(CardsList);
+        if (panel is {
+                FirstVisibleIndex: >= 0,
+                LastVisibleIndex: >= 0,
+            })
+        {
+            int firstVisible = Math.Clamp(panel.FirstVisibleIndex, 0, _tiles.Count - 1);
+            int lastVisible = Math.Clamp(panel.LastVisibleIndex, firstVisible, _tiles.Count - 1);
+
+            GridZoomAnchor? CandidateForPath(string? path)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                    return null;
+                int index = -1;
+                for (int candidateIndex = firstVisible;
+                     candidateIndex <= lastVisible;
+                     candidateIndex++)
+                {
+                    if (!string.Equals(
+                            _tiles[candidateIndex].Path,
+                            path,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    index = candidateIndex;
+                    break;
+                }
+                if (index < firstVisible || index > lastVisible || !_tiles[index].IsRealFile)
+                    return null;
+                double top = panel.GetItemViewportTop(index);
+                return double.IsFinite(top)
+                    ? new GridZoomAnchor(path, top, Math.Abs(top - center))
+                    : null;
+            }
+
+            GridZoomAnchor? selectedLayoutAnchor = CandidateForPath(selectedPath);
+            if (selectedLayoutAnchor is not null)
+                return selectedLayoutAnchor;
+            GridZoomAnchor? previousLayoutAnchor = CandidateForPath(_lastGridZoomAnchorPath);
+            if (previousLayoutAnchor is not null)
+                return previousLayoutAnchor;
+
+            int middle = firstVisible + ((lastVisible - firstVisible) / 2);
+            for (int distance = 0; distance <= lastVisible - firstVisible; distance++)
+            {
+                int left = middle - distance;
+                int right = middle + distance;
+                int index = left >= firstVisible && _tiles[left].IsRealFile
+                    ? left
+                    : right <= lastVisible && _tiles[right].IsRealFile
+                        ? right
+                        : -1;
+                if (index < 0)
+                    continue;
+                double top = panel.GetItemViewportTop(index);
+                if (double.IsFinite(top))
+                {
+                    return new GridZoomAnchor(
+                        _tiles[index].Path,
+                        top,
+                        Math.Abs(top - center));
+                }
+            }
+        }
         foreach (ListBoxItem item in FindVisualDescendants<ListBoxItem>(CardsList))
         {
             if (item.DataContext is not Tile tile || !tile.IsRealFile || item.ActualHeight <= 0)
@@ -9602,28 +10620,12 @@ public partial class MainWindow : Window
     private async Task<bool> ApplyCurrentSortInteractiveAsync()
     {
         ConfigureGalleryItemsSources();
-        long generation = ++_interactiveSortGeneration;
-        long catalogRevision = _catalogContentRevision;
-        string sortBy = _sortBy;
-        string randomSortSeed = _randomSortSeed;
-        Tile[] ordered = _allTiles.ToArray();
-
-        await Task.Run(() => Array.Sort(
-            ordered,
-            (left, right) => CompareTilesForSort(left, right, sortBy, randomSortSeed)));
-
-        if (generation != _interactiveSortGeneration
-            || catalogRevision != _catalogContentRevision
-            || !string.Equals(sortBy, _sortBy, StringComparison.Ordinal)
-            || !string.Equals(randomSortSeed, _randomSortSeed, StringComparison.Ordinal))
-        {
+        SearchFilterCompletion completion = await QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: true,
+            selectFirst: true);
+        if (!completion.Applied || completion.Discarded)
             return false;
-        }
-
-        _allTiles.Clear();
-        _allTiles.AddRange(ordered);
-        _catalogContentRevision++;
-        ApplyFilters();
         SaveState();
         return true;
     }
@@ -9789,7 +10791,7 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private bool SetManualDateRange(DateTime? from, DateTime? to)
+    private bool SetManualDateRange(DateTime? from, DateTime? to, bool asynchronous = true)
     {
         DateTime? normalizedFrom = from?.Date;
         DateTime? normalizedTo = to?.Date;
@@ -9809,7 +10811,17 @@ public partial class MainWindow : Window
 
         if (changed && !_initializing)
         {
-            ApplyFilters();
+            if (asynchronous)
+            {
+                _ = QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: false,
+                    selectFirst: true);
+            }
+            else
+            {
+                ApplyFilters();
+            }
             SaveState();
         }
 
@@ -12647,21 +13659,47 @@ public partial class MainWindow : Window
         if (_selectedPaths.Count == 0)
             return null;
 
+        if (_primarySelectedTile is { } cachedPrimary
+            && !string.IsNullOrWhiteSpace(_primarySelectedPath)
+            && string.Equals(
+                cachedPrimary.Path,
+                _primarySelectedPath,
+                StringComparison.OrdinalIgnoreCase)
+            && _selectedPaths.Contains(cachedPrimary.Path))
+        {
+            return cachedPrimary;
+        }
+
         if (!string.IsNullOrWhiteSpace(_primarySelectedPath))
         {
             var primary = _tiles.FirstOrDefault(tile => string.Equals(tile.Path, _primarySelectedPath, StringComparison.OrdinalIgnoreCase));
             if (primary is not null && _selectedPaths.Contains(primary.Path))
+            {
+                _primarySelectedTile = primary;
                 return primary;
+            }
         }
 
         Tile? projected = CardsList.SelectedItem as Tile ?? RowsList.SelectedItem as Tile;
         if (projected is not null && _selectedPaths.Contains(projected.Path))
         {
-            return _tiles.FirstOrDefault(tile =>
+            Tile? current = _tiles.FirstOrDefault(tile =>
                 string.Equals(tile.Path, projected.Path, StringComparison.OrdinalIgnoreCase));
+            if (current is not null)
+            {
+                _primarySelectedTile = current;
+                _primarySelectedPath = current.Path;
+            }
+            return current;
         }
 
-        return _tiles.FirstOrDefault(tile => _selectedPaths.Contains(tile.Path));
+        Tile? fallback = _tiles.FirstOrDefault(tile => _selectedPaths.Contains(tile.Path));
+        if (fallback is not null)
+        {
+            _primarySelectedTile = fallback;
+            _primarySelectedPath = fallback.Path;
+        }
+        return fallback;
     }
 
     private void OpenSelectedExternally_Click(object sender, RoutedEventArgs e)
@@ -14238,7 +15276,10 @@ public partial class MainWindow : Window
             _catalogContentRevision++;
         _selectedPaths.RemoveWhere(deletedPaths.Contains);
         if (_primarySelectedPath is not null && deletedPaths.Contains(_primarySelectedPath))
+        {
             _primarySelectedPath = null;
+            _primarySelectedTile = null;
+        }
         if (_restoredSelectedPath is not null && deletedPaths.Contains(_restoredSelectedPath))
             _restoredSelectedPath = null;
 
@@ -14526,7 +15567,7 @@ public partial class MainWindow : Window
     private void DismissDeleteStatus_Click(object sender, RoutedEventArgs e)
     {
         _statusToastDismissTimer?.Stop();
-        DeleteStatusToast.Visibility = Visibility.Collapsed;
+        DeleteStatusToast.Visibility = Visibility.Hidden;
     }
 
     private void RetryDelete_Click(object sender, RoutedEventArgs e)
@@ -15403,6 +16444,7 @@ public partial class MainWindow : Window
             return false;
 
         _primarySelectedPath = primary.Path;
+        _primarySelectedTile = primary;
         _selectionVisualSyncGeneration++;
         SynchronizeSelectionControls();
         ApplyPrimarySelection(primary);
@@ -15416,6 +16458,7 @@ public partial class MainWindow : Window
             return false;
         _selectedPaths.Clear();
         _primarySelectedPath = null;
+        _primarySelectedTile = null;
         _selectionVisualSyncGeneration++;
         SynchronizeSelectionControls();
         ApplyPrimarySelection(null);
@@ -16843,7 +17886,11 @@ public partial class MainWindow : Window
     public int SelectedFavoriteLevelForSmoke => SelectedTile()?.Fav ?? 0;
     public bool AdjustGalleryFavoriteForSmoke(string fileName, int delta)
     {
-        Tile? tile = _allTiles.FirstOrDefault(candidate => string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+        Tile? tile = SelectedTile() is { } selected
+            && string.Equals(selected.FileName, fileName, StringComparison.OrdinalIgnoreCase)
+                ? selected
+                : _allTiles.FirstOrDefault(candidate =>
+                    string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
         if (tile is null || delta is not (-1 or 1))
             return false;
 
@@ -16856,8 +17903,11 @@ public partial class MainWindow : Window
     }
     public async Task<bool> AdjustGalleryFavoritePointerForSmokeAsync(string fileName, int delta)
     {
-        Tile? tile = _allTiles.FirstOrDefault(candidate =>
-            string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+        Tile? tile = SelectedTile() is { } selected
+            && string.Equals(selected.FileName, fileName, StringComparison.OrdinalIgnoreCase)
+                ? selected
+                : _allTiles.FirstOrDefault(candidate =>
+                    string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
         if (tile is null || delta is not (-1 or 1))
             return false;
 
@@ -17032,7 +18082,7 @@ public partial class MainWindow : Window
         => GetBrowserThumbnailCachePaths(new Tile { Path = Path.GetFullPath(path), ModifiedUtc = modifiedUtc });
     public int GridItemsSourceCountForSmoke => CardsList.Items.Count;
     public bool GridUsesFullExtentVirtualizationForSmoke
-        => ReferenceEquals(CardsList.ItemsSource, _tiles)
+        => ReferenceEquals(CardsList.ItemsSource, _tilesView)
             && FindVisualDescendant<VirtualizingWrapPanel>(CardsList) is not null;
     public double GridExtentHeightForSmoke
         => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.ExtentHeight ?? 0;
@@ -17322,6 +18372,7 @@ public partial class MainWindow : Window
             _tiles.ReplaceAll(_allTiles);
             _selectedPaths.Clear();
             _primarySelectedPath = null;
+            _primarySelectedTile = null;
         }
         finally
         {
@@ -17819,11 +18870,14 @@ public partial class MainWindow : Window
     public bool ToggleSelectedFavoriteForSmoke() => ToggleSelectedFavorite();
     public bool AdjustSelectedFavoriteForSmoke(int delta) => AdjustSelectedFavorite(delta);
     public bool MarkSelectedTileRealForSmoke()
+        => SetSelectedTileRealForSmoke(true);
+
+    public bool SetSelectedTileRealForSmoke(bool isRealFile)
     {
         if (SelectedTile() is not Tile tile)
             return false;
 
-        tile.IsRealFile = true;
+        tile.IsRealFile = isRealFile;
         return true;
     }
     public bool RaiseFavoriteDecreaseForSmoke()
@@ -17950,9 +19004,11 @@ public partial class MainWindow : Window
     public Task<bool> SetSortByInteractiveForSmokeAsync(string sortBy) => SetSortByInteractiveAsync(sortBy);
     public bool ReshuffleRandomSortForSmoke() => ReshuffleRandomSort();
     public string RandomSortSeedForSmoke => _randomSortSeed;
-    public bool ClearManualDateRangeForSmoke() => SetManualDateRange(null, null);
-    public bool SetManualDateRangeForSmoke(string? from, string? to) => SetManualDateRange(ParseStateDate(from), ParseStateDate(to));
-    public bool SetFavoriteFilterLevelsForSmoke(params int[] levels) => SetFavoriteFilterLevels(levels);
+    public bool ClearManualDateRangeForSmoke() => SetManualDateRange(null, null, asynchronous: false);
+    public bool SetManualDateRangeForSmoke(string? from, string? to)
+        => SetManualDateRange(ParseStateDate(from), ParseStateDate(to), asynchronous: false);
+    public bool SetFavoriteFilterLevelsForSmoke(params int[] levels)
+        => SetFavoriteFilterLevels(levels, asynchronous: false);
     public void SetShowUnseenDotsForSmoke(bool enabled)
         => SetShowUnseenDots(enabled, persist: true);
     public void SetSidebarUnseenDotsForSmoke(bool enabled) => ShowUnseenDots.IsChecked = enabled;
@@ -18006,20 +19062,21 @@ public partial class MainWindow : Window
         SetFolderBucketSelection(selected, primary, persist: true);
         return true;
     }
-    public bool HideSelectedFolderBucketsForSmoke() => SetSelectedFolderBucketsHidden(hidden: true);
-    public bool ShowSelectedFolderBucketsForSmoke() => SetSelectedFolderBucketsHidden(hidden: false);
-    public bool SetFolderBucketHiddenForSmoke(string key, bool hidden) => SetFolderBucketHidden(key, hidden);
+    public bool HideSelectedFolderBucketsForSmoke() => SetSelectedFolderBucketsHidden(hidden: true, asynchronous: false);
+    public bool ShowSelectedFolderBucketsForSmoke() => SetSelectedFolderBucketsHidden(hidden: false, asynchronous: false);
+    public bool SetFolderBucketHiddenForSmoke(string key, bool hidden)
+        => SetFolderBucketHidden(key, hidden, asynchronous: false);
     public void ShowAllFolderBucketsForSmoke()
     {
         _hiddenFolderBuckets.Clear();
-        ApplyFolderBucketFilterChange();
+        ApplyFolderBucketFilterChange(asynchronous: false);
     }
 
     public void HideAllFolderBucketsForSmoke()
     {
         foreach (var bucket in _folderBucketViews)
             _hiddenFolderBuckets.Add(bucket.Key);
-        ApplyFolderBucketFilterChange();
+        ApplyFolderBucketFilterChange(asynchronous: false);
     }
 
     public void InvertFolderBucketsForSmoke()
@@ -18029,7 +19086,7 @@ public partial class MainWindow : Window
         _hiddenFolderBuckets.Clear();
         foreach (string key in next)
             _hiddenFolderBuckets.Add(key);
-        ApplyFolderBucketFilterChange();
+        ApplyFolderBucketFilterChange(asynchronous: false);
     }
 
     public List<string> FilteredFileNamesForSmoke(int take = 20)
@@ -18569,7 +19626,7 @@ public partial class MainWindow : Window
 
     public bool SetSelectedFavoriteLevelForSmoke(int level)
     {
-        return SelectedTiles().Count > 1
+        return _selectedPaths.Count > 1
             ? SetFavoriteLevelForSelection(level)
             : SelectedTile() is { IsRealFile: true } tile && SetFavoriteLevel(tile, level);
     }
@@ -18653,6 +19710,34 @@ public partial class MainWindow : Window
         SetFavoriteFilterState(false, false, apply: true, persist: true);
     }
 
+    public Task<SearchFilterCompletion> SetFavoriteOnlyFilterForSmokeAsync(bool enabled)
+    {
+        SetFavoriteFilterState(
+            enabled,
+            false,
+            apply: false,
+            persist: false,
+            asynchronous: true);
+        return QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: true);
+    }
+
+    public Task<SearchFilterCompletion> ClearFavoriteFiltersForSmokeAsync()
+    {
+        SetFavoriteFilterState(
+            false,
+            false,
+            apply: false,
+            persist: false,
+            asynchronous: true);
+        return QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: true);
+    }
+
     public void SetEnhancedOnlyFilterForSmoke(bool enabled)
     {
         EnhancedOnlyFilter.IsChecked = enabled;
@@ -18664,7 +19749,25 @@ public partial class MainWindow : Window
         bool changed = UnseenOnlyFilter.IsChecked != enabled;
         UnseenOnlyFilter.IsChecked = enabled;
         if (!changed)
-            ApplyFiltersForCurrentFilterChange();
+            ApplyFilters();
+    }
+
+    public Task<SearchFilterCompletion> SetUnseenOnlyFilterForSmokeAsync(bool enabled)
+    {
+        bool changed = UnseenOnlyFilter.IsChecked != enabled;
+        UnseenOnlyFilter.IsChecked = enabled;
+        if (changed)
+        {
+            return _pendingSearchFilterCompletion?.Task
+                ?? Task.FromResult(new SearchFilterCompletion(
+                    false,
+                    false,
+                    "unseen filter did not schedule a catalog projection"));
+        }
+        return QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: !enabled);
     }
 
     public bool RealizeNextGridBatchForSmoke()
@@ -19589,33 +20692,93 @@ internal sealed record MetadataIndexSnapshotPlan(
     MetadataIndexEntry[] Entries,
     bool DurableEntrySetExact);
 
-internal sealed class ResettableObservableCollection<T> : ObservableCollection<T>
+internal sealed class SnapshotCollectionView<T> : CollectionView, IReadOnlyList<T>
 {
+    private readonly ResettableObservableCollection<T> _source;
+
+    public SnapshotCollectionView(ResettableObservableCollection<T> source)
+        : base(Array.Empty<T>())
+    {
+        _source = source;
+        _source.CollectionChanged += Source_CollectionChanged;
+    }
+
+    public override int Count => _source.Count;
+    public override bool IsEmpty => _source.Count == 0;
+    public T this[int index] => _source[index];
+
+    public override object GetItemAt(int index) => _source[index]!;
+    public override int IndexOf(object item) => item is T value ? _source.IndexOf(value) : -1;
+    public override bool Contains(object item) => item is T value && _source.Contains(value);
+
+    protected override IEnumerator GetEnumerator() => _source.GetEnumerator();
+
+    protected override void RefreshOverride()
+    {
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(IsEmpty)));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    private void Source_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        => OnCollectionChanged(e);
+
+    IEnumerator<T> IEnumerable<T>.GetEnumerator() => _source.GetEnumerator();
+}
+
+internal sealed class ResettableObservableCollection<T> :
+    IList<T>,
+    IReadOnlyList<T>,
+    IList,
+    INotifyCollectionChanged,
+    INotifyPropertyChanged
+{
+    private T[] _items = [];
+    private readonly object _syncRoot = new();
+
+    public event NotifyCollectionChangedEventHandler? CollectionChanged;
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public int Count => _items.Length;
+    public bool IsReadOnly => false;
+    bool IList.IsFixedSize => false;
+    bool IList.IsReadOnly => false;
+    bool ICollection.IsSynchronized => false;
+    object ICollection.SyncRoot => _syncRoot;
+
+    public T this[int index]
+    {
+        get => _items[index];
+        set
+        {
+            T[] next = (T[])_items.Clone();
+            T previous = next[index];
+            next[index] = value;
+            _items = next;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+            CollectionChanged?.Invoke(
+                this,
+                new NotifyCollectionChangedEventArgs(
+                    NotifyCollectionChangedAction.Replace,
+                    value,
+                    previous,
+                    index));
+        }
+    }
+
+    object? IList.this[int index]
+    {
+        get => this[index];
+        set => this[index] = Cast(value);
+    }
+
     public void ReplaceAll(IReadOnlyList<T> items)
     {
         ArgumentNullException.ThrowIfNull(items);
-        CheckReentrancy();
-        if (Items is List<T> list)
-        {
-            list.Clear();
-            list.EnsureCapacity(items.Count);
-            if (items is List<T> sourceList)
-                list.AddRange(sourceList);
-            else
-            {
-                for (int index = 0; index < items.Count; index++)
-                    list.Add(items[index]);
-            }
-        }
-        else
-        {
-            Items.Clear();
-            for (int index = 0; index < items.Count; index++)
-                Items.Add(items[index]);
-        }
-        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
-        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        T[] next = new T[items.Count];
+        for (int index = 0; index < items.Count; index++)
+            next[index] = items[index];
+        ReplaceOwned(next);
     }
 
     public void ReplaceAll(T[] items, int count)
@@ -19623,22 +20786,115 @@ internal sealed class ResettableObservableCollection<T> : ObservableCollection<T
         ArgumentNullException.ThrowIfNull(items);
         if (count < 0 || count > items.Length)
             throw new ArgumentOutOfRangeException(nameof(count));
-        CheckReentrancy();
-        if (Items is List<T> list)
-        {
-            list.Clear();
-            list.EnsureCapacity(count);
-            list.AddRange(items.AsSpan(0, count));
-        }
-        else
-        {
-            Items.Clear();
-            for (int index = 0; index < count; index++)
-                Items.Add(items[index]);
-        }
-        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
-        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        ReplaceOwned(count == items.Length ? items : items.AsSpan(0, count).ToArray());
+    }
+
+    private void ReplaceOwned(T[] items)
+    {
+        _items = items;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Count)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    public void Add(T item)
+    {
+        int index = _items.Length;
+        T[] next = new T[index + 1];
+        Array.Copy(_items, next, index);
+        next[index] = item;
+        _items = next;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Count)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        CollectionChanged?.Invoke(
+            this,
+            new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, item, index));
+    }
+
+    int IList.Add(object? value)
+    {
+        Add(Cast(value));
+        return _items.Length - 1;
+    }
+
+    public void Clear()
+    {
+        if (_items.Length == 0)
+            return;
+        ReplaceOwned([]);
+    }
+
+    public bool Contains(T item) => Array.IndexOf(_items, item) >= 0;
+    bool IList.Contains(object? value) => value is T item && Contains(item);
+
+    public void CopyTo(T[] array, int arrayIndex)
+        => Array.Copy(_items, 0, array, arrayIndex, _items.Length);
+
+    void ICollection.CopyTo(Array array, int index)
+        => Array.Copy(_items, 0, array, index, _items.Length);
+
+    public IEnumerator<T> GetEnumerator()
+        => ((IEnumerable<T>)_items).GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();
+
+    public int IndexOf(T item) => Array.IndexOf(_items, item);
+    int IList.IndexOf(object? value) => value is T item ? IndexOf(item) : -1;
+
+    public void Insert(int index, T item)
+    {
+        if ((uint)index > (uint)_items.Length)
+            throw new ArgumentOutOfRangeException(nameof(index));
+        T[] next = new T[_items.Length + 1];
+        Array.Copy(_items, 0, next, 0, index);
+        next[index] = item;
+        Array.Copy(_items, index, next, index + 1, _items.Length - index);
+        _items = next;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Count)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        CollectionChanged?.Invoke(
+            this,
+            new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, item, index));
+    }
+
+    void IList.Insert(int index, object? value) => Insert(index, Cast(value));
+
+    public bool Remove(T item)
+    {
+        int index = IndexOf(item);
+        if (index < 0)
+            return false;
+        RemoveAt(index);
+        return true;
+    }
+
+    void IList.Remove(object? value)
+    {
+        if (value is T item)
+            Remove(item);
+    }
+
+    public void RemoveAt(int index)
+    {
+        T removed = _items[index];
+        T[] next = new T[_items.Length - 1];
+        Array.Copy(_items, 0, next, 0, index);
+        Array.Copy(_items, index + 1, next, index, _items.Length - index - 1);
+        _items = next;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Count)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        CollectionChanged?.Invoke(
+            this,
+            new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, removed, index));
+    }
+
+    private static T Cast(object? value)
+    {
+        if (value is T item)
+            return item;
+        if (value is null && default(T) is null)
+            return default!;
+        throw new ArgumentException($"Value must be assignable to {typeof(T).FullName}.", nameof(value));
     }
 }
 

@@ -16,9 +16,6 @@
     <ItemsPanelTemplate x:Key="VirtualizedCardItemsPanel">
       <local:VirtualizingWrapPanel HorizontalSpacing="10" VerticalSpacing="10" OverscanRows="0"/>
     </ItemsPanelTemplate>
-    <ItemsPanelTemplate x:Key="GroupedVirtualizedCardItemsPanel">
-      <local:VirtualizingWrapPanel HorizontalSpacing="10" VerticalSpacing="10" OverscanRows="0" ShowGroupHeaders="True"/>
-    </ItemsPanelTemplate>
   </Window.Resources>
 
   <Grid>
@@ -1319,7 +1316,7 @@
       </Border>
     </Grid>
 
-    <Grid x:Name="DeleteStatusToast" Grid.RowSpan="3" Panel.ZIndex="400" Visibility="Collapsed" IsHitTestVisible="True" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,66,0,0" AutomationProperties.Name="Aibos status notification">
+    <Grid x:Name="DeleteStatusToast" Grid.RowSpan="3" Panel.ZIndex="400" Visibility="Hidden" IsHitTestVisible="True" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,66,0,0" AutomationProperties.Name="Aibos status notification">
       <Border Width="560" Padding="12,9" CornerRadius="4" Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
         <DockPanel LastChildFill="True">
           <Button x:Name="DeleteStatusDismissButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="DismissDeleteStatus_Click" ToolTip="Dismiss" AutomationProperties.Name="Dismiss status notification" Width="28" Height="28"><Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="13" Height="13"/></Button>

@@ -9771,12 +9771,23 @@ public partial class App : Application
             }
             ReportProgress(activeOperation);
             var heartbeatGapSamples = new List<string>();
+            var layoutSamples = new List<string>();
+            async Task FlushLayoutAsync()
+            {
+                string operation = activeOperation;
+                activeOperation = operation + "-layout";
+                var watch = Stopwatch.StartNew();
+                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                watch.Stop();
+                layoutSamples.Add($"{operation}:{watch.ElapsedMilliseconds}ms");
+                activeOperation = operation;
+            }
             heartbeat.Tick += (_, _) =>
             {
                 long now = heartbeatWatch.ElapsedMilliseconds;
                 long gap = now - lastHeartbeatMs;
                 maxHeartbeatGapMs = Math.Max(maxHeartbeatGapMs, gap);
-                if (gap > 100)
+                if (gap > 50)
                     heartbeatGapSamples.Add($"{activeOperation}@{now}ms:{gap}ms");
                 lastHeartbeatMs = now;
                 heartbeatCount++;
@@ -9800,35 +9811,100 @@ public partial class App : Application
                 ReportProgress("warmup");
                 MainWindow.SearchFilterCompletion warmSearch =
                     await window.SetSearchInputForSmokeAsync("needle");
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                await FlushLayoutAsync();
                 MainWindow.SearchFilterCompletion warmClear =
                     await window.SetSearchInputForSmokeAsync("");
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
-                window.SetFavoriteOnlyFilterForSmoke(true);
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                await FlushLayoutAsync();
+                MainWindow.SearchFilterCompletion warmFavorite =
+                    await window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                await FlushLayoutAsync();
                 bool warmFavoriteCountExact = window.FilteredCountForSmoke == count / 10;
-                window.ClearFavoriteFiltersForSmoke();
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                MainWindow.SearchFilterCompletion warmFavoriteClear =
+                    await window.ClearFavoriteFiltersForSmokeAsync();
+                await FlushLayoutAsync();
                 bool warmSortOldest =
                     await window.SetSortByInteractiveForSmokeAsync("modified-oldest");
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                await FlushLayoutAsync();
                 bool warmSortName =
                     await window.SetSortByInteractiveForSmokeAsync("name");
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                await FlushLayoutAsync();
                 bool warmSortRestored =
                     await window.SetSortByInteractiveForSmokeAsync("modified-newest");
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                await FlushLayoutAsync();
                 selected &= window.SelectFileNameForSmoke(selectedName);
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                await FlushLayoutAsync();
+                ReportProgress("mixed-latest-wins");
+                bool mixedAnchorPrepared = window.MarkSelectedTileRealForSmoke()
+                    && await window.WaitForGridRealizationIdleForSmokeAsync();
+                string? mixedAnchorBefore = window.CaptureGridViewportAnchorPathForSmoke();
+                int discardCountBeforeMixed = window.CatalogProjectionDiscardedCountForSmoke;
+                Task<MainWindow.SearchFilterCompletion> staleMixedSearch =
+                    window.SetSearchInputForSmokeAsync("needle");
+                Task<MainWindow.SearchFilterCompletion> staleMixedFilter =
+                    window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                Task<bool> latestMixedSort =
+                    window.SetSortByInteractiveForSmokeAsync("name");
+                MainWindow.SearchFilterCompletion staleMixedSearchResult =
+                    await staleMixedSearch;
+                MainWindow.SearchFilterCompletion staleMixedFilterResult =
+                    await staleMixedFilter;
+                bool latestMixedSortApplied = await latestMixedSort;
+                await FlushLayoutAsync();
+                await window.WaitForGridZoomAnchorForSmokeAsync();
+                bool mixedRealizationSettled =
+                    await window.WaitForGridRealizationIdleForSmokeAsync();
+                string? mixedAnchorAfter = window.CaptureGridViewportAnchorPathForSmoke();
+                int mixedDiscardedCount =
+                    window.CatalogProjectionDiscardedCountForSmoke - discardCountBeforeMixed;
+                int mixedFilteredCount = window.FilteredCountForSmoke;
+                bool mixedViewportAnchorPreserved = mixedAnchorPrepared
+                    && mixedRealizationSettled
+                    && !string.IsNullOrWhiteSpace(mixedAnchorBefore)
+                    && string.Equals(mixedAnchorBefore, mixedAnchorAfter, StringComparison.OrdinalIgnoreCase);
+                bool mixedLatestWins = staleMixedSearchResult.Discarded
+                    && !staleMixedSearchResult.Applied
+                    && staleMixedFilterResult.Discarded
+                    && !staleMixedFilterResult.Applied
+                    && latestMixedSortApplied
+                    && mixedFilteredCount == count / 100
+                    && string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        selectedName,
+                        StringComparison.OrdinalIgnoreCase);
+                Task<MainWindow.SearchFilterCompletion> staleMixedClear =
+                    window.SetSearchInputForSmokeAsync("");
+                Task<MainWindow.SearchFilterCompletion> latestMixedFilterClear =
+                    window.ClearFavoriteFiltersForSmokeAsync();
+                MainWindow.SearchFilterCompletion staleMixedClearResult =
+                    await staleMixedClear;
+                MainWindow.SearchFilterCompletion latestMixedFilterClearResult =
+                    await latestMixedFilterClear;
+                bool mixedSortRestored =
+                    await window.SetSortByInteractiveForSmokeAsync("modified-newest");
+                window.SetSelectedTileRealForSmoke(false);
+                selected &= window.SelectFileNameForSmoke(selectedName);
+                bool mixedCleanupComplete = staleMixedClearResult.Discarded
+                    && latestMixedFilterClearResult.Applied
+                    && !latestMixedFilterClearResult.Discarded
+                    && mixedSortRestored
+                    && window.FilteredCountForSmoke == count
+                    && selected;
                 bool warmupComplete = warmSearch.Applied
                     && !warmSearch.Discarded
                     && warmClear.Applied
                     && !warmClear.Discarded
+                    && warmFavorite.Applied
+                    && !warmFavorite.Discarded
+                    && warmFavoriteClear.Applied
+                    && !warmFavoriteClear.Discarded
                     && warmFavoriteCountExact
                     && window.FilteredCountForSmoke == count
                     && warmSortOldest
                     && warmSortName
                     && warmSortRestored
+                    && mixedLatestWins
+                    && mixedViewportAnchorPreserved
+                    && mixedCleanupComplete
                     && selected;
 
                 var process = Process.GetCurrentProcess();
@@ -9839,6 +9915,7 @@ public partial class App : Application
                 var searchSamples = new List<long>();
                 var searchPhaseSamples = new List<MainWindow.SearchFilterCompletion>();
                 var filterSamples = new List<long>();
+                var filterPhaseSamples = new List<MainWindow.SearchFilterCompletion>();
                 var sortSamples = new List<long>();
                 bool countsExact = true;
                 bool completionsApplied = true;
@@ -9860,7 +9937,7 @@ public partial class App : Application
                     activeOperation = $"search-match-{iteration + 1}";
                     var watch = Stopwatch.StartNew();
                     MainWindow.SearchFilterCompletion match = await window.SetSearchInputForSmokeAsync("needle");
-                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    await FlushLayoutAsync();
                     watch.Stop();
                     searchSamples.Add(watch.ElapsedMilliseconds);
                     searchPhaseSamples.Add(match);
@@ -9870,7 +9947,7 @@ public partial class App : Application
                     activeOperation = $"search-clear-{iteration + 1}";
                     watch.Restart();
                     MainWindow.SearchFilterCompletion clear = await window.SetSearchInputForSmokeAsync("");
-                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    await FlushLayoutAsync();
                     watch.Stop();
                     searchSamples.Add(watch.ElapsedMilliseconds);
                     searchPhaseSamples.Add(clear);
@@ -9883,36 +9960,49 @@ public partial class App : Application
                 {
                     activeOperation = $"filter-on-{iteration + 1}";
                     var watch = Stopwatch.StartNew();
-                    window.SetFavoriteOnlyFilterForSmoke(true);
-                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    MainWindow.SearchFilterCompletion favorite =
+                        await window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                    await FlushLayoutAsync();
                     watch.Stop();
                     filterSamples.Add(watch.ElapsedMilliseconds);
+                    filterPhaseSamples.Add(favorite);
+                    completionsApplied &= favorite.Applied && !favorite.Discarded;
                     countsExact &= window.FilteredCountForSmoke == count / 10;
 
                     activeOperation = $"filter-clear-{iteration + 1}";
                     watch.Restart();
-                    window.ClearFavoriteFiltersForSmoke();
-                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    MainWindow.SearchFilterCompletion favoriteClear =
+                        await window.ClearFavoriteFiltersForSmokeAsync();
+                    await FlushLayoutAsync();
                     watch.Stop();
                     filterSamples.Add(watch.ElapsedMilliseconds);
+                    filterPhaseSamples.Add(favoriteClear);
+                    completionsApplied &= favoriteClear.Applied && !favoriteClear.Discarded;
                     countsExact &= window.FilteredCountForSmoke == count;
                 }
 
                 ReportProgress("favorite-eviction-prepare");
+                activeOperation = "favorite-eviction-select";
                 bool favoriteEvictionPrepared = window.SelectFileNameForSmoke(selectedName)
                     && window.MarkSelectedTileRealForSmoke();
+                activeOperation = "favorite-eviction-write";
                 window.ForceSharedStoreWritersForSmoke();
                 favoriteEvictionPrepared &= window.SetSelectedFavoriteLevelForSmoke(1);
+                activeOperation = "favorite-eviction-drain";
                 SharedWriteStatus[] preparedWrites = await window.DrainSharedStoreWritersForSmokeAsync();
                 favoriteEvictionPrepared &= preparedWrites.All(static status => status == SharedWriteStatus.Succeeded);
-                window.SetFavoriteOnlyFilterForSmoke(true);
+                activeOperation = "favorite-eviction-filter";
+                MainWindow.SearchFilterCompletion favoriteEvictionFilter =
+                    await window.SetFavoriteOnlyFilterForSmokeAsync(true);
                 favoriteEvictionPrepared &= window.FilteredCountForSmoke == count / 10
+                    && favoriteEvictionFilter.Applied
+                    && !favoriteEvictionFilter.Discarded
                     && string.Equals(window.SelectedFileNameForSmoke, selectedName, StringComparison.OrdinalIgnoreCase);
 
                 ReportProgress("favorite-eviction");
                 var favoriteEvictionWatch = Stopwatch.StartNew();
                 bool favoriteEvicted = await window.AdjustGalleryFavoritePointerForSmokeAsync(selectedName, -1);
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                await FlushLayoutAsync();
                 favoriteEvictionWatch.Stop();
                 favoriteEvictionElapsedMs = favoriteEvictionWatch.ElapsedMilliseconds;
                 favoriteEvictionSelected = window.SelectedFileNameForSmoke;
@@ -9926,11 +10016,17 @@ public partial class App : Application
                 countsExact &= favoriteEvictionExact;
 
                 ReportProgress("favorite-eviction-restore");
-                window.ClearFavoriteFiltersForSmoke();
+                activeOperation = "favorite-eviction-restore-filter";
+                MainWindow.SearchFilterCompletion favoriteEvictionClear =
+                    await window.ClearFavoriteFiltersForSmokeAsync();
+                activeOperation = "favorite-eviction-restore-select";
                 bool favoriteEvictionRestored = window.SelectFileNameForSmoke(selectedName)
                     && window.SetSelectedFavoriteLevelForSmoke(5);
+                activeOperation = "favorite-eviction-restore-drain";
                 SharedWriteStatus[] restoredWrites = await window.DrainSharedStoreWritersForSmokeAsync();
                 countsExact &= favoriteEvictionRestored
+                    && favoriteEvictionClear.Applied
+                    && !favoriteEvictionClear.Discarded
                     && restoredWrites.All(static status => status == SharedWriteStatus.Succeeded)
                     && window.FilteredCountForSmoke == count;
 
@@ -9949,14 +10045,14 @@ public partial class App : Application
                     activeOperation = $"sort-{sortMode}";
                     var watch = Stopwatch.StartNew();
                     bool changed = await window.SetSortByInteractiveForSmokeAsync(sortMode);
-                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    await FlushLayoutAsync();
                     watch.Stop();
                     sortSamples.Add(watch.ElapsedMilliseconds);
                     countsExact &= changed && window.FilteredCountForSmoke == count;
                 }
 
                 ReportProgress("final-layout");
-                await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                await FlushLayoutAsync();
                 activeOperation = "final-settle";
                 await Task.Delay(250);
                 heartbeat.Stop();
@@ -9983,6 +10079,13 @@ public partial class App : Application
                 bool bounded = window.GridItemsSourceCountForSmoke == count
                     && window.GridUsesFullExtentVirtualizationForSmoke
                     && window.GridRealizedCountForSmoke <= window.GridMaxRealizationCountForSmoke;
+                long catalogProjectionMaxApplySliceMs = Math.Max(
+                    searchPhaseSamples.Count == 0
+                        ? 0
+                        : searchPhaseSamples.Max(static sample => sample.MaxApplySliceMs),
+                    filterPhaseSamples.Count == 0
+                        ? 0
+                        : filterPhaseSamples.Max(static sample => sample.MaxApplySliceMs));
                 bool ok = window.CatalogCountForSmoke == count
                     && warmupComplete
                     && countsExact
@@ -9993,7 +10096,8 @@ public partial class App : Application
                     && filterP95 <= 250
                     && sortP95 <= 500
                     && favoriteEvictionElapsedMs <= 250
-                    && maxHeartbeatGapMs <= 250
+                    && catalogProjectionMaxApplySliceMs <= 4
+                    && maxHeartbeatGapMs <= 50
                     // Rapid churn leaves dead WPF generator/layout objects in
                     // young generations and committed pages in the process
                     // working set. Gate the collectible live graph tightly and
@@ -10018,6 +10122,7 @@ public partial class App : Application
                     SearchSamplesMs = searchSamples,
                     SearchPhaseSamples = searchPhaseSamples,
                     FilterSamplesMs = filterSamples,
+                    FilterPhaseSamples = filterPhaseSamples,
                     SortSamplesMs = sortSamples,
                     CountsExact = countsExact,
                     SearchCompletionsApplied = completionsApplied,
@@ -10029,7 +10134,20 @@ public partial class App : Application
                     GridUsesFullExtentVirtualization = window.GridUsesFullExtentVirtualizationForSmoke,
                     HeartbeatCount = heartbeatCount,
                     DispatcherHeartbeatMaxGapMs = maxHeartbeatGapMs,
+                    CatalogProjectionMaxApplySliceMs = catalogProjectionMaxApplySliceMs,
+                    CatalogProjectionDiscardedCount = window.CatalogProjectionDiscardedCountForSmoke,
+                    PreparedCatalogLayoutAppliedCount = window.PreparedCatalogLayoutAppliedCountForSmoke,
+                    PreparedCatalogLayoutRejectedCount = window.PreparedCatalogLayoutRejectedCountForSmoke,
+                    CatalogLayoutMaxMeasureMs = window.CatalogLayoutMaxMeasureMsForSmoke,
+                    MixedLatestWins = mixedLatestWins,
+                    MixedViewportAnchorPreserved = mixedViewportAnchorPreserved,
+                    MixedDiscardedCount = mixedDiscardedCount,
+                    MixedStaleSearchDiscarded = staleMixedSearchResult.Discarded,
+                    MixedStaleFilterDiscarded = staleMixedFilterResult.Discarded,
+                    MixedLatestSortApplied = latestMixedSortApplied,
+                    MixedFilteredCount = mixedFilteredCount,
                     HeartbeatGapSamples = heartbeatGapSamples,
+                    LayoutSamples = layoutSamples,
                     WorkingSetBeforeBytes = workingSetBefore,
                     WorkingSetAfterBytes = workingSetAfter,
                     WorkingSetRegressionPercent = workingSetRegressionPercent,
@@ -11422,14 +11540,14 @@ public partial class App : Application
 
                 win.FlushStateForSmoke();
                 string stateBeforeResizePreview = FileFingerprint(statePath);
-                double[] rapidWidths = [260, 740, 315, 880, 420, 612];
+                double[] rapidWidths = [330, 410, 345, 400, 360, 390];
                 bool widthsAccepted = rapidWidths.All(win.PreviewRightPanelWidthForSmoke);
                 string stateDuringResizePreview = FileFingerprint(statePath);
                 win.CommitRightPanelWidthForSmoke();
                 string stateAfterResizeCommit = FileFingerprint(statePath);
                 bool resizeCommittedOnce = string.Equals(stateBeforeResizePreview, stateDuringResizePreview, StringComparison.Ordinal)
                     && !string.Equals(stateDuringResizePreview, stateAfterResizeCommit, StringComparison.Ordinal)
-                    && Nearly(win.RightPanelStoredWidthForSmoke, 612);
+                    && Nearly(win.RightPanelStoredWidthForSmoke, 390);
 
                 string[] favoriteNames = ["rapid-image-000.png", "rapid-image-001.png", "rapid-image-002.png", "rapid-image-003.png", "rapid-image-004.png"];
                 bool favoriteLevelsAssigned = true;
@@ -11446,9 +11564,11 @@ public partial class App : Application
                 win.SetFavoriteFilterLevelsForSmoke();
                 int allCount = win.FilteredCountForSmoke;
                 int unseenCount = win.UnseenCountForSmoke;
-                win.SetUnseenOnlyFilterForSmoke(true);
+                MainWindow.SearchFilterCompletion unseenOnly =
+                    await win.SetUnseenOnlyFilterForSmokeAsync(true);
                 int unseenFilteredCount = win.FilteredCountForSmoke;
-                win.SetUnseenOnlyFilterForSmoke(false);
+                MainWindow.SearchFilterCompletion unseenClear =
+                    await win.SetUnseenOnlyFilterForSmokeAsync(false);
                 int afterUnseenClearCount = win.FilteredCountForSmoke;
                 win.SetShowUnseenDotsForSmoke(false);
                 bool dotsHidden = win.VisibleUnseenDotCountForSmoke == 0;
@@ -11490,7 +11610,7 @@ public partial class App : Application
                 bool finalStatePersisted = persisted is not null
                     && string.Equals(persisted.SearchQuery, "rapid-final-target", StringComparison.Ordinal)
                     && string.Equals(persisted.SelectedPath, Path.Combine(folder, finalName), StringComparison.OrdinalIgnoreCase)
-                    && Nearly(persisted.RightPanelWidth, 612)
+                    && Nearly(persisted.RightPanelWidth, 390)
                     && string.Equals(persisted.DisplayStyle, "poster", StringComparison.Ordinal)
                     && string.Equals(persisted.AspectMode, "square", StringComparison.Ordinal)
                     && persisted.FavoriteFilterLevels?.SequenceEqual([3]) == true
@@ -11506,7 +11626,7 @@ public partial class App : Application
                 await reload.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 bool restored = string.Equals(reload.SearchQueryForSmoke, "rapid-final-target", StringComparison.Ordinal)
                     && string.Equals(reload.SelectedFileNameForSmoke, finalName, StringComparison.OrdinalIgnoreCase)
-                    && Nearly(reload.RightPanelStoredWidthForSmoke, 612)
+                    && Nearly(reload.RightPanelStoredWidthForSmoke, 390)
                     && string.Equals(reload.DisplayStyleForSmoke, "poster", StringComparison.Ordinal)
                     && string.Equals(reload.AspectModeForSmoke, "square", StringComparison.Ordinal)
                     && reload.FavoriteFilterLevelsForSmoke.SequenceEqual([3])
@@ -11529,7 +11649,9 @@ public partial class App : Application
                 bool modeAndLayoutChurn = listMode && compact && portrait && gridMode && standard && original && poster && square;
                 bool filterChurn = favoriteLevelsAssigned
                     && allCount == fixtureCount
+                    && unseenOnly.Applied && !unseenOnly.Discarded
                     && unseenFilteredCount == unseenCount
+                    && unseenClear.Applied && !unseenClear.Discarded
                     && afterUnseenClearCount == fixtureCount
                     && dotsHidden && dotsShown;
                 bool heartbeatAdvanced = heartbeatCount >= 5;
@@ -11740,9 +11862,15 @@ public partial class App : Application
                     int seenBeforeDots = win.SeenStoreCountForSmoke;
                     win.SetShowUnseenDotsForSmoke(iteration % 2 == 0);
                     unseenStable &= win.SeenStoreCountForSmoke == seenBeforeDots;
-                    win.SetUnseenOnlyFilterForSmoke(true);
-                    unseenStable &= win.FilteredCountForSmoke == win.UnseenCountForSmoke && win.SelectedCountForSmoke == 0;
-                    win.SetUnseenOnlyFilterForSmoke(false);
+                    MainWindow.SearchFilterCompletion unseenOnly =
+                        await win.SetUnseenOnlyFilterForSmokeAsync(true);
+                    unseenStable &= unseenOnly.Applied
+                        && !unseenOnly.Discarded
+                        && win.FilteredCountForSmoke == win.UnseenCountForSmoke
+                        && win.SelectedCountForSmoke == 0;
+                    MainWindow.SearchFilterCompletion unseenClear =
+                        await win.SetUnseenOnlyFilterForSmokeAsync(false);
+                    unseenStable &= unseenClear.Applied && !unseenClear.Discarded;
 
                     dateStable &= win.SetManualDateRangeForSmoke(DateTime.Today.ToString("yyyy-MM-dd"), DateTime.Today.ToString("yyyy-MM-dd"));
                     dateStable &= win.FilteredCountForSmoke == 3;
@@ -23882,6 +24010,7 @@ public partial class App : Application
         public List<long> SearchSamplesMs { get; init; } = [];
         public List<MainWindow.SearchFilterCompletion> SearchPhaseSamples { get; init; } = [];
         public List<long> FilterSamplesMs { get; init; } = [];
+        public List<MainWindow.SearchFilterCompletion> FilterPhaseSamples { get; init; } = [];
         public List<long> SortSamplesMs { get; init; } = [];
         public bool CountsExact { get; init; }
         public bool SearchCompletionsApplied { get; init; }
@@ -23893,7 +24022,20 @@ public partial class App : Application
         public bool GridUsesFullExtentVirtualization { get; init; }
         public int HeartbeatCount { get; init; }
         public long DispatcherHeartbeatMaxGapMs { get; init; }
+        public long CatalogProjectionMaxApplySliceMs { get; init; }
+        public int CatalogProjectionDiscardedCount { get; init; }
+        public int PreparedCatalogLayoutAppliedCount { get; init; }
+        public int PreparedCatalogLayoutRejectedCount { get; init; }
+        public long CatalogLayoutMaxMeasureMs { get; init; }
+        public bool MixedLatestWins { get; init; }
+        public bool MixedViewportAnchorPreserved { get; init; }
+        public int MixedDiscardedCount { get; init; }
+        public bool MixedStaleSearchDiscarded { get; init; }
+        public bool MixedStaleFilterDiscarded { get; init; }
+        public bool MixedLatestSortApplied { get; init; }
+        public int MixedFilteredCount { get; init; }
         public List<string> HeartbeatGapSamples { get; init; } = [];
+        public List<string> LayoutSamples { get; init; } = [];
         public long WorkingSetBeforeBytes { get; init; }
         public long WorkingSetAfterBytes { get; init; }
         public double WorkingSetRegressionPercent { get; init; }
