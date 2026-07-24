@@ -51,8 +51,6 @@ public partial class App : Application
             ["FocusColor"] = "Focus",
             ["FavoriteColor"] = "Favorite",
             ["FavoriteTextColor"] = "FavoriteText",
-            ["FavoriteThumbnailStatusBorderColor"] = "FavoriteThumbnailStatusBorderBrush",
-            ["EnhancedThumbnailStatusBorderColor"] = "EnhancedThumbnailStatusBorderBrush",
             ["SuccessColor"] = "Success",
             ["WarningColor"] = "Warning",
             ["DangerColor"] = "Danger",
@@ -3378,11 +3376,21 @@ public partial class App : Application
                     && first.EnhancedThumbnailStatusBorderCheckedForSmoke
                     && first.EnhancedThumbnailStatusBorderDraftColorForSmoke == "#445566"
                     && first.ConfirmBeforeDeleteForSmoke;
-                bool seededResourcesLoaded = !first.FavoriteThumbnailStatusBorderResourceVisibleForSmoke
-                    && first.EnhancedThumbnailStatusBorderResourceVisibleForSmoke
-                    && first.EnhancedThumbnailStatusBorderResourceColorForSmoke == "#445566"
-                    && !first.EnhancedThumbnailStatusBorderResourceIsRainbowForSmoke
-                    && first.EnhancedThumbnailStatusBorderResourceIsFrozenForSmoke;
+                bool seededFavoriteResourceVisible =
+                    first.FavoriteThumbnailStatusBorderResourceVisibleForSmoke;
+                bool seededEnhancedResourceVisible =
+                    first.EnhancedThumbnailStatusBorderResourceVisibleForSmoke;
+                string seededEnhancedResourceColor =
+                    first.EnhancedThumbnailStatusBorderResourceColorForSmoke;
+                bool seededEnhancedResourceIsRainbow =
+                    first.EnhancedThumbnailStatusBorderResourceIsRainbowForSmoke;
+                bool seededEnhancedResourceIsFrozen =
+                    first.EnhancedThumbnailStatusBorderResourceIsFrozenForSmoke;
+                bool seededResourcesLoaded = !seededFavoriteResourceVisible
+                    && seededEnhancedResourceVisible
+                    && seededEnhancedResourceColor == "#445566"
+                    && !seededEnhancedResourceIsRainbow
+                    && seededEnhancedResourceIsFrozen;
 
                 first.SetThumbnailStatusBorderDraftForSmoke(true, "#ABCDEF", true, "RAINBOW");
                 bool firstSaveSucceeded = first.SaveThumbnailStatusBorderDraftForSmoke();
@@ -3860,6 +3868,11 @@ public partial class App : Application
                     surfaceContract,
                     seededSettingsLoaded,
                     seededResourcesLoaded,
+                    seededFavoriteResourceVisible,
+                    seededEnhancedResourceVisible,
+                    seededEnhancedResourceColor,
+                    seededEnhancedResourceIsRainbow,
+                    seededEnhancedResourceIsFrozen,
                     firstSaveSucceeded,
                     normalizedAndApplied,
                     legacyRainbowMigratedToSolidCyan,
