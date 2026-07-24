@@ -747,6 +747,9 @@
     <Style x:Key="CardItem" TargetType="ListBoxItem">
       <Setter Property="Margin" Value="0,0,10,10"/>
       <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource CommonButtonFocusVisual}"/>
+      <Setter Property="AutomationProperties.Name" Value="{Binding FileName}"/>
+      <Setter Property="AutomationProperties.HelpText" Value="{Binding AutomationHelpText}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBoxItem">
@@ -836,6 +839,9 @@
     <Style x:Key="ListRowItem" TargetType="ListBoxItem">
       <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
       <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource CommonButtonFocusVisual}"/>
+      <Setter Property="AutomationProperties.Name" Value="{Binding FileName}"/>
+      <Setter Property="AutomationProperties.HelpText" Value="{Binding AutomationHelpText}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBoxItem">

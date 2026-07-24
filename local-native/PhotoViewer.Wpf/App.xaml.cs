@@ -10051,6 +10051,164 @@ public partial class App : Application
                     countsExact &= changed && window.FilteredCountForSmoke == count;
                 }
 
+                ReportProgress("keyboard-accessibility");
+                int keyboardStartIndex = Math.Min(count - 2, 50_000);
+                int tailIndex = count - 1;
+                string tailName = $"interaction-smoke-{tailIndex:D6}{(tailIndex % 100 == 0 ? "-needle" : "")}.png";
+                string headName = "interaction-smoke-000000-needle.png";
+                bool keyboardSeeded = window.SelectIndexForSmoke(keyboardStartIndex);
+                await FlushLayoutAsync();
+                bool keyboardInitialFocus = window.FocusSelectedGalleryItemForSmoke();
+                int keyboardMaxRealized = window.GridRealizedCountForSmoke;
+                long keyboardSelectionSyncMaxMs = window.LastCardsSelectionSyncMsForSmoke;
+
+                bool keyboardEndHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.End);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
+                bool keyboardEndFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                bool keyboardEndExact = window.SelectedIndexForSmoke == tailIndex
+                    && string.Equals(window.SelectedFileNameForSmoke, tailName, StringComparison.Ordinal)
+                    && keyboardEndFocused;
+                bool keyboardBoundaryEndHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.End);
+                bool keyboardBoundaryEndExact = keyboardBoundaryEndHandled
+                    && window.SelectedIndexForSmoke == tailIndex;
+                bool keyboardLetterIgnored = !window.InvokeGalleryNavigationKeyForSmoke(Key.A)
+                    && window.SelectedIndexForSmoke == tailIndex;
+                keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
+
+                bool keyboardHomeHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Home);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
+                bool keyboardHomeFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                bool keyboardHomeExact = window.SelectedIndexForSmoke == 0
+                    && string.Equals(window.SelectedFileNameForSmoke, headName, StringComparison.Ordinal)
+                    && keyboardHomeFocused;
+                keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
+
+                bool keyboardRightHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Right);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
+                bool keyboardRightFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                int afterRightIndex = window.SelectedIndexForSmoke;
+                bool keyboardRightExact = afterRightIndex == 1 && keyboardRightFocused;
+                keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
+
+                int expectedAfterDown = Math.Min(count - 1, afterRightIndex + Math.Max(1, window.GridColumnCountForSmoke));
+                bool keyboardDownHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Down);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
+                bool keyboardDownFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                int afterDownIndex = window.SelectedIndexForSmoke;
+                bool keyboardDownExact = afterDownIndex == expectedAfterDown && keyboardDownFocused;
+                keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
+
+                bool keyboardPageDownHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.PageDown);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
+                bool keyboardPageDownFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                int afterPageDownIndex = window.SelectedIndexForSmoke;
+                bool keyboardPageDownExact = afterPageDownIndex > afterDownIndex && keyboardPageDownFocused;
+                keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
+
+                bool projectionFocusPrepared = window.SelectIndexForSmoke(keyboardStartIndex);
+                await FlushLayoutAsync();
+                projectionFocusPrepared &= window.FocusSelectedGalleryItemForSmoke();
+                string? projectionFocusPath = window.SelectedPathForSmoke;
+                MainWindow.SearchFilterCompletion keyboardFocusFilter =
+                    await window.SetSearchInputForSmokeAsync("needle");
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                bool projectionFilterFocusRestored = await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                    && string.Equals(window.FocusedGalleryPathForSmoke, projectionFocusPath, StringComparison.OrdinalIgnoreCase);
+                MainWindow.SearchFilterCompletion keyboardFocusClear =
+                    await window.SetSearchInputForSmokeAsync("");
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                bool projectionClearFocusRestored = await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                    && string.Equals(window.FocusedGalleryPathForSmoke, projectionFocusPath, StringComparison.OrdinalIgnoreCase);
+                bool projectionFocusRestored = projectionFocusPrepared
+                    && keyboardFocusFilter.Applied
+                    && !keyboardFocusFilter.Discarded
+                    && keyboardFocusClear.Applied
+                    && !keyboardFocusClear.Discarded
+                    && projectionFilterFocusRestored
+                    && projectionClearFocusRestored;
+                keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
+
+                GalleryAutomationItemSmokeSnapshot automationTailPeer =
+                    window.BeginGridAutomationRealizationForSmoke(tailIndex);
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                GalleryAutomationItemSmokeSnapshot automationTailContainer =
+                    window.CaptureGridAutomationItemForSmoke(tailIndex);
+                bool automationRealizePreservedSelection = window.SelectedIndexForSmoke == keyboardStartIndex;
+                bool automationSelected = window.SelectGridItemThroughAutomationForSmoke(tailIndex);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
+                GridSelectionVisualSmokeSnapshot automationTailSelection =
+                    await window.WaitForGridSelectionVisualForSmokeAsync(tailName);
+                bool automationSelectionExact = automationSelected
+                    && window.SelectedIndexForSmoke == tailIndex
+                    && automationTailSelection.CanonicalSelected
+                    && automationTailSelection.ContainerRealized
+                    && automationTailSelection.ContainerSelected;
+                keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
+
+                bool recycleHomeHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Home);
+                bool recycleHomeFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+                GalleryAutomationItemSmokeSnapshot recycledHeadContainer =
+                    window.CaptureGridAutomationItemForSmoke(0);
+                bool recycledContainerStateReset = recycleHomeHandled
+                    && recycleHomeFocused
+                    && recycledHeadContainer.ContainerRealized
+                    && recycledHeadContainer.ContainerSelected
+                    && recycledHeadContainer.ContainerFocused
+                    && recycledHeadContainer.ContainerBoundToExpectedItem
+                    && string.Equals(recycledHeadContainer.Name, headName, StringComparison.Ordinal)
+                    && recycledHeadContainer.HelpText.Contains("Favorite level 5", StringComparison.Ordinal)
+                    && recycledHeadContainer.HelpText.Contains("AI-enhanced", StringComparison.Ordinal)
+                    && !string.Equals(recycledHeadContainer.Name, tailName, StringComparison.Ordinal);
+                keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
+
+                bool keyboardNavigationExact = keyboardSeeded
+                    && keyboardInitialFocus
+                    && keyboardEndHandled
+                    && keyboardEndExact
+                    && keyboardBoundaryEndExact
+                    && keyboardLetterIgnored
+                    && keyboardHomeHandled
+                    && keyboardHomeExact
+                    && keyboardRightHandled
+                    && keyboardRightExact
+                    && keyboardDownHandled
+                    && keyboardDownExact
+                    && keyboardPageDownHandled
+                    && keyboardPageDownExact;
+                bool automationVirtualizedItemExact =
+                    automationTailPeer.VirtualizedItemPatternAvailable
+                    && automationTailPeer.SelectionItemPatternAvailable
+                    && string.Equals(automationTailPeer.Name, tailName, StringComparison.Ordinal)
+                    && automationTailPeer.HelpText.Contains("Favorite level 0", StringComparison.Ordinal)
+                    && automationTailPeer.HelpText.Contains("Original", StringComparison.Ordinal)
+                    && automationTailContainer.ContainerRealized
+                    && automationTailContainer.ContainerBoundToExpectedItem
+                    && string.Equals(automationTailContainer.Name, tailName, StringComparison.Ordinal)
+                    && automationRealizePreservedSelection
+                    && automationSelectionExact;
+                bool keyboardAccessibilityBounded =
+                    keyboardMaxRealized <= window.GridMaxRealizationCountForSmoke;
+                selected &= window.SelectFileNameForSmoke(selectedName);
+                await window.WaitForGridRealizationIdleForSmokeAsync();
+
                 ReportProgress("final-layout");
                 await FlushLayoutAsync();
                 activeOperation = "final-settle";
@@ -10092,6 +10250,11 @@ public partial class App : Application
                     && completionsApplied
                     && selectionStable
                     && bounded
+                    && keyboardNavigationExact
+                    && projectionFocusRestored
+                    && automationVirtualizedItemExact
+                    && recycledContainerStateReset
+                    && keyboardAccessibilityBounded
                     && searchP95 <= 250
                     && filterP95 <= 250
                     && sortP95 <= 500
@@ -10128,6 +10291,25 @@ public partial class App : Application
                     SearchCompletionsApplied = completionsApplied,
                     SelectionStable = selectionStable,
                     SelectedFileName = window.SelectedFileNameForSmoke,
+                    KeyboardNavigationExact = keyboardNavigationExact,
+                    KeyboardEndExact = keyboardEndExact,
+                    KeyboardBoundaryEndExact = keyboardBoundaryEndExact,
+                    KeyboardLetterIgnored = keyboardLetterIgnored,
+                    KeyboardHomeExact = keyboardHomeExact,
+                    KeyboardRightExact = keyboardRightExact,
+                    KeyboardDownExact = keyboardDownExact,
+                    KeyboardPageDownExact = keyboardPageDownExact,
+                    ProjectionFocusRestored = projectionFocusRestored,
+                    AutomationVirtualizedItemExact = automationVirtualizedItemExact,
+                    AutomationRealizePreservedSelection = automationRealizePreservedSelection,
+                    AutomationSelectionExact = automationSelectionExact,
+                    RecycledContainerStateReset = recycledContainerStateReset,
+                    KeyboardAccessibilityMaxRealized = keyboardMaxRealized,
+                    KeyboardSelectionSyncMaxMs = keyboardSelectionSyncMaxMs,
+                    KeyboardAccessibilityBounded = keyboardAccessibilityBounded,
+                    AutomationTailPeer = automationTailPeer,
+                    AutomationTailContainer = automationTailContainer,
+                    RecycledHeadContainer = recycledHeadContainer,
                     GridItemsSourceCount = window.GridItemsSourceCountForSmoke,
                     GridRealizedCount = window.GridRealizedCountForSmoke,
                     GridRealizationLimit = window.GridMaxRealizationCountForSmoke,
@@ -24016,6 +24198,25 @@ public partial class App : Application
         public bool SearchCompletionsApplied { get; init; }
         public bool SelectionStable { get; init; }
         public string? SelectedFileName { get; init; }
+        public bool KeyboardNavigationExact { get; init; }
+        public bool KeyboardEndExact { get; init; }
+        public bool KeyboardBoundaryEndExact { get; init; }
+        public bool KeyboardLetterIgnored { get; init; }
+        public bool KeyboardHomeExact { get; init; }
+        public bool KeyboardRightExact { get; init; }
+        public bool KeyboardDownExact { get; init; }
+        public bool KeyboardPageDownExact { get; init; }
+        public bool ProjectionFocusRestored { get; init; }
+        public bool AutomationVirtualizedItemExact { get; init; }
+        public bool AutomationRealizePreservedSelection { get; init; }
+        public bool AutomationSelectionExact { get; init; }
+        public bool RecycledContainerStateReset { get; init; }
+        public int KeyboardAccessibilityMaxRealized { get; init; }
+        public long KeyboardSelectionSyncMaxMs { get; init; }
+        public bool KeyboardAccessibilityBounded { get; init; }
+        public GalleryAutomationItemSmokeSnapshot? AutomationTailPeer { get; init; }
+        public GalleryAutomationItemSmokeSnapshot? AutomationTailContainer { get; init; }
+        public GalleryAutomationItemSmokeSnapshot? RecycledHeadContainer { get; init; }
         public int GridItemsSourceCount { get; init; }
         public int GridRealizedCount { get; init; }
         public int GridRealizationLimit { get; init; }
