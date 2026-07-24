@@ -69,7 +69,16 @@ if ($result.selectionStable -ne $true) { $failures.Add('selection did not surviv
 if ($result.gridItemsSourceCount -ne $Count -or $result.gridUsesFullExtentVirtualization -ne $true -or $result.gridRealizedCount -gt $result.gridRealizationLimit) {
     $failures.Add('100k gallery containers were not bounded by full-extent virtualization')
 }
-if ($result.dispatcherHeartbeatMaxGapMs -gt 250) { $failures.Add("dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms") }
+if ($result.catalogProjectionMaxApplySliceMs -gt 4) {
+    $failures.Add("catalog projection apply slice was $($result.catalogProjectionMaxApplySliceMs) ms")
+}
+if ($result.dispatcherHeartbeatMaxGapMs -gt 50) { $failures.Add("dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms") }
+if ($result.mixedLatestWins -ne $true -or $result.mixedStaleSearchDiscarded -ne $true -or $result.mixedStaleFilterDiscarded -ne $true -or $result.mixedDiscardedCount -lt 1) {
+    $failures.Add('mixed search/filter/sort did not discard stale generations')
+}
+if ($result.mixedViewportAnchorPreserved -ne $true) {
+    $failures.Add('mixed projection did not preserve the first visible anchor')
+}
 if ($result.liveManagedMemoryRegressionPercent -gt 15) {
     $failures.Add("live managed-memory regression was $($result.liveManagedMemoryRegressionPercent)%")
 }

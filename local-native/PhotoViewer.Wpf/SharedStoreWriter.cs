@@ -126,8 +126,12 @@ internal sealed class SharedStoreWriter<TDelta>
         }
 
         SharedWriteResult<TDelta> result;
+        Thread currentThread = Thread.CurrentThread;
+        ThreadPriority previousPriority = currentThread.Priority;
         try
         {
+            if (previousPriority > ThreadPriority.Lowest)
+                currentThread.Priority = ThreadPriority.Lowest;
             Interlocked.Increment(ref _batchWriteCount);
             result = _writeBatch(batch);
         }
@@ -135,7 +139,11 @@ internal sealed class SharedStoreWriter<TDelta>
         {
             result = new SharedWriteResult<TDelta>(SharedWriteStatus.Failed, batch, ex.Message);
         }
-
+        finally
+        {
+            if (currentThread.Priority != previousPriority)
+                currentThread.Priority = previousPriority;
+        }
         await _applyCompletion(result).ConfigureAwait(false);
         return result.Status;
     }

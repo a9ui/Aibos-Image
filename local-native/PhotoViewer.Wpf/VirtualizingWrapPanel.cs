@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -20,6 +21,33 @@ public sealed class VirtualizingWrapPanelRangeChangedEventArgs(
     public int LastRealizedIndex { get; } = lastRealizedIndex;
 }
 
+internal readonly record struct VirtualizingLayoutItem(string Group, double ItemHeight);
+
+internal readonly record struct VirtualizingLayoutContext(
+    double AvailableWidth,
+    double ItemWidth,
+    double ItemHeight,
+    double HorizontalSpacing,
+    double VerticalSpacing,
+    bool ForceSingleColumn,
+    bool ShowGroupHeaders,
+    double GroupHeaderHeight);
+
+internal readonly record struct VirtualizingGroupHeaderInfo(string Label, int Count);
+
+internal sealed record PreparedVirtualizingLayout(
+    VirtualizingLayoutContext Context,
+    int ItemCount,
+    List<double> RowTops,
+    List<double> RowHeights,
+    List<int> RowFirstIndices,
+    List<int> RowItemCounts,
+    List<VirtualizingGroupHeaderInfo?> RowHeaders,
+    int[] ItemRows,
+    Size Extent,
+    int Columns,
+    double CellWidth);
+
 /// <summary>
 /// Pixel-scrolling virtualizing panel for the gallery's uniform-width,
 /// variable-height cards.  The complete item order owns the scroll extent;
@@ -37,7 +65,10 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     // 96-container slice held the dispatcher for more than 750 ms on the 10k
     // catalog gate. Keep each realization slice below one input-stall budget;
     // the remaining viewport is already represented by progressive placeholders.
-    private const int MaxNewContainersPerMeasure = 24;
+    private const int InteractiveContainersPerMeasure = 1;
+    private const int MediumDensityContainersPerMeasure = 4;
+    private const int DenseContainersPerMeasure = 16;
+    private const int RealizationContinuationDelayMilliseconds = 16;
     private static readonly Brush ProgressivePlaceholderBrush = CreateProgressivePlaceholderBrush();
 
     public static readonly DependencyProperty ItemWidthProperty = DependencyProperty.Register(
@@ -88,11 +119,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         typeof(VirtualizingWrapPanel),
         new FrameworkPropertyMetadata(46d, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender, OnLayoutPropertyChanged));
 
-    private readonly List<double> _rowTops = [];
-    private readonly List<double> _rowHeights = [];
-    private readonly List<int> _rowFirstIndices = [];
-    private readonly List<int> _rowItemCounts = [];
-    private readonly List<GroupHeaderInfo?> _rowHeaders = [];
+    private List<double> _rowTops = [];
+    private List<double> _rowHeights = [];
+    private List<int> _rowFirstIndices = [];
+    private List<int> _rowItemCounts = [];
+    private List<VirtualizingGroupHeaderInfo?> _rowHeaders = [];
     private int[] _itemRows = [];
     private Size _extent;
     private Size _viewport;
@@ -110,7 +141,16 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private int _firstRealizedIndex = -1;
     private int _lastRealizedIndex = -1;
     private bool _realizationContinuationPending;
+    private int _priorityRealizationIndex = -1;
+    private readonly HashSet<UIElement> _deferredMeasureContainers = [];
+    private bool _itemsResetPreparationActive;
+    private int _itemsResetVisualsRemaining;
+    private int _itemsResetGeneratorPosition = -1;
     private long _layoutGeneration;
+    private PreparedVirtualizingLayout? _preparedLayout;
+    private int _preparedLayoutAppliedCount;
+    private int _preparedLayoutRejectedCount;
+    private long _maxMeasureMilliseconds;
 
     public event EventHandler<VirtualizingWrapPanelRangeChangedEventArgs>? RealizedRangeChanged;
 
@@ -172,6 +212,9 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     public int VisiblePlaceholderCount => _realizationContinuationPending ? CountVisibleUnrealizedItems() : 0;
     public int VisibleUnrealizedItemCount => CountVisibleUnrealizedItems();
     public long LayoutGeneration => _layoutGeneration;
+    internal int PreparedLayoutAppliedCount => _preparedLayoutAppliedCount;
+    internal int PreparedLayoutRejectedCount => _preparedLayoutRejectedCount;
+    internal long MaxMeasureMilliseconds => _maxMeasureMilliseconds;
 
     internal void SetLayoutSource(IReadOnlyList<Tile> source)
     {
@@ -186,9 +229,315 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     public void InvalidateItemLayout()
     {
+        _preparedLayout = null;
         MarkLayoutDirty();
         InvalidateMeasure();
         InvalidateVisual();
+    }
+
+    internal bool BeginItemsResetPreparation()
+    {
+        if (_itemsResetPreparationActive)
+            throw new InvalidOperationException("Items reset preparation is already active.");
+        _realizationContinuationPending = false;
+        _priorityRealizationIndex = -1;
+        _deferredMeasureContainers.Clear();
+        int realizedCount = InternalChildren.Count;
+        if (realizedCount == 0)
+            return false;
+
+        IItemContainerGenerator generator = ItemContainerGenerator;
+        for (int childIndex = 0; childIndex < realizedCount; childIndex++)
+        {
+            if (generator.IndexFromGeneratorPosition(new GeneratorPosition(childIndex, 0)) >= 0)
+                continue;
+            ResyncGeneratorVisuals();
+            return false;
+        }
+
+        _itemsResetPreparationActive = true;
+        _itemsResetVisualsRemaining = realizedCount;
+        _itemsResetGeneratorPosition = realizedCount - 1;
+        return true;
+    }
+
+    internal bool PrepareNextItemsResetSlice()
+    {
+        if (!_itemsResetPreparationActive)
+            throw new InvalidOperationException("Items reset preparation is not active.");
+
+        // A realized card template can be expensive to detach on slower
+        // machines. Keep visual detachment and generator-map mutation as
+        // separate one-container operations so the caller can yield to input
+        // between every bounded unit.
+        if (_itemsResetVisualsRemaining > 0)
+        {
+            RemoveInternalChildRange(InternalChildren.Count - 1, 1);
+            _itemsResetVisualsRemaining--;
+            return false;
+        }
+
+        if (_itemsResetGeneratorPosition >= 0)
+        {
+            ItemContainerGenerator.Remove(
+                new GeneratorPosition(_itemsResetGeneratorPosition, 0),
+                1);
+            _itemsResetGeneratorPosition--;
+        }
+
+        return _itemsResetGeneratorPosition < 0;
+    }
+
+    internal void CompleteItemsResetPreparation()
+    {
+        _itemsResetPreparationActive = false;
+        _itemsResetVisualsRemaining = 0;
+        _itemsResetGeneratorPosition = -1;
+    }
+
+    internal void CancelItemsResetPreparation()
+    {
+        if (!_itemsResetPreparationActive)
+            return;
+        ClearVisualChildren();
+        ItemContainerGenerator.RemoveAll();
+        CompleteItemsResetPreparation();
+        MarkLayoutDirty();
+        InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    internal VirtualizingLayoutContext? CaptureLayoutContext()
+    {
+        ItemsControl? owner = ItemsControl.GetItemsOwner(this);
+        double availableWidth = ResolveViewportLength(_viewport.Width, ActualWidth, 1);
+        double itemWidth = ResolveItemWidth(owner, 0);
+        double itemHeight = ResolveItemHeight(owner, 0);
+        if (!double.IsFinite(availableWidth)
+            || !double.IsFinite(itemWidth)
+            || availableWidth <= 0
+            || itemWidth <= 0)
+        {
+            return null;
+        }
+
+        return new VirtualizingLayoutContext(
+            availableWidth,
+            itemWidth,
+            itemHeight,
+            Math.Max(0, HorizontalSpacing),
+            Math.Max(0, VerticalSpacing),
+            ForceSingleColumn,
+            ShowGroupHeaders,
+            Math.Max(24, GroupHeaderHeight));
+    }
+
+    internal void SetPreparedLayout(PreparedVirtualizingLayout? layout)
+    {
+        _preparedLayout = layout;
+        MarkLayoutDirty();
+        InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    internal static PreparedVirtualizingLayout PrepareLayout(
+        IReadOnlyList<VirtualizingLayoutItem> items,
+        VirtualizingLayoutContext context,
+        CancellationToken cancellationToken)
+    {
+        int itemCount = items.Count;
+        double cellWidth = Math.Max(1, context.ItemWidth + context.HorizontalSpacing);
+        int columns = context.ForceSingleColumn
+            ? 1
+            : Math.Max(
+                1,
+                (int)Math.Floor(
+                    (Math.Max(1, context.AvailableWidth) + context.HorizontalSpacing)
+                    / cellWidth));
+        var rowTops = new List<double>(Math.Max(1, (itemCount + columns - 1) / columns));
+        var rowHeights = new List<double>(rowTops.Capacity);
+        var rowFirstIndices = new List<int>(rowTops.Capacity);
+        var rowItemCounts = new List<int>(rowTops.Capacity);
+        var rowHeaders = new List<VirtualizingGroupHeaderInfo?>(rowTops.Capacity);
+        var itemRows = new int[itemCount];
+        double y = 0;
+        int groupStart = 0;
+        while (groupStart < itemCount)
+        {
+            if ((groupStart & 255) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+
+            string group = items[groupStart].Group;
+            int groupEnd = context.ShowGroupHeaders ? groupStart + 1 : itemCount;
+            while (context.ShowGroupHeaders
+                && groupEnd < itemCount
+                && string.Equals(items[groupEnd].Group, group, StringComparison.Ordinal))
+            {
+                if ((groupEnd & 255) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+                groupEnd++;
+            }
+
+            if (context.ShowGroupHeaders)
+            {
+                AddPreparedRow(
+                    rowTops,
+                    rowHeights,
+                    rowFirstIndices,
+                    rowItemCounts,
+                    rowHeaders,
+                    groupStart,
+                    0,
+                    y,
+                    context.GroupHeaderHeight,
+                    new VirtualizingGroupHeaderInfo(group, groupEnd - groupStart));
+                y += context.GroupHeaderHeight;
+            }
+
+            for (int first = groupStart; first < groupEnd; first += columns)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int end = Math.Min(groupEnd, first + columns);
+                double rowHeight = 1;
+                for (int index = first; index < end; index++)
+                {
+                    double itemHeight = double.IsFinite(context.ItemHeight) && context.ItemHeight > 0
+                        ? context.ItemHeight
+                        : Math.Max(1, items[index].ItemHeight);
+                    rowHeight = Math.Max(rowHeight, itemHeight + context.VerticalSpacing);
+                }
+                int row = rowTops.Count;
+                AddPreparedRow(
+                    rowTops,
+                    rowHeights,
+                    rowFirstIndices,
+                    rowItemCounts,
+                    rowHeaders,
+                    first,
+                    end - first,
+                    y,
+                    rowHeight,
+                    null);
+                for (int index = first; index < end; index++)
+                    itemRows[index] = row;
+                y += rowHeight;
+            }
+
+            groupStart = groupEnd;
+        }
+
+        return new PreparedVirtualizingLayout(
+            context,
+            itemCount,
+            rowTops,
+            rowHeights,
+            rowFirstIndices,
+            rowItemCounts,
+            rowHeaders,
+            itemRows,
+            new Size(Math.Max(context.AvailableWidth, columns * cellWidth), y),
+            columns,
+            cellWidth);
+    }
+
+    internal static PreparedVirtualizingLayout PrepareUniformLayout(
+        int itemCount,
+        VirtualizingLayoutContext context,
+        string group,
+        double itemHeight,
+        CancellationToken cancellationToken)
+    {
+        if (itemCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(itemCount));
+        cancellationToken.ThrowIfCancellationRequested();
+
+        double cellWidth = Math.Max(1, context.ItemWidth + context.HorizontalSpacing);
+        int columns = context.ForceSingleColumn
+            ? 1
+            : Math.Max(
+                1,
+                (int)Math.Floor(
+                    (Math.Max(1, context.AvailableWidth) + context.HorizontalSpacing)
+                    / cellWidth));
+        int itemRowCount = (itemCount + columns - 1) / columns;
+        int totalRowCount = itemRowCount + (context.ShowGroupHeaders && itemCount > 0 ? 1 : 0);
+        var rowTops = new List<double>(totalRowCount);
+        var rowHeights = new List<double>(totalRowCount);
+        var rowFirstIndices = new List<int>(totalRowCount);
+        var rowItemCounts = new List<int>(totalRowCount);
+        var rowHeaders = new List<VirtualizingGroupHeaderInfo?>(totalRowCount);
+        var itemRows = new int[itemCount];
+        double y = 0;
+        if (context.ShowGroupHeaders && itemCount > 0)
+        {
+            AddPreparedRow(
+                rowTops,
+                rowHeights,
+                rowFirstIndices,
+                rowItemCounts,
+                rowHeaders,
+                0,
+                0,
+                y,
+                context.GroupHeaderHeight,
+                new VirtualizingGroupHeaderInfo(group, itemCount));
+            y += context.GroupHeaderHeight;
+        }
+
+        double rowHeight = Math.Max(1, itemHeight) + context.VerticalSpacing;
+        for (int first = 0; first < itemCount; first += columns)
+        {
+            if ((first & 1023) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+            int count = Math.Min(columns, itemCount - first);
+            int row = rowTops.Count;
+            AddPreparedRow(
+                rowTops,
+                rowHeights,
+                rowFirstIndices,
+                rowItemCounts,
+                rowHeaders,
+                first,
+                count,
+                y,
+                rowHeight,
+                null);
+            for (int index = first; index < first + count; index++)
+                itemRows[index] = row;
+            y += rowHeight;
+        }
+
+        return new PreparedVirtualizingLayout(
+            context,
+            itemCount,
+            rowTops,
+            rowHeights,
+            rowFirstIndices,
+            rowItemCounts,
+            rowHeaders,
+            itemRows,
+            new Size(Math.Max(context.AvailableWidth, columns * cellWidth), y),
+            columns,
+            cellWidth);
+    }
+
+    private static void AddPreparedRow(
+        List<double> rowTops,
+        List<double> rowHeights,
+        List<int> rowFirstIndices,
+        List<int> rowItemCounts,
+        List<VirtualizingGroupHeaderInfo?> rowHeaders,
+        int firstIndex,
+        int itemCount,
+        double top,
+        double height,
+        VirtualizingGroupHeaderInfo? header)
+    {
+        rowFirstIndices.Add(firstIndex);
+        rowItemCounts.Add(itemCount);
+        rowTops.Add(top);
+        rowHeights.Add(height);
+        rowHeaders.Add(header);
     }
 
     public double GetItemViewportTop(int index)
@@ -218,6 +567,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     public bool BringItemIntoView(int index)
     {
+        if (_itemsResetPreparationActive)
+            return false;
         ItemsControl? owner = ItemsControl.GetItemsOwner(this);
         int count = owner?.Items.Count ?? 0;
         if (index < 0 || index >= count)
@@ -227,7 +578,9 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         int row = index < _itemRows.Length ? _itemRows[index] : -1;
         if (row < 0 || row >= _rowTops.Count)
             return false;
+        _priorityRealizationIndex = index;
         BringRowIntoView(row);
+        InvalidateMeasure();
         return true;
     }
 
@@ -235,6 +588,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     {
         if (dependencyObject is not VirtualizingWrapPanel panel)
             return;
+        panel._preparedLayout = null;
         panel.MarkLayoutDirty();
         panel.InvalidateMeasure();
         panel.InvalidateVisual();
@@ -272,11 +626,13 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         // this notification reaches the panel. Mirror WPF's
         // VirtualizingStackPanel behavior and detach only the corresponding
         // visual range; calling generator.Remove here would mutate the new map.
+        ForgetDeferredMeasureRange(childIndex, count);
         RemoveInternalChildRange(childIndex, count);
     }
 
     private void ClearVisualChildren()
     {
+        _deferredMeasureContainers.Clear();
         if (InternalChildren.Count > 0)
             RemoveInternalChildRange(0, InternalChildren.Count);
     }
@@ -289,11 +645,25 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     protected override Size MeasureOverride(Size availableSize)
     {
+        var measureWatch = Stopwatch.StartNew();
+        Size CompleteMeasure(Size result)
+        {
+            measureWatch.Stop();
+            _maxMeasureMilliseconds = Math.Max(_maxMeasureMilliseconds, measureWatch.ElapsedMilliseconds);
+            return result;
+        }
+
         ItemsControl? owner = ItemsControl.GetItemsOwner(this);
         int itemCount = owner?.Items.Count ?? 0;
         double viewportWidth = ResolveViewportLength(availableSize.Width, ActualWidth, 1);
         double viewportHeight = ResolveViewportLength(availableSize.Height, ActualHeight, ScrollOwner?.ActualHeight ?? 1);
         _viewport = new Size(viewportWidth, viewportHeight);
+
+        if (_itemsResetPreparationActive)
+        {
+            UpdateScrollInfo();
+            return CompleteMeasure(availableSize);
+        }
 
         EnsureLayout(owner, itemCount, viewportWidth);
         CoerceOffsets();
@@ -303,7 +673,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             CleanupItems(0, -1);
             UpdateRange(-1, -1, -1, -1);
             UpdateScrollInfo();
-            return availableSize;
+            return CompleteMeasure(availableSize);
         }
 
         int firstVisibleRow = FindFirstRowWhoseBottomExceeds(_offset.Y);
@@ -317,7 +687,34 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         int lastRealizedIndex = LastItemIndexForRows(firstRealizedRow, lastRealizedRow, itemCount);
 
         CleanupItems(firstRealizedIndex, lastRealizedIndex);
-        bool realizationComplete = RealizeItems(firstRealizedIndex, lastRealizedIndex, out int lastProcessedIndex);
+        int visibleItemCount = Math.Max(0, lastVisibleIndex - firstVisibleIndex + 1);
+        int containerBudget = visibleItemCount >= 128
+            ? DenseContainersPerMeasure
+            : visibleItemCount >= 32
+                ? MediumDensityContainersPerMeasure
+                : InteractiveContainersPerMeasure;
+        if (_priorityRealizationIndex >= firstRealizedIndex
+            && _priorityRealizationIndex <= lastRealizedIndex)
+        {
+            int priorityIndex = _priorityRealizationIndex;
+            if (!RealizePriorityItem(priorityIndex))
+            {
+                UpdateRange(
+                    firstVisibleIndex,
+                    lastVisibleIndex,
+                    priorityIndex,
+                    priorityIndex);
+                UpdateScrollInfo();
+                ScheduleRealizationContinuation();
+                return CompleteMeasure(availableSize);
+            }
+            _priorityRealizationIndex = -1;
+        }
+        bool realizationComplete = RealizeItems(
+            firstRealizedIndex,
+            lastRealizedIndex,
+            containerBudget,
+            out int lastProcessedIndex);
         int reportedFirstRealizedIndex = lastProcessedIndex >= firstRealizedIndex ? firstRealizedIndex : -1;
         UpdateRange(firstVisibleIndex, lastVisibleIndex, reportedFirstRealizedIndex, lastProcessedIndex);
         UpdateScrollInfo();
@@ -328,11 +725,13 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             _realizationContinuationPending = false;
             InvalidateVisual();
         }
-        return availableSize;
+        return CompleteMeasure(availableSize);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
+        if (_itemsResetPreparationActive)
+            return finalSize;
         IItemContainerGenerator generator = ItemContainerGenerator;
         for (int childIndex = 0; childIndex < InternalChildren.Count; childIndex++)
         {
@@ -354,6 +753,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     protected override void BringIndexIntoView(int index)
     {
+        if (_itemsResetPreparationActive)
+            return;
         ItemsControl? owner = ItemsControl.GetItemsOwner(this);
         int count = owner?.Items.Count ?? 0;
         if (index < 0 || index >= count)
@@ -368,6 +769,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     public Rect MakeVisible(Visual visual, Rect rectangle)
     {
+        if (_itemsResetPreparationActive)
+            return Rect.Empty;
         UIElement? child = visual as UIElement;
         while (child is not null && !InternalChildren.Contains(child))
             child = VisualTreeHelper.GetParent(child) as UIElement;
@@ -406,6 +809,46 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     {
         double itemWidthSignature = ResolveItemWidth(owner, 0);
         double itemHeightSignature = ResolveItemHeight(owner, 0);
+        if (_preparedLayout is { } prepared)
+        {
+            var currentContext = new VirtualizingLayoutContext(
+                availableWidth,
+                itemWidthSignature,
+                itemHeightSignature,
+                Math.Max(0, HorizontalSpacing),
+                Math.Max(0, VerticalSpacing),
+                ForceSingleColumn,
+                ShowGroupHeaders,
+                Math.Max(24, GroupHeaderHeight));
+            if (prepared.ItemCount == itemCount
+                && LayoutContextsMatch(prepared.Context, currentContext))
+            {
+                _layoutGeneration++;
+                _layoutDirty = false;
+                _realizationContinuationPending = false;
+                _layoutItemCount = itemCount;
+                _layoutWidth = availableWidth;
+                _layoutItemWidthSignature = itemWidthSignature;
+                _layoutItemHeightSignature = itemHeightSignature;
+                _rowTops = prepared.RowTops;
+                _rowHeights = prepared.RowHeights;
+                _rowFirstIndices = prepared.RowFirstIndices;
+                _rowItemCounts = prepared.RowItemCounts;
+                _rowHeaders = prepared.RowHeaders;
+                _itemRows = prepared.ItemRows;
+                _extent = prepared.Extent;
+                _columns = prepared.Columns;
+                _cellWidth = prepared.CellWidth;
+                _preparedLayout = null;
+                _preparedLayoutAppliedCount++;
+                ScrollOwner?.InvalidateScrollInfo();
+                InvalidateVisual();
+                return;
+            }
+            _preparedLayout = null;
+            _preparedLayoutRejectedCount++;
+        }
+
         if (!_layoutDirty
             && _layoutItemCount == itemCount
             && AreClose(_layoutWidth, availableWidth)
@@ -448,7 +891,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             if (ShowGroupHeaders)
             {
                 double headerHeight = Math.Max(24, GroupHeaderHeight);
-                AddRow(groupStart, 0, y, headerHeight, new GroupHeaderInfo(group, groupEnd - groupStart));
+                AddRow(groupStart, 0, y, headerHeight, new VirtualizingGroupHeaderInfo(group, groupEnd - groupStart));
                 y += headerHeight;
             }
 
@@ -473,7 +916,20 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         InvalidateVisual();
     }
 
-    private void AddRow(int firstIndex, int itemCount, double top, double height, GroupHeaderInfo? header)
+    private static bool LayoutContextsMatch(
+        VirtualizingLayoutContext left,
+        VirtualizingLayoutContext right)
+        => AreClose(left.AvailableWidth, right.AvailableWidth)
+            && AreClose(left.ItemWidth, right.ItemWidth)
+            && ((!double.IsFinite(left.ItemHeight) && !double.IsFinite(right.ItemHeight))
+                || AreClose(left.ItemHeight, right.ItemHeight))
+            && AreClose(left.HorizontalSpacing, right.HorizontalSpacing)
+            && AreClose(left.VerticalSpacing, right.VerticalSpacing)
+            && left.ForceSingleColumn == right.ForceSingleColumn
+            && left.ShowGroupHeaders == right.ShowGroupHeaders
+            && AreClose(left.GroupHeaderHeight, right.GroupHeaderHeight);
+
+    private void AddRow(int firstIndex, int itemCount, double top, double height, VirtualizingGroupHeaderInfo? header)
     {
         _rowFirstIndices.Add(firstIndex);
         _rowItemCounts.Add(itemCount);
@@ -540,7 +996,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             : null;
     }
 
-    private bool RealizeItems(int firstIndex, int lastIndex, out int lastProcessedIndex)
+    private bool RealizeItems(
+        int firstIndex,
+        int lastIndex,
+        int containerBudget,
+        out int lastProcessedIndex)
     {
         lastProcessedIndex = -1;
         if (firstIndex < 0 || lastIndex < firstIndex)
@@ -565,17 +1025,68 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                         InsertInternalChild(childIndex, child);
                     generator.PrepareItemContainer(child);
                     newlyRealizedCount++;
+                    if (containerBudget == InteractiveContainersPerMeasure)
+                    {
+                        // Preparing a WPF card and measuring its visual tree in
+                        // one Render pass can exceed an input heartbeat on
+                        // slower runners. Keep the progressive placeholder for
+                        // one frame and perform the first measure from the next
+                        // input-separated continuation.
+                        _deferredMeasureContainers.Add(child);
+                        return false;
+                    }
                 }
 
                 int row = itemIndex < _itemRows.Length ? _itemRows[itemIndex] : -1;
                 double height = row >= 0 && row < _rowHeights.Count ? _rowHeights[row] : DefaultItemHeight;
+                bool measureWasDeferred = _deferredMeasureContainers.Contains(child);
+                bool measureWasInvalid = !child.IsMeasureValid;
                 child.Measure(new Size(_cellWidth, height));
+                _deferredMeasureContainers.Remove(child);
                 lastProcessedIndex = itemIndex;
-                if (newlyRealizedCount >= MaxNewContainersPerMeasure && itemIndex < lastIndex)
+                if (containerBudget == InteractiveContainersPerMeasure
+                    && measureWasDeferred
+                    && measureWasInvalid
+                    && itemIndex < lastIndex)
+                {
+                    return false;
+                }
+                if (newlyRealizedCount >= Math.Max(1, containerBudget) && itemIndex < lastIndex)
                     return false;
             }
         }
         return true;
+    }
+
+    private bool RealizePriorityItem(int index)
+    {
+        if (index < 0)
+            return false;
+
+        IItemContainerGenerator generator = ItemContainerGenerator;
+        GeneratorPosition position = generator.GeneratorPositionFromIndex(index);
+        int childIndex = position.Offset == 0 ? position.Index : position.Index + 1;
+        using (generator.StartAt(position, GeneratorDirection.Forward, allowStartAtRealizedItem: true))
+        {
+            if (generator.GenerateNext(out bool newlyRealized) is not UIElement child)
+                return false;
+            if (newlyRealized)
+            {
+                if (childIndex >= InternalChildren.Count)
+                    AddInternalChild(child);
+                else
+                    InsertInternalChild(childIndex, child);
+                generator.PrepareItemContainer(child);
+                _deferredMeasureContainers.Add(child);
+                return false;
+            }
+
+            int row = index < _itemRows.Length ? _itemRows[index] : -1;
+            double height = row >= 0 && row < _rowHeights.Count ? _rowHeights[row] : DefaultItemHeight;
+            child.Measure(new Size(_cellWidth, height));
+            _deferredMeasureContainers.Remove(child);
+            return true;
+        }
     }
 
     private void ScheduleRealizationContinuation()
@@ -585,7 +1096,15 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         long generation = _layoutGeneration;
         _realizationContinuationPending = true;
         InvalidateVisual();
-        Dispatcher.BeginInvoke(() =>
+        _ = ContinueRealizationAsync(generation);
+    }
+
+    private async Task ContinueRealizationAsync(long generation)
+    {
+        await Task.Delay(RealizationContinuationDelayMilliseconds).ConfigureAwait(false);
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            return;
+        await Dispatcher.InvokeAsync(() =>
         {
             if (generation != _layoutGeneration || !_realizationContinuationPending)
                 return;
@@ -595,13 +1114,14 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 // Re-measure from current items/viewport state instead of
                 // retaining a range that may have gone stale after input.
                 InvalidateMeasure();
-        }, DispatcherPriority.Background);
+        }, DispatcherPriority.ContextIdle);
     }
 
     private void MarkLayoutDirty()
     {
         _layoutDirty = true;
         _realizationContinuationPending = false;
+        _priorityRealizationIndex = -1;
     }
 
     private static Brush CreateProgressivePlaceholderBrush()
@@ -614,7 +1134,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private void CleanupItems(int firstIndex, int lastIndex)
     {
         IItemContainerGenerator generator = ItemContainerGenerator;
-        for (int childIndex = InternalChildren.Count - 1; childIndex >= 0; childIndex--)
+        int childIndex = InternalChildren.Count - 1;
+        while (childIndex >= 0)
         {
             GeneratorPosition position = new(childIndex, 0);
             int itemIndex = generator.IndexFromGeneratorPosition(position);
@@ -629,10 +1150,50 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 return;
             }
             if (itemIndex >= firstIndex && itemIndex <= lastIndex)
+            {
+                childIndex--;
                 continue;
-            generator.Remove(position, 1);
-            RemoveInternalChildRange(childIndex, 1);
+            }
+
+            int runEnd = childIndex;
+            int runStart = childIndex;
+            int firstRunItemIndex = itemIndex;
+            while (runStart > 0)
+            {
+                int previousItemIndex = generator.IndexFromGeneratorPosition(
+                    new GeneratorPosition(runStart - 1, 0));
+                if (previousItemIndex < 0)
+                {
+                    ResyncGeneratorVisuals();
+                    return;
+                }
+                if ((previousItemIndex >= firstIndex && previousItemIndex <= lastIndex)
+                    || previousItemIndex + 1 != firstRunItemIndex)
+                {
+                    break;
+                }
+                runStart--;
+                firstRunItemIndex = previousItemIndex;
+            }
+
+            int runCount = runEnd - runStart + 1;
+            GeneratorPosition runPosition = new(runStart, 0);
+            // This is an ordinary viewport eviction, not a source Reset.
+            // Remove preserves ListBox.SelectedItems bookkeeping; recycling
+            // the range here can leave WPF's logical selection detached from
+            // a correctly selected realized container.
+            generator.Remove(runPosition, runCount);
+            ForgetDeferredMeasureRange(runStart, runCount);
+            RemoveInternalChildRange(runStart, runCount);
+            childIndex = runStart - 1;
         }
+    }
+
+    private void ForgetDeferredMeasureRange(int start, int count)
+    {
+        int end = Math.Min(InternalChildren.Count, start + count);
+        for (int index = Math.Max(0, start); index < end; index++)
+            _deferredMeasureContainers.Remove(InternalChildren[index]);
     }
 
     private int FindFirstRowWhoseBottomExceeds(double offset)
@@ -714,7 +1275,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
         for (int row = 0; row < _rowHeaders.Count; row++)
         {
-            GroupHeaderInfo? header = _rowHeaders[row];
+            VirtualizingGroupHeaderInfo? header = _rowHeaders[row];
             if (header is null)
                 continue;
             double y = _rowTops[row] - _offset.Y;
@@ -785,7 +1346,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     }
 
     private bool IsItemContainerRealized(int index)
-        => ItemsControl.GetItemsOwner(this)?.ItemContainerGenerator.ContainerFromIndex(index) is not null;
+        => ItemsControl.GetItemsOwner(this)?.ItemContainerGenerator.ContainerFromIndex(index) is UIElement container
+            && !_deferredMeasureContainers.Contains(container);
 
     private void CoerceOffsets()
     {
@@ -860,5 +1422,4 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private double AverageRowHeight()
         => _rowHeights.Count == 0 ? DefaultItemHeight : _extent.Height / _rowHeights.Count;
 
-    private readonly record struct GroupHeaderInfo(string Label, int Count);
 }
