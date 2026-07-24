@@ -66,6 +66,9 @@ if ($result.favoriteEvictionExact -ne $true `
     -or $result.favoriteEvictionAutomationExact -ne $true) {
     $failures.Add('favorite-filter eviction did not republish an externally searchable Automation projection')
 }
+if ($result.favoritePendingBroadenRaceExact -ne $true) {
+    $failures.Add('favorite exclusion retained a stale narrow projection while a broader search was pending')
+}
 if ($result.searchP95Ms -gt 250 -or $result.filterP95Ms -gt 250 -or $result.sortP95Ms -gt 500) {
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")
 }

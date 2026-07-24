@@ -9921,6 +9921,67 @@ public partial class App : Application
                     && window.FilteredCountForSmoke == count
                     && selected;
 
+                // A favorite-only exclusion may reuse the current projection
+                // only when that projection is stable. Reproduce the race where
+                // clearing a narrow search has been scheduled but not applied
+                // before the selected favorite is removed. The exclusion must
+                // restart from the full catalog, not the stale narrow subset.
+                ReportProgress("favorite-pending-broaden-race");
+                window.ForceSharedStoreWritersForSmoke();
+                bool favoritePendingBroadenRaceExact =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.MarkSelectedTileRealForSmoke()
+                    && window.SetSelectedFavoriteLevelForSmoke(1);
+                SharedWriteStatus[] racePreparedWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                MainWindow.SearchFilterCompletion raceFavoriteFilter =
+                    await window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                MainWindow.SearchFilterCompletion raceNarrowSearch =
+                    await window.SetSearchInputForSmokeAsync("needle");
+                favoritePendingBroadenRaceExact &=
+                    racePreparedWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && raceFavoriteFilter.Applied
+                    && !raceFavoriteFilter.Discarded
+                    && raceNarrowSearch.Applied
+                    && !raceNarrowSearch.Discarded
+                    && window.FilteredCountForSmoke == count / 100
+                    && window.SelectFileNameForSmoke(selectedName);
+                Task<MainWindow.SearchFilterCompletion> pendingRaceBroaden =
+                    window.SetSearchInputForSmokeAsync("");
+                (bool raceFavoriteEvicted, MainWindow.SearchFilterCompletion raceFavoriteProjection) =
+                    await window.AdjustGalleryFavoriteImmediateForSmokeAsync(selectedName, -1);
+                MainWindow.SearchFilterCompletion raceBroadenResult =
+                    await pendingRaceBroaden;
+                bool raceRealizationSettled =
+                    await window.WaitForGridRealizationIdleForSmokeAsync();
+                favoritePendingBroadenRaceExact &=
+                    raceFavoriteEvicted
+                    && raceBroadenResult.Discarded
+                    && !raceBroadenResult.Applied
+                    && raceFavoriteProjection.Applied
+                    && !raceFavoriteProjection.Discarded
+                    && raceRealizationSettled
+                    && window.FilteredCountForSmoke == (count / 10) - 1
+                    && !string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        selectedName,
+                        StringComparison.OrdinalIgnoreCase);
+                MainWindow.SearchFilterCompletion raceFavoriteClear =
+                    await window.ClearFavoriteFiltersForSmokeAsync();
+                bool raceFavoriteRestored =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.SetSelectedFavoriteLevelForSmoke(5);
+                SharedWriteStatus[] raceRestoredWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                selected &= window.SelectFileNameForSmoke(selectedName);
+                favoritePendingBroadenRaceExact &=
+                    raceFavoriteClear.Applied
+                    && !raceFavoriteClear.Discarded
+                    && raceFavoriteRestored
+                    && raceRestoredWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && window.FilteredCountForSmoke == count
+                    && selected;
+
                 // Prime the accessibility paths before the memory and heartbeat
                 // baselines just like the search/filter/sort paths above. The
                 // first UI Automation client connection commits native UIA/WPF
@@ -10006,6 +10067,7 @@ public partial class App : Application
                     && mixedLatestWins
                     && mixedViewportAnchorPreserved
                     && mixedCleanupComplete
+                    && favoritePendingBroadenRaceExact
                     && accessibilityWarmupComplete
                     && selected;
 
@@ -10584,6 +10646,7 @@ public partial class App : Application
                     PreparedCatalogLayoutRejectedCount = window.PreparedCatalogLayoutRejectedCountForSmoke,
                     CatalogLayoutMaxMeasureMs = window.CatalogLayoutMaxMeasureMsForSmoke,
                     MixedLatestWins = mixedLatestWins,
+                    FavoritePendingBroadenRaceExact = favoritePendingBroadenRaceExact,
                     MixedViewportAnchorPreserved = mixedViewportAnchorPreserved,
                     MixedDiscardedCount = mixedDiscardedCount,
                     MixedStaleSearchDiscarded = staleMixedSearchResult.Discarded,
@@ -24678,6 +24741,7 @@ public partial class App : Application
         public int PreparedCatalogLayoutRejectedCount { get; init; }
         public long CatalogLayoutMaxMeasureMs { get; init; }
         public bool MixedLatestWins { get; init; }
+        public bool FavoritePendingBroadenRaceExact { get; init; }
         public bool MixedViewportAnchorPreserved { get; init; }
         public int MixedDiscardedCount { get; init; }
         public bool MixedStaleSearchDiscarded { get; init; }

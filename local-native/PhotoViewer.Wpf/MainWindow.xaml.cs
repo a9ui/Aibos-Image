@@ -4488,12 +4488,19 @@ public partial class MainWindow : Window
         // the replacement and its UI Automation index off the dispatcher, then
         // publishes them together in one Reset. Direct RemoveAt invalidated the
         // index and left external UIA lookup on a 100k fallback scan.
+        bool projectionIsStable = _scheduledCatalogProjection is null
+            && _pendingSearchFilterCompletion is null
+            && _catalogProjectionCts is null;
         _ = QueueCatalogProjection(
             debounce: false,
             reorderCatalog: false,
             selectFirst: true,
             selectionFallbackIndex: fallbackIndex,
-            restrictToCurrentProjection: true);
+            // A current-projection subset is valid only for a pure exclusion
+            // from the projection already on screen. If a broader search or
+            // filter request is pending, canceling it and starting from the old
+            // subset would permanently omit newly eligible items.
+            restrictToCurrentProjection: projectionIsStable);
     }
 
     private void RefreshModalFavoriteSurface(Tile? knownSelected = null)
@@ -18386,6 +18393,17 @@ public partial class MainWindow : Window
             CommandParameter = delta < 0 ? "decrease" : "increase",
         };
         return ActivateCardFavoriteButton(button);
+    }
+    public async Task<(bool Adjusted, SearchFilterCompletion Projection)>
+        AdjustGalleryFavoriteImmediateForSmokeAsync(string fileName, int delta)
+    {
+        bool adjusted = AdjustGalleryFavoriteForSmoke(fileName, delta);
+        Task<SearchFilterCompletion> projection = _pendingSearchFilterCompletion?.Task
+            ?? Task.FromResult(new SearchFilterCompletion(
+                false,
+                false,
+                "favorite mutation did not schedule a catalog projection"));
+        return (adjusted, await projection);
     }
     public async Task<bool> AdjustGalleryFavoritePointerForSmokeAsync(string fileName, int delta)
     {

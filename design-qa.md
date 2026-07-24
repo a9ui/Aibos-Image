@@ -334,3 +334,36 @@ final result: passed
   760 x 480 and 960 x 500 work-area containment; Original-aspect reflow.
 
 final result: passed
+
+## M3 pending-broaden Favorite exclusion audit repair
+
+- Independent final review found one stale-subset race in the Favorite-only
+  fast path. If a narrow search was visible, a broader search was pending, and
+  the selected Favorite was removed before that broader projection published,
+  the exclusion could cancel the broader request and reuse the old narrow
+  projection as its source.
+- Current-projection reuse is now allowed only when no scheduled, pending, or
+  in-flight catalog projection exists. Otherwise the scheduler recomputes from
+  the complete logical catalog. Publication, selection fallback, UI Automation,
+  and the deferred pointer route are unchanged.
+- The 100,000-item gate now reproduces the exact overlap: Favorite-only plus a
+  1,000-item narrow search, pending search clear, then immediate Favorite
+  exclusion. It requires the pending broaden to be discarded, the replacement
+  projection to publish, the target to be evicted, and the complete 9,999-item
+  Favorite projection to appear before restoring all 100,000 items.
+- The first harness attempt correctly exposed that the preceding stale-peer
+  warmup had intentionally marked the synthetic selected tile non-real. The
+  regression now explicitly restores that existing smoke precondition before
+  mutating Favorite state; no product condition or performance threshold was
+  relaxed.
+- Three isolated .NET 10 Release processes passed at 100,000 items:
+  - cold: 43 ms Favorite eviction, 46 ms heartbeat, 11 ms one-container
+    detach, 9.448% normalized working-set growth;
+  - warm 1: 36 ms Favorite eviction, 34 ms heartbeat, 9 ms one-container
+    detach, 7.369% normalized working-set growth;
+  - warm 2: 38 ms Favorite eviction, 43 ms heartbeat, 1 ms one-container
+    detach, 7.521% normalized working-set growth.
+- All three passed the new pending-broaden regression and the unchanged hard
+  limits of 100/50/12/35. Release build remained warning 0/error 0.
+
+final result: passed
