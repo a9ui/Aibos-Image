@@ -32,6 +32,7 @@ internal enum ViewerKeyAction
     MovePreviewTabRight,
     FlipHorizontal,
     ToggleEnhancedPreview,
+    EnhanceCurrentImage,
     GalleryZoomIn,
     GalleryZoomOut,
     GalleryZoomReset,
@@ -195,6 +196,8 @@ internal readonly record struct KeyChord(Key Key, ModifierKeys Modifiers)
     public static bool TryParse(string? value, out KeyChord chord)
     {
         chord = default;
+        if (value == " ")
+            return TryCreate(Key.Space, ModifierKeys.None, out chord, out _);
         if (string.Equals(value?.Trim(), UnboundStorageValue, StringComparison.OrdinalIgnoreCase))
         {
             chord = Unbound;
@@ -315,6 +318,24 @@ internal static class KeyBindingSettings
         Key.F6, Key.F7, Key.F8, Key.F9, Key.F10, Key.F11, Key.F12,
     };
 
+    private static readonly IReadOnlyDictionary<string, ViewerKeyAction> BrowserSharedActions =
+        new Dictionary<string, ViewerKeyAction>(StringComparer.Ordinal)
+        {
+            ["nextImage"] = ViewerKeyAction.NextImage,
+            ["prevImage"] = ViewerKeyAction.PreviousImage,
+            ["toggleFavorite"] = ViewerKeyAction.FavoriteIncrease,
+            ["decreaseFavorite"] = ViewerKeyAction.FavoriteDecrease,
+            ["deleteImage"] = ViewerKeyAction.RecycleCurrentImage,
+            ["closeModal"] = ViewerKeyAction.CloseModal,
+            ["flipHorizontal"] = ViewerKeyAction.FlipHorizontal,
+            ["enhanceImage"] = ViewerKeyAction.EnhanceCurrentImage,
+            ["toggleFilmstrip"] = ViewerKeyAction.ToggleModalFilmstrip,
+            ["addToAlbum"] = ViewerKeyAction.AddToAlbum,
+            ["zoomIn"] = ViewerKeyAction.ModalZoomIn,
+            ["zoomOut"] = ViewerKeyAction.ModalZoomOut,
+            ["zoomReset"] = ViewerKeyAction.ModalZoomReset,
+        };
+
     public static IReadOnlyList<KeyBindingDefinition> Definitions { get; } =
     [
         Def(ViewerKeyAction.PreviousImage, "previousImage", "Previous image", "Navigate to the previous image while the modal is open.", ShortcutContext.Modal, Key.Left),
@@ -335,6 +356,7 @@ internal static class KeyBindingSettings
         Def(ViewerKeyAction.MovePreviewTabRight, "movePreviewTabRight", "Move preview tab right", "Move the focused preview tab one position to the right.", ShortcutContext.Viewer, Key.Right, ModifierKeys.Alt | ModifierKeys.Shift),
         Def(ViewerKeyAction.FlipHorizontal, "flipHorizontal", "Flip modal image", "Flip the current modal image horizontally. This does not modify the source file.", ShortcutContext.Modal, Key.H),
         Def(ViewerKeyAction.ToggleEnhancedPreview, "toggleEnhancedPreview", "Toggle Original / Enhanced preview", "Switch only between the original and an already-succeeded managed output. This never creates or starts an enhancement job.", ShortcutContext.Modal, Key.E),
+        Def(ViewerKeyAction.EnhanceCurrentImage, "enhanceCurrentImage", "Enhance current image", "Start the explicit AI enhancement action for the current modal image. Ordinary browsing never starts a job.", ShortcutContext.Modal, Key.A),
         Def(ViewerKeyAction.GalleryZoomIn, "galleryZoomIn", "Gallery zoom in", "Increase Grid card size without changing the sidebar, header, or fonts.", ShortcutContext.Gallery, Key.OemPlus, ModifierKeys.Control),
         Def(ViewerKeyAction.GalleryZoomOut, "galleryZoomOut", "Gallery zoom out", "Decrease Grid card size without changing the sidebar, header, or fonts.", ShortcutContext.Gallery, Key.OemMinus, ModifierKeys.Control),
         Def(ViewerKeyAction.GalleryZoomReset, "galleryZoomReset", "Reset gallery zoom", "Reset Grid card size to 200.", ShortcutContext.Gallery, Key.D0, ModifierKeys.Control),
@@ -352,6 +374,65 @@ internal static class KeyBindingSettings
 
     public static Dictionary<ViewerKeyAction, KeyChord> CreateDefaults()
         => Definitions.ToDictionary(static definition => definition.Action, static definition => definition.DefaultChord);
+
+    public static bool TryApplyBrowserSharedBindings(
+        IReadOnlyDictionary<ViewerKeyAction, KeyChord> localBindings,
+        IReadOnlyDictionary<string, string>? persistedBrowserBindings,
+        out Dictionary<ViewerKeyAction, KeyChord> merged,
+        out string? error)
+    {
+        merged = new Dictionary<ViewerKeyAction, KeyChord>(localBindings);
+        error = null;
+        foreach ((string browserName, ViewerKeyAction action) in BrowserSharedActions)
+        {
+            KeyChord chord = Definition(action).DefaultChord;
+            if (persistedBrowserBindings is not null
+                && persistedBrowserBindings.TryGetValue(browserName, out string? raw))
+            {
+                if (!KeyChord.TryParse(raw, out chord)
+                    || chord.Modifiers != ModifierKeys.None
+                    || !IsAllowedForAction(action, chord, out _))
+                {
+                    error = $"Shared keyBindings.{browserName} is not a Browser-compatible single key.";
+                    merged = new Dictionary<ViewerKeyAction, KeyChord>(localBindings);
+                    return false;
+                }
+            }
+            merged[action] = chord;
+        }
+
+        HashSet<ViewerKeyAction> sharedActions = BrowserSharedActions.Values.ToHashSet();
+        IReadOnlyDictionary<ViewerKeyAction, IReadOnlyList<ViewerKeyAction>> conflicts = FindConflicts(merged);
+        if (conflicts.Any(pair =>
+                sharedActions.Contains(pair.Key)
+                && pair.Value.Any(sharedActions.Contains)))
+        {
+            error = "Shared Browser key bindings contain an overlapping shortcut conflict.";
+            merged = new Dictionary<ViewerKeyAction, KeyChord>(localBindings);
+            return false;
+        }
+
+        foreach (ViewerKeyAction localAction in conflicts.Keys.Where(action => !sharedActions.Contains(action)).ToArray())
+            merged[localAction] = AllocateCollisionFreeLocalChord(merged, localAction);
+
+        if (FindConflicts(merged).Count > 0)
+        {
+            error = "Shared Browser key bindings could not be composed with WPF-only shortcuts safely.";
+            merged = new Dictionary<ViewerKeyAction, KeyChord>(localBindings);
+            return false;
+        }
+        return true;
+    }
+
+    public static IReadOnlyDictionary<string, string> ToBrowserSharedBindings(
+        IReadOnlyDictionary<ViewerKeyAction, KeyChord> bindings)
+        => BrowserSharedActions.ToDictionary(
+            static pair => pair.Key,
+            pair => ToBrowserKeyText(
+                bindings.TryGetValue(pair.Value, out KeyChord chord)
+                    ? chord
+                    : Definition(pair.Value).DefaultChord),
+            StringComparer.Ordinal);
 
     public static Dictionary<ViewerKeyAction, KeyChord> NormalizePersisted(
         IReadOnlyDictionary<string, JsonElement>? persisted,
@@ -471,6 +552,8 @@ internal static class KeyBindingSettings
     }
 
     public static KeyBindingDefinition Definition(ViewerKeyAction action) => ByAction[action];
+    public static bool IsBrowserSharedAction(ViewerKeyAction action)
+        => BrowserSharedActions.Values.Contains(action);
 
     public static bool IsAllowedForAction(ViewerKeyAction action, KeyChord chord, out string error)
     {
@@ -484,9 +567,59 @@ internal static class KeyBindingSettings
             error = "Windows-key combinations cannot be assigned because Windows may consume them before Aibos.";
             return false;
         }
+        if (BrowserSharedActions.Values.Contains(action) && chord.Modifiers != ModifierKeys.None)
+        {
+            error = "This shortcut is shared with the Browser app and must use one key without Ctrl, Alt, Shift, or Win.";
+            return false;
+        }
 
         error = "";
         return true;
+    }
+
+    private static KeyChord AllocateCollisionFreeLocalChord(
+        IReadOnlyDictionary<ViewerKeyAction, KeyChord> bindings,
+        ViewerKeyAction action)
+    {
+        KeyBindingDefinition definition = Definition(action);
+        IEnumerable<KeyChord> candidates = new[] { definition.DefaultChord }
+            .Concat(SafeMigrationKeys.Select(static key => new KeyChord(key, ModifierKeys.None)));
+        foreach (KeyChord candidate in candidates)
+        {
+            bool collides = Definitions.Any(other =>
+                other.Action != action
+                && (other.Context & definition.Context) != ShortcutContext.None
+                && bindings.TryGetValue(other.Action, out KeyChord otherChord)
+                && otherChord.IsBound
+                && otherChord == candidate);
+            if (!collides)
+                return candidate;
+        }
+        return KeyChord.Unbound;
+    }
+
+    private static string ToBrowserKeyText(KeyChord chord)
+    {
+        if (!chord.IsBound)
+            return KeyChord.UnboundStorageValue;
+        if (chord.Modifiers != ModifierKeys.None)
+            throw new InvalidOperationException("Browser-shared shortcuts cannot contain modifiers.");
+        return chord.Key switch
+        {
+            Key.Left => "ArrowLeft",
+            Key.Right => "ArrowRight",
+            Key.Up => "ArrowUp",
+            Key.Down => "ArrowDown",
+            Key.Escape => "Escape",
+            Key.Delete => "Delete",
+            Key.Back => "Backspace",
+            Key.Return => "Enter",
+            Key.Space => " ",
+            Key.OemPlus => "=",
+            Key.OemMinus => "-",
+            >= Key.D0 and <= Key.D9 => ((int)chord.Key - (int)Key.D0).ToString(),
+            _ => chord.Key.ToString().ToLowerInvariant(),
+        };
     }
 
     private static KeyChord AllocateMigrationChord(

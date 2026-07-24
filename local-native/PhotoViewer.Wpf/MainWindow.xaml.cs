@@ -20,6 +20,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shell;
 using System.Windows.Threading;
@@ -28,6 +29,22 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow : Window
 {
+    private enum ModalPointerState
+    {
+        Visible,
+        ArmedToHide,
+        Hidden,
+        Interacting,
+        Panning,
+    }
+
+    private enum ModalEdgeTarget
+    {
+        None,
+        Previous,
+        Next,
+    }
+
     private static readonly StringComparer EnhancementSourceIdentityComparer = StringComparer.OrdinalIgnoreCase;
     private static readonly HttpClient ModalEnhancementHttpClient = new()
     {
@@ -46,7 +63,11 @@ public partial class MainWindow : Window
     private const int MinParallelThumbnailCount = 32;
     private const int MaxThumbnailDecodeWorkers = 12;
     private const int InitialThumbnailPrefetchCount = 16;
-    private const int MaxResidentThumbnailCount = 128;
+    private const int LegacyResidentThumbnailCountHint = 128;
+    private const long MinResidentThumbnailBudgetBytes = 192L * 1024 * 1024;
+    private const long MaxResidentThumbnailBudgetBytes = 512L * 1024 * 1024;
+    private const long FallbackResidentThumbnailBudgetBytes = 256L * 1024 * 1024;
+    private const int TransientStatusToastMilliseconds = 850;
     private const int MinParallelCatalogPreparationCount = 512;
     private const int MaxCatalogPreparationWorkers = 4;
     private const int ImmediateViewportThumbnailCount = 1;
@@ -72,18 +93,28 @@ public partial class MainWindow : Window
     private const double MaxCardWidth = 600;
     private const double DefaultCardWidth = 200;
     private const double CardWidthStep = 20;
-    private const double DefaultRightPanelWidth = 340;
-    private const double MinRightPanelWidth = 240;
-    private const double MaxRightPanelWidth = 900;
-    private const double AdaptiveWorkbenchThreshold = 1080;
-    private const double AdaptivePreviewHeight = 280;
+    private const double WideSidebarWidth = 232;
+    private const double CompactSidebarRailWidth = 48;
+    private const double DefaultRightPanelWidth = 360;
+    private const double MinRightPanelWidth = 320;
+    private const double MaxRightPanelWidth = 420;
+    private const double AdaptiveWorkbenchThreshold = 1180;
+    private const double AdaptivePreviewMinHeight = 168;
+    private const double AdaptivePreviewMaxHeight = 232;
+    private const double AdaptivePreviewHeightRatio = 0.30;
     private const double ModalZoomMin = 0.25;
     private const double ModalZoomMax = 10;
+    private const double ModalEdgeNavigationDefaultPercent = 5;
+    private const double ModalEdgeNavigationMinPercent = 0;
+    private const double ModalEdgeNavigationMaxPercent = 20;
     private const string EnhancedStatusBorderDefaultColor = "#38BDF8";
     private const double ModalZoomKeyboardStep = 1.15;
-    private const double ModalZoomWheelStep = 1.1;
-    private const int ModalChromeTransientMilliseconds = 900;
-    private const double ModalFilmstripHoverZone = 128;
+    private const double ModalZoomWheelStep = 1.08;
+    private const int ModalTransformAnimationMilliseconds = 110;
+    private const int ModalTransformQualitySettleMilliseconds = 140;
+    private const int ModalChromeRevealAnimationMilliseconds = 90;
+    private const int ModalChromeTransientMilliseconds = 800;
+    private const double ModalFilmstripHoverZone = 176;
     private const int MaxModalFilmstripWindowItems = 101;
     private const string DisplayStyleStandard = "standard";
     private const string DisplayStyleCompact = "compact";
@@ -162,7 +193,15 @@ public partial class MainWindow : Window
     private readonly ConcurrentDictionary<string, byte> _thumbnailDecodeFailures = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<Tile> _residentThumbnailLru = new();
     private readonly Dictionary<string, LinkedListNode<Tile>> _residentThumbnailNodes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _residentThumbnailByteSizes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _protectedResidentThumbnailPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly long _residentThumbnailBudgetBytes = ResolveResidentThumbnailBudgetBytes();
     private int _maxResidentThumbnailCount;
+    private long _residentThumbnailBytes;
+    private long _maxResidentThumbnailBytes;
+    private long _maxProtectedResidentThumbnailBytes;
+    private long _maxEffectiveResidentThumbnailBudgetBytes;
+    private int _visibleThumbnailEvictionCount;
     private int _activeThumbnailDecodeWorkers;
     private int _maxActiveThumbnailDecodeWorkers;
     private int _thumbnailViewportScheduleCount;
@@ -258,16 +297,24 @@ public partial class MainWindow : Window
     private Vector _modalPanStartOffset;
     private Point? _modalPointerStartPoint;
     private bool _modalPointerMoved;
+    private ModalPointerState _modalPointerState = ModalPointerState.Visible;
+    private ModalEdgeTarget _modalPressedEdgeTarget;
+    private Point _modalLastPointerPosition;
+    private bool _modalHasPointerPosition;
+    private bool _modalChromePointerPressActive;
     private bool _modalManualChromeVisible = true;
     private bool _modalTransientChromeVisible;
     private bool _modalFilmstripOpen = true;
     private bool _modalFilmstripHoverVisible;
+    private double _modalEdgeNavigationPercent = ModalEdgeNavigationDefaultPercent;
+    private bool _syncingModalEdgeNavigationPercent;
     private bool _syncingModalFilmstripSelection;
     private long _modalSingleClickGeneration;
-    private Task _modalSingleClickToggleTask = Task.CompletedTask;
     private readonly DispatcherTimer _modalFeedbackTimer;
     private readonly DispatcherTimer _modalChromeTransientTimer;
+    private readonly DispatcherTimer _modalTransformQualityTimer;
     private readonly DispatcherTimer _modalEnhancementPollTimer;
+    private DispatcherTimer? _statusToastDismissTimer;
     private bool _modalEnhancementPolling;
     private bool _modalEnhancementRequestPending;
     private string? _modalEnhancementJobId;
@@ -385,9 +432,13 @@ public partial class MainWindow : Window
     private bool _modalShowingEnhanced;
     private bool _confirmBeforeDelete = true;
     private bool _syncingConfirmBeforeDelete;
+    private string _uiLanguage = UiLanguageResources.English;
+    private bool _syncingUiLanguage;
     private Dictionary<ViewerKeyAction, KeyChord> _keyBindings = KeyBindingSettings.CreateDefaults();
     private Dictionary<ViewerKeyAction, KeyChord> _draftKeyBindings = KeyBindingSettings.CreateDefaults();
     private Dictionary<string, JsonElement>? _keyBindingUnknownEntries;
+    private bool _sharedKeyBindingsProtected;
+    private string? _sharedKeyBindingsError;
     private readonly Dictionary<ViewerKeyAction, Button> _keyBindingButtons = [];
     private readonly Dictionary<ViewerKeyAction, TextBlock> _keyBindingConflictTexts = [];
     private ViewerKeyAction? _recordingKeyAction;
@@ -449,11 +500,26 @@ public partial class MainWindow : Window
             if (ModalInteractionFeedback is not null)
                 ModalInteractionFeedback.Visibility = Visibility.Collapsed;
         };
+        _statusToastDismissTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(TransientStatusToastMilliseconds),
+        };
+        _statusToastDismissTimer.Tick += (_, _) =>
+        {
+            _statusToastDismissTimer.Stop();
+            if (_statusRetryAction is null && !HasUnresolvedSharedFailures && DeleteStatusToast is not null)
+                DeleteStatusToast.Visibility = Visibility.Collapsed;
+        };
         _modalChromeTransientTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(ModalChromeTransientMilliseconds),
         };
         _modalChromeTransientTimer.Tick += (_, _) => ExpireModalChromeTransient();
+        _modalTransformQualityTimer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromMilliseconds(ModalTransformQualitySettleMilliseconds),
+        };
+        _modalTransformQualityTimer.Tick += (_, _) => EndModalTransformInteraction();
         _modalEnhancementPollTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromSeconds(1),
@@ -677,7 +743,10 @@ public partial class MainWindow : Window
         int lastRealizedIndex)
     {
         if (_tiles.Count == 0)
+        {
+            ClearProtectedResidentThumbnails();
             return;
+        }
 
         int firstVisible = Math.Clamp(firstVisibleIndex, 0, _tiles.Count - 1);
         int lastVisible = Math.Clamp(lastVisibleIndex, firstVisible, _tiles.Count - 1);
@@ -688,6 +757,7 @@ public partial class MainWindow : Window
             firstVisible = firstRealized;
             lastVisible = lastRealized;
         }
+        SetProtectedResidentThumbnailRanges(firstVisible, lastVisible, firstRealized, lastRealized);
 
         var candidates = new List<Tile>(Math.Max(0, lastRealized - firstRealized + 1));
         var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -759,10 +829,12 @@ public partial class MainWindow : Window
         bool movingDown = currentOffset >= _lastListThumbnailVerticalOffset;
         _lastListThumbnailVerticalOffset = currentOffset;
         var candidates = new List<(Tile Tile, bool Visible, double Distance, double Top)>();
+        var protectedTiles = new List<Tile>();
         foreach (ListBoxItem item in FindVisualDescendants<ListBoxItem>(RowsList))
         {
             if (item.DataContext is not Tile { IsRealFile: true } tile)
                 continue;
+            protectedTiles.Add(tile);
             if (tile.Thumbnail is not null)
             {
                 TouchResidentThumbnail(tile);
@@ -780,6 +852,7 @@ public partial class MainWindow : Window
             {
             }
         }
+        SetProtectedResidentThumbnails(protectedTiles);
 
         List<Tile> visibleCandidates = candidates
             .Where(static candidate => candidate.Visible)
@@ -982,6 +1055,7 @@ public partial class MainWindow : Window
         _modalSingleClickGeneration++;
         _modalFeedbackTimer.Stop();
         _modalChromeTransientTimer.Stop();
+        _modalTransformQualityTimer.Stop();
         CancelPreviewTabHoverDecode();
 
         // Closing flushes only the viewer state. Folder recents, favorites,
@@ -1978,12 +2052,22 @@ public partial class MainWindow : Window
 
     private void RefreshLandingFolderSetUi()
     {
+        if (LandingFolderSetEmptyHint is not null)
+        {
+            LandingFolderSetEmptyHint.Visibility = _landingFolderSet.Count == 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
         if (LandingFolderStatusText is not null)
         {
             int existingCount = _landingFolderSet.Count(Directory.Exists);
             LandingFolderStatusText.Text = _landingFolderSet.Count == 0
-                ? "No folders selected yet."
-                : $"{existingCount:N0} usable / {_landingFolderSet.Count:N0} selected folder(s)";
+                ? UiLanguageResources.Text("UiNoFoldersSelected")
+                : UiLanguageResources.Format(
+                    "UiUsableSelectedFoldersFormat",
+                    existingCount,
+                    _landingFolderSet.Count);
         }
 
         if (OpenFolderSetButton is not null)
@@ -2324,18 +2408,139 @@ public partial class MainWindow : Window
 
     private void StoreResidentThumbnail(Tile tile, BitmapSource thumbnail)
     {
+        long bytes = EstimateBitmapBytes(thumbnail);
+        if (_residentThumbnailByteSizes.TryGetValue(tile.Path, out long previousBytes))
+            _residentThumbnailBytes = Math.Max(0, _residentThumbnailBytes - previousBytes);
+        _residentThumbnailByteSizes[tile.Path] = bytes;
+        _residentThumbnailBytes += bytes;
         tile.Thumbnail = thumbnail;
         TouchResidentThumbnail(tile);
-        while (_residentThumbnailLru.Count > MaxResidentThumbnailCount)
+        TrimResidentThumbnails();
+    }
+
+    private void SetProtectedResidentThumbnailRanges(
+        int firstVisibleIndex,
+        int lastVisibleIndex,
+        int firstRealizedIndex,
+        int lastRealizedIndex)
+    {
+        _protectedResidentThumbnailPaths.Clear();
+        AddProtectedResidentThumbnailRange(firstVisibleIndex, lastVisibleIndex);
+        AddProtectedResidentThumbnailRange(firstRealizedIndex, lastRealizedIndex);
+        FinishProtectedResidentThumbnailUpdate();
+    }
+
+    private void AddProtectedResidentThumbnailRange(int firstIndex, int lastIndex)
+    {
+        if (_tiles.Count == 0 || firstIndex < 0 || lastIndex < firstIndex)
+            return;
+
+        int first = Math.Clamp(firstIndex, 0, _tiles.Count - 1);
+        int last = Math.Clamp(lastIndex, first, _tiles.Count - 1);
+        for (int index = first; index <= last; index++)
         {
-            LinkedListNode<Tile>? oldest = _residentThumbnailLru.First;
-            if (oldest is null)
+            Tile tile = _tiles[index];
+            if (tile.IsRealFile)
+                _protectedResidentThumbnailPaths.Add(tile.Path);
+        }
+    }
+
+    private void SetProtectedResidentThumbnails(IEnumerable<Tile> tiles)
+    {
+        _protectedResidentThumbnailPaths.Clear();
+        foreach (Tile tile in tiles)
+        {
+            if (tile.IsRealFile)
+                _protectedResidentThumbnailPaths.Add(tile.Path);
+        }
+        FinishProtectedResidentThumbnailUpdate();
+    }
+
+    private void ClearProtectedResidentThumbnails()
+    {
+        if (_protectedResidentThumbnailPaths.Count == 0)
+            return;
+        _protectedResidentThumbnailPaths.Clear();
+        TrimResidentThumbnails();
+    }
+
+    private void FinishProtectedResidentThumbnailUpdate()
+    {
+        if (SelectedTile() is { IsRealFile: true } selected)
+            _protectedResidentThumbnailPaths.Add(selected.Path);
+        TrimResidentThumbnails();
+    }
+
+    private void TrimResidentThumbnails()
+    {
+        long protectedBytes = ProtectedResidentThumbnailBytes();
+        long effectiveBudget = Math.Max(_residentThumbnailBudgetBytes, protectedBytes);
+        _maxProtectedResidentThumbnailBytes = Math.Max(_maxProtectedResidentThumbnailBytes, protectedBytes);
+        _maxEffectiveResidentThumbnailBudgetBytes = Math.Max(
+            _maxEffectiveResidentThumbnailBudgetBytes,
+            effectiveBudget);
+        while (_residentThumbnailBytes > effectiveBudget)
+        {
+            LinkedListNode<Tile>? oldestUnprotected = _residentThumbnailLru.First;
+            while (oldestUnprotected is not null
+                && _protectedResidentThumbnailPaths.Contains(oldestUnprotected.Value.Path))
+            {
+                oldestUnprotected = oldestUnprotected.Next;
+            }
+            if (oldestUnprotected is null)
                 break;
-            _residentThumbnailLru.RemoveFirst();
-            _residentThumbnailNodes.Remove(oldest.Value.Path);
-            oldest.Value.Thumbnail = null;
+            EvictResidentThumbnail(oldestUnprotected);
         }
         _maxResidentThumbnailCount = Math.Max(_maxResidentThumbnailCount, _residentThumbnailLru.Count);
+        _maxResidentThumbnailBytes = Math.Max(_maxResidentThumbnailBytes, _residentThumbnailBytes);
+    }
+
+    private long ProtectedResidentThumbnailBytes()
+    {
+        long total = 0;
+        foreach (string path in _protectedResidentThumbnailPaths)
+        {
+            if (_residentThumbnailByteSizes.TryGetValue(path, out long bytes))
+                total = total > long.MaxValue - bytes ? long.MaxValue : total + bytes;
+        }
+        return total;
+    }
+
+    private void EvictResidentThumbnail(LinkedListNode<Tile> node)
+    {
+        string path = node.Value.Path;
+        if (_protectedResidentThumbnailPaths.Contains(path))
+        {
+            _visibleThumbnailEvictionCount++;
+            return;
+        }
+
+        _residentThumbnailLru.Remove(node);
+        _residentThumbnailNodes.Remove(path);
+        if (_residentThumbnailByteSizes.Remove(path, out long bytes))
+            _residentThumbnailBytes = Math.Max(0, _residentThumbnailBytes - bytes);
+        node.Value.Thumbnail = null;
+    }
+
+    private static long EstimateBitmapBytes(BitmapSource bitmap)
+    {
+        long width = Math.Max(1, bitmap.PixelWidth);
+        long height = Math.Max(1, bitmap.PixelHeight);
+        long bitsPerPixel = Math.Max(8, bitmap.Format.BitsPerPixel);
+        long stride = checked(((width * bitsPerPixel) + 7) / 8);
+        return checked(stride * height);
+    }
+
+    private static long ResolveResidentThumbnailBudgetBytes()
+    {
+        long available = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        long candidate = available > 0
+            ? available / 32
+            : FallbackResidentThumbnailBudgetBytes;
+        return Math.Clamp(
+            candidate,
+            MinResidentThumbnailBudgetBytes,
+            MaxResidentThumbnailBudgetBytes);
     }
 
     private void TouchResidentThumbnail(Tile tile)
@@ -2344,6 +2549,8 @@ public partial class MainWindow : Window
         {
             if (_residentThumbnailNodes.Remove(tile.Path, out LinkedListNode<Tile>? stale))
                 _residentThumbnailLru.Remove(stale);
+            if (_residentThumbnailByteSizes.Remove(tile.Path, out long staleBytes))
+                _residentThumbnailBytes = Math.Max(0, _residentThumbnailBytes - staleBytes);
             return;
         }
 
@@ -2364,7 +2571,14 @@ public partial class MainWindow : Window
             tile.Thumbnail = null;
         _residentThumbnailLru.Clear();
         _residentThumbnailNodes.Clear();
+        _residentThumbnailByteSizes.Clear();
+        _protectedResidentThumbnailPaths.Clear();
         _maxResidentThumbnailCount = 0;
+        _residentThumbnailBytes = 0;
+        _maxResidentThumbnailBytes = 0;
+        _maxProtectedResidentThumbnailBytes = 0;
+        _maxEffectiveResidentThumbnailBudgetBytes = _residentThumbnailBudgetBytes;
+        _visibleThumbnailEvictionCount = 0;
     }
 
     private BitmapSource? LoadThumbnailBitmap(Tile tile, int decodePixelWidth)
@@ -3675,7 +3889,7 @@ public partial class MainWindow : Window
                     _pendingFavoriteMutations[delta.Path] = current with { DurableLevel = delta.DesiredLevel };
             }
             if (committedCurrent && _pendingFavoriteMutations.Count == 0)
-                SetStatusToast("Favorites saved.");
+                SetTransientStatusToast("Favorites saved.");
             return;
         }
 
@@ -3924,6 +4138,69 @@ public partial class MainWindow : Window
         }
         SyncSelectionActionSurface();
         RefreshModalFavoriteSurface();
+    }
+
+    private void RefreshFavoriteMutationSurface(IReadOnlyList<Tile> changedTiles)
+    {
+        bool favoriteFilterActive = FavoriteOnlyFilter?.IsChecked == true
+            || UnfavoriteOnlyFilter?.IsChecked == true;
+        if (favoriteFilterActive)
+            RemoveChangedTilesExcludedByFavoriteFilter(changedTiles);
+
+        SyncSelectionActionSurface();
+        RefreshModalFavoriteSurface();
+    }
+
+    private void RemoveChangedTilesExcludedByFavoriteFilter(IReadOnlyList<Tile> changedTiles)
+    {
+        bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
+        bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
+        var removalIndices = new List<int>();
+        foreach (Tile tile in changedTiles.Distinct())
+        {
+            int index = _tiles.IndexOf(tile);
+            if (index >= 0 && !MatchesFavoriteFilter(tile, favoritesOnly, unfavoriteOnly))
+                removalIndices.Add(index);
+        }
+        if (removalIndices.Count == 0)
+            return;
+
+        int fallbackIndex = removalIndices.Min();
+        bool wasSyncingSelection = _syncingSelection;
+        _syncingSelection = true;
+        try
+        {
+            CancelThumbnailViewportLoading();
+            _thumbnailViewportRevision++;
+            foreach (int index in removalIndices.Distinct().OrderByDescending(static index => index))
+            {
+                Tile removed = _tiles[index];
+                _selectedPaths.Remove(removed.Path);
+                if (string.Equals(_primarySelectedPath, removed.Path, StringComparison.OrdinalIgnoreCase))
+                    _primarySelectedPath = null;
+                _tiles.RemoveAt(index);
+            }
+        }
+        finally
+        {
+            _syncingSelection = wasSyncingSelection;
+        }
+
+        _galleryVirtualizingPanel?.InvalidateItemLayout();
+        Tile? preferred = !string.IsNullOrWhiteSpace(_primarySelectedPath)
+            ? _tiles.FirstOrDefault(tile => string.Equals(tile.Path, _primarySelectedPath, StringComparison.OrdinalIgnoreCase))
+            : null;
+        if (preferred is null && _selectedPaths.Count > 0)
+            preferred = _tiles.LastOrDefault(tile => _selectedPaths.Contains(tile.Path));
+        if (preferred is null && _tiles.Count > 0)
+            preferred = _tiles[Math.Clamp(fallbackIndex, 0, _tiles.Count - 1)];
+
+        if (_selectedPaths.Count > 0)
+            SetSelection(_tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList(), preferred);
+        else
+            SelectTile(preferred);
+        UpdateFolderStats();
+        ReconcileOpenSurfacesAfterFilterChange();
     }
 
     private void RefreshModalFavoriteSurface()
@@ -6989,6 +7266,95 @@ public partial class MainWindow : Window
         SetShowUnseenDots(enabled, persist: true);
     }
 
+    private void UiLanguage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _syncingUiLanguage)
+            return;
+        if (sender is FrameworkElement { Tag: string language })
+            SetUiLanguage(language, persist: true);
+    }
+
+    private bool SetUiLanguage(string? language, bool persist)
+    {
+        string normalized = UiLanguageResources.Normalize(language);
+        bool changed = !string.Equals(_uiLanguage, normalized, StringComparison.Ordinal);
+        _uiLanguage = normalized;
+        UiLanguageResources.Apply(normalized);
+
+        _syncingUiLanguage = true;
+        try
+        {
+            if (UiEnglishRadioButton is not null)
+                UiEnglishRadioButton.IsChecked = normalized == UiLanguageResources.English;
+            if (UiJapaneseRadioButton is not null)
+                UiJapaneseRadioButton.IsChecked = normalized == UiLanguageResources.Japanese;
+        }
+        finally
+        {
+            _syncingUiLanguage = false;
+        }
+
+        if (UiLanguageStatusText is not null)
+        {
+            UiLanguageStatusText.Text = UiLanguageResources.Text(
+                normalized == UiLanguageResources.Japanese
+                    ? "UiLanguageAppliedJapanese"
+                    : "UiLanguageAppliedEnglish");
+        }
+
+        SetModalEdgeNavigationPercent(_modalEdgeNavigationPercent, persist: false);
+        SyncFavoriteFilterControls();
+        RefreshLandingFolderSetUi();
+        if (_dirtyThumbnailStatusBorderPreferences == ThumbnailStatusBorderDirtyPreferences.None)
+            RefreshThumbnailStatusBorderIdleText();
+        ApplyKeyBindingTooltips();
+        if (changed && persist)
+            SaveState();
+        return changed;
+    }
+
+    private void ModalEdgeNavigationSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_initializing || _syncingModalEdgeNavigationPercent)
+            return;
+        SetModalEdgeNavigationPercent(e.NewValue, persist: true);
+    }
+
+    private bool SetModalEdgeNavigationPercent(double value, bool persist)
+    {
+        double normalized = Math.Clamp(
+            Math.Round(double.IsFinite(value) ? value : ModalEdgeNavigationDefaultPercent),
+            ModalEdgeNavigationMinPercent,
+            ModalEdgeNavigationMaxPercent);
+        bool changed = Math.Abs(normalized - _modalEdgeNavigationPercent) >= 0.01;
+        _modalEdgeNavigationPercent = normalized;
+
+        _syncingModalEdgeNavigationPercent = true;
+        try
+        {
+            if (ModalEdgeNavigationSlider is not null
+                && Math.Abs(ModalEdgeNavigationSlider.Value - normalized) >= 0.01)
+            {
+                ModalEdgeNavigationSlider.Value = normalized;
+            }
+            if (ModalEdgeNavigationValueText is not null)
+                ModalEdgeNavigationValueText.Text = UiLanguageResources.Format("UiModalEdgeEachSideFormat", normalized.ToString("0"));
+        }
+        finally
+        {
+            _syncingModalEdgeNavigationPercent = false;
+        }
+
+        double center = Math.Max(0, 100 - (normalized * 2));
+        ModalPreviousZoneColumn.Width = new GridLength(normalized, GridUnitType.Star);
+        ModalCenterZoneColumn.Width = new GridLength(center, GridUnitType.Star);
+        ModalNextZoneColumn.Width = new GridLength(normalized, GridUnitType.Star);
+
+        if (changed && persist)
+            SaveState();
+        return changed;
+    }
+
     private void SetShowUnseenDots(bool enabled, bool persist)
     {
         _showUnseenDots = enabled;
@@ -7187,10 +7553,10 @@ public partial class MainWindow : Window
             return;
 
         FavoriteFilterSummary.Text = favoritesOnly
-            ? (_favoriteFilterLevels.Count == 0 ? "All ratings" : string.Join(" + ", _favoriteFilterLevels.OrderBy(static level => level).Select(static level => $"Lv {level}")))
+            ? (_favoriteFilterLevels.Count == 0 ? UiLanguageResources.Text("UiAllRatings") : string.Join(" + ", _favoriteFilterLevels.OrderBy(static level => level).Select(static level => $"Lv {level}")))
             : unfavoriteOnly
-                ? "Unrated only"
-                : "All ratings";
+                ? UiLanguageResources.Text("UiUnratedOnly")
+                : UiLanguageResources.Text("UiAllRatings");
     }
 
     private void SyncFavoriteFilterLevelsFromControls()
@@ -7373,9 +7739,9 @@ public partial class MainWindow : Window
             tile.Fav = nextLevels[key];
         }
 
-        RefreshFavoriteMutationSurface();
+        RefreshFavoriteMutationSurface(selected);
         SaveState();
-        SetStatusToast(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
+        SetTransientStatusToast(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
         return true;
     }
 
@@ -7440,7 +7806,7 @@ public partial class MainWindow : Window
         }
 
         tile.Fav = clamped;
-        RefreshFavoriteMutationSurface();
+        RefreshFavoriteMutationSurface([tile]);
 
         SaveState();
         return true;
@@ -7458,6 +7824,7 @@ public partial class MainWindow : Window
 
         _favoriteSaveAttemptCount++;
         SharedStoreWriter<FavoriteDelta> writer = EnsureFavoriteWriter();
+        var changedTiles = new List<Tile>(changes.Count);
         foreach ((Tile tile, int requestedLevel) in changes)
         {
             int desired = Math.Clamp(requestedLevel, 0, 5);
@@ -7474,12 +7841,13 @@ public partial class MainWindow : Window
             else
                 _favorites.Remove(key);
             tile.Fav = desired;
+            changedTiles.Add(tile);
             writer.Enqueue(new FavoriteDelta(key, durable, desired, generation));
         }
 
-        RefreshFavoriteMutationSurface();
+        RefreshFavoriteMutationSurface(changedTiles);
         SaveState();
-        SetStatusToast($"{successMessage} Saving...");
+        SetTransientStatusToast($"{successMessage} Saving...");
         ScheduleFavoriteWriterPump();
         return true;
     }
@@ -9351,12 +9719,12 @@ public partial class MainWindow : Window
         if (_adaptiveWorkbench)
         {
             NarrowSidebarRail.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
-            SidebarCol.Width = show ? new GridLength(240) : new GridLength(44);
+            SidebarCol.Width = show ? new GridLength(WideSidebarWidth) : new GridLength(CompactSidebarRailWidth);
             _sidebarVisibleBeforeAdaptive = show;
         }
         else
         {
-            SidebarCol.Width = show ? new GridLength(240) : new GridLength(0);
+            SidebarCol.Width = show ? new GridLength(WideSidebarWidth) : new GridLength(0);
         }
         ToggleSidebar.Style = (Style)FindResource(show ? "IconButtonActive" : "IconButton");
         ToggleSidebar.ToolTip = show ? "Hide sidebar" : "Show sidebar";
@@ -9412,12 +9780,13 @@ public partial class MainWindow : Window
             Grid.SetColumnSpan(RightPanel, 3);
             RightPanel.BorderThickness = new Thickness(0, 1, 0, 0);
             WorkbenchPreviewSplitterRow.Height = open ? new GridLength(6) : new GridLength(0);
-            WorkbenchPreviewRow.Height = open ? new GridLength(AdaptivePreviewHeight) : new GridLength(0);
+            WorkbenchPreviewRow.Height = open ? new GridLength(CurrentAdaptivePreviewHeight()) : new GridLength(0);
             RightSplitterCol.Width = new GridLength(0);
             RightCol.MinWidth = 0;
             RightCol.MaxWidth = MaxRightPanelWidth;
             RightCol.Width = new GridLength(0);
-            PreviewImageCanvas.Height = 180;
+            PreviewImageCanvas.Height = CurrentAdaptivePreviewImageHeight();
+            PreviewBitmap.Stretch = Stretch.Uniform;
             return;
         }
 
@@ -9442,13 +9811,21 @@ public partial class MainWindow : Window
         RightCol.MaxWidth = MaxRightPanelWidth;
         RightCol.Width = open ? new GridLength(_rightPanelWidth) : new GridLength(0);
         PreviewImageCanvas.Height = 320;
+        PreviewBitmap.Stretch = Stretch.UniformToFill;
     }
 
     private void ApplyAdaptiveWorkbenchLayout(double width, bool preserveGridAnchor = true)
     {
-        bool adaptive = double.IsFinite(width) && width <= AdaptiveWorkbenchThreshold;
+        bool adaptive = double.IsFinite(width) && width < AdaptiveWorkbenchThreshold;
         if (adaptive == _adaptiveWorkbench)
+        {
+            if (adaptive && RightPanel.Visibility == Visibility.Visible)
+            {
+                WorkbenchPreviewRow.Height = new GridLength(CurrentAdaptivePreviewHeight());
+                PreviewImageCanvas.Height = CurrentAdaptivePreviewImageHeight();
+            }
             return;
+        }
 
         GridZoomAnchor? anchor = preserveGridAnchor ? CaptureGridZoomAnchor() : null;
         if (adaptive)
@@ -9457,16 +9834,20 @@ public partial class MainWindow : Window
             _adaptiveWorkbench = true;
             Sidebar.Visibility = Visibility.Collapsed;
             NarrowSidebarRail.Visibility = Visibility.Visible;
-            SidebarCol.Width = new GridLength(44);
-            SearchBoxContainer.MaxWidth = 300;
+            SidebarCol.Width = new GridLength(CompactSidebarRailWidth);
+            SearchBoxContainer.MaxWidth = 360;
+            ViewerShortcutsButton.Visibility = Visibility.Collapsed;
+            OpenAppSettingsButton.Visibility = Visibility.Collapsed;
         }
         else
         {
             _adaptiveWorkbench = false;
             NarrowSidebarRail.Visibility = Visibility.Collapsed;
             Sidebar.Visibility = _sidebarVisibleBeforeAdaptive ? Visibility.Visible : Visibility.Collapsed;
-            SidebarCol.Width = _sidebarVisibleBeforeAdaptive ? new GridLength(240) : new GridLength(0);
-            SearchBoxContainer.MaxWidth = 720;
+            SidebarCol.Width = _sidebarVisibleBeforeAdaptive ? new GridLength(WideSidebarWidth) : new GridLength(0);
+            SearchBoxContainer.MaxWidth = 480;
+            ViewerShortcutsButton.Visibility = Visibility.Visible;
+            OpenAppSettingsButton.Visibility = Visibility.Visible;
         }
 
         bool rightOpen = RightPanel.Visibility == Visibility.Visible;
@@ -9476,6 +9857,25 @@ public partial class MainWindow : Window
         if (preserveGridAnchor)
             ScheduleGridGeometryAnchorRestore(anchor);
     }
+
+    private double CurrentAdaptivePreviewHeight()
+    {
+        double availableHeight = ActualHeight;
+        if (!double.IsFinite(availableHeight) || availableHeight <= 0)
+            availableHeight = Height;
+        if (!double.IsFinite(availableHeight) || availableHeight <= 0)
+            availableHeight = MinHeight;
+        return Math.Clamp(
+            Math.Round(availableHeight * AdaptivePreviewHeightRatio),
+            AdaptivePreviewMinHeight,
+            AdaptivePreviewMaxHeight);
+    }
+
+    private double CurrentAdaptivePreviewImageHeight()
+        => Math.Clamp(
+            CurrentAdaptivePreviewHeight() - 124,
+            72,
+            112);
 
     private static double NormalizeRightPanelWidth(double width)
         => double.IsFinite(width) ? Math.Clamp(width, MinRightPanelWidth, MaxRightPanelWidth) : DefaultRightPanelWidth;
@@ -10278,7 +10678,11 @@ public partial class MainWindow : Window
         UpdateModalFit();
         ScheduleModalFitUpdate();
         if (opening)
+        {
+            _modalHasPointerPosition = false;
+            _modalPressedEdgeTarget = ModalEdgeTarget.None;
             SetModalChromeVisible(true, showFeedback: false);
+        }
         SyncModalFilmstripSelection(t);
         SyncModalMetadataSidebar();
         watch.Stop();
@@ -10463,25 +10867,24 @@ public partial class MainWindow : Window
 
     private void ModalBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // Image and empty preview surfaces share the same chrome toggle. Edge
-        // zones and controls retain their own routed interactions; preview is
-        // closed explicitly with Esc, the preview close button, or a downward
-        // swipe.
-        if (TryToggleModalChromeFromSurface(e.OriginalSource))
-        {
+        // The transformed image and chrome handle their own clicks. Every
+        // remaining point on the black canvas returns to the gallery.
+        Point position = e.GetPosition(ModalImageArea);
+        if (TryCloseModalFromEmptySurface(e.OriginalSource as DependencyObject, position))
             e.Handled = true;
-        }
     }
 
-    private bool TryToggleModalChromeFromSurface(object? hitTarget)
+    private bool TryCloseModalFromEmptySurface(DependencyObject? hitTarget, Point position)
     {
         if (Modal.Visibility != Visibility.Visible
-            || (!ReferenceEquals(hitTarget, Modal) && !ReferenceEquals(hitTarget, ModalImageArea)))
+            || _modalPointerState == ModalPointerState.Panning
+            || IsModalChromeInteractionTarget(hitTarget)
+            || IsPointInsideTransformedModalImage(position))
         {
             return false;
         }
 
-        ScheduleModalChromeToggle();
+        CloseModal(restoreFocus: true);
         return true;
     }
 
@@ -11035,6 +11438,10 @@ public partial class MainWindow : Window
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
         _modalChromeTransientTimer.Stop();
+        _modalHasPointerPosition = false;
+        _modalPressedEdgeTarget = ModalEdgeTarget.None;
+        _modalChromePointerPressActive = false;
+        EndModalTransformInteraction();
         UpdateModalEnhancedControls(false);
         UpdateModalEnhancementActionControls();
         SetModalChromeVisible(true, showFeedback: false);
@@ -11075,24 +11482,36 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private bool AdjustModalZoom(double multiplier)
+    private bool AdjustModalZoom(double multiplier, Point? anchor = null)
     {
         if (Modal.Visibility != Visibility.Visible || multiplier <= 0)
             return false;
 
-        return SetModalZoom(_modalZoom * multiplier);
+        return SetModalZoom(_modalZoom * multiplier, anchor);
     }
 
-    private bool SetModalZoom(double zoom)
+    private bool SetModalZoom(double zoom, Point? anchor = null, bool animate = true)
     {
         double next = Math.Clamp(zoom, ModalZoomMin, ModalZoomMax);
         if (Math.Abs(next - _modalZoom) < 0.0001)
             return false;
 
+        double previous = _modalZoom;
+        if (anchor.HasValue && ModalImage.ActualWidth > 0 && ModalImage.ActualHeight > 0)
+        {
+            Point point = anchor.Value;
+            double offsetX = point.X - (ModalImage.ActualWidth / 2);
+            double offsetY = point.Y - (ModalImage.ActualHeight / 2);
+            double previousScaleX = _modalFlipped ? -previous : previous;
+            double nextScaleX = _modalFlipped ? -next : next;
+            _modalPanX += offsetX * (previousScaleX - nextScaleX);
+            _modalPanY += offsetY * (previous - next);
+        }
+
         _modalZoom = next;
         ClampModalPan();
-        UpdateModalTransform();
-        RevealModalChromeTransient();
+        BeginModalTransformInteraction();
+        UpdateModalTransform(animate);
         return true;
     }
 
@@ -11107,8 +11526,7 @@ public partial class MainWindow : Window
         _modalPanX = 0;
         _modalPanY = 0;
         _modalTransformPath = path;
-        UpdateModalTransform();
-        ScheduleModalFitUpdate();
+        UpdateModalTransform(animate: showFeedback);
         return changed;
     }
 
@@ -11125,6 +11543,7 @@ public partial class MainWindow : Window
 
         _modalPanX = nextX;
         _modalPanY = nextY;
+        BeginModalTransformInteraction();
         UpdateModalTransform();
         return true;
     }
@@ -11150,22 +11569,67 @@ public partial class MainWindow : Window
         _modalPanY = Math.Clamp(_modalPanY, -maxY, maxY);
     }
 
-    private void UpdateModalTransform()
+    private void UpdateModalTransform(bool animate = false)
     {
         if (ModalVisualTransform is not null)
         {
-            ModalVisualTransform.ScaleX = _modalFlipped ? -_modalZoom : _modalZoom;
-            ModalVisualTransform.ScaleY = _modalZoom;
+            SetAnimatedTransformValue(
+                ModalVisualTransform,
+                ScaleTransform.ScaleXProperty,
+                _modalFlipped ? -_modalZoom : _modalZoom,
+                animate);
+            SetAnimatedTransformValue(
+                ModalVisualTransform,
+                ScaleTransform.ScaleYProperty,
+                _modalZoom,
+                animate);
         }
 
         if (ModalPanTransform is not null)
         {
-            ModalPanTransform.X = _modalPanX;
-            ModalPanTransform.Y = _modalPanY;
+            SetAnimatedTransformValue(ModalPanTransform, TranslateTransform.XProperty, _modalPanX, animate);
+            SetAnimatedTransformValue(ModalPanTransform, TranslateTransform.YProperty, _modalPanY, animate);
         }
 
         if (ModalZoomLabel is not null)
             ModalZoomLabel.Text = $"{Math.Round(_modalFitScale * _modalZoom * 100):0}%";
+        if (ModalImageArea is not null)
+            UpdateModalEdgeNavigationPresentation();
+    }
+
+    private static void SetAnimatedTransformValue(
+        Animatable target,
+        DependencyProperty property,
+        double value,
+        bool animate)
+    {
+        double current = target.GetValue(property) is double existing ? existing : value;
+        target.BeginAnimation(property, null);
+        target.SetValue(property, value);
+        if (!animate || !double.IsFinite(current) || Math.Abs(current - value) < 0.0001)
+            return;
+
+        var motion = new DoubleAnimation(current, value, TimeSpan.FromMilliseconds(ModalTransformAnimationMilliseconds))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+            FillBehavior = FillBehavior.Stop,
+        };
+        target.BeginAnimation(property, motion, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void BeginModalTransformInteraction()
+    {
+        if (ModalBitmap is not null)
+            RenderOptions.SetBitmapScalingMode(ModalBitmap, BitmapScalingMode.Linear);
+        _modalTransformQualityTimer.Stop();
+        _modalTransformQualityTimer.Start();
+    }
+
+    private void EndModalTransformInteraction()
+    {
+        _modalTransformQualityTimer.Stop();
+        if (ModalBitmap is not null)
+            RenderOptions.SetBitmapScalingMode(ModalBitmap, BitmapScalingMode.HighQuality);
     }
 
     private void ScheduleModalFitUpdate()
@@ -11188,12 +11652,9 @@ public partial class MainWindow : Window
         double sourceHeight = tile.ImagePixelHeight > 0 ? tile.ImagePixelHeight : ModalBitmap.Source?.Height ?? 640;
         double oldEffectiveScale = _modalFitScale * _modalZoom;
         bool preserveUserZoom = Math.Abs(_modalZoom - 1) > 0.0001;
-        double metadataWidth = ModalMetadataSidebar.Visibility == Visibility.Visible
-            ? ModalMetadataSidebar.Width + ModalMetadataSidebar.Margin.Right + 12
-            : 0;
         double areaWidth = ModalImageArea.ActualWidth > 0 ? ModalImageArea.ActualWidth : Modal.ActualWidth;
         double areaHeight = ModalImageArea.ActualHeight > 0 ? ModalImageArea.ActualHeight : Modal.ActualHeight;
-        double availableWidth = Math.Max(1, areaWidth - metadataWidth);
+        double availableWidth = Math.Max(1, areaWidth);
         double availableHeight = Math.Max(1, areaHeight);
         _modalFitScale = Math.Min(availableWidth / sourceWidth, availableHeight / sourceHeight);
         ModalImage.Width = Math.Max(1, sourceWidth * _modalFitScale);
@@ -11218,6 +11679,10 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible)
             return;
 
+        // Image interaction is immersive from pointer-down, not after the
+        // button-up gesture has already completed.
+        SetModalChromeVisible(false, showFeedback: false);
+        BeginModalPointerInteraction();
         Point start = e.GetPosition(ModalImage);
         _modalPointerStartPoint = start;
         _modalPointerMoved = false;
@@ -11250,6 +11715,8 @@ public partial class MainWindow : Window
             || Math.Abs(delta.Y) >= SystemParameters.MinimumVerticalDragDistance)
         {
             _modalPointerMoved = true;
+            if (_modalZoom > 1 && _modalPanStartPoint.HasValue)
+                BeginModalPanning();
         }
 
         if (_modalZoom > 1 && _modalPanStartPoint.HasValue)
@@ -11264,14 +11731,13 @@ public partial class MainWindow : Window
     {
         Point end = e.GetPosition(ModalImage);
         Point? start = _modalPointerStartPoint;
-        bool zoomed = _modalZoom > 1;
         bool moved = _modalPointerMoved;
         EndModalPointerGesture();
-        if (!zoomed && start.HasValue)
+        if (start.HasValue)
         {
             Vector delta = end - start.Value;
             if (!TryNavigateModalSwipe(delta) && !moved)
-                ScheduleModalChromeToggle();
+                HideModalChromeFromImage();
         }
         e.Handled = true;
     }
@@ -11287,9 +11753,19 @@ public partial class MainWindow : Window
 
     private void EndModalPointerGesture()
     {
+        bool wasPanning = _modalPointerState == ModalPointerState.Panning;
         _modalPointerStartPoint = null;
         _modalPointerMoved = false;
         EndModalPan();
+        if (wasPanning)
+        {
+            _modalPointerState = ModalPointerState.Hidden;
+            UpdateModalChromePresentation();
+        }
+        else
+        {
+            EndModalPointerInteraction();
+        }
     }
 
     private bool TryNavigateModalSwipe(Vector delta)
@@ -11318,26 +11794,13 @@ public partial class MainWindow : Window
         return NavigateModal(delta.X < 0 ? 1 : -1);
     }
 
-    private void ScheduleModalChromeToggle()
+    private void HideModalChromeFromImage()
     {
-        if (Modal.Visibility != Visibility.Visible || _modalZoom > 1)
+        if (Modal.Visibility != Visibility.Visible)
             return;
 
-        long generation = ++_modalSingleClickGeneration;
-        Func<Task> toggleAsync = async () =>
-        {
-            await Task.Delay(180);
-            if (generation == _modalSingleClickGeneration
-                && Modal.Visibility == Visibility.Visible
-                && _modalZoom <= 1)
-            {
-                SetModalChromeVisible(!_modalManualChromeVisible, showFeedback: true);
-            }
-        };
-        _modalSingleClickToggleTask = Dispatcher
-            .InvokeAsync(toggleAsync, DispatcherPriority.Background)
-            .Task
-            .Unwrap();
+        CancelPendingModalSingleClick();
+        SetModalChromeVisible(false, showFeedback: false);
     }
 
     private void CancelPendingModalSingleClick() => _modalSingleClickGeneration++;
@@ -11348,6 +11811,14 @@ public partial class MainWindow : Window
         _modalManualChromeVisible = visible;
         _modalTransientChromeVisible = false;
         _modalFilmstripHoverVisible = false;
+        _modalPointerState = visible ? ModalPointerState.Visible : ModalPointerState.Hidden;
+        _modalPressedEdgeTarget = ModalEdgeTarget.None;
+        _modalChromePointerPressActive = false;
+        if (!visible)
+        {
+            _modalFeedbackTimer.Stop();
+            ModalInteractionFeedback.Visibility = Visibility.Collapsed;
+        }
         UpdateModalChromePresentation();
         if (showFeedback)
             ShowModalInteractionFeedback(visible ? "Controls shown" : "Controls hidden");
@@ -11357,14 +11828,17 @@ public partial class MainWindow : Window
 
     private void RevealModalChromeTransient()
     {
-        if (Modal.Visibility != Visibility.Visible || _modalManualChromeVisible)
+        if (Modal.Visibility != Visibility.Visible
+            || _modalManualChromeVisible
+            || _modalPointerState == ModalPointerState.Panning)
             return;
 
         if (!_modalTransientChromeVisible)
         {
             _modalTransientChromeVisible = true;
-            UpdateModalChromePresentation();
         }
+        _modalPointerState = ModalPointerState.ArmedToHide;
+        UpdateModalChromePresentation();
         _modalChromeTransientTimer.Stop();
         _modalChromeTransientTimer.Start();
     }
@@ -11372,10 +11846,107 @@ public partial class MainWindow : Window
     private void ExpireModalChromeTransient()
     {
         _modalChromeTransientTimer.Stop();
+        if (_modalPointerState is ModalPointerState.Interacting or ModalPointerState.Panning)
+            return;
         if (!_modalTransientChromeVisible)
             return;
         _modalTransientChromeVisible = false;
+        _modalFilmstripHoverVisible = false;
+        _modalPointerState = _modalManualChromeVisible
+            ? ModalPointerState.Visible
+            : ModalPointerState.Hidden;
         UpdateModalChromePresentation();
+    }
+
+    private void BeginModalPointerInteraction()
+    {
+        if (Modal.Visibility != Visibility.Visible || _modalPointerState == ModalPointerState.Panning)
+            return;
+
+        _modalChromeTransientTimer.Stop();
+        _modalPointerState = ModalPointerState.Interacting;
+        UpdateModalEdgeNavigationPresentation();
+    }
+
+    private void EndModalPointerInteraction()
+    {
+        if (_modalPointerState != ModalPointerState.Interacting)
+            return;
+
+        if (_modalManualChromeVisible)
+        {
+            _modalPointerState = ModalPointerState.Visible;
+            _modalChromeTransientTimer.Stop();
+        }
+        else if (_modalTransientChromeVisible)
+        {
+            _modalPointerState = ModalPointerState.ArmedToHide;
+            _modalChromeTransientTimer.Stop();
+            _modalChromeTransientTimer.Start();
+        }
+        else
+        {
+            _modalPointerState = ModalPointerState.Hidden;
+        }
+        UpdateModalChromePresentation();
+    }
+
+    private void BeginModalPanning()
+    {
+        if (Modal.Visibility != Visibility.Visible || _modalPointerState == ModalPointerState.Panning)
+            return;
+
+        _modalChromeTransientTimer.Stop();
+        _modalManualChromeVisible = false;
+        _modalTransientChromeVisible = false;
+        _modalFilmstripHoverVisible = false;
+        _modalPressedEdgeTarget = ModalEdgeTarget.None;
+        _modalPointerState = ModalPointerState.Panning;
+        UpdateModalChromePresentation();
+    }
+
+    private void Modal_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || e.ChangedButton != MouseButton.Left
+            || e.OriginalSource is not DependencyObject source
+            || !IsModalChromeInteractionTarget(source))
+        {
+            return;
+        }
+
+        _modalChromePointerPressActive = true;
+        _modalPressedEdgeTarget = IsDescendantOrSelf(source, ModalPreviousButton)
+            ? ModalEdgeTarget.Previous
+            : IsDescendantOrSelf(source, ModalNextButton)
+                ? ModalEdgeTarget.Next
+                : ModalEdgeTarget.None;
+        BeginModalPointerInteraction();
+    }
+
+    private void Modal_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || !_modalChromePointerPressActive)
+            return;
+
+        _modalChromePointerPressActive = false;
+        Dispatcher.BeginInvoke(() =>
+        {
+            _modalPressedEdgeTarget = ModalEdgeTarget.None;
+            if (Modal.Visibility != Visibility.Visible || _modalPointerState == ModalPointerState.Panning)
+                return;
+
+            if (Mouse.DirectlyOver is DependencyObject target
+                && (IsModalChromeInteractionTarget(target) || IsModalChromeCaptureActive()))
+            {
+                BeginModalPointerInteraction();
+            }
+            else
+            {
+                EndModalPointerInteraction();
+            }
+            UpdateModalEdgeNavigationPresentation();
+        }, DispatcherPriority.Input);
     }
 
     private void Modal_PreviewMouseMove(object sender, MouseEventArgs e)
@@ -11383,17 +11954,66 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible)
             return;
 
-        RevealModalChromeTransient();
-        Point position = e.GetPosition(Modal);
+        Point position = e.GetPosition(ModalImageArea);
+        _modalHasPointerPosition = double.IsFinite(position.X) && double.IsFinite(position.Y);
+        if (_modalHasPointerPosition)
+            _modalLastPointerPosition = position;
+
+        if (_modalPointerState == ModalPointerState.Panning)
+        {
+            SetModalFilmstripHoverVisible(false);
+            UpdateModalEdgeNavigationPresentation();
+            return;
+        }
+
+        if (_modalPointerStartPoint.HasValue)
+        {
+            BeginModalPointerInteraction();
+            SetModalFilmstripHoverVisible(false);
+            return;
+        }
+
+        bool overChrome = e.OriginalSource is DependencyObject target
+            && IsModalChromeInteractionTarget(target);
+        if (!overChrome)
+            overChrome = IsModalChromeCaptureActive();
+
+        if (!_modalManualChromeVisible && !_modalTransientChromeVisible)
+            RevealModalChromeTransient();
+        else if (!_modalManualChromeVisible && _modalTransientChromeVisible && !overChrome)
+            RevealModalChromeTransient();
+
+        if (overChrome)
+            BeginModalPointerInteraction();
+        else if (_modalPointerState == ModalPointerState.Interacting)
+            EndModalPointerInteraction();
+        else if (_modalManualChromeVisible)
+            _modalPointerState = ModalPointerState.Visible;
+
+        Point modalPosition = e.GetPosition(Modal);
         SetModalFilmstripHoverVisible(
-            position.Y >= Math.Max(0, Modal.ActualHeight - ModalFilmstripHoverZone)
-            && position.Y <= Modal.ActualHeight);
+            modalPosition.Y >= Math.Max(0, Modal.ActualHeight - ModalFilmstripHoverZone)
+            && modalPosition.Y <= Modal.ActualHeight);
+        UpdateModalEdgeNavigationPresentation();
     }
 
-    private void Modal_MouseLeave(object sender, MouseEventArgs e) => SetModalFilmstripHoverVisible(false);
+    private void Modal_MouseLeave(object sender, MouseEventArgs e)
+    {
+        _modalHasPointerPosition = false;
+        SetModalFilmstripHoverVisible(false);
+        if (!_modalChromePointerPressActive
+            && !_modalPointerStartPoint.HasValue
+            && !IsModalChromeCaptureActive())
+        {
+            EndModalPointerInteraction();
+        }
+        UpdateModalEdgeNavigationPresentation();
+    }
 
     private void SetModalFilmstripHoverVisible(bool visible)
     {
+        if (_modalPointerState == ModalPointerState.Panning)
+            visible = false;
         if (_modalFilmstripHoverVisible == visible)
             return;
         _modalFilmstripHoverVisible = visible;
@@ -11484,32 +12104,267 @@ public partial class MainWindow : Window
     private void UpdateModalFilmstripPresentation()
     {
         bool layoutVisible = _modalManualChromeVisible && _modalFilmstripOpen;
-        bool overlayVisible = _modalFilmstripHoverVisible && !layoutVisible;
-        bool layoutChanged = (ModalFilmstripLayout.Visibility == Visibility.Visible) != layoutVisible;
-        ModalFilmstripLayout.Visibility = layoutVisible ? Visibility.Visible : Visibility.Collapsed;
-        ModalFilmstripOverlay.Visibility = overlayVisible ? Visibility.Visible : Visibility.Collapsed;
-        ModalFooter.Margin = new Thickness(0, 0, 0, layoutVisible || overlayVisible ? 146 : 10);
+        bool overlayVisible = _modalFilmstripOpen
+            && _modalFilmstripHoverVisible
+            && !layoutVisible
+            && _modalPointerState != ModalPointerState.Panning;
+        SetModalChromeElementVisibility(ModalFilmstripLayout, layoutVisible, animateReveal: false);
+        SetModalChromeElementVisibility(ModalFilmstripOverlay, overlayVisible, animateReveal: true);
         ModalFilmstripToggleButton.ToolTip = $"{(_modalFilmstripOpen ? "Hide" : "Show")} image filmstrip ({BindingText(ViewerKeyAction.ToggleModalFilmstrip)})";
         AutomationProperties.SetName(ModalFilmstripToggleButton, $"{(_modalFilmstripOpen ? "Hide" : "Show")} image filmstrip");
         if (SelectedTile() is Tile selected)
             SyncModalFilmstripSelection(selected);
-        if (layoutChanged)
-            ScheduleModalFitUpdate();
+    }
+
+    private bool IsModalChromeCaptureActive()
+        => Mouse.Captured is DependencyObject captured
+            && IsModalChromeInteractionTarget(captured);
+
+    private bool IsModalChromeInteractionTarget(DependencyObject? target)
+    {
+        if (target is null)
+            return false;
+
+        return IsDescendantOrSelf(target, ModalWindowCaptionControls)
+            || IsDescendantOrSelf(target, ModalTopBarSurface)
+            || IsDescendantOrSelf(target, ModalTopBar)
+            || IsDescendantOrSelf(target, ModalMetadataSidebar)
+            || IsDescendantOrSelf(target, ModalFooter)
+            || IsDescendantOrSelf(target, ModalFilmstripOverlay)
+            || IsDescendantOrSelf(target, ModalFilmstripLayout)
+            || IsDescendantOrSelf(target, ModalPreviousButton)
+            || IsDescendantOrSelf(target, ModalNextButton);
+    }
+
+    private bool TryGetTransformedModalImageRectangle(out Rect imageRectangle)
+    {
+        imageRectangle = Rect.Empty;
+        if (ModalImageArea.ActualWidth <= 0
+            || ModalImageArea.ActualHeight <= 0
+            || ModalImage.ActualWidth <= 0
+            || ModalImage.ActualHeight <= 0
+            || ModalVisual.RenderSize.Width <= 0
+            || ModalVisual.RenderSize.Height <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            imageRectangle = ModalVisual
+                .TransformToAncestor(ModalImageArea)
+                .TransformBounds(new Rect(new Point(0, 0), ModalVisual.RenderSize));
+            Rect imageClip = ModalImage
+                .TransformToAncestor(ModalImageArea)
+                .TransformBounds(new Rect(new Point(0, 0), ModalImage.RenderSize));
+            imageRectangle.Intersect(imageClip);
+            imageRectangle.Intersect(new Rect(0, 0, ModalImageArea.ActualWidth, ModalImageArea.ActualHeight));
+            return !imageRectangle.IsEmpty
+                && imageRectangle.Width > 0
+                && imageRectangle.Height > 0;
+        }
+        catch (InvalidOperationException)
+        {
+            imageRectangle = Rect.Empty;
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            imageRectangle = Rect.Empty;
+            return false;
+        }
+    }
+
+    private bool IsPointInsideTransformedModalImage(Point point)
+        => TryGetTransformedModalImageRectangle(out Rect imageRectangle)
+            && imageRectangle.Contains(point);
+
+    private ModalEdgeTarget ResolveModalEdgeTarget(Point point)
+    {
+        if (_modalPointerState == ModalPointerState.Panning
+            || _modalEdgeNavigationPercent <= 0
+            || ModalImageArea.ActualWidth <= 0
+            || !TryGetTransformedModalImageRectangle(out Rect imageRectangle)
+            || !imageRectangle.Contains(point))
+        {
+            return ModalEdgeTarget.None;
+        }
+
+        double edgeWidth = ModalImageArea.ActualWidth * (_modalEdgeNavigationPercent / 100d);
+        if (point.X <= edgeWidth)
+            return ModalEdgeTarget.Previous;
+        if (point.X >= ModalImageArea.ActualWidth - edgeWidth)
+            return ModalEdgeTarget.Next;
+        return ModalEdgeTarget.None;
+    }
+
+    private bool TryFindModalBlackCanvasPoint(out Point point)
+    {
+        point = default;
+        if (!TryGetTransformedModalImageRectangle(out Rect imageRectangle))
+            return false;
+
+        double width = ModalImageArea.ActualWidth;
+        double height = ModalImageArea.ActualHeight;
+        Point[] candidates =
+        [
+            new Point(1, height / 2),
+            new Point(Math.Max(1, width - 1), height / 2),
+            new Point(width / 2, 1),
+            new Point(width / 2, Math.Max(1, height - 1)),
+        ];
+        foreach (Point candidate in candidates)
+        {
+            if (candidate.X >= 0
+                && candidate.X <= width
+                && candidate.Y >= 0
+                && candidate.Y <= height
+                && !imageRectangle.Contains(candidate))
+            {
+                point = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void UpdateModalEdgeNavigationPresentation()
+    {
+        bool chromeVisible = ModalChromeEffectivelyVisible
+            && _modalPointerState != ModalPointerState.Panning;
+        bool hasImageRectangle = TryGetTransformedModalImageRectangle(out Rect imageRectangle);
+        ModalEdgeTarget target = _modalPressedEdgeTarget != ModalEdgeTarget.None
+            ? _modalPressedEdgeTarget
+            : _modalHasPointerPosition
+                ? ResolveModalEdgeTarget(_modalLastPointerPosition)
+                : ModalEdgeTarget.None;
+
+        SetModalEdgeButtonPresentation(
+            ModalPreviousButton,
+            chromeVisible,
+            target == ModalEdgeTarget.Previous,
+            hasImageRectangle ? imageRectangle : null);
+        SetModalEdgeButtonPresentation(
+            ModalNextButton,
+            chromeVisible,
+            target == ModalEdgeTarget.Next,
+            hasImageRectangle ? imageRectangle : null);
+    }
+
+    private static void SetModalEdgeButtonPresentation(
+        Button button,
+        bool chromeVisible,
+        bool active,
+        Rect? imageRectangle)
+    {
+        const double activeOpacity = 0.78;
+        bool wasActive = button.Visibility == Visibility.Visible && button.IsHitTestVisible;
+        if (!chromeVisible)
+        {
+            button.BeginAnimation(OpacityProperty, null);
+            button.Opacity = 0;
+            button.IsHitTestVisible = false;
+            KeyboardNavigation.SetIsTabStop(button, false);
+            button.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        button.Visibility = Visibility.Visible;
+        if (imageRectangle is Rect image)
+        {
+            button.VerticalAlignment = VerticalAlignment.Top;
+            button.Height = Math.Max(1, image.Height);
+            button.Margin = new Thickness(0, Math.Max(0, image.Top), 0, 0);
+        }
+        else
+        {
+            button.VerticalAlignment = VerticalAlignment.Stretch;
+            button.Height = double.NaN;
+            button.Margin = new Thickness(0);
+            active = false;
+        }
+
+        button.IsHitTestVisible = active;
+        KeyboardNavigation.SetIsTabStop(button, active);
+        if (!active)
+        {
+            if (wasActive || button.Opacity > 0)
+            {
+                button.BeginAnimation(OpacityProperty, null);
+                button.Opacity = 0;
+            }
+            return;
+        }
+
+        if (!wasActive)
+        {
+            button.BeginAnimation(OpacityProperty, null);
+            button.Opacity = activeOpacity;
+            button.BeginAnimation(
+                OpacityProperty,
+                new DoubleAnimation(0, activeOpacity, TimeSpan.FromMilliseconds(ModalChromeRevealAnimationMilliseconds))
+                {
+                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+                    FillBehavior = FillBehavior.Stop,
+                },
+                HandoffBehavior.SnapshotAndReplace);
+        }
+        else if (!button.HasAnimatedProperties)
+        {
+            button.Opacity = activeOpacity;
+        }
     }
 
     private void UpdateModalChromePresentation()
     {
-        Visibility visibility = ModalChromeEffectivelyVisible ? Visibility.Visible : Visibility.Collapsed;
-        ModalTopBar.Visibility = visibility;
-        ModalFooter.Visibility = visibility;
-        ModalZoomIndicator.Visibility = visibility;
-        ModalPreviousButton.Visibility = visibility;
-        ModalNextButton.Visibility = visibility;
+        bool visible = ModalChromeEffectivelyVisible;
+        bool animateReveal = visible && !_modalManualChromeVisible && _modalTransientChromeVisible;
+        SetModalChromeElementVisibility(ModalTopBarSurface, visible, animateReveal);
+        SetModalChromeElementVisibility(ModalTopBar, visible, animateReveal);
+        SetModalChromeElementVisibility(ModalFooter, visible, animateReveal);
+        SetModalChromeElementVisibility(ModalZoomIndicator, visible, animateReveal);
+        UpdateModalEdgeNavigationPresentation();
         UpdateModalFilmstripPresentation();
 
         bool cursorHidden = !ModalChromeEffectivelyVisible && ModalFilmstripOverlay.Visibility != Visibility.Visible;
         Modal.Cursor = cursorHidden ? Cursors.None : Cursors.Arrow;
         Modal.ForceCursor = cursorHidden;
+    }
+
+    private static void SetModalChromeElementVisibility(
+        UIElement element,
+        bool visible,
+        bool animateReveal)
+    {
+        if (!visible)
+        {
+            element.BeginAnimation(OpacityProperty, null);
+            element.Opacity = 1;
+            element.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        bool wasVisible = element.Visibility == Visibility.Visible;
+        element.Visibility = Visibility.Visible;
+        if (!animateReveal || wasVisible)
+        {
+            if (!wasVisible)
+            {
+                element.BeginAnimation(OpacityProperty, null);
+                element.Opacity = 1;
+            }
+            return;
+        }
+
+        element.Opacity = 1;
+        element.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation(0.2, 1, TimeSpan.FromMilliseconds(ModalChromeRevealAnimationMilliseconds))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop,
+            },
+            HandoffBehavior.SnapshotAndReplace);
     }
 
     private void ShowModalInteractionFeedback(string message)
@@ -11557,8 +12412,10 @@ public partial class MainWindow : Window
 
         if (Modal.Visibility == Visibility.Visible)
         {
+            bool chromeWasVisible = ModalChromeEffectivelyVisible;
             OpenModal();
-            ShowModalInteractionFeedback(delta > 0 ? "Next image" : "Previous image");
+            if (chromeWasVisible)
+                ShowModalInteractionFeedback(delta > 0 ? "Next image" : "Previous image");
         }
 
         return true;
@@ -11712,7 +12569,9 @@ public partial class MainWindow : Window
             AutomationProperties.SetHelpText(capture, $"{definition.HelpText} Activate, then press a new key combination.");
             var label = new TextBlock
             {
-                Text = definition.Label,
+                Text = definition.Label + (KeyBindingSettings.IsBrowserSharedAction(definition.Action)
+                    ? "  ·  Browser + WPF"
+                    : ""),
                 Foreground = (Brush)FindResource("TextSecondary"),
                 FontSize = 11.5,
                 TextWrapping = TextWrapping.Wrap,
@@ -11744,7 +12603,9 @@ public partial class MainWindow : Window
         _recordingKeyAction = null;
         _keyBindingCaptureError = null;
         _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
-        KeyBindingsStatusText.Text = "Choose an action to record a new key combination.";
+        KeyBindingsStatusText.Text = _sharedKeyBindingsProtected
+            ? $"Shared Browser/WPF shortcuts are protected. {_sharedKeyBindingsError}"
+            : "Browser-shared actions use one key; WPF-only actions may use key combinations.";
         RefreshKeyBindingEditor();
     }
 
@@ -11871,8 +12732,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        var previous = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
-        _keyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_draftKeyBindings);
+        var candidate = new Dictionary<ViewerKeyAction, KeyChord>(_draftKeyBindings);
+        if (!TryPersistSharedKeyBindings(candidate, out string? sharedError))
+        {
+            _sharedKeyBindingsProtected = true;
+            _sharedKeyBindingsError = sharedError;
+            KeyBindingsStatusText.Text = $"Shared Browser/WPF shortcuts were not changed. {sharedError}";
+            RefreshKeyBindingEditor();
+            return;
+        }
+
+        _sharedKeyBindingsProtected = false;
+        _sharedKeyBindingsError = null;
+        _keyBindings = candidate;
         SaveState();
         bool persisted = TryReadViewerStateFile(ResolvedStatePath, out ViewerState? savedState)
             && savedState is not null
@@ -11881,15 +12753,15 @@ public partial class MainWindow : Window
                 KeyBindingSettings.NormalizePersisted(savedState.KeyBindings, out _));
         if (!persisted)
         {
-            _keyBindings = previous;
-            KeyBindingsStatusText.Text = "Key bindings could not be saved. The draft is preserved; fix the local state error and retry.";
+            KeyBindingsStatusText.Text = "Shared Browser/WPF shortcuts are saved and active, but WPF-only shortcut state could not be saved. Fix the local state error and retry.";
+            ApplyKeyBindingTooltips();
             RefreshKeyBindingEditor();
             return;
         }
 
         _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
         _keyBindingCaptureError = null;
-        KeyBindingsStatusText.Text = "Key bindings saved and applied.";
+        KeyBindingsStatusText.Text = "Browser/WPF shortcuts saved and applied through shared settings.";
         ApplyKeyBindingTooltips();
         RefreshKeyBindingEditor();
     }
@@ -11902,28 +12774,105 @@ public partial class MainWindow : Window
             && second.TryGetValue(definition.Action, out KeyChord secondChord)
             && firstChord == secondChord);
 
+    private static bool TryPersistSharedKeyBindings(
+        IReadOnlyDictionary<ViewerKeyAction, KeyChord> bindings,
+        out string? error)
+    {
+        error = null;
+        IReadOnlyDictionary<string, string> browserBindings;
+        string path;
+        try
+        {
+            browserBindings = KeyBindingSettings.ToBrowserSharedBindings(bindings);
+            path = ThumbnailStatusBorderSettingsPath;
+        }
+        catch (Exception ex)
+        {
+            error = $"Shared settings path or shortcut mapping is unavailable: {ex.Message}";
+            return false;
+        }
+
+        string? operationError = null;
+        bool operationStarted = false;
+        bool saved = TryWithPersistenceLock(path, () =>
+        {
+            operationStarted = true;
+            if (!ThumbnailStatusBorderSettingsStore.TryReadExistingJson(
+                    path,
+                    out string? existingJson,
+                    out operationError))
+            {
+                return false;
+            }
+            if (!ThumbnailStatusBorderSettingsStore.TryMergeBrowserKeyBindings(
+                    existingJson,
+                    browserBindings,
+                    out string mergedJson,
+                    out operationError))
+            {
+                return false;
+            }
+
+            ThumbnailStatusBorderLoadResult parsed = ThumbnailStatusBorderSettingsStore.Parse(mergedJson);
+            if (parsed.IsProtected
+                || !KeyBindingSettings.TryApplyBrowserSharedBindings(
+                    bindings,
+                    parsed.BrowserKeyBindings,
+                    out Dictionary<ViewerKeyAction, KeyChord> roundTripped,
+                    out operationError))
+            {
+                operationError ??= parsed.Error ?? "The merged shared shortcut settings were invalid.";
+                return false;
+            }
+            IReadOnlyDictionary<string, string> roundTrippedBrowser =
+                KeyBindingSettings.ToBrowserSharedBindings(roundTripped);
+            if (browserBindings.Any(pair =>
+                    !roundTrippedBrowser.TryGetValue(pair.Key, out string? value)
+                    || !string.Equals(value, pair.Value, StringComparison.Ordinal)))
+            {
+                operationError = "Shared shortcut round-trip did not preserve the requested bindings.";
+                return false;
+            }
+            return TryWriteAtomicSharedJson(path, mergedJson, out operationError);
+        });
+
+        if (saved)
+            return true;
+        error = operationError ?? (operationStarted
+            ? "The shared shortcut settings write failed."
+            : "The shared settings file is busy. Try again.");
+        return false;
+    }
+
     private void ApplyKeyBindingTooltips()
     {
         if (ModalCloseBtn is null)
             return;
-        ModalCloseBtn.ToolTip = $"Close ({BindingText(ViewerKeyAction.CloseModal)})";
-        ModalPreviousButton.ToolTip = $"Previous image ({BindingText(ViewerKeyAction.PreviousImage)})";
-        ModalNextButton.ToolTip = $"Next image ({BindingText(ViewerKeyAction.NextImage)})";
-        ModalFavoriteDecreaseButton.ToolTip = $"Favorite -1 ({BindingText(ViewerKeyAction.FavoriteDecrease)})";
-        ModalFavoriteIncreaseButton.ToolTip = $"Favorite +1 ({BindingText(ViewerKeyAction.FavoriteIncrease)})";
-        FavoriteDecreaseButton.ToolTip = $"Favorite -1 ({BindingText(ViewerKeyAction.FavoriteDecrease)})";
-        FavoriteIncreaseButton.ToolTip = $"Favorite +1 ({BindingText(ViewerKeyAction.FavoriteIncrease)})";
-        BulkFavoriteDecreaseButton.ToolTip = $"Decrease favorite level for selected images ({BindingText(ViewerKeyAction.FavoriteDecrease)})";
-        BulkFavoriteIncreaseButton.ToolTip = $"Increase favorite level for selected images ({BindingText(ViewerKeyAction.FavoriteIncrease)})";
-        ModalDeleteButton.ToolTip = $"Move current source to Recycle Bin ({BindingText(ViewerKeyAction.RecycleCurrentImage)})";
-        RestorePreviewTabButton.ToolTip = $"Reopen last closed ({BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab)})";
-        ModalFlipButton.ToolTip = $"Flip horizontal ({BindingText(ViewerKeyAction.FlipHorizontal)})";
-        ModalEnhancedToggleButton.ToolTip = $"Toggle Original / Enhanced ({BindingText(ViewerKeyAction.ToggleEnhancedPreview)})";
-        ModalZoomOutButton.ToolTip = $"Zoom out ({BindingText(ViewerKeyAction.ModalZoomOut)})";
-        ModalZoomResetButton.ToolTip = $"Reset to fit ({BindingText(ViewerKeyAction.ModalZoomReset)})";
-        ModalZoomInButton.ToolTip = $"Zoom in ({BindingText(ViewerKeyAction.ModalZoomIn)})";
-        ModalFilmstripToggleButton.ToolTip = $"{(_modalFilmstripOpen ? "Hide" : "Show")} image filmstrip ({BindingText(ViewerKeyAction.ToggleModalFilmstrip)})";
-        ModalShortcutHintText.Text = $"   {BindingText(ViewerKeyAction.PreviousImage)} / {BindingText(ViewerKeyAction.NextImage)} navigate   ·   {BindingText(ViewerKeyAction.CloseModal)} close";
+        ModalCloseBtn.ToolTip = UiLanguageResources.Format("UiBackToGalleryFormat", BindingText(ViewerKeyAction.CloseModal));
+        ModalPreviousButton.ToolTip = UiLanguageResources.Format("UiPreviousImageFormat", BindingText(ViewerKeyAction.PreviousImage));
+        ModalNextButton.ToolTip = UiLanguageResources.Format("UiNextImageFormat", BindingText(ViewerKeyAction.NextImage));
+        ModalFavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
+        ModalFavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
+        FavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
+        FavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
+        BulkFavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiBulkFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
+        BulkFavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiBulkFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
+        ModalDeleteButton.ToolTip = UiLanguageResources.Format("UiRecycleCurrentFormat", BindingText(ViewerKeyAction.RecycleCurrentImage));
+        RestorePreviewTabButton.ToolTip = UiLanguageResources.Format("UiReopenClosedFormat", BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab));
+        ModalFlipButton.ToolTip = UiLanguageResources.Format("UiFlipHorizontalFormat", BindingText(ViewerKeyAction.FlipHorizontal));
+        ModalEnhancedToggleButton.ToolTip = UiLanguageResources.Format("UiToggleEnhancedFormat", BindingText(ViewerKeyAction.ToggleEnhancedPreview));
+        ModalEnhanceButton.ToolTip = UiLanguageResources.Format("UiEnhanceCurrentFormat", BindingText(ViewerKeyAction.EnhanceCurrentImage));
+        ModalZoomOutButton.ToolTip = UiLanguageResources.Format("UiZoomOutFormat", BindingText(ViewerKeyAction.ModalZoomOut));
+        ModalZoomResetButton.ToolTip = UiLanguageResources.Format("UiResetFitFormat", BindingText(ViewerKeyAction.ModalZoomReset));
+        ModalZoomInButton.ToolTip = UiLanguageResources.Format("UiZoomInFormat", BindingText(ViewerKeyAction.ModalZoomIn));
+        ModalFilmstripToggleButton.ToolTip = UiLanguageResources.Format(
+            _modalFilmstripOpen ? "UiHideFilmstripFormat" : "UiShowFilmstripFormat",
+            BindingText(ViewerKeyAction.ToggleModalFilmstrip));
+        ModalShortcutHintText.Text = UiLanguageResources.Format(
+            "UiModalShortcutFormat",
+            BindingText(ViewerKeyAction.PreviousImage),
+            BindingText(ViewerKeyAction.NextImage),
+            BindingText(ViewerKeyAction.CloseModal));
     }
 
     private string BindingText(ViewerKeyAction action)
@@ -11961,12 +12910,35 @@ public partial class MainWindow : Window
         _draftThumbnailStatusBorderSettings = loaded.Settings;
         _thumbnailStatusBorderSettingsProtected = loaded.IsProtected;
         _thumbnailStatusBorderSettingsError = loaded.Error;
+        _sharedKeyBindingsProtected = loaded.IsProtected;
+        _sharedKeyBindingsError = loaded.Error;
+        if (!loaded.IsProtected)
+        {
+            if (KeyBindingSettings.TryApplyBrowserSharedBindings(
+                    _keyBindings,
+                    loaded.BrowserKeyBindings,
+                    out Dictionary<ViewerKeyAction, KeyChord> sharedBindings,
+                    out string? sharedBindingError))
+            {
+                _keyBindings = sharedBindings;
+                _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
+                _sharedKeyBindingsProtected = false;
+                _sharedKeyBindingsError = null;
+            }
+            else
+            {
+                _sharedKeyBindingsProtected = true;
+                _sharedKeyBindingsError = sharedBindingError;
+            }
+        }
         _confirmBeforeDelete =
             ThumbnailStatusBorderSettingsStore.ResolveEffectiveConfirmBeforeDelete(
                 _confirmBeforeDelete,
                 loaded);
         SyncConfirmBeforeDeleteCheckBox();
         ApplyThumbnailStatusBorderResources(loaded.Settings);
+        ApplyKeyBindingTooltips();
+        RefreshKeyBindingEditor();
     }
 
     private static void ApplyThumbnailStatusBorderResources(ThumbnailStatusBorderSettings settings)
@@ -12033,10 +13005,18 @@ public partial class MainWindow : Window
         _draftThumbnailStatusBorderSettings = _thumbnailStatusBorderSettings;
         _dirtyThumbnailStatusBorderPreferences = ThumbnailStatusBorderDirtyPreferences.None;
         PopulateThumbnailStatusBorderControls(_draftThumbnailStatusBorderSettings);
-        SaveThumbnailBordersButton.Content = _thumbnailStatusBorderSettingsProtected ? "Retry save" : "Save borders";
+        RefreshThumbnailStatusBorderIdleText();
+    }
+
+    private void RefreshThumbnailStatusBorderIdleText()
+    {
+        SaveThumbnailBordersButton.Content = UiLanguageResources.Text(
+            _thumbnailStatusBorderSettingsProtected ? "UiRetrySave" : "UiSaveBorders");
         ThumbnailBordersStatusText.Text = _thumbnailStatusBorderSettingsProtected
-            ? $"Shared settings are protected and were not changed. {_thumbnailStatusBorderSettingsError}"
-            : "Favorite and AI-enhanced borders can be changed independently.";
+            ? UiLanguageResources.Format(
+                "UiSharedSettingsProtectedFormat",
+                _thumbnailStatusBorderSettingsError ?? "")
+            : UiLanguageResources.Text("UiThumbnailBordersEditable");
     }
 
     private void PopulateThumbnailStatusBorderControls(ThumbnailStatusBorderSettings settings)
@@ -12093,8 +13073,8 @@ public partial class MainWindow : Window
             : ThumbnailStatusBorderDirtyPreferences.Enhanced;
         bool valid = RefreshThumbnailStatusBorderColorPreviews();
         ThumbnailBordersStatusText.Text = valid
-            ? "Ready to save."
-            : "Use a six-digit hex color such as #38bdf8 for each border color.";
+            ? UiLanguageResources.Text("UiBordersReadyToSave")
+            : UiLanguageResources.Text("UiBorderHexHelp");
     }
 
     private void ThumbnailBorderEnabled_Changed(object sender, RoutedEventArgs e)
@@ -12104,7 +13084,7 @@ public partial class MainWindow : Window
         _dirtyThumbnailStatusBorderPreferences |= ReferenceEquals(sender, FavoriteThumbnailBorderCheckBox)
             ? ThumbnailStatusBorderDirtyPreferences.Favorite
             : ThumbnailStatusBorderDirtyPreferences.Enhanced;
-        ThumbnailBordersStatusText.Text = "Ready to save.";
+        ThumbnailBordersStatusText.Text = UiLanguageResources.Text("UiBordersReadyToSave");
     }
 
     private void ResetThumbnailBorders_Click(object sender, RoutedEventArgs e)
@@ -12112,9 +13092,9 @@ public partial class MainWindow : Window
         _draftThumbnailStatusBorderSettings = ThumbnailStatusBorderSettings.Default;
         _dirtyThumbnailStatusBorderPreferences = ThumbnailStatusBorderDirtyPreferences.All;
         PopulateThumbnailStatusBorderControls(_draftThumbnailStatusBorderSettings);
-        SaveThumbnailBordersButton.Content = "Save borders";
+        SaveThumbnailBordersButton.Content = UiLanguageResources.Text("UiSaveBorders");
         EnhancedThumbnailBorderColorTextBox.Text = EnhancedStatusBorderDefaultColor;
-        ThumbnailBordersStatusText.Text = "Default yellow Favorite and cyan AI-enhanced borders are ready. Save to apply them.";
+        ThumbnailBordersStatusText.Text = UiLanguageResources.Text("UiBorderDefaultsReady");
     }
 
     private void SaveThumbnailBorders_Click(object sender, RoutedEventArgs e)
@@ -12124,20 +13104,20 @@ public partial class MainWindow : Window
         {
             if (_thumbnailStatusBorderSettingsProtected)
             {
-                SaveThumbnailBordersButton.Content = "Retry save";
-                ThumbnailBordersStatusText.Text = "Shared settings remain protected. Change a border preference before retrying; nothing was overwritten.";
+                SaveThumbnailBordersButton.Content = UiLanguageResources.Text("UiRetrySave");
+                ThumbnailBordersStatusText.Text = UiLanguageResources.Text("UiProtectedChangeBeforeRetry");
             }
             else
             {
                 _lastThumbnailStatusBorderSaveSucceeded = true;
-                ThumbnailBordersStatusText.Text = "No thumbnail border changes to save.";
+                ThumbnailBordersStatusText.Text = UiLanguageResources.Text("UiNoBorderChanges");
             }
             return;
         }
         if (!TryReadThumbnailStatusBorderDraft(out ThumbnailStatusBorderSettings draft))
         {
-            SaveThumbnailBordersButton.Content = "Retry save";
-            ThumbnailBordersStatusText.Text = "Favorite and AI-enhanced borders each need a six-digit hex color. Nothing was changed.";
+            SaveThumbnailBordersButton.Content = UiLanguageResources.Text("UiRetrySave");
+            ThumbnailBordersStatusText.Text = UiLanguageResources.Text("UiBordersNeedHex");
             return;
         }
 
@@ -12150,8 +13130,8 @@ public partial class MainWindow : Window
         {
             _thumbnailStatusBorderSettingsProtected = true;
             _thumbnailStatusBorderSettingsError = error;
-            SaveThumbnailBordersButton.Content = "Retry save";
-            ThumbnailBordersStatusText.Text = $"Could not save shared settings. Nothing was overwritten. {error}";
+            SaveThumbnailBordersButton.Content = UiLanguageResources.Text("UiRetrySave");
+            ThumbnailBordersStatusText.Text = UiLanguageResources.Format("UiCouldNotSaveSharedFormat", error ?? "");
             return;
         }
 
@@ -12163,8 +13143,8 @@ public partial class MainWindow : Window
         PopulateThumbnailStatusBorderControls(persisted);
         _dirtyThumbnailStatusBorderPreferences = ThumbnailStatusBorderDirtyPreferences.None;
         _lastThumbnailStatusBorderSaveSucceeded = true;
-        SaveThumbnailBordersButton.Content = "Save borders";
-        ThumbnailBordersStatusText.Text = "Saved. Gallery and list borders updated without reloading thumbnails.";
+        SaveThumbnailBordersButton.Content = UiLanguageResources.Text("UiSaveBorders");
+        ThumbnailBordersStatusText.Text = UiLanguageResources.Text("UiBordersSaved");
     }
 
     private bool TryReadThumbnailStatusBorderDraft(out ThumbnailStatusBorderSettings settings)
@@ -13233,6 +14213,7 @@ public partial class MainWindow : Window
 
     private void SetStatusToast(string status, Action? retryAction = null)
     {
+        _statusToastDismissTimer?.Stop();
         if (HasUnresolvedSharedFailures)
         {
             // The toast is a singleton, but Favorite and Seen recovery intents
@@ -13252,6 +14233,15 @@ public partial class MainWindow : Window
             DeleteStatusRetryButton.Visibility = retryAction is null ? Visibility.Collapsed : Visibility.Visible;
             DeleteStatusToast.Visibility = Visibility.Visible;
         }
+    }
+
+    private void SetTransientStatusToast(string status)
+    {
+        SetStatusToast(status);
+        if (_statusRetryAction is not null || HasUnresolvedSharedFailures)
+            return;
+        _statusToastDismissTimer?.Stop();
+        _statusToastDismissTimer?.Start();
     }
 
     private void ReportCurrentImageDecodeFailure()
@@ -13285,7 +14275,10 @@ public partial class MainWindow : Window
             : null);
 
     private void DismissDeleteStatus_Click(object sender, RoutedEventArgs e)
-        => DeleteStatusToast.Visibility = Visibility.Collapsed;
+    {
+        _statusToastDismissTimer?.Stop();
+        DeleteStatusToast.Visibility = Visibility.Collapsed;
+    }
 
     private void RetryDelete_Click(object sender, RoutedEventArgs e)
     {
@@ -13387,6 +14380,7 @@ public partial class MainWindow : Window
     private void RestoreState()
     {
         var state = ReadState();
+        SetUiLanguage(state?.UiLanguage, persist: false);
         SharedRecentReadResult sharedRecent = ReadSharedRecentFolders();
         var lastFolderSet = ResolveStartupFolderSet(
             state?.LastFolderSet ?? [],
@@ -13443,6 +14437,9 @@ public partial class MainWindow : Window
         _confirmBeforeDelete = state.ConfirmBeforeDelete;
         _foldersSectionExpanded = state.FoldersSectionExpanded ?? true;
         _modalFilmstripOpen = state.ModalFilmstripOpen ?? true;
+        SetModalEdgeNavigationPercent(
+            state.ModalEdgeNavigationPercent ?? ModalEdgeNavigationDefaultPercent,
+            persist: false);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -13572,6 +14569,8 @@ public partial class MainWindow : Window
                 ConfirmBeforeDelete = _confirmBeforeDelete,
                 FoldersSectionExpanded = _foldersSectionExpanded,
                 ModalFilmstripOpen = _modalFilmstripOpen,
+                ModalEdgeNavigationPercent = _modalEdgeNavigationPercent,
+                UiLanguage = _uiLanguage,
                 HiddenFolderBuckets = _hiddenFolderBuckets.Count > 0 ? _hiddenFolderBuckets.OrderBy(static item => item, StringComparer.OrdinalIgnoreCase).ToList() : null,
                 SelectedFolderBucketKeys = _selectedFolderBucketKeys.Count > 0 ? _selectedFolderBucketKeys.OrderBy(static item => item, StringComparer.OrdinalIgnoreCase).ToList() : null,
                 PrimarySelectedFolderBucketKey = _primarySelectedFolderBucketKey,
@@ -13981,9 +14980,6 @@ public partial class MainWindow : Window
             && (IsModalNativeInputFocused(e.OriginalSource) || IsModalNativeInputFocused(Keyboard.FocusedElement));
         bool modalActionButtonFocused = modalVisible
             && (IsModalActionButtonFocused(e.OriginalSource) || IsModalActionButtonFocused(Keyboard.FocusedElement));
-        if (modalVisible && !modalNativeInputFocused)
-            RevealModalChromeTransient();
-
         // Modal close remains reachable even when a child Button owns focus.
         // Settings and Recycle confirmation use the fixed Escape rescue above.
         if (Modal.Visibility == Visibility.Visible
@@ -14071,6 +15067,12 @@ public partial class MainWindow : Window
                 return ToggleModalFlip();
             if (MatchesBinding(ViewerKeyAction.ToggleEnhancedPreview, key, modifiers))
                 return ToggleModalEnhanced();
+            if (MatchesBinding(ViewerKeyAction.EnhanceCurrentImage, key, modifiers)
+                && ModalEnhanceButton.IsEnabled)
+            {
+                StartModalEnhancement_Click(this, new RoutedEventArgs());
+                return true;
+            }
             if (MatchesBinding(ViewerKeyAction.ModalZoomIn, key, modifiers))
                 return AdjustModalZoom(ModalZoomKeyboardStep);
             if (MatchesBinding(ViewerKeyAction.ModalZoomOut, key, modifiers))
@@ -14268,7 +15270,8 @@ public partial class MainWindow : Window
         {
             if (IsModalImageWheelSource(e.OriginalSource as DependencyObject))
             {
-                AdjustModalZoom(e.Delta > 0 ? ModalZoomWheelStep : 1 / ModalZoomWheelStep);
+                Point anchor = e.GetPosition(ModalImage);
+                AdjustModalZoom(e.Delta > 0 ? ModalZoomWheelStep : 1 / ModalZoomWheelStep, anchor);
                 e.Handled = true;
             }
             else
@@ -14889,6 +15892,15 @@ public partial class MainWindow : Window
     public int DeleteConfirmationZIndexForSmoke => Panel.GetZIndex(DeleteConfirmationDialog);
     public int DeleteStatusZIndexForSmoke => Panel.GetZIndex(DeleteStatusToast);
     public bool ConfirmBeforeDeleteForSmoke => _confirmBeforeDelete;
+    public string UiLanguageForSmoke => _uiLanguage;
+    public string UiSearchPlaceholderForSmoke => SearchWatermark.Text;
+    public string UiGeneralNavigationForSmoke => SettingsGeneralNav.Content?.ToString() ?? "";
+    public string UiModalShortcutHintForSmoke => ModalShortcutHintText.Text;
+    public bool SetUiLanguageForSmoke(string language)
+    {
+        SetUiLanguage(language, persist: true);
+        return string.Equals(_uiLanguage, UiLanguageResources.Normalize(language), StringComparison.Ordinal);
+    }
 
     public void SetRecycleBinDeleteBackendForSmoke(Func<string, RecycleBinDeleteResult> backend)
         => _recycleBinDelete = backend ?? throw new ArgumentNullException(nameof(backend));
@@ -14966,6 +15978,7 @@ public partial class MainWindow : Window
             && RestorePreviewTabButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab), StringComparison.Ordinal) == true
             && ModalFlipButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.FlipHorizontal), StringComparison.Ordinal) == true
             && ModalEnhancedToggleButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.ToggleEnhancedPreview), StringComparison.Ordinal) == true
+            && ModalEnhanceButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.EnhanceCurrentImage), StringComparison.Ordinal) == true
             && ModalShortcutHintText.Text.Contains(BindingText(ViewerKeyAction.CloseModal), StringComparison.Ordinal);
     public bool KeyBindingRecordingForSmoke => _recordingKeyAction is not null;
     public string KeyBindingStatusForSmoke => KeyBindingsStatusText.Text;
@@ -15543,7 +16556,15 @@ public partial class MainWindow : Window
     public int ThumbnailBrowserCacheHitsForSmoke => _thumbnailBrowserCacheHits;
     public int ResidentThumbnailCountForSmoke => _residentThumbnailLru.Count;
     public int MaxResidentThumbnailCountForSmoke => _maxResidentThumbnailCount;
-    public int ResidentThumbnailLimitForSmoke => MaxResidentThumbnailCount;
+    public int ResidentThumbnailLimitForSmoke => LegacyResidentThumbnailCountHint;
+    public int ProtectedResidentThumbnailCountForSmoke => _protectedResidentThumbnailPaths.Count;
+    public long ResidentThumbnailBytesForSmoke => _residentThumbnailBytes;
+    public long MaxResidentThumbnailBytesForSmoke => _maxResidentThumbnailBytes;
+    public long ResidentThumbnailBudgetBytesForSmoke => _residentThumbnailBudgetBytes;
+    public long MaxEffectiveResidentThumbnailBudgetBytesForSmoke
+        => Math.Max(_residentThumbnailBudgetBytes, _maxEffectiveResidentThumbnailBudgetBytes);
+    public long MaxProtectedResidentThumbnailBytesForSmoke => _maxProtectedResidentThumbnailBytes;
+    public int VisibleThumbnailEvictionCountForSmoke => _visibleThumbnailEvictionCount;
     public int ActiveThumbnailDecodeWorkersForSmoke => Volatile.Read(ref _activeThumbnailDecodeWorkers);
     public int MaxActiveThumbnailDecodeWorkersForSmoke => Volatile.Read(ref _maxActiveThumbnailDecodeWorkers);
     public int ThumbnailDecodeWorkerLimitForSmoke => MaxThumbnailDecodeWorkers;
@@ -16550,7 +17571,7 @@ public partial class MainWindow : Window
         {
             "plus" or "+" or "=" => AdjustModalZoom(ModalZoomKeyboardStep),
             "minus" or "-" => AdjustModalZoom(1 / ModalZoomKeyboardStep),
-            "zero" or "0" => ResetModalTransform(_modalTransformPath),
+            "zero" or "0" => ResetModalTransform(_modalTransformPath, showFeedback: true),
             _ => false,
         };
     }
@@ -16561,6 +17582,18 @@ public partial class MainWindow : Window
     public bool ResetModalTransformForSmoke() => ResetModalTransform(_modalTransformPath, showFeedback: true);
 
     public bool SetModalPanForSmoke(double x, double y) => SetModalPan(x, y);
+    public bool ModalTransformAnimationActiveForSmoke
+        => (ModalVisualTransform?.HasAnimatedProperties ?? false)
+            || (ModalPanTransform?.HasAnimatedProperties ?? false);
+    public bool ModalInteractiveScalingForSmoke
+        => ModalBitmap is not null
+            && RenderOptions.GetBitmapScalingMode(ModalBitmap) == BitmapScalingMode.Linear;
+    public bool SettleModalTransformQualityForSmoke()
+    {
+        EndModalTransformInteraction();
+        return ModalBitmap is not null
+            && RenderOptions.GetBitmapScalingMode(ModalBitmap) == BitmapScalingMode.HighQuality;
+    }
 
     public bool ModalChromeVisibleForSmoke
         => ModalChromeEffectivelyVisible
@@ -16571,6 +17604,17 @@ public partial class MainWindow : Window
             && ModalNextButton.Visibility == Visibility.Visible;
     public bool ModalManualChromeVisibleForSmoke => _modalManualChromeVisible;
     public bool ModalTransientChromeVisibleForSmoke => _modalTransientChromeVisible;
+    public string ModalPointerStateForSmoke => _modalPointerState.ToString();
+    public bool ModalTransientChromeAnimationActiveForSmoke
+        => new UIElement[]
+        {
+            ModalTopBarSurface,
+            ModalTopBar,
+            ModalFooter,
+            ModalZoomIndicator,
+            ModalPreviousButton,
+            ModalNextButton,
+        }.Any(static element => element.HasAnimatedProperties);
     public bool ModalCursorHiddenForSmoke
         => Modal.ForceCursor && ReferenceEquals(Modal.Cursor, Cursors.None);
     public bool ModalFilmstripLayoutVisibleForSmoke
@@ -16649,15 +17693,87 @@ public partial class MainWindow : Window
         => ModalPreviousZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalCenterZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalNextZoneColumn.Width.GridUnitType == GridUnitType.Star
-            && Math.Abs(ModalPreviousZoneColumn.Width.Value - 28) < 0.01
-            && Math.Abs(ModalCenterZoneColumn.Width.Value - 44) < 0.01
-            && Math.Abs(ModalNextZoneColumn.Width.Value - 28) < 0.01
+            && Math.Abs(ModalPreviousZoneColumn.Width.Value - 5) < 0.01
+            && Math.Abs(ModalCenterZoneColumn.Width.Value - 90) < 0.01
+            && Math.Abs(ModalNextZoneColumn.Width.Value - 5) < 0.01
             && ModalPreviousButton.Content is System.Windows.Shapes.Path
             && ModalNextButton.Content is System.Windows.Shapes.Path
             && ReferenceEquals(ModalPreviousButton.Style, TryFindResource("ModalEdgeButton"))
             && ReferenceEquals(ModalNextButton.Style, TryFindResource("ModalEdgeButton"))
             && ModalPreviousButton.FocusVisualStyle is not null
             && ModalNextButton.FocusVisualStyle is not null;
+    public bool ModalEdgeImageIntersectionContractForSmoke
+    {
+        get
+        {
+            UpdateLayout();
+            UpdateModalEdgeNavigationPresentation();
+            if (!TryGetTransformedModalImageRectangle(out Rect imageRectangle)
+                || ModalImageArea.ActualWidth <= 0
+                || ModalImageArea.ActualHeight <= 0)
+            {
+                return false;
+            }
+
+            double edgeWidth = ModalImageArea.ActualWidth * (_modalEdgeNavigationPercent / 100d);
+            Rect previousRegion = new(0, 0, edgeWidth, ModalImageArea.ActualHeight);
+            Rect nextRegion = new(
+                Math.Max(0, ModalImageArea.ActualWidth - edgeWidth),
+                0,
+                edgeWidth,
+                ModalImageArea.ActualHeight);
+            previousRegion.Intersect(imageRectangle);
+            nextRegion.Intersect(imageRectangle);
+
+            bool previousPointerAvailable = _modalHasPointerPosition;
+            Point previousPointer = _modalLastPointerPosition;
+            ModalEdgeTarget previousPressedTarget = _modalPressedEdgeTarget;
+            try
+            {
+                bool VerifyRegion(Rect region, ModalEdgeTarget expected)
+                {
+                    if (region.IsEmpty)
+                        return true;
+                    _modalHasPointerPosition = true;
+                    _modalLastPointerPosition = new Point(
+                        region.Left + (region.Width / 2),
+                        region.Top + (region.Height / 2));
+                    UpdateModalEdgeNavigationPresentation();
+                    return expected == ModalEdgeTarget.Previous
+                        ? ModalPreviousButton.IsHitTestVisible && !ModalNextButton.IsHitTestVisible
+                        : ModalNextButton.IsHitTestVisible && !ModalPreviousButton.IsHitTestVisible;
+                }
+
+                bool VerifyNoRegion(Point point)
+                {
+                    _modalHasPointerPosition = true;
+                    _modalLastPointerPosition = point;
+                    UpdateModalEdgeNavigationPresentation();
+                    return !ModalPreviousButton.IsHitTestVisible && !ModalNextButton.IsHitTestVisible;
+                }
+
+                _modalPressedEdgeTarget = ModalEdgeTarget.None;
+                bool previousMatches = VerifyRegion(previousRegion, ModalEdgeTarget.Previous);
+                bool nextMatches = VerifyRegion(nextRegion, ModalEdgeTarget.Next);
+                bool centerRejected = VerifyNoRegion(new Point(
+                    imageRectangle.Left + (imageRectangle.Width / 2),
+                    imageRectangle.Top + (imageRectangle.Height / 2)));
+                bool blackCanvasRejected = TryFindModalBlackCanvasPoint(out Point blackCanvas)
+                    && VerifyNoRegion(blackCanvas);
+                return previousMatches
+                    && nextMatches
+                    && centerRejected
+                    && blackCanvasRejected;
+            }
+            finally
+            {
+                _modalHasPointerPosition = previousPointerAvailable;
+                _modalLastPointerPosition = previousPointer;
+                _modalPressedEdgeTarget = previousPressedTarget;
+                UpdateModalEdgeNavigationPresentation();
+            }
+        }
+    }
     public bool ActivateModalContextFavoriteForSmoke(int delta)
     {
         string prefix = delta switch
@@ -16699,6 +17815,43 @@ public partial class MainWindow : Window
             && !ModalInteractionFeedbackText.Text.StartsWith("Zoom", StringComparison.OrdinalIgnoreCase);
     public void RevealModalChromeTransientForSmoke() => RevealModalChromeTransient();
     public void ExpireModalChromeTransientForSmoke() => ExpireModalChromeTransient();
+    public bool BeginModalControlInteractionForSmoke()
+    {
+        BeginModalPointerInteraction();
+        return _modalPointerState == ModalPointerState.Interacting
+            && !_modalChromeTransientTimer.IsEnabled;
+    }
+    public bool EndModalControlInteractionForSmoke()
+    {
+        EndModalPointerInteraction();
+        return _modalPointerState == (_modalManualChromeVisible
+                ? ModalPointerState.Visible
+                : _modalTransientChromeVisible
+                    ? ModalPointerState.ArmedToHide
+                    : ModalPointerState.Hidden)
+            && (_modalManualChromeVisible
+                || !_modalTransientChromeVisible
+                || _modalChromeTransientTimer.IsEnabled);
+    }
+    public bool BeginModalPanningForSmoke()
+    {
+        BeginModalPanning();
+        return _modalPointerState == ModalPointerState.Panning
+            && !_modalManualChromeVisible
+            && !_modalTransientChromeVisible
+            && !ModalPreviousButton.IsHitTestVisible
+            && !ModalNextButton.IsHitTestVisible
+            && Modal.Cursor == Cursors.None;
+    }
+    public bool EndModalPanningForSmoke()
+    {
+        if (_modalPointerState != ModalPointerState.Panning)
+            return false;
+        EndModalPointerGesture();
+        return _modalPointerState == ModalPointerState.Hidden
+            && !ModalChromeEffectivelyVisible
+            && Modal.Cursor == Cursors.None;
+    }
     public void SetModalChromeVisibleForSmoke(bool visible)
     {
         CancelPendingModalSingleClick();
@@ -16711,28 +17864,37 @@ public partial class MainWindow : Window
         => string.Equals(System.Windows.Automation.AutomationProperties.GetName(ModalPreviousButton), "Previous image edge zone", StringComparison.Ordinal)
             && string.Equals(System.Windows.Automation.AutomationProperties.GetName(ModalNextButton), "Next image edge zone", StringComparison.Ordinal)
             && ModalImageArea.ActualWidth > 0
-            && Math.Abs((ModalPreviousZoneColumn.ActualWidth / ModalImageArea.ActualWidth) - 0.28) < 0.01
-            && Math.Abs((ModalNextZoneColumn.ActualWidth / ModalImageArea.ActualWidth) - 0.28) < 0.01;
-    public bool ToggleModalChromeFromEmptySurfaceForSmoke() => TryToggleModalChromeFromSurface(ModalImageArea);
+            && Math.Abs((ModalPreviousZoneColumn.ActualWidth / ModalImageArea.ActualWidth) - 0.05) < 0.01
+            && Math.Abs((ModalNextZoneColumn.ActualWidth / ModalImageArea.ActualWidth) - 0.05) < 0.01;
+    public double ModalEdgeNavigationPercentForSmoke => _modalEdgeNavigationPercent;
+    public bool SetModalEdgeNavigationPercentForSmoke(double value)
+    {
+        _ = SetModalEdgeNavigationPercent(value, persist: true);
+        UpdateLayout();
+        double expected = Math.Clamp(
+            Math.Round(double.IsFinite(value) ? value : ModalEdgeNavigationDefaultPercent),
+            ModalEdgeNavigationMinPercent,
+            ModalEdgeNavigationMaxPercent);
+        return Math.Abs(_modalEdgeNavigationPercent - expected) < 0.01
+            && Math.Abs(ModalPreviousZoneColumn.Width.Value - expected) < 0.01
+            && Math.Abs(ModalCenterZoneColumn.Width.Value - (100 - (expected * 2))) < 0.01
+            && Math.Abs(ModalNextZoneColumn.Width.Value - expected) < 0.01
+            && Math.Abs(ModalEdgeNavigationSlider.Value - expected) < 0.01;
+    }
+    public bool HideModalChromeFromImageForSmoke()
+    {
+        HideModalChromeFromImage();
+        return Modal.Visibility == Visibility.Visible
+            && !_modalManualChromeVisible
+            && !_modalTransientChromeVisible
+            && !ModalChromeEffectivelyVisible
+            && Modal.Cursor == Cursors.None;
+    }
+    public bool CloseModalFromEmptySurfaceForSmoke()
+        => TryFindModalBlackCanvasPoint(out Point blackCanvas)
+            && TryCloseModalFromEmptySurface(ModalImageArea, blackCanvas);
     public bool ModalInteractionFeedbackVisibleForSmoke => ModalInteractionFeedback.Visibility == Visibility.Visible;
     public string ModalInteractionFeedbackForSmoke => ModalInteractionFeedbackText.Text;
-    public void ScheduleModalChromeToggleForSmoke() => ScheduleModalChromeToggle();
-    public async Task<bool> WaitForModalChromeToggleForSmokeAsync(bool expectedVisible, int timeoutMilliseconds = 3000)
-    {
-        try
-        {
-            await _modalSingleClickToggleTask.WaitAsync(TimeSpan.FromMilliseconds(timeoutMilliseconds));
-        }
-        catch (TimeoutException)
-        {
-            return false;
-        }
-
-        string expectedFeedback = expectedVisible ? "shown" : "hidden";
-        return _modalManualChromeVisible == expectedVisible
-            && ModalChromeEffectivelyVisible == expectedVisible
-            && ModalInteractionFeedbackText.Text.Contains(expectedFeedback, StringComparison.OrdinalIgnoreCase);
-    }
     public async Task<bool> WaitForModalChromeTransientExpirationForSmokeAsync(int timeoutMilliseconds = 5000)
     {
         var watch = Stopwatch.StartNew();
@@ -16828,6 +17990,13 @@ public partial class MainWindow : Window
         StartModalEnhancement_Click(this, new RoutedEventArgs());
         await WaitForModalEnhancementRequestForSmokeAsync();
         return _modalEnhancementJobStatus is "queued" or "running";
+    }
+
+    public async Task<bool> StartModalEnhancementWithShortcutForSmokeAsync()
+    {
+        bool handled = InvokePreviewKeyForSmoke(Key.A, ModifierKeys.None);
+        await WaitForModalEnhancementRequestForSmokeAsync();
+        return handled && _modalEnhancementJobStatus is "queued" or "running";
     }
 
     public void BeginModalEnhancementForSmoke()
@@ -17381,7 +18550,7 @@ public sealed class ViewerState
     public string? SelectedPath { get; set; }
     public double CardWidth { get; set; } = 200;
     public bool? RightPanelOpen { get; set; }
-    public double RightPanelWidth { get; set; } = 340;
+    public double RightPanelWidth { get; set; } = 360;
     public string? DisplayStyle { get; set; }
     public string? AspectMode { get; set; }
     public string? SortBy { get; set; }
@@ -17399,6 +18568,10 @@ public sealed class ViewerState
     public bool? FoldersSectionExpanded { get; set; }
     // Missing in older state means open, matching the Browser and original WPF default.
     public bool? ModalFilmstripOpen { get; set; }
+    // WPF-only viewer hit zone; it does not modify the shared settings.json contract.
+    public double? ModalEdgeNavigationPercent { get; set; }
+    // WPF-only presentation language. Browser settings.json remains untouched.
+    public string? UiLanguage { get; set; }
     // Kept only to read pre-P0A scalar state; new writes use FavoriteFilterLevels.
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? FavoriteFilterLevel { get; set; }
@@ -18041,9 +19214,10 @@ public sealed class Tile : INotifyPropertyChanged
     }
 
     public bool ShowFavoriteBadge => _showCardStatusBadge && _fav > 0;
+    public string FavoriteGlyph => _fav > 0 ? "\uEB52" : "\uEB51";
     public bool ShowEnhancedBadge => _showCardStatusBadge && _enhanced;
     public bool ShowUnseenDotOnCard => _showCardStatusBadge && _showUnseenDot;
-    public double CardFavoriteButtonSize => Math.Clamp(_cardWidth - 4, 18, 30);
+    public double CardFavoriteButtonSize => Math.Clamp(_cardWidth - 4, 18, 34);
     public bool UseCompactCardTemplate => _cardWidth < 80;
     public double CompactFavoriteControlHeight => Math.Clamp(_cardHeight * 0.45, 10, 18);
 
@@ -18129,6 +19303,7 @@ public sealed class Tile : INotifyPropertyChanged
             if (_fav == clamped) return;
             _fav = clamped;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Fav)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FavoriteGlyph)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
         }
     }

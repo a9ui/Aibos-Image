@@ -77,6 +77,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-legacy-asset-ledger.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-parity-foundation.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-ui-language.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-thumbnail-status-borders.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-recent.ps1
