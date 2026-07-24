@@ -367,3 +367,34 @@ final result: passed
   limits of 100/50/12/35. Release build remained warning 0/error 0.
 
 final result: passed
+
+## M3 hosted keyboard-focus contention repair
+
+- Exact hosted candidate `980c8a3a3129057da5ffdf47b0cb20fe9622e815`
+  passed Release, shared-state, thumbnail, Public surface, CodeQL, and every
+  large-catalog correctness contract, including the pending-broaden regression.
+  The large gate failed only one 56 ms Input heartbeat during
+  `keyboard-focus-filter` against the unchanged 50 ms limit.
+- Hosted diagnostics bounded Dispatcher-owned work at 2 ms per apply/detach
+  slice while background projection compute consumed 19-39 ms. Independent
+  high-reasoning review therefore classified the failure as real CPU scheduler
+  contention rather than a blocking UI operation.
+- The broad cooperative-yield prototype was rejected: applying yields to the
+  sort comparator increased local sort P95 to 1,166 ms against 500 ms. None of
+  that prototype is retained.
+- The accepted repair changes only the existing background projection worker
+  from `BelowNormal` to `Lowest` priority and restores the pooled thread's
+  original priority in the existing `finally`. Projection logic, focus
+  restoration, heartbeat boundaries, and every threshold are unchanged.
+- Three isolated .NET 10 Release processes passed at 100,000 items after the
+  priority repair:
+  - cold: 73 ms Favorite eviction, 43 ms heartbeat, 2 ms one-container detach,
+    7.456% normalized working-set growth;
+  - warm 1: 25 ms Favorite eviction, 36 ms heartbeat, 1 ms one-container detach,
+    3.727% normalized working-set growth;
+  - warm 2: 26 ms Favorite eviction, 39 ms heartbeat, 1 ms one-container detach,
+    8.768% normalized working-set growth.
+- Search/filter/sort P95 remained within 250/250/500 ms in all three processes,
+  and the pending-broaden Favorite regression remained exact.
+
+final result: passed

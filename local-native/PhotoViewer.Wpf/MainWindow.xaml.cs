@@ -7823,8 +7823,8 @@ public partial class MainWindow : Window
                 ThreadPriority previousPriority = currentThread.Priority;
                 try
                 {
-                    if (previousPriority > ThreadPriority.BelowNormal)
-                        currentThread.Priority = ThreadPriority.BelowNormal;
+                    if (previousPriority > ThreadPriority.Lowest)
+                        currentThread.Priority = ThreadPriority.Lowest;
                     return ComputeFilterResult(snapshot, cts.Token);
                 }
                 finally
