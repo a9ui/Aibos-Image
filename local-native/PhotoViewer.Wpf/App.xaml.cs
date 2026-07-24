@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -26,6 +27,11 @@ public partial class App : Application
         "GlassBorderColor", "GlassBorderHoverColor", "BorderStrongColor",
         "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
         "FavoriteSoftColor", "SuccessSoftColor", "SuccessBorderColor", "LogoColor", "FavStepColor",
+        "OverlaySoftColor", "OverlayStrongColor", "DropOverlayColor",
+        "DividerSubtleColor", "DividerMediumColor", "DividerStrongColor",
+        "ThumbnailCaptionStartColor", "ThumbnailCaptionEndColor", "ThumbnailCaptionTextColor",
+        "AiBadgeBackgroundColor", "CompactFavoriteBackgroundColor",
+        "ScrollThumbColor", "ScrollThumbHoverColor",
     ];
     private static readonly IReadOnlyDictionary<string, string> ThemeBrushResourceByColorKey =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -64,12 +70,33 @@ public partial class App : Application
             ["SuccessBorderColor"] = "SuccessBorder",
             ["LogoColor"] = "LogoBrush",
             ["FavStepColor"] = "FavStepGradient",
+            ["OverlaySoftColor"] = "OverlaySoftBrush",
+            ["OverlayStrongColor"] = "OverlayStrongBrush",
+            ["DropOverlayColor"] = "DropOverlayBrush",
+            ["DividerSubtleColor"] = "DividerSubtleBrush",
+            ["DividerMediumColor"] = "DividerMediumBrush",
+            ["DividerStrongColor"] = "DividerStrongBrush",
+            ["ThumbnailCaptionTextColor"] = "ThumbnailCaptionTextBrush",
+            ["AiBadgeBackgroundColor"] = "AiBadgeBackgroundBrush",
+            ["CompactFavoriteBackgroundColor"] = "CompactFavoriteBackgroundBrush",
+            ["ScrollThumbColor"] = "ScrollThumbBrush",
+            ["ScrollThumbHoverColor"] = "ScrollThumbHoverBrush",
         };
 
     private readonly Dictionary<string, Color> _standardColorPalette = new(StringComparer.Ordinal);
     private bool _accessibilityPaletteInitialized;
+    private bool _forceHighContrast;
+    private bool? _highContrastForSmoke;
+    private bool? _systemReducedMotionForSmoke;
+    private bool? _systemReducedTransparencyForSmoke;
+    private bool? _reducedMotionOverride;
+    private bool? _reducedTransparencyOverride;
     private bool _highContrastPaletteApplied;
+    private bool _reducedMotionEnabled;
+    private bool _reducedTransparencyEnabled;
     internal bool HighContrastPaletteApplied => _highContrastPaletteApplied;
+    internal bool ReducedMotionEnabled => _reducedMotionEnabled;
+    internal bool ReducedTransparencyEnabled => _reducedTransparencyEnabled;
     internal event EventHandler? AccessibilityPaletteChanged;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -143,6 +170,13 @@ public partial class App : Application
             return;
         }
 
+        int accessibilityFallbackSmokeIdx = Array.IndexOf(e.Args, "--accessibility-fallback-smoke");
+        if (accessibilityFallbackSmokeIdx >= 0 && accessibilityFallbackSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureAccessibilityFallbackSmoke(e.Args[accessibilityFallbackSmokeIdx + 1]);
+            return;
+        }
+
         if (parityContractSmokeIdx >= 0)
         {
             string? resultPath = parityContractSmokeIdx + 1 < e.Args.Length
@@ -196,6 +230,13 @@ public partial class App : Application
         if (thumbnailStatusBordersSmokeIdx >= 0 && thumbnailStatusBordersSmokeIdx + 1 < e.Args.Length)
         {
             CaptureThumbnailStatusBordersSmoke(e.Args[thumbnailStatusBordersSmokeIdx + 1]);
+            return;
+        }
+
+        int thumbnailContinuitySmokeIdx = Array.IndexOf(e.Args, "--thumbnail-continuity-smoke");
+        if (thumbnailContinuitySmokeIdx >= 0 && thumbnailContinuitySmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureThumbnailContinuitySmoke(e.Args[thumbnailContinuitySmokeIdx + 1]);
             return;
         }
 
@@ -906,6 +947,13 @@ public partial class App : Application
         }
     }
 
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        if (_accessibilityPaletteInitialized)
+            ApplyAccessibilityPreferences();
+    }
+
     private void InitializeAccessibilityPalette(bool forceHighContrast)
     {
         if (_accessibilityPaletteInitialized)
@@ -918,57 +966,158 @@ public partial class App : Application
             _standardColorPalette[key] = color;
         }
 
+        _forceHighContrast = forceHighContrast;
         _accessibilityPaletteInitialized = true;
         SystemParameters.StaticPropertyChanged += SystemParameters_StaticPropertyChanged;
-        ApplyHighContrastPalette(forceHighContrast || SystemParameters.HighContrast);
+        ApplyAccessibilityPreferences();
     }
 
     private void SystemParameters_StaticPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (!string.Equals(e.PropertyName, nameof(SystemParameters.HighContrast), StringComparison.Ordinal))
+        if (!string.Equals(e.PropertyName, nameof(SystemParameters.HighContrast), StringComparison.Ordinal)
+            && !string.Equals(e.PropertyName, nameof(SystemParameters.ClientAreaAnimation), StringComparison.Ordinal))
+        {
             return;
+        }
         Dispatcher.BeginInvoke(
-            () => ApplyHighContrastPalette(SystemParameters.HighContrast),
+            () => ApplyAccessibilityPreferences(),
             DispatcherPriority.Send);
     }
 
-    private void ApplyHighContrastPalette(bool enabled)
+    internal void SetAccessibilityOverrides(bool? reducedMotion, bool? reducedTransparency)
+    {
+        _reducedMotionOverride = reducedMotion;
+        _reducedTransparencyOverride = reducedTransparency;
+        ApplyAccessibilityPreferences();
+    }
+
+    internal void RefreshAccessibilityPreferencesFromSystem()
+        => ApplyAccessibilityPreferences();
+
+    private void ApplyAccessibilityPreferences()
     {
         if (!_accessibilityPaletteInitialized)
             return;
 
-        if (!enabled)
-        {
-            foreach ((string key, Color color) in _standardColorPalette)
-                SetThemeColor(key, color);
-            bool changed = _highContrastPaletteApplied;
-            _highContrastPaletteApplied = false;
-            if (changed)
-                AccessibilityPaletteChanged?.Invoke(this, EventArgs.Empty);
-            return;
-        }
+        bool highContrast = _highContrastForSmoke
+            ?? (_forceHighContrast || SystemParameters.HighContrast);
+        bool reducedMotion = highContrast
+            || (_reducedMotionOverride
+                ?? _systemReducedMotionForSmoke
+                ?? !SystemParameters.ClientAreaAnimation);
+        bool reducedTransparency = highContrast
+            || (_reducedTransparencyOverride
+                ?? _systemReducedTransparencyForSmoke
+                ?? SystemPrefersReducedTransparency());
+        bool changed = highContrast != _highContrastPaletteApplied
+            || reducedMotion != _reducedMotionEnabled
+            || reducedTransparency != _reducedTransparencyEnabled;
 
+        _highContrastPaletteApplied = highContrast;
+        _reducedMotionEnabled = reducedMotion;
+        _reducedTransparencyEnabled = reducedTransparency;
+
+        RestoreStandardPalette();
+        if (reducedTransparency && !highContrast)
+            ApplyReducedTransparencyPalette();
+        if (highContrast)
+            ApplySystemHighContrastPalette();
+
+        if (changed)
+            AccessibilityPaletteChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RestoreStandardPalette()
+    {
+        foreach ((string key, Color color) in _standardColorPalette)
+            SetThemeColor(key, color);
+    }
+
+    private void ApplyReducedTransparencyPalette()
+    {
+        Color backdrop = CompositeOpaque(
+            _standardColorPalette["BgPrimaryColor"],
+            Colors.Black);
+        foreach ((string key, Color color) in _standardColorPalette)
+        {
+            if (color.A < byte.MaxValue)
+                SetThemeColor(key, CompositeOpaque(color, backdrop));
+        }
+    }
+
+    private void ApplySystemHighContrastPalette()
+    {
+        SetThemeColors(SystemColors.ControlColor, ThemeColorResourceKeys);
         SetThemeColors(SystemColors.WindowColor, "BgPrimaryColor");
         SetThemeColors(SystemColors.ControlColor,
             "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
             "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
-            "FavoriteSoftColor", "SuccessSoftColor");
+            "FavoriteSoftColor", "SuccessSoftColor",
+            "OverlaySoftColor", "OverlayStrongColor", "DropOverlayColor",
+            "ThumbnailCaptionStartColor", "ThumbnailCaptionEndColor", "AiBadgeBackgroundColor");
         SetThemeColors(SystemColors.WindowTextColor,
             "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor",
-            "FavoriteTextColor", "SuccessColor", "DangerTextColor", "LogoColor");
+            "FavoriteTextColor", "SuccessColor", "DangerTextColor", "LogoColor",
+            "ThumbnailCaptionTextColor");
         SetThemeColors(SystemColors.GrayTextColor, "TextDisabledColor");
         SetThemeColors(SystemColors.HighlightTextColor, "SelectionTextColor");
         SetThemeColors(SystemColors.HotTrackColor,
             "AccentColor", "AccentLightColor", "FavoriteColor",
             "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
-            "WarningColor", "DangerColor", "SuccessBorderColor", "FavStepColor");
+            "WarningColor", "DangerColor", "SuccessBorderColor", "FavStepColor",
+            "CompactFavoriteBackgroundColor");
         SetThemeColors(SystemColors.HighlightColor, "FocusColor");
-        SetThemeColors(SystemColors.ActiveBorderColor, "GlassBorderColor");
-        SetThemeColors(SystemColors.WindowTextColor, "GlassBorderHoverColor", "BorderStrongColor");
-        bool paletteChanged = !_highContrastPaletteApplied;
-        _highContrastPaletteApplied = true;
-        if (paletteChanged)
-            AccessibilityPaletteChanged?.Invoke(this, EventArgs.Empty);
+        SetThemeColors(
+            SystemColors.ActiveBorderColor,
+            "GlassBorderColor", "DividerSubtleColor", "DividerMediumColor",
+            "ScrollThumbColor");
+        SetThemeColors(
+            SystemColors.WindowTextColor,
+            "GlassBorderHoverColor", "BorderStrongColor", "DividerStrongColor",
+            "ScrollThumbHoverColor");
+    }
+
+    private static Color CompositeOpaque(Color foreground, Color background)
+    {
+        double alpha = foreground.A / 255d;
+        static byte Blend(byte front, byte back, double alphaValue)
+            => (byte)Math.Clamp(
+                Math.Round((front * alphaValue) + (back * (1 - alphaValue))),
+                byte.MinValue,
+                byte.MaxValue);
+        return Color.FromArgb(
+            byte.MaxValue,
+            Blend(foreground.R, background.R, alpha),
+            Blend(foreground.G, background.G, alpha),
+            Blend(foreground.B, background.B, alpha));
+    }
+
+    private static bool SystemPrefersReducedTransparency()
+    {
+        const string personalizePath =
+            @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+        try
+        {
+            using RegistryKey? personalize = Registry.CurrentUser.OpenSubKey(personalizePath);
+            object? raw = personalize?.GetValue("EnableTransparency");
+            return raw is not null
+                && Convert.ToInt32(raw, CultureInfo.InvariantCulture) == 0;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException
+            or System.Security.SecurityException
+            or IOException
+            or FormatException
+            or InvalidCastException
+            or OverflowException)
+        {
+            return false;
+        }
+    }
+
+    private void ApplyHighContrastPalette(bool enabled)
+    {
+        _highContrastForSmoke = enabled;
+        ApplyAccessibilityPreferences();
     }
 
     private void SetThemeColors(Color color, params string[] keys)
@@ -1001,9 +1150,17 @@ public partial class App : Application
             object result;
             bool succeeded = false;
             MainWindow? window = null;
-            bool restoreHighContrast = SystemParameters.HighContrast;
+            bool? previousHighContrastForSmoke = _highContrastForSmoke;
+            bool? previousSystemReducedMotionForSmoke = _systemReducedMotionForSmoke;
+            bool? previousSystemReducedTransparencyForSmoke = _systemReducedTransparencyForSmoke;
+            bool? previousReducedMotionOverride = _reducedMotionOverride;
+            bool? previousReducedTransparencyOverride = _reducedTransparencyOverride;
             try
             {
+                _systemReducedMotionForSmoke = false;
+                _systemReducedTransparencyForSmoke = false;
+                _reducedMotionOverride = null;
+                _reducedTransparencyOverride = null;
                 Dictionary<string, Color> standard = ThemeColorResourceKeys.ToDictionary(
                     static key => key,
                     key => _standardColorPalette[key],
@@ -1077,12 +1234,252 @@ public partial class App : Application
             finally
             {
                 window?.Close();
-                ApplyHighContrastPalette(restoreHighContrast);
+                _highContrastForSmoke = previousHighContrastForSmoke;
+                _systemReducedMotionForSmoke = previousSystemReducedMotionForSmoke;
+                _systemReducedTransparencyForSmoke = previousSystemReducedTransparencyForSmoke;
+                _reducedMotionOverride = previousReducedMotionOverride;
+                _reducedTransparencyOverride = previousReducedTransparencyOverride;
+                ApplyAccessibilityPreferences();
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
             File.WriteAllText(resultFullPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
             Shutdown(succeeded ? 0 : 1);
+        }, DispatcherPriority.ContextIdle);
+    }
+
+    private void CaptureAccessibilityFallbackSmoke(string resultPath)
+    {
+        string resultFullPath = Path.GetFullPath(resultPath);
+        string root = CreateManagedAutomationRoot();
+        string statePath = Path.Combine(root, "state.json");
+        string settingsPath = Path.Combine(root, "settings.json");
+        string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
+        string? previousSettingsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH");
+        bool? previousHighContrastForSmoke = _highContrastForSmoke;
+        bool? previousSystemReducedMotionForSmoke = _systemReducedMotionForSmoke;
+        bool? previousSystemReducedTransparencyForSmoke = _systemReducedTransparencyForSmoke;
+        bool? previousReducedMotionOverride = _reducedMotionOverride;
+        bool? previousReducedTransparencyOverride = _reducedTransparencyOverride;
+        Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
+        Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", settingsPath);
+        Directory.CreateDirectory(root);
+        File.WriteAllText(
+            statePath,
+            """
+            {
+              "Version": 2,
+              "futureOwner": { "keep": true }
+            }
+            """);
+        File.WriteAllText(
+            settingsPath,
+            """
+            {
+              "version": 1,
+              "futureSharedOwner": { "keep": true }
+            }
+            """);
+        string sharedSettingsBefore = FileFingerprint(settingsPath);
+        Dictionary<string, Color> standard = ThemeColorResourceKeys.ToDictionary(
+            static key => key,
+            key => _standardColorPalette[key],
+            StringComparer.Ordinal);
+        string[] translucentKeys = standard
+            .Where(static pair => pair.Value.A < byte.MaxValue)
+            .Select(static pair => pair.Key)
+            .ToArray();
+
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var windows = new List<MainWindow>();
+        Dispatcher.InvokeAsync(async () =>
+        {
+            object result;
+            bool ok = false;
+            try
+            {
+                _highContrastForSmoke = false;
+                _systemReducedMotionForSmoke = true;
+                _systemReducedTransparencyForSmoke = true;
+                _reducedMotionOverride = null;
+                _reducedTransparencyOverride = null;
+                ApplyAccessibilityPreferences();
+
+                var window = HiddenWindow();
+                windows.Add(window);
+                window.Show();
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
+
+                bool followsSystem = window.ReducedMotionOverrideForSmoke is null
+                    && window.ReducedTransparencyOverrideForSmoke is null
+                    && window.ReducedMotionEffectiveForSmoke
+                    && window.ReducedTransparencyEffectiveForSmoke
+                    && window.ReducedMotionPopupContractForSmoke;
+
+                bool fullOverrideSaved = window.SetAccessibilityPreferencesForSmoke(
+                    reducedMotion: false,
+                    reducedTransparency: false);
+                window.FlushStateForSmoke();
+                bool fullOverrideEffective = !window.ReducedMotionEffectiveForSmoke
+                    && !window.ReducedTransparencyEffectiveForSmoke
+                    && !window.ReducedMotionPopupContractForSmoke
+                    && ResourceColor("BgSecondaryColor") == standard["BgSecondaryColor"];
+
+                bool modalOpened = window.SelectIndexForSmoke(0)
+                    && window.OpenModalForSmoke();
+                bool standardZoomed = modalOpened
+                    && window.ModalZoomShortcutForSmoke("plus");
+                bool standardMotionActive = standardZoomed
+                    && window.ModalTransformAnimationActiveForSmoke;
+
+                bool reduceOverrideSaved = window.SetAccessibilityPreferencesForSmoke(
+                    reducedMotion: true,
+                    reducedTransparency: true);
+                window.FlushStateForSmoke();
+                bool activeMotionCanceled = !window.ModalTransformAnimationActiveForSmoke
+                    && !window.ModalTransientChromeAnimationActiveForSmoke;
+                bool reducedZoomed = window.ModalZoomShortcutForSmoke("plus");
+                window.SetModalChromeVisibleForSmoke(false);
+                window.RevealModalChromeTransientForSmoke();
+                bool reducedMotionInstant = reducedZoomed
+                    && !window.ModalTransformAnimationActiveForSmoke
+                    && !window.ModalTransientChromeAnimationActiveForSmoke
+                    && window.ReducedMotionPopupContractForSmoke;
+                string[] nonOpaqueKeys = translucentKeys
+                    .Where(key => ResourceColor(key).A != byte.MaxValue)
+                    .ToArray();
+                bool reducedTransparencyOpaque = nonOpaqueKeys.Length == 0
+                    && ResourceBrushColor("BgSecondary").A == byte.MaxValue
+                    && ResourceBrushColor("GlassBorder").A == byte.MaxValue;
+
+                using JsonDocument persisted = JsonDocument.Parse(File.ReadAllText(statePath));
+                bool localOverridesPersisted = persisted.RootElement.TryGetProperty(
+                        "ReducedMotionOverride",
+                        out JsonElement motionOverride)
+                    && motionOverride.ValueKind == JsonValueKind.True
+                    && persisted.RootElement.TryGetProperty(
+                        "ReducedTransparencyOverride",
+                        out JsonElement transparencyOverride)
+                    && transparencyOverride.ValueKind == JsonValueKind.True;
+                bool unknownLocalPreserved = persisted.RootElement.TryGetProperty(
+                        "futureOwner",
+                        out JsonElement futureOwner)
+                    && futureOwner.TryGetProperty("keep", out JsonElement keep)
+                    && keep.GetBoolean();
+
+                var reloaded = HiddenWindow();
+                windows.Add(reloaded);
+                reloaded.Show();
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                bool localOverridesReloaded = reloaded.ReducedMotionOverrideForSmoke == true
+                    && reloaded.ReducedTransparencyOverrideForSmoke == true
+                    && reloaded.ReducedMotionEffectiveForSmoke
+                    && reloaded.ReducedTransparencyEffectiveForSmoke;
+
+                bool systemModeSelected = reloaded.SetAccessibilityPreferencesForSmoke(
+                    reducedMotion: null,
+                    reducedTransparency: null,
+                    persist: false);
+                bool nullFollowsInjectedSystem = systemModeSelected
+                    && reloaded.ReducedMotionEffectiveForSmoke
+                    && reloaded.ReducedTransparencyEffectiveForSmoke;
+                bool fullModeSelected = reloaded.SetAccessibilityPreferencesForSmoke(
+                    reducedMotion: false,
+                    reducedTransparency: false,
+                    persist: false);
+                bool explicitFullOverridesSystem = fullModeSelected
+                    && !reloaded.ReducedMotionEffectiveForSmoke
+                    && !reloaded.ReducedTransparencyEffectiveForSmoke;
+
+                _highContrastForSmoke = true;
+                ApplyAccessibilityPreferences();
+                bool highContrastWins = HighContrastPaletteApplied
+                    && reloaded.ReducedMotionEffectiveForSmoke
+                    && reloaded.ReducedTransparencyEffectiveForSmoke
+                    && ResourceColor("BgPrimaryColor") == SystemColors.WindowColor
+                    && ResourceColor("TextPrimaryColor") == SystemColors.WindowTextColor;
+                _highContrastForSmoke = false;
+                ApplyAccessibilityPreferences();
+                bool highContrastExitRestoresOverride = !HighContrastPaletteApplied
+                    && !reloaded.ReducedMotionEffectiveForSmoke
+                    && !reloaded.ReducedTransparencyEffectiveForSmoke
+                    && ResourceColor("BgSecondaryColor") == standard["BgSecondaryColor"];
+
+                bool sharedSettingsUntouched = string.Equals(
+                    sharedSettingsBefore,
+                    FileFingerprint(settingsPath),
+                    StringComparison.Ordinal);
+                ok = followsSystem
+                    && fullOverrideSaved
+                    && fullOverrideEffective
+                    && modalOpened
+                    && standardMotionActive
+                    && reduceOverrideSaved
+                    && activeMotionCanceled
+                    && reducedMotionInstant
+                    && reducedTransparencyOpaque
+                    && localOverridesPersisted
+                    && unknownLocalPreserved
+                    && localOverridesReloaded
+                    && nullFollowsInjectedSystem
+                    && explicitFullOverridesSystem
+                    && highContrastWins
+                    && highContrastExitRestoresOverride
+                    && sharedSettingsUntouched;
+                result = new
+                {
+                    ok,
+                    message = ok
+                        ? "Windows-following accessibility fallbacks, WPF-local overrides, instant motion, opaque tokens, and high-contrast precedence passed"
+                        : "accessibility fallback contract did not match expectations",
+                    followsSystem,
+                    fullOverrideSaved,
+                    fullOverrideEffective,
+                    modalOpened,
+                    standardMotionActive,
+                    reduceOverrideSaved,
+                    activeMotionCanceled,
+                    reducedMotionInstant,
+                    reducedTransparencyOpaque,
+                    nonOpaqueKeys,
+                    localOverridesPersisted,
+                    unknownLocalPreserved,
+                    localOverridesReloaded,
+                    nullFollowsInjectedSystem,
+                    explicitFullOverridesSystem,
+                    highContrastWins,
+                    highContrastExitRestoresOverride,
+                    sharedSettingsUntouched,
+                    statePath,
+                };
+            }
+            catch (Exception ex)
+            {
+                result = new { ok = false, message = ex.ToString() };
+            }
+            finally
+            {
+                foreach (MainWindow window in windows)
+                {
+                    try { window.Close(); } catch { }
+                }
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", previousStatePath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", previousSettingsPath);
+                _highContrastForSmoke = previousHighContrastForSmoke;
+                _systemReducedMotionForSmoke = previousSystemReducedMotionForSmoke;
+                _systemReducedTransparencyForSmoke = previousSystemReducedTransparencyForSmoke;
+                _reducedMotionOverride = previousReducedMotionOverride;
+                _reducedTransparencyOverride = previousReducedTransparencyOverride;
+                ApplyAccessibilityPreferences();
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
+            File.WriteAllText(
+                resultFullPath,
+                JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+            try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); } catch { }
+            Shutdown(ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);
     }
 
@@ -2448,7 +2845,7 @@ public partial class App : Application
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var window = HiddenWindow();
         window.Show();
-        window.Dispatcher.InvokeAsync(() =>
+        window.Dispatcher.InvokeAsync(async () =>
         {
             bool ok = false;
             object result;
@@ -2464,6 +2861,31 @@ public partial class App : Application
                         && inner.Top >= outer.Top - 0.01
                         && inner.Right <= outer.Right + 0.01
                         && inner.Bottom <= outer.Bottom + 0.01;
+
+                async Task SettleLayoutAsync()
+                {
+                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.ContextIdle);
+                }
+
+                window.Width = 1280;
+                window.Height = 820;
+                window.SetUiLanguageForSmoke("ja");
+                await SettleLayoutAsync();
+                bool wideAdaptiveOff = !window.AdaptiveWorkbenchForSmoke;
+                bool wideSettingsPinned = window.SidebarSettingsPinnedForSmoke;
+                bool wideScrollContained = window.SidebarScrollContractForSmoke;
+                bool wideButtonTextFits = window.SidebarButtonTextFitsForSmoke;
+                List<string> wideClippedButtons = window.SidebarClippedButtonNamesForSmoke;
+                bool wideChromeContained = window.VisibleWorkbenchChromeContainedForSmoke;
+                double wideDragRegionWidth = window.HeaderDragRegionWidthForSmoke;
+                bool wideSidebarLayout = wideAdaptiveOff
+                    && wideSettingsPinned
+                    && wideScrollContained
+                    && wideButtonTextFits
+                    && wideChromeContained
+                    && wideDragRegionWidth >= 95;
+                window.SetUiLanguageForSmoke("en");
 
                 // Keep the injected secondary work area inside the CI desktop's
                 // physical bounds so Windows does not clamp an intentionally
@@ -2512,6 +2934,47 @@ public partial class App : Application
                     && dpiEquivalentRestore.Width == dpiChangedWorkArea.Width
                     && dpiEquivalentRestore.Height == dpiChangedWorkArea.Height;
 
+                // Per-monitor DPI can reduce a physical work area below the
+                // normal-window design minimum in DIPs. Fake maximize must
+                // temporarily lower the effective minimums so no edge, footer,
+                // or pinned navigation is coerced beyond that work area.
+                var compactWorkArea = new Rect(80, 40, 760, 480);
+                window.Left = initial.Left;
+                window.Top = initial.Top;
+                window.Width = initial.Width;
+                window.Height = initial.Height;
+                window.SetCurrentMonitorWorkAreaForSmoke(compactWorkArea);
+                window.ToggleMaximizeForSmoke();
+                await SettleLayoutAsync();
+                Rect compactMaximized = window.WindowBoundsForSmoke;
+                Size compactMinimum = window.EffectiveWindowMinimumForSmoke;
+                bool compactContained = window.FakeMaximizedForSmoke
+                    && SameRect(compactMaximized, compactWorkArea)
+                    && SameRect(new Rect(0, 0, compactMinimum.Width, compactMinimum.Height), new Rect(0, 0, compactWorkArea.Width, compactWorkArea.Height))
+                    && window.AdaptiveWorkbenchForSmoke
+                    && window.SearchMinimumWidthForSmoke <= 140
+                    && window.HeaderDragRegionWidthForSmoke >= 95
+                    && window.VisibleWorkbenchChromeContainedForSmoke;
+                window.ToggleMaximizeForSmoke();
+
+                var shortWorkArea = new Rect(20, 20, 960, 500);
+                window.Left = 40;
+                window.Top = 40;
+                window.Width = 940;
+                window.Height = 570;
+                window.SetCurrentMonitorWorkAreaForSmoke(shortWorkArea);
+                window.ToggleMaximizeForSmoke();
+                await SettleLayoutAsync();
+                Rect shortMaximized = window.WindowBoundsForSmoke;
+                Size shortMinimum = window.EffectiveWindowMinimumForSmoke;
+                bool shortContained = window.FakeMaximizedForSmoke
+                    && SameRect(shortMaximized, shortWorkArea)
+                    && Math.Abs(shortMinimum.Width - 900) < 0.01
+                    && Math.Abs(shortMinimum.Height - shortWorkArea.Height) < 0.01
+                    && window.AdaptiveWorkbenchForSmoke
+                    && window.VisibleWorkbenchChromeContainedForSmoke;
+                window.ToggleMaximizeForSmoke();
+
                 window.Left = initial.Left;
                 window.Top = initial.Top;
                 window.Width = initial.Width;
@@ -2527,10 +2990,13 @@ public partial class App : Application
                 Rect fallbackNormalized = window.RestoreFromFakeMaximizeForSmoke(fallbackOffscreenBounds);
                 bool fallbackOffscreenContained = Contains(SystemParameters.WorkArea, fallbackNormalized);
                 ok = usedCurrentMonitor
+                    && wideSidebarLayout
                     && restoredExactly
                     && disconnectedContained
                     && oversizedContained
                     && dpiEquivalentContained
+                    && compactContained
+                    && shortContained
                     && safeFallback
                     && fallbackRestored
                     && fallbackOffscreenContained;
@@ -2539,8 +3005,16 @@ public partial class App : Application
                     ok,
                     message = ok
                         ? "fake maximize and restore stayed current-monitor-safe across topology, resolution, and DPI-equivalent changes"
-                        : "window work-area contract failed",
+                        : $"window work-area contract failed: wide={wideSidebarLayout} adaptiveOff={wideAdaptiveOff} pinned={wideSettingsPinned} scroll={wideScrollContained} text={wideButtonTextFits}[{string.Join(',', wideClippedButtons)}] chrome={wideChromeContained} drag={wideDragRegionWidth:0.##} compact={compactContained} short={shortContained}",
                     initial,
+                    wideSidebarLayout,
+                    wideAdaptiveOff,
+                    wideSettingsPinned,
+                    wideScrollContained,
+                    wideButtonTextFits,
+                    wideClippedButtons,
+                    wideChromeContained,
+                    wideDragRegionWidth,
                     secondMonitorWorkArea,
                     maximized,
                     restored,
@@ -2558,6 +3032,14 @@ public partial class App : Application
                     preDpiBounds,
                     dpiEquivalentRestore,
                     dpiEquivalentContained,
+                    compactWorkArea,
+                    compactMaximized,
+                    compactMinimum,
+                    compactContained,
+                    shortWorkArea,
+                    shortMaximized,
+                    shortMinimum,
+                    shortContained,
                     safeFallback,
                     fallbackRestored,
                     fallbackOffscreenBounds,
@@ -4772,6 +5254,7 @@ public partial class App : Application
 
         win.Dispatcher.InvokeAsync(async () =>
         {
+            bool captureRootArranged = false;
             int folderIdx = Array.IndexOf(args, "--folder");
             if (folderIdx >= 0 && folderIdx + 1 < args.Length)
                 await win.LoadFolderAsync(args[folderIdx + 1]);
@@ -4790,6 +5273,49 @@ public partial class App : Application
                 await win.WaitForPreviewPngMetadataForSmokeAsync(win.SelectedFileNameForSmoke!);
 
             win.ShowScreen(screen);
+            if (args.Contains("--wait-visible-thumbnails"))
+            {
+                var captureRoot = (FrameworkElement)win.Content;
+                captureRoot.Measure(new Size(shotWidth, shotHeight));
+                captureRoot.Arrange(new Rect(0, 0, shotWidth, shotHeight));
+                captureRoot.UpdateLayout();
+                captureRootArranged = true;
+                await win.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+                if (!await win.WaitForGridRealizationIdleForSmokeAsync(timeoutMilliseconds: 5_000))
+                    throw new InvalidOperationException("grid realization did not settle before the screenshot");
+                string[] visibleNames = win.FilteredFileNamesForSmoke(24).ToArray();
+                bool[] thumbnailReady = await Task.WhenAll(visibleNames.Select(name =>
+                    win.WaitForThumbnailForSmokeAsync(name, timeoutMilliseconds: 5_000)));
+                if (thumbnailReady.Any(static ready => !ready))
+                    throw new InvalidOperationException("one or more visible thumbnails did not settle before the screenshot");
+                if (!await win.WaitForGridRealizationIdleForSmokeAsync(timeoutMilliseconds: 5_000))
+                    throw new InvalidOperationException("grid realization changed after thumbnail decode");
+            }
+            string? captureGridStatePath = ArgValue(args.ToArray(), "--capture-grid-state");
+            if (!string.IsNullOrWhiteSpace(captureGridStatePath))
+            {
+                string fullGridStatePath = Path.GetFullPath(captureGridStatePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(fullGridStatePath)!);
+                File.WriteAllText(
+                    fullGridStatePath,
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            win.FilteredCountForSmoke,
+                            win.GridItemsSourceCountForSmoke,
+                            win.GridColumnCountForSmoke,
+                            win.GridSurfaceWidthForSmoke,
+                            win.GridViewportWidthForSmoke,
+                            win.GridRealizedCountForSmoke,
+                            win.GridFirstVisibleIndexForSmoke,
+                            win.GridLastVisibleIndexForSmoke,
+                            win.GridVisiblePlaceholderCountForSmoke,
+                            win.GridVisibleUnrealizedCountForSmoke,
+                            win.GridRealizationContinuationPendingForSmoke,
+                            win.GridLayoutGenerationForSmoke,
+                        },
+                        new JsonSerializerOptions { WriteIndented = true }));
+            }
             if (args.Contains("--show-enhancement-jobs"))
             {
                 List<string> sources = win.EnhancementWorkspaceCatalogPathsForSmoke.Take(5).ToList();
@@ -4907,9 +5433,12 @@ public partial class App : Application
             // Windows clamps an offscreen HWND to the current monitor work area.
             // Arrange the content at the requested audit viewport so visual
             // comparisons do not silently inherit the host desktop height.
-            root.Measure(new Size(shotWidth, shotHeight));
-            root.Arrange(new Rect(0, 0, shotWidth, shotHeight));
-            root.UpdateLayout();
+            if (!captureRootArranged)
+            {
+                root.Measure(new Size(shotWidth, shotHeight));
+                root.Arrange(new Rect(0, 0, shotWidth, shotHeight));
+                root.UpdateLayout();
+            }
             var rtb = new RenderTargetBitmap(shotWidth, shotHeight, 96, 96, PixelFormats.Pbgra32);
             rtb.Render(root);
 
@@ -9148,8 +9677,12 @@ public partial class App : Application
         }
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        string progressPath = resultFullPath + ".progress";
+        try { File.WriteAllText(progressPath, "construct-window"); } catch { }
         var window = HiddenWindow();
+        try { File.WriteAllText(progressPath, "show-window"); } catch { }
         window.Show();
+        try { File.WriteAllText(progressPath, "queue-dispatcher"); } catch { }
         window.SuppressStatePersistence();
 
         window.Dispatcher.InvokeAsync(async () =>
@@ -9164,6 +9697,12 @@ public partial class App : Application
             long maxHeartbeatGapMs = 0;
             int heartbeatCount = 0;
             string activeOperation = "startup";
+            void ReportProgress(string operation)
+            {
+                activeOperation = operation;
+                try { File.WriteAllText(progressPath, operation); } catch { }
+            }
+            ReportProgress(activeOperation);
             var heartbeatGapSamples = new List<string>();
             heartbeat.Tick += (_, _) =>
             {
@@ -9178,6 +9717,7 @@ public partial class App : Application
 
             try
             {
+                ReportProgress("seed");
                 var seedWatch = Stopwatch.StartNew();
                 window.SeedLargeInteractionCatalogForSmoke(count);
                 window.UpdateLayout();
@@ -9209,6 +9749,7 @@ public partial class App : Application
                 heartbeatWatch.Restart();
                 lastHeartbeatMs = 0;
                 heartbeat.Start();
+                ReportProgress("search-churn");
 
                 for (int iteration = 0; iteration < 6; iteration++)
                 {
@@ -9233,6 +9774,7 @@ public partial class App : Application
                     countsExact &= window.FilteredCountForSmoke == count;
                 }
 
+                ReportProgress("filter-churn");
                 for (int iteration = 0; iteration < 6; iteration++)
                 {
                     activeOperation = $"filter-on-{iteration + 1}";
@@ -9252,7 +9794,7 @@ public partial class App : Application
                     countsExact &= window.FilteredCountForSmoke == count;
                 }
 
-                activeOperation = "favorite-eviction-prepare";
+                ReportProgress("favorite-eviction-prepare");
                 bool favoriteEvictionPrepared = window.SelectFileNameForSmoke(selectedName)
                     && window.MarkSelectedTileRealForSmoke();
                 window.ForceSharedStoreWritersForSmoke();
@@ -9263,9 +9805,9 @@ public partial class App : Application
                 favoriteEvictionPrepared &= window.FilteredCountForSmoke == count / 10
                     && string.Equals(window.SelectedFileNameForSmoke, selectedName, StringComparison.OrdinalIgnoreCase);
 
-                activeOperation = "favorite-eviction";
+                ReportProgress("favorite-eviction");
                 var favoriteEvictionWatch = Stopwatch.StartNew();
-                bool favoriteEvicted = window.RaiseFavoriteDecreaseForSmoke();
+                bool favoriteEvicted = await window.AdjustGalleryFavoritePointerForSmokeAsync(selectedName, -1);
                 await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
                 favoriteEvictionWatch.Stop();
                 favoriteEvictionElapsedMs = favoriteEvictionWatch.ElapsedMilliseconds;
@@ -9279,7 +9821,7 @@ public partial class App : Application
                         StringComparison.OrdinalIgnoreCase);
                 countsExact &= favoriteEvictionExact;
 
-                activeOperation = "favorite-eviction-restore";
+                ReportProgress("favorite-eviction-restore");
                 window.ClearFavoriteFiltersForSmoke();
                 bool favoriteEvictionRestored = window.SelectFileNameForSmoke(selectedName)
                     && window.SetSelectedFavoriteLevelForSmoke(5);
@@ -9288,6 +9830,7 @@ public partial class App : Application
                     && restoredWrites.All(static status => status == SharedWriteStatus.Succeeded)
                     && window.FilteredCountForSmoke == count;
 
+                ReportProgress("sort-churn");
                 string[] sortModes =
                 [
                     "name",
@@ -9308,7 +9851,7 @@ public partial class App : Application
                     countsExact &= changed && window.FilteredCountForSmoke == count;
                 }
 
-                activeOperation = "final-layout";
+                ReportProgress("final-layout");
                 await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
                 activeOperation = "final-settle";
                 await Task.Delay(250);
@@ -9412,6 +9955,7 @@ public partial class App : Application
             }
 
             WriteCatalogInteractionSmokeResult(resultFullPath, result);
+            try { if (File.Exists(progressPath)) File.Delete(progressPath); } catch { }
             Shutdown(result.Ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);
     }
@@ -16355,9 +16899,9 @@ public partial class App : Application
                 bool zoomIndicator = win.ModalZoomIndicatorContractForSmoke
                     && win.ModalSingleZoomReadoutForSmoke;
                 double layoutImageHeight = win.ModalImageAreaHeightForSmoke;
-                bool filmstripLayoutVisible = win.ModalFilmstripLayoutVisibleForSmoke;
+                bool filmstripLayoutVisible = win.ModalFilmstripOverlayVisibleForSmoke;
                 bool filmstripPinned = win.ModalFilmstripPinnedForSmoke;
-                bool filmstripPortraitContract = win.ModalBottomPortraitFilmstripContractForSmoke;
+                bool filmstripItemContract = win.ModalBottomFilmstripContractForSmoke;
                 bool modalFullWindowFit = win.ModalFullWindowFitContractForSmoke;
                 bool modalFitSurfaceVisible = win.ModalFitSurfaceVisibleForSmoke;
                 bool modalFitStretchUniform = win.ModalFitStretchUniformForSmoke;
@@ -16372,7 +16916,7 @@ public partial class App : Application
                 double modalImageHeight = win.ModalImageHeightForSmoke;
                 bool filmstripLayout = filmstripLayoutVisible
                     && filmstripPinned
-                    && filmstripPortraitContract
+                    && filmstripItemContract
                     && modalFullWindowFit;
                 int contextFavoriteBefore = win.SelectedFavoriteLevelForSmoke;
                 bool contextMenuAction = win.ActivateModalContextFavoriteForSmoke(1)
@@ -16383,16 +16927,45 @@ public partial class App : Application
                 await Task.Delay(1050);
                 bool manualVisiblePersistent = win.ModalManualChromeVisibleForSmoke
                     && win.ModalChromeVisibleForSmoke
-                    && win.ModalFilmstripLayoutVisibleForSmoke
+                    && win.ModalFilmstripOverlayVisibleForSmoke
                     && string.Equals(win.ModalPointerStateForSmoke, "Visible", StringComparison.Ordinal);
+                Rect footerWithFilmstrip = win.ModalFooterBoundsForSmoke;
+                bool filmstripButtonOff = win.ToggleModalFilmstripForSmoke()
+                    && !win.ModalFilmstripPinnedForSmoke
+                    && !win.ModalFilmstripOverlayVisibleForSmoke;
+                win.UpdateLayout();
+                Rect footerWithoutFilmstrip = win.ModalFooterBoundsForSmoke;
+                bool filmstripButtonOn = win.ToggleModalFilmstripForSmoke()
+                    && win.ModalFilmstripPinnedForSmoke
+                    && win.ModalFilmstripOverlayVisibleForSmoke;
+                win.UpdateLayout();
+                Rect footerAfterFilmstrip = win.ModalFooterBoundsForSmoke;
+                bool filmstripButtonStableGeometry = filmstripButtonOff
+                    && filmstripButtonOn
+                    && Math.Abs(footerWithoutFilmstrip.X - footerWithFilmstrip.X) < 0.5
+                    && Math.Abs(footerWithoutFilmstrip.Y - footerWithFilmstrip.Y) < 0.5
+                    && Math.Abs(footerWithoutFilmstrip.Width - footerWithFilmstrip.Width) < 0.5
+                    && Math.Abs(footerWithoutFilmstrip.Height - footerWithFilmstrip.Height) < 0.5
+                    && Math.Abs(footerAfterFilmstrip.X - footerWithFilmstrip.X) < 0.5
+                    && Math.Abs(footerAfterFilmstrip.Y - footerWithFilmstrip.Y) < 0.5
+                    && Math.Abs(footerAfterFilmstrip.Width - footerWithFilmstrip.Width) < 0.5
+                    && Math.Abs(footerAfterFilmstrip.Height - footerWithFilmstrip.Height) < 0.5;
 
                 bool imageClickImmediateHide = win.ModalVisibleForSmoke
-                    && win.HideModalChromeFromImageForSmoke();
-                bool chromeHidden = imageClickImmediateHide
+                    && win.ToggleModalChromeFromImageForSmoke()
+                    && !win.ModalChromeVisibleForSmoke;
+                bool imageClickImmediateShow = imageClickImmediateHide
+                    && win.ToggleModalChromeFromImageForSmoke()
+                    && win.ModalChromeVisibleForSmoke
+                    && win.ModalManualChromeVisibleForSmoke;
+                bool imageClickReturnedHidden = imageClickImmediateShow
+                    && win.ToggleModalChromeFromImageForSmoke()
+                    && !win.ModalChromeVisibleForSmoke;
+                bool chromeHidden = imageClickReturnedHidden
                     && !win.ModalChromeVisibleForSmoke
                     && !win.ModalManualChromeVisibleForSmoke
                     && win.ModalCursorHiddenForSmoke
-                    && !win.ModalFilmstripLayoutVisibleForSmoke
+                    && !win.ModalFilmstripOverlayVisibleForSmoke
                     && win.ModalWindowCaptionControlsContractForSmoke
                     && string.Equals(win.ModalPointerStateForSmoke, "Hidden", StringComparison.Ordinal);
                 win.UpdateLayout();
@@ -16403,7 +16976,7 @@ public partial class App : Application
                     && !win.ModalManualChromeVisibleForSmoke
                     && win.ModalTransientChromeVisibleForSmoke
                     && !win.ModalCursorHiddenForSmoke
-                    && !win.ModalFilmstripLayoutVisibleForSmoke
+                    && !win.ModalFilmstripOverlayVisibleForSmoke
                     && string.Equals(win.ModalPointerStateForSmoke, "ArmedToHide", StringComparison.Ordinal);
                 bool transientRevealMotion = win.ModalTransientChromeAnimationActiveForSmoke;
                 bool controlInteractionStarted = win.BeginModalControlInteractionForSmoke();
@@ -16446,7 +17019,6 @@ public partial class App : Application
                 win.UpdateLayout();
                 double overlayHeightDuring = win.ModalImageAreaHeightForSmoke;
                 bool filmstripOverlay = win.ModalFilmstripOverlayVisibleForSmoke
-                    && !win.ModalFilmstripLayoutVisibleForSmoke
                     && !win.ModalCursorHiddenForSmoke;
                 win.SetModalBottomHoverForSmoke(false);
                 win.UpdateLayout();
@@ -16459,23 +17031,37 @@ public partial class App : Application
                 bool chromeShown = win.ModalChromeVisibleForSmoke
                     && win.ModalManualChromeVisibleForSmoke
                     && !win.ModalCursorHiddenForSmoke
-                    && win.ModalFilmstripLayoutVisibleForSmoke
+                    && win.ModalFilmstripOverlayVisibleForSmoke
                     && Math.Abs(win.ModalImageAreaHeightForSmoke - hiddenImageHeight) < 0.5
                     && Math.Abs(layoutImageHeight - hiddenImageHeight) < 0.5;
 
+                bool detailsZoomed = win.ModalZoomShortcutForSmoke("plus");
+                bool detailsPanned = win.SetModalPanForSmoke(20, 12);
+                ModalTransformSnapshot transformBeforeDetails = win.ModalTransformForSmoke();
                 double imageWidthBeforeDetails = win.ModalImageWidthForSmoke;
                 double imageHeightBeforeDetails = win.ModalImageHeightForSmoke;
                 bool controlDidNotToggle = win.ToggleModalMetadataForSmoke();
                 await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
+                ModalTransformSnapshot transformWithDetails = win.ModalTransformForSmoke();
                 double imageWidthWithDetails = win.ModalImageWidthForSmoke;
                 double imageHeightWithDetails = win.ModalImageHeightForSmoke;
                 bool doubleClickMetadata = win.ToggleModalMetadataFromImageDoubleClickForSmoke();
                 await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
+                ModalTransformSnapshot transformAfterDetails = win.ModalTransformForSmoke();
                 bool detailsOverlayStableGeometry =
                     Math.Abs(imageWidthWithDetails - imageWidthBeforeDetails) < 0.5
                     && Math.Abs(imageHeightWithDetails - imageHeightBeforeDetails) < 0.5
                     && Math.Abs(win.ModalImageWidthForSmoke - imageWidthBeforeDetails) < 0.5
                     && Math.Abs(win.ModalImageHeightForSmoke - imageHeightBeforeDetails) < 0.5;
+                bool detailsTransformStable = detailsZoomed
+                    && detailsPanned
+                    && Math.Abs(transformWithDetails.Zoom - transformBeforeDetails.Zoom) < 0.0001
+                    && Math.Abs(transformWithDetails.PanX - transformBeforeDetails.PanX) < 0.0001
+                    && Math.Abs(transformWithDetails.PanY - transformBeforeDetails.PanY) < 0.0001
+                    && Math.Abs(transformAfterDetails.Zoom - transformBeforeDetails.Zoom) < 0.0001
+                    && Math.Abs(transformAfterDetails.PanX - transformBeforeDetails.PanX) < 0.0001
+                    && Math.Abs(transformAfterDetails.PanY - transformBeforeDetails.PanY) < 0.0001;
+                win.ResetModalTransformForSmoke();
 
                 string? beforeEdge = win.SelectedFileNameForSmoke;
                 bool edgeNext = win.ModalEdgeNavigateForSmoke(1);
@@ -16532,7 +17118,6 @@ public partial class App : Application
                 win.SetModalBottomHoverForSmoke(true);
                 win.UpdateLayout();
                 bool filmstripOffSuppressesHover = !win.ModalFilmstripPinnedForSmoke
-                    && !win.ModalFilmstripLayoutVisibleForSmoke
                     && !win.ModalFilmstripOverlayVisibleForSmoke;
                 win.SetModalBottomHoverForSmoke(false);
                 if (!win.ModalFilmstripPinnedForSmoke)
@@ -16617,11 +17202,13 @@ public partial class App : Application
                 bool ok = selected && opened && accessibility && windowCaptionControls && edgeChrome
                     && edgePercentageSetting && edgeImageIntersection
                     && zoomIndicator && filmstripLayout && contextMenuAction && manualVisiblePersistent
+                    && filmstripButtonStableGeometry
                     && chromeHidden && transientReveal && transientRevealMotion && transientExpired
                     && pointerStateContract && controlAutoHideSuspended && panningSuppressesChrome
                     && hiddenZoomPersistence
                     && filmstripOverlay && filmstripOverlayDismissed && filmstripOverlayStableGeometry
-                    && chromeShown && controlDidNotToggle && doubleClickMetadata && detailsOverlayStableGeometry
+                    && chromeShown && controlDidNotToggle && doubleClickMetadata
+                    && detailsOverlayStableGeometry && detailsTransformStable
                     && edgeNext && !string.Equals(beforeEdge, afterEdge, StringComparison.OrdinalIgnoreCase) && edgeFeedback
                     && swipeNext && !string.Equals(beforeSwipe, afterSwipe, StringComparison.OrdinalIgnoreCase) && smallSwipeIgnored
                     && zoomed && zoomFeedback && zoomedSwipeBlocked && reset
@@ -16641,7 +17228,8 @@ public partial class App : Application
                     FilmstripLayout = filmstripLayout,
                     FilmstripLayoutVisible = filmstripLayoutVisible,
                     FilmstripPinned = filmstripPinned,
-                    FilmstripPortraitContract = filmstripPortraitContract,
+                    FilmstripItemContract = filmstripItemContract,
+                    FilmstripButtonStableGeometry = filmstripButtonStableGeometry,
                     ModalFullWindowFit = modalFullWindowFit,
                     ModalFitSurfaceVisible = modalFitSurfaceVisible,
                     ModalFitStretchUniform = modalFitStretchUniform,
@@ -16657,6 +17245,7 @@ public partial class App : Application
                     ContextMenuAction = contextMenuAction,
                     ManualVisiblePersistent = manualVisiblePersistent,
                     ImageClickImmediateHide = imageClickImmediateHide,
+                    ImageClickImmediateShow = imageClickImmediateShow,
                     ChromeHidden = chromeHidden,
                     TransientReveal = transientReveal,
                     TransientRevealMotion = transientRevealMotion,
@@ -16671,6 +17260,7 @@ public partial class App : Application
                     ControlDidNotToggle = controlDidNotToggle,
                     DoubleClickMetadata = doubleClickMetadata,
                     DetailsOverlayStableGeometry = detailsOverlayStableGeometry,
+                    DetailsTransformStable = detailsTransformStable,
                     EdgeNext = edgeNext && !string.Equals(beforeEdge, afterEdge, StringComparison.OrdinalIgnoreCase),
                     SwipeNext = swipeNext && !string.Equals(beforeSwipe, afterSwipe, StringComparison.OrdinalIgnoreCase),
                     SwipeDownClosed = swipeDownClosed,
@@ -22336,7 +22926,8 @@ public partial class App : Application
         public bool FilmstripLayout { get; init; }
         public bool FilmstripLayoutVisible { get; init; }
         public bool FilmstripPinned { get; init; }
-        public bool FilmstripPortraitContract { get; init; }
+        public bool FilmstripItemContract { get; init; }
+        public bool FilmstripButtonStableGeometry { get; init; }
         public bool ModalFullWindowFit { get; init; }
         public bool ModalFitSurfaceVisible { get; init; }
         public bool ModalFitStretchUniform { get; init; }
@@ -22352,6 +22943,7 @@ public partial class App : Application
         public bool ContextMenuAction { get; init; }
         public bool ManualVisiblePersistent { get; init; }
         public bool ImageClickImmediateHide { get; init; }
+        public bool ImageClickImmediateShow { get; init; }
         public bool ChromeHidden { get; init; }
         public bool TransientReveal { get; init; }
         public bool TransientRevealMotion { get; init; }
@@ -22366,6 +22958,7 @@ public partial class App : Application
         public bool ControlDidNotToggle { get; init; }
         public bool DoubleClickMetadata { get; init; }
         public bool DetailsOverlayStableGeometry { get; init; }
+        public bool DetailsTransformStable { get; init; }
         public bool EdgeNext { get; init; }
         public bool SwipeNext { get; init; }
         public bool SwipeDownClosed { get; init; }

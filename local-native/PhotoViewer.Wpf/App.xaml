@@ -39,6 +39,19 @@
     <Color x:Key="SuccessBorderColor">#356D5B</Color>
     <Color x:Key="LogoColor">#7B83FF</Color>
     <Color x:Key="FavStepColor">#4E57CF</Color>
+    <Color x:Key="OverlaySoftColor">#B8000000</Color>
+    <Color x:Key="OverlayStrongColor">#D20A0C12</Color>
+    <Color x:Key="DropOverlayColor">#D9101018</Color>
+    <Color x:Key="DividerSubtleColor">#0AFFFFFF</Color>
+    <Color x:Key="DividerMediumColor">#3CFFFFFF</Color>
+    <Color x:Key="DividerStrongColor">#57FFFFFF</Color>
+    <Color x:Key="ThumbnailCaptionStartColor">#D0000000</Color>
+    <Color x:Key="ThumbnailCaptionEndColor">#00000000</Color>
+    <Color x:Key="ThumbnailCaptionTextColor">#F2FFFFFF</Color>
+    <Color x:Key="AiBadgeBackgroundColor">#D9142630</Color>
+    <Color x:Key="CompactFavoriteBackgroundColor">#E0F43F5E</Color>
+    <Color x:Key="ScrollThumbColor">#22FFFFFF</Color>
+    <Color x:Key="ScrollThumbHoverColor">#3CFFFFFF</Color>
 
     <!-- Lightweight opaque workbench tokens: square, quiet, and fast. -->
     <SolidColorBrush x:Key="BgPrimary" Color="{DynamicResource BgPrimaryColor}"/>
@@ -73,6 +86,17 @@
     <SolidColorBrush x:Key="FavoriteSoft" Color="{DynamicResource FavoriteSoftColor}"/>
     <SolidColorBrush x:Key="SuccessSoft" Color="{DynamicResource SuccessSoftColor}"/>
     <SolidColorBrush x:Key="SuccessBorder" Color="{DynamicResource SuccessBorderColor}"/>
+    <SolidColorBrush x:Key="OverlaySoftBrush" Color="{DynamicResource OverlaySoftColor}"/>
+    <SolidColorBrush x:Key="OverlayStrongBrush" Color="{DynamicResource OverlayStrongColor}"/>
+    <SolidColorBrush x:Key="DropOverlayBrush" Color="{DynamicResource DropOverlayColor}"/>
+    <SolidColorBrush x:Key="DividerSubtleBrush" Color="{DynamicResource DividerSubtleColor}"/>
+    <SolidColorBrush x:Key="DividerMediumBrush" Color="{DynamicResource DividerMediumColor}"/>
+    <SolidColorBrush x:Key="DividerStrongBrush" Color="{DynamicResource DividerStrongColor}"/>
+    <SolidColorBrush x:Key="ThumbnailCaptionTextBrush" Color="{DynamicResource ThumbnailCaptionTextColor}"/>
+    <SolidColorBrush x:Key="AiBadgeBackgroundBrush" Color="{DynamicResource AiBadgeBackgroundColor}"/>
+    <SolidColorBrush x:Key="CompactFavoriteBackgroundBrush" Color="{DynamicResource CompactFavoriteBackgroundColor}"/>
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="{DynamicResource ScrollThumbColor}"/>
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="{DynamicResource ScrollThumbHoverColor}"/>
 
     <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, monospace</FontFamily>
 
@@ -405,7 +429,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
-            <Border x:Name="bd" CornerRadius="3" Padding="8,4" Background="Transparent">
+            <Border x:Name="bd" CornerRadius="3" Padding="6,4" Background="Transparent">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -655,7 +679,7 @@
     <!-- ═══════════ Image card (ListBoxItem) ═══════════ -->
     <Style x:Key="CompactCardFavoriteButton" TargetType="Button" BasedOn="{StaticResource CommonButtonBase}">
       <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
-      <Setter Property="Background" Value="#B8000000"/>
+      <Setter Property="Background" Value="{DynamicResource OverlaySoftBrush}"/>
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="Padding" Value="0"/>
       <Setter Property="FontSize" Value="9"/>
@@ -673,7 +697,7 @@
                   <Condition Property="IsMouseOver" Value="True"/>
                   <Condition Property="IsEnabled" Value="True"/>
                 </MultiTrigger.Conditions>
-                <Setter TargetName="compactFavoriteButtonBackground" Property="Background" Value="#E0F43F5E"/>
+                <Setter TargetName="compactFavoriteButtonBackground" Property="Background" Value="{DynamicResource CompactFavoriteBackgroundBrush}"/>
               </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
             </ControlTemplate.Triggers>
@@ -721,7 +745,7 @@
     </ControlTemplate>
 
     <Style x:Key="CardItem" TargetType="ListBoxItem">
-      <Setter Property="Margin" Value="0,0,14,14"/>
+      <Setter Property="Margin" Value="0,0,10,10"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
@@ -745,12 +769,12 @@
                       <Button Style="{StaticResource IconButton}" Width="{Binding CardFavoriteButtonSize}" Height="{Binding CardFavoriteButtonSize}"
                               CommandParameter="decrease" Tag="{Binding}" Margin="0,0,2,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"
                               ToolTip="Decrease favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Decrease favorite level for {0}}">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource Favorite}" FontSize="14"/>
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource Favorite}" FontSize="16"/>
                       </Button>
                       <Button Style="{StaticResource IconButton}" Width="{Binding CardFavoriteButtonSize}" Height="{Binding CardFavoriteButtonSize}"
                               CommandParameter="increase" Tag="{Binding}" ToolTip="Increase favorite level"
                               AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="14"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="16"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"/></StackPanel>
                       </Button>
                     </StackPanel>
 
@@ -759,12 +783,12 @@
                     <Border x:Name="overlay" VerticalAlignment="Bottom" Height="58" Opacity="1" Padding="10,0,10,8" Visibility="{Binding ShowCardDetails, Converter={StaticResource BoolToVis}}">
                       <Border.Background>
                         <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
-                          <GradientStop Color="#D0000000" Offset="0"/>
-                          <GradientStop Color="#00000000" Offset="1"/>
+                          <GradientStop Color="{DynamicResource ThumbnailCaptionStartColor}" Offset="0"/>
+                          <GradientStop Color="{DynamicResource ThumbnailCaptionEndColor}" Offset="1"/>
                         </LinearGradientBrush>
                       </Border.Background>
                       <StackPanel VerticalAlignment="Bottom">
-                        <TextBlock Text="{Binding FileName}" Foreground="#F2FFFFFF"
+                        <TextBlock Text="{Binding FileName}" Foreground="{DynamicResource ThumbnailCaptionTextBrush}"
                                    FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                         <TextBlock Text="{Binding SizeText}" Foreground="{StaticResource TextTertiary}"
                                    FontSize="10.5" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
@@ -777,7 +801,7 @@
                     <Border CornerRadius="2" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
                     <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="5" Padding="4,1" CornerRadius="4"
-                            Background="#D9142630" BorderBrush="#FF38BDF8" BorderThickness="1"
+                            Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
                             IsHitTestVisible="False" Visibility="{Binding ShowEnhancedBadge, Converter={StaticResource BoolToVis}}">
                       <TextBlock Text="AI" Foreground="#FFBAE6FD" FontSize="9" FontWeight="SemiBold"/>
                     </Border>
@@ -840,18 +864,18 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
                   <Button Style="{StaticResource IconButton}" Width="28" Height="28" CommandParameter="decrease" Tag="{Binding}"
                           ToolTip="Decrease favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Decrease favorite level for {0}}">
-                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource Favorite}" FontSize="14"/>
+                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource Favorite}" FontSize="16"/>
                   </Button>
                   <Button Style="{StaticResource IconButton}" MinWidth="34" Width="Auto" Height="28" Padding="5,0" CommandParameter="increase" Tag="{Binding}"
                           ToolTip="Increase favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}">
-                    <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="14"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0"/></StackPanel>
+                    <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="16"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0"/></StackPanel>
                   </Button>
                 </StackPanel>
               </Grid>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="bd" Property="Background" Value="#08FFFFFF"/>
+                <Setter TargetName="bd" Property="Background" Value="{DynamicResource DividerSubtleBrush}"/>
               </Trigger>
               <Trigger Property="IsSelected" Value="True">
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
@@ -956,10 +980,10 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Thumb">
-            <Border x:Name="t" CornerRadius="4" Background="#22FFFFFF" Margin="2"/>
+            <Border x:Name="t" CornerRadius="4" Background="{DynamicResource ScrollThumbBrush}" Margin="2"/>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="t" Property="Background" Value="#3CFFFFFF"/>
+                <Setter TargetName="t" Property="Background" Value="{DynamicResource ScrollThumbHoverBrush}"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>

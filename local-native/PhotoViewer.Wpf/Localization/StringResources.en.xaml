@@ -52,6 +52,16 @@
   <sys:String x:Key="UiConfirmBeforeDeleteHelp">Moves source images to the Windows Recycle Bin; it never uses a hard-delete fallback.</sys:String>
   <sys:String x:Key="UiUnseenDots">Unseen dots</sys:String>
   <sys:String x:Key="UiUnseenDotsHelp">Shows a dot on images that have not been viewed. This display option never changes seen history.</sys:String>
+  <sys:String x:Key="UiAccessibilityEffects">ACCESSIBILITY EFFECTS</sys:String>
+  <sys:String x:Key="UiReducedMotion">Reduced motion</sys:String>
+  <sys:String x:Key="UiReducedTransparency">Reduced transparency</sys:String>
+  <sys:String x:Key="UiAccessibilitySystem">System</sys:String>
+  <sys:String x:Key="UiAccessibilityReduce">Reduce</sys:String>
+  <sys:String x:Key="UiAccessibilityFull">Full</sys:String>
+  <sys:String x:Key="UiAccessibilityReduced">Reduced</sys:String>
+  <sys:String x:Key="UiAccessibilityFullValue">Full</sys:String>
+  <sys:String x:Key="UiAccessibilityStatusFormat">Motion: {0} / Transparency: {1}</sys:String>
+  <sys:String x:Key="UiAccessibilityHelp">Follows Windows by default. Overrides stay in this WPF app and never change Browser or shared image data.</sys:String>
   <sys:String x:Key="UiModalEdgeNavigation">MODAL EDGE NAVIGATION</sys:String>
   <sys:String x:Key="UiModalEdgeEachSideFormat">{0}% each side</sys:String>
   <sys:String x:Key="UiModalEdgeHelp">Only the image-intersecting edge zone navigates. Zero disables edge clicking; arrow keys remain available.</sys:String>

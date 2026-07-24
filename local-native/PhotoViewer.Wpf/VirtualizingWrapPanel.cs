@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -109,6 +110,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private int _firstRealizedIndex = -1;
     private int _lastRealizedIndex = -1;
     private bool _realizationContinuationPending;
+    private long _layoutGeneration;
 
     public event EventHandler<VirtualizingWrapPanelRangeChangedEventArgs>? RealizedRangeChanged;
 
@@ -166,6 +168,10 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     public int LastRealizedIndex => _lastRealizedIndex;
     public int ColumnCount => _columns;
     public int RealizedItemCount => InternalChildren.Count;
+    public bool RealizationContinuationPending => _realizationContinuationPending;
+    public int VisiblePlaceholderCount => _realizationContinuationPending ? CountVisibleUnrealizedItems() : 0;
+    public int VisibleUnrealizedItemCount => CountVisibleUnrealizedItems();
+    public long LayoutGeneration => _layoutGeneration;
 
     internal void SetLayoutSource(IReadOnlyList<Tile> source)
     {
@@ -173,16 +179,14 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         if (ReferenceEquals(_layoutSource, source))
             return;
         _layoutSource = source;
-        _layoutDirty = true;
-        _realizationContinuationPending = false;
+        MarkLayoutDirty();
         InvalidateMeasure();
         InvalidateVisual();
     }
 
     public void InvalidateItemLayout()
     {
-        _layoutDirty = true;
-        _realizationContinuationPending = false;
+        MarkLayoutDirty();
         InvalidateMeasure();
         InvalidateVisual();
     }
@@ -231,18 +235,56 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     {
         if (dependencyObject is not VirtualizingWrapPanel panel)
             return;
-        panel._layoutDirty = true;
-        panel._realizationContinuationPending = false;
+        panel.MarkLayoutDirty();
         panel.InvalidateMeasure();
         panel.InvalidateVisual();
     }
 
     protected override void OnItemsChanged(object sender, ItemsChangedEventArgs args)
     {
-        _layoutDirty = true;
-        _realizationContinuationPending = false;
         base.OnItemsChanged(sender, args);
+        switch (args.Action)
+        {
+            case NotifyCollectionChangedAction.Remove:
+                RemoveChangedVisualRange(args.Position, args.ItemUICount);
+                break;
+            case NotifyCollectionChangedAction.Move:
+                RemoveChangedVisualRange(args.OldPosition, args.ItemUICount);
+                break;
+        }
+        MarkLayoutDirty();
         InvalidateVisual();
+    }
+
+    private void RemoveChangedVisualRange(GeneratorPosition position, int count)
+    {
+        if (count <= 0)
+            return;
+
+        int childIndex = position.Index + (position.Offset > 0 ? 1 : 0);
+        if (childIndex < 0 || childIndex + count > InternalChildren.Count)
+        {
+            ResyncGeneratorVisuals();
+            return;
+        }
+
+        // ItemContainerGenerator has already applied the source mutation when
+        // this notification reaches the panel. Mirror WPF's
+        // VirtualizingStackPanel behavior and detach only the corresponding
+        // visual range; calling generator.Remove here would mutate the new map.
+        RemoveInternalChildRange(childIndex, count);
+    }
+
+    private void ClearVisualChildren()
+    {
+        if (InternalChildren.Count > 0)
+            RemoveInternalChildRange(0, InternalChildren.Count);
+    }
+
+    private void ResyncGeneratorVisuals()
+    {
+        ItemContainerGenerator.RemoveAll();
+        ClearVisualChildren();
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -373,6 +415,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             return;
         }
 
+        _layoutGeneration++;
         _layoutDirty = false;
         _realizationContinuationPending = false;
         _layoutItemCount = itemCount;
@@ -539,10 +582,13 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     {
         if (_realizationContinuationPending)
             return;
+        long generation = _layoutGeneration;
         _realizationContinuationPending = true;
         InvalidateVisual();
         Dispatcher.BeginInvoke(() =>
         {
+            if (generation != _layoutGeneration || !_realizationContinuationPending)
+                return;
             _realizationContinuationPending = false;
             InvalidateVisual();
             if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
@@ -550,6 +596,12 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 // retaining a range that may have gone stale after input.
                 InvalidateMeasure();
         }, DispatcherPriority.Background);
+    }
+
+    private void MarkLayoutDirty()
+    {
+        _layoutDirty = true;
+        _realizationContinuationPending = false;
     }
 
     private static Brush CreateProgressivePlaceholderBrush()
@@ -566,6 +618,16 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         {
             GeneratorPosition position = new(childIndex, 0);
             int itemIndex = generator.IndexFromGeneratorPosition(position);
+            if (itemIndex < 0)
+            {
+                // The generator and visual collection must stay index-aligned.
+                // A single negative mapping cannot identify which child became
+                // orphaned after an unexpected mutation, so rebuild the bounded
+                // realized slice instead of guessing and shifting every later
+                // container by one.
+                ResyncGeneratorVisuals();
+                return;
+            }
             if (itemIndex >= firstIndex && itemIndex <= lastIndex)
                 continue;
             generator.Remove(position, 1);
@@ -687,6 +749,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         double spacingY = Math.Max(0, VerticalSpacing);
         for (int index = _firstVisibleIndex; index <= _lastVisibleIndex; index++)
         {
+            if (IsItemContainerRealized(index))
+                continue;
             int row = index < _itemRows.Length ? _itemRows[index] : -1;
             if (row < 0 || row >= _rowTops.Count || _rowItemCounts[row] <= 0)
                 continue;
@@ -702,6 +766,26 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 3);
         }
     }
+
+    private int CountVisibleUnrealizedItems()
+    {
+        if (_firstVisibleIndex < 0
+            || _lastVisibleIndex < _firstVisibleIndex)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int index = _firstVisibleIndex; index <= _lastVisibleIndex; index++)
+        {
+            if (!IsItemContainerRealized(index))
+                count++;
+        }
+        return count;
+    }
+
+    private bool IsItemContainerRealized(int index)
+        => ItemsControl.GetItemsOwner(this)?.ItemContainerGenerator.ContainerFromIndex(index) is not null;
 
     private void CoerceOffsets()
     {
