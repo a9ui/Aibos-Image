@@ -16326,6 +16326,11 @@ public partial class App : Application
                 win.SetSortByForSmoke("name");
                 bool selected = win.SelectFileNameForSmoke(secondName);
                 bool opened = win.OpenModalForSmoke();
+                win.UpdateLayout();
+                // OpenModal queues an actual-bounds refit at Loaded priority.
+                // Yield below that priority so clamped CI desktops measure the
+                // settled fit rather than the pre-clamp requested window size.
+                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
                     && win.ModalContextMenuContractForSmoke;
@@ -16349,11 +16354,6 @@ public partial class App : Application
                 bool edgePercentageSetting = edgePercentageSet && edgePercentagePersisted && edgePercentageReset;
                 bool zoomIndicator = win.ModalZoomIndicatorContractForSmoke
                     && win.ModalSingleZoomReadoutForSmoke;
-                win.UpdateLayout();
-                // OpenModal queues an actual-bounds refit at Loaded priority.
-                // Yield below that priority so clamped CI desktops measure the
-                // settled fit rather than the pre-clamp requested window size.
-                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
                 double layoutImageHeight = win.ModalImageAreaHeightForSmoke;
                 bool filmstripLayoutVisible = win.ModalFilmstripLayoutVisibleForSmoke;
                 bool filmstripPinned = win.ModalFilmstripPinnedForSmoke;
