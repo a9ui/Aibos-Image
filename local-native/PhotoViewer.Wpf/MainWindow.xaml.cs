@@ -707,6 +707,12 @@ public partial class MainWindow : Window
         }
     }
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        ConstrainWindowToCurrentWorkArea();
+    }
+
     private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         ScheduleModalFitUpdate();
@@ -721,6 +727,7 @@ public partial class MainWindow : Window
     {
         GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
         base.OnDpiChanged(oldDpi, newDpi);
+        ConstrainWindowToCurrentWorkArea();
         PreserveGridAnchorAfterDpiChange(anchor);
     }
 
@@ -15590,6 +15597,30 @@ public partial class MainWindow : Window
         MinHeight = Math.Min(DesignWindowMinHeight, Math.Max(1, workArea.Height));
     }
 
+    private void ConstrainWindowToCurrentWorkArea()
+    {
+        Rect workArea = ResolveSafeCurrentMonitorWorkArea();
+        ApplyEffectiveWindowMinimums(workArea);
+        if (_fakeMaximized)
+        {
+            Left = workArea.Left;
+            Top = workArea.Top;
+            Width = workArea.Width;
+            Height = workArea.Height;
+            return;
+        }
+
+        Rect normalized = NormalizeRestoreBounds(
+            new Rect(Left, Top, Width, Height),
+            workArea,
+            DesignWindowMinWidth,
+            DesignWindowMinHeight);
+        Left = normalized.Left;
+        Top = normalized.Top;
+        Width = normalized.Width;
+        Height = normalized.Height;
+    }
+
     private static Rect NormalizeRestoreBounds(Rect saved, Rect workArea, double minWidth, double minHeight)
     {
         double safeMinWidth = Math.Min(workArea.Width, Math.Max(1, minWidth));
@@ -15683,6 +15714,11 @@ public partial class MainWindow : Window
     public void SetCurrentMonitorWorkAreaForSmoke(Rect area) => _currentMonitorWorkArea = () => area;
     public void SetThrowingMonitorWorkAreaForSmoke() => _currentMonitorWorkArea = () => throw new InvalidOperationException("injected monitor lookup failure");
     public void ResetCurrentMonitorWorkAreaForSmoke() => _currentMonitorWorkArea = ResolveCurrentMonitorWorkArea;
+    public Rect ConstrainWindowToCurrentWorkAreaForSmoke()
+    {
+        ConstrainWindowToCurrentWorkArea();
+        return WindowBoundsForSmoke;
+    }
     public void ToggleMaximizeForSmoke() => Maximize_Click(this, new RoutedEventArgs());
     public Rect RestoreFromFakeMaximizeForSmoke(Rect savedBounds)
     {
@@ -17535,6 +17571,7 @@ public partial class MainWindow : Window
             && Grid.GetColumn(RightPanel) == 1
             && Grid.GetColumnSpan(RightPanel) == 3
             && WorkbenchPreviewRow.ActualHeight > 0;
+    public static double DefaultRightPanelWidthForSmoke => DefaultRightPanelWidth;
     public double RightPanelWidthForSmoke => RightPanel.ActualWidth;
     public double RightPanelStoredWidthForSmoke => _rightPanelWidth;
     public bool RightPanelOpenForSmoke => RightPanel.Visibility == Visibility.Visible;

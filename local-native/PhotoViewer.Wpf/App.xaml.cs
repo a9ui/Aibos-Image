@@ -2885,6 +2885,26 @@ public partial class App : Application
                     && wideDragRegionWidth >= 95;
                 window.SetUiLanguageForSmoke("en");
 
+                // Startup must normalize the initial design size before the
+                // user can reach custom maximize controls on a compact work area.
+                var compactStartupWorkArea = new Rect(80, 40, 760, 480);
+                window.Left = 180;
+                window.Top = 60;
+                window.Width = 1280;
+                window.Height = 820;
+                window.SetCurrentMonitorWorkAreaForSmoke(compactStartupWorkArea);
+                Rect compactStartupBounds = window.ConstrainWindowToCurrentWorkAreaForSmoke();
+                await SettleLayoutAsync();
+                Size compactStartupMinimum = window.EffectiveWindowMinimumForSmoke;
+                bool compactStartupContained = !window.FakeMaximizedForSmoke
+                    && SameRect(compactStartupBounds, compactStartupWorkArea)
+                    && SameRect(
+                        new Rect(0, 0, compactStartupMinimum.Width, compactStartupMinimum.Height),
+                        new Rect(0, 0, compactStartupWorkArea.Width, compactStartupWorkArea.Height))
+                    && window.AdaptiveWorkbenchForSmoke
+                    && window.HeaderDragRegionWidthForSmoke >= 95
+                    && window.VisibleWorkbenchChromeContainedForSmoke;
+
                 // Keep the injected secondary work area inside the CI desktop's
                 // physical bounds so Windows does not clamp an intentionally
                 // nonexistent monitor. Its offset/size still differs from the
@@ -2989,6 +3009,7 @@ public partial class App : Application
                 bool fallbackOffscreenContained = Contains(SystemParameters.WorkArea, fallbackNormalized);
                 ok = usedCurrentMonitor
                     && wideSidebarLayout
+                    && compactStartupContained
                     && restoredExactly
                     && disconnectedContained
                     && oversizedContained
@@ -3003,7 +3024,7 @@ public partial class App : Application
                     ok,
                     message = ok
                         ? "fake maximize and restore stayed current-monitor-safe across topology, resolution, and DPI-equivalent changes"
-                        : $"window work-area contract failed: wide={wideSidebarLayout} adaptiveOff={wideAdaptiveOff} pinned={wideSettingsPinned} scroll={wideScrollContained} text={wideButtonTextFits}[{string.Join(',', wideClippedButtons)}] chrome={wideChromeContained} drag={wideDragRegionWidth:0.##} compact={compactContained} short={shortContained}",
+                        : $"window work-area contract failed: wide={wideSidebarLayout} startup={compactStartupContained} adaptiveOff={wideAdaptiveOff} pinned={wideSettingsPinned} scroll={wideScrollContained} text={wideButtonTextFits}[{string.Join(',', wideClippedButtons)}] chrome={wideChromeContained} drag={wideDragRegionWidth:0.##} compact={compactContained} short={shortContained}",
                     initial,
                     wideSidebarLayout,
                     wideAdaptiveOff,
@@ -3013,6 +3034,10 @@ public partial class App : Application
                     wideClippedButtons,
                     wideChromeContained,
                     wideDragRegionWidth,
+                    compactStartupWorkArea,
+                    compactStartupBounds,
+                    compactStartupMinimum,
+                    compactStartupContained,
                     secondMonitorWorkArea,
                     maximized,
                     restored,
@@ -14820,7 +14845,7 @@ public partial class App : Application
                 third.Close();
 
                 bool ok = defaultOpen
-                    && Nearly(defaultWidth, 360)
+                    && Nearly(defaultWidth, PhotoViewer.Wpf.MainWindow.DefaultRightPanelWidthForSmoke)
                     && resized
                     && Nearly(resizedWidth, 400)
                     && restoredOpen
