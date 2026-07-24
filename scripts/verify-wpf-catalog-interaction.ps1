@@ -91,6 +91,9 @@ if ($result.keyboardAccessibilityBounded -ne $true `
     -or $result.keyboardAccessibilityMaxRealized -gt $result.gridRealizationLimit) {
     $failures.Add('keyboard/UI Automation navigation exceeded the realized-container bound')
 }
+if ($result.keyboardSelectionSyncMaxMs -gt 4) {
+    $failures.Add("keyboard/UI Automation selection synchronization exceeded 4 ms ($($result.keyboardSelectionSyncMaxMs) ms)")
+}
 if ($result.gridItemsSourceCount -ne $Count -or $result.gridUsesFullExtentVirtualization -ne $true -or $result.gridRealizedCount -gt $result.gridRealizationLimit) {
     $failures.Add('100k gallery containers were not bounded by full-extent virtualization')
 }

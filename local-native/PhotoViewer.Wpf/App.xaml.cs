@@ -10060,8 +10060,12 @@ public partial class App : Application
                 await FlushLayoutAsync();
                 bool keyboardInitialFocus = window.FocusSelectedGalleryItemForSmoke();
                 int keyboardMaxRealized = window.GridRealizedCountForSmoke;
+                long keyboardSelectionSyncMaxMs = window.LastCardsSelectionSyncMsForSmoke;
 
                 bool keyboardEndHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.End);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
                 bool keyboardEndFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
                 await window.WaitForGridRealizationIdleForSmokeAsync();
                 bool keyboardEndExact = window.SelectedIndexForSmoke == tailIndex
@@ -10075,6 +10079,9 @@ public partial class App : Application
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
                 bool keyboardHomeHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Home);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
                 bool keyboardHomeFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
                 await window.WaitForGridRealizationIdleForSmokeAsync();
                 bool keyboardHomeExact = window.SelectedIndexForSmoke == 0
@@ -10083,6 +10090,9 @@ public partial class App : Application
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
                 bool keyboardRightHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Right);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
                 bool keyboardRightFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
                 await window.WaitForGridRealizationIdleForSmokeAsync();
                 int afterRightIndex = window.SelectedIndexForSmoke;
@@ -10091,6 +10101,9 @@ public partial class App : Application
 
                 int expectedAfterDown = Math.Min(count - 1, afterRightIndex + Math.Max(1, window.GridColumnCountForSmoke));
                 bool keyboardDownHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Down);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
                 bool keyboardDownFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
                 await window.WaitForGridRealizationIdleForSmokeAsync();
                 int afterDownIndex = window.SelectedIndexForSmoke;
@@ -10098,6 +10111,9 @@ public partial class App : Application
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
                 bool keyboardPageDownHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.PageDown);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
                 bool keyboardPageDownFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
                 await window.WaitForGridRealizationIdleForSmokeAsync();
                 int afterPageDownIndex = window.SelectedIndexForSmoke;
@@ -10134,6 +10150,9 @@ public partial class App : Application
                     window.CaptureGridAutomationItemForSmoke(tailIndex);
                 bool automationRealizePreservedSelection = window.SelectedIndexForSmoke == keyboardStartIndex;
                 bool automationSelected = window.SelectGridItemThroughAutomationForSmoke(tailIndex);
+                keyboardSelectionSyncMaxMs = Math.Max(
+                    keyboardSelectionSyncMaxMs,
+                    window.LastCardsSelectionSyncMsForSmoke);
                 GridSelectionVisualSmokeSnapshot automationTailSelection =
                     await window.WaitForGridSelectionVisualForSmokeAsync(tailName);
                 bool automationSelectionExact = automationSelected
@@ -10286,6 +10305,7 @@ public partial class App : Application
                     AutomationSelectionExact = automationSelectionExact,
                     RecycledContainerStateReset = recycledContainerStateReset,
                     KeyboardAccessibilityMaxRealized = keyboardMaxRealized,
+                    KeyboardSelectionSyncMaxMs = keyboardSelectionSyncMaxMs,
                     KeyboardAccessibilityBounded = keyboardAccessibilityBounded,
                     AutomationTailPeer = automationTailPeer,
                     AutomationTailContainer = automationTailContainer,
@@ -24192,6 +24212,7 @@ public partial class App : Application
         public bool AutomationSelectionExact { get; init; }
         public bool RecycledContainerStateReset { get; init; }
         public int KeyboardAccessibilityMaxRealized { get; init; }
+        public long KeyboardSelectionSyncMaxMs { get; init; }
         public bool KeyboardAccessibilityBounded { get; init; }
         public GalleryAutomationItemSmokeSnapshot? AutomationTailPeer { get; init; }
         public GalleryAutomationItemSmokeSnapshot? AutomationTailContainer { get; init; }

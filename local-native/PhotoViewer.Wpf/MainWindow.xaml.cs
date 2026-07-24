@@ -6231,7 +6231,13 @@ public partial class MainWindow : Window
                 : _tiles.IndexOf(primary);
         _selectionVisualSyncGeneration++;
 
-        SynchronizeSelectionControls();
+        IReadOnlyList<Tile>? knownMaterializedSelection = _selectedPaths.Count switch
+        {
+            0 => [],
+            1 when primary is not null => [primary],
+            _ => null,
+        };
+        SynchronizeSelectionControls(knownMaterializedSelection);
         ApplyPrimarySelection(primary, _primarySelectedIndex);
     }
 
@@ -6424,6 +6430,12 @@ public partial class MainWindow : Window
     {
         CancelPendingGalleryFocus();
         _selectedPaths.Clear();
+        int knownPrimaryIndex = primaryIndex.GetValueOrDefault(-1);
+        bool primaryIndexIsKnown = primary is not null
+            && knownPrimaryIndex >= 0
+            && knownPrimaryIndex < _tiles.Count
+            && ReferenceEquals(_tiles[knownPrimaryIndex], primary);
+        IReadOnlyList<Tile>? materializedSelection = null;
         if (selectedTiles is IReadOnlyCollection<Tile> collection
             && collection.Count > MaxMaterializedSelectionVisualItems)
         {
@@ -6438,25 +6450,35 @@ public partial class MainWindow : Window
         }
         else
         {
-            foreach (Tile tile in selectedTiles.Where(tile => _tiles.Contains(tile)))
-                _selectedPaths.Add(tile.Path);
+            var accepted = new List<Tile>(
+                selectedTiles is IReadOnlyCollection<Tile> knownCollection
+                    ? knownCollection.Count
+                    : 4);
+            foreach (Tile tile in selectedTiles)
+            {
+                bool available = primaryIndexIsKnown && ReferenceEquals(tile, primary)
+                    || _tiles.Contains(tile);
+                if (available && _selectedPaths.Add(tile.Path))
+                    accepted.Add(tile);
+            }
+            materializedSelection = accepted;
         }
 
         Tile? effectivePrimary = primary is not null && _selectedPaths.Contains(primary.Path)
             ? primary
-            : SelectedTiles().LastOrDefault();
+            : materializedSelection?.LastOrDefault()
+                ?? SelectedTiles().LastOrDefault();
         _primarySelectedPath = effectivePrimary?.Path;
         _primarySelectedTile = effectivePrimary;
         _primarySelectedIndex = effectivePrimary is null
             ? -1
-            : primaryIndex is >= 0
-                && primaryIndex < _tiles.Count
-                && ReferenceEquals(_tiles[primaryIndex.Value], effectivePrimary)
-                    ? primaryIndex.Value
+            : primaryIndexIsKnown
+                && ReferenceEquals(primary, effectivePrimary)
+                    ? knownPrimaryIndex
                     : _tiles.IndexOf(effectivePrimary);
         _selectionVisualSyncGeneration++;
 
-        SynchronizeSelectionControls();
+        SynchronizeSelectionControls(materializedSelection);
         ApplyPrimarySelection(effectivePrimary, _primarySelectedIndex);
     }
 
