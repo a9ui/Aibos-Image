@@ -1207,6 +1207,7 @@ public partial class MainWindow : Window
     private sealed record CatalogProjectionRequest(
         long Generation,
         bool ReorderCatalog,
+        bool RestrictToCurrentProjection,
         bool SelectFirst,
         int? SelectionFallbackIndex,
         GridZoomAnchor? ViewportAnchor,
@@ -4491,7 +4492,8 @@ public partial class MainWindow : Window
             debounce: false,
             reorderCatalog: false,
             selectFirst: true,
-            selectionFallbackIndex: fallbackIndex);
+            selectionFallbackIndex: fallbackIndex,
+            restrictToCurrentProjection: true);
     }
 
     private void RefreshModalFavoriteSurface(Tile? knownSelected = null)
@@ -7761,7 +7763,8 @@ public partial class MainWindow : Window
         bool reorderCatalog,
         bool selectFirst,
         int? selectionFallbackIndex = null,
-        GridZoomAnchor? viewportAnchor = null)
+        GridZoomAnchor? viewportAnchor = null,
+        bool restrictToCurrentProjection = false)
     {
         CancelPendingCatalogProjection(completePending: true);
         long generation = ++_catalogProjectionGeneration;
@@ -7770,6 +7773,7 @@ public partial class MainWindow : Window
         var request = new CatalogProjectionRequest(
             generation,
             reorderCatalog,
+            restrictToCurrentProjection,
             selectFirst,
             selectionFallbackIndex,
             viewportAnchor ?? PreferredGridGeometryAnchor(),
@@ -8599,7 +8603,7 @@ public partial class MainWindow : Window
         }
 
         if (RefreshFavoriteMutationSurface(selected))
-            SaveState();
+            ScheduleSearchStateSave();
         SetTransientStatusToast(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
         return true;
     }
@@ -8667,7 +8671,7 @@ public partial class MainWindow : Window
 
         tile.Fav = clamped;
         if (RefreshFavoriteMutationSurface([tile]))
-            SaveState();
+            ScheduleSearchStateSave();
         return true;
     }
 
@@ -8705,7 +8709,7 @@ public partial class MainWindow : Window
         }
 
         if (RefreshFavoriteMutationSurface(changedTiles))
-            SaveState();
+            ScheduleSearchStateSave();
         SetTransientStatusToast($"{successMessage} Saving...");
         ScheduleFavoriteWriterPump();
         return true;
@@ -9489,13 +9493,16 @@ public partial class MainWindow : Window
     {
         AttachGalleryVirtualizationPanel();
         string query = SearchInput?.Text?.Trim() ?? "";
-        int tileCount = _allTiles.Count;
+        IReadOnlyList<Tile> catalogSource = request?.RestrictToCurrentProjection == true
+            ? _tiles
+            : _allTiles;
+        int tileCount = catalogSource.Count;
         FilterTileSnapshot[] tiles = ArrayPool<FilterTileSnapshot>.Shared.Rent(tileCount);
         try
         {
             for (int index = 0; index < tileCount; index++)
             {
-                Tile tile = _allTiles[index];
+                Tile tile = catalogSource[index];
                 tiles[index] = new FilterTileSnapshot(
                     tile,
                     tile.Path,

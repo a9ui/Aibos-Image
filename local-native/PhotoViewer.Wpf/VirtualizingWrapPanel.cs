@@ -144,7 +144,6 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private int _priorityRealizationIndex = -1;
     private readonly HashSet<UIElement> _deferredMeasureContainers = [];
     private bool _itemsResetPreparationActive;
-    private int _itemsResetVisualsRemaining;
     private int _itemsResetGeneratorPosition = -1;
     private long _layoutGeneration;
     private PreparedVirtualizingLayout? _preparedLayout;
@@ -268,7 +267,6 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         }
 
         _itemsResetPreparationActive = true;
-        _itemsResetVisualsRemaining = realizedCount;
         _itemsResetGeneratorPosition = realizedCount - 1;
         return true;
     }
@@ -278,22 +276,20 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         if (!_itemsResetPreparationActive)
             throw new InvalidOperationException("Items reset preparation is not active.");
 
-        // A realized card template can be expensive to detach on slower
-        // machines. Keep visual detachment and generator-map mutation as
-        // separate one-container operations so the caller can yield to input
-        // between every bounded unit.
-        if (_itemsResetVisualsRemaining > 0)
-        {
-            RemoveInternalChildRange(InternalChildren.Count - 1, 1);
-            _itemsResetVisualsRemaining--;
-            return false;
-        }
-
+        // Match ordinary viewport cleanup: release one generator entry before
+        // detaching its tail visual. Reset preparation previously removed every
+        // visual first and only then updated the generator map, leaving WPF to
+        // unlink a still-live container while the visual tree was changing.
+        // Keep the official generator-first pair as one bounded container unit
+        // and yield before the next item.
         if (_itemsResetGeneratorPosition >= 0)
         {
+            int childIndex = InternalChildren.Count - 1;
             ItemContainerGenerator.Remove(
                 new GeneratorPosition(_itemsResetGeneratorPosition, 0),
                 1);
+            ForgetDeferredMeasureRange(childIndex, 1);
+            RemoveInternalChildRange(childIndex, 1);
             _itemsResetGeneratorPosition--;
         }
 
@@ -303,7 +299,6 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     internal void CompleteItemsResetPreparation()
     {
         _itemsResetPreparationActive = false;
-        _itemsResetVisualsRemaining = 0;
         _itemsResetGeneratorPosition = -1;
     }
 

@@ -277,6 +277,26 @@ unchanged.
   eviction, neighboring selection, external UI Automation projection, and
   100,000-item logical count. The post-gate DPI, modal, Album, accessibility,
   enhancement, batch, and companion-path checks also passed.
+- The next exact hosted run kept normalized working-set growth at 11.791% but
+  exposed two slower-runner product costs: Favorite eviction at 121 ms and one
+  53 ms heartbeat sample. Correctness, selection, UI Automation, and the
+  one-container reset were still exact.
+- Favorite-filter exclusion now feeds the existing scheduler from the current
+  visible projection. In the measured Favorite-only case that reduces the
+  immutable input from 100,000 items to 10,000 without bypassing the staged
+  Automation projection or atomic publication. Real-product state persistence
+  is also debounced after the projection; the smoke suppresses state writes, so
+  that improvement is not counted as gate evidence.
+- Reset preparation now follows WPF's ordinary viewport-cleanup lifecycle:
+  release one tail generator entry, forget its deferred measure, detach its
+  visual, then yield. The previous visual-first/all-generators-later order was
+  unique to Reset and produced a local 18 ms detach outlier.
+- The repaired tree passed three isolated 100,000-item processes with
+  heartbeat 48/47/44 ms, Favorite eviction 35/29/34 ms, one-container reset
+  1/8/9 ms, and normalized working-set growth 5.388/4.234/10.399%. All exact
+  count, neighboring selection, UI Automation, virtualization, and heartbeat
+  sample requirements passed. Thumbnail continuity, right-panel selection,
+  and accessibility regression gates passed afterward.
 
 final result: passed
 
