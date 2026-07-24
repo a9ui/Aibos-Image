@@ -16326,17 +16326,17 @@ public partial class App : Application
                 win.SetSortByForSmoke("name");
                 bool selected = win.SelectFileNameForSmoke(secondName);
                 bool opened = win.OpenModalForSmoke();
-                win.UpdateLayout();
-                // OpenModal queues an actual-bounds refit at Loaded priority.
-                // Yield below that priority so clamped CI desktops measure the
-                // settled fit rather than the pre-clamp requested window size.
-                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
                     && win.ModalContextMenuContractForSmoke;
                 bool windowCaptionControls = win.ModalWindowCaptionControlsContractForSmoke
                     && win.ActivateModalMinimizeForSmoke()
                     && win.ActivateModalMaximizeForSmoke();
+                win.UpdateLayout();
+                // Opening and the caption-control smoke both queue actual-bounds
+                // refits at Loaded priority. Settle after both so clamped CI
+                // desktops measure the final restored window geometry.
+                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
                 bool edgeChrome = win.ModalEdgeChromeContractForSmoke;
                 bool edgePercentageSet = win.SetModalEdgeNavigationPercentForSmoke(12);
                 bool edgeImageIntersection = edgePercentageSet
