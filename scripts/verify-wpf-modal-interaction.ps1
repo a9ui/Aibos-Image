@@ -54,6 +54,7 @@ try {
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 8
     $required = @(
+        'fullMotionMode',
         'accessibility',
         'windowCaptionControls',
         'edgeChrome',

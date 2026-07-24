@@ -16972,6 +16972,13 @@ public partial class App : Application
             ModalInteractionSmokeResult result;
             try
             {
+                // This verifier owns the full-motion modal contract. Reduced-
+                // motion behavior is exercised by the accessibility verifier.
+                bool fullMotionMode = win.SetAccessibilityPreferencesForSmoke(
+                        reducedMotion: false,
+                        reducedTransparency: false,
+                        persist: false)
+                    && !win.ReducedMotionEffectiveForSmoke;
                 await win.LoadFolderAsync(folder).WaitAsync(TimeSpan.FromSeconds(15));
                 win.SetSortByForSmoke("name");
                 bool selected = win.SelectFileNameForSmoke(secondName);
@@ -17305,7 +17312,8 @@ public partial class App : Application
                     && win.InvokePreviewKeyForSmoke(Key.Escape)
                     && !win.ModalVisibleForSmoke;
 
-                bool ok = selected && opened && accessibility && windowCaptionControls && edgeChrome
+                bool ok = fullMotionMode
+                    && selected && opened && accessibility && windowCaptionControls && edgeChrome
                     && edgePercentageSetting && edgeImageIntersection
                     && zoomIndicator && filmstripLayout && contextMenuAction && manualVisiblePersistent
                     && filmstripButtonStableGeometry
@@ -17325,6 +17333,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok ? "modal pointer states, transformed-image edge zones, full-canvas fit, immediate chrome hide, black-canvas gallery return, fixed filmstrip controls, and hidden-state parity passed" : "modal interaction parity did not meet the expected contract",
+                    FullMotionMode = fullMotionMode,
                     Accessibility = accessibility,
                     WindowCaptionControls = windowCaptionControls,
                     EdgeChrome = edgeChrome,
@@ -23023,6 +23032,7 @@ public partial class App : Application
     {
         public bool Ok { get; init; }
         public string Message { get; init; } = "";
+        public bool FullMotionMode { get; init; }
         public bool Accessibility { get; init; }
         public bool WindowCaptionControls { get; init; }
         public bool EdgeChrome { get; init; }
