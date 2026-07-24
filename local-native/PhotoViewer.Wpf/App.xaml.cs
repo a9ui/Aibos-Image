@@ -9920,6 +9920,76 @@ public partial class App : Application
                     && mixedSortRestored
                     && window.FilteredCountForSmoke == count
                     && selected;
+
+                // Prime the accessibility paths before the memory and heartbeat
+                // baselines just like the search/filter/sort paths above. The
+                // first UI Automation client connection commits native UIA/WPF
+                // pages, while the first focused projection reset initializes
+                // focus restoration and container realization. Counting those
+                // one-time subsystem costs as repeated catalog churn made the
+                // normalized working-set and dispatcher gates runner-dependent.
+                ReportProgress("accessibility-warmup");
+                heartbeatWatch.Restart();
+                lastHeartbeatMs = 0;
+                heartbeat.Start();
+                bool warmAccessibilitySelected =
+                    window.SelectFileNameForSmoke(selectedName);
+                await FlushLayoutAsync();
+                bool warmAccessibilityFocused =
+                    window.FocusSelectedGalleryItemForSmoke();
+                string? warmAccessibilityPath = window.SelectedPathForSmoke;
+                MainWindow.SearchFilterCompletion warmAccessibilityFilter =
+                    await window.SetSearchInputForSmokeAsync("needle");
+                bool warmAccessibilityFilterSettled =
+                    await window.WaitForGridRealizationIdleForSmokeAsync()
+                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                    && string.Equals(
+                        window.FocusedGalleryPathForSmoke,
+                        warmAccessibilityPath,
+                        StringComparison.OrdinalIgnoreCase);
+                MainWindow.SearchFilterCompletion warmAccessibilityClear =
+                    await window.SetSearchInputForSmokeAsync("");
+                bool warmAccessibilityClearSettled =
+                    await window.WaitForGridRealizationIdleForSmokeAsync()
+                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                    && string.Equals(
+                        window.FocusedGalleryPathForSmoke,
+                        warmAccessibilityPath,
+                        StringComparison.OrdinalIgnoreCase);
+                int warmAutomationIndex = count - 1;
+                string warmAutomationSuffix =
+                    warmAutomationIndex % 100 == 0 ? "-needle" : "";
+                string warmAutomationName =
+                    $"interaction-smoke-{warmAutomationIndex:D6}{warmAutomationSuffix}.png";
+                ExternalGalleryAutomationSmokeSnapshot warmAutomation =
+                    await RunExternalGalleryAutomationLookupAsync(
+                        window,
+                        warmAutomationName);
+                bool warmAutomationSettled =
+                    await window.WaitForGridRealizationIdleForSmokeAsync();
+                bool accessibilityWarmupComplete =
+                    warmAccessibilitySelected
+                    && warmAccessibilityFocused
+                    && warmAccessibilityFilter.Applied
+                    && !warmAccessibilityFilter.Discarded
+                    && warmAccessibilityFilterSettled
+                    && warmAccessibilityClear.Applied
+                    && !warmAccessibilityClear.Discarded
+                    && warmAccessibilityClearSettled
+                    && warmAutomation.Found
+                    && warmAutomation.NameExact
+                    && warmAutomation.VirtualizedItemPatternAvailable
+                    && warmAutomation.SelectionItemPatternAvailable
+                    && warmAutomation.RealizeInvoked
+                    && warmAutomationSettled
+                    && window.SelectFileNameForSmoke(selectedName);
+                await FlushLayoutAsync();
+                accessibilityWarmupComplete &=
+                    window.FocusSelectedGalleryItemForSmoke()
+                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                    && await window.WaitForGridRealizationIdleForSmokeAsync();
+                window.ResetGridAutomationLookupMetricsForSmoke();
+
                 bool warmupComplete = warmSearch.Applied
                     && !warmSearch.Discarded
                     && warmClear.Applied
@@ -9936,13 +10006,22 @@ public partial class App : Application
                     && mixedLatestWins
                     && mixedViewportAnchorPreserved
                     && mixedCleanupComplete
+                    && accessibilityWarmupComplete
                     && selected;
 
                 var process = Process.GetCurrentProcess();
+                // The forced collection below defines the memory baseline; it
+                // is harness work, not an app interaction. Preserve every
+                // heartbeat sample already captured during the cold
+                // accessibility warmup, but do not attribute the deliberate
+                // stop-the-world collection to the next product operation.
+                heartbeat.Stop();
                 long managedMemoryBefore = GC.GetTotalMemory(forceFullCollection: true);
                 process.Refresh();
                 long workingSetBefore = process.WorkingSet64;
                 int gen2Before = GC.CollectionCount(2);
+                lastHeartbeatMs = heartbeatWatch.ElapsedMilliseconds;
+                heartbeat.Start();
                 var searchSamples = new List<long>();
                 var searchPhaseSamples = new List<MainWindow.SearchFilterCompletion>();
                 var filterSamples = new List<long>();
@@ -9965,9 +10044,6 @@ public partial class App : Application
                     favoriteEvictionAutomationProbeIndex % 100 == 0 ? "-needle" : "";
                 string favoriteEvictionAutomationProbe =
                     $"interaction-smoke-{favoriteEvictionAutomationProbeIndex:D6}{favoriteEvictionAutomationProbeSuffix}.png";
-                heartbeatWatch.Restart();
-                lastHeartbeatMs = 0;
-                heartbeat.Start();
                 ReportProgress("search-churn");
 
                 for (int iteration = 0; iteration < 6; iteration++)

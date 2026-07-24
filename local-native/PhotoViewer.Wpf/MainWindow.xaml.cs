@@ -18760,6 +18760,8 @@ public partial class MainWindow : Window
         => CardsList.AutomationRealizePending;
     public long GridAutomationLookupMaxMsForSmoke
         => CardsList.AutomationLookupMaxMilliseconds;
+    public void ResetGridAutomationLookupMetricsForSmoke()
+        => CardsList.ResetAutomationLookupMetrics();
 
     public bool SelectGridItemThroughAutomationForSmoke(int index)
     {

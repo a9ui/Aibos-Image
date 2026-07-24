@@ -139,6 +139,9 @@ public sealed class VirtualizedGalleryListBox : ListBox
             _automationLookupMaxMilliseconds,
             elapsedMilliseconds);
 
+    internal void ResetAutomationLookupMetrics()
+        => _automationLookupMaxMilliseconds = 0;
+
     protected override AutomationPeer OnCreateAutomationPeer()
         => new VirtualizedGalleryListBoxAutomationPeer(this);
 
