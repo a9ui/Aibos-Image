@@ -209,6 +209,17 @@ if ($result.catalogProjectionMaxApplySliceMs -gt $result.catalogProjectionDiagno
         "$($result.catalogProjectionMaxApplySliceMs) ms > " +
         "$($result.catalogProjectionDiagnosticSliceTargetMs) ms")
 }
+if ($result.catalogProjectionMaxPreResetSelectionReleaseMs `
+        -gt $result.catalogProjectionDiagnosticSliceTargetMs `
+    -or $result.catalogProjectionPreResetSelectionClearedExact -ne $true `
+    -or $result.catalogProjectionPreResetSelectionReleasedCount -le 0) {
+    $failures.Add(
+        "pre-Reset WPF selection release contract failed " +
+        "(wall $($result.catalogProjectionMaxPreResetSelectionReleaseMs)/" +
+        "$($result.catalogProjectionDiagnosticSliceTargetMs) ms; " +
+        "cleared exact $($result.catalogProjectionPreResetSelectionClearedExact); " +
+        "released $($result.catalogProjectionPreResetSelectionReleasedCount))")
+}
 if ($result.catalogSnapshotResetBudgetMs -ne 12 `
     -or $result.catalogSnapshotResetMaxWallMs -gt $result.catalogSnapshotResetBudgetMs `
     -or $result.catalogSnapshotResetCountExact -ne $true `

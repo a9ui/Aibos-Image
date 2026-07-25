@@ -11141,6 +11141,26 @@ public partial class App : Application
                             sample.CatalogSnapshotResetCount > 0)
                         .All(static sample =>
                             sample.CatalogSnapshotResetThreadCpuMs >= 0);
+                long catalogProjectionMaxPreResetSelectionReleaseMs =
+                    appliedProjectionSamples
+                        .Where(static sample =>
+                            sample.CatalogSnapshotResetCount > 0)
+                        .Select(static sample =>
+                            sample.PreResetSelectionReleaseMs)
+                        .DefaultIfEmpty(0)
+                        .Max();
+                bool catalogProjectionPreResetSelectionClearedExact =
+                    appliedProjectionSamples
+                        .Where(static sample =>
+                            sample.CatalogSnapshotResetCount > 0)
+                        .All(static sample =>
+                            sample.PreResetSelectionCleared);
+                int catalogProjectionPreResetSelectionReleasedCount =
+                    appliedProjectionSamples
+                        .Where(static sample =>
+                            sample.CatalogSnapshotResetCount > 0)
+                        .Sum(static sample =>
+                            sample.PreResetSelectionReleasedCount);
                 int catalogProjectionMaxDetachedContainersPerSlice =
                     appliedProjectionSamples
                         .Select(static sample => sample.MaxResetDetachedContainersPerSlice)
@@ -11222,6 +11242,10 @@ public partial class App : Application
                         <= CatalogSnapshotResetBudgetMs
                     && catalogSnapshotResetCountExact
                     && catalogSnapshotResetCpuMeasuredExact
+                    && catalogProjectionMaxPreResetSelectionReleaseMs
+                        <= CatalogProjectionDiagnosticSliceTargetMs
+                    && catalogProjectionPreResetSelectionClearedExact
+                    && catalogProjectionPreResetSelectionReleasedCount > 0
                     && catalogProjectionDetachWithinBudget
                     && dispatcherDiagnostic.SensorValid
                     // Only strict, callback-free, zero-CPU Posted->Started
@@ -11334,6 +11358,12 @@ public partial class App : Application
                         catalogSnapshotResetCountExact,
                     CatalogSnapshotResetCpuMeasuredExact =
                         catalogSnapshotResetCpuMeasuredExact,
+                    CatalogProjectionMaxPreResetSelectionReleaseMs =
+                        catalogProjectionMaxPreResetSelectionReleaseMs,
+                    CatalogProjectionPreResetSelectionClearedExact =
+                        catalogProjectionPreResetSelectionClearedExact,
+                    CatalogProjectionPreResetSelectionReleasedCount =
+                        catalogProjectionPreResetSelectionReleasedCount,
                     ColdGalleryFocusWarmupMs =
                         coldGalleryFocusWarmupMs,
                     ColdGalleryFocusWarmupBudgetMs =
@@ -26205,6 +26235,9 @@ public partial class App : Application
         public double CatalogSnapshotResetMaxThreadCpuMs { get; init; } = -1;
         public bool CatalogSnapshotResetCountExact { get; init; }
         public bool CatalogSnapshotResetCpuMeasuredExact { get; init; }
+        public long CatalogProjectionMaxPreResetSelectionReleaseMs { get; init; }
+        public bool CatalogProjectionPreResetSelectionClearedExact { get; init; }
+        public int CatalogProjectionPreResetSelectionReleasedCount { get; init; }
         public double ColdGalleryFocusWarmupMs { get; init; }
         public long ColdGalleryFocusWarmupBudgetMs { get; init; }
         public long CatalogProjectionSingleContainerDetachBudgetMs { get; init; }

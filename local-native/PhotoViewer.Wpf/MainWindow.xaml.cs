@@ -306,6 +306,9 @@ public partial class MainWindow : Window
     private string? _pendingGalleryFocusPath;
     private int _pendingGalleryFocusIndex = -1;
     private bool _pendingGalleryFocusGrid;
+    private int _pendingGalleryFocusRetryCount;
+    private const int MaxPendingGalleryFocusRetryCount = 3;
+    private const int CatalogResetSelectionScanReleaseThreshold = 24_000;
     private string? _activePreviewTabPath;
     private string? _restoredActivePreviewTabPath;
     private bool _previewTabsPersistenceReady = true;
@@ -1251,6 +1254,9 @@ public partial class MainWindow : Window
         long CatalogSwapMs = 0,
         long PanelCommitMs = 0,
         long PreResetMs = 0,
+        long PreResetSelectionReleaseMs = 0,
+        bool PreResetSelectionCleared = false,
+        int PreResetSelectionReleasedCount = 0,
         long ResetMs = 0,
         long SelectionCommitMs = 0,
         double ResetGeneratorRemoveMs = 0,
@@ -1356,6 +1362,9 @@ public partial class MainWindow : Window
         long CatalogSwapMs = 0,
         long PanelCommitMs = 0,
         long PreResetMs = 0,
+        long PreResetSelectionReleaseMs = 0,
+        bool PreResetSelectionCleared = false,
+        int PreResetSelectionReleasedCount = 0,
         long ResetMs = 0,
         long SelectionCommitMs = 0,
         double ResetGeneratorRemoveMs = 0,
@@ -6596,6 +6605,7 @@ public partial class MainWindow : Window
         _pendingGalleryFocusPath = tile.Path;
         _pendingGalleryFocusIndex = index;
         _pendingGalleryFocusGrid = grid;
+        _pendingGalleryFocusRetryCount = 0;
         if (grid)
         {
             _galleryVirtualizingPanel?.BringItemIntoView(index);
@@ -6643,26 +6653,59 @@ public partial class MainWindow : Window
             return;
 
         ListBox listBox = _pendingGalleryFocusGrid ? CardsList : RowsList;
-        if (listBox.Visibility != Visibility.Visible
-            || index >= _tiles.Count
-            || !string.Equals(_tiles[index].Path, path, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(_primarySelectedPath, path, StringComparison.OrdinalIgnoreCase)
-            || RealizedGalleryContainer(listBox, index) is not ListBoxItem container
-            || container.DataContext is not Tile boundTile
-            || !ReferenceEquals(boundTile, _tiles[index])
-            || !container.IsMeasureValid
-            || !container.IsVisible
-            || !container.IsEnabled)
+        if (listBox.Visibility != Visibility.Visible)
+            return;
+        if (index >= _tiles.Count)
+            return;
+        if (!string.Equals(_tiles[index].Path, path, StringComparison.OrdinalIgnoreCase))
+            return;
+        if (!string.Equals(_primarySelectedPath, path, StringComparison.OrdinalIgnoreCase))
+            return;
+        if (RealizedGalleryContainer(listBox, index) is not ListBoxItem container)
         {
+            RetryPendingGalleryFocusCompletion(listBox, index);
             return;
         }
+        if (container.DataContext is not Tile boundTile
+            || !ReferenceEquals(boundTile, _tiles[index]))
+            return;
+        if (!container.IsMeasureValid)
+        {
+            RetryPendingGalleryFocusCompletion(listBox, index);
+            return;
+        }
+        if (!container.IsVisible)
+        {
+            RetryPendingGalleryFocusCompletion(listBox, index);
+            return;
+        }
+        if (!container.IsEnabled)
+            return;
 
         SelectRealizedContainer(listBox, _tiles[index]);
         if (!container.Focus() || !container.IsKeyboardFocusWithin)
+        {
+            RetryPendingGalleryFocusCompletion(listBox, index);
             return;
+        }
 
         _pendingGalleryFocusPath = null;
         _pendingGalleryFocusIndex = -1;
+        _pendingGalleryFocusRetryCount = 0;
+    }
+
+    private void RetryPendingGalleryFocusCompletion(ListBox listBox, int index)
+    {
+        if (_pendingGalleryFocusRetryCount >= MaxPendingGalleryFocusRetryCount)
+            return;
+        _pendingGalleryFocusRetryCount++;
+        if (ReferenceEquals(listBox, CardsList))
+            _galleryVirtualizingPanel?.BringItemIntoView(index);
+        else if (index >= 0 && index < _tiles.Count)
+            RowsList.ScrollIntoView(_tiles[index]);
+        Dispatcher.BeginInvoke(
+            QueuePendingGalleryFocusCompletion,
+            DispatcherPriority.Render);
     }
 
     private ListBoxItem? RealizedGalleryContainer(ListBox listBox, int index)
@@ -6685,6 +6728,7 @@ public partial class MainWindow : Window
         _queuedGalleryFocusCompletionGeneration = -1;
         _pendingGalleryFocusPath = null;
         _pendingGalleryFocusIndex = -1;
+        _pendingGalleryFocusRetryCount = 0;
     }
 
     private IReadOnlyList<Tile> SelectedTiles()
@@ -6814,6 +6858,56 @@ public partial class MainWindow : Window
         {
             _syncingSelection = false;
         }
+    }
+
+    private (long ElapsedMs, bool Cleared, int ReleasedCount)
+        ReleaseWpfSelectionBeforeCatalogReset()
+    {
+        int selectedBefore =
+            CardsList.SelectedItems.Count + RowsList.SelectedItems.Count;
+        bool wasSyncingSelection = _syncingSelection;
+        _syncingSelection = true;
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            // WPF Selector.Reset locates any unresolved selected ItemInfo by
+            // walking the new Items collection from index zero. Release only
+            // WPF's bounded visual selection while its indices are still
+            // current; Aibos keeps the canonical path selection and restores
+            // the realized state after publication.
+            if (CardsList.SelectedItems.Count > 0)
+                CardsList.SelectedIndex = -1;
+            if (RowsList.SelectedItems.Count > 0)
+                RowsList.SelectedIndex = -1;
+        }
+        finally
+        {
+            watch.Stop();
+            _syncingSelection = wasSyncingSelection;
+        }
+
+        return (
+            watch.ElapsedMilliseconds,
+            CardsList.SelectedItems.Count == 0
+                && RowsList.SelectedItems.Count == 0,
+            selectedBefore);
+    }
+
+    private bool ShouldReleaseWpfSelectionBeforeCatalogReset(FilterResult filterResult)
+    {
+        int selectedVisualCount =
+            CardsList.SelectedItems.Count + RowsList.SelectedItems.Count;
+        if (selectedVisualCount == 0)
+            return false;
+
+        // Selector.LocateSelectedItems walks the post-Reset view until it
+        // relocates the old WPF selection. Keep normal and small projections
+        // semantically untouched; release only when the known scan length can
+        // consume the atomic 12 ms Reset budget.
+        int expectedScanLength = filterResult.SelectedTiles.Length == 0
+            ? filterResult.Count
+            : Math.Max(0, filterResult.PreferredSelectionIndex);
+        return expectedScanLength >= CatalogResetSelectionScanReleaseThreshold;
     }
 
     private void SynchronizeCanonicalSelectionMarkers(IReadOnlyCollection<Tile>? selectedTiles)
@@ -8156,6 +8250,12 @@ public partial class MainWindow : Window
             CatalogSwapMs = applyMetrics.CatalogSwapMs,
             PanelCommitMs = applyMetrics.PanelCommitMs,
             PreResetMs = applyMetrics.PreResetMs,
+            PreResetSelectionReleaseMs =
+                applyMetrics.PreResetSelectionReleaseMs,
+            PreResetSelectionCleared =
+                applyMetrics.PreResetSelectionCleared,
+            PreResetSelectionReleasedCount =
+                applyMetrics.PreResetSelectionReleasedCount,
             ResetMs = applyMetrics.ResetMs,
             SelectionCommitMs = applyMetrics.SelectionCommitMs,
             ResetGeneratorRemoveMs = applyMetrics.ResetGeneratorRemoveMs,
@@ -10375,6 +10475,9 @@ public partial class MainWindow : Window
         long catalogSwapMs = 0;
         long panelCommitMs = 0;
         long preResetMs = 0;
+        long preResetSelectionReleaseMs = 0;
+        bool preResetSelectionCleared = true;
+        int preResetSelectionReleasedCount = 0;
         long resetMs = 0;
         long selectionCommitMs = 0;
         double resetGeneratorRemoveMs = 0;
@@ -10459,6 +10562,18 @@ public partial class MainWindow : Window
                     reconcileMs);
             }
         }
+        if (!publishSingleRemoval
+            && ShouldReleaseWpfSelectionBeforeCatalogReset(filterResult))
+        {
+            (
+                preResetSelectionReleaseMs,
+                preResetSelectionCleared,
+                preResetSelectionReleasedCount) =
+                ReleaseWpfSelectionBeforeCatalogReset();
+            // A large relocation is rare, but keep its deselection and the
+            // generator detachment as two independently bounded UI slices.
+            _ = await YieldForInputAsync(checkGeneration: false);
+        }
         bool resetPreparationStarted = !publishSingleRemoval
             && preparedPanel?.BeginItemsResetPreparation() == true;
         try
@@ -10528,6 +10643,9 @@ public partial class MainWindow : Window
                     catalogSwapMs,
                     panelCommitMs,
                     preResetMs,
+                    preResetSelectionReleaseMs,
+                    preResetSelectionCleared,
+                    preResetSelectionReleasedCount,
                     resetMs,
                     selectionCommitMs,
                     resetGeneratorRemoveMs,
@@ -10755,6 +10873,9 @@ public partial class MainWindow : Window
             catalogSwapMs,
             panelCommitMs,
             preResetMs,
+            preResetSelectionReleaseMs,
+            preResetSelectionCleared,
+            preResetSelectionReleasedCount,
             resetMs,
             selectionCommitMs,
             resetGeneratorRemoveMs,
@@ -10834,6 +10955,8 @@ public partial class MainWindow : Window
         {
             CancelThumbnailViewportLoading();
             _thumbnailViewportRevision++;
+            if (ShouldReleaseWpfSelectionBeforeCatalogReset(filterResult))
+                ReleaseWpfSelectionBeforeCatalogReset();
             StageGalleryAutomationProjection(filterResult.AutomationProjection);
             _tiles.ReplaceAll(filtered, filteredCount);
         }
