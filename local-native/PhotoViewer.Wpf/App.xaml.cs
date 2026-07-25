@@ -9808,7 +9808,54 @@ public partial class App : Application
             var heartbeatGapSamples = new List<string>();
             var heartbeatDiagnosticSamples = new List<DispatcherHeartbeatDiagnosticSample>();
             var layoutSamples = new List<string>();
+            var accessibilityWarmupSubstepSamples = new List<CatalogInteractionSubstepSample>();
             var stalePeerSubstepSamples = new List<CatalogInteractionSubstepSample>();
+            T MeasureAccessibilityWarmupSubstep<T>(string operation, Func<T> action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    return action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    accessibilityWarmupSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            async Task<T> MeasureAccessibilityWarmupSubstepAsync<T>(
+                string operation,
+                Func<Task<T>> action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    return await action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    accessibilityWarmupSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            async Task MeasureAccessibilityWarmupActionAsync(
+                string operation,
+                Func<Task> action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    await action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    accessibilityWarmupSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
             T MeasureStalePeerSubstep<T>(string operation, Func<T> action)
             {
                 SetActiveOperation(operation);
@@ -10019,6 +10066,10 @@ public partial class App : Application
                     && !raceNarrowSearch.Discarded
                     && window.FilteredCountForSmoke == count / 100
                     && window.SelectFileNameForSmoke(selectedName);
+                int resetNotificationsBeforePendingBroaden =
+                    window.ProjectionResetNotificationCountForSmoke;
+                int removeNotificationsBeforePendingBroaden =
+                    window.ProjectionRemoveNotificationCountForSmoke;
                 Task<MainWindow.SearchFilterCompletion> pendingRaceBroaden =
                     window.SetSearchInputForSmokeAsync("");
                 (bool raceFavoriteEvicted, MainWindow.SearchFilterCompletion raceFavoriteProjection) =
@@ -10033,6 +10084,10 @@ public partial class App : Application
                     && !raceBroadenResult.Applied
                     && raceFavoriteProjection.Applied
                     && !raceFavoriteProjection.Discarded
+                    && window.ProjectionResetNotificationCountForSmoke
+                        > resetNotificationsBeforePendingBroaden
+                    && window.ProjectionRemoveNotificationCountForSmoke
+                        == removeNotificationsBeforePendingBroaden
                     && raceRealizationSettled
                     && window.FilteredCountForSmoke == (count / 10) - 1
                     && !string.Equals(
@@ -10068,40 +10123,60 @@ public partial class App : Application
                 lastHeartbeatGcPause = GC.GetTotalPauseDuration();
                 heartbeat.Start();
                 bool warmAccessibilitySelected =
-                    window.SelectFileNameForSmoke(selectedName);
-                await FlushLayoutAsync();
+                    MeasureAccessibilityWarmupSubstep(
+                        "accessibility-warmup-select",
+                        () => window.SelectFileNameForSmoke(selectedName));
+                await MeasureAccessibilityWarmupActionAsync(
+                    "accessibility-warmup-select-layout",
+                    FlushLayoutAsync);
                 bool warmAccessibilityFocused =
-                    window.FocusSelectedGalleryItemForSmoke();
+                    MeasureAccessibilityWarmupSubstep(
+                        "accessibility-warmup-focus",
+                        window.FocusSelectedGalleryItemForSmoke);
                 string? warmAccessibilityPath = window.SelectedPathForSmoke;
                 MainWindow.SearchFilterCompletion warmAccessibilityFilter =
-                    await window.SetSearchInputForSmokeAsync("needle");
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-filter",
+                        () => window.SetSearchInputForSmokeAsync("needle"));
                 bool warmAccessibilityFilterSettled =
-                    await window.WaitForGridRealizationIdleForSmokeAsync()
-                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
-                    && string.Equals(
-                        window.FocusedGalleryPathForSmoke,
-                        warmAccessibilityPath,
-                        StringComparison.OrdinalIgnoreCase);
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-filter-idle",
+                        async () =>
+                            await window.WaitForGridRealizationIdleForSmokeAsync()
+                            && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                            && string.Equals(
+                                window.FocusedGalleryPathForSmoke,
+                                warmAccessibilityPath,
+                                StringComparison.OrdinalIgnoreCase));
                 MainWindow.SearchFilterCompletion warmAccessibilityClear =
-                    await window.SetSearchInputForSmokeAsync("");
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-clear",
+                        () => window.SetSearchInputForSmokeAsync(""));
                 bool warmAccessibilityClearSettled =
-                    await window.WaitForGridRealizationIdleForSmokeAsync()
-                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
-                    && string.Equals(
-                        window.FocusedGalleryPathForSmoke,
-                        warmAccessibilityPath,
-                        StringComparison.OrdinalIgnoreCase);
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-clear-idle",
+                        async () =>
+                            await window.WaitForGridRealizationIdleForSmokeAsync()
+                            && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                            && string.Equals(
+                                window.FocusedGalleryPathForSmoke,
+                                warmAccessibilityPath,
+                                StringComparison.OrdinalIgnoreCase));
                 int warmAutomationIndex = count - 1;
                 string warmAutomationSuffix =
                     warmAutomationIndex % 100 == 0 ? "-needle" : "";
                 string warmAutomationName =
                     $"interaction-smoke-{warmAutomationIndex:D6}{warmAutomationSuffix}.png";
                 ExternalGalleryAutomationSmokeSnapshot warmAutomation =
-                    await RunExternalGalleryAutomationLookupAsync(
-                        window,
-                        warmAutomationName);
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-automation",
+                        () => RunExternalGalleryAutomationLookupAsync(
+                            window,
+                            warmAutomationName));
                 bool warmAutomationSettled =
-                    await window.WaitForGridRealizationIdleForSmokeAsync();
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-automation-idle",
+                        () => window.WaitForGridRealizationIdleForSmokeAsync());
                 bool accessibilityWarmupComplete =
                     warmAccessibilitySelected
                     && warmAccessibilityFocused
@@ -10118,11 +10193,16 @@ public partial class App : Application
                     && warmAutomation.RealizeInvoked
                     && warmAutomationSettled
                     && window.SelectFileNameForSmoke(selectedName);
-                await FlushLayoutAsync();
+                await MeasureAccessibilityWarmupActionAsync(
+                    "accessibility-warmup-final-layout",
+                    FlushLayoutAsync);
                 accessibilityWarmupComplete &=
-                    window.FocusSelectedGalleryItemForSmoke()
-                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
-                    && await window.WaitForGridRealizationIdleForSmokeAsync();
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-final-focus",
+                        async () =>
+                            window.FocusSelectedGalleryItemForSmoke()
+                            && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                            && await window.WaitForGridRealizationIdleForSmokeAsync());
                 window.ResetGridAutomationLookupMetricsForSmoke();
 
                 bool warmupComplete = warmSearch.Applied
@@ -10168,6 +10248,7 @@ public partial class App : Application
                 bool completionsApplied = true;
                 bool favoriteEvictionExact = false;
                 bool favoriteEvictionAutomationExact = false;
+                bool favoriteEvictionSingleRemovalExact = false;
                 ExternalGalleryAutomationSmokeSnapshot? favoriteEvictionAutomation = null;
                 long favoriteEvictionElapsedMs = 0;
                 string? favoriteEvictionSelected = null;
@@ -10251,11 +10332,20 @@ public partial class App : Application
                     && string.Equals(window.SelectedFileNameForSmoke, selectedName, StringComparison.OrdinalIgnoreCase);
 
                 ReportProgress("favorite-eviction");
+                int resetNotificationsBeforeFavoriteEviction =
+                    window.ProjectionResetNotificationCountForSmoke;
+                int removeNotificationsBeforeFavoriteEviction =
+                    window.ProjectionRemoveNotificationCountForSmoke;
                 var favoriteEvictionWatch = Stopwatch.StartNew();
                 bool favoriteEvicted = await window.AdjustGalleryFavoritePointerForSmokeAsync(selectedName, -1);
                 await FlushLayoutAsync();
                 favoriteEvictionWatch.Stop();
                 favoriteEvictionElapsedMs = favoriteEvictionWatch.ElapsedMilliseconds;
+                favoriteEvictionSingleRemovalExact =
+                    window.ProjectionResetNotificationCountForSmoke
+                        == resetNotificationsBeforeFavoriteEviction
+                    && window.ProjectionRemoveNotificationCountForSmoke
+                        == removeNotificationsBeforeFavoriteEviction + 1;
                 int selectionBeforeFavoriteAutomation = window.SelectedIndexForSmoke;
                 favoriteEvictionAutomation =
                     await RunExternalGalleryAutomationLookupAsync(
@@ -10272,6 +10362,7 @@ public partial class App : Application
                 favoriteEvictionSelected = window.SelectedFileNameForSmoke;
                 favoriteEvictionExact = favoriteEvictionPrepared
                     && favoriteEvicted
+                    && favoriteEvictionSingleRemovalExact
                     && favoriteEvictionAutomationExact
                     && window.FilteredCountForSmoke == (count / 10) - 1
                     && string.Equals(
@@ -10696,6 +10787,7 @@ public partial class App : Application
                     && sortP95 <= 500
                     && favoriteEvictionExact
                     && favoriteEvictionAutomationExact
+                    && favoriteEvictionSingleRemovalExact
                     && favoriteEvictionElapsedMs <= CatalogFavoriteEvictionBudgetMs
                     && catalogProjectionMaxSingleContainerDetachMs <= CatalogProjectionSingleContainerDetachBudgetMs
                     && maxHeartbeatGapMs <= CatalogInteractionDispatcherHeartbeatBudgetMs
@@ -10714,12 +10806,16 @@ public partial class App : Application
                     FilteredCount = window.FilteredCountForSmoke,
                     SeedElapsedMs = seedWatch.ElapsedMilliseconds,
                     WarmupComplete = warmupComplete,
+                    AccessibilityWarmupFilterCompletion = warmAccessibilityFilter,
+                    AccessibilityWarmupClearCompletion = warmAccessibilityClear,
+                    AccessibilityWarmupSubstepSamples = accessibilityWarmupSubstepSamples,
                     SearchP95Ms = searchP95,
                     FilterP95Ms = filterP95,
                     SortP95Ms = sortP95,
                     FavoriteEvictionElapsedMs = favoriteEvictionElapsedMs,
                     FavoriteEvictionExact = favoriteEvictionExact,
                     FavoriteEvictionAutomationExact = favoriteEvictionAutomationExact,
+                    FavoriteEvictionSingleRemovalExact = favoriteEvictionSingleRemovalExact,
                     FavoriteEvictionAutomation = favoriteEvictionAutomation,
                     FavoriteEvictionSelectedFileName = favoriteEvictionSelected,
                     FavoriteEvictionExpectedNeighbor = favoriteEvictionExpectedNeighbor,
@@ -24846,6 +24942,9 @@ public partial class App : Application
         public int FilteredCount { get; init; }
         public long SeedElapsedMs { get; init; }
         public bool WarmupComplete { get; init; }
+        public MainWindow.SearchFilterCompletion AccessibilityWarmupFilterCompletion { get; init; }
+        public MainWindow.SearchFilterCompletion AccessibilityWarmupClearCompletion { get; init; }
+        public List<CatalogInteractionSubstepSample> AccessibilityWarmupSubstepSamples { get; init; } = [];
         public double SearchP95Ms { get; init; }
         public double FilterP95Ms { get; init; }
         public double SortP95Ms { get; init; }
@@ -24889,6 +24988,7 @@ public partial class App : Application
         public bool AutomationVirtualizedItemExact { get; init; }
         public bool AutomationRealizePreservedSelection { get; init; }
         public bool AutomationSelectionExact { get; init; }
+        public bool FavoriteEvictionSingleRemovalExact { get; init; }
         public bool RecycledContainerStateReset { get; init; }
         public int KeyboardAccessibilityMaxRealized { get; init; }
         public long KeyboardSelectionSyncMaxMs { get; init; }

@@ -500,7 +500,7 @@ internal sealed class GalleryAutomationProjectionIndex
                     cancellationToken.ThrowIfCancellationRequested();
                     if (index > 0
                         && cancellationToken.CanBeCanceled
-                        && (index & 2047) == 0)
+                        && (index & 1023) == 0)
                     {
                         Thread.Yield();
                     }

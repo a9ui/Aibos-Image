@@ -1172,6 +1172,7 @@ public partial class MainWindow : Window
         CatalogLayoutCache LayoutCache,
         Tile[]? UnfilteredProjection,
         bool ReorderCatalog,
+        bool RestrictToCurrentProjection,
         string SortBy,
         string RandomSortSeed,
         bool AlbumActive,
@@ -1212,7 +1213,8 @@ public partial class MainWindow : Window
         bool ActivePreviewIncluded,
         GridZoomAnchor? ViewportAnchor,
         PreparedVirtualizingLayout? PreparedLayout,
-        GalleryAutomationProjectionIndex AutomationProjection);
+        GalleryAutomationProjectionIndex AutomationProjection,
+        int? ExactSingleRemovalIndex);
 
     private sealed record CatalogProjectionRequest(
         long Generation,
@@ -9679,6 +9681,7 @@ public partial class MainWindow : Window
                 _catalogLayoutCache,
                 unfilteredProjection,
                 request?.ReorderCatalog == true,
+                request?.RestrictToCurrentProjection == true,
                 _sortBy,
                 _randomSortSeed,
                 albumActive,
@@ -9729,7 +9732,7 @@ public partial class MainWindow : Window
         cancellationToken.ThrowIfCancellationRequested();
         if (index > 0
             && cancellationToken.CanBeCanceled
-            && (index & 2047) == 0)
+            && (index & 1023) == 0)
         {
             Thread.Yield();
         }
@@ -9953,6 +9956,30 @@ public partial class MainWindow : Window
                     cancellationToken);
             }
         }
+        int? exactSingleRemovalIndex = null;
+        if (snapshot.RestrictToCurrentProjection
+            && !snapshot.ReorderCatalog
+            && filteredCount == snapshot.TileCount - 1)
+        {
+            int removedIndex = 0;
+            while (removedIndex < filteredCount
+                && ReferenceEquals(snapshot.Tiles[removedIndex].Tile, filtered[removedIndex]))
+            {
+                removedIndex++;
+            }
+
+            bool exactRemoval = true;
+            for (int index = removedIndex; index < filteredCount; index++)
+            {
+                if (ReferenceEquals(snapshot.Tiles[index + 1].Tile, filtered[index]))
+                    continue;
+                exactRemoval = false;
+                break;
+            }
+            if (exactRemoval)
+                exactSingleRemovalIndex = removedIndex;
+        }
+
         GalleryAutomationProjectionIndex automationProjection =
             GalleryAutomationProjectionIndex.Create(
                 filtered,
@@ -9969,7 +9996,8 @@ public partial class MainWindow : Window
             activePreviewIncluded,
             snapshot.ViewportAnchor,
             preparedLayout,
-            automationProjection);
+            automationProjection,
+            exactSingleRemovalIndex);
     }
 
     private void StageGalleryAutomationProjection(
@@ -10072,7 +10100,6 @@ public partial class MainWindow : Window
         FilterSnapshot snapshot,
         long generation)
     {
-        const long inputYieldTargetMs = 2;
         long maxSliceMs = 0;
         long publishMs = 0;
         long statsMs = 0;
@@ -10098,14 +10125,10 @@ public partial class MainWindow : Window
             return elapsedMs;
         }
 
-        async Task<bool> YieldForInputAsync(bool force = false)
+        async Task<bool> YieldForInputAsync()
         {
-            if (!force && slice.ElapsedMilliseconds < inputYieldTargetMs)
-                return generation == _catalogProjectionGeneration;
-
             FinishSlice();
             await Dispatcher.Yield(DispatcherPriority.Background);
-            slice.Restart();
             if (generation != _catalogProjectionGeneration)
                 return false;
             return true;
@@ -10116,14 +10139,20 @@ public partial class MainWindow : Window
         VirtualizingWrapPanel? preparedPanel = _galleryVirtualizingPanel;
         CancelThumbnailViewportLoading();
         _thumbnailViewportRevision++;
-        // Service input immediately before entering the Reset preparation and
-        // publication path. Otherwise the heartbeat can already be one timer
-        // interval old when WPF begins the unavoidable Reset/render work.
-        if (!await YieldForInputAsync(force: true))
+        if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
 
         var phase = new Stopwatch();
-        bool resetPreparationStarted = preparedPanel?.BeginItemsResetPreparation() == true;
+        int exactSingleRemovalIndex = filterResult.ExactSingleRemovalIndex ?? -1;
+        bool publishSingleRemoval =
+            exactSingleRemovalIndex >= 0
+            && _tiles.CanReplaceOneRemoved(
+                filterResult.Tiles,
+                filterResult.Count,
+                exactSingleRemovalIndex);
+        bool resetPreparationStarted = !publishSingleRemoval
+            && preparedPanel?.BeginItemsResetPreparation() == true;
         try
         {
             if (resetPreparationStarted)
@@ -10149,25 +10178,9 @@ public partial class MainWindow : Window
                     if (resetPreparationComplete)
                         break;
 
-                    if (!await YieldForInputAsync(force: true))
-                    {
-                        return new CatalogProjectionApplyMetrics(
-                            maxSliceMs,
-                            publishMs,
-                            statsMs,
-                            selectionMs,
-                            reconcileMs,
-                            catalogSwapMs,
-                            panelCommitMs,
-                            preResetMs,
-                            resetMs,
-                            selectionCommitMs,
-                            resetGeneratorRemoveMs,
-                            resetForgetDeferredMeasureMs,
-                            resetRemoveInternalChildRangeMs,
-                            resetRemoveInternalChildRangeThreadCpuMs,
-                            resetPanelTotalMs);
-                    }
+                    FinishSlice();
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                    slice.Restart();
                 }
                 while (true);
             }
@@ -10221,7 +10234,17 @@ public partial class MainWindow : Window
 
                 phase.Restart();
                 StageGalleryAutomationProjection(filterResult.AutomationProjection);
-                _tiles.ReplaceAll(filterResult.Tiles, filterResult.Count);
+                if (publishSingleRemoval)
+                {
+                    _tiles.ReplaceOneRemoved(
+                        filterResult.Tiles,
+                        filterResult.Count,
+                        exactSingleRemovalIndex);
+                }
+                else
+                {
+                    _tiles.ReplaceAll(filterResult.Tiles, filterResult.Count);
+                }
                 phase.Stop();
                 resetMs = phase.ElapsedMilliseconds;
 
@@ -10250,10 +10273,10 @@ public partial class MainWindow : Window
         }
 
         publishMs = slice.ElapsedMilliseconds;
-        if (!await YieldForInputAsync(force: true))
+        if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
 
-        phase.Restart();
         Tile? preferred = filterResult.PreferredSelection;
         if (preferred is not null)
         {
@@ -10271,24 +10294,22 @@ public partial class MainWindow : Window
         }
         if (filterResult.PreparedLayout is null)
             _galleryVirtualizingPanel?.InvalidateItemLayout();
-        phase.Stop();
-        statsMs = phase.ElapsedMilliseconds;
+        statsMs = slice.ElapsedMilliseconds;
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
 
-        phase.Restart();
         if (preferred is not null)
         {
             _selectionVisualSyncGeneration++;
             SynchronizeSelectionControls(filterResult.SelectedTiles);
         }
 
-        phase.Stop();
-        selectionMs = phase.ElapsedMilliseconds;
+        selectionMs = slice.ElapsedMilliseconds;
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
 
-        phase.Restart();
         bool primarySelectionUnchanged = preferred is not null
             && string.Equals(
                 snapshot.PreviousSelectedPath,
@@ -10299,12 +10320,11 @@ public partial class MainWindow : Window
         else if (filterResult.Count == 0)
             SelectTile(null);
 
-        phase.Stop();
-        selectionMs += phase.ElapsedMilliseconds;
+        selectionMs += slice.ElapsedMilliseconds;
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        slice.Restart();
 
-        phase.Restart();
         ReconcileOpenSurfacesAfterFilterChange(filterResult.ActivePreviewIncluded);
         bool restoreGalleryFocus = snapshot.RestoreGalleryFocus
             && preferred is not null
@@ -10322,9 +10342,7 @@ public partial class MainWindow : Window
                 RowsList.Visibility != Visibility.Visible);
         }
         ScheduleCatalogStatsUpdate(generation);
-        phase.Stop();
-        reconcileMs = phase.ElapsedMilliseconds;
-        FinishSlice();
+        reconcileMs = FinishSlice();
         return new CatalogProjectionApplyMetrics(
             maxSliceMs,
             publishMs,
@@ -18752,6 +18770,8 @@ public partial class MainWindow : Window
     public static IReadOnlyList<string> BrowserThumbnailCachePathsForSmoke(string path, DateTime modifiedUtc)
         => GetBrowserThumbnailCachePaths(new Tile { Path = Path.GetFullPath(path), ModifiedUtc = modifiedUtc });
     public int GridItemsSourceCountForSmoke => CardsList.Items.Count;
+    public int ProjectionResetNotificationCountForSmoke => _tiles.ResetNotificationCount;
+    public int ProjectionRemoveNotificationCountForSmoke => _tiles.RemoveNotificationCount;
     public bool GridUsesFullExtentVirtualizationForSmoke
         => ReferenceEquals(CardsList.ItemsSource, _tilesView)
             && FindVisualDescendant<VirtualizingWrapPanel>(CardsList) is not null;
@@ -21768,6 +21788,8 @@ internal sealed class ResettableObservableCollection<T> :
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public int Count => _items.Length;
+    public int ResetNotificationCount { get; private set; }
+    public int RemoveNotificationCount { get; private set; }
     public bool IsReadOnly => false;
     bool IList.IsFixedSize => false;
     bool IList.IsReadOnly => false;
@@ -21817,11 +21839,54 @@ internal sealed class ResettableObservableCollection<T> :
         ReplaceOwned(count == items.Length ? items : items.AsSpan(0, count).ToArray());
     }
 
+    public bool CanReplaceOneRemoved(T[] items, int count, int removedIndex)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (count != items.Length
+            || _items.Length != count + 1
+            || (uint)removedIndex >= (uint)_items.Length)
+        {
+            return false;
+        }
+
+        EqualityComparer<T> comparer = EqualityComparer<T>.Default;
+        for (int index = 0; index < removedIndex; index++)
+        {
+            if (!comparer.Equals(_items[index], items[index]))
+                return false;
+        }
+        for (int index = removedIndex; index < count; index++)
+        {
+            if (!comparer.Equals(_items[index + 1], items[index]))
+                return false;
+        }
+        return true;
+    }
+
+    public void ReplaceOneRemoved(T[] items, int count, int removedIndex)
+    {
+        if (!CanReplaceOneRemoved(items, count, removedIndex))
+            throw new InvalidOperationException("The replacement is not one exact ordered removal.");
+
+        T removed = _items[removedIndex];
+        _items = items;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Count)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        RemoveNotificationCount++;
+        CollectionChanged?.Invoke(
+            this,
+            new NotifyCollectionChangedEventArgs(
+                NotifyCollectionChangedAction.Remove,
+                removed,
+                removedIndex));
+    }
+
     private void ReplaceOwned(T[] items)
     {
         _items = items;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Count)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        ResetNotificationCount++;
         CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 
@@ -21911,6 +21976,7 @@ internal sealed class ResettableObservableCollection<T> :
         _items = next;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Count)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        RemoveNotificationCount++;
         CollectionChanged?.Invoke(
             this,
             new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, removed, index));

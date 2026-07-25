@@ -367,6 +367,43 @@ final result: passed
 
 final result: passed
 
+## M3 repair 8 exact single-removal candidate
+
+- Repair 6 passed locally but its exact hosted Windows run exposed three
+  independent hard-gate overruns: search P95 251.75 ms, one 13 ms
+  single-container detach, and two heartbeat samples above 50 ms. All catalog
+  count, selection, stale-peer, UI Automation, Favorite, virtualization, and
+  memory semantics remained exact.
+- A bounded Reset-container recycling experiment was rejected after its changed
+  tree still produced a 14 ms detach and 54 ms heartbeat and did not
+  consistently lower apply allocation.
+- The candidate therefore uses the previously reviewed narrower A+B repair:
+  a stable current-projection result that is proved off-thread and revalidated
+  on the Dispatcher as exactly one ordered removal publishes one Remove
+  notification after staging the matching Automation projection. Every
+  broader, reordered, pending, or non-exact result stays on the existing Reset
+  path. The non-sort scan and Automation-index cooperative-yield quantum is
+  1,024 items; thresholds and sort semantics are unchanged.
+- The interaction gate now requires the Favorite-only exercise to observe one
+  Remove and zero Reset notifications. The pending-broaden race must continue
+  to use Reset and zero Remove notifications.
+- The first fresh 100,000-item process passed: search/filter/sort P95
+  181/78.45/108.75 ms, Favorite eviction 63 ms with exact single Remove,
+  heartbeat 46 ms, maximum detach and apply slice 4 ms, normalized working-set
+  growth 10.002%, and all semantic checks exact.
+- The second required fresh process held only on a 52 ms heartbeat during the
+  cold accessibility warmup. It kept search/filter/sort P95
+  188.8/108.45/187.5 ms, Favorite eviction 55 ms, exact single Remove,
+  one-millisecond detach/apply slices, and all semantics exact. The candidate
+  is not accepted from a later green rerun.
+- The diagnostic candidate retains the warmup filter and clear completion
+  metrics and records wall time for selection, layout, focus, filter, clear,
+  realization-idle, external UI Automation, and final-focus substeps. No
+  product threshold, source image, shared state, cache, history, Browser
+  behavior, license, or deployment boundary changes.
+
+final result: pending exact hosted attribution
+
 ## M3 pending-broaden Favorite exclusion audit repair
 
 - Independent final review found one stale-subset race in the Favorite-only
