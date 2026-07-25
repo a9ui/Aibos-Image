@@ -6861,7 +6861,7 @@ public partial class MainWindow : Window
     }
 
     private (long ElapsedMs, bool Cleared, int ReleasedCount)
-        ReleaseWpfSelectionBeforeCatalogReset()
+        ReleaseWpfSelectionBeforeCatalogPublication()
     {
         int selectedBefore =
             CardsList.SelectedItems.Count + RowsList.SelectedItems.Count;
@@ -6893,12 +6893,25 @@ public partial class MainWindow : Window
             selectedBefore);
     }
 
-    private bool ShouldReleaseWpfSelectionBeforeCatalogReset(FilterResult filterResult)
+    private bool ShouldReleaseWpfSelectionBeforeCatalogPublication(FilterResult filterResult)
     {
-        int selectedVisualCount =
-            CardsList.SelectedItems.Count + RowsList.SelectedItems.Count;
-        if (selectedVisualCount == 0)
+        IEnumerable<Tile> selectedVisualTiles =
+            CardsList.SelectedItems.OfType<Tile>()
+                .Concat(RowsList.SelectedItems.OfType<Tile>());
+        Tile[] selectedVisualSnapshot = selectedVisualTiles.Distinct().ToArray();
+        if (selectedVisualSnapshot.Length == 0)
             return false;
+
+        // The exact favorites-only Remove path is cheap only while WPF does
+        // not own the item that is about to disappear. Release that one
+        // bounded visual selection before the Remove notification; canonical
+        // selection chooses and restores the neighboring item afterwards.
+        if (filterResult.ExactSingleRemovalIndex.HasValue
+            && selectedVisualSnapshot.Any(selected =>
+                !filterResult.SelectedTiles.Contains(selected)))
+        {
+            return true;
+        }
 
         // Selector.LocateSelectedItems walks the post-Reset view until it
         // relocates the old WPF selection. Keep normal and small projections
@@ -10562,14 +10575,13 @@ public partial class MainWindow : Window
                     reconcileMs);
             }
         }
-        if (!publishSingleRemoval
-            && ShouldReleaseWpfSelectionBeforeCatalogReset(filterResult))
+        if (ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult))
         {
             (
                 preResetSelectionReleaseMs,
                 preResetSelectionCleared,
                 preResetSelectionReleasedCount) =
-                ReleaseWpfSelectionBeforeCatalogReset();
+                ReleaseWpfSelectionBeforeCatalogPublication();
             // A large relocation is rare, but keep its deselection and the
             // generator detachment as two independently bounded UI slices.
             _ = await YieldForInputAsync(checkGeneration: false);
@@ -10955,8 +10967,8 @@ public partial class MainWindow : Window
         {
             CancelThumbnailViewportLoading();
             _thumbnailViewportRevision++;
-            if (ShouldReleaseWpfSelectionBeforeCatalogReset(filterResult))
-                ReleaseWpfSelectionBeforeCatalogReset();
+            if (ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult))
+                ReleaseWpfSelectionBeforeCatalogPublication();
             StageGalleryAutomationProjection(filterResult.AutomationProjection);
             _tiles.ReplaceAll(filtered, filteredCount);
         }
