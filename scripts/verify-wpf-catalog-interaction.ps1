@@ -260,7 +260,10 @@ elseif ($controlConsensus.sensorValid -ne $true `
     -or $controlConsensus.normalProbe.waitError -ne 0 `
     -or $controlConsensus.probePeriodMs -ne 2 `
     -or $controlConsensus.probePhaseOffsetMs -ne 1 `
-    -or $controlConsensus.lateIntervalEpsilonMs -ne 0.5) {
+    -or $controlConsensus.lateIntervalEpsilonMs -ne 0.5 `
+    -or $controlConsensus.probeCadenceToleranceMs -ne 0.75 `
+    -or $controlConsensus.probeCadenceAgreementToleranceMs -ne 0.25 `
+    -or $controlConsensus.probeCadenceAgreementValid -ne $true) {
     $failures.Add('independent high-resolution scheduler probes were invalid or incomplete')
 }
 if ($null -ne $dispatcherDiagnostic) {

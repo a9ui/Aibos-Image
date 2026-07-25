@@ -25426,6 +25426,12 @@ public partial class App : Application
         private const double ProbePeriodMs = 2;
         private const double ProbePhaseOffsetMs = 1;
         private const double LateIntervalEpsilonMs = 0.5;
+        // Hosted Windows runners can coalesce a requested 2 ms high-resolution
+        // period by slightly more than 0.5 ms. Keep the accepted cadence below
+        // the 3 ms late-interval threshold and require both independent probes
+        // to agree, so host variance cannot silently weaken attribution.
+        private const double ProbeCadenceToleranceMs = 0.75;
+        private const double ProbeCadenceAgreementToleranceMs = 0.25;
         private readonly SchedulerControlProbe _aboveNormal;
         private readonly SchedulerControlProbe _normal;
         private bool _started;
@@ -25489,9 +25495,20 @@ public partial class App : Application
             List<SchedulerLateInterval> consensusIntervals =
                 IntersectIntervals(aboveIntervals, normalIntervals);
             SchedulerControlProbeSummary aboveSummary =
-                _aboveNormal.CreateSummary(aboveIntervals.Count, ProbePeriodMs);
+                _aboveNormal.CreateSummary(
+                    aboveIntervals.Count,
+                    ProbePeriodMs,
+                    ProbeCadenceToleranceMs);
             SchedulerControlProbeSummary normalSummary =
-                _normal.CreateSummary(normalIntervals.Count, ProbePeriodMs);
+                _normal.CreateSummary(
+                    normalIntervals.Count,
+                    ProbePeriodMs,
+                    ProbeCadenceToleranceMs);
+            bool probeCadenceAgreementValid =
+                Math.Abs(
+                    aboveSummary.ObservedCadenceMedianMs
+                        - normalSummary.ObservedCadenceMedianMs)
+                    <= ProbeCadenceAgreementToleranceMs;
             double observedInitialPhaseOffsetMs = TicksToMilliseconds(
                 Math.Abs(
                     aboveSummary.FirstActualTimestamp
@@ -25531,6 +25548,7 @@ public partial class App : Application
                 && windowCovered
                 && heartbeatTimestampsMonotonic
                 && initialPhaseValid
+                && probeCadenceAgreementValid
                 && ProbeSummaryValid(aboveSummary)
                 && ProbeSummaryValid(normalSummary);
 
@@ -25619,6 +25637,10 @@ public partial class App : Application
                 ObservedInitialPhaseOffsetMs = observedInitialPhaseOffsetMs,
                 InitialPhaseValid = initialPhaseValid,
                 LateIntervalEpsilonMs = LateIntervalEpsilonMs,
+                ProbeCadenceToleranceMs = ProbeCadenceToleranceMs,
+                ProbeCadenceAgreementToleranceMs =
+                    ProbeCadenceAgreementToleranceMs,
+                ProbeCadenceAgreementValid = probeCadenceAgreementValid,
                 AboveNormalProbe = aboveSummary,
                 NormalProbe = normalSummary,
                 ControlConsensusIntervalCount = consensusIntervals.Count,
@@ -25821,7 +25843,8 @@ public partial class App : Application
 
             public SchedulerControlProbeSummary CreateSummary(
                 int lateIntervalCount,
-                double expectedPeriodMs)
+                double expectedPeriodMs,
+                double cadenceToleranceMs)
             {
                 int count = Math.Min(
                     Volatile.Read(ref _sampleCount),
@@ -25860,8 +25883,8 @@ public partial class App : Application
                 }
                 bool cadenceValid =
                     count > 10
-                    && cadenceMedianMs >= expectedPeriodMs - 0.5
-                    && cadenceMedianMs <= expectedPeriodMs + 0.5;
+                    && cadenceMedianMs >= expectedPeriodMs - cadenceToleranceMs
+                    && cadenceMedianMs <= expectedPeriodMs + cadenceToleranceMs;
                 return new SchedulerControlProbeSummary
                 {
                     Name = _name,
@@ -26079,6 +26102,9 @@ public partial class App : Application
         public double ObservedInitialPhaseOffsetMs { get; init; }
         public bool InitialPhaseValid { get; init; }
         public double LateIntervalEpsilonMs { get; init; }
+        public double ProbeCadenceToleranceMs { get; init; }
+        public double ProbeCadenceAgreementToleranceMs { get; init; }
+        public bool ProbeCadenceAgreementValid { get; init; }
         public SchedulerControlProbeSummary AboveNormalProbe { get; init; } = new();
         public SchedulerControlProbeSummary NormalProbe { get; init; } = new();
         public int ControlConsensusIntervalCount { get; init; }
