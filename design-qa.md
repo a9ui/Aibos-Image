@@ -598,6 +598,13 @@ final result: pending independent review and exact hosted verification
   remains advisory when CPU timing is available, so the observed 19.854 ms
   descheduled wall sample remains visible without being misclassified as Aibos
   work; that sample consumed 0 ms thread CPU with a 49 ms heartbeat.
+- Windows may charge one 15.625 ms scheduler accounting quantum to a reset
+  interval whose exact same-thread wall duration is only 1.0343 ms. The gate
+  therefore retains raw thread CPU and exact wall evidence, but evaluates each
+  individual slice with `min(raw CPU, exact wall)` when CPU timing is available;
+  CPU time for one thread cannot physically exceed that enclosing wall interval.
+  Only that per-slice effective value is aggregated. Maxima from different
+  slices are never combined, and unavailable CPU still falls back to exact wall.
 
 final result: pending clean exact verification
 

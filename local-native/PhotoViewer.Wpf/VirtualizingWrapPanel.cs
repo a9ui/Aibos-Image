@@ -332,8 +332,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         double forgetDeferredMeasureMs = 0;
         double removeInternalChildRangeMs = 0;
         double removeInternalChildRangeThreadCpuMs = 0;
-        long sliceCpuStarted = ReadCurrentThreadCpuTimeTicks();
         long sliceStarted = Stopwatch.GetTimestamp();
+        long sliceCpuStarted = ReadCurrentThreadCpuTimeTicks();
         if (_itemsResetGeneratorPosition >= 0)
         {
             int childIndex = InternalChildren.Count - 1;
@@ -367,6 +367,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         }
 
         long sliceCpuFinished = ReadCurrentThreadCpuTimeTicks();
+        long sliceFinished = Stopwatch.GetTimestamp();
         double panelThreadCpuMs =
             sliceCpuStarted >= 0 && sliceCpuFinished >= sliceCpuStarted
                 ? TimeSpan.FromTicks(sliceCpuFinished - sliceCpuStarted).TotalMilliseconds
@@ -377,7 +378,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             forgetDeferredMeasureMs,
             removeInternalChildRangeMs,
             removeInternalChildRangeThreadCpuMs,
-            Stopwatch.GetElapsedTime(sliceStarted).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(sliceStarted, sliceFinished).TotalMilliseconds,
             panelThreadCpuMs);
     }
 

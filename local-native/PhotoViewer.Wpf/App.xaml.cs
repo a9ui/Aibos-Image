@@ -10773,6 +10773,14 @@ public partial class App : Application
                         : filterPhaseSamples.Max(static sample => sample.PreResetMs));
                 List<MainWindow.SearchFilterCompletion> catalogProjectionDetachSamples =
                     searchPhaseSamples.Concat(filterPhaseSamples).ToList();
+                MainWindow.SearchFilterCompletion catalogProjectionMaxBudgetSample =
+                    catalogProjectionDetachSamples.Count == 0
+                        ? default
+                        : catalogProjectionDetachSamples
+                            .OrderByDescending(static sample => sample.ResetPanelBudgetMs)
+                            .First();
+                double catalogProjectionMaxResetPanelBudgetMs =
+                    catalogProjectionMaxBudgetSample.ResetPanelBudgetMs;
                 double catalogProjectionMaxResetPanelThreadCpuMs =
                     catalogProjectionDetachSamples
                         .Where(static sample => sample.ResetPanelThreadCpuMs >= 0)
@@ -10780,15 +10788,12 @@ public partial class App : Application
                         .DefaultIfEmpty(-1)
                         .Max();
                 string catalogProjectionDetachBudgetBasis =
-                    catalogProjectionMaxResetPanelThreadCpuMs >= 0
-                        ? "thread-cpu"
-                        : "wall-fallback";
+                    catalogProjectionMaxBudgetSample.ResetPanelBudgetUsedWallFallback
+                        ? "wall-fallback"
+                        : "thread-cpu-clamped-to-wall";
                 bool catalogProjectionDetachWithinBudget =
-                    catalogProjectionMaxResetPanelThreadCpuMs >= 0
-                        ? catalogProjectionMaxResetPanelThreadCpuMs
-                            <= CatalogProjectionSingleContainerDetachBudgetMs
-                        : catalogProjectionMaxSingleContainerDetachMs
-                            <= CatalogProjectionSingleContainerDetachBudgetMs;
+                    catalogProjectionMaxResetPanelBudgetMs
+                        <= CatalogProjectionSingleContainerDetachBudgetMs;
                 MainWindow.SearchFilterCompletion catalogProjectionMaxDetachSample =
                     catalogProjectionDetachSamples.Count == 0
                         ? default
@@ -10946,6 +10951,8 @@ public partial class App : Application
                         catalogProjectionMaxSingleContainerDetachMs,
                     CatalogProjectionMaxResetPanelThreadCpuMs =
                         catalogProjectionMaxResetPanelThreadCpuMs,
+                    CatalogProjectionMaxResetPanelBudgetMs =
+                        catalogProjectionMaxResetPanelBudgetMs,
                     CatalogProjectionDetachBudgetBasis =
                         catalogProjectionDetachBudgetBasis,
                     CatalogProjectionMaxGeneratorRemoveMs =
@@ -25098,6 +25105,7 @@ public partial class App : Application
         public long CatalogProjectionSingleContainerDetachBudgetMs { get; init; }
         public long CatalogProjectionMaxSingleContainerDetachMs { get; init; }
         public double CatalogProjectionMaxResetPanelThreadCpuMs { get; init; } = -1;
+        public double CatalogProjectionMaxResetPanelBudgetMs { get; init; }
         public string CatalogProjectionDetachBudgetBasis { get; init; } = "";
         public double CatalogProjectionMaxGeneratorRemoveMs { get; init; }
         public double CatalogProjectionMaxForgetDeferredMeasureMs { get; init; }

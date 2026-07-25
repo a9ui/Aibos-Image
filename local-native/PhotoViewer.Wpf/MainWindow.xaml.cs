@@ -1242,6 +1242,8 @@ public partial class MainWindow : Window
         double ResetRemoveInternalChildRangeThreadCpuMs = 0,
         double ResetPanelTotalMs = 0,
         double ResetPanelThreadCpuMs = -1,
+        double ResetPanelBudgetMs = 0,
+        bool ResetPanelBudgetUsedWallFallback = false,
         long ResetAllocatedBytes = 0);
 
     private sealed class CatalogLayoutCache
@@ -1338,6 +1340,8 @@ public partial class MainWindow : Window
         double ResetRemoveInternalChildRangeThreadCpuMs = 0,
         double ResetPanelTotalMs = 0,
         double ResetPanelThreadCpuMs = -1,
+        double ResetPanelBudgetMs = 0,
+        bool ResetPanelBudgetUsedWallFallback = false,
         long ResetAllocatedBytes = 0,
         bool PreparedLayoutReady = false)
     {
@@ -7993,6 +7997,9 @@ public partial class MainWindow : Window
                 applyMetrics.ResetRemoveInternalChildRangeThreadCpuMs,
             ResetPanelTotalMs = applyMetrics.ResetPanelTotalMs,
             ResetPanelThreadCpuMs = applyMetrics.ResetPanelThreadCpuMs,
+            ResetPanelBudgetMs = applyMetrics.ResetPanelBudgetMs,
+            ResetPanelBudgetUsedWallFallback =
+                applyMetrics.ResetPanelBudgetUsedWallFallback,
             ResetAllocatedBytes = applyMetrics.ResetAllocatedBytes,
             PreparedLayoutReady = result?.PreparedLayout is not null,
         });
@@ -10137,6 +10144,8 @@ public partial class MainWindow : Window
         double resetRemoveInternalChildRangeThreadCpuMs = 0;
         double resetPanelTotalMs = 0;
         double resetPanelThreadCpuMs = -1;
+        double resetPanelBudgetMs = 0;
+        bool resetPanelBudgetUsedWallFallback = false;
         long resetAllocatedBytes = 0;
         var slice = Stopwatch.StartNew();
 
@@ -10234,6 +10243,15 @@ public partial class MainWindow : Window
                             ? resetSlice.PanelThreadCpuMs
                             : Math.Max(resetPanelThreadCpuMs, resetSlice.PanelThreadCpuMs);
                     }
+                    bool sliceBudgetUsedWallFallback = resetSlice.PanelThreadCpuMs < 0;
+                    double sliceBudgetMs = sliceBudgetUsedWallFallback
+                        ? resetSlice.PanelTotalMs
+                        : Math.Min(resetSlice.PanelThreadCpuMs, resetSlice.PanelTotalMs);
+                    if (sliceBudgetMs > resetPanelBudgetMs)
+                    {
+                        resetPanelBudgetMs = sliceBudgetMs;
+                        resetPanelBudgetUsedWallFallback = sliceBudgetUsedWallFallback;
+                    }
                     // Preserve the original reset semantics: stale-generation
                     // rejection happens only after reset preparation finishes.
                     // Yield after the final detach as well, so its visual-tree
@@ -10268,7 +10286,9 @@ public partial class MainWindow : Window
                     resetRemoveInternalChildRangeMs,
                     resetRemoveInternalChildRangeThreadCpuMs,
                     resetPanelTotalMs,
-                    resetPanelThreadCpuMs);
+                    resetPanelThreadCpuMs,
+                    resetPanelBudgetMs,
+                    resetPanelBudgetUsedWallFallback);
             }
 
             bool wasSyncingSelection = _syncingSelection;
@@ -10461,6 +10481,8 @@ public partial class MainWindow : Window
             resetRemoveInternalChildRangeThreadCpuMs,
             resetPanelTotalMs,
             resetPanelThreadCpuMs,
+            resetPanelBudgetMs,
+            resetPanelBudgetUsedWallFallback,
             resetAllocatedBytes);
     }
 

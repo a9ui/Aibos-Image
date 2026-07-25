@@ -126,20 +126,35 @@ if ($result.favoriteEvictionBudgetMs -ne 100 -or $result.favoriteEvictionElapsed
 if ($result.catalogProjectionDiagnosticSliceTargetMs -ne 4) {
     $failures.Add("catalog projection diagnostic target was $($result.catalogProjectionDiagnosticSliceTargetMs) ms")
 }
-$detachUsesThreadCpu = $null -ne $result.catalogProjectionMaxResetPanelThreadCpuMs `
-    -and $result.catalogProjectionMaxResetPanelThreadCpuMs -ge 0
-$detachBudgetValue = if ($detachUsesThreadCpu) {
+$hasEffectiveDetachBudget = $null -ne $result.catalogProjectionMaxResetPanelBudgetMs
+$detachUsesThreadCpu = $false
+$detachBudgetValue = if ($hasEffectiveDetachBudget) {
+    $detachUsesThreadCpu = $result.catalogProjectionDetachBudgetBasis -ne 'wall-fallback'
+    $result.catalogProjectionMaxResetPanelBudgetMs
+}
+elseif ($null -ne $result.catalogProjectionMaxResetPanelThreadCpuMs `
+    -and $result.catalogProjectionMaxResetPanelThreadCpuMs -ge 0) {
+    $detachUsesThreadCpu = $true
     $result.catalogProjectionMaxResetPanelThreadCpuMs
 }
 else {
     $result.catalogProjectionMaxSingleContainerDetachMs
 }
-$detachBudgetBasis = if ($detachUsesThreadCpu) { 'thread-cpu' } else { 'wall-fallback' }
+$detachBudgetBasis = if ($hasEffectiveDetachBudget) {
+    $result.catalogProjectionDetachBudgetBasis
+}
+elseif ($detachUsesThreadCpu) {
+    'thread-cpu'
+}
+else {
+    'wall-fallback'
+}
 if ($result.catalogProjectionSingleContainerDetachBudgetMs -ne 12 `
     -or $detachBudgetValue -gt $result.catalogProjectionSingleContainerDetachBudgetMs) {
     $failures.Add(
         "single-container reset unit was $detachBudgetValue ms on $detachBudgetBasis " +
         "(budget $($result.catalogProjectionSingleContainerDetachBudgetMs) ms; " +
+        "effective $($result.catalogProjectionMaxResetPanelBudgetMs) ms; " +
         "code CPU $($result.catalogProjectionMaxResetPanelThreadCpuMs) ms; " +
         "advisory wall $($result.catalogProjectionMaxSingleContainerDetachMs) ms; " +
         "dominant $($result.catalogProjectionDominantResetSubstep); " +
