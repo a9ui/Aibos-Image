@@ -12,6 +12,14 @@
     <AssemblyTitle>Aibos</AssemblyTitle>
     <Description>Local-first Aibos Image WPF renderer</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Brand\Generated\Aibos.App.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Brand\Generated\Aibos.App.ico" />
+    <Resource Include="Brand\Generated\Aibos.Mark.20.png" />
+    <Resource Include="Brand\Generated\Aibos.Mark.24.png" />
+    <Resource Include="Brand\Generated\Aibos.Mark.64.png" />
+  </ItemGroup>
 
 </Project>

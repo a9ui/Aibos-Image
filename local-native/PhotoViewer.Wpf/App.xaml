@@ -13,6 +13,8 @@
     <Color x:Key="AccentLightColor">#FF9AA0FF</Color>
     <Color x:Key="FavoriteColor">#FFFF4D73</Color>
     <Color x:Key="HeaderBgColor">#EB0B0F16</Color>
+    <Color x:Key="GlassChromeTopColor">#D9181F2C</Color>
+    <Color x:Key="GlassChromeBottomColor">#B8090E17</Color>
     <Color x:Key="TextPrimaryColor">#F2FFFFFF</Color>
     <Color x:Key="TextSecondaryColor">#B8C4CAD8</Color>
     <Color x:Key="TextTertiaryColor">#8FAAB3C4</Color>
@@ -53,12 +55,20 @@
     <Color x:Key="ScrollThumbColor">#22FFFFFF</Color>
     <Color x:Key="ScrollThumbHoverColor">#3CFFFFFF</Color>
 
-    <!-- Lightweight opaque workbench tokens: square, quiet, and fast. -->
+    <!--
+      Lightweight workbench tokens. Floating chrome uses one static alpha
+      gradient: no blur, refraction, shader, parallax, or continuous effect.
+      Reduced Transparency composites every alpha token to an opaque color.
+    -->
     <SolidColorBrush x:Key="BgPrimary" Color="{DynamicResource BgPrimaryColor}"/>
     <SolidColorBrush x:Key="BgSecondary" Color="{DynamicResource BgSecondaryColor}"/>
     <SolidColorBrush x:Key="BgTertiary" Color="{DynamicResource BgTertiaryColor}"/>
     <SolidColorBrush x:Key="BgElevated" Color="{DynamicResource BgElevatedColor}"/>
     <SolidColorBrush x:Key="HeaderBg" Color="{DynamicResource HeaderBgColor}"/>
+    <LinearGradientBrush x:Key="GlassChrome" StartPoint="0,0" EndPoint="0,1">
+      <GradientStop Color="{DynamicResource GlassChromeTopColor}" Offset="0"/>
+      <GradientStop Color="{DynamicResource GlassChromeBottomColor}" Offset="1"/>
+    </LinearGradientBrush>
     <SolidColorBrush x:Key="TextPrimary" Color="{DynamicResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondary" Color="{DynamicResource TextSecondaryColor}"/>
     <SolidColorBrush x:Key="TextTertiary" Color="{DynamicResource TextTertiaryColor}"/>

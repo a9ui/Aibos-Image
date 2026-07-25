@@ -66,6 +66,21 @@ if ($result.favoriteEvictionExact -ne $true `
     -or $result.favoriteEvictionAutomationExact -ne $true) {
     $failures.Add('favorite-filter eviction did not republish an externally searchable Automation projection')
 }
+if ($result.favoritePendingBroadenRaceExact -ne $true) {
+    $failures.Add('favorite exclusion retained a stale narrow projection while a broader search was pending')
+}
+if ($result.favoriteRapidReincludeRaceExact -ne $true) {
+    $failures.Add('rapid re-favorite did not cancel an in-flight favorite exclusion projection')
+}
+if ($result.favoriteSortRaceExact -ne $true) {
+    $failures.Add('favorite mutation superseded an interactive sort without preserving its final catalog order')
+}
+if ($result.favoriteDuplicateEvictionRaceExact -ne $true) {
+    $failures.Add('superseded favorite exclusion released a newer generation notification')
+}
+if ($result.favoriteFilteredFailureStatusExact -ne $true) {
+    $failures.Add('favorite-filter write failure did not preserve rollback projection and Retry status')
+}
 if ($result.searchP95Ms -gt 250 -or $result.filterP95Ms -gt 250 -or $result.sortP95Ms -gt 500) {
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")
 }
@@ -91,6 +106,9 @@ if ($result.externalAutomationExact -ne $true `
 if ($result.repeatedAutomationRealizeCoalesced -ne $true) {
     $failures.Add('repeated UI Automation Realize requests were not coalesced')
 }
+if ($null -eq $result.automationRealizeMaxDispatchMs) {
+    $failures.Add('UI Automation realization dispatch duration was not recorded')
+}
 if ($result.staleAutomationPeerLifetimeExact -ne $true `
     -or $result.staleAutomationRealizeUnavailable -ne $true `
     -or $result.staleAutomationSelectUnavailable -ne $true) {
@@ -114,10 +132,90 @@ if ($result.keyboardSelectionSyncMaxMs -gt 4) {
 if ($result.gridItemsSourceCount -ne $Count -or $result.gridUsesFullExtentVirtualization -ne $true -or $result.gridRealizedCount -gt $result.gridRealizationLimit) {
     $failures.Add('100k gallery containers were not bounded by full-extent virtualization')
 }
-if ($result.catalogProjectionMaxApplySliceMs -gt 4) {
-    $failures.Add("catalog projection apply slice was $($result.catalogProjectionMaxApplySliceMs) ms")
+if ($result.favoriteEvictionExact -ne $true -or $result.favoriteEvictionAutomationExact -ne $true) {
+    $failures.Add('favorite-only removal did not evict the target and preserve the exact neighboring selection/UI Automation projection')
 }
-if ($result.dispatcherHeartbeatMaxGapMs -gt 50) { $failures.Add("dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms") }
+if ($result.favoriteEvictionBudgetMs -ne 100 -or $result.favoriteEvictionElapsedMs -gt $result.favoriteEvictionBudgetMs) {
+    $failures.Add("favorite-only removal was $($result.favoriteEvictionElapsedMs) ms (budget $($result.favoriteEvictionBudgetMs) ms)")
+}
+if ($result.catalogProjectionDiagnosticSliceTargetMs -ne 4) {
+    $failures.Add("catalog projection diagnostic target was $($result.catalogProjectionDiagnosticSliceTargetMs) ms")
+}
+$hasEffectiveDetachBudget = $null -ne $result.catalogProjectionMaxResetPanelBudgetMs
+$detachUsesThreadCpu = $false
+$detachBudgetValue = if ($hasEffectiveDetachBudget) {
+    $detachUsesThreadCpu = $result.catalogProjectionDetachBudgetBasis -ne 'wall-fallback'
+    $result.catalogProjectionMaxResetPanelBudgetMs
+}
+elseif ($null -ne $result.catalogProjectionMaxResetPanelThreadCpuMs `
+    -and $result.catalogProjectionMaxResetPanelThreadCpuMs -ge 0) {
+    $detachUsesThreadCpu = $true
+    $result.catalogProjectionMaxResetPanelThreadCpuMs
+}
+else {
+    $result.catalogProjectionMaxSingleContainerDetachMs
+}
+$detachBudgetBasis = if ($hasEffectiveDetachBudget) {
+    $result.catalogProjectionDetachBudgetBasis
+}
+elseif ($detachUsesThreadCpu) {
+    'thread-cpu'
+}
+else {
+    'wall-fallback'
+}
+if ($result.catalogProjectionSingleContainerDetachBudgetMs -ne 12) {
+    $failures.Add(
+        "single-container reset diagnostic threshold was " +
+        "$($result.catalogProjectionSingleContainerDetachBudgetMs) ms")
+}
+if ($detachBudgetValue -gt $result.catalogProjectionSingleContainerDetachBudgetMs) {
+    Write-Warning (
+        "single-container reset diagnostic exceeded: $detachBudgetValue ms on $detachBudgetBasis " +
+        "(budget $($result.catalogProjectionSingleContainerDetachBudgetMs) ms; " +
+        "effective $($result.catalogProjectionMaxResetPanelBudgetMs) ms; " +
+        "code CPU $($result.catalogProjectionMaxResetPanelThreadCpuMs) ms; " +
+        "advisory wall $($result.catalogProjectionMaxSingleContainerDetachMs) ms; " +
+        "dominant $($result.catalogProjectionDominantResetSubstep); " +
+        "generator $($result.catalogProjectionMaxGeneratorRemoveMs) ms; " +
+        "deferred-measure $($result.catalogProjectionMaxForgetDeferredMeasureMs) ms; " +
+        "visual $($result.catalogProjectionMaxRemoveInternalChildRangeMs) ms; " +
+        "visual thread CPU $($result.catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs) ms; " +
+        "panel total $($result.catalogProjectionMaxResetPanelTotalMs) ms)")
+}
+if ($result.catalogProjectionMaxDetachedContainersPerSlice -gt 1) {
+    $failures.Add(
+        "catalog reset detached $($result.catalogProjectionMaxDetachedContainersPerSlice) " +
+        'containers in one Dispatcher turn')
+}
+if ($result.catalogProjectionInputBoundaryBeforePublicationExact -ne $true `
+    -or $result.catalogProjectionInputBoundaryAfterPublicationExact -ne $true) {
+    $failures.Add(
+        "catalog publication input boundaries were not exact " +
+        "(before $($result.catalogProjectionInputBoundaryBeforePublicationExact); " +
+        "after $($result.catalogProjectionInputBoundaryAfterPublicationExact))")
+}
+if ($result.catalogProjectionMaxSingleContainerDetachMs -gt 0 `
+    -and ($result.catalogProjectionMaxResetPanelTotalMs -le 0 `
+        -or $result.catalogProjectionDominantResetSubstep -eq 'none' `
+        -or ($detachUsesThreadCpu `
+            -and $result.catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs -lt 0))) {
+    $failures.Add('single-container reset sub-step attribution was missing')
+}
+if ($result.catalogProjectionMaxApplySliceMs -gt $result.catalogProjectionDiagnosticSliceTargetMs) {
+    Write-Warning (
+        "catalog projection diagnostic target exceeded: " +
+        "$($result.catalogProjectionMaxApplySliceOperation) " +
+        "$($result.catalogProjectionMaxApplySliceMs) ms > " +
+        "$($result.catalogProjectionDiagnosticSliceTargetMs) ms")
+}
+if ($result.dispatcherHeartbeatBudgetMs -ne 50 `
+    -or $result.dispatcherHeartbeatMaxGapMs -gt $result.dispatcherHeartbeatBudgetMs `
+    -or @($result.heartbeatGapSamples).Count -ne 0) {
+    $failures.Add(
+        "dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms " +
+        "(budget $($result.dispatcherHeartbeatBudgetMs) ms; over-budget samples $(@($result.heartbeatGapSamples).Count))")
+}
 if ($result.mixedLatestWins -ne $true -or $result.mixedStaleSearchDiscarded -ne $true -or $result.mixedStaleFilterDiscarded -ne $true -or $result.mixedDiscardedCount -lt 1) {
     $failures.Add('mixed search/filter/sort did not discard stale generations')
 }

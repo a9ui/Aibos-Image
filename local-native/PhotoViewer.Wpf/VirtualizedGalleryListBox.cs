@@ -6,12 +6,14 @@ using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Threading;
 
 namespace PhotoViewer.Wpf;
 
 public sealed class VirtualizedGalleryListBox : ListBox
 {
+    private const int MaxDetachedContainerPoolSize = 32;
     private GalleryAutomationProjectionIndex? _automationProjection;
     private GalleryAutomationProjectionIndex? _pendingAutomationProjection;
     private DispatcherOperation? _automationRealizeOperation;
@@ -20,7 +22,15 @@ public sealed class VirtualizedGalleryListBox : ListBox
     private int _pendingAutomationRealizeIndex = -1;
     private int _automationRealizeDispatchCount;
     private int _automationRealizeCoalescedCount;
+    private long _automationRealizeMaxDispatchMilliseconds;
     private long _automationLookupMaxMilliseconds;
+    // WPF empties its own recycling queue on a collection Reset. This bounded
+    // pool accepts only containers the custom panel has already removed from
+    // both the generator map and visual tree.
+    private readonly Queue<ListBoxItem> _detachedContainerPool = [];
+    private readonly HashSet<ListBoxItem> _detachedContainerSet = [];
+    private int _detachedContainerCreatedCount;
+    private int _detachedContainerReuseCount;
 
     public VirtualizedGalleryListBox()
     {
@@ -30,14 +40,22 @@ public sealed class VirtualizedGalleryListBox : ListBox
             _automationProjectionGeneration++;
             CancelAutomationRealization();
             ReleaseAutomationProjections();
+            _detachedContainerPool.Clear();
+            _detachedContainerSet.Clear();
         };
     }
+
+    public bool ReuseDetachedContainers { get; set; }
 
     internal long AutomationProjectionGeneration => _automationProjectionGeneration;
     internal int AutomationRealizeDispatchCount => _automationRealizeDispatchCount;
     internal int AutomationRealizeCoalescedCount => _automationRealizeCoalescedCount;
     internal bool AutomationRealizePending => _pendingAutomationRealizeIndex >= 0;
+    internal long AutomationRealizeMaxDispatchMilliseconds
+        => _automationRealizeMaxDispatchMilliseconds;
     internal long AutomationLookupMaxMilliseconds => _automationLookupMaxMilliseconds;
+    internal int DetachedContainerCreatedCount => _detachedContainerCreatedCount;
+    internal int DetachedContainerReuseCount => _detachedContainerReuseCount;
 
     internal void StageAutomationProjection(GalleryAutomationProjectionIndex projection)
     {
@@ -120,8 +138,19 @@ public sealed class VirtualizedGalleryListBox : ListBox
                 return;
             }
 
-            ScrollIntoView(Items[index]);
-            CompleteAutomationRealizeIfPossible();
+            var watch = Stopwatch.StartNew();
+            try
+            {
+                ScrollIntoView(Items[index]);
+                CompleteAutomationRealizeIfPossible();
+            }
+            finally
+            {
+                watch.Stop();
+                _automationRealizeMaxDispatchMilliseconds = Math.Max(
+                    _automationRealizeMaxDispatchMilliseconds,
+                    watch.ElapsedMilliseconds);
+            }
         }, DispatcherPriority.Input);
     }
 
@@ -139,8 +168,50 @@ public sealed class VirtualizedGalleryListBox : ListBox
             _automationLookupMaxMilliseconds,
             elapsedMilliseconds);
 
+    internal void ResetAutomationLookupMetrics()
+    {
+        _automationLookupMaxMilliseconds = 0;
+        _automationRealizeMaxDispatchMilliseconds = 0;
+    }
+
     protected override AutomationPeer OnCreateAutomationPeer()
         => new VirtualizedGalleryListBoxAutomationPeer(this);
+
+    protected override DependencyObject GetContainerForItemOverride()
+    {
+        if (ReuseDetachedContainers)
+        {
+            int candidateCount = _detachedContainerPool.Count;
+            while (candidateCount-- > 0)
+            {
+                ListBoxItem candidate = _detachedContainerPool.Dequeue();
+                if (VisualTreeHelper.GetParent(candidate) is null)
+                {
+                    _detachedContainerSet.Remove(candidate);
+                    _detachedContainerReuseCount++;
+                    return candidate;
+                }
+                _detachedContainerPool.Enqueue(candidate);
+            }
+        }
+
+        _detachedContainerCreatedCount++;
+        return base.GetContainerForItemOverride();
+    }
+
+    internal void CacheDetachedContainer(ListBoxItem container)
+    {
+        // Callers must finish generator and visual-tree detachment first.
+        // GetContainerForItemOverride also verifies that invariant before use.
+        if (!ReuseDetachedContainers
+            || _detachedContainerPool.Count >= MaxDetachedContainerPoolSize
+            || !_detachedContainerSet.Add(container))
+        {
+            return;
+        }
+
+        _detachedContainerPool.Enqueue(container);
+    }
 
     protected override void OnItemsChanged(NotifyCollectionChangedEventArgs e)
     {
@@ -493,7 +564,16 @@ internal sealed class GalleryAutomationProjectionIndex
             for (int index = 0; index < count; index++)
             {
                 if ((index & 255) == 0)
+                {
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (index > 0
+                        && count > 16_384
+                        && cancellationToken.CanBeCanceled
+                        && (index & 1023) == 0)
+                    {
+                        Thread.Yield();
+                    }
+                }
                 Tile tile = items[index];
                 names.TryAdd(tile.FileName, index);
             }

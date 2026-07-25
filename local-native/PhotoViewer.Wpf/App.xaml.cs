@@ -19,9 +19,21 @@ namespace PhotoViewer.Wpf;
 
 public partial class App : Application
 {
+    // M3 catalog-interaction contract. The 4 ms value remains a diagnostic
+    // target for code-owned slices. A WPF generator/visual-tree reset removes
+    // exactly one realized container per dispatcher turn. The 12 ms value is
+    // retained as a diagnostic design threshold: GetThreadTimes is too coarse
+    // to distinguish sub-quantum CPU from runner descheduling, so cloud hard
+    // acceptance uses the structural one-container turn plus heartbeat.
+    private const long CatalogProjectionDiagnosticSliceTargetMs = 4;
+    private const long CatalogProjectionSingleContainerDetachBudgetMs = 12;
+    private const long CatalogInteractionDispatcherHeartbeatBudgetMs = 50;
+    private const long CatalogFavoriteEvictionBudgetMs = 100;
+
     private static readonly string[] ThemeColorResourceKeys =
     [
         "BgPrimaryColor", "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
+        "GlassChromeTopColor", "GlassChromeBottomColor",
         "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor", "TextDisabledColor", "SelectionTextColor",
         "AccentColor", "AccentLightColor", "FocusColor", "FavoriteColor", "FavoriteTextColor",
         "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
@@ -1051,6 +1063,7 @@ public partial class App : Application
         SetThemeColors(SystemColors.WindowColor, "BgPrimaryColor");
         SetThemeColors(SystemColors.ControlColor,
             "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
+            "GlassChromeTopColor", "GlassChromeBottomColor",
             "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
             "FavoriteSoftColor", "SuccessSoftColor",
             "OverlaySoftColor", "OverlayStrongColor", "DropOverlayColor",
@@ -9054,12 +9067,16 @@ public partial class App : Application
             try
             {
                 await first.LoadFolderAsync(aspectFolder);
+                bool metadataReady = await first.WaitForCatalogImageDimensionsForSmokeAsync();
                 int filtered = first.FilteredCountForSmoke;
                 List<string> initialOrder = first.FilteredFileNamesForSmoke(3);
                 bool selectedBravo = first.SelectFileNameForSmoke("bravo-square.png");
                 string? selectedBefore = first.SelectedFileNameForSmoke;
 
-                DisplayStyleMetrics original = first.DisplayStyleMetricsForSmoke();
+                DisplayStyleMetrics originalLandscape = first.DisplayStyleMetricsForSmoke("alpha-landscape.png");
+                DisplayStyleMetrics originalSquare = first.DisplayStyleMetricsForSmoke("bravo-square.png");
+                DisplayStyleMetrics originalPortrait = first.DisplayStyleMetricsForSmoke("charlie-portrait.png");
+                DisplayStyleMetrics original = originalLandscape;
                 bool squareChanged = first.SetAspectModeForSmoke("square");
                 DisplayStyleMetrics square = first.DisplayStyleMetricsForSmoke();
                 List<string> squareOrder = first.FilteredFileNamesForSmoke(3);
@@ -9094,11 +9111,16 @@ public partial class App : Application
                     && portrait.ListThumbnailHeight > square.ListThumbnailHeight
                     && Math.Abs((portrait.CardHeight / portrait.CardWidth) - 1.5) < 0.03
                     && string.Equals(portrait.CardThumbnailStretch, "UniformToFill", StringComparison.Ordinal);
-                bool originalShape = original.CardHeight > square.CardHeight
-                    && original.ListThumbnailHeight > square.ListThumbnailHeight
-                    && Math.Abs((original.CardHeight / original.CardWidth) - 1.5) < 0.03
-                    && string.Equals(original.AspectMode, "original", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(original.CardThumbnailStretch, "Uniform", StringComparison.Ordinal);
+                bool originalShape = metadataReady
+                    && Math.Abs((originalLandscape.CardHeight / originalLandscape.CardWidth) - (2d / 3d)) < 0.03
+                    && Math.Abs((originalSquare.CardHeight / originalSquare.CardWidth) - 1d) < 0.03
+                    && Math.Abs((originalPortrait.CardHeight / originalPortrait.CardWidth) - 1.5d) < 0.03
+                    && originalLandscape.ListThumbnailHeight < originalSquare.ListThumbnailHeight
+                    && originalSquare.ListThumbnailHeight < originalPortrait.ListThumbnailHeight
+                    && string.Equals(originalLandscape.AspectMode, "original", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(originalLandscape.CardThumbnailStretch, "Uniform", StringComparison.Ordinal)
+                    && string.Equals(originalSquare.CardThumbnailStretch, "Uniform", StringComparison.Ordinal)
+                    && string.Equals(originalPortrait.CardThumbnailStretch, "Uniform", StringComparison.Ordinal);
                 bool orderStable = SameNameOrder(squareOrder, initialOrder)
                     && SameNameOrder(portraitOrder, initialOrder)
                     && SameNameOrder(restoredOrder, initialOrder);
@@ -9116,7 +9138,7 @@ public partial class App : Application
                     && restored.CardHeight > restored.CardWidth;
                 bool runtimeRestore = originalChanged
                     && string.Equals(restoredOriginalRuntime.AspectMode, "original", StringComparison.OrdinalIgnoreCase)
-                    && Math.Abs((restoredOriginalRuntime.CardHeight / restoredOriginalRuntime.CardWidth) - 1.5) < 0.03
+                    && Math.Abs((restoredOriginalRuntime.CardHeight / restoredOriginalRuntime.CardWidth) - (2d / 3d)) < 0.03
                     && string.Equals(restoredOriginalRuntime.CardThumbnailStretch, "Uniform", StringComparison.Ordinal);
 
                 bool ok = filtered == 3
@@ -9136,7 +9158,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "aspect controls changed deterministic grid/list dimensions, preserved order/selection, composed with zoom, and restored from WPF state"
+                        ? "late metadata reflowed Original cards to source geometry; aspect controls preserved order/selection, composed with zoom, and restored from WPF state"
                         : "aspect smoke did not meet dimension/order/selection/persistence expectations",
                     Folder = aspectFolder,
                     ProjectRoot = smokeRoot,
@@ -9147,6 +9169,9 @@ public partial class App : Application
                     PortraitOrder = portraitOrder,
                     RestoredOrder = restoredOrder,
                     Original = original,
+                    OriginalLandscape = originalLandscape,
+                    OriginalSquare = originalSquare,
+                    OriginalPortrait = originalPortrait,
                     Square = square,
                     Portrait = portrait,
                     PortraitZoomed = portraitZoomed,
@@ -9161,6 +9186,7 @@ public partial class App : Application
                     OriginalChanged = originalChanged,
                     Zoomed = zoomed,
                     PersistedTargetSet = persistedTargetSet,
+                    MetadataReady = metadataReady,
                     SquareShape = squareShape,
                     PortraitShape = portraitShape,
                     OriginalShape = originalShape,
@@ -9764,37 +9790,187 @@ public partial class App : Application
             var heartbeatWatch = Stopwatch.StartNew();
             long lastHeartbeatMs = 0;
             long maxHeartbeatGapMs = 0;
+            double maxHeartbeatGapGcPauseMs = 0;
+            long maxHeartbeatGapProjectionGeneration = 0;
             int heartbeatCount = 0;
             string activeOperation = "startup";
             string maxHeartbeatGapSample = "";
-            void ReportProgress(string operation)
+            TimeSpan lastHeartbeatGcPause = GC.GetTotalPauseDuration();
+            void SetActiveOperation(string operation)
             {
                 activeOperation = operation;
+                window.SetCatalogInteractionDiagnosticOperationForSmoke(operation);
+            }
+            void ReportProgress(string operation)
+            {
+                SetActiveOperation(operation);
                 try { File.WriteAllText(progressPath, operation); } catch { }
             }
             ReportProgress(activeOperation);
             var heartbeatGapSamples = new List<string>();
+            var heartbeatDiagnosticSamples = new List<DispatcherHeartbeatDiagnosticSample>();
             var layoutSamples = new List<string>();
+            var accessibilityWarmupSubstepSamples = new List<CatalogInteractionSubstepSample>();
+            var stalePeerSubstepSamples = new List<CatalogInteractionSubstepSample>();
+            var keyboardFocusSubstepSamples = new List<CatalogInteractionGcSubstepSample>();
+            T MeasureAccessibilityWarmupSubstep<T>(string operation, Func<T> action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    return action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    accessibilityWarmupSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            async Task<T> MeasureAccessibilityWarmupSubstepAsync<T>(
+                string operation,
+                Func<Task<T>> action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    return await action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    accessibilityWarmupSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            async Task MeasureAccessibilityWarmupActionAsync(
+                string operation,
+                Func<Task> action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    await action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    accessibilityWarmupSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            T MeasureStalePeerSubstep<T>(string operation, Func<T> action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    return action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    stalePeerSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            void MeasureStalePeerAction(string operation, Action action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    stalePeerSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            async Task<T> MeasureStalePeerSubstepAsync<T>(
+                string operation,
+                Func<Task<T>> action)
+            {
+                SetActiveOperation(operation);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    return await action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    stalePeerSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            async Task<T> MeasureKeyboardFocusSubstepAsync<T>(
+                string operation,
+                Func<Task<T>> action)
+            {
+                SetActiveOperation(operation);
+                long allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
+                TimeSpan gcPauseBefore = GC.GetTotalPauseDuration();
+                int gen0Before = GC.CollectionCount(0);
+                int gen1Before = GC.CollectionCount(1);
+                int gen2Before = GC.CollectionCount(2);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    return await action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    keyboardFocusSubstepSamples.Add(new(
+                        operation,
+                        watch.Elapsed.TotalMilliseconds,
+                        Math.Max(0, GC.GetTotalAllocatedBytes(precise: false) - allocatedBefore),
+                        Math.Max(0, (GC.GetTotalPauseDuration() - gcPauseBefore).TotalMilliseconds),
+                        GC.CollectionCount(0) - gen0Before,
+                        GC.CollectionCount(1) - gen1Before,
+                        GC.CollectionCount(2) - gen2Before,
+                        window.CatalogProjectionGenerationForSmoke));
+                }
+            }
             async Task FlushLayoutAsync()
             {
                 string operation = activeOperation;
-                activeOperation = operation + "-layout";
+                SetActiveOperation(operation + "-layout");
                 var watch = Stopwatch.StartNew();
                 await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
                 watch.Stop();
                 layoutSamples.Add($"{operation}:{watch.ElapsedMilliseconds}ms");
-                activeOperation = operation;
+                SetActiveOperation(operation);
             }
             heartbeat.Tick += (_, _) =>
             {
                 long now = heartbeatWatch.ElapsedMilliseconds;
                 long gap = now - lastHeartbeatMs;
+                TimeSpan gcPauseNow = GC.GetTotalPauseDuration();
+                double gcPauseDeltaMs =
+                    (gcPauseNow - lastHeartbeatGcPause).TotalMilliseconds;
+                lastHeartbeatGcPause = gcPauseNow;
+                long projectionGeneration = window.CatalogProjectionGenerationForSmoke;
+                if (gap >= 30)
+                {
+                    heartbeatDiagnosticSamples.Add(new(
+                        activeOperation,
+                        now,
+                        gap,
+                        gcPauseDeltaMs,
+                        projectionGeneration));
+                }
                 if (gap > maxHeartbeatGapMs)
                 {
                     maxHeartbeatGapMs = gap;
-                    maxHeartbeatGapSample = $"{activeOperation}@{now}ms:{gap}ms";
+                    maxHeartbeatGapGcPauseMs = gcPauseDeltaMs;
+                    maxHeartbeatGapProjectionGeneration = projectionGeneration;
+                    maxHeartbeatGapSample =
+                        $"{activeOperation}@{now}ms:{gap}ms"
+                        + $":gc={gcPauseDeltaMs:F3}ms"
+                        + $":generation={projectionGeneration}";
                 }
-                if (gap > 50)
+                if (gap > CatalogInteractionDispatcherHeartbeatBudgetMs)
                     heartbeatGapSamples.Add($"{activeOperation}@{now}ms:{gap}ms");
                 lastHeartbeatMs = now;
                 heartbeatCount++;
@@ -9896,6 +10072,392 @@ public partial class App : Application
                     && mixedSortRestored
                     && window.FilteredCountForSmoke == count
                     && selected;
+
+                // A favorite-only exclusion may reuse the current projection
+                // only when that projection is stable. Reproduce the race where
+                // clearing a narrow search has been scheduled but not applied
+                // before the selected favorite is removed. The exclusion must
+                // restart from the full catalog, not the stale narrow subset.
+                ReportProgress("favorite-pending-broaden-race");
+                window.ForceSharedStoreWritersForSmoke();
+                bool favoritePendingBroadenRaceExact =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.MarkSelectedTileRealForSmoke()
+                    && window.SetSelectedFavoriteLevelForSmoke(1);
+                SharedWriteStatus[] racePreparedWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                MainWindow.SearchFilterCompletion raceFavoriteFilter =
+                    await window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                MainWindow.SearchFilterCompletion raceNarrowSearch =
+                    await window.SetSearchInputForSmokeAsync("needle");
+                favoritePendingBroadenRaceExact &=
+                    racePreparedWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && raceFavoriteFilter.Applied
+                    && !raceFavoriteFilter.Discarded
+                    && raceNarrowSearch.Applied
+                    && !raceNarrowSearch.Discarded
+                    && window.FilteredCountForSmoke == count / 100
+                    && window.SelectFileNameForSmoke(selectedName);
+                int resetNotificationsBeforePendingBroaden =
+                    window.ProjectionResetNotificationCountForSmoke;
+                int removeNotificationsBeforePendingBroaden =
+                    window.ProjectionRemoveNotificationCountForSmoke;
+                Task<MainWindow.SearchFilterCompletion> pendingRaceBroaden =
+                    window.SetSearchInputForSmokeAsync("");
+                (bool raceFavoriteEvicted, MainWindow.SearchFilterCompletion raceFavoriteProjection) =
+                    await window.AdjustGalleryFavoriteImmediateForSmokeAsync(selectedName, -1);
+                MainWindow.SearchFilterCompletion raceBroadenResult =
+                    await pendingRaceBroaden;
+                bool raceRealizationSettled =
+                    await window.WaitForGridRealizationIdleForSmokeAsync();
+                favoritePendingBroadenRaceExact &=
+                    raceFavoriteEvicted
+                    && raceBroadenResult.Discarded
+                    && !raceBroadenResult.Applied
+                    && raceFavoriteProjection.Applied
+                    && !raceFavoriteProjection.Discarded
+                    && window.ProjectionResetNotificationCountForSmoke
+                        > resetNotificationsBeforePendingBroaden
+                    && window.ProjectionRemoveNotificationCountForSmoke
+                        == removeNotificationsBeforePendingBroaden
+                    && raceRealizationSettled
+                    && window.FilteredCountForSmoke == (count / 10) - 1
+                    && !string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        selectedName,
+                        StringComparison.OrdinalIgnoreCase);
+                MainWindow.SearchFilterCompletion raceFavoriteClear =
+                    await window.ClearFavoriteFiltersForSmokeAsync();
+                bool raceFavoriteRestored =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.SetSelectedFavoriteLevelForSmoke(5);
+                SharedWriteStatus[] raceRestoredWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                selected &= window.SelectFileNameForSmoke(selectedName);
+                favoritePendingBroadenRaceExact &=
+                    raceFavoriteClear.Applied
+                    && !raceFavoriteClear.Discarded
+                    && raceFavoriteRestored
+                    && raceRestoredWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && window.FilteredCountForSmoke == count
+                    && selected;
+
+                // A rapid re-favorite must cancel the in-flight exclusion
+                // snapshot. Otherwise the stale Fav=0 projection can remove a
+                // tile after its model and durable intent are Fav=1 again.
+                ReportProgress("favorite-rapid-reinclude-race");
+                bool favoriteRapidReincludeRaceExact =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.MarkSelectedTileRealForSmoke()
+                    && window.SetSelectedFavoriteLevelForSmoke(1);
+                SharedWriteStatus[] rapidPreparedWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                MainWindow.SearchFilterCompletion rapidFavoriteFilter =
+                    await window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                favoriteRapidReincludeRaceExact &=
+                    rapidPreparedWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && rapidFavoriteFilter.Applied
+                    && !rapidFavoriteFilter.Discarded
+                    && window.SelectFileNameForSmoke(selectedName);
+                bool rapidExcluded =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                Task<MainWindow.SearchFilterCompletion> staleRapidExclusion =
+                    window.PendingCatalogProjectionForSmoke();
+                bool rapidReincluded =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, 1);
+                Task<MainWindow.SearchFilterCompletion> latestRapidInclusion =
+                    window.PendingCatalogProjectionForSmoke();
+                MainWindow.SearchFilterCompletion staleRapidResult =
+                    await staleRapidExclusion;
+                MainWindow.SearchFilterCompletion latestRapidResult =
+                    await latestRapidInclusion;
+                bool rapidRealizationSettled =
+                    await window.WaitForGridRealizationIdleForSmokeAsync();
+                favoriteRapidReincludeRaceExact &=
+                    rapidExcluded
+                    && rapidReincluded
+                    && staleRapidResult.Discarded
+                    && !staleRapidResult.Applied
+                    && latestRapidResult.Applied
+                    && !latestRapidResult.Discarded
+                    && rapidRealizationSettled
+                    && window.FilteredCountForSmoke == count / 10
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 1
+                    && string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        selectedName,
+                        StringComparison.OrdinalIgnoreCase);
+
+                // A favorite mutation that supersedes a running interactive
+                // sort must inherit its reorder intent. Otherwise the new
+                // sort label can be published over the old catalog order.
+                ReportProgress("favorite-sort-race");
+                Task<bool> pendingFavoriteSort =
+                    window.SetSortByInteractiveForSmokeAsync("name");
+                Task<MainWindow.SearchFilterCompletion> staleFavoriteSortProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                bool favoriteChangedDuringSort =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, 1);
+                Task<MainWindow.SearchFilterCompletion> latestFavoriteSortProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                MainWindow.SearchFilterCompletion staleFavoriteSortResult =
+                    await staleFavoriteSortProjection;
+                bool staleFavoriteSortApplied = await pendingFavoriteSort;
+                MainWindow.SearchFilterCompletion latestFavoriteSortResult =
+                    await latestFavoriteSortProjection;
+                bool favoriteSortRaceExact =
+                    favoriteChangedDuringSort
+                    && !staleFavoriteSortApplied
+                    && staleFavoriteSortResult.Discarded
+                    && !staleFavoriteSortResult.Applied
+                    && latestFavoriteSortResult.Applied
+                    && !latestFavoriteSortResult.Discarded
+                    && string.Equals(
+                        window.SortByForSmoke,
+                        "name",
+                        StringComparison.Ordinal)
+                    && window.CatalogOrderMatchesCurrentSortForSmoke()
+                    && window.FilteredCountForSmoke == count / 10
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 2;
+                bool favoriteSortRestored =
+                    await window.SetSortByInteractiveForSmokeAsync("modified-newest");
+                bool favoriteLevelRestored =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                SharedWriteStatus[] favoriteSortWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                favoriteSortRaceExact &=
+                    favoriteSortRestored
+                    && favoriteLevelRestored
+                    && favoriteSortWrites.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && window.CatalogOrderMatchesCurrentSortForSmoke()
+                    && window.FilteredCountForSmoke == count / 10
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 1
+                    && window.SelectFileNameForSmoke(selectedName);
+
+                // Two identical fast decreases create two projection
+                // generations. The discarded first generation must not flush
+                // the second generation's deferred binding notifications.
+                bool duplicateFirstDecrease =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                Task<MainWindow.SearchFilterCompletion> duplicateFirstProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                bool duplicateSecondDecrease =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                Task<MainWindow.SearchFilterCompletion> duplicateSecondProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                MainWindow.SearchFilterCompletion duplicateFirstResult =
+                    await duplicateFirstProjection;
+                bool duplicateStillDeferredAfterFirst =
+                    window.FavoriteNotificationsPendingForFileForSmoke(selectedName);
+                MainWindow.SearchFilterCompletion duplicateSecondResult =
+                    await duplicateSecondProjection;
+                await window.Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.ContextIdle);
+                bool favoriteDuplicateEvictionRaceExact =
+                    duplicateFirstDecrease
+                    && duplicateSecondDecrease
+                    && duplicateFirstResult.Discarded
+                    && !duplicateFirstResult.Applied
+                    && duplicateStillDeferredAfterFirst
+                    && duplicateSecondResult.Applied
+                    && !duplicateSecondResult.Discarded
+                    && !window.FavoriteNotificationsPendingForFileForSmoke(selectedName)
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 0
+                    && window.FilteredCountForSmoke == (count / 10) - 1;
+                MainWindow.SearchFilterCompletion duplicateFavoriteClear =
+                    await window.ClearFavoriteFiltersForSmokeAsync();
+                bool duplicateFavoriteRestored =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.SetSelectedFavoriteLevelForSmoke(1);
+                SharedWriteStatus[] duplicateRestoredWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                MainWindow.SearchFilterCompletion duplicateFavoriteFilter =
+                    await window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                favoriteDuplicateEvictionRaceExact &=
+                    duplicateFavoriteClear.Applied
+                    && !duplicateFavoriteClear.Discarded
+                    && duplicateFavoriteRestored
+                    && duplicateRestoredWrites.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && duplicateFavoriteFilter.Applied
+                    && !duplicateFavoriteFilter.Discarded
+                    && window.FilteredCountForSmoke == count / 10
+                    && window.SelectFileNameForSmoke(selectedName);
+
+                // A failed durable write rolls the model back to Fav=1 and
+                // schedules a recovery projection. The deferred presentation
+                // must not overwrite that final Retry status with stale
+                // "Saving..." feedback.
+                window.FailNextFavoriteWriterForSmoke();
+                bool filteredFailureAccepted =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                Task<MainWindow.SearchFilterCompletion> failedExclusion =
+                    window.PendingCatalogProjectionForSmoke();
+                SharedWriteStatus[] filteredFailureStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                Task<MainWindow.SearchFilterCompletion> rollbackProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                MainWindow.SearchFilterCompletion failedExclusionResult =
+                    await failedExclusion;
+                MainWindow.SearchFilterCompletion rollbackProjectionResult =
+                    await rollbackProjection;
+                await window.Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.ContextIdle);
+                string favoriteFilteredFailureStatus =
+                    window.DeleteStatusForSmoke;
+                bool favoriteFilteredRollbackProjectionExact =
+                    rollbackProjectionResult.Applied
+                    || rollbackProjectionResult.Discarded;
+                bool favoriteFilteredRollbackStateExact =
+                    window.FailedFavoriteRetryPendingForSmoke
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 1
+                    && window.FilteredCountForSmoke == count / 10;
+                bool favoriteFilteredFailureToastExact =
+                    favoriteFilteredFailureStatus.Contains(
+                        "Retry",
+                        StringComparison.OrdinalIgnoreCase)
+                    && !favoriteFilteredFailureStatus.Contains(
+                        "Saving",
+                        StringComparison.OrdinalIgnoreCase);
+                bool favoriteFilteredFailureStatusExact =
+                    filteredFailureAccepted
+                    && filteredFailureStatuses.Contains(SharedWriteStatus.Failed)
+                    && (failedExclusionResult.Applied
+                        || failedExclusionResult.Discarded)
+                    && favoriteFilteredRollbackStateExact
+                    && favoriteFilteredFailureToastExact;
+                window.RetryFailedFavoriteForSmoke();
+                Task<MainWindow.SearchFilterCompletion> retryProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                SharedWriteStatus[] filteredRetryStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                MainWindow.SearchFilterCompletion retryProjectionResult =
+                    await retryProjection;
+                bool favoriteFilteredRetryExact =
+                    filteredRetryStatuses.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && retryProjectionResult.Applied
+                    && !retryProjectionResult.Discarded
+                    && !window.FailedFavoriteRetryPendingForSmoke
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 0
+                    && window.FilteredCountForSmoke == (count / 10) - 1;
+                favoriteFilteredFailureStatusExact &=
+                    favoriteFilteredRetryExact;
+                MainWindow.SearchFilterCompletion rapidFavoriteClear =
+                    await window.ClearFavoriteFiltersForSmokeAsync();
+                bool rapidFavoriteRestored =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.SetSelectedFavoriteLevelForSmoke(5);
+                SharedWriteStatus[] rapidRestoredWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                selected &= window.SelectFileNameForSmoke(selectedName);
+                favoriteRapidReincludeRaceExact &=
+                    rapidFavoriteClear.Applied
+                    && !rapidFavoriteClear.Discarded
+                    && rapidFavoriteRestored
+                    && rapidRestoredWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && window.FilteredCountForSmoke == count
+                    && selected;
+
+                // Prime the accessibility paths before the memory and heartbeat
+                // baselines just like the search/filter/sort paths above. The
+                // first UI Automation client connection commits native UIA/WPF
+                // pages, while the first focused projection reset initializes
+                // focus restoration and container realization. Counting those
+                // one-time subsystem costs as repeated catalog churn made the
+                // normalized working-set and dispatcher gates runner-dependent.
+                ReportProgress("accessibility-warmup");
+                heartbeatWatch.Restart();
+                lastHeartbeatMs = 0;
+                lastHeartbeatGcPause = GC.GetTotalPauseDuration();
+                heartbeat.Start();
+                bool warmAccessibilitySelected =
+                    MeasureAccessibilityWarmupSubstep(
+                        "accessibility-warmup-select",
+                        () => window.SelectFileNameForSmoke(selectedName));
+                await MeasureAccessibilityWarmupActionAsync(
+                    "accessibility-warmup-select-layout",
+                    FlushLayoutAsync);
+                bool warmAccessibilityFocused =
+                    MeasureAccessibilityWarmupSubstep(
+                        "accessibility-warmup-focus",
+                        window.FocusSelectedGalleryItemForSmoke);
+                string? warmAccessibilityPath = window.SelectedPathForSmoke;
+                MainWindow.SearchFilterCompletion warmAccessibilityFilter =
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-filter",
+                        () => window.SetSearchInputForSmokeAsync("needle"));
+                bool warmAccessibilityFilterSettled =
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-filter-idle",
+                        async () =>
+                            await window.WaitForGridRealizationIdleForSmokeAsync()
+                            && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                            && string.Equals(
+                                window.FocusedGalleryPathForSmoke,
+                                warmAccessibilityPath,
+                                StringComparison.OrdinalIgnoreCase));
+                MainWindow.SearchFilterCompletion warmAccessibilityClear =
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-clear",
+                        () => window.SetSearchInputForSmokeAsync(""));
+                bool warmAccessibilityClearSettled =
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-clear-idle",
+                        async () =>
+                            await window.WaitForGridRealizationIdleForSmokeAsync()
+                            && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                            && string.Equals(
+                                window.FocusedGalleryPathForSmoke,
+                                warmAccessibilityPath,
+                                StringComparison.OrdinalIgnoreCase));
+                int warmAutomationIndex = count - 1;
+                string warmAutomationSuffix =
+                    warmAutomationIndex % 100 == 0 ? "-needle" : "";
+                string warmAutomationName =
+                    $"interaction-smoke-{warmAutomationIndex:D6}{warmAutomationSuffix}.png";
+                ExternalGalleryAutomationSmokeSnapshot warmAutomation =
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-automation",
+                        () => RunExternalGalleryAutomationLookupAsync(
+                            window,
+                            warmAutomationName));
+                bool warmAutomationSettled =
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-automation-idle",
+                        () => window.WaitForGridRealizationIdleForSmokeAsync());
+                bool accessibilityWarmupComplete =
+                    warmAccessibilitySelected
+                    && warmAccessibilityFocused
+                    && warmAccessibilityFilter.Applied
+                    && !warmAccessibilityFilter.Discarded
+                    && warmAccessibilityFilterSettled
+                    && warmAccessibilityClear.Applied
+                    && !warmAccessibilityClear.Discarded
+                    && warmAccessibilityClearSettled
+                    && warmAutomation.Found
+                    && warmAutomation.NameExact
+                    && warmAutomation.VirtualizedItemPatternAvailable
+                    && warmAutomation.SelectionItemPatternAvailable
+                    && warmAutomation.RealizeInvoked
+                    && warmAutomationSettled
+                    && window.SelectFileNameForSmoke(selectedName);
+                await MeasureAccessibilityWarmupActionAsync(
+                    "accessibility-warmup-final-layout",
+                    FlushLayoutAsync);
+                accessibilityWarmupComplete &=
+                    await MeasureAccessibilityWarmupSubstepAsync(
+                        "accessibility-warmup-final-focus",
+                        async () =>
+                            window.FocusSelectedGalleryItemForSmoke()
+                            && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                            && await window.WaitForGridRealizationIdleForSmokeAsync());
+                window.ResetGridAutomationLookupMetricsForSmoke();
+
                 bool warmupComplete = warmSearch.Applied
                     && !warmSearch.Discarded
                     && warmClear.Applied
@@ -9912,13 +10474,28 @@ public partial class App : Application
                     && mixedLatestWins
                     && mixedViewportAnchorPreserved
                     && mixedCleanupComplete
+                    && favoritePendingBroadenRaceExact
+                    && favoriteRapidReincludeRaceExact
+                    && favoriteSortRaceExact
+                    && favoriteDuplicateEvictionRaceExact
+                    && favoriteFilteredFailureStatusExact
+                    && accessibilityWarmupComplete
                     && selected;
 
                 var process = Process.GetCurrentProcess();
+                // The forced collection below defines the memory baseline; it
+                // is harness work, not an app interaction. Preserve every
+                // heartbeat sample already captured during the cold
+                // accessibility warmup, but do not attribute the deliberate
+                // stop-the-world collection to the next product operation.
+                heartbeat.Stop();
                 long managedMemoryBefore = GC.GetTotalMemory(forceFullCollection: true);
                 process.Refresh();
                 long workingSetBefore = process.WorkingSet64;
                 int gen2Before = GC.CollectionCount(2);
+                lastHeartbeatMs = heartbeatWatch.ElapsedMilliseconds;
+                lastHeartbeatGcPause = GC.GetTotalPauseDuration();
+                heartbeat.Start();
                 var searchSamples = new List<long>();
                 var searchPhaseSamples = new List<MainWindow.SearchFilterCompletion>();
                 var filterSamples = new List<long>();
@@ -9928,8 +10505,10 @@ public partial class App : Application
                 bool completionsApplied = true;
                 bool favoriteEvictionExact = false;
                 bool favoriteEvictionAutomationExact = false;
+                bool favoriteEvictionSingleRemovalExact = false;
                 ExternalGalleryAutomationSmokeSnapshot? favoriteEvictionAutomation = null;
                 long favoriteEvictionElapsedMs = 0;
+                long favoriteEvictionApplySliceMs = 0;
                 string? favoriteEvictionSelected = null;
                 int favoriteEvictionNeighborIndex = count > 50_010 ? 50_010 : 49_990;
                 string favoriteEvictionNeighborSuffix =
@@ -9941,14 +10520,11 @@ public partial class App : Application
                     favoriteEvictionAutomationProbeIndex % 100 == 0 ? "-needle" : "";
                 string favoriteEvictionAutomationProbe =
                     $"interaction-smoke-{favoriteEvictionAutomationProbeIndex:D6}{favoriteEvictionAutomationProbeSuffix}.png";
-                heartbeatWatch.Restart();
-                lastHeartbeatMs = 0;
-                heartbeat.Start();
                 ReportProgress("search-churn");
 
                 for (int iteration = 0; iteration < 6; iteration++)
                 {
-                    activeOperation = $"search-match-{iteration + 1}";
+                    SetActiveOperation($"search-match-{iteration + 1}");
                     var watch = Stopwatch.StartNew();
                     MainWindow.SearchFilterCompletion match = await window.SetSearchInputForSmokeAsync("needle");
                     await FlushLayoutAsync();
@@ -9958,7 +10534,7 @@ public partial class App : Application
                     completionsApplied &= match.Applied && !match.Discarded;
                     countsExact &= window.FilteredCountForSmoke == count / 100;
 
-                    activeOperation = $"search-clear-{iteration + 1}";
+                    SetActiveOperation($"search-clear-{iteration + 1}");
                     watch.Restart();
                     MainWindow.SearchFilterCompletion clear = await window.SetSearchInputForSmokeAsync("");
                     await FlushLayoutAsync();
@@ -9972,7 +10548,7 @@ public partial class App : Application
                 ReportProgress("filter-churn");
                 for (int iteration = 0; iteration < 6; iteration++)
                 {
-                    activeOperation = $"filter-on-{iteration + 1}";
+                    SetActiveOperation($"filter-on-{iteration + 1}");
                     var watch = Stopwatch.StartNew();
                     MainWindow.SearchFilterCompletion favorite =
                         await window.SetFavoriteOnlyFilterForSmokeAsync(true);
@@ -9983,7 +10559,7 @@ public partial class App : Application
                     completionsApplied &= favorite.Applied && !favorite.Discarded;
                     countsExact &= window.FilteredCountForSmoke == count / 10;
 
-                    activeOperation = $"filter-clear-{iteration + 1}";
+                    SetActiveOperation($"filter-clear-{iteration + 1}");
                     watch.Restart();
                     MainWindow.SearchFilterCompletion favoriteClear =
                         await window.ClearFavoriteFiltersForSmokeAsync();
@@ -9996,16 +10572,16 @@ public partial class App : Application
                 }
 
                 ReportProgress("favorite-eviction-prepare");
-                activeOperation = "favorite-eviction-select";
+                SetActiveOperation("favorite-eviction-select");
                 bool favoriteEvictionPrepared = window.SelectFileNameForSmoke(selectedName)
                     && window.MarkSelectedTileRealForSmoke();
-                activeOperation = "favorite-eviction-write";
+                SetActiveOperation("favorite-eviction-write");
                 window.ForceSharedStoreWritersForSmoke();
                 favoriteEvictionPrepared &= window.SetSelectedFavoriteLevelForSmoke(1);
-                activeOperation = "favorite-eviction-drain";
+                SetActiveOperation("favorite-eviction-drain");
                 SharedWriteStatus[] preparedWrites = await window.DrainSharedStoreWritersForSmokeAsync();
                 favoriteEvictionPrepared &= preparedWrites.All(static status => status == SharedWriteStatus.Succeeded);
-                activeOperation = "favorite-eviction-filter";
+                SetActiveOperation("favorite-eviction-filter");
                 MainWindow.SearchFilterCompletion favoriteEvictionFilter =
                     await window.SetFavoriteOnlyFilterForSmokeAsync(true);
                 favoriteEvictionPrepared &= window.FilteredCountForSmoke == count / 10
@@ -10014,16 +10590,28 @@ public partial class App : Application
                     && string.Equals(window.SelectedFileNameForSmoke, selectedName, StringComparison.OrdinalIgnoreCase);
 
                 ReportProgress("favorite-eviction");
+                int resetNotificationsBeforeFavoriteEviction =
+                    window.ProjectionResetNotificationCountForSmoke;
+                int removeNotificationsBeforeFavoriteEviction =
+                    window.ProjectionRemoveNotificationCountForSmoke;
                 var favoriteEvictionWatch = Stopwatch.StartNew();
                 bool favoriteEvicted = await window.AdjustGalleryFavoritePointerForSmokeAsync(selectedName, -1);
+                favoriteEvictionApplySliceMs = window.LastCatalogProjectionApplySliceMsForSmoke;
                 await FlushLayoutAsync();
                 favoriteEvictionWatch.Stop();
                 favoriteEvictionElapsedMs = favoriteEvictionWatch.ElapsedMilliseconds;
+                favoriteEvictionSingleRemovalExact =
+                    window.ProjectionResetNotificationCountForSmoke
+                        == resetNotificationsBeforeFavoriteEviction
+                    && window.ProjectionRemoveNotificationCountForSmoke
+                        == removeNotificationsBeforeFavoriteEviction + 1;
                 int selectionBeforeFavoriteAutomation = window.SelectedIndexForSmoke;
+                SetActiveOperation("favorite-eviction-automation");
                 favoriteEvictionAutomation =
                     await RunExternalGalleryAutomationLookupAsync(
                         window,
                         favoriteEvictionAutomationProbe);
+                SetActiveOperation("favorite-eviction-realization-idle");
                 await window.WaitForGridRealizationIdleForSmokeAsync();
                 favoriteEvictionAutomationExact = favoriteEvictionAutomation.Found
                     && favoriteEvictionAutomation.NameExact
@@ -10035,6 +10623,7 @@ public partial class App : Application
                 favoriteEvictionSelected = window.SelectedFileNameForSmoke;
                 favoriteEvictionExact = favoriteEvictionPrepared
                     && favoriteEvicted
+                    && favoriteEvictionSingleRemovalExact
                     && favoriteEvictionAutomationExact
                     && window.FilteredCountForSmoke == (count / 10) - 1
                     && string.Equals(
@@ -10044,13 +10633,13 @@ public partial class App : Application
                 countsExact &= favoriteEvictionExact;
 
                 ReportProgress("favorite-eviction-restore");
-                activeOperation = "favorite-eviction-restore-filter";
+                SetActiveOperation("favorite-eviction-restore-filter");
                 MainWindow.SearchFilterCompletion favoriteEvictionClear =
                     await window.ClearFavoriteFiltersForSmokeAsync();
-                activeOperation = "favorite-eviction-restore-select";
+                SetActiveOperation("favorite-eviction-restore-select");
                 bool favoriteEvictionRestored = window.SelectFileNameForSmoke(selectedName)
                     && window.SetSelectedFavoriteLevelForSmoke(5);
-                activeOperation = "favorite-eviction-restore-drain";
+                SetActiveOperation("favorite-eviction-restore-drain");
                 SharedWriteStatus[] restoredWrites = await window.DrainSharedStoreWritersForSmokeAsync();
                 countsExact &= favoriteEvictionRestored
                     && favoriteEvictionClear.Applied
@@ -10070,7 +10659,7 @@ public partial class App : Application
                 ];
                 foreach (string sortMode in sortModes)
                 {
-                    activeOperation = $"sort-{sortMode}";
+                    SetActiveOperation($"sort-{sortMode}");
                     var watch = Stopwatch.StartNew();
                     bool changed = await window.SetSortByInteractiveForSmokeAsync(sortMode);
                     await FlushLayoutAsync();
@@ -10084,10 +10673,10 @@ public partial class App : Application
                 int tailIndex = count - 1;
                 string tailName = $"interaction-smoke-{tailIndex:D6}{(tailIndex % 100 == 0 ? "-needle" : "")}.png";
                 string headName = "interaction-smoke-000000-needle.png";
-                activeOperation = "keyboard-seed-layout";
+                SetActiveOperation("keyboard-seed-layout");
                 bool keyboardSeeded = window.SelectIndexForSmoke(keyboardStartIndex);
                 await FlushLayoutAsync();
-                activeOperation = "keyboard-initial-focus";
+                SetActiveOperation("keyboard-initial-focus");
                 bool keyboardInitialFocus = window.FocusSelectedGalleryItemForSmoke();
                 int keyboardMaxRealized = window.GridRealizedCountForSmoke;
                 long keyboardSelectionSyncMaxMs = window.LastCardsSelectionSyncMsForSmoke;
@@ -10098,30 +10687,38 @@ public partial class App : Application
                 // layout into the heartbeat window on slower hosted runners.
                 bool projectionFocusPrepared = keyboardInitialFocus;
                 string? projectionFocusPath = window.SelectedPathForSmoke;
-                activeOperation = "keyboard-focus-filter";
+                SetActiveOperation("keyboard-focus-filter");
                 MainWindow.SearchFilterCompletion keyboardFocusFilter =
                     await window.SetSearchInputForSmokeAsync("needle");
-                activeOperation = "keyboard-focus-filter-realize";
-                await window.WaitForGridRealizationIdleForSmokeAsync();
-                bool projectionFilterFocusRestored = await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                bool keyboardFocusFilterRealized = await MeasureKeyboardFocusSubstepAsync(
+                    "keyboard-focus-filter-realize",
+                    () => window.WaitForGridRealizationIdleForSmokeAsync());
+                bool projectionFilterFocusRestored = await MeasureKeyboardFocusSubstepAsync(
+                    "keyboard-focus-filter-focus",
+                    () => window.WaitForPrimaryGalleryFocusForSmokeAsync())
                     && string.Equals(window.FocusedGalleryPathForSmoke, projectionFocusPath, StringComparison.OrdinalIgnoreCase);
-                activeOperation = "keyboard-focus-clear";
+                SetActiveOperation("keyboard-focus-clear");
                 MainWindow.SearchFilterCompletion keyboardFocusClear =
                     await window.SetSearchInputForSmokeAsync("");
-                activeOperation = "keyboard-focus-clear-realize";
-                await window.WaitForGridRealizationIdleForSmokeAsync();
-                bool projectionClearFocusRestored = await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                bool keyboardFocusClearRealized = await MeasureKeyboardFocusSubstepAsync(
+                    "keyboard-focus-clear-realize",
+                    () => window.WaitForGridRealizationIdleForSmokeAsync());
+                bool projectionClearFocusRestored = await MeasureKeyboardFocusSubstepAsync(
+                    "keyboard-focus-clear-focus",
+                    () => window.WaitForPrimaryGalleryFocusForSmokeAsync())
                     && string.Equals(window.FocusedGalleryPathForSmoke, projectionFocusPath, StringComparison.OrdinalIgnoreCase);
                 bool projectionFocusRestored = projectionFocusPrepared
                     && keyboardFocusFilter.Applied
                     && !keyboardFocusFilter.Discarded
                     && keyboardFocusClear.Applied
                     && !keyboardFocusClear.Discarded
+                    && keyboardFocusFilterRealized
+                    && keyboardFocusClearRealized
                     && projectionFilterFocusRestored
                     && projectionClearFocusRestored;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-end";
+                SetActiveOperation("keyboard-end");
                 bool keyboardEndHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.End);
                 keyboardSelectionSyncMaxMs = Math.Max(
                     keyboardSelectionSyncMaxMs,
@@ -10138,7 +10735,7 @@ public partial class App : Application
                     && window.SelectedIndexForSmoke == tailIndex;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-home";
+                SetActiveOperation("keyboard-home");
                 bool keyboardHomeHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Home);
                 keyboardSelectionSyncMaxMs = Math.Max(
                     keyboardSelectionSyncMaxMs,
@@ -10150,7 +10747,7 @@ public partial class App : Application
                     && keyboardHomeFocused;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-right";
+                SetActiveOperation("keyboard-right");
                 bool keyboardRightHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Right);
                 keyboardSelectionSyncMaxMs = Math.Max(
                     keyboardSelectionSyncMaxMs,
@@ -10161,7 +10758,7 @@ public partial class App : Application
                 bool keyboardRightExact = afterRightIndex == 1 && keyboardRightFocused;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-down";
+                SetActiveOperation("keyboard-down");
                 int expectedAfterDown = Math.Min(count - 1, afterRightIndex + Math.Max(1, window.GridColumnCountForSmoke));
                 bool keyboardDownHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Down);
                 keyboardSelectionSyncMaxMs = Math.Max(
@@ -10173,7 +10770,7 @@ public partial class App : Application
                 bool keyboardDownExact = afterDownIndex == expectedAfterDown && keyboardDownFocused;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-page-down";
+                SetActiveOperation("keyboard-page-down");
                 bool keyboardPageDownHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.PageDown);
                 keyboardSelectionSyncMaxMs = Math.Max(
                     keyboardSelectionSyncMaxMs,
@@ -10184,7 +10781,7 @@ public partial class App : Application
                 bool keyboardPageDownExact = afterPageDownIndex > afterDownIndex && keyboardPageDownFocused;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-external-automation";
+                SetActiveOperation("keyboard-external-automation");
                 int selectionBeforeExternalAutomation = window.SelectedIndexForSmoke;
                 ExternalGalleryAutomationSmokeSnapshot externalAutomation =
                     await RunExternalGalleryAutomationLookupAsync(window, tailName);
@@ -10199,7 +10796,7 @@ public partial class App : Application
                     window.SelectedIndexForSmoke == selectionBeforeExternalAutomation;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-repeated-realize";
+                SetActiveOperation("keyboard-repeated-realize");
                 int realizeDispatchBefore = window.GridAutomationRealizeDispatchCountForSmoke;
                 int realizeCoalescedBefore = window.GridAutomationRealizeCoalescedCountForSmoke;
                 GalleryAutomationPeerSmokeLease? repeatedRealizeLease =
@@ -10217,7 +10814,7 @@ public partial class App : Application
                     && !window.GridAutomationRealizePendingForSmoke;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-tail-realize-select";
+                SetActiveOperation("keyboard-tail-realize-select");
                 int selectionBeforeAutomationRealize = window.SelectedIndexForSmoke;
                 GalleryAutomationItemSmokeSnapshot automationTailPeer =
                     window.BeginGridAutomationRealizationForSmoke(tailIndex);
@@ -10239,7 +10836,7 @@ public partial class App : Application
                     && automationTailSelection.ContainerSelected;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-recycle-home";
+                SetActiveOperation("keyboard-recycle-home");
                 bool recycleHomeHandled = window.InvokeGalleryNavigationKeyForSmoke(Key.Home);
                 bool recycleHomeFocused = await window.WaitForPrimaryGalleryFocusForSmokeAsync();
                 await window.WaitForGridRealizationIdleForSmokeAsync();
@@ -10257,20 +10854,33 @@ public partial class App : Application
                     && !string.Equals(recycledHeadContainer.Name, tailName, StringComparison.Ordinal);
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
-                activeOperation = "keyboard-stale-peer";
-                GalleryAutomationPeerSmokeLease? stalePeer =
-                    window.CreateGridAutomationPeerLeaseForSmoke(tailIndex);
-                bool stalePeerPrepared = stalePeer is not null
-                    && string.Equals(stalePeer.Name, tailName, StringComparison.Ordinal);
+                (GalleryAutomationPeerSmokeLease? stalePeer, bool stalePeerPrepared) =
+                    MeasureStalePeerSubstep(
+                        "keyboard-stale-peer-prepare",
+                        () =>
+                        {
+                            GalleryAutomationPeerSmokeLease? peer =
+                                window.CreateGridAutomationPeerLeaseForSmoke(tailIndex);
+                            return (
+                                peer,
+                                peer is not null
+                                    && string.Equals(peer.Name, tailName, StringComparison.Ordinal));
+                        });
                 MainWindow.SearchFilterCompletion stalePeerFilter =
-                    await window.SetSearchInputForSmokeAsync("needle");
-                await window.WaitForGridRealizationIdleForSmokeAsync();
+                    await MeasureStalePeerSubstepAsync(
+                        "keyboard-stale-peer-filter",
+                        () => window.SetSearchInputForSmokeAsync("needle"));
+                _ = await MeasureStalePeerSubstepAsync(
+                    "keyboard-stale-peer-filter-idle",
+                    () => window.WaitForGridRealizationIdleForSmokeAsync());
                 int selectionBeforeStaleOperations = window.SelectedIndexForSmoke;
                 bool staleRealizeUnavailable = false;
                 bool staleSelectUnavailable = false;
                 try
                 {
-                    stalePeer?.Realize();
+                    MeasureStalePeerAction(
+                        "keyboard-stale-peer-realize",
+                        () => stalePeer?.Realize());
                 }
                 catch (ElementNotAvailableException)
                 {
@@ -10278,7 +10888,9 @@ public partial class App : Application
                 }
                 try
                 {
-                    stalePeer?.Select();
+                    MeasureStalePeerAction(
+                        "keyboard-stale-peer-select",
+                        () => stalePeer?.Select());
                 }
                 catch (ElementNotAvailableException)
                 {
@@ -10287,10 +10899,24 @@ public partial class App : Application
                 bool stalePeerDidNotMutateSelection =
                     window.SelectedIndexForSmoke == selectionBeforeStaleOperations;
                 MainWindow.SearchFilterCompletion stalePeerClear =
-                    await window.SetSearchInputForSmokeAsync("");
-                await window.WaitForGridRealizationIdleForSmokeAsync();
-                GalleryAutomationPeerSmokeLease? reacquiredPeer =
-                    window.CreateGridAutomationPeerLeaseForSmoke(tailIndex);
+                    await MeasureStalePeerSubstepAsync(
+                        "keyboard-stale-peer-clear",
+                        () => window.SetSearchInputForSmokeAsync(""));
+                _ = await MeasureStalePeerSubstepAsync(
+                    "keyboard-stale-peer-clear-idle",
+                    () => window.WaitForGridRealizationIdleForSmokeAsync());
+                (GalleryAutomationPeerSmokeLease? reacquiredPeer, bool reacquiredPeerNameExact) =
+                    MeasureStalePeerSubstep(
+                        "keyboard-stale-peer-reacquire",
+                        () =>
+                        {
+                            GalleryAutomationPeerSmokeLease? peer =
+                                window.CreateGridAutomationPeerLeaseForSmoke(tailIndex);
+                            return (
+                                peer,
+                                peer is not null
+                                    && string.Equals(peer.Name, tailName, StringComparison.Ordinal));
+                        });
                 bool stalePeerLifetimeExact = stalePeerPrepared
                     && stalePeerFilter.Applied
                     && staleRealizeUnavailable
@@ -10298,7 +10924,7 @@ public partial class App : Application
                     && stalePeerDidNotMutateSelection
                     && stalePeerClear.Applied
                     && reacquiredPeer is not null
-                    && string.Equals(reacquiredPeer.Name, tailName, StringComparison.Ordinal);
+                    && reacquiredPeerNameExact;
 
                 bool keyboardNavigationExact = keyboardSeeded
                     && keyboardInitialFocus
@@ -10332,7 +10958,7 @@ public partial class App : Application
 
                 ReportProgress("final-layout");
                 await FlushLayoutAsync();
-                activeOperation = "final-settle";
+                SetActiveOperation("final-settle");
                 await Task.Delay(250);
                 heartbeat.Stop();
                 process.Refresh();
@@ -10358,6 +10984,8 @@ public partial class App : Application
                 bool bounded = window.GridItemsSourceCountForSmoke == count
                     && window.GridUsesFullExtentVirtualizationForSmoke
                     && window.GridRealizedCountForSmoke <= window.GridMaxRealizationCountForSmoke;
+                bool detachedContainerReuseActive =
+                    window.GridDetachedContainerReuseCountForSmoke > 0;
                 long catalogProjectionMaxApplySliceMs = Math.Max(
                     searchPhaseSamples.Count == 0
                         ? 0
@@ -10365,12 +10993,96 @@ public partial class App : Application
                     filterPhaseSamples.Count == 0
                         ? 0
                         : filterPhaseSamples.Max(static sample => sample.MaxApplySliceMs));
+                long catalogProjectionMaxSingleContainerDetachMs = Math.Max(
+                    searchPhaseSamples.Count == 0
+                        ? 0
+                        : searchPhaseSamples.Max(static sample => sample.PreResetMs),
+                    filterPhaseSamples.Count == 0
+                        ? 0
+                        : filterPhaseSamples.Max(static sample => sample.PreResetMs));
+                List<MainWindow.SearchFilterCompletion> catalogProjectionDetachSamples =
+                    searchPhaseSamples.Concat(filterPhaseSamples).ToList();
+                MainWindow.SearchFilterCompletion catalogProjectionMaxBudgetSample =
+                    catalogProjectionDetachSamples.Count == 0
+                        ? default
+                        : catalogProjectionDetachSamples
+                            .OrderByDescending(static sample => sample.ResetPanelBudgetMs)
+                            .First();
+                double catalogProjectionMaxResetPanelBudgetMs =
+                    catalogProjectionMaxBudgetSample.ResetPanelBudgetMs;
+                double catalogProjectionMaxResetPanelThreadCpuMs =
+                    catalogProjectionDetachSamples
+                        .Where(static sample => sample.ResetPanelThreadCpuMs >= 0)
+                        .Select(static sample => sample.ResetPanelThreadCpuMs)
+                        .DefaultIfEmpty(-1)
+                        .Max();
+                string catalogProjectionDetachBudgetBasis =
+                    catalogProjectionMaxBudgetSample.ResetPanelBudgetUsedWallFallback
+                        ? "wall-fallback"
+                        : "thread-cpu-clamped-to-wall";
+                bool catalogProjectionDetachWithinBudget =
+                    catalogProjectionMaxResetPanelBudgetMs
+                        <= CatalogProjectionSingleContainerDetachBudgetMs;
+                List<MainWindow.SearchFilterCompletion> appliedProjectionSamples =
+                    catalogProjectionDetachSamples
+                        .Where(static sample => sample.Applied && !sample.Discarded)
+                        .ToList();
+                int catalogProjectionMaxDetachedContainersPerSlice =
+                    appliedProjectionSamples
+                        .Select(static sample => sample.MaxResetDetachedContainersPerSlice)
+                        .DefaultIfEmpty(0)
+                        .Max();
+                bool catalogProjectionInputBoundaryBeforePublicationExact =
+                    appliedProjectionSamples.Count > 0
+                    && appliedProjectionSamples.All(
+                        static sample => sample.InputBoundaryBeforePublication);
+                bool catalogProjectionInputBoundaryAfterPublicationExact =
+                    appliedProjectionSamples.Count > 0
+                    && appliedProjectionSamples.All(
+                        static sample => sample.InputBoundaryAfterPublication);
+                MainWindow.SearchFilterCompletion catalogProjectionMaxDetachSample =
+                    catalogProjectionDetachSamples.Count == 0
+                        ? default
+                        : catalogProjectionDetachSamples
+                            .OrderByDescending(static sample => sample.PreResetMs)
+                            .First();
+                double catalogProjectionMaxGeneratorRemoveMs =
+                    catalogProjectionMaxDetachSample.ResetGeneratorRemoveMs;
+                double catalogProjectionMaxForgetDeferredMeasureMs =
+                    catalogProjectionMaxDetachSample.ResetForgetDeferredMeasureMs;
+                double catalogProjectionMaxRemoveInternalChildRangeMs =
+                    catalogProjectionMaxDetachSample.ResetRemoveInternalChildRangeMs;
+                double catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs =
+                    catalogProjectionMaxDetachSample.ResetRemoveInternalChildRangeThreadCpuMs;
+                double catalogProjectionMaxResetPanelTotalMs =
+                    catalogProjectionMaxDetachSample.ResetPanelTotalMs;
+                string catalogProjectionDominantResetSubstep =
+                    catalogProjectionMaxGeneratorRemoveMs <= 0
+                    && catalogProjectionMaxForgetDeferredMeasureMs <= 0
+                    && catalogProjectionMaxRemoveInternalChildRangeMs <= 0
+                        ? "none"
+                        : catalogProjectionMaxGeneratorRemoveMs
+                            >= catalogProjectionMaxForgetDeferredMeasureMs
+                        && catalogProjectionMaxGeneratorRemoveMs
+                            >= catalogProjectionMaxRemoveInternalChildRangeMs
+                            ? "ItemContainerGenerator.Remove"
+                            : catalogProjectionMaxForgetDeferredMeasureMs
+                                >= catalogProjectionMaxRemoveInternalChildRangeMs
+                                ? "ForgetDeferredMeasureRange"
+                                : "RemoveInternalChildRange";
+                string catalogProjectionMaxApplySliceOperation =
+                    catalogProjectionMaxApplySliceMs <= CatalogProjectionDiagnosticSliceTargetMs
+                        ? "within-diagnostic-target"
+                        : catalogProjectionMaxSingleContainerDetachMs == catalogProjectionMaxApplySliceMs
+                            ? "single-container-reset-unit"
+                            : "code-owned-apply-slice";
                 bool ok = window.CatalogCountForSmoke == count
                     && warmupComplete
                     && countsExact
                     && completionsApplied
                     && selectionStable
                     && bounded
+                    && detachedContainerReuseActive
                     && keyboardNavigationExact
                     && projectionFocusRestored
                     && externalAutomationExact
@@ -10383,9 +11095,15 @@ public partial class App : Application
                     && searchP95 <= 250
                     && filterP95 <= 250
                     && sortP95 <= 500
-                    && favoriteEvictionElapsedMs <= 250
-                    && catalogProjectionMaxApplySliceMs <= 4
-                    && maxHeartbeatGapMs <= 50
+                    && favoriteEvictionExact
+                    && favoriteEvictionAutomationExact
+                    && favoriteEvictionSingleRemovalExact
+                    && favoriteEvictionElapsedMs <= CatalogFavoriteEvictionBudgetMs
+                    && catalogProjectionMaxDetachedContainersPerSlice <= 1
+                    && catalogProjectionInputBoundaryBeforePublicationExact
+                    && catalogProjectionInputBoundaryAfterPublicationExact
+                    && maxHeartbeatGapMs <= CatalogInteractionDispatcherHeartbeatBudgetMs
+                    && heartbeatGapSamples.Count == 0
                     // Rapid churn leaves dead WPF generator/layout objects in
                     // young generations and committed pages in the process
                     // working set. Gate the collectible live graph tightly and
@@ -10400,12 +11118,17 @@ public partial class App : Application
                     FilteredCount = window.FilteredCountForSmoke,
                     SeedElapsedMs = seedWatch.ElapsedMilliseconds,
                     WarmupComplete = warmupComplete,
+                    AccessibilityWarmupFilterCompletion = warmAccessibilityFilter,
+                    AccessibilityWarmupClearCompletion = warmAccessibilityClear,
+                    AccessibilityWarmupSubstepSamples = accessibilityWarmupSubstepSamples,
                     SearchP95Ms = searchP95,
                     FilterP95Ms = filterP95,
                     SortP95Ms = sortP95,
                     FavoriteEvictionElapsedMs = favoriteEvictionElapsedMs,
+                    FavoriteEvictionApplySliceMs = favoriteEvictionApplySliceMs,
                     FavoriteEvictionExact = favoriteEvictionExact,
                     FavoriteEvictionAutomationExact = favoriteEvictionAutomationExact,
+                    FavoriteEvictionSingleRemovalExact = favoriteEvictionSingleRemovalExact,
                     FavoriteEvictionAutomation = favoriteEvictionAutomation,
                     FavoriteEvictionSelectedFileName = favoriteEvictionSelected,
                     FavoriteEvictionExpectedNeighbor = favoriteEvictionExpectedNeighbor,
@@ -10433,10 +11156,14 @@ public partial class App : Application
                     RepeatedAutomationRealizeCoalesced = repeatedRealizeCoalesced,
                     AutomationRealizeDispatchCount = window.GridAutomationRealizeDispatchCountForSmoke,
                     AutomationRealizeCoalescedCount = window.GridAutomationRealizeCoalescedCountForSmoke,
+                    AutomationRealizeMaxDispatchMs = window.GridAutomationRealizeMaxDispatchMsForSmoke,
                     AutomationLookupMaxMs = window.GridAutomationLookupMaxMsForSmoke,
                     StaleAutomationPeerLifetimeExact = stalePeerLifetimeExact,
                     StaleAutomationRealizeUnavailable = staleRealizeUnavailable,
                     StaleAutomationSelectUnavailable = staleSelectUnavailable,
+                    StaleAutomationFilterCompletion = stalePeerFilter,
+                    StaleAutomationClearCompletion = stalePeerClear,
+                    StaleAutomationSubstepSamples = stalePeerSubstepSamples,
                     AutomationVirtualizedItemExact = automationVirtualizedItemExact,
                     AutomationRealizePreservedSelection = automationRealizePreservedSelection,
                     AutomationSelectionExact = automationSelectionExact,
@@ -10444,6 +11171,9 @@ public partial class App : Application
                     KeyboardAccessibilityMaxRealized = keyboardMaxRealized,
                     KeyboardSelectionSyncMaxMs = keyboardSelectionSyncMaxMs,
                     KeyboardAccessibilityBounded = keyboardAccessibilityBounded,
+                    KeyboardFocusFilterCompletion = keyboardFocusFilter,
+                    KeyboardFocusClearCompletion = keyboardFocusClear,
+                    KeyboardFocusSubstepSamples = keyboardFocusSubstepSamples,
                     AutomationTailPeer = automationTailPeer,
                     AutomationTailContainer = automationTailContainer,
                     RecycledHeadContainer = recycledHeadContainer,
@@ -10451,15 +11181,78 @@ public partial class App : Application
                     GridRealizedCount = window.GridRealizedCountForSmoke,
                     GridRealizationLimit = window.GridMaxRealizationCountForSmoke,
                     GridUsesFullExtentVirtualization = window.GridUsesFullExtentVirtualizationForSmoke,
+                    GridDetachedContainerCreatedCount =
+                        window.GridDetachedContainerCreatedCountForSmoke,
+                    GridDetachedContainerReuseCount =
+                        window.GridDetachedContainerReuseCountForSmoke,
                     HeartbeatCount = heartbeatCount,
                     DispatcherHeartbeatMaxGapMs = maxHeartbeatGapMs,
                     DispatcherHeartbeatMaxGapSample = maxHeartbeatGapSample,
+                    DispatcherHeartbeatMaxGapGcPauseMs = maxHeartbeatGapGcPauseMs,
+                    DispatcherHeartbeatMaxGapProjectionGeneration =
+                        maxHeartbeatGapProjectionGeneration,
                     CatalogProjectionMaxApplySliceMs = catalogProjectionMaxApplySliceMs,
+                    CatalogProjectionMaxApplySliceOperation = catalogProjectionMaxApplySliceOperation,
+                    CatalogProjectionDiagnosticSliceTargetMs = CatalogProjectionDiagnosticSliceTargetMs,
+                    CatalogProjectionSingleContainerDetachBudgetMs =
+                        CatalogProjectionSingleContainerDetachBudgetMs,
+                    CatalogProjectionMaxSingleContainerDetachMs =
+                        catalogProjectionMaxSingleContainerDetachMs,
+                    CatalogProjectionMaxResetPanelThreadCpuMs =
+                        catalogProjectionMaxResetPanelThreadCpuMs,
+                    CatalogProjectionMaxResetPanelBudgetMs =
+                        catalogProjectionMaxResetPanelBudgetMs,
+                    CatalogProjectionDetachBudgetBasis =
+                        catalogProjectionDetachBudgetBasis,
+                    CatalogProjectionDetachWithinDiagnosticBudget =
+                        catalogProjectionDetachWithinBudget,
+                    CatalogProjectionMaxDetachedContainersPerSlice =
+                        catalogProjectionMaxDetachedContainersPerSlice,
+                    CatalogProjectionInputBoundaryBeforePublicationExact =
+                        catalogProjectionInputBoundaryBeforePublicationExact,
+                    CatalogProjectionInputBoundaryAfterPublicationExact =
+                        catalogProjectionInputBoundaryAfterPublicationExact,
+                    CatalogProjectionMaxGeneratorRemoveMs =
+                        catalogProjectionMaxGeneratorRemoveMs,
+                    CatalogProjectionMaxForgetDeferredMeasureMs =
+                        catalogProjectionMaxForgetDeferredMeasureMs,
+                    CatalogProjectionMaxRemoveInternalChildRangeMs =
+                        catalogProjectionMaxRemoveInternalChildRangeMs,
+                    CatalogProjectionMaxRemoveInternalChildRangeThreadCpuMs =
+                        catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs,
+                    CatalogProjectionMaxResetPanelTotalMs =
+                        catalogProjectionMaxResetPanelTotalMs,
+                    CatalogProjectionDominantResetSubstep =
+                        catalogProjectionDominantResetSubstep,
+                    DispatcherHeartbeatBudgetMs = CatalogInteractionDispatcherHeartbeatBudgetMs,
+                    FavoriteEvictionBudgetMs = CatalogFavoriteEvictionBudgetMs,
                     CatalogProjectionDiscardedCount = window.CatalogProjectionDiscardedCountForSmoke,
                     PreparedCatalogLayoutAppliedCount = window.PreparedCatalogLayoutAppliedCountForSmoke,
                     PreparedCatalogLayoutRejectedCount = window.PreparedCatalogLayoutRejectedCountForSmoke,
                     CatalogLayoutMaxMeasureMs = window.CatalogLayoutMaxMeasureMsForSmoke,
+                    CatalogLayoutMaxMeasureWallMs = window.CatalogLayoutMaxMeasureWallMsForSmoke,
+                    CatalogLayoutMaxMeasureOperation = window.CatalogLayoutMaxMeasureOperationForSmoke,
+                    CatalogLayoutMaxMeasureGeneration = window.CatalogLayoutMaxMeasureGenerationForSmoke,
+                    CatalogLayoutMaxMeasureThreadCpuMs =
+                        window.CatalogLayoutMaxMeasureThreadCpuMsForSmoke,
                     MixedLatestWins = mixedLatestWins,
+                    FavoritePendingBroadenRaceExact = favoritePendingBroadenRaceExact,
+                    FavoriteRapidReincludeRaceExact = favoriteRapidReincludeRaceExact,
+                    FavoriteSortRaceExact = favoriteSortRaceExact,
+                    FavoriteDuplicateEvictionRaceExact =
+                        favoriteDuplicateEvictionRaceExact,
+                    FavoriteFilteredFailureStatusExact =
+                        favoriteFilteredFailureStatusExact,
+                    FavoriteFilteredFailureStatus =
+                        favoriteFilteredFailureStatus,
+                    FavoriteFilteredRollbackProjectionExact =
+                        favoriteFilteredRollbackProjectionExact,
+                    FavoriteFilteredRollbackStateExact =
+                        favoriteFilteredRollbackStateExact,
+                    FavoriteFilteredFailureToastExact =
+                        favoriteFilteredFailureToastExact,
+                    FavoriteFilteredRetryExact =
+                        favoriteFilteredRetryExact,
                     MixedViewportAnchorPreserved = mixedViewportAnchorPreserved,
                     MixedDiscardedCount = mixedDiscardedCount,
                     MixedStaleSearchDiscarded = staleMixedSearchResult.Discarded,
@@ -10467,6 +11260,7 @@ public partial class App : Application
                     MixedLatestSortApplied = latestMixedSortApplied,
                     MixedFilteredCount = mixedFilteredCount,
                     HeartbeatGapSamples = heartbeatGapSamples,
+                    HeartbeatDiagnosticSamples = heartbeatDiagnosticSamples,
                     LayoutSamples = layoutSamples,
                     WorkingSetBeforeBytes = workingSetBefore,
                     WorkingSetAfterBytes = workingSetAfter,
@@ -17528,6 +18322,13 @@ public partial class App : Application
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
                     && win.ModalContextMenuContractForSmoke;
+                bool lightweightGlass = win.ModalLightweightGlassContractForSmoke;
+                bool actualPixelsControl = win.ModalActualPixelsControlContractForSmoke;
+                bool favoriteLevelReadoutInitial = win.ModalFavoriteLevelReadoutContractForSmoke;
+                bool adaptiveToolbar = win.ApplyModalToolbarWidthForSmoke(900)
+                    && win.ModalCompactToolbarContractForSmoke
+                    && win.ApplyModalToolbarWidthForSmoke(1280)
+                    && win.ModalWideToolbarContractForSmoke;
                 bool windowCaptionControls = win.ModalWindowCaptionControlsContractForSmoke
                     && win.ActivateModalMinimizeForSmoke()
                     && win.ActivateModalMaximizeForSmoke();
@@ -17574,9 +18375,18 @@ public partial class App : Application
                     && filmstripItemContract
                     && modalFullWindowFit;
                 int contextFavoriteBefore = win.SelectedFavoriteLevelForSmoke;
-                bool contextMenuAction = win.ActivateModalContextFavoriteForSmoke(1)
-                    && win.ActivateModalContextFavoriteForSmoke(-1)
+                bool contextFavoriteRaised = win.ActivateModalContextFavoriteForSmoke(1);
+                bool favoriteLevelReadoutRaised = contextFavoriteRaised
+                    && win.ModalFavoriteLevelReadoutContractForSmoke;
+                bool contextFavoriteLowered = win.ActivateModalContextFavoriteForSmoke(-1);
+                bool favoriteLevelReadoutLowered = contextFavoriteLowered
+                    && win.ModalFavoriteLevelReadoutContractForSmoke;
+                bool contextMenuAction = contextFavoriteRaised
+                    && contextFavoriteLowered
                     && win.SelectedFavoriteLevelForSmoke == contextFavoriteBefore;
+                bool favoriteLevelReadout = favoriteLevelReadoutInitial
+                    && favoriteLevelReadoutRaised
+                    && favoriteLevelReadoutLowered;
 
                 win.SetModalChromeVisibleForSmoke(true);
                 await Task.Delay(1050);
@@ -17855,7 +18665,9 @@ public partial class App : Application
                     && !win.ModalVisibleForSmoke;
 
                 bool ok = fullMotionMode
-                    && selected && opened && accessibility && windowCaptionControls && edgeChrome
+                    && selected && opened && accessibility && lightweightGlass
+                    && actualPixelsControl && favoriteLevelReadout && adaptiveToolbar
+                    && windowCaptionControls && edgeChrome
                     && edgePercentageSetting && edgeImageIntersection
                     && zoomIndicator && filmstripLayout && contextMenuAction && manualVisiblePersistent
                     && filmstripButtonStableGeometry
@@ -17877,6 +18689,10 @@ public partial class App : Application
                     Message = ok ? "modal pointer states, transformed-image edge zones, full-canvas fit, immediate chrome hide, black-canvas gallery return, fixed filmstrip controls, and hidden-state parity passed" : "modal interaction parity did not meet the expected contract",
                     FullMotionMode = fullMotionMode,
                     Accessibility = accessibility,
+                    LightweightGlass = lightweightGlass,
+                    ActualPixelsControl = actualPixelsControl,
+                    FavoriteLevelReadout = favoriteLevelReadout,
+                    AdaptiveToolbar = adaptiveToolbar,
                     WindowCaptionControls = windowCaptionControls,
                     EdgeChrome = edgeChrome,
                     EdgePercentageSetting = edgePercentageSetting,
@@ -17996,6 +18812,8 @@ public partial class App : Application
                 bool shortcutZoomed = win.ModalZoomShortcutForSmoke("plus");
                 var afterShortcut = win.ModalTransformForSmoke();
                 bool zoomMotionActive = win.ModalTransformAnimationActiveForSmoke;
+                bool fineWheelZoomed = win.ModalZoomWheelForSmoke(30);
+                var afterFineWheel = win.ModalTransformForSmoke();
                 bool wheelZoomed = win.ModalZoomWheelForSmoke(120);
                 var afterWheel = win.ModalTransformForSmoke();
                 bool interactiveScaling = win.ModalInteractiveScalingForSmoke;
@@ -18009,6 +18827,9 @@ public partial class App : Application
                 bool modalVisibleBeforeClose = win.ModalVisibleForSmoke;
                 bool closed = win.CloseTopmostOverlayForSmoke();
                 var afterClose = win.ModalTransformForSmoke();
+                double fineWheelFactor = afterFineWheel.Zoom / afterShortcut.Zoom;
+                double standardWheelFactor = afterWheel.Zoom / afterFineWheel.Zoom;
+                double expectedFineWheelFactor = Math.Pow(1.08, 0.25);
 
                 bool ok = selected
                     && modalVisibleBeforeClose
@@ -18021,8 +18842,14 @@ public partial class App : Application
                     && shortcutZoomed
                     && afterShortcut.Zoom > 1
                     && zoomMotionActive
+                    && fineWheelZoomed
+                    && afterFineWheel.Zoom > afterShortcut.Zoom
+                    && fineWheelFactor > 1
+                    && fineWheelFactor < standardWheelFactor
+                    && Math.Abs(fineWheelFactor - expectedFineWheelFactor) < 0.0001
                     && wheelZoomed
-                    && afterWheel.Zoom > afterShortcut.Zoom
+                    && afterWheel.Zoom > afterFineWheel.Zoom
+                    && Math.Abs(standardWheelFactor - 1.08) < 0.0001
                     && interactiveScaling
                     && settledScaling
                     && reset
@@ -18043,7 +18870,7 @@ public partial class App : Application
 
                 result = new ModalTransformSmokeResult(
                     ok,
-                    ok ? "modal flip, keyboard/wheel zoom, reset, and navigation reset passed" : "modal transform smoke did not meet expected behavior",
+                    ok ? "modal flip, proportional high-resolution wheel zoom, reset, and navigation reset passed" : "modal transform smoke did not meet expected behavior",
                     folder,
                     selectIndex,
                     selected,
@@ -18053,8 +18880,12 @@ public partial class App : Application
                     afterFlip,
                     shortcutZoomed,
                     afterShortcut,
+                    fineWheelZoomed,
+                    afterFineWheel,
+                    fineWheelFactor,
                     wheelZoomed,
                     afterWheel,
+                    standardWheelFactor,
                     reset,
                     afterReset,
                     movedNext,
@@ -18108,6 +18939,7 @@ public partial class App : Application
                 var afterPositivePan = win.ModalTransformForSmoke();
                 bool pannedNegative = win.SetModalPanForSmoke(double.MinValue, double.MaxValue);
                 var afterNegativePan = win.ModalTransformForSmoke();
+                ModalPanCadenceSnapshot cadence = await win.RunCoalescedModalPanForSmokeAsync(48);
                 bool reset = win.ResetModalTransformForSmoke();
                 var afterReset = win.ModalTransformForSmoke();
                 string? startPath = win.SelectedPathForSmoke;
@@ -18133,6 +18965,17 @@ public partial class App : Application
                     && afterNegativePan.PanY > 0
                     && Math.Abs(afterNegativePan.PanX) <= afterNegativePan.MaxPanX + epsilon
                     && Math.Abs(afterNegativePan.PanY) <= afterNegativePan.MaxPanY + epsilon
+                    && cadence.Available
+                    && cadence.RequestedUpdates == 48
+                    && cadence.AcceptedUpdates == 48
+                    && cadence.InputUpdates == cadence.AcceptedUpdates
+                    && cadence.QueuedBeforeYield
+                    && !cadence.QueuedAfterYield
+                    && cadence.VisualUpdates >= 1
+                    && cadence.VisualUpdates <= 2
+                    && cadence.VisualUpdates < cadence.InputUpdates
+                    && Math.Abs(cadence.ModelPanX - cadence.VisualPanX) < epsilon
+                    && Math.Abs(cadence.ModelPanY - cadence.VisualPanY) < epsilon
                     && reset
                     && Math.Abs(afterReset.Zoom - 1) < epsilon
                     && Math.Abs(afterReset.PanX) < epsilon
@@ -18144,7 +18987,7 @@ public partial class App : Application
 
                 result = new ModalPanSmokeResult(
                     ok,
-                    ok ? "modal pan clamps after zoom and resets on reset/navigation" : "modal pan smoke did not meet expected behavior",
+                    ok ? "modal pan clamps, coalesces raw drag input to render cadence, and resets on reset/navigation" : "modal pan smoke did not meet expected behavior",
                     folder,
                     selectIndex,
                     selected,
@@ -18154,6 +18997,7 @@ public partial class App : Application
                     afterPositivePan,
                     pannedNegative,
                     afterNegativePan,
+                    cadence,
                     reset,
                     afterReset,
                     movedNext,
@@ -23556,8 +24400,12 @@ public partial class App : Application
         ModalTransformSnapshot AfterFlip = default,
         bool ShortcutZoomed = false,
         ModalTransformSnapshot AfterShortcut = default,
+        bool FineWheelZoomed = false,
+        ModalTransformSnapshot AfterFineWheel = default,
+        double FineWheelFactor = 0,
         bool WheelZoomed = false,
         ModalTransformSnapshot AfterWheel = default,
+        double StandardWheelFactor = 0,
         bool Reset = false,
         ModalTransformSnapshot AfterReset = default,
         bool MovedNext = false,
@@ -23576,6 +24424,10 @@ public partial class App : Application
         public string Message { get; init; } = "";
         public bool FullMotionMode { get; init; }
         public bool Accessibility { get; init; }
+        public bool LightweightGlass { get; init; }
+        public bool ActualPixelsControl { get; init; }
+        public bool FavoriteLevelReadout { get; init; }
+        public bool AdaptiveToolbar { get; init; }
         public bool WindowCaptionControls { get; init; }
         public bool EdgeChrome { get; init; }
         public bool EdgePercentageSetting { get; init; }
@@ -23658,6 +24510,7 @@ public partial class App : Application
         ModalTransformSnapshot AfterPositivePan = default,
         bool PannedNegative = false,
         ModalTransformSnapshot AfterNegativePan = default,
+        ModalPanCadenceSnapshot Cadence = default,
         bool Reset = false,
         ModalTransformSnapshot AfterReset = default,
         bool MovedNext = false,
@@ -24215,6 +25068,9 @@ public partial class App : Application
         public List<string> PortraitOrder { get; init; } = [];
         public List<string> RestoredOrder { get; init; } = [];
         public DisplayStyleMetrics? Original { get; init; }
+        public DisplayStyleMetrics? OriginalLandscape { get; init; }
+        public DisplayStyleMetrics? OriginalSquare { get; init; }
+        public DisplayStyleMetrics? OriginalPortrait { get; init; }
         public DisplayStyleMetrics? Square { get; init; }
         public DisplayStyleMetrics? Portrait { get; init; }
         public DisplayStyleMetrics? PortraitZoomed { get; init; }
@@ -24229,6 +25085,7 @@ public partial class App : Application
         public bool OriginalChanged { get; init; }
         public bool Zoomed { get; init; }
         public bool PersistedTargetSet { get; init; }
+        public bool MetadataReady { get; init; }
         public bool SquareShape { get; init; }
         public bool PortraitShape { get; init; }
         public bool OriginalShape { get; init; }
@@ -24416,6 +25273,27 @@ public partial class App : Application
         public string Message { get; init; } = "";
     }
 
+    private sealed record CatalogInteractionSubstepSample(
+        string Operation,
+        double WallMs);
+
+    private sealed record CatalogInteractionGcSubstepSample(
+        string Operation,
+        double WallMs,
+        long AllocatedBytes,
+        double GcPauseMs,
+        int Gen0Collections,
+        int Gen1Collections,
+        int Gen2Collections,
+        long ProjectionGeneration);
+
+    private sealed record DispatcherHeartbeatDiagnosticSample(
+        string Operation,
+        long ElapsedMs,
+        long GapMs,
+        double GcPauseMs,
+        long ProjectionGeneration);
+
     private sealed class CatalogInteractionSmokeResult
     {
         public bool Ok { get; init; }
@@ -24425,10 +25303,14 @@ public partial class App : Application
         public int FilteredCount { get; init; }
         public long SeedElapsedMs { get; init; }
         public bool WarmupComplete { get; init; }
+        public MainWindow.SearchFilterCompletion AccessibilityWarmupFilterCompletion { get; init; }
+        public MainWindow.SearchFilterCompletion AccessibilityWarmupClearCompletion { get; init; }
+        public List<CatalogInteractionSubstepSample> AccessibilityWarmupSubstepSamples { get; init; } = [];
         public double SearchP95Ms { get; init; }
         public double FilterP95Ms { get; init; }
         public double SortP95Ms { get; init; }
         public long FavoriteEvictionElapsedMs { get; init; }
+        public long FavoriteEvictionApplySliceMs { get; init; }
         public bool FavoriteEvictionExact { get; init; }
         public bool FavoriteEvictionAutomationExact { get; init; }
         public ExternalGalleryAutomationSmokeSnapshot? FavoriteEvictionAutomation { get; init; }
@@ -24458,17 +25340,25 @@ public partial class App : Application
         public bool RepeatedAutomationRealizeCoalesced { get; init; }
         public int AutomationRealizeDispatchCount { get; init; }
         public int AutomationRealizeCoalescedCount { get; init; }
+        public long AutomationRealizeMaxDispatchMs { get; init; }
         public long AutomationLookupMaxMs { get; init; }
         public bool StaleAutomationPeerLifetimeExact { get; init; }
         public bool StaleAutomationRealizeUnavailable { get; init; }
         public bool StaleAutomationSelectUnavailable { get; init; }
+        public MainWindow.SearchFilterCompletion StaleAutomationFilterCompletion { get; init; }
+        public MainWindow.SearchFilterCompletion StaleAutomationClearCompletion { get; init; }
+        public List<CatalogInteractionSubstepSample> StaleAutomationSubstepSamples { get; init; } = [];
         public bool AutomationVirtualizedItemExact { get; init; }
         public bool AutomationRealizePreservedSelection { get; init; }
         public bool AutomationSelectionExact { get; init; }
+        public bool FavoriteEvictionSingleRemovalExact { get; init; }
         public bool RecycledContainerStateReset { get; init; }
         public int KeyboardAccessibilityMaxRealized { get; init; }
         public long KeyboardSelectionSyncMaxMs { get; init; }
         public bool KeyboardAccessibilityBounded { get; init; }
+        public MainWindow.SearchFilterCompletion KeyboardFocusFilterCompletion { get; init; }
+        public MainWindow.SearchFilterCompletion KeyboardFocusClearCompletion { get; init; }
+        public List<CatalogInteractionGcSubstepSample> KeyboardFocusSubstepSamples { get; init; } = [];
         public GalleryAutomationItemSmokeSnapshot? AutomationTailPeer { get; init; }
         public GalleryAutomationItemSmokeSnapshot? AutomationTailContainer { get; init; }
         public GalleryAutomationItemSmokeSnapshot? RecycledHeadContainer { get; init; }
@@ -24476,15 +25366,52 @@ public partial class App : Application
         public int GridRealizedCount { get; init; }
         public int GridRealizationLimit { get; init; }
         public bool GridUsesFullExtentVirtualization { get; init; }
+        public int GridDetachedContainerCreatedCount { get; init; }
+        public int GridDetachedContainerReuseCount { get; init; }
         public int HeartbeatCount { get; init; }
         public long DispatcherHeartbeatMaxGapMs { get; init; }
         public string DispatcherHeartbeatMaxGapSample { get; init; } = "";
+        public double DispatcherHeartbeatMaxGapGcPauseMs { get; init; }
+        public long DispatcherHeartbeatMaxGapProjectionGeneration { get; init; }
         public long CatalogProjectionMaxApplySliceMs { get; init; }
+        public string CatalogProjectionMaxApplySliceOperation { get; init; } = "";
+        public long CatalogProjectionDiagnosticSliceTargetMs { get; init; }
+        public long CatalogProjectionSingleContainerDetachBudgetMs { get; init; }
+        public long CatalogProjectionMaxSingleContainerDetachMs { get; init; }
+        public double CatalogProjectionMaxResetPanelThreadCpuMs { get; init; } = -1;
+        public double CatalogProjectionMaxResetPanelBudgetMs { get; init; }
+        public string CatalogProjectionDetachBudgetBasis { get; init; } = "";
+        public bool CatalogProjectionDetachWithinDiagnosticBudget { get; init; }
+        public int CatalogProjectionMaxDetachedContainersPerSlice { get; init; }
+        public bool CatalogProjectionInputBoundaryBeforePublicationExact { get; init; }
+        public bool CatalogProjectionInputBoundaryAfterPublicationExact { get; init; }
+        public double CatalogProjectionMaxGeneratorRemoveMs { get; init; }
+        public double CatalogProjectionMaxForgetDeferredMeasureMs { get; init; }
+        public double CatalogProjectionMaxRemoveInternalChildRangeMs { get; init; }
+        public double CatalogProjectionMaxRemoveInternalChildRangeThreadCpuMs { get; init; }
+        public double CatalogProjectionMaxResetPanelTotalMs { get; init; }
+        public string CatalogProjectionDominantResetSubstep { get; init; } = "";
+        public long DispatcherHeartbeatBudgetMs { get; init; }
+        public long FavoriteEvictionBudgetMs { get; init; }
         public int CatalogProjectionDiscardedCount { get; init; }
         public int PreparedCatalogLayoutAppliedCount { get; init; }
         public int PreparedCatalogLayoutRejectedCount { get; init; }
         public long CatalogLayoutMaxMeasureMs { get; init; }
+        public double CatalogLayoutMaxMeasureWallMs { get; init; }
+        public string CatalogLayoutMaxMeasureOperation { get; init; } = "";
+        public long CatalogLayoutMaxMeasureGeneration { get; init; }
+        public double CatalogLayoutMaxMeasureThreadCpuMs { get; init; }
         public bool MixedLatestWins { get; init; }
+        public bool FavoritePendingBroadenRaceExact { get; init; }
+        public bool FavoriteRapidReincludeRaceExact { get; init; }
+        public bool FavoriteSortRaceExact { get; init; }
+        public bool FavoriteDuplicateEvictionRaceExact { get; init; }
+        public bool FavoriteFilteredFailureStatusExact { get; init; }
+        public string FavoriteFilteredFailureStatus { get; init; } = "";
+        public bool FavoriteFilteredRollbackProjectionExact { get; init; }
+        public bool FavoriteFilteredRollbackStateExact { get; init; }
+        public bool FavoriteFilteredFailureToastExact { get; init; }
+        public bool FavoriteFilteredRetryExact { get; init; }
         public bool MixedViewportAnchorPreserved { get; init; }
         public int MixedDiscardedCount { get; init; }
         public bool MixedStaleSearchDiscarded { get; init; }
@@ -24492,6 +25419,7 @@ public partial class App : Application
         public bool MixedLatestSortApplied { get; init; }
         public int MixedFilteredCount { get; init; }
         public List<string> HeartbeatGapSamples { get; init; } = [];
+        public List<DispatcherHeartbeatDiagnosticSample> HeartbeatDiagnosticSamples { get; init; } = [];
         public List<string> LayoutSamples { get; init; } = [];
         public long WorkingSetBeforeBytes { get; init; }
         public long WorkingSetAfterBytes { get; init; }

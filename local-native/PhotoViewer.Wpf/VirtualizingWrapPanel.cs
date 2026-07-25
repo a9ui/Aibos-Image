@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Collections.Specialized;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -22,6 +23,22 @@ public sealed class VirtualizingWrapPanelRangeChangedEventArgs(
 }
 
 internal readonly record struct VirtualizingLayoutItem(string Group, double ItemHeight);
+
+internal readonly record struct ItemsResetPreparationSlice(
+    bool Complete,
+    int DetachedContainerCount,
+    double GeneratorRemoveMs,
+    double ForgetDeferredMeasureMs,
+    double RemoveInternalChildRangeMs,
+    double RemoveInternalChildRangeThreadCpuMs,
+    double PanelTotalMs,
+    double PanelThreadCpuMs);
+
+internal readonly record struct VirtualizingMeasureDiagnostic(
+    string Operation,
+    long LayoutGeneration,
+    double WallMs,
+    double ThreadCpuMs);
 
 internal readonly record struct VirtualizingLayoutContext(
     double AvailableWidth,
@@ -68,8 +85,24 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private const int InteractiveContainersPerMeasure = 1;
     private const int MediumDensityContainersPerMeasure = 4;
     private const int DenseContainersPerMeasure = 16;
-    private const int RealizationContinuationDelayMilliseconds = 16;
+    // Leave a small margin beyond the 15 ms input heartbeat before the next
+    // progressive Render invalidation. Equal-frame scheduling let the render
+    // continuation and input timer race on busy runners, occasionally joining
+    // two otherwise bounded card preparations into one visible input gap.
+    private const int RealizationContinuationDelayMilliseconds = 20;
     private static readonly Brush ProgressivePlaceholderBrush = CreateProgressivePlaceholderBrush();
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentThread();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetThreadTimes(
+        IntPtr thread,
+        out long creationTime,
+        out long exitTime,
+        out long kernelTime,
+        out long userTime);
 
     public static readonly DependencyProperty ItemWidthProperty = DependencyProperty.Register(
         nameof(ItemWidth),
@@ -144,13 +177,17 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private int _priorityRealizationIndex = -1;
     private readonly HashSet<UIElement> _deferredMeasureContainers = [];
     private bool _itemsResetPreparationActive;
-    private int _itemsResetVisualsRemaining;
     private int _itemsResetGeneratorPosition = -1;
+    private VirtualizedGalleryListBox? _itemsResetContainerReuseOwner;
     private long _layoutGeneration;
     private PreparedVirtualizingLayout? _preparedLayout;
     private int _preparedLayoutAppliedCount;
     private int _preparedLayoutRejectedCount;
     private long _maxMeasureMilliseconds;
+    private string _diagnosticOperation = "";
+    private bool _diagnosticMeasureThreadCpuEnabled;
+    private VirtualizingMeasureDiagnostic _maxMeasureDiagnostic =
+        new("", 0, 0, -1);
 
     public event EventHandler<VirtualizingWrapPanelRangeChangedEventArgs>? RealizedRangeChanged;
 
@@ -165,6 +202,9 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         _deferredMeasureContainers.Clear();
         InvalidateVisual();
     }
+
+    internal void ResumePendingRealization()
+        => InvalidateMeasure();
 
     public double ItemWidth
     {
@@ -227,6 +267,14 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     internal int PreparedLayoutAppliedCount => _preparedLayoutAppliedCount;
     internal int PreparedLayoutRejectedCount => _preparedLayoutRejectedCount;
     internal long MaxMeasureMilliseconds => _maxMeasureMilliseconds;
+    internal VirtualizingMeasureDiagnostic MaxMeasureDiagnostic => _maxMeasureDiagnostic;
+
+    internal void SetDiagnosticOperation(string operation)
+    {
+        _diagnosticOperation = operation ?? "";
+        _diagnosticMeasureThreadCpuEnabled =
+            !string.IsNullOrEmpty(_diagnosticOperation);
+    }
 
     internal void SetLayoutSource(IReadOnlyList<Tile> source)
     {
@@ -268,43 +316,97 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         }
 
         _itemsResetPreparationActive = true;
-        _itemsResetVisualsRemaining = realizedCount;
         _itemsResetGeneratorPosition = realizedCount - 1;
+        _itemsResetContainerReuseOwner =
+            ItemsControl.GetItemsOwner(this) as VirtualizedGalleryListBox;
         return true;
     }
 
-    internal bool PrepareNextItemsResetSlice()
+    internal ItemsResetPreparationSlice PrepareNextItemsResetSlice()
     {
         if (!_itemsResetPreparationActive)
             throw new InvalidOperationException("Items reset preparation is not active.");
 
-        // A realized card template can be expensive to detach on slower
-        // machines. Keep visual detachment and generator-map mutation as
-        // separate one-container operations so the caller can yield to input
-        // between every bounded unit.
-        if (_itemsResetVisualsRemaining > 0)
-        {
-            RemoveInternalChildRange(InternalChildren.Count - 1, 1);
-            _itemsResetVisualsRemaining--;
-            return false;
-        }
-
+        // Match ordinary viewport cleanup: release one generator entry before
+        // detaching its tail visual. Reset preparation previously removed every
+        // visual first and only then updated the generator map, leaving WPF to
+        // unlink a still-live container while the visual tree was changing.
+        // Keep the official generator-first pair as one bounded container unit
+        // and yield before the next item.
+        double generatorRemoveMs = 0;
+        double forgetDeferredMeasureMs = 0;
+        double removeInternalChildRangeMs = 0;
+        double removeInternalChildRangeThreadCpuMs = 0;
+        int detachedContainerCount = 0;
+        long sliceStarted = Stopwatch.GetTimestamp();
+        long sliceCpuStarted = ReadCurrentThreadCpuTimeTicks();
         if (_itemsResetGeneratorPosition >= 0)
         {
+            int childIndex = InternalChildren.Count - 1;
+            UIElement detachedChild = InternalChildren[childIndex];
+            long generatorStarted = Stopwatch.GetTimestamp();
             ItemContainerGenerator.Remove(
                 new GeneratorPosition(_itemsResetGeneratorPosition, 0),
                 1);
+            long generatorFinished = Stopwatch.GetTimestamp();
+            ForgetDeferredMeasureRange(childIndex, 1);
+            long forgetFinished = Stopwatch.GetTimestamp();
+            long visualCpuStarted = ReadCurrentThreadCpuTimeTicks();
+            RemoveInternalChildRange(childIndex, 1);
+            long visualCpuFinished = ReadCurrentThreadCpuTimeTicks();
+            long visualFinished = Stopwatch.GetTimestamp();
+            // Keep custom reuse ownership out of WPF's unlink callbacks. The
+            // container becomes reusable only after the visual detach above.
+            if (detachedChild is ListBoxItem detachedContainer)
+                _itemsResetContainerReuseOwner?.CacheDetachedContainer(detachedContainer);
+            detachedContainerCount = 1;
+            generatorRemoveMs =
+                Stopwatch.GetElapsedTime(generatorStarted, generatorFinished).TotalMilliseconds;
+            forgetDeferredMeasureMs =
+                Stopwatch.GetElapsedTime(generatorFinished, forgetFinished).TotalMilliseconds;
+            removeInternalChildRangeMs =
+                Stopwatch.GetElapsedTime(forgetFinished, visualFinished).TotalMilliseconds;
+            removeInternalChildRangeThreadCpuMs =
+                visualCpuStarted >= 0 && visualCpuFinished >= visualCpuStarted
+                    ? TimeSpan.FromTicks(visualCpuFinished - visualCpuStarted).TotalMilliseconds
+                    : -1;
             _itemsResetGeneratorPosition--;
         }
 
-        return _itemsResetGeneratorPosition < 0;
+        long sliceCpuFinished = ReadCurrentThreadCpuTimeTicks();
+        long sliceFinished = Stopwatch.GetTimestamp();
+        double panelThreadCpuMs =
+            sliceCpuStarted >= 0 && sliceCpuFinished >= sliceCpuStarted
+                ? TimeSpan.FromTicks(sliceCpuFinished - sliceCpuStarted).TotalMilliseconds
+                : -1;
+        return new ItemsResetPreparationSlice(
+            _itemsResetGeneratorPosition < 0,
+            detachedContainerCount,
+            generatorRemoveMs,
+            forgetDeferredMeasureMs,
+            removeInternalChildRangeMs,
+            removeInternalChildRangeThreadCpuMs,
+            Stopwatch.GetElapsedTime(sliceStarted, sliceFinished).TotalMilliseconds,
+            panelThreadCpuMs);
+    }
+
+    private static long ReadCurrentThreadCpuTimeTicks()
+    {
+        return GetThreadTimes(
+            GetCurrentThread(),
+            out _,
+            out _,
+            out long kernelTime,
+            out long userTime)
+            ? kernelTime + userTime
+            : -1;
     }
 
     internal void CompleteItemsResetPreparation()
     {
         _itemsResetPreparationActive = false;
-        _itemsResetVisualsRemaining = 0;
         _itemsResetGeneratorPosition = -1;
+        _itemsResetContainerReuseOwner = null;
     }
 
     internal void CancelItemsResetPreparation()
@@ -658,10 +760,32 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     protected override Size MeasureOverride(Size availableSize)
     {
         var measureWatch = Stopwatch.StartNew();
+        long measureCpuStarted = _diagnosticMeasureThreadCpuEnabled
+            ? ReadCurrentThreadCpuTimeTicks()
+            : -1;
+        string measureOperation = _diagnosticOperation;
+        long measureGeneration = _layoutGeneration;
         Size CompleteMeasure(Size result)
         {
             measureWatch.Stop();
             _maxMeasureMilliseconds = Math.Max(_maxMeasureMilliseconds, measureWatch.ElapsedMilliseconds);
+            long measureCpuFinished = _diagnosticMeasureThreadCpuEnabled
+                ? ReadCurrentThreadCpuTimeTicks()
+                : -1;
+            double wallMs = measureWatch.Elapsed.TotalMilliseconds;
+            double threadCpuMs =
+                measureCpuStarted >= 0 && measureCpuFinished >= measureCpuStarted
+                    ? TimeSpan.FromTicks(measureCpuFinished - measureCpuStarted).TotalMilliseconds
+                    : -1;
+            if (_diagnosticMeasureThreadCpuEnabled
+                && wallMs > _maxMeasureDiagnostic.WallMs)
+            {
+                _maxMeasureDiagnostic = new VirtualizingMeasureDiagnostic(
+                    measureOperation,
+                    measureGeneration,
+                    wallMs,
+                    threadCpuMs);
+            }
             return result;
         }
 
@@ -682,9 +806,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
         if (itemCount == 0 || _rowTops.Count == 0)
         {
-            CleanupItems(0, -1);
+            bool emptyCleanupComplete = CleanupItems(0, -1);
             UpdateRange(-1, -1, -1, -1);
             UpdateScrollInfo();
+            if (!emptyCleanupComplete)
+                ScheduleRealizationContinuation();
             return CompleteMeasure(availableSize);
         }
 
@@ -698,7 +824,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         int firstRealizedIndex = FirstItemIndexForRows(firstRealizedRow, lastRealizedRow, itemCount);
         int lastRealizedIndex = LastItemIndexForRows(firstRealizedRow, lastRealizedRow, itemCount);
 
-        CleanupItems(firstRealizedIndex, lastRealizedIndex);
+        bool cleanupComplete = CleanupItems(firstRealizedIndex, lastRealizedIndex);
         int visibleItemCount = Math.Max(0, lastVisibleIndex - firstVisibleIndex + 1);
         int containerBudget = visibleItemCount >= 128
             ? DenseContainersPerMeasure
@@ -745,7 +871,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         int reportedFirstRealizedIndex = lastProcessedIndex >= firstRealizedIndex ? firstRealizedIndex : -1;
         UpdateRange(firstVisibleIndex, lastVisibleIndex, reportedFirstRealizedIndex, lastProcessedIndex);
         UpdateScrollInfo();
-        if (!realizationComplete)
+        if (!cleanupComplete || !realizationComplete)
             ScheduleRealizationContinuation();
         else if (_realizationContinuationPending)
         {
@@ -1148,7 +1274,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         return brush;
     }
 
-    private void CleanupItems(int firstIndex, int lastIndex)
+    private bool CleanupItems(int firstIndex, int lastIndex)
     {
         IItemContainerGenerator generator = ItemContainerGenerator;
         int childIndex = InternalChildren.Count - 1;
@@ -1164,7 +1290,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 // realized slice instead of guessing and shifting every later
                 // container by one.
                 ResyncGeneratorVisuals();
-                return;
+                return true;
             }
             if (itemIndex >= firstIndex && itemIndex <= lastIndex)
             {
@@ -1172,38 +1298,25 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 continue;
             }
 
-            int runEnd = childIndex;
-            int runStart = childIndex;
-            int firstRunItemIndex = itemIndex;
-            while (runStart > 0)
-            {
-                int previousItemIndex = generator.IndexFromGeneratorPosition(
-                    new GeneratorPosition(runStart - 1, 0));
-                if (previousItemIndex < 0)
-                {
-                    ResyncGeneratorVisuals();
-                    return;
-                }
-                if ((previousItemIndex >= firstIndex && previousItemIndex <= lastIndex)
-                    || previousItemIndex + 1 != firstRunItemIndex)
-                {
-                    break;
-                }
-                runStart--;
-                firstRunItemIndex = previousItemIndex;
-            }
-
-            int runCount = runEnd - runStart + 1;
-            GeneratorPosition runPosition = new(runStart, 0);
+            UIElement detachedChild = InternalChildren[childIndex];
             // This is an ordinary viewport eviction, not a source Reset.
             // Remove preserves ListBox.SelectedItems bookkeeping; recycling
             // the range here can leave WPF's logical selection detached from
-            // a correctly selected realized container.
-            generator.Remove(runPosition, runCount);
-            ForgetDeferredMeasureRange(runStart, runCount);
-            RemoveInternalChildRange(runStart, runCount);
-            childIndex = runStart - 1;
+            // a correctly selected realized container. Detach one card per
+            // Render pass so a distant UIA/keyboard jump cannot unlink the
+            // complete old viewport ahead of Input.
+            generator.Remove(position, 1);
+            ForgetDeferredMeasureRange(childIndex, 1);
+            RemoveInternalChildRange(childIndex, 1);
+            if (detachedChild is ListBoxItem detachedContainer
+                && ItemsControl.GetItemsOwner(this) is VirtualizedGalleryListBox owner)
+            {
+                owner.CacheDetachedContainer(detachedContainer);
+            }
+            return false;
         }
+
+        return true;
     }
 
     private void ForgetDeferredMeasureRange(int start, int count)
@@ -1278,6 +1391,13 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
+        // Reset preparation deliberately yields between one-container detach
+        // units. Rendering the stale projection at every yield rebuilt all
+        // visible date-header FormattedText objects before Input could run,
+        // even though that frame was immediately replaced. Keep the last
+        // composed frame until the atomic collection publication finishes.
+        if (_itemsResetPreparationActive)
+            return;
         DrawProgressivePlaceholders(drawingContext);
         if (!ShowGroupHeaders || _rowHeaders.Count == 0)
             return;
