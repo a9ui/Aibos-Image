@@ -251,6 +251,8 @@ public partial class MainWindow : Window
     private IReadOnlyList<SeenDelta>? _failedSeenBatch;
     private long _favoriteMutationGeneration;
     private long _seenMutationGeneration;
+    private readonly Dictionary<Tile, long> _deferredFavoriteNotificationOwners =
+        new(ReferenceEqualityComparer.Instance);
     private bool _favoriteWriterAdopted;
     private bool _seenWriterAdopted;
     private DispatcherTimer? _favoriteWriterPumpTimer;
@@ -1117,6 +1119,9 @@ public partial class MainWindow : Window
         _shutdownPersistenceFlushCount++;
         _searchFilterTimer.Stop();
         _searchStateSaveTimer.Stop();
+        foreach (Tile tile in _deferredFavoriteNotificationOwners.Keys)
+            tile.FlushFavoriteNotifications();
+        _deferredFavoriteNotificationOwners.Clear();
         CancelPendingCatalogProjection(completePending: true);
         _loadCts?.Cancel();
         _previewCts?.Cancel();
@@ -4491,7 +4496,7 @@ public partial class MainWindow : Window
         bool favoriteFilterActive = FavoriteOnlyFilter?.IsChecked == true
             || UnfavoriteOnlyFilter?.IsChecked == true;
         if (favoriteFilterActive)
-            RemoveChangedTilesExcludedByFavoriteFilter(changedTiles);
+            ReconcileFavoriteFilterProjection(changedTiles);
 
         SyncSelectionActionSurface();
         Tile? knownPrimary = !string.IsNullOrWhiteSpace(_primarySelectedPath)
@@ -4504,7 +4509,8 @@ public partial class MainWindow : Window
         return favoriteFilterActive;
     }
 
-    private void RemoveChangedTilesExcludedByFavoriteFilter(IReadOnlyList<Tile> changedTiles)
+    private Task<SearchFilterCompletion>? RemoveChangedTilesExcludedByFavoriteFilter(
+        IReadOnlyList<Tile> changedTiles)
     {
         bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
         bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
@@ -4520,7 +4526,7 @@ public partial class MainWindow : Window
                 fallbackIndex = Math.Min(fallbackIndex ?? index, index);
         }
         if (!projectionChange)
-            return;
+            return null;
         int selectedIndex = _primarySelectedIndex >= 0
             ? _primarySelectedIndex
             : Math.Max(CardsList.SelectedIndex, RowsList.SelectedIndex);
@@ -4531,12 +4537,15 @@ public partial class MainWindow : Window
         // the replacement and its UI Automation index off the dispatcher, then
         // publishes them together in one Reset. Direct RemoveAt invalidated the
         // index and left external UIA lookup on a 100k fallback scan.
+        bool reorderCatalog = _scheduledCatalogProjection?.ReorderCatalog == true;
         bool projectionIsStable = _scheduledCatalogProjection is null
             && _pendingSearchFilterCompletion is null
             && _catalogProjectionCts is null;
-        _ = QueueCatalogProjection(
+        return QueueCatalogProjection(
             debounce: false,
-            reorderCatalog: false,
+            // Favorite mutation supersedes the captured filter snapshot, but
+            // it must not discard an in-flight interactive sort intent.
+            reorderCatalog,
             selectFirst: true,
             selectionFallbackIndex: fallbackIndex,
             // A current-projection subset is valid only for a pure exclusion
@@ -4544,6 +4553,112 @@ public partial class MainWindow : Window
             // filter request is pending, canceling it and starting from the old
             // subset would permanently omit newly eligible items.
             restrictToCurrentProjection: projectionIsStable);
+    }
+
+    private bool ShouldDeferFavoriteEvictionPresentation(Tile tile, int desiredLevel)
+    {
+        bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
+        bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
+        if (!favoritesOnly && !unfavoriteOnly)
+            return false;
+        bool remainsIncluded = favoritesOnly
+            ? desiredLevel > 0
+                && (_favoriteFilterLevels.Count == 0
+                    || _favoriteFilterLevels.Contains(desiredLevel))
+            : desiredLevel <= 0;
+        return !remainsIncluded
+            && CardsList.TryResolveAutomationItem(tile, out _);
+    }
+
+    private Task<SearchFilterCompletion>? ReconcileFavoriteFilterProjection(
+        IReadOnlyList<Tile> changedTiles)
+    {
+        Task<SearchFilterCompletion>? exclusion =
+            RemoveChangedTilesExcludedByFavoriteFilter(changedTiles);
+        if (exclusion is not null)
+            return exclusion;
+
+        bool projectionPending = _scheduledCatalogProjection is not null
+            || _pendingSearchFilterCompletion is not null
+            || _catalogProjectionCts is not null;
+        if (!projectionPending)
+            return null;
+
+        bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
+        bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
+        if (!changedTiles.Distinct().Any(tile =>
+                MatchesFavoriteFilter(tile, favoritesOnly, unfavoriteOnly)))
+        {
+            return null;
+        }
+
+        int selectedIndex = _primarySelectedIndex >= 0
+            ? _primarySelectedIndex
+            : Math.Max(CardsList.SelectedIndex, RowsList.SelectedIndex);
+        bool reorderCatalog = _scheduledCatalogProjection?.ReorderCatalog == true;
+        // A later inclusion must supersede any in-flight exclusion snapshot.
+        // Recompute from the full catalog so the old generation cannot remove
+        // an image that has already become eligible again. Preserve an
+        // interactive sort that the favorite mutation supersedes.
+        return QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog,
+            selectFirst: true,
+            selectionFallbackIndex: selectedIndex >= 0 ? selectedIndex : null,
+            restrictToCurrentProjection: false);
+    }
+
+    private async Task CompleteDeferredFavoritePresentationAsync(
+        Tile tile,
+        string status,
+        Task<SearchFilterCompletion> projection,
+        string mutationPath,
+        long mutationGeneration)
+    {
+        SearchFilterCompletion completion = default;
+        bool projectionCompleted = false;
+        try
+        {
+            completion = await projection.ConfigureAwait(false);
+            projectionCompleted = true;
+        }
+        finally
+        {
+            if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+            {
+                try
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!_deferredFavoriteNotificationOwners.TryGetValue(
+                                tile,
+                                out long ownerGeneration)
+                            || ownerGeneration != mutationGeneration)
+                        {
+                            return;
+                        }
+                        tile.FlushFavoriteNotifications();
+                        _deferredFavoriteNotificationOwners.Remove(tile);
+                        SyncSelectionActionSurface();
+                        RefreshModalFavoriteSurface();
+                        if (projectionCompleted
+                            && completion.Applied
+                            && !completion.Discarded
+                            && _pendingFavoriteMutations.TryGetValue(
+                                mutationPath,
+                                out FavoritePendingMutation? current)
+                            && current.Generation == mutationGeneration)
+                        {
+                            SetTransientStatusToast(status);
+                        }
+                    }, DispatcherPriority.Background);
+                }
+                catch (TaskCanceledException)
+                {
+                    // The close path synchronously flushes every tracked tile.
+                }
+            }
+        }
     }
 
     private void RefreshModalFavoriteSurface(Tile? knownSelected = null)
@@ -7859,12 +7974,8 @@ public partial class MainWindow : Window
         long captureAllocatedBefore = collectAllocationDiagnostics
             ? GC.GetAllocatedBytesForCurrentThread()
             : 0;
-        var captureWatch = Stopwatch.StartNew();
-        FilterSnapshot snapshot = CaptureFilterSnapshot(request);
-        captureWatch.Stop();
-        long captureAllocatedBytes = collectAllocationDiagnostics
-            ? GC.GetAllocatedBytesForCurrentThread() - captureAllocatedBefore
-            : 0;
+        var captureWatch = new Stopwatch();
+        long captureAllocatedBytes = 0;
         long computeMs = 0;
         long computeAllocatedBytes = 0;
         long applyMs = 0;
@@ -7874,9 +7985,17 @@ public partial class MainWindow : Window
         long cleanupMs;
         long cleanupAllocatedBytes = 0;
         FilterResult? result = null;
+        FilterSnapshot? snapshotForCleanup = null;
         SearchFilterCompletion outcome;
         try
         {
+            captureWatch.Start();
+            FilterSnapshot snapshot = CaptureFilterSnapshot(request);
+            snapshotForCleanup = snapshot;
+            captureWatch.Stop();
+            captureAllocatedBytes = collectAllocationDiagnostics
+                ? GC.GetAllocatedBytesForCurrentThread() - captureAllocatedBefore
+                : 0;
             result = await Task.Run(() =>
             {
                 var computeWatch = Stopwatch.StartNew();
@@ -7953,6 +8072,8 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (captureWatch.IsRunning)
+                captureWatch.Stop();
             result?.AutomationProjection.ReleaseCreator();
             long cleanupAllocatedBefore = collectAllocationDiagnostics
                 ? GC.GetAllocatedBytesForCurrentThread()
@@ -7960,7 +8081,8 @@ public partial class MainWindow : Window
             var cleanupWatch = Stopwatch.StartNew();
             if (result is not null)
                 ReturnFilterResult(result);
-            ReturnFilterSnapshot(snapshot);
+            if (snapshotForCleanup is not null)
+                ReturnFilterSnapshot(snapshotForCleanup);
             if (ReferenceEquals(_catalogProjectionCts, cts))
                 _catalogProjectionCts = null;
             cts.Dispose();
@@ -8807,6 +8929,9 @@ public partial class MainWindow : Window
         _favoriteSaveAttemptCount++;
         SharedStoreWriter<FavoriteDelta> writer = EnsureFavoriteWriter();
         var changedTiles = new List<Tile>(changes.Count);
+        Tile? deferredTile = null;
+        string? deferredMutationPath = null;
+        long deferredMutationGeneration = 0;
         foreach ((Tile tile, int requestedLevel) in changes)
         {
             int desired = Math.Clamp(requestedLevel, 0, 5);
@@ -8822,14 +8947,52 @@ public partial class MainWindow : Window
                 _favorites[key] = desired;
             else
                 _favorites.Remove(key);
-            tile.Fav = desired;
+            bool deferPresentation = changes.Count == 1
+                && ShouldDeferFavoriteEvictionPresentation(tile, desired);
+            tile.SetFavoriteLevel(desired, notify: !deferPresentation);
+            if (deferPresentation)
+            {
+                deferredTile = tile;
+                deferredMutationPath = key;
+                deferredMutationGeneration = generation;
+                _deferredFavoriteNotificationOwners[tile] = generation;
+            }
+            else
+                _deferredFavoriteNotificationOwners.Remove(tile);
             changedTiles.Add(tile);
             writer.Enqueue(new FavoriteDelta(key, durable, desired, generation));
         }
 
-        if (RefreshFavoriteMutationSurface(changedTiles))
+        string status = $"{successMessage} Saving...";
+        if (deferredTile is not null)
+        {
+            Task<SearchFilterCompletion>? projection =
+                ReconcileFavoriteFilterProjection(changedTiles);
             ScheduleSearchStateSave();
-        SetTransientStatusToast($"{successMessage} Saving...");
+            if (projection is not null)
+            {
+                _ = CompleteDeferredFavoritePresentationAsync(
+                    deferredTile,
+                    status,
+                    projection,
+                    deferredMutationPath!,
+                    deferredMutationGeneration);
+            }
+            else
+            {
+                deferredTile.FlushFavoriteNotifications();
+                _deferredFavoriteNotificationOwners.Remove(deferredTile);
+                SyncSelectionActionSurface();
+                RefreshModalFavoriteSurface();
+                SetTransientStatusToast(status);
+            }
+        }
+        else
+        {
+            if (RefreshFavoriteMutationSurface(changedTiles))
+                ScheduleSearchStateSave();
+            SetTransientStatusToast(status);
+        }
         ScheduleFavoriteWriterPump();
         return true;
     }
@@ -17667,6 +17830,22 @@ public partial class MainWindow : Window
     }
     public int CatalogCountForSmoke => _allTiles.Count;
     public List<string> AllFileNamesForSmoke => _allTiles.Select(static tile => tile.FileName).ToList();
+    public bool CatalogOrderMatchesCurrentSortForSmoke()
+    {
+        for (int index = 1; index < _allTiles.Count; index++)
+        {
+            if (CompareTilesForSort(
+                    _allTiles[index - 1],
+                    _allTiles[index],
+                    _sortBy,
+                    _randomSortSeed) > 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
     public string DeleteStatusForSmoke => _deleteStatus;
     public bool DeleteConfirmationVisibleForSmoke => DeleteConfirmationDialog.Visibility == Visibility.Visible;
     public string DeleteConfirmationTextForSmoke => DeleteConfirmationText.Text;
@@ -18736,6 +18915,12 @@ public partial class MainWindow : Window
                 "favorite mutation did not schedule a catalog projection"));
         return (adjusted, await projection);
     }
+    public Task<SearchFilterCompletion> PendingCatalogProjectionForSmoke()
+        => _pendingSearchFilterCompletion?.Task
+            ?? Task.FromResult(new SearchFilterCompletion(
+                false,
+                false,
+                "favorite mutation did not schedule a catalog projection"));
     public async Task<bool> AdjustGalleryFavoritePointerForSmokeAsync(string fileName, int delta)
     {
         Tile? tile = SelectedTile() is { } selected
@@ -18791,6 +18976,10 @@ public partial class MainWindow : Window
     }
     public int FavoriteLevelForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Fav ?? -1;
+    public bool FavoriteNotificationsPendingForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile =>
+            string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))
+            ?.FavoriteNotificationsPending == true;
     public bool UnseenForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Unseen == true;
     public bool EnhancedForFileForSmoke(string fileName)
@@ -19116,6 +19305,8 @@ public partial class MainWindow : Window
         => CardsList.AutomationRealizeCoalescedCount;
     public bool GridAutomationRealizePendingForSmoke
         => CardsList.AutomationRealizePending;
+    public long GridAutomationRealizeMaxDispatchMsForSmoke
+        => CardsList.AutomationRealizeMaxDispatchMilliseconds;
     public long GridAutomationLookupMaxMsForSmoke
         => CardsList.AutomationLookupMaxMilliseconds;
     public void ResetGridAutomationLookupMetricsForSmoke()
@@ -22318,16 +22509,45 @@ public sealed class Tile : INotifyPropertyChanged
     public int Fav
     {
         get => _fav;
-        set
+        set => SetFavoriteLevel(value, notify: true);
+    }
+
+    private bool _favoriteNotificationsPending;
+    internal bool FavoriteNotificationsPending => _favoriteNotificationsPending;
+
+    internal void SetFavoriteLevel(int value, bool notify)
+    {
+        int clamped = Math.Clamp(value, 0, 5);
+        if (_fav == clamped)
         {
-            int clamped = Math.Clamp(value, 0, 5);
-            if (_fav == clamped) return;
-            _fav = clamped;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Fav)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FavoriteGlyph)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+            if (notify)
+                FlushFavoriteNotifications();
+            return;
         }
+        _fav = clamped;
+        if (!notify)
+        {
+            _favoriteNotificationsPending = true;
+            return;
+        }
+        RaiseFavoriteNotifications();
+    }
+
+    internal void FlushFavoriteNotifications()
+    {
+        if (!_favoriteNotificationsPending)
+            return;
+        _favoriteNotificationsPending = false;
+        RaiseFavoriteNotifications();
+    }
+
+    private void RaiseFavoriteNotifications()
+    {
+        _favoriteNotificationsPending = false;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Fav)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FavoriteGlyph)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
     }
 
     private BitmapSource? _thumbnail;

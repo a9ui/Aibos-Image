@@ -85,7 +85,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private const int InteractiveContainersPerMeasure = 1;
     private const int MediumDensityContainersPerMeasure = 4;
     private const int DenseContainersPerMeasure = 16;
-    private const int RealizationContinuationDelayMilliseconds = 16;
+    // Leave a small margin beyond the 15 ms input heartbeat before the next
+    // progressive Render invalidation. Equal-frame scheduling let the render
+    // continuation and input timer race on busy runners, occasionally joining
+    // two otherwise bounded card preparations into one visible input gap.
+    private const int RealizationContinuationDelayMilliseconds = 20;
     private static readonly Brush ProgressivePlaceholderBrush = CreateProgressivePlaceholderBrush();
 
     [DllImport("kernel32.dll")]

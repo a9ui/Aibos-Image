@@ -69,6 +69,18 @@ if ($result.favoriteEvictionExact -ne $true `
 if ($result.favoritePendingBroadenRaceExact -ne $true) {
     $failures.Add('favorite exclusion retained a stale narrow projection while a broader search was pending')
 }
+if ($result.favoriteRapidReincludeRaceExact -ne $true) {
+    $failures.Add('rapid re-favorite did not cancel an in-flight favorite exclusion projection')
+}
+if ($result.favoriteSortRaceExact -ne $true) {
+    $failures.Add('favorite mutation superseded an interactive sort without preserving its final catalog order')
+}
+if ($result.favoriteDuplicateEvictionRaceExact -ne $true) {
+    $failures.Add('superseded favorite exclusion released a newer generation notification')
+}
+if ($result.favoriteFilteredFailureStatusExact -ne $true) {
+    $failures.Add('favorite-filter write failure did not preserve rollback projection and Retry status')
+}
 if ($result.searchP95Ms -gt 250 -or $result.filterP95Ms -gt 250 -or $result.sortP95Ms -gt 500) {
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")
 }
@@ -93,6 +105,9 @@ if ($result.externalAutomationExact -ne $true `
 }
 if ($result.repeatedAutomationRealizeCoalesced -ne $true) {
     $failures.Add('repeated UI Automation Realize requests were not coalesced')
+}
+if ($null -eq $result.automationRealizeMaxDispatchMs) {
+    $failures.Add('UI Automation realization dispatch duration was not recorded')
 }
 if ($result.staleAutomationPeerLifetimeExact -ne $true `
     -or $result.staleAutomationRealizeUnavailable -ne $true `

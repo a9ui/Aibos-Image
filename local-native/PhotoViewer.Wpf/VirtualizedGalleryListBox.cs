@@ -22,6 +22,7 @@ public sealed class VirtualizedGalleryListBox : ListBox
     private int _pendingAutomationRealizeIndex = -1;
     private int _automationRealizeDispatchCount;
     private int _automationRealizeCoalescedCount;
+    private long _automationRealizeMaxDispatchMilliseconds;
     private long _automationLookupMaxMilliseconds;
     // WPF empties its own recycling queue on a collection Reset. This bounded
     // pool accepts only containers the custom panel has already removed from
@@ -50,6 +51,8 @@ public sealed class VirtualizedGalleryListBox : ListBox
     internal int AutomationRealizeDispatchCount => _automationRealizeDispatchCount;
     internal int AutomationRealizeCoalescedCount => _automationRealizeCoalescedCount;
     internal bool AutomationRealizePending => _pendingAutomationRealizeIndex >= 0;
+    internal long AutomationRealizeMaxDispatchMilliseconds
+        => _automationRealizeMaxDispatchMilliseconds;
     internal long AutomationLookupMaxMilliseconds => _automationLookupMaxMilliseconds;
     internal int DetachedContainerCreatedCount => _detachedContainerCreatedCount;
     internal int DetachedContainerReuseCount => _detachedContainerReuseCount;
@@ -135,8 +138,19 @@ public sealed class VirtualizedGalleryListBox : ListBox
                 return;
             }
 
-            ScrollIntoView(Items[index]);
-            CompleteAutomationRealizeIfPossible();
+            var watch = Stopwatch.StartNew();
+            try
+            {
+                ScrollIntoView(Items[index]);
+                CompleteAutomationRealizeIfPossible();
+            }
+            finally
+            {
+                watch.Stop();
+                _automationRealizeMaxDispatchMilliseconds = Math.Max(
+                    _automationRealizeMaxDispatchMilliseconds,
+                    watch.ElapsedMilliseconds);
+            }
         }, DispatcherPriority.Input);
     }
 
@@ -155,7 +169,10 @@ public sealed class VirtualizedGalleryListBox : ListBox
             elapsedMilliseconds);
 
     internal void ResetAutomationLookupMetrics()
-        => _automationLookupMaxMilliseconds = 0;
+    {
+        _automationLookupMaxMilliseconds = 0;
+        _automationRealizeMaxDispatchMilliseconds = 0;
+    }
 
     protected override AutomationPeer OnCreateAutomationPeer()
         => new VirtualizedGalleryListBoxAutomationPeer(this);

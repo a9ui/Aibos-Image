@@ -10142,6 +10142,227 @@ public partial class App : Application
                     && window.FilteredCountForSmoke == count
                     && selected;
 
+                // A rapid re-favorite must cancel the in-flight exclusion
+                // snapshot. Otherwise the stale Fav=0 projection can remove a
+                // tile after its model and durable intent are Fav=1 again.
+                ReportProgress("favorite-rapid-reinclude-race");
+                bool favoriteRapidReincludeRaceExact =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.MarkSelectedTileRealForSmoke()
+                    && window.SetSelectedFavoriteLevelForSmoke(1);
+                SharedWriteStatus[] rapidPreparedWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                MainWindow.SearchFilterCompletion rapidFavoriteFilter =
+                    await window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                favoriteRapidReincludeRaceExact &=
+                    rapidPreparedWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && rapidFavoriteFilter.Applied
+                    && !rapidFavoriteFilter.Discarded
+                    && window.SelectFileNameForSmoke(selectedName);
+                bool rapidExcluded =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                Task<MainWindow.SearchFilterCompletion> staleRapidExclusion =
+                    window.PendingCatalogProjectionForSmoke();
+                bool rapidReincluded =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, 1);
+                Task<MainWindow.SearchFilterCompletion> latestRapidInclusion =
+                    window.PendingCatalogProjectionForSmoke();
+                MainWindow.SearchFilterCompletion staleRapidResult =
+                    await staleRapidExclusion;
+                MainWindow.SearchFilterCompletion latestRapidResult =
+                    await latestRapidInclusion;
+                bool rapidRealizationSettled =
+                    await window.WaitForGridRealizationIdleForSmokeAsync();
+                favoriteRapidReincludeRaceExact &=
+                    rapidExcluded
+                    && rapidReincluded
+                    && staleRapidResult.Discarded
+                    && !staleRapidResult.Applied
+                    && latestRapidResult.Applied
+                    && !latestRapidResult.Discarded
+                    && rapidRealizationSettled
+                    && window.FilteredCountForSmoke == count / 10
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 1
+                    && string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        selectedName,
+                        StringComparison.OrdinalIgnoreCase);
+
+                // A favorite mutation that supersedes a running interactive
+                // sort must inherit its reorder intent. Otherwise the new
+                // sort label can be published over the old catalog order.
+                ReportProgress("favorite-sort-race");
+                Task<bool> pendingFavoriteSort =
+                    window.SetSortByInteractiveForSmokeAsync("name");
+                Task<MainWindow.SearchFilterCompletion> staleFavoriteSortProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                bool favoriteChangedDuringSort =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, 1);
+                Task<MainWindow.SearchFilterCompletion> latestFavoriteSortProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                MainWindow.SearchFilterCompletion staleFavoriteSortResult =
+                    await staleFavoriteSortProjection;
+                bool staleFavoriteSortApplied = await pendingFavoriteSort;
+                MainWindow.SearchFilterCompletion latestFavoriteSortResult =
+                    await latestFavoriteSortProjection;
+                bool favoriteSortRaceExact =
+                    favoriteChangedDuringSort
+                    && !staleFavoriteSortApplied
+                    && staleFavoriteSortResult.Discarded
+                    && !staleFavoriteSortResult.Applied
+                    && latestFavoriteSortResult.Applied
+                    && !latestFavoriteSortResult.Discarded
+                    && string.Equals(
+                        window.SortByForSmoke,
+                        "name",
+                        StringComparison.Ordinal)
+                    && window.CatalogOrderMatchesCurrentSortForSmoke()
+                    && window.FilteredCountForSmoke == count / 10
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 2;
+                bool favoriteSortRestored =
+                    await window.SetSortByInteractiveForSmokeAsync("modified-newest");
+                bool favoriteLevelRestored =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                SharedWriteStatus[] favoriteSortWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                favoriteSortRaceExact &=
+                    favoriteSortRestored
+                    && favoriteLevelRestored
+                    && favoriteSortWrites.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && window.CatalogOrderMatchesCurrentSortForSmoke()
+                    && window.FilteredCountForSmoke == count / 10
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 1
+                    && window.SelectFileNameForSmoke(selectedName);
+
+                // Two identical fast decreases create two projection
+                // generations. The discarded first generation must not flush
+                // the second generation's deferred binding notifications.
+                bool duplicateFirstDecrease =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                Task<MainWindow.SearchFilterCompletion> duplicateFirstProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                bool duplicateSecondDecrease =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                Task<MainWindow.SearchFilterCompletion> duplicateSecondProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                MainWindow.SearchFilterCompletion duplicateFirstResult =
+                    await duplicateFirstProjection;
+                bool duplicateStillDeferredAfterFirst =
+                    window.FavoriteNotificationsPendingForFileForSmoke(selectedName);
+                MainWindow.SearchFilterCompletion duplicateSecondResult =
+                    await duplicateSecondProjection;
+                await window.Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.ContextIdle);
+                bool favoriteDuplicateEvictionRaceExact =
+                    duplicateFirstDecrease
+                    && duplicateSecondDecrease
+                    && duplicateFirstResult.Discarded
+                    && !duplicateFirstResult.Applied
+                    && duplicateStillDeferredAfterFirst
+                    && duplicateSecondResult.Applied
+                    && !duplicateSecondResult.Discarded
+                    && !window.FavoriteNotificationsPendingForFileForSmoke(selectedName)
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 0
+                    && window.FilteredCountForSmoke == (count / 10) - 1;
+                MainWindow.SearchFilterCompletion duplicateFavoriteClear =
+                    await window.ClearFavoriteFiltersForSmokeAsync();
+                bool duplicateFavoriteRestored =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.SetSelectedFavoriteLevelForSmoke(1);
+                SharedWriteStatus[] duplicateRestoredWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                MainWindow.SearchFilterCompletion duplicateFavoriteFilter =
+                    await window.SetFavoriteOnlyFilterForSmokeAsync(true);
+                favoriteDuplicateEvictionRaceExact &=
+                    duplicateFavoriteClear.Applied
+                    && !duplicateFavoriteClear.Discarded
+                    && duplicateFavoriteRestored
+                    && duplicateRestoredWrites.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && duplicateFavoriteFilter.Applied
+                    && !duplicateFavoriteFilter.Discarded
+                    && window.FilteredCountForSmoke == count / 10
+                    && window.SelectFileNameForSmoke(selectedName);
+
+                // A failed durable write rolls the model back to Fav=1 and
+                // schedules a recovery projection. The deferred presentation
+                // must not overwrite that final Retry status with stale
+                // "Saving..." feedback.
+                window.FailNextFavoriteWriterForSmoke();
+                bool filteredFailureAccepted =
+                    window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
+                Task<MainWindow.SearchFilterCompletion> failedExclusion =
+                    window.PendingCatalogProjectionForSmoke();
+                SharedWriteStatus[] filteredFailureStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                Task<MainWindow.SearchFilterCompletion> rollbackProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                MainWindow.SearchFilterCompletion failedExclusionResult =
+                    await failedExclusion;
+                MainWindow.SearchFilterCompletion rollbackProjectionResult =
+                    await rollbackProjection;
+                await window.Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.ContextIdle);
+                string favoriteFilteredFailureStatus =
+                    window.DeleteStatusForSmoke;
+                bool favoriteFilteredRollbackProjectionExact =
+                    rollbackProjectionResult.Applied
+                    || rollbackProjectionResult.Discarded;
+                bool favoriteFilteredRollbackStateExact =
+                    window.FailedFavoriteRetryPendingForSmoke
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 1
+                    && window.FilteredCountForSmoke == count / 10;
+                bool favoriteFilteredFailureToastExact =
+                    favoriteFilteredFailureStatus.Contains(
+                        "Retry",
+                        StringComparison.OrdinalIgnoreCase)
+                    && !favoriteFilteredFailureStatus.Contains(
+                        "Saving",
+                        StringComparison.OrdinalIgnoreCase);
+                bool favoriteFilteredFailureStatusExact =
+                    filteredFailureAccepted
+                    && filteredFailureStatuses.Contains(SharedWriteStatus.Failed)
+                    && (failedExclusionResult.Applied
+                        || failedExclusionResult.Discarded)
+                    && favoriteFilteredRollbackStateExact
+                    && favoriteFilteredFailureToastExact;
+                window.RetryFailedFavoriteForSmoke();
+                Task<MainWindow.SearchFilterCompletion> retryProjection =
+                    window.PendingCatalogProjectionForSmoke();
+                SharedWriteStatus[] filteredRetryStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                MainWindow.SearchFilterCompletion retryProjectionResult =
+                    await retryProjection;
+                bool favoriteFilteredRetryExact =
+                    filteredRetryStatuses.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && retryProjectionResult.Applied
+                    && !retryProjectionResult.Discarded
+                    && !window.FailedFavoriteRetryPendingForSmoke
+                    && window.FavoriteLevelForFileForSmoke(selectedName) == 0
+                    && window.FilteredCountForSmoke == (count / 10) - 1;
+                favoriteFilteredFailureStatusExact &=
+                    favoriteFilteredRetryExact;
+                MainWindow.SearchFilterCompletion rapidFavoriteClear =
+                    await window.ClearFavoriteFiltersForSmokeAsync();
+                bool rapidFavoriteRestored =
+                    window.SelectFileNameForSmoke(selectedName)
+                    && window.SetSelectedFavoriteLevelForSmoke(5);
+                SharedWriteStatus[] rapidRestoredWrites =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                selected &= window.SelectFileNameForSmoke(selectedName);
+                favoriteRapidReincludeRaceExact &=
+                    rapidFavoriteClear.Applied
+                    && !rapidFavoriteClear.Discarded
+                    && rapidFavoriteRestored
+                    && rapidRestoredWrites.All(static status => status == SharedWriteStatus.Succeeded)
+                    && window.FilteredCountForSmoke == count
+                    && selected;
+
                 // Prime the accessibility paths before the memory and heartbeat
                 // baselines just like the search/filter/sort paths above. The
                 // first UI Automation client connection commits native UIA/WPF
@@ -10254,6 +10475,10 @@ public partial class App : Application
                     && mixedViewportAnchorPreserved
                     && mixedCleanupComplete
                     && favoritePendingBroadenRaceExact
+                    && favoriteRapidReincludeRaceExact
+                    && favoriteSortRaceExact
+                    && favoriteDuplicateEvictionRaceExact
+                    && favoriteFilteredFailureStatusExact
                     && accessibilityWarmupComplete
                     && selected;
 
@@ -10381,10 +10606,12 @@ public partial class App : Application
                     && window.ProjectionRemoveNotificationCountForSmoke
                         == removeNotificationsBeforeFavoriteEviction + 1;
                 int selectionBeforeFavoriteAutomation = window.SelectedIndexForSmoke;
+                SetActiveOperation("favorite-eviction-automation");
                 favoriteEvictionAutomation =
                     await RunExternalGalleryAutomationLookupAsync(
                         window,
                         favoriteEvictionAutomationProbe);
+                SetActiveOperation("favorite-eviction-realization-idle");
                 await window.WaitForGridRealizationIdleForSmokeAsync();
                 favoriteEvictionAutomationExact = favoriteEvictionAutomation.Found
                     && favoriteEvictionAutomation.NameExact
@@ -10929,6 +11156,7 @@ public partial class App : Application
                     RepeatedAutomationRealizeCoalesced = repeatedRealizeCoalesced,
                     AutomationRealizeDispatchCount = window.GridAutomationRealizeDispatchCountForSmoke,
                     AutomationRealizeCoalescedCount = window.GridAutomationRealizeCoalescedCountForSmoke,
+                    AutomationRealizeMaxDispatchMs = window.GridAutomationRealizeMaxDispatchMsForSmoke,
                     AutomationLookupMaxMs = window.GridAutomationLookupMaxMsForSmoke,
                     StaleAutomationPeerLifetimeExact = stalePeerLifetimeExact,
                     StaleAutomationRealizeUnavailable = staleRealizeUnavailable,
@@ -11009,6 +11237,22 @@ public partial class App : Application
                         window.CatalogLayoutMaxMeasureThreadCpuMsForSmoke,
                     MixedLatestWins = mixedLatestWins,
                     FavoritePendingBroadenRaceExact = favoritePendingBroadenRaceExact,
+                    FavoriteRapidReincludeRaceExact = favoriteRapidReincludeRaceExact,
+                    FavoriteSortRaceExact = favoriteSortRaceExact,
+                    FavoriteDuplicateEvictionRaceExact =
+                        favoriteDuplicateEvictionRaceExact,
+                    FavoriteFilteredFailureStatusExact =
+                        favoriteFilteredFailureStatusExact,
+                    FavoriteFilteredFailureStatus =
+                        favoriteFilteredFailureStatus,
+                    FavoriteFilteredRollbackProjectionExact =
+                        favoriteFilteredRollbackProjectionExact,
+                    FavoriteFilteredRollbackStateExact =
+                        favoriteFilteredRollbackStateExact,
+                    FavoriteFilteredFailureToastExact =
+                        favoriteFilteredFailureToastExact,
+                    FavoriteFilteredRetryExact =
+                        favoriteFilteredRetryExact,
                     MixedViewportAnchorPreserved = mixedViewportAnchorPreserved,
                     MixedDiscardedCount = mixedDiscardedCount,
                     MixedStaleSearchDiscarded = staleMixedSearchResult.Discarded,
@@ -25096,6 +25340,7 @@ public partial class App : Application
         public bool RepeatedAutomationRealizeCoalesced { get; init; }
         public int AutomationRealizeDispatchCount { get; init; }
         public int AutomationRealizeCoalescedCount { get; init; }
+        public long AutomationRealizeMaxDispatchMs { get; init; }
         public long AutomationLookupMaxMs { get; init; }
         public bool StaleAutomationPeerLifetimeExact { get; init; }
         public bool StaleAutomationRealizeUnavailable { get; init; }
@@ -25158,6 +25403,15 @@ public partial class App : Application
         public double CatalogLayoutMaxMeasureThreadCpuMs { get; init; }
         public bool MixedLatestWins { get; init; }
         public bool FavoritePendingBroadenRaceExact { get; init; }
+        public bool FavoriteRapidReincludeRaceExact { get; init; }
+        public bool FavoriteSortRaceExact { get; init; }
+        public bool FavoriteDuplicateEvictionRaceExact { get; init; }
+        public bool FavoriteFilteredFailureStatusExact { get; init; }
+        public string FavoriteFilteredFailureStatus { get; init; } = "";
+        public bool FavoriteFilteredRollbackProjectionExact { get; init; }
+        public bool FavoriteFilteredRollbackStateExact { get; init; }
+        public bool FavoriteFilteredFailureToastExact { get; init; }
+        public bool FavoriteFilteredRetryExact { get; init; }
         public bool MixedViewportAnchorPreserved { get; init; }
         public int MixedDiscardedCount { get; init; }
         public bool MixedStaleSearchDiscarded { get; init; }
