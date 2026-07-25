@@ -30,10 +30,15 @@ public partial class App
         long UiThreadCpuTicks,
         uint CurrentThreadId,
         CatalogDispatcherEventKind Kind,
-        DispatcherOperation? Operation,
+        int OperationIdentity,
+        string CallbackName,
         DispatcherPriority Priority,
         string AppOperation,
         long HeartbeatTag);
+
+    private sealed record CatalogDispatcherOperationIdentity(
+        int Value,
+        string CallbackName);
 
     private sealed class CatalogDispatcherOperationBuilder(int identity)
     {
@@ -126,7 +131,8 @@ public partial class App
 
     private sealed class CatalogDispatcherDiagnosticRecorder : IDisposable
     {
-        private const int EventCapacity = 65_536;
+        // Harness-only headroom for the sealed UIA/keyboard measurement.
+        private const int EventCapacity = 524_288;
         private const int ActiveStackCapacity = 32;
         private const uint ThreadQueryLimitedInformation = 0x0800;
         private static readonly FieldInfo? DispatcherOperationMethodField =
@@ -137,6 +143,9 @@ public partial class App
         private readonly Func<string> _appOperationProvider;
         private readonly CatalogDispatcherRawEvent[] _events =
             new CatalogDispatcherRawEvent[EventCapacity];
+        private readonly ConditionalWeakTable<
+            DispatcherOperation,
+            CatalogDispatcherOperationIdentity> _operationIdentities = new();
         private readonly DispatcherOperation?[] _activeStack =
             new DispatcherOperation?[ActiveStackCapacity];
         private readonly uint _uiThreadId;
@@ -148,6 +157,7 @@ public partial class App
         private int _activeStackOverflowCount;
         private int _activeStackMismatchCount;
         private long _nextHeartbeatTag;
+        private int _nextOperationIdentity;
         private bool _started;
         private bool _stopped;
 
@@ -178,11 +188,36 @@ public partial class App
             hooks.OperationStarted += Hooks_OperationStarted;
             hooks.OperationCompleted += Hooks_OperationCompleted;
             hooks.OperationAborted += Hooks_OperationAborted;
-            hooks.OperationPriorityChanged += Hooks_OperationPriorityChanged;
-            hooks.DispatcherInactive += Hooks_DispatcherInactive;
             _started = true;
             return true;
         }
+
+        public void PrepareCapacityForMeasurement()
+        {
+            if (!_dispatcher.CheckAccess() || _started)
+                throw new InvalidOperationException(
+                    "Dispatcher diagnostic capacity must be prepared before hooks start.");
+
+            // Commit the fixed harness buffer before the product memory
+            // baseline so recording does not masquerade as product growth.
+            for (int index = 0; index < _events.Length; index += 32)
+            {
+                _events[index] = new CatalogDispatcherRawEvent(
+                    -1,
+                    -1,
+                    -1,
+                    0,
+                    CatalogDispatcherEventKind.DispatcherInactive,
+                    0,
+                    "",
+                    DispatcherPriority.Invalid,
+                    "",
+                    0);
+            }
+            Array.Clear(_events);
+        }
+
+        public void StopRecording() => StopHooks();
 
         public long ReadUiThreadCpuTicks()
         {
@@ -253,20 +288,22 @@ public partial class App
             });
 
             var operationBuilders =
-                new Dictionary<DispatcherOperation, CatalogDispatcherOperationBuilder>(
-                    ReferenceEqualityComparer.Instance);
-            var heartbeatOperations = new Dictionary<long, DispatcherOperation>();
-            int nextOperationIdentity = 0;
+                new Dictionary<int, CatalogDispatcherOperationBuilder>();
+            var heartbeatOperations = new Dictionary<long, int>();
             foreach (CatalogDispatcherRawEvent item in rawEvents)
             {
-                if (item.Operation is not { } operation)
+                if (item.OperationIdentity <= 0)
                     continue;
-                if (!operationBuilders.TryGetValue(operation, out CatalogDispatcherOperationBuilder? builder))
+                if (!operationBuilders.TryGetValue(
+                    item.OperationIdentity,
+                    out CatalogDispatcherOperationBuilder? builder))
                 {
-                    builder = new CatalogDispatcherOperationBuilder(++nextOperationIdentity);
-                    builder.CallbackName =
-                        DispatcherOperationCallbackName(operation);
-                    operationBuilders.Add(operation, builder);
+                    builder =
+                        new CatalogDispatcherOperationBuilder(item.OperationIdentity)
+                        {
+                            CallbackName = item.CallbackName,
+                        };
+                    operationBuilders.Add(item.OperationIdentity, builder);
                 }
                 if (item.Priority != DispatcherPriority.Invalid)
                     builder.Priority = item.Priority;
@@ -304,23 +341,23 @@ public partial class App
                         break;
                     case CatalogDispatcherEventKind.HeartbeatStarted:
                         if (item.HeartbeatTag > 0)
-                            heartbeatOperations[item.HeartbeatTag] = operation;
+                            heartbeatOperations[item.HeartbeatTag] =
+                                item.OperationIdentity;
                         break;
                 }
             }
 
-            var boundarySet =
-                new HashSet<DispatcherOperation>(ReferenceEqualityComparer.Instance);
+            var boundarySet = new HashSet<int>();
             foreach (DispatcherOperation? operation in boundaryOperations)
             {
                 if (operation is not null)
-                    boundarySet.Add(operation);
+                    boundarySet.Add(IdentityFor(operation).Value);
             }
             int lifecycleTimestampInversionCount = 0;
             int concurrentPostedStartReorderCount = 0;
             int startedWithoutTerminalCount = 0;
             int boundaryTruncatedOperationCount = 0;
-            foreach ((DispatcherOperation operation, CatalogDispatcherOperationBuilder builder)
+            foreach ((int operationIdentity, CatalogDispatcherOperationBuilder builder)
                 in operationBuilders)
             {
                 if (builder.PostedTimestamp > 0
@@ -343,7 +380,7 @@ public partial class App
                 }
                 if (builder.StartedTimestamp > 0 && builder.TerminalTimestamp == 0)
                 {
-                    if (boundarySet.Contains(operation))
+                    if (boundarySet.Contains(operationIdentity))
                         boundaryTruncatedOperationCount++;
                     else
                         startedWithoutTerminalCount++;
@@ -375,13 +412,13 @@ public partial class App
                 }
                 rawOverBudgetCount++;
                 CatalogDispatcherOperationBuilder? heartbeatBuilder = null;
-                DispatcherOperation? heartbeatOperation = null;
+                int heartbeatOperationIdentity = 0;
                 if (heartbeat.HeartbeatTag <= 0
                     || !heartbeatOperations.TryGetValue(
                         heartbeat.HeartbeatTag,
-                        out heartbeatOperation)
+                        out heartbeatOperationIdentity)
                     || !operationBuilders.TryGetValue(
-                        heartbeatOperation,
+                        heartbeatOperationIdentity,
                         out heartbeatBuilder)
                     || heartbeatBuilder.PostedTimestamp <= 0
                     || heartbeatBuilder.StartedTimestamp <= 0
@@ -402,10 +439,10 @@ public partial class App
                         heartbeatBuilder.StartedTimestamp);
                 var activeOperations = new List<CatalogDispatcherOperationDiagnostic>();
                 double activeOperationOverlapMs = 0;
-                foreach ((DispatcherOperation operation, CatalogDispatcherOperationBuilder builder)
+                foreach ((int operationIdentity, CatalogDispatcherOperationBuilder builder)
                     in operationBuilders)
                 {
-                    if (ReferenceEquals(operation, heartbeatOperation)
+                    if (operationIdentity == heartbeatOperationIdentity
                         || builder.StartedTimestamp <= 0
                         || builder.TerminalTimestamp <= builder.StartedTimestamp)
                     {
@@ -475,13 +512,13 @@ public partial class App
                 long strictQueueBoundaryTimestamp = 0;
                 double excessQueueCpuMs = -1;
                 if (queueLifecycleExact
-                    && heartbeatOperation is not null
+                    && heartbeatOperationIdentity > 0
                     && heartbeatBuilder is not null)
                 {
                     strictQueueDelayTicks = StrictSchedulerQueueDelayTicks(
                         queueSegmentStartTimestamp,
                         queueSegmentEndTimestamp,
-                        heartbeatOperation,
+                        heartbeatOperationIdentity,
                         heartbeatBuilder,
                         operationBuilders,
                         panelPhases,
@@ -563,7 +600,7 @@ public partial class App
                 && heartbeatLifecycleMissingCount == 0
                 && !panelPhaseOverflow
                 && panelPhaseInvalidCount == 0;
-            return new CatalogDispatcherDiagnosticSummary
+            var summary = new CatalogDispatcherDiagnosticSummary
             {
                 SensorValid = sensorValid,
                 HooksStarted = _started,
@@ -591,6 +628,11 @@ public partial class App
                     maxStrictSchedulerQueueDelayMs,
                 OverBudgetHeartbeats = overBudget,
             };
+            // The summary is value-only. Release DispatcherOperation graphs
+            // before the harness takes its post-measurement full-GC snapshot.
+            Array.Clear(_events);
+            _operationIdentities.Clear();
+            return summary;
         }
 
         public void Dispose()
@@ -612,8 +654,6 @@ public partial class App
                     hooks.OperationStarted -= Hooks_OperationStarted;
                     hooks.OperationCompleted -= Hooks_OperationCompleted;
                     hooks.OperationAborted -= Hooks_OperationAborted;
-                    hooks.OperationPriorityChanged -= Hooks_OperationPriorityChanged;
-                    hooks.DispatcherInactive -= Hooks_DispatcherInactive;
                 }
                 _stopped = true;
             }
@@ -637,8 +677,14 @@ public partial class App
             }
 
             DispatcherPriority priority = DispatcherPriority.Invalid;
+            int operationIdentity = 0;
+            string callbackName = "";
             if (operation is not null)
             {
+                CatalogDispatcherOperationIdentity identity =
+                    IdentityFor(operation);
+                operationIdentity = identity.Value;
+                callbackName = identity.CallbackName;
                 try { priority = operation.Priority; }
                 catch (InvalidOperationException) { }
             }
@@ -648,12 +694,21 @@ public partial class App
                 cpuTicks,
                 GetCurrentThreadId(),
                 kind,
-                operation,
+                operationIdentity,
+                callbackName,
                 priority,
                 _appOperationProvider(),
                 heartbeatTag);
             return cpuTicks;
         }
+
+        private CatalogDispatcherOperationIdentity IdentityFor(
+            DispatcherOperation operation)
+            => _operationIdentities.GetValue(
+                operation,
+                key => new CatalogDispatcherOperationIdentity(
+                    Interlocked.Increment(ref _nextOperationIdentity),
+                    DispatcherOperationCallbackName(key)));
 
         private void Hooks_OperationPosted(object? sender, DispatcherHookEventArgs e)
             => Record(CatalogDispatcherEventKind.OperationPosted, e.Operation);
@@ -727,9 +782,9 @@ public partial class App
         private static long StrictSchedulerQueueDelayTicks(
             long queueStart,
             long queueEnd,
-            DispatcherOperation heartbeatOperation,
+            int heartbeatOperationIdentity,
             CatalogDispatcherOperationBuilder heartbeatBuilder,
-            IReadOnlyDictionary<DispatcherOperation, CatalogDispatcherOperationBuilder>
+            IReadOnlyDictionary<int, CatalogDispatcherOperationBuilder>
                 operationBuilders,
             IReadOnlyList<VirtualizingPanelPhaseDiagnostic> panelPhases,
             IReadOnlyList<CatalogDispatcherRawEvent> rawEvents,
@@ -747,10 +802,10 @@ public partial class App
             }
 
             var blockers = new List<(long Start, long End, long StartCpuTicks)>();
-            foreach ((DispatcherOperation operation, CatalogDispatcherOperationBuilder builder)
+            foreach ((int operationIdentity, CatalogDispatcherOperationBuilder builder)
                 in operationBuilders)
             {
-                if (ReferenceEquals(operation, heartbeatOperation)
+                if (operationIdentity == heartbeatOperationIdentity
                     || builder.StartedTimestamp <= 0
                     || builder.TerminalTimestamp <= builder.StartedTimestamp)
                 {

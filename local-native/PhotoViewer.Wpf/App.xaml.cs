@@ -9819,7 +9819,6 @@ public partial class App : Application
                 new CatalogDispatcherDiagnosticRecorder(
                     window.Dispatcher,
                     () => activeOperation);
-            dispatcherDiagnostics.Start();
             bool uiThreadPriorityNormal =
                 Thread.CurrentThread.Priority == ThreadPriority.Normal;
             using var schedulerControlProbes = new SchedulerControlProbePair();
@@ -10542,6 +10541,9 @@ public partial class App : Application
                     && accessibilityWarmupComplete
                     && selected;
 
+                dispatcherDiagnostics.PrepareCapacityForMeasurement();
+                dispatcherDiagnostics.Start();
+
                 var process = Process.GetCurrentProcess();
                 // The forced collection below defines the memory baseline; it
                 // is harness work, not an app interaction. Preserve every
@@ -11026,6 +11028,7 @@ public partial class App : Application
                 await Task.Delay(250);
                 heartbeat.Stop();
                 long schedulerMeasurementEndTimestamp = Stopwatch.GetTimestamp();
+                dispatcherDiagnostics.StopRecording();
                 SchedulerHostAttributionSummary schedulerHostAttribution =
                     schedulerControlProbes.StopAndAnalyze(
                         schedulerMeasurementStartTimestamp,
@@ -11060,6 +11063,194 @@ public partial class App : Application
                 double liveManagedMemoryRegressionPercent = managedMemoryBefore <= 0
                     ? 0
                     : ((managedMemoryAfterFullGc - managedMemoryBefore) * 100d) / managedMemoryBefore;
+
+                // Run the two Extended-selection contract cases after the
+                // heartbeat/memory interval is sealed. Their own completion
+                // metrics remain part of the hard Reset/slice aggregate, while
+                // synthetic sparse-selection setup cannot pollute product
+                // responsiveness or memory attribution.
+                ReportProgress("extended-selection-far-tail");
+                int farTailPrimaryIndex = 10;
+                int farTailSecondaryIndex = count - 10;
+                string farTailPrimaryName =
+                    $"interaction-smoke-{farTailPrimaryIndex:D6}.png";
+                string farTailSecondarySuffix =
+                    farTailSecondaryIndex % 100 == 0 ? "-needle" : "";
+                string farTailSecondaryName =
+                    $"interaction-smoke-{farTailSecondaryIndex:D6}{farTailSecondarySuffix}.png";
+                bool farTailSelectionPrepared =
+                    window.SelectSparseIndicesForSmoke(
+                        farTailPrimaryIndex,
+                        farTailPrimaryIndex,
+                        farTailSecondaryIndex);
+                farTailSelectionPrepared &=
+                    window.SelectedCountForSmoke == 2
+                    && window.SelectionVisualItemCountForSmoke >= 1;
+                MainWindow.SearchFilterCompletion farTailSelectionReleaseCompletion =
+                    await window.SetSearchInputForSmokeAsync("interaction");
+                await FlushLayoutAsync();
+                List<string> farTailSelectedNames = window.SelectedFileNamesForSmoke;
+                bool farTailFocusRestored =
+                    window.FocusSelectedGalleryItemForSmoke()
+                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                GridSelectionVisualSmokeSnapshot farTailVisual =
+                    await window.WaitForGridSelectionVisualForSmokeAsync(
+                        farTailPrimaryName);
+                bool farTailAutomationSelected =
+                    window.GridAutomationReportsSelectedForSmoke(
+                        farTailPrimaryName);
+                bool farTailSelectionReleaseExact =
+                    farTailSelectionPrepared
+                    && farTailSelectionReleaseCompletion.Applied
+                    && !farTailSelectionReleaseCompletion.Discarded
+                    && farTailSelectionReleaseCompletion.PreResetSelectionCleared
+                    && farTailSelectionReleaseCompletion.PreResetSelectionReleasedCount >= 1
+                    && farTailSelectionReleaseCompletion.MaxApplySliceMs
+                        <= CatalogProjectionDiagnosticSliceTargetMs
+                    && farTailSelectionReleaseCompletion.ResetMs
+                        <= CatalogSnapshotResetBudgetMs
+                    && window.FilteredCountForSmoke == count
+                    && window.SelectedCountForSmoke == 2
+                    && string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        farTailPrimaryName,
+                        StringComparison.OrdinalIgnoreCase)
+                    && farTailSelectedNames.Contains(
+                        farTailPrimaryName,
+                        StringComparer.OrdinalIgnoreCase)
+                    && farTailSelectedNames.Contains(
+                        farTailSecondaryName,
+                        StringComparer.OrdinalIgnoreCase)
+                    && farTailFocusRestored
+                    && farTailVisual.CanonicalSelected
+                    && farTailVisual.SelectedItemsContains
+                    && farTailAutomationSelected;
+                MainWindow.SearchFilterCompletion farTailSelectionClear =
+                    await window.SetSearchInputForSmokeAsync("");
+                await FlushLayoutAsync();
+
+                ReportProgress("extended-selection-secondary-eviction");
+                int evictionPrimaryIndex = 1;
+                int evictionSecondaryIndex = 3;
+                string evictionPrimaryName =
+                    $"interaction-smoke-{evictionPrimaryIndex:D6}.png";
+                bool secondaryEvictionPrepared =
+                    window.SelectSparseIndicesForSmoke(
+                        evictionPrimaryIndex,
+                        evictionPrimaryIndex,
+                        evictionSecondaryIndex);
+                secondaryEvictionPrepared &=
+                    window.SelectedCountForSmoke == 2
+                    && window.SelectionVisualItemCountForSmoke >= 1;
+                MainWindow.SearchFilterCompletion secondaryEvictionReleaseCompletion =
+                    await window.SetUnseenOnlyFilterForSmokeAsync(true);
+                await FlushLayoutAsync();
+                const int minimumLargeProjectionCount = 24_000;
+                int secondaryEvictionFilteredCount = window.FilteredCountForSmoke;
+                int secondaryEvictionSelectedCount = window.SelectedCountForSmoke;
+                string? secondaryEvictionSelectedFileName =
+                    window.SelectedFileNameForSmoke;
+                bool secondaryEvictionFocusRestored =
+                    window.FocusSelectedGalleryItemForSmoke()
+                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                GridSelectionVisualSmokeSnapshot secondaryEvictionVisual =
+                    await window.WaitForGridSelectionVisualForSmokeAsync(
+                        evictionPrimaryName);
+                bool secondaryEvictionAutomationSelected =
+                    window.GridAutomationReportsSelectedForSmoke(
+                        evictionPrimaryName);
+                bool secondaryEvictionReleaseExact =
+                    secondaryEvictionPrepared
+                    && secondaryEvictionReleaseCompletion.Applied
+                    && !secondaryEvictionReleaseCompletion.Discarded
+                    && secondaryEvictionReleaseCompletion.PreResetSelectionCleared
+                    && secondaryEvictionReleaseCompletion.PreResetSelectionReleasedCount >= 1
+                    && secondaryEvictionReleaseCompletion.MaxApplySliceMs
+                        <= CatalogProjectionDiagnosticSliceTargetMs
+                    && secondaryEvictionReleaseCompletion.ResetMs
+                        <= CatalogSnapshotResetBudgetMs
+                    && secondaryEvictionFilteredCount >= minimumLargeProjectionCount
+                    && secondaryEvictionFilteredCount < count
+                    && secondaryEvictionSelectedCount == 1
+                    && string.Equals(
+                        secondaryEvictionSelectedFileName,
+                        evictionPrimaryName,
+                        StringComparison.OrdinalIgnoreCase)
+                    && secondaryEvictionFocusRestored
+                    && secondaryEvictionVisual.CanonicalSelected
+                    && secondaryEvictionVisual.SelectedItemsContains
+                    && secondaryEvictionAutomationSelected;
+                MainWindow.SearchFilterCompletion secondaryEvictionClear =
+                    await window.SetUnseenOnlyFilterForSmokeAsync(false);
+                await FlushLayoutAsync();
+
+                ReportProgress("single-selection-threshold-boundary");
+                const int boundarySelectionIndex = 23_999;
+                string boundarySelectionName =
+                    $"interaction-smoke-{boundarySelectionIndex:D6}.png";
+                bool boundarySelectionPrepared =
+                    window.SelectSparseIndicesForSmoke(
+                        boundarySelectionIndex,
+                        boundarySelectionIndex)
+                    && window.SelectedCountForSmoke == 1
+                    && window.SelectionVisualItemCountForSmoke >= 1;
+                MainWindow.SearchFilterCompletion boundarySelectionReleaseCompletion =
+                    await window.SetSearchInputForSmokeAsync("interaction");
+                await FlushLayoutAsync();
+                bool boundarySelectionFocusRestored =
+                    window.FocusSelectedGalleryItemForSmoke()
+                    && await window.WaitForPrimaryGalleryFocusForSmokeAsync();
+                GridSelectionVisualSmokeSnapshot boundarySelectionVisual =
+                    await window.WaitForGridSelectionVisualForSmokeAsync(
+                        boundarySelectionName);
+                bool boundarySelectionAutomationSelected =
+                    window.GridAutomationReportsSelectedForSmoke(
+                        boundarySelectionName);
+                bool boundarySelectionReleaseExact =
+                    boundarySelectionPrepared
+                    && boundarySelectionReleaseCompletion.Applied
+                    && !boundarySelectionReleaseCompletion.Discarded
+                    && boundarySelectionReleaseCompletion.PreResetSelectionCleared
+                    && boundarySelectionReleaseCompletion.PreResetSelectionReleasedCount >= 1
+                    && boundarySelectionReleaseCompletion.MaxApplySliceMs
+                        <= CatalogProjectionDiagnosticSliceTargetMs
+                    && boundarySelectionReleaseCompletion.ResetMs
+                        <= CatalogSnapshotResetBudgetMs
+                    && window.FilteredCountForSmoke == count
+                    && window.SelectedCountForSmoke == 1
+                    && string.Equals(
+                        window.SelectedFileNameForSmoke,
+                        boundarySelectionName,
+                        StringComparison.OrdinalIgnoreCase)
+                    && boundarySelectionFocusRestored
+                    && boundarySelectionVisual.CanonicalSelected
+                    && boundarySelectionVisual.SelectedItemsContains
+                    && boundarySelectionAutomationSelected;
+                MainWindow.SearchFilterCompletion boundarySelectionClear =
+                    await window.SetSearchInputForSmokeAsync("");
+                await FlushLayoutAsync();
+                bool selectedAfterExtendedSelectionCases =
+                    window.SelectFileNameForSmoke(selectedName);
+                _ = await window.WaitForGridRealizationIdleForSmokeAsync();
+
+                searchPhaseSamples.Add(farTailSelectionReleaseCompletion);
+                searchPhaseSamples.Add(boundarySelectionReleaseCompletion);
+                filterPhaseSamples.Add(secondaryEvictionReleaseCompletion);
+                countsExact &= window.FilteredCountForSmoke == count;
+                completionsApplied &=
+                    farTailSelectionReleaseCompletion.Applied
+                    && !farTailSelectionReleaseCompletion.Discarded
+                    && farTailSelectionClear.Applied
+                    && !farTailSelectionClear.Discarded
+                    && secondaryEvictionReleaseCompletion.Applied
+                    && !secondaryEvictionReleaseCompletion.Discarded
+                    && secondaryEvictionClear.Applied
+                    && !secondaryEvictionClear.Discarded
+                    && boundarySelectionReleaseCompletion.Applied
+                    && !boundarySelectionReleaseCompletion.Discarded
+                    && boundarySelectionClear.Applied
+                    && !boundarySelectionClear.Discarded;
+
                 double searchP95 = SmokePercentile(searchSamples, 0.95);
                 double filterP95 = SmokePercentile(filterSamples, 0.95);
                 double sortP95 = SmokePercentile(sortSamples, 0.95);
@@ -11214,6 +11405,10 @@ public partial class App : Application
                         <= CatalogColdGalleryFocusWarmupBudgetMs
                     && countsExact
                     && completionsApplied
+                    && farTailSelectionReleaseExact
+                    && secondaryEvictionReleaseExact
+                    && boundarySelectionReleaseExact
+                    && selectedAfterExtendedSelectionCases
                     && selectionStable
                     && bounded
                     && detachedContainerReuseActive
@@ -11284,6 +11479,17 @@ public partial class App : Application
                     FavoriteEvictionAutomation = favoriteEvictionAutomation,
                     FavoriteEvictionSelectedFileName = favoriteEvictionSelected,
                     FavoriteEvictionExpectedNeighbor = favoriteEvictionExpectedNeighbor,
+                    FarTailSelectionReleaseExact = farTailSelectionReleaseExact,
+                    FarTailSelectionReleaseCompletion = farTailSelectionReleaseCompletion,
+                    SecondaryEvictionReleaseExact = secondaryEvictionReleaseExact,
+                    SecondaryEvictionReleaseCompletion = secondaryEvictionReleaseCompletion,
+                    SecondaryEvictionPrepared = secondaryEvictionPrepared,
+                    SecondaryEvictionMinimumFilteredCount = minimumLargeProjectionCount,
+                    SecondaryEvictionFilteredCount = secondaryEvictionFilteredCount,
+                    SecondaryEvictionSelectedCount = secondaryEvictionSelectedCount,
+                    SecondaryEvictionSelectedFileName = secondaryEvictionSelectedFileName,
+                    BoundarySelectionReleaseExact = boundarySelectionReleaseExact,
+                    BoundarySelectionReleaseCompletion = boundarySelectionReleaseCompletion,
                     SearchSamplesMs = searchSamples,
                     SearchPhaseSamples = searchPhaseSamples,
                     FilterSamplesMs = filterSamples,
@@ -26168,6 +26374,17 @@ public partial class App : Application
         public ExternalGalleryAutomationSmokeSnapshot? FavoriteEvictionAutomation { get; init; }
         public string? FavoriteEvictionSelectedFileName { get; init; }
         public string? FavoriteEvictionExpectedNeighbor { get; init; }
+        public bool FarTailSelectionReleaseExact { get; init; }
+        public MainWindow.SearchFilterCompletion FarTailSelectionReleaseCompletion { get; init; }
+        public bool SecondaryEvictionReleaseExact { get; init; }
+        public MainWindow.SearchFilterCompletion SecondaryEvictionReleaseCompletion { get; init; }
+        public bool SecondaryEvictionPrepared { get; init; }
+        public int SecondaryEvictionMinimumFilteredCount { get; init; }
+        public int SecondaryEvictionFilteredCount { get; init; }
+        public int SecondaryEvictionSelectedCount { get; init; }
+        public string? SecondaryEvictionSelectedFileName { get; init; }
+        public bool BoundarySelectionReleaseExact { get; init; }
+        public MainWindow.SearchFilterCompletion BoundarySelectionReleaseCompletion { get; init; }
         public List<long> SearchSamplesMs { get; init; } = [];
         public List<MainWindow.SearchFilterCompletion> SearchPhaseSamples { get; init; } = [];
         public List<long> FilterSamplesMs { get; init; } = [];

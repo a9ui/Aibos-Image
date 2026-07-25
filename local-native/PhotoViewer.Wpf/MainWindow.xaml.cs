@@ -1230,6 +1230,7 @@ public partial class MainWindow : Window
         Tile[] SelectedTiles,
         Tile? PreferredSelection,
         int PreferredSelectionIndex,
+        int SelectedRelocationScanLength,
         bool ActivePreviewIncluded,
         GridZoomAnchor? ViewportAnchor,
         PreparedVirtualizingLayout? PreparedLayout,
@@ -6744,7 +6745,8 @@ public partial class MainWindow : Window
         IEnumerable<Tile> selectedTiles,
         Tile? primary,
         int? primaryIndex = null,
-        bool deferPrimaryPresentation = false)
+        bool deferPrimaryPresentation = false,
+        bool realizedOnlyVisuals = false)
     {
         CancelPendingGalleryFocus();
         _selectedPaths.Clear();
@@ -6796,7 +6798,9 @@ public partial class MainWindow : Window
                     : _tiles.IndexOf(effectivePrimary);
         _selectionVisualSyncGeneration++;
 
-        SynchronizeSelectionControls(materializedSelection);
+        SynchronizeSelectionControls(
+            materializedSelection,
+            realizedOnly: realizedOnlyVisuals);
         if (deferPrimaryPresentation && effectivePrimary is not null)
             QueuePrimarySelectionPresentation(effectivePrimary, _primarySelectedIndex);
         else
@@ -6825,7 +6829,9 @@ public partial class MainWindow : Window
         }, DispatcherPriority.ContextIdle);
     }
 
-    private void SynchronizeSelectionControls(IReadOnlyList<Tile>? knownMaterializedSelection = null)
+    private void SynchronizeSelectionControls(
+        IReadOnlyList<Tile>? knownMaterializedSelection = null,
+        bool realizedOnly = false)
     {
         if (_syncingSelection)
             return;
@@ -6833,21 +6839,23 @@ public partial class MainWindow : Window
         try
         {
             _syncingSelection = true;
-            bool sparseVisuals = _selectedPaths.Count > MaxMaterializedSelectionVisualItems;
-            IReadOnlyList<Tile>? materializedSelections = sparseVisuals
+            bool hugeSparseSelection =
+                _selectedPaths.Count > MaxMaterializedSelectionVisualItems;
+            bool realizedOnlyVisuals = hugeSparseSelection || realizedOnly;
+            IReadOnlyList<Tile>? materializedSelections = hugeSparseSelection
                 ? null
                 : knownMaterializedSelection
                     ?? _tiles.Where(tile => _selectedPaths.Contains(tile.Path)).ToList();
             SynchronizeCanonicalSelectionMarkers(materializedSelections);
             var cardsWatch = Stopwatch.StartNew();
-            if (sparseVisuals)
+            if (realizedOnlyVisuals)
                 SynchronizeRealizedSelectionControl(CardsList);
             else
                 SynchronizeSelectionControl(CardsList, materializedSelections!);
             cardsWatch.Stop();
             _lastCardsSelectionSyncMs = cardsWatch.ElapsedMilliseconds;
             var rowsWatch = Stopwatch.StartNew();
-            if (sparseVisuals)
+            if (realizedOnlyVisuals)
                 SynchronizeRealizedSelectionControl(RowsList);
             else
                 SynchronizeSelectionControl(RowsList, materializedSelections!);
@@ -6913,14 +6921,13 @@ public partial class MainWindow : Window
             return true;
         }
 
-        // Selector.LocateSelectedItems walks the post-Reset view until it
-        // relocates the old WPF selection. Keep normal and small projections
-        // semantically untouched; release only when the known scan length can
-        // consume the atomic 12 ms Reset budget.
-        int expectedScanLength = filterResult.SelectedTiles.Length == 0
-            ? filterResult.Count
-            : Math.Max(0, filterResult.PreferredSelectionIndex);
-        return expectedScanLength >= CatalogResetSelectionScanReleaseThreshold;
+        // Selector.LocateSelectedItems must relocate every selected ItemInfo,
+        // not only the primary one. The worker computes the farthest surviving
+        // selection (or the complete projection length when any selection is
+        // evicted) so an Extended selection with a near primary cannot hide a
+        // far-tail scan from this dispatcher-bound decision.
+        return filterResult.SelectedRelocationScanLength
+            >= CatalogResetSelectionScanReleaseThreshold;
     }
 
     private void SynchronizeCanonicalSelectionMarkers(IReadOnlyCollection<Tile>? selectedTiles)
@@ -10270,6 +10277,7 @@ public partial class MainWindow : Window
         Tile? primary = null;
         Tile? previous = null;
         Tile? lastSelected = null;
+        int farthestSelectedIndex = -1;
         bool activePreviewIncluded = false;
         for (int index = 0; index < filteredCount; index++)
         {
@@ -10289,6 +10297,7 @@ public partial class MainWindow : Window
             {
                 survivingSelected.Add(tile);
                 lastSelected = tile;
+                farthestSelectedIndex = index;
             }
             if (!activePreviewIncluded
                 && !string.IsNullOrWhiteSpace(snapshot.ActivePreviewTabPath)
@@ -10301,6 +10310,11 @@ public partial class MainWindow : Window
             }
         }
 
+        int selectedRelocationScanLength = selected is null
+            ? 0
+            : survivingSelected.Count < selected.Count
+                ? filteredCount
+                : farthestSelectedIndex + 1;
         Tile? preferred = primary ?? previous ?? lastSelected;
         if (preferred is null && snapshot.SelectionFallbackIndex.HasValue && filteredCount > 0)
             preferred = filtered[Math.Clamp(snapshot.SelectionFallbackIndex.Value, 0, filteredCount - 1)];
@@ -10373,6 +10387,7 @@ public partial class MainWindow : Window
             survivingSelected.ToArray(),
             preferred,
             preferredIndex,
+            selectedRelocationScanLength,
             activePreviewIncluded,
             snapshot.ViewportAnchor,
             preparedLayout,
@@ -10817,7 +10832,10 @@ public partial class MainWindow : Window
         if (preferred is not null)
         {
             _selectionVisualSyncGeneration++;
-            SynchronizeSelectionControls(filterResult.SelectedTiles);
+            SynchronizeSelectionControls(
+                filterResult.SelectedTiles,
+                realizedOnly: filterResult.SelectedRelocationScanLength
+                    >= CatalogResetSelectionScanReleaseThreshold);
         }
 
         phase.Stop();
@@ -11005,7 +11023,10 @@ public partial class MainWindow : Window
             _primarySelectedTile = preferred;
             _primarySelectedIndex = _tiles.IndexOf(preferred);
             _selectionVisualSyncGeneration++;
-            SynchronizeSelectionControls();
+            SynchronizeSelectionControls(
+                filterResult.SelectedTiles,
+                realizedOnly: filterResult.SelectedRelocationScanLength
+                    >= CatalogResetSelectionScanReleaseThreshold);
             ApplyPrimarySelection(preferred);
         }
         else if (filteredCount == 0)
@@ -19577,6 +19598,34 @@ public partial class MainWindow : Window
         return selectionProvider.IsSelected;
     }
 
+    public bool GridAutomationReportsSelectedForSmoke(string fileName)
+    {
+        int index = -1;
+        for (int candidateIndex = 0; candidateIndex < _tiles.Count; candidateIndex++)
+        {
+            if (string.Equals(
+                    _tiles[candidateIndex].FileName,
+                    fileName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                index = candidateIndex;
+                break;
+            }
+        }
+
+        if (index < 0
+            || UIElementAutomationPeer.CreatePeerForElement(CardsList)
+                is not VirtualizedGalleryListBoxAutomationPeer listPeer
+            || listPeer.GetOrCreateItemPeer(_tiles[index])
+                .GetPattern(PatternInterface.SelectionItem)
+                is not ISelectionItemProvider selectionProvider)
+        {
+            return false;
+        }
+
+        return selectionProvider.IsSelected;
+    }
+
     public GalleryAutomationItemSmokeSnapshot CaptureGridAutomationItemForSmoke(int index)
     {
         if (index < 0 || index >= _tiles.Count)
@@ -21396,6 +21445,71 @@ public partial class MainWindow : Window
         var selected = _tiles.Skip(start).Take(count).ToList();
         SetSelection(selected, _tiles[lastIndex]);
         return true;
+    }
+
+    public bool SelectIndicesForSmoke(int primaryIndex, params int[] selectedIndices)
+    {
+        if (primaryIndex < 0
+            || primaryIndex >= _tiles.Count
+            || selectedIndices.Length == 0
+            || selectedIndices.Any(index => index < 0 || index >= _tiles.Count)
+            || !selectedIndices.Contains(primaryIndex))
+        {
+            return false;
+        }
+
+        List<Tile> selected = selectedIndices
+            .Distinct()
+            .Select(index => _tiles[index])
+            .ToList();
+        SetSelection(selected, _tiles[primaryIndex], primaryIndex);
+        return _selectedPaths.Count == selected.Count
+            && string.Equals(
+                _primarySelectedPath,
+                _tiles[primaryIndex].Path,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool SelectSparseIndicesForSmoke(
+        int primaryIndex,
+        params int[] selectedIndices)
+    {
+        if (primaryIndex < 0
+            || primaryIndex >= _tiles.Count
+            || selectedIndices.Length == 0
+            || selectedIndices.Any(index => index < 0 || index >= _tiles.Count)
+            || !selectedIndices.Contains(primaryIndex))
+        {
+            return false;
+        }
+
+        List<Tile> selected = selectedIndices
+            .Distinct()
+            .Select(index => _tiles[index])
+            .ToList();
+        SetSelection(
+            selected,
+            _tiles[primaryIndex],
+            primaryIndex,
+            realizedOnlyVisuals: true);
+        bool wasSyncingSelection = _syncingSelection;
+        _syncingSelection = true;
+        try
+        {
+            if (CardsList.Visibility == Visibility.Visible)
+                CardsList.SelectedIndex = primaryIndex;
+            if (RowsList.Visibility == Visibility.Visible)
+                RowsList.SelectedIndex = primaryIndex;
+        }
+        finally
+        {
+            _syncingSelection = wasSyncingSelection;
+        }
+        return _selectedPaths.Count == selected.Count
+            && string.Equals(
+                _primarySelectedPath,
+                _tiles[primaryIndex].Path,
+                StringComparison.OrdinalIgnoreCase);
     }
 
     public bool ToggleSelectionForSmoke(int index)
