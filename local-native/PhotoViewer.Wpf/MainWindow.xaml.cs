@@ -86,7 +86,7 @@ public partial class MainWindow : Window
     private const int MaxDecodedLongEdge = 16_384;
     private const int DecodePixelBudgetMultiplier = 5;
     private const int DecodeLongEdgeMultiplier = 8;
-    private const int SearchFilterDebounceMilliseconds = 75;
+    private const int SearchFilterDebounceMilliseconds = 50;
     private const int SearchStateSaveDebounceMilliseconds = 300;
     private const int MaxVirtualizedContainerSmokeCount = 512;
     private const int MaxMaterializedSelectionVisualItems = 2_048;

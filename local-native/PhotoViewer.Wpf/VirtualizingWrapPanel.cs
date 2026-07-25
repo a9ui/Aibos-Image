@@ -85,11 +85,12 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private const int InteractiveContainersPerMeasure = 1;
     private const int MediumDensityContainersPerMeasure = 4;
     private const int DenseContainersPerMeasure = 16;
-    // Leave a small margin beyond the 15 ms input heartbeat before the next
-    // progressive Render invalidation. Equal-frame scheduling let the render
-    // continuation and input timer race on busy runners, occasionally joining
-    // two otherwise bounded card preparations into one visible input gap.
-    private const int RealizationContinuationDelayMilliseconds = 20;
+    // Leave two Windows timer quanta beyond the 15 ms input heartbeat before
+    // the next progressive Render invalidation. A 20 ms delay can round into
+    // the same ~31.25 ms wakeup as the Input timer on busy hosts, letting the
+    // following Render pass win their race and extend an otherwise bounded
+    // input gap. Waiting 32 ms guarantees an intervening input opportunity.
+    private const int RealizationContinuationDelayMilliseconds = 32;
     private static readonly Brush ProgressivePlaceholderBrush = CreateProgressivePlaceholderBrush();
 
     [DllImport("kernel32.dll")]
