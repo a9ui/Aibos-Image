@@ -433,6 +433,39 @@ final result: pending exact hosted attribution
 
 final result: pending exact hosted adjudication
 
+## M3 repair 10 exact-removal presentation turn
+
+- Repair 9 reduced the exact hosted Favorite-only result from 107 ms to
+  101 ms, but the unchanged 100 ms hard limit still rejected the candidate.
+  Search/filter/sort P95 were 244.45/137.85/194.25 ms, heartbeat was exactly
+  50 ms with zero over-budget samples, maximum detach/apply slices were
+  2/3 ms, normalized working-set growth was 6.951%, and every semantic contract
+  remained exact.
+- The Favorite path had already proved one ordered removal, staged its matching
+  Automation projection, and safely unwound the originating pointer route.
+  It nevertheless paid four more `Dispatcher.Yield` scheduling turns between
+  O(1) presentation phases. Repair 10 retains the initial route-unwind yield,
+  all generation checks, and every Reset/broader-projection yield, while keeping
+  only the proven exact-removal presentation phases in the same Dispatcher
+  turn.
+- Independent review rejected the first prototype because it also skipped the
+  mandatory immediate post-publication yield and split the diagnostic
+  Stopwatch at boundaries that did not actually yield. That green result is
+  excluded from acceptance evidence.
+- The corrected implementation always yields before and immediately after
+  publication. It skips only the later three exact-removal presentation
+  boundaries, keeps the main apply-slice Stopwatch cumulative across them, and
+  emits the exact Favorite projection's apply slice separately.
+- The corrected fresh 100,000-item process measured Favorite-only eviction at
+  72 ms with a 2 ms uninterrupted apply slice, search/filter/sort P95 at
+  205.15/97.4/180 ms, one-millisecond detach, exact single Remove and
+  pending-broaden Reset semantics, and 7.615% normalized working-set growth.
+  It remained red only on one unrelated 52 ms keyboard-focus-clear heartbeat
+  sample with zero GC pause; no rerun or threshold change substitutes for that
+  result. Release build remained warning 0/error 0.
+
+final result: pending exact hosted verification
+
 ## M3 pending-broaden Favorite exclusion audit repair
 
 - Independent final review found one stale-subset race in the Favorite-only

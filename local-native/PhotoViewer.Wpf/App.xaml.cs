@@ -10251,6 +10251,7 @@ public partial class App : Application
                 bool favoriteEvictionSingleRemovalExact = false;
                 ExternalGalleryAutomationSmokeSnapshot? favoriteEvictionAutomation = null;
                 long favoriteEvictionElapsedMs = 0;
+                long favoriteEvictionApplySliceMs = 0;
                 string? favoriteEvictionSelected = null;
                 int favoriteEvictionNeighborIndex = count > 50_010 ? 50_010 : 49_990;
                 string favoriteEvictionNeighborSuffix =
@@ -10338,6 +10339,7 @@ public partial class App : Application
                     window.ProjectionRemoveNotificationCountForSmoke;
                 var favoriteEvictionWatch = Stopwatch.StartNew();
                 bool favoriteEvicted = await window.AdjustGalleryFavoritePointerForSmokeAsync(selectedName, -1);
+                favoriteEvictionApplySliceMs = window.LastCatalogProjectionApplySliceMsForSmoke;
                 await FlushLayoutAsync();
                 favoriteEvictionWatch.Stop();
                 favoriteEvictionElapsedMs = favoriteEvictionWatch.ElapsedMilliseconds;
@@ -10813,6 +10815,7 @@ public partial class App : Application
                     FilterP95Ms = filterP95,
                     SortP95Ms = sortP95,
                     FavoriteEvictionElapsedMs = favoriteEvictionElapsedMs,
+                    FavoriteEvictionApplySliceMs = favoriteEvictionApplySliceMs,
                     FavoriteEvictionExact = favoriteEvictionExact,
                     FavoriteEvictionAutomationExact = favoriteEvictionAutomationExact,
                     FavoriteEvictionSingleRemovalExact = favoriteEvictionSingleRemovalExact,
@@ -24949,6 +24952,7 @@ public partial class App : Application
         public double FilterP95Ms { get; init; }
         public double SortP95Ms { get; init; }
         public long FavoriteEvictionElapsedMs { get; init; }
+        public long FavoriteEvictionApplySliceMs { get; init; }
         public bool FavoriteEvictionExact { get; init; }
         public bool FavoriteEvictionAutomationExact { get; init; }
         public ExternalGalleryAutomationSmokeSnapshot? FavoriteEvictionAutomation { get; init; }
