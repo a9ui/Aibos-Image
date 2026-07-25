@@ -528,6 +528,31 @@ final result: attribution complete; product repair required
 
 final result: pending independent review and exact hosted verification
 
+## M3 repair 13 stale-realization cancellation
+
+- Exact hosted Repair 12 retained every semantic and resource contract but
+  reported one 53 ms heartbeat during `search-clear-6` at generation 33.
+  GC pause was zero, maximum detach/apply slice was 6 ms, Favorite eviction
+  was 92 ms, and the failing clear completion's maximum apply slice was 3 ms.
+- Progressive realization from the preceding projection was canceled only
+  when reset preparation began, after debounce, capture, and background
+  compute. A newly queued search/filter now invalidates that stale realization
+  generation immediately. Existing visible containers remain until the next
+  atomic projection publication; no data, selection, focus, Reset, scheduling
+  threshold, or heartbeat contract changes.
+- A current request that is discarded or fails with no successor resumes
+  Measure on the still-current view. Superseded and closing requests do not
+  resume it. This prevents a canceled progressive placeholder from remaining
+  indefinitely when no successful publication follows.
+- The corrected changed-tree .NET 10 Release 100,000-item gate passed:
+  heartbeat 44 ms, search/filter/sort P95 172/93.4/118.75 ms, Favorite
+  eviction 62 ms with a 2 ms apply slice, maximum detach/apply 2/4 ms, and
+  normalized working-set growth 10.074%. All count, selection, focus,
+  pending-broaden, stale-peer, UI Automation, virtualization, and recycled
+  state contracts remained exact.
+
+final result: pending independent review and exact hosted verification
+
 ## M3 pending-broaden Favorite exclusion audit repair
 
 - Independent final review found one stale-subset race in the Favorite-only

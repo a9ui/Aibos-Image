@@ -197,6 +197,9 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         InvalidateVisual();
     }
 
+    internal void ResumePendingRealization()
+        => InvalidateMeasure();
+
     public double ItemWidth
     {
         get => (double)GetValue(ItemWidthProperty);

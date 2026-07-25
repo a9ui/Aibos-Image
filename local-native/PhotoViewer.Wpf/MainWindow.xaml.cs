@@ -7805,6 +7805,10 @@ public partial class MainWindow : Window
         bool restrictToCurrentProjection = false)
     {
         CancelPendingCatalogProjection(completePending: true);
+        // A new query/filter owns the next gallery projection. Stop the old
+        // view's progressive card realization before debounce and background
+        // compute so stale container work cannot compete with current input.
+        _galleryVirtualizingPanel?.CancelPendingRealization();
         long generation = ++_catalogProjectionGeneration;
         var completion = new TaskCompletionSource<SearchFilterCompletion>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -7989,6 +7993,15 @@ public partial class MainWindow : Window
             ResetAllocatedBytes = applyMetrics.ResetAllocatedBytes,
             PreparedLayoutReady = result?.PreparedLayout is not null,
         });
+        if (!outcome.Applied
+            && request.Generation == _catalogProjectionGeneration
+            && ReferenceEquals(_scheduledCatalogProjection, request))
+        {
+            // The request canceled stale progressive realization when it was
+            // queued. If it ends without a successor or publication, resume
+            // the still-current view instead of leaving an unmeasured card.
+            _galleryVirtualizingPanel?.ResumePendingRealization();
+        }
         if (ReferenceEquals(_pendingSearchFilterCompletion, request.Completion))
             _pendingSearchFilterCompletion = null;
         if (ReferenceEquals(_scheduledCatalogProjection, request))
