@@ -1385,6 +1385,13 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
+        // Reset preparation deliberately yields between one-container detach
+        // units. Rendering the stale projection at every yield rebuilt all
+        // visible date-header FormattedText objects before Input could run,
+        // even though that frame was immediately replaced. Keep the last
+        // composed frame until the atomic collection publication finishes.
+        if (_itemsResetPreparationActive)
+            return;
         DrawProgressivePlaceholders(drawingContext);
         if (!ShowGroupHeaders || _rowHeaders.Count == 0)
             return;

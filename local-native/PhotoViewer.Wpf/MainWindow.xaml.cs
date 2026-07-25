@@ -10144,11 +10144,11 @@ public partial class MainWindow : Window
             return elapsedMs;
         }
 
-        async Task<bool> YieldForInputAsync()
+        async Task<bool> YieldForInputAsync(bool checkGeneration = true)
         {
             FinishSlice();
             await Dispatcher.Yield(DispatcherPriority.Background);
-            if (generation != _catalogProjectionGeneration)
+            if (checkGeneration && generation != _catalogProjectionGeneration)
                 return false;
             slice.Restart();
             return true;
@@ -10178,6 +10178,28 @@ public partial class MainWindow : Window
                 filterResult.Tiles,
                 filterResult.Count,
                 exactSingleRemovalIndex);
+        if (!publishSingleRemoval
+            && snapshot.RestoreGalleryFocus
+            && Keyboard.FocusedElement is DependencyObject focusedElement)
+        {
+            ListBox? focusedGallery = IsDescendantOrSelf(focusedElement, CardsList)
+                ? CardsList
+                : IsDescendantOrSelf(focusedElement, RowsList)
+                    ? RowsList
+                    : null;
+            if (focusedGallery is not null
+                && !ReferenceEquals(focusedElement, focusedGallery)
+                && focusedGallery.Focus()
+                && !await YieldForInputAsync())
+            {
+                return new CatalogProjectionApplyMetrics(
+                    maxSliceMs,
+                    publishMs,
+                    statsMs,
+                    selectionMs,
+                    reconcileMs);
+            }
+        }
         bool resetPreparationStarted = !publishSingleRemoval
             && preparedPanel?.BeginItemsResetPreparation() == true;
         try
@@ -10202,12 +10224,13 @@ public partial class MainWindow : Window
                             resetSlice.RemoveInternalChildRangeThreadCpuMs;
                         resetPanelTotalMs = resetSlice.PanelTotalMs;
                     }
+                    // Preserve the original reset semantics: stale-generation
+                    // rejection happens only after reset preparation finishes.
+                    // Yield after the final detach as well, so its visual-tree
+                    // cleanup cannot concatenate with catalog publication.
+                    _ = await YieldForInputAsync(checkGeneration: false);
                     if (resetPreparationComplete)
                         break;
-
-                    FinishSlice();
-                    await Dispatcher.Yield(DispatcherPriority.Background);
-                    slice.Restart();
                 }
                 while (true);
             }

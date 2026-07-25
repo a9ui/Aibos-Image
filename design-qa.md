@@ -553,6 +553,42 @@ final result: pending independent review and exact hosted verification
 
 final result: pending independent review and exact hosted verification
 
+## M3 repair 14 dispatcher-yield attribution
+
+- Exact hosted Repair 13 passed every semantic, allocation, latency, detach,
+  memory, and UI Automation contract except one 54 ms Input heartbeat during
+  accessibility warmup clear at generation 21. The completion reported zero
+  GC pause, a 2 ms maximum code slice, 2.143 ms maximum reset-container unit,
+  and no generation-21 panel Measure maximum; the session's maximum Measure
+  remained the seed at generation 13.
+- A temporary diagnostics-only candidate timestamped DataBind, Render, Input,
+  and Background boundaries and kept per-operation/per-generation panel
+  Measure maxima. It showed that the last container detach was not yielded:
+  the final detach and publication were concatenated before the existing
+  post-publication yield. Panel Measure stayed below 0.5 ms in the affected
+  generations; the delay accumulated in the render/dispatch interval.
+- The temporary probes were removed from the product candidate because 214
+  yields injected more than 642 Dispatcher operations and materially perturbed
+  the acceptance run. Fixed four-container batching was also measured and
+  rejected after it increased the heartbeat gap from 56 ms to 64 ms.
+- Intermediate reset-detach yields no longer redraw the stale progressive
+  placeholders and date-header text that will be replaced by the pending
+  projection. Stale panel overlays are not regenerated; normal published
+  rendering resumes after completion. This removes repeated Render-priority
+  allocation ahead of Input without changing collection order.
+- If keyboard focus is inside a gallery item that is about to be reset, focus
+  first moves to the stable owning ListBox and yields once. The existing
+  post-publication request then restores focus to the resulting primary gallery
+  selection. This avoids WPF's synchronous focus-loss work inside visual
+  detachment while keeping newer projections able to observe and preserve
+  gallery focus.
+- Reset preparation remains one container per synchronous unit and retains its
+  original stale-generation semantics. It now yields after the final detach
+  before currentness validation and atomic catalog publication, separating the
+  final visual-tree cleanup from the publication render.
+
+final result: pending clean exact verification
+
 ## M3 pending-broaden Favorite exclusion audit repair
 
 - Independent final review found one stale-subset race in the Favorite-only
