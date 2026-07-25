@@ -209,6 +209,44 @@ if ($result.catalogProjectionMaxApplySliceMs -gt $result.catalogProjectionDiagno
         "$($result.catalogProjectionMaxApplySliceMs) ms > " +
         "$($result.catalogProjectionDiagnosticSliceTargetMs) ms")
 }
+if ($result.farTailSelectionReleaseExact -ne $true `
+    -or $result.farTailSelectionReleaseCompletion.preResetSelectionCleared -ne $true `
+    -or $result.farTailSelectionReleaseCompletion.preResetSelectionReleasedCount -lt 1) {
+    $failures.Add(
+        "far-tail Extended selection release contract failed " +
+        "(exact $($result.farTailSelectionReleaseExact); " +
+        "cleared $($result.farTailSelectionReleaseCompletion.preResetSelectionCleared); " +
+        "released $($result.farTailSelectionReleaseCompletion.preResetSelectionReleasedCount))")
+}
+if ($result.secondaryEvictionReleaseExact -ne $true `
+    -or $result.secondaryEvictionReleaseCompletion.preResetSelectionCleared -ne $true `
+    -or $result.secondaryEvictionReleaseCompletion.preResetSelectionReleasedCount -lt 1) {
+    $failures.Add(
+        "evicted-secondary Extended selection release contract failed " +
+        "(exact $($result.secondaryEvictionReleaseExact); " +
+        "cleared $($result.secondaryEvictionReleaseCompletion.preResetSelectionCleared); " +
+        "released $($result.secondaryEvictionReleaseCompletion.preResetSelectionReleasedCount))")
+}
+if ($result.boundarySelectionReleaseExact -ne $true `
+    -or $result.boundarySelectionReleaseCompletion.preResetSelectionCleared -ne $true `
+    -or $result.boundarySelectionReleaseCompletion.preResetSelectionReleasedCount -lt 1) {
+    $failures.Add(
+        "23,999-index selection boundary release contract failed " +
+        "(exact $($result.boundarySelectionReleaseExact); " +
+        "cleared $($result.boundarySelectionReleaseCompletion.preResetSelectionCleared); " +
+        "released $($result.boundarySelectionReleaseCompletion.preResetSelectionReleasedCount))")
+}
+if ($result.catalogProjectionMaxPreResetSelectionReleaseMs `
+        -gt $result.catalogProjectionDiagnosticSliceTargetMs `
+    -or $result.catalogProjectionPreResetSelectionClearedExact -ne $true `
+    -or $result.catalogProjectionPreResetSelectionReleasedCount -le 0) {
+    $failures.Add(
+        "pre-Reset WPF selection release contract failed " +
+        "(wall $($result.catalogProjectionMaxPreResetSelectionReleaseMs)/" +
+        "$($result.catalogProjectionDiagnosticSliceTargetMs) ms; " +
+        "cleared exact $($result.catalogProjectionPreResetSelectionClearedExact); " +
+        "released $($result.catalogProjectionPreResetSelectionReleasedCount))")
+}
 if ($result.catalogSnapshotResetBudgetMs -ne 12 `
     -or $result.catalogSnapshotResetMaxWallMs -gt $result.catalogSnapshotResetBudgetMs `
     -or $result.catalogSnapshotResetCountExact -ne $true `

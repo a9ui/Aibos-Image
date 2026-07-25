@@ -490,7 +490,9 @@ public sealed class VirtualizedGalleryListBoxItemAutomationPeer(
             get
             {
                 peer.EnsureCurrent();
-                return inner.IsSelected;
+                return peer.Item is Tile tile
+                    ? tile.IsCanonicalSelected
+                    : inner.IsSelected;
             }
         }
 
