@@ -9724,6 +9724,7 @@ public partial class MainWindow : Window
 
     private static void CheckCatalogWorkerInputHandoff(
         int index,
+        int itemCount,
         CancellationToken cancellationToken)
     {
         if ((index & 63) != 0)
@@ -9731,6 +9732,7 @@ public partial class MainWindow : Window
 
         cancellationToken.ThrowIfCancellationRequested();
         if (index > 0
+            && itemCount > 16_384
             && cancellationToken.CanBeCanceled
             && (index & 1023) == 0)
         {
@@ -9789,7 +9791,7 @@ public partial class MainWindow : Window
             : new List<int>(Math.Min(snapshot.TileCount, 4_096));
         for (int index = 0; index < snapshot.TileCount; index++)
         {
-            CheckCatalogWorkerInputHandoff(index, cancellationToken);
+            CheckCatalogWorkerInputHandoff(index, snapshot.TileCount, cancellationToken);
 
             FilterTileSnapshot tile = snapshot.Tiles[index];
             if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot))
@@ -9831,7 +9833,7 @@ public partial class MainWindow : Window
         {
             for (int filteredIndex = 0; filteredIndex < filteredCount; filteredIndex++)
             {
-                CheckCatalogWorkerInputHandoff(filteredIndex, cancellationToken);
+                CheckCatalogWorkerInputHandoff(filteredIndex, filteredCount, cancellationToken);
                 FilterTileSnapshot tile = snapshot.Tiles[matchedIndices![filteredIndex]];
                 filtered[filteredIndex] = tile.Tile;
                 if (filteredLayoutItems is not null)
@@ -9842,7 +9844,7 @@ public partial class MainWindow : Window
         {
             for (int index = 0; index < snapshot.TileCount; index++)
             {
-                CheckCatalogWorkerInputHandoff(index, cancellationToken);
+                CheckCatalogWorkerInputHandoff(index, snapshot.TileCount, cancellationToken);
                 FilterTileSnapshot tile = snapshot.Tiles[index];
                 filteredLayoutItems[index] = new VirtualizingLayoutItem(tile.Group, tile.CardHeight);
             }
@@ -9893,7 +9895,7 @@ public partial class MainWindow : Window
         bool activePreviewIncluded = false;
         for (int index = 0; index < filteredCount; index++)
         {
-            CheckCatalogWorkerInputHandoff(index, cancellationToken);
+            CheckCatalogWorkerInputHandoff(index, filteredCount, cancellationToken);
             Tile tile = filtered[index];
             if (!string.IsNullOrWhiteSpace(snapshot.PrimarySelectedPath)
                 && string.Equals(tile.Path, snapshot.PrimarySelectedPath, StringComparison.OrdinalIgnoreCase))
@@ -10236,7 +10238,7 @@ public partial class MainWindow : Window
                 StageGalleryAutomationProjection(filterResult.AutomationProjection);
                 if (publishSingleRemoval)
                 {
-                    _tiles.ReplaceOneRemoved(
+                    _tiles.ReplaceOneRemovedAfterValidation(
                         filterResult.Tiles,
                         filterResult.Count,
                         exactSingleRemovalIndex);
@@ -21863,10 +21865,15 @@ internal sealed class ResettableObservableCollection<T> :
         return true;
     }
 
-    public void ReplaceOneRemoved(T[] items, int count, int removedIndex)
+    public void ReplaceOneRemovedAfterValidation(T[] items, int count, int removedIndex)
     {
-        if (!CanReplaceOneRemoved(items, count, removedIndex))
-            throw new InvalidOperationException("The replacement is not one exact ordered removal.");
+        ArgumentNullException.ThrowIfNull(items);
+        if (count != items.Length
+            || _items.Length != count + 1
+            || (uint)removedIndex >= (uint)_items.Length)
+        {
+            throw new InvalidOperationException("The validated one-item removal shape changed before publication.");
+        }
 
         T removed = _items[removedIndex];
         _items = items;

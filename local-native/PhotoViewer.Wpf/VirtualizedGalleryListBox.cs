@@ -499,6 +499,7 @@ internal sealed class GalleryAutomationProjectionIndex
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (index > 0
+                        && count > 16_384
                         && cancellationToken.CanBeCanceled
                         && (index & 1023) == 0)
                     {

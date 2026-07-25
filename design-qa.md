@@ -404,6 +404,35 @@ final result: passed
 
 final result: pending exact hosted attribution
 
+## M3 repair 9 bounded small-projection handoff
+
+- The Repair 8 exact hosted run kept every catalog, selection, UI Automation,
+  pending-broaden, virtualization, heartbeat, detach, and memory contract
+  green. Its sole failure was Favorite-only eviction at 107 ms against the
+  unchanged 100 ms hard limit; the same route had completed in 55-63 ms in the
+  two fresh local processes.
+- Independent very-high review attributed the narrow-host variance to worker
+  handoffs that remained tuned for the 100,000-item projection even after the
+  Favorite-only path safely restricted its input to 10,000 items. Cancellation
+  checks remain every 64 items, but projections of at most 16,384 items no
+  longer call `Thread.Yield`; larger projections retain the 1,024-item
+  cooperative-yield quantum.
+- Dispatcher publication still proves the current collection is exactly the
+  worker result with one ordered item removed. The already validated array is
+  then committed with shape checks instead of repeating the same full sequence
+  comparison a second time. Automation staging, one Remove / zero Reset
+  notification semantics, selection fallback, and pending-broaden Reset
+  fallback are unchanged.
+- The first fresh 100,000-item local process reduced Favorite-only eviction to
+  70 ms and kept search/filter/sort P95 at 207.45/81.5/171.25 ms, maximum apply
+  and detach slices at 1 ms, normalized working-set growth at 7.583%, and all
+  correctness contracts exact. Two unrelated 61/59 ms heartbeat samples during
+  100,000-item search/filter Reset paths had no GC pause and only 1 ms measured
+  Dispatcher slices, so this process remains red pending exact hosted
+  adjudication; no threshold was relaxed and no green rerun is substituted.
+
+final result: pending exact hosted adjudication
+
 ## M3 pending-broaden Favorite exclusion audit repair
 
 - Independent final review found one stale-subset race in the Favorite-only
