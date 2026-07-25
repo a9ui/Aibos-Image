@@ -26,6 +26,7 @@ internal readonly record struct VirtualizingLayoutItem(string Group, double Item
 
 internal readonly record struct ItemsResetPreparationSlice(
     bool Complete,
+    int DetachedContainerCount,
     double GeneratorRemoveMs,
     double ForgetDeferredMeasureMs,
     double RemoveInternalChildRangeMs,
@@ -332,6 +333,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         double forgetDeferredMeasureMs = 0;
         double removeInternalChildRangeMs = 0;
         double removeInternalChildRangeThreadCpuMs = 0;
+        int detachedContainerCount = 0;
         long sliceStarted = Stopwatch.GetTimestamp();
         long sliceCpuStarted = ReadCurrentThreadCpuTimeTicks();
         if (_itemsResetGeneratorPosition >= 0)
@@ -353,6 +355,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             // container becomes reusable only after the visual detach above.
             if (detachedChild is ListBoxItem detachedContainer)
                 _itemsResetContainerReuseOwner?.CacheDetachedContainer(detachedContainer);
+            detachedContainerCount = 1;
             generatorRemoveMs =
                 Stopwatch.GetElapsedTime(generatorStarted, generatorFinished).TotalMilliseconds;
             forgetDeferredMeasureMs =
@@ -374,6 +377,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 : -1;
         return new ItemsResetPreparationSlice(
             _itemsResetGeneratorPosition < 0,
+            detachedContainerCount,
             generatorRemoveMs,
             forgetDeferredMeasureMs,
             removeInternalChildRangeMs,

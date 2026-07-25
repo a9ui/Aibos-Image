@@ -1244,6 +1244,9 @@ public partial class MainWindow : Window
         double ResetPanelThreadCpuMs = -1,
         double ResetPanelBudgetMs = 0,
         bool ResetPanelBudgetUsedWallFallback = false,
+        int MaxResetDetachedContainersPerSlice = 0,
+        bool InputBoundaryBeforePublication = false,
+        bool InputBoundaryAfterPublication = false,
         long ResetAllocatedBytes = 0);
 
     private sealed class CatalogLayoutCache
@@ -1342,6 +1345,9 @@ public partial class MainWindow : Window
         double ResetPanelThreadCpuMs = -1,
         double ResetPanelBudgetMs = 0,
         bool ResetPanelBudgetUsedWallFallback = false,
+        int MaxResetDetachedContainersPerSlice = 0,
+        bool InputBoundaryBeforePublication = false,
+        bool InputBoundaryAfterPublication = false,
         long ResetAllocatedBytes = 0,
         bool PreparedLayoutReady = false)
     {
@@ -8000,6 +8006,12 @@ public partial class MainWindow : Window
             ResetPanelBudgetMs = applyMetrics.ResetPanelBudgetMs,
             ResetPanelBudgetUsedWallFallback =
                 applyMetrics.ResetPanelBudgetUsedWallFallback,
+            MaxResetDetachedContainersPerSlice =
+                applyMetrics.MaxResetDetachedContainersPerSlice,
+            InputBoundaryBeforePublication =
+                applyMetrics.InputBoundaryBeforePublication,
+            InputBoundaryAfterPublication =
+                applyMetrics.InputBoundaryAfterPublication,
             ResetAllocatedBytes = applyMetrics.ResetAllocatedBytes,
             PreparedLayoutReady = result?.PreparedLayout is not null,
         });
@@ -10146,6 +10158,9 @@ public partial class MainWindow : Window
         double resetPanelThreadCpuMs = -1;
         double resetPanelBudgetMs = 0;
         bool resetPanelBudgetUsedWallFallback = false;
+        int maxResetDetachedContainersPerSlice = 0;
+        bool inputBoundaryBeforePublication = false;
+        bool inputBoundaryAfterPublication = false;
         long resetAllocatedBytes = 0;
         var slice = Stopwatch.StartNew();
 
@@ -10182,6 +10197,7 @@ public partial class MainWindow : Window
         _thumbnailViewportRevision++;
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        inputBoundaryBeforePublication = true;
 
         var phase = new Stopwatch();
         int exactSingleRemovalIndex = filterResult.ExactSingleRemovalIndex ?? -1;
@@ -10227,6 +10243,9 @@ public partial class MainWindow : Window
                         preparedPanel!.PrepareNextItemsResetSlice();
                     phase.Stop();
                     resetPreparationComplete = resetSlice.Complete;
+                    maxResetDetachedContainersPerSlice = Math.Max(
+                        maxResetDetachedContainersPerSlice,
+                        resetSlice.DetachedContainerCount);
                     if (phase.ElapsedMilliseconds > preResetMs)
                     {
                         preResetMs = phase.ElapsedMilliseconds;
@@ -10288,7 +10307,10 @@ public partial class MainWindow : Window
                     resetPanelTotalMs,
                     resetPanelThreadCpuMs,
                     resetPanelBudgetMs,
-                    resetPanelBudgetUsedWallFallback);
+                    resetPanelBudgetUsedWallFallback,
+                    maxResetDetachedContainersPerSlice,
+                    inputBoundaryBeforePublication,
+                    inputBoundaryAfterPublication);
             }
 
             bool wasSyncingSelection = _syncingSelection;
@@ -10370,6 +10392,7 @@ public partial class MainWindow : Window
         // phase.
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
+        inputBoundaryAfterPublication = true;
 
         phase.Restart();
         Tile? preferred = filterResult.PreferredSelection;
@@ -10483,6 +10506,9 @@ public partial class MainWindow : Window
             resetPanelThreadCpuMs,
             resetPanelBudgetMs,
             resetPanelBudgetUsedWallFallback,
+            maxResetDetachedContainersPerSlice,
+            inputBoundaryBeforePublication,
+            inputBoundaryAfterPublication,
             resetAllocatedBytes);
     }
 

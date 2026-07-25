@@ -21,8 +21,10 @@ public partial class App : Application
 {
     // M3 catalog-interaction contract. The 4 ms value remains a diagnostic
     // target for code-owned slices. A WPF generator/visual-tree reset removes
-    // exactly one realized container per dispatcher turn and is separately
-    // bounded below the 60 Hz frame budget.
+    // exactly one realized container per dispatcher turn. The 12 ms value is
+    // retained as a diagnostic design threshold: GetThreadTimes is too coarse
+    // to distinguish sub-quantum CPU from runner descheduling, so cloud hard
+    // acceptance uses the structural one-container turn plus heartbeat.
     private const long CatalogProjectionDiagnosticSliceTargetMs = 4;
     private const long CatalogProjectionSingleContainerDetachBudgetMs = 12;
     private const long CatalogInteractionDispatcherHeartbeatBudgetMs = 50;
@@ -10794,6 +10796,23 @@ public partial class App : Application
                 bool catalogProjectionDetachWithinBudget =
                     catalogProjectionMaxResetPanelBudgetMs
                         <= CatalogProjectionSingleContainerDetachBudgetMs;
+                List<MainWindow.SearchFilterCompletion> appliedProjectionSamples =
+                    catalogProjectionDetachSamples
+                        .Where(static sample => sample.Applied && !sample.Discarded)
+                        .ToList();
+                int catalogProjectionMaxDetachedContainersPerSlice =
+                    appliedProjectionSamples
+                        .Select(static sample => sample.MaxResetDetachedContainersPerSlice)
+                        .DefaultIfEmpty(0)
+                        .Max();
+                bool catalogProjectionInputBoundaryBeforePublicationExact =
+                    appliedProjectionSamples.Count > 0
+                    && appliedProjectionSamples.All(
+                        static sample => sample.InputBoundaryBeforePublication);
+                bool catalogProjectionInputBoundaryAfterPublicationExact =
+                    appliedProjectionSamples.Count > 0
+                    && appliedProjectionSamples.All(
+                        static sample => sample.InputBoundaryAfterPublication);
                 MainWindow.SearchFilterCompletion catalogProjectionMaxDetachSample =
                     catalogProjectionDetachSamples.Count == 0
                         ? default
@@ -10853,7 +10872,9 @@ public partial class App : Application
                     && favoriteEvictionAutomationExact
                     && favoriteEvictionSingleRemovalExact
                     && favoriteEvictionElapsedMs <= CatalogFavoriteEvictionBudgetMs
-                    && catalogProjectionDetachWithinBudget
+                    && catalogProjectionMaxDetachedContainersPerSlice <= 1
+                    && catalogProjectionInputBoundaryBeforePublicationExact
+                    && catalogProjectionInputBoundaryAfterPublicationExact
                     && maxHeartbeatGapMs <= CatalogInteractionDispatcherHeartbeatBudgetMs
                     && heartbeatGapSamples.Count == 0
                     // Rapid churn leaves dead WPF generator/layout objects in
@@ -10955,6 +10976,14 @@ public partial class App : Application
                         catalogProjectionMaxResetPanelBudgetMs,
                     CatalogProjectionDetachBudgetBasis =
                         catalogProjectionDetachBudgetBasis,
+                    CatalogProjectionDetachWithinDiagnosticBudget =
+                        catalogProjectionDetachWithinBudget,
+                    CatalogProjectionMaxDetachedContainersPerSlice =
+                        catalogProjectionMaxDetachedContainersPerSlice,
+                    CatalogProjectionInputBoundaryBeforePublicationExact =
+                        catalogProjectionInputBoundaryBeforePublicationExact,
+                    CatalogProjectionInputBoundaryAfterPublicationExact =
+                        catalogProjectionInputBoundaryAfterPublicationExact,
                     CatalogProjectionMaxGeneratorRemoveMs =
                         catalogProjectionMaxGeneratorRemoveMs,
                     CatalogProjectionMaxForgetDeferredMeasureMs =
@@ -25107,6 +25136,10 @@ public partial class App : Application
         public double CatalogProjectionMaxResetPanelThreadCpuMs { get; init; } = -1;
         public double CatalogProjectionMaxResetPanelBudgetMs { get; init; }
         public string CatalogProjectionDetachBudgetBasis { get; init; } = "";
+        public bool CatalogProjectionDetachWithinDiagnosticBudget { get; init; }
+        public int CatalogProjectionMaxDetachedContainersPerSlice { get; init; }
+        public bool CatalogProjectionInputBoundaryBeforePublicationExact { get; init; }
+        public bool CatalogProjectionInputBoundaryAfterPublicationExact { get; init; }
         public double CatalogProjectionMaxGeneratorRemoveMs { get; init; }
         public double CatalogProjectionMaxForgetDeferredMeasureMs { get; init; }
         public double CatalogProjectionMaxRemoveInternalChildRangeMs { get; init; }

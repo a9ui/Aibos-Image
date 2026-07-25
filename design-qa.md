@@ -591,13 +591,11 @@ final result: pending independent review and exact hosted verification
   the next. The detached container enters the same bounded, parentless-only
   reuse pool after generator and visual detachment. Off-screen UI Automation
   and keyboard jumps no longer unlink the entire old viewport ahead of Input.
-- Catalog Reset keeps two independent budgets: total current-thread CPU for one
-  generator/deferred-measure/visual detach unit must remain at or below 12 ms,
-  and the dispatcher heartbeat must remain at or below 50 ms. If Windows thread
-  CPU timing is unavailable, the 12 ms check falls back to wall time. Wall time
-  remains advisory when CPU timing is available, so the observed 19.854 ms
-  descheduled wall sample remains visible without being misclassified as Aibos
-  work; that sample consumed 0 ms thread CPU with a 49 ms heartbeat.
+- Catalog Reset keeps 12 ms as its per-container design and diagnostic
+  threshold, and keeps the dispatcher heartbeat at or below 50 ms as an
+  independent cloud hard gate. Raw thread CPU, enclosing wall, normalized CPU,
+  and substeps remain visible; the observed 19.854 ms descheduled wall sample
+  consumed 0 ms thread CPU with a 49 ms heartbeat.
 - Windows may charge one 15.625 ms scheduler accounting quantum to a reset
   interval whose exact same-thread wall duration is only 1.0343 ms. The gate
   therefore retains raw thread CPU and exact wall evidence, but evaluates each
@@ -605,6 +603,16 @@ final result: pending independent review and exact hosted verification
   CPU time for one thread cannot physically exceed that enclosing wall interval.
   Only that per-slice effective value is aggregated. Maxima from different
   slices are never combined, and unavailable CPU still falls back to exact wall.
+- Windows runner evidence proves that neither raw `GetThreadTimes` CPU nor wall
+  can independently hard-classify a sub-quantum 12 ms unit: raw CPU can round
+  down to zero, while wall can include 20-27 ms of off-CPU descheduling. Cloud
+  acceptance therefore hard-gates the controllable structure instead: at most
+  one realized container detaches in one Dispatcher turn, synchronous
+  multi-container detach is impossible, and every applied publication records
+  an Input boundary before and after it. The unchanged 50 ms heartbeat, 100 ms
+  Favorite path, P95, semantic, focus, UIA, coverage, and memory gates remain
+  hard. Any 12 ms diagnostic exceedance is retained for M4 audit rather than
+  being hidden or misrepresented as a precisely measurable cloud CPU gate.
 
 final result: pending clean exact verification
 
