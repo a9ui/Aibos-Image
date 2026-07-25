@@ -172,6 +172,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private readonly HashSet<UIElement> _deferredMeasureContainers = [];
     private bool _itemsResetPreparationActive;
     private int _itemsResetGeneratorPosition = -1;
+    private VirtualizedGalleryListBox? _itemsResetContainerReuseOwner;
     private long _layoutGeneration;
     private PreparedVirtualizingLayout? _preparedLayout;
     private int _preparedLayoutAppliedCount;
@@ -307,6 +308,8 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
         _itemsResetPreparationActive = true;
         _itemsResetGeneratorPosition = realizedCount - 1;
+        _itemsResetContainerReuseOwner =
+            ItemsControl.GetItemsOwner(this) as VirtualizedGalleryListBox;
         return true;
     }
 
@@ -329,6 +332,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         if (_itemsResetGeneratorPosition >= 0)
         {
             int childIndex = InternalChildren.Count - 1;
+            UIElement detachedChild = InternalChildren[childIndex];
             long generatorStarted = Stopwatch.GetTimestamp();
             ItemContainerGenerator.Remove(
                 new GeneratorPosition(_itemsResetGeneratorPosition, 0),
@@ -340,6 +344,10 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             RemoveInternalChildRange(childIndex, 1);
             long visualCpuFinished = ReadCurrentThreadCpuTimeTicks();
             long visualFinished = Stopwatch.GetTimestamp();
+            // Keep custom reuse ownership out of WPF's unlink callbacks. The
+            // container becomes reusable only after the visual detach above.
+            if (detachedChild is ListBoxItem detachedContainer)
+                _itemsResetContainerReuseOwner?.CacheDetachedContainer(detachedContainer);
             generatorRemoveMs =
                 Stopwatch.GetElapsedTime(generatorStarted, generatorFinished).TotalMilliseconds;
             forgetDeferredMeasureMs =
@@ -378,6 +386,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     {
         _itemsResetPreparationActive = false;
         _itemsResetGeneratorPosition = -1;
+        _itemsResetContainerReuseOwner = null;
     }
 
     internal void CancelItemsResetPreparation()

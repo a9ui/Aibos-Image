@@ -466,6 +466,68 @@ final result: pending exact hosted adjudication
 
 final result: pending exact hosted verification
 
+## M3 repair 11 keyboard focus GC attribution
+
+- The exact hosted Repair 10 tree passed every semantic, Favorite, projection,
+  memory, and internal-slice contract. Its only failure was a 59 ms Input
+  heartbeat during `keyboard-focus-filter-realize`; the same interval recorded
+  a 54.769 ms runtime GC pause at projection generation 55.
+- Existing projection diagnostics show that later clear operations reuse the
+  prepared 100,000-item layout (`ComputeAllocatedBytes` falls to 560 bytes),
+  while each WPF Reset publication still allocates roughly 0.8-1.7 MB.
+  Expanding the weak layout cache would not remove that publication churn and
+  could retain several large-object-heap layouts, so that change is rejected.
+- The next changed tree exports the filter and clear
+  `SearchFilterCompletion` records used by the keyboard-focus scenario. Grid
+  realization and focus restoration are separately labeled and report wall
+  time, process allocation, GC pause, and Gen0/1/2 collection deltas. This is
+  diagnostic-only: product scheduling, input priority, GC policy, thresholds,
+  and user-visible behavior are unchanged.
+- The diagnostic run passed incidentally at a 45 ms heartbeat, so it is not
+  accepted as the product repair. It isolated the allocation source:
+  generation 55 spent only 2,040 bytes in the staged collection Reset and
+  roughly 1.12 MB across apply presentation, while subsequent card
+  realization allocated 2.76 MB. Focus restoration allocated only 8 KB.
+
+final result: attribution complete; product repair required
+
+## M3 repair 12 bounded reset-container reuse
+
+- WPF clears its built-in recyclable-container queue on a collection Reset.
+  The custom gallery panel must therefore recreate card templates after every
+  search/filter publication even though only the visible card containers are
+  involved.
+- Cards view now retains at most 32 homogeneous `ListBoxItem` containers only
+  after reset preparation has fully unlinked each container from the WPF
+  generator and visual tree. A candidate is reused only when it has no visual
+  parent. Normal viewport cleanup and the list view's built-in WPF recycling
+  remain unchanged; the bounded pool is cleared when the gallery unloads.
+- The first prototype registered containers from
+  `ClearContainerForItemOverride`, before the panel detached them. It reduced
+  realization allocation by about half and Favorite eviction to 39 ms, but
+  one visual detach reached 28 ms and a heartbeat reached 56 ms. That tree is
+  rejected.
+- The corrected reset-only implementation registers a container after
+  `RemoveInternalChildRange`. The exact local .NET 10 Release 100,000-item
+  gate passed with 237 container reuses:
+  - search/filter/sort P95 193.55/110.7/86.5 ms;
+  - Favorite eviction 45 ms with a 2 ms exact apply slice;
+  - heartbeat 45 ms with zero over-budget samples;
+  - maximum reset-container detach 11 ms against the unchanged 12 ms limit;
+  - normalized working-set growth 5.891%;
+  - exact count, selection, focus, pending-broaden, stale-peer, UI Automation,
+    virtualization, and recycled-container state contracts.
+- For keyboard-focus generation 55, apply allocation fell from 1,123,144 to
+  738,504 bytes and realization from 2,755,184 to 2,066,224 bytes. Generation
+  56 fell from 1,119,360 to 777,408 apply bytes and from 2,689,368 to
+  1,558,608 realization bytes. The maximum 11 ms detach is green but has only
+  one millisecond of margin against the unchanged 12 ms hard limit, so M3
+  remains held until exact same-tree hosted evidence.
+- No forced GC, no GC subtraction, no threshold change, and no change to
+  user data, Browser behavior, licensing, or deployment is included.
+
+final result: pending independent review and exact hosted verification
+
 ## M3 pending-broaden Favorite exclusion audit repair
 
 - Independent final review found one stale-subset race in the Favorite-only

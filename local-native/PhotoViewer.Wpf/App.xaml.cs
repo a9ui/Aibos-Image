@@ -9810,6 +9810,7 @@ public partial class App : Application
             var layoutSamples = new List<string>();
             var accessibilityWarmupSubstepSamples = new List<CatalogInteractionSubstepSample>();
             var stalePeerSubstepSamples = new List<CatalogInteractionSubstepSample>();
+            var keyboardFocusSubstepSamples = new List<CatalogInteractionGcSubstepSample>();
             T MeasureAccessibilityWarmupSubstep<T>(string operation, Func<T> action)
             {
                 SetActiveOperation(operation);
@@ -9898,6 +9899,35 @@ public partial class App : Application
                 {
                     watch.Stop();
                     stalePeerSubstepSamples.Add(new(operation, watch.Elapsed.TotalMilliseconds));
+                }
+            }
+            async Task<T> MeasureKeyboardFocusSubstepAsync<T>(
+                string operation,
+                Func<Task<T>> action)
+            {
+                SetActiveOperation(operation);
+                long allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
+                TimeSpan gcPauseBefore = GC.GetTotalPauseDuration();
+                int gen0Before = GC.CollectionCount(0);
+                int gen1Before = GC.CollectionCount(1);
+                int gen2Before = GC.CollectionCount(2);
+                var watch = Stopwatch.StartNew();
+                try
+                {
+                    return await action();
+                }
+                finally
+                {
+                    watch.Stop();
+                    keyboardFocusSubstepSamples.Add(new(
+                        operation,
+                        watch.Elapsed.TotalMilliseconds,
+                        Math.Max(0, GC.GetTotalAllocatedBytes(precise: false) - allocatedBefore),
+                        Math.Max(0, (GC.GetTotalPauseDuration() - gcPauseBefore).TotalMilliseconds),
+                        GC.CollectionCount(0) - gen0Before,
+                        GC.CollectionCount(1) - gen1Before,
+                        GC.CollectionCount(2) - gen2Before,
+                        window.CatalogProjectionGenerationForSmoke));
                 }
             }
             async Task FlushLayoutAsync()
@@ -10431,22 +10461,30 @@ public partial class App : Application
                 SetActiveOperation("keyboard-focus-filter");
                 MainWindow.SearchFilterCompletion keyboardFocusFilter =
                     await window.SetSearchInputForSmokeAsync("needle");
-                SetActiveOperation("keyboard-focus-filter-realize");
-                await window.WaitForGridRealizationIdleForSmokeAsync();
-                bool projectionFilterFocusRestored = await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                bool keyboardFocusFilterRealized = await MeasureKeyboardFocusSubstepAsync(
+                    "keyboard-focus-filter-realize",
+                    () => window.WaitForGridRealizationIdleForSmokeAsync());
+                bool projectionFilterFocusRestored = await MeasureKeyboardFocusSubstepAsync(
+                    "keyboard-focus-filter-focus",
+                    () => window.WaitForPrimaryGalleryFocusForSmokeAsync())
                     && string.Equals(window.FocusedGalleryPathForSmoke, projectionFocusPath, StringComparison.OrdinalIgnoreCase);
                 SetActiveOperation("keyboard-focus-clear");
                 MainWindow.SearchFilterCompletion keyboardFocusClear =
                     await window.SetSearchInputForSmokeAsync("");
-                SetActiveOperation("keyboard-focus-clear-realize");
-                await window.WaitForGridRealizationIdleForSmokeAsync();
-                bool projectionClearFocusRestored = await window.WaitForPrimaryGalleryFocusForSmokeAsync()
+                bool keyboardFocusClearRealized = await MeasureKeyboardFocusSubstepAsync(
+                    "keyboard-focus-clear-realize",
+                    () => window.WaitForGridRealizationIdleForSmokeAsync());
+                bool projectionClearFocusRestored = await MeasureKeyboardFocusSubstepAsync(
+                    "keyboard-focus-clear-focus",
+                    () => window.WaitForPrimaryGalleryFocusForSmokeAsync())
                     && string.Equals(window.FocusedGalleryPathForSmoke, projectionFocusPath, StringComparison.OrdinalIgnoreCase);
                 bool projectionFocusRestored = projectionFocusPrepared
                     && keyboardFocusFilter.Applied
                     && !keyboardFocusFilter.Discarded
                     && keyboardFocusClear.Applied
                     && !keyboardFocusClear.Discarded
+                    && keyboardFocusFilterRealized
+                    && keyboardFocusClearRealized
                     && projectionFilterFocusRestored
                     && projectionClearFocusRestored;
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
@@ -10717,6 +10755,8 @@ public partial class App : Application
                 bool bounded = window.GridItemsSourceCountForSmoke == count
                     && window.GridUsesFullExtentVirtualizationForSmoke
                     && window.GridRealizedCountForSmoke <= window.GridMaxRealizationCountForSmoke;
+                bool detachedContainerReuseActive =
+                    window.GridDetachedContainerReuseCountForSmoke > 0;
                 long catalogProjectionMaxApplySliceMs = Math.Max(
                     searchPhaseSamples.Count == 0
                         ? 0
@@ -10775,6 +10815,7 @@ public partial class App : Application
                     && completionsApplied
                     && selectionStable
                     && bounded
+                    && detachedContainerReuseActive
                     && keyboardNavigationExact
                     && projectionFocusRestored
                     && externalAutomationExact
@@ -10860,6 +10901,9 @@ public partial class App : Application
                     KeyboardAccessibilityMaxRealized = keyboardMaxRealized,
                     KeyboardSelectionSyncMaxMs = keyboardSelectionSyncMaxMs,
                     KeyboardAccessibilityBounded = keyboardAccessibilityBounded,
+                    KeyboardFocusFilterCompletion = keyboardFocusFilter,
+                    KeyboardFocusClearCompletion = keyboardFocusClear,
+                    KeyboardFocusSubstepSamples = keyboardFocusSubstepSamples,
                     AutomationTailPeer = automationTailPeer,
                     AutomationTailContainer = automationTailContainer,
                     RecycledHeadContainer = recycledHeadContainer,
@@ -10867,6 +10911,10 @@ public partial class App : Application
                     GridRealizedCount = window.GridRealizedCountForSmoke,
                     GridRealizationLimit = window.GridMaxRealizationCountForSmoke,
                     GridUsesFullExtentVirtualization = window.GridUsesFullExtentVirtualizationForSmoke,
+                    GridDetachedContainerCreatedCount =
+                        window.GridDetachedContainerCreatedCountForSmoke,
+                    GridDetachedContainerReuseCount =
+                        window.GridDetachedContainerReuseCountForSmoke,
                     HeartbeatCount = heartbeatCount,
                     DispatcherHeartbeatMaxGapMs = maxHeartbeatGapMs,
                     DispatcherHeartbeatMaxGapSample = maxHeartbeatGapSample,
@@ -24929,6 +24977,16 @@ public partial class App : Application
         string Operation,
         double WallMs);
 
+    private sealed record CatalogInteractionGcSubstepSample(
+        string Operation,
+        double WallMs,
+        long AllocatedBytes,
+        double GcPauseMs,
+        int Gen0Collections,
+        int Gen1Collections,
+        int Gen2Collections,
+        long ProjectionGeneration);
+
     private sealed record DispatcherHeartbeatDiagnosticSample(
         string Operation,
         long ElapsedMs,
@@ -24997,6 +25055,9 @@ public partial class App : Application
         public int KeyboardAccessibilityMaxRealized { get; init; }
         public long KeyboardSelectionSyncMaxMs { get; init; }
         public bool KeyboardAccessibilityBounded { get; init; }
+        public MainWindow.SearchFilterCompletion KeyboardFocusFilterCompletion { get; init; }
+        public MainWindow.SearchFilterCompletion KeyboardFocusClearCompletion { get; init; }
+        public List<CatalogInteractionGcSubstepSample> KeyboardFocusSubstepSamples { get; init; } = [];
         public GalleryAutomationItemSmokeSnapshot? AutomationTailPeer { get; init; }
         public GalleryAutomationItemSmokeSnapshot? AutomationTailContainer { get; init; }
         public GalleryAutomationItemSmokeSnapshot? RecycledHeadContainer { get; init; }
@@ -25004,6 +25065,8 @@ public partial class App : Application
         public int GridRealizedCount { get; init; }
         public int GridRealizationLimit { get; init; }
         public bool GridUsesFullExtentVirtualization { get; init; }
+        public int GridDetachedContainerCreatedCount { get; init; }
+        public int GridDetachedContainerReuseCount { get; init; }
         public int HeartbeatCount { get; init; }
         public long DispatcherHeartbeatMaxGapMs { get; init; }
         public string DispatcherHeartbeatMaxGapSample { get; init; } = "";

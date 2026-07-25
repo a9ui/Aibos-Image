@@ -426,6 +426,7 @@
        <Grid>
         <local:VirtualizedGalleryListBox x:Name="CardsList" AutomationProperties.AutomationId="AibosGalleryGrid"
                  Background="Transparent" BorderThickness="0" Padding="14,12,10,18"
+                 ReuseDetachedContainers="True"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                  ItemsPanel="{StaticResource VirtualizedCardItemsPanel}"

@@ -1240,7 +1240,8 @@ public partial class MainWindow : Window
         double ResetForgetDeferredMeasureMs = 0,
         double ResetRemoveInternalChildRangeMs = 0,
         double ResetRemoveInternalChildRangeThreadCpuMs = 0,
-        double ResetPanelTotalMs = 0);
+        double ResetPanelTotalMs = 0,
+        long ResetAllocatedBytes = 0);
 
     private sealed class CatalogLayoutCache
     {
@@ -1335,6 +1336,7 @@ public partial class MainWindow : Window
         double ResetRemoveInternalChildRangeMs = 0,
         double ResetRemoveInternalChildRangeThreadCpuMs = 0,
         double ResetPanelTotalMs = 0,
+        long ResetAllocatedBytes = 0,
         bool PreparedLayoutReady = false)
     {
         public static SearchFilterCompletion AppliedResult => new(true, false, null);
@@ -7984,6 +7986,7 @@ public partial class MainWindow : Window
             ResetRemoveInternalChildRangeThreadCpuMs =
                 applyMetrics.ResetRemoveInternalChildRangeThreadCpuMs,
             ResetPanelTotalMs = applyMetrics.ResetPanelTotalMs,
+            ResetAllocatedBytes = applyMetrics.ResetAllocatedBytes,
             PreparedLayoutReady = result?.PreparedLayout is not null,
         });
         if (ReferenceEquals(_pendingSearchFilterCompletion, request.Completion))
@@ -10117,6 +10120,7 @@ public partial class MainWindow : Window
         double resetRemoveInternalChildRangeMs = 0;
         double resetRemoveInternalChildRangeThreadCpuMs = 0;
         double resetPanelTotalMs = 0;
+        long resetAllocatedBytes = 0;
         var slice = Stopwatch.StartNew();
 
         long FinishSlice()
@@ -10242,6 +10246,11 @@ public partial class MainWindow : Window
                 phase.Stop();
                 panelCommitMs = phase.ElapsedMilliseconds;
 
+                bool collectResetAllocation =
+                    !string.IsNullOrEmpty(_catalogInteractionDiagnosticOperation);
+                long resetAllocatedBefore = collectResetAllocation
+                    ? GC.GetAllocatedBytesForCurrentThread()
+                    : 0;
                 phase.Restart();
                 StageGalleryAutomationProjection(filterResult.AutomationProjection);
                 if (publishSingleRemoval)
@@ -10257,6 +10266,9 @@ public partial class MainWindow : Window
                 }
                 phase.Stop();
                 resetMs = phase.ElapsedMilliseconds;
+                resetAllocatedBytes = collectResetAllocation
+                    ? GC.GetAllocatedBytesForCurrentThread() - resetAllocatedBefore
+                    : 0;
 
                 phase.Restart();
                 if (resetPreparationStarted)
@@ -10400,7 +10412,8 @@ public partial class MainWindow : Window
             resetForgetDeferredMeasureMs,
             resetRemoveInternalChildRangeMs,
             resetRemoveInternalChildRangeThreadCpuMs,
-            resetPanelTotalMs);
+            resetPanelTotalMs,
+            resetAllocatedBytes);
     }
 
     private void ScheduleCatalogStatsUpdate(long generation)
@@ -19275,6 +19288,10 @@ public partial class MainWindow : Window
         UpdateFolderStats();
     }
     public int GridMaxRealizationCountForSmoke => MaxVirtualizedContainerSmokeCount;
+    public int GridDetachedContainerCreatedCountForSmoke
+        => CardsList.DetachedContainerCreatedCount;
+    public int GridDetachedContainerReuseCountForSmoke
+        => CardsList.DetachedContainerReuseCount;
     public double CardWidthForSmoke => SizeSlider.Value;
     public double ListThumbnailSizeForSmoke => _allTiles.FirstOrDefault()?.ListThumbnailSize ?? 0;
     public bool ListUsesRecyclingVirtualizationForSmoke
