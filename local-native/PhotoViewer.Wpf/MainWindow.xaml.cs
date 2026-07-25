@@ -1241,6 +1241,7 @@ public partial class MainWindow : Window
         double ResetRemoveInternalChildRangeMs = 0,
         double ResetRemoveInternalChildRangeThreadCpuMs = 0,
         double ResetPanelTotalMs = 0,
+        double ResetPanelThreadCpuMs = -1,
         long ResetAllocatedBytes = 0);
 
     private sealed class CatalogLayoutCache
@@ -1336,6 +1337,7 @@ public partial class MainWindow : Window
         double ResetRemoveInternalChildRangeMs = 0,
         double ResetRemoveInternalChildRangeThreadCpuMs = 0,
         double ResetPanelTotalMs = 0,
+        double ResetPanelThreadCpuMs = -1,
         long ResetAllocatedBytes = 0,
         bool PreparedLayoutReady = false)
     {
@@ -7990,6 +7992,7 @@ public partial class MainWindow : Window
             ResetRemoveInternalChildRangeThreadCpuMs =
                 applyMetrics.ResetRemoveInternalChildRangeThreadCpuMs,
             ResetPanelTotalMs = applyMetrics.ResetPanelTotalMs,
+            ResetPanelThreadCpuMs = applyMetrics.ResetPanelThreadCpuMs,
             ResetAllocatedBytes = applyMetrics.ResetAllocatedBytes,
             PreparedLayoutReady = result?.PreparedLayout is not null,
         });
@@ -10133,6 +10136,7 @@ public partial class MainWindow : Window
         double resetRemoveInternalChildRangeMs = 0;
         double resetRemoveInternalChildRangeThreadCpuMs = 0;
         double resetPanelTotalMs = 0;
+        double resetPanelThreadCpuMs = -1;
         long resetAllocatedBytes = 0;
         var slice = Stopwatch.StartNew();
 
@@ -10224,6 +10228,12 @@ public partial class MainWindow : Window
                             resetSlice.RemoveInternalChildRangeThreadCpuMs;
                         resetPanelTotalMs = resetSlice.PanelTotalMs;
                     }
+                    if (resetSlice.PanelThreadCpuMs >= 0)
+                    {
+                        resetPanelThreadCpuMs = resetPanelThreadCpuMs < 0
+                            ? resetSlice.PanelThreadCpuMs
+                            : Math.Max(resetPanelThreadCpuMs, resetSlice.PanelThreadCpuMs);
+                    }
                     // Preserve the original reset semantics: stale-generation
                     // rejection happens only after reset preparation finishes.
                     // Yield after the final detach as well, so its visual-tree
@@ -10257,7 +10267,8 @@ public partial class MainWindow : Window
                     resetForgetDeferredMeasureMs,
                     resetRemoveInternalChildRangeMs,
                     resetRemoveInternalChildRangeThreadCpuMs,
-                    resetPanelTotalMs);
+                    resetPanelTotalMs,
+                    resetPanelThreadCpuMs);
             }
 
             bool wasSyncingSelection = _syncingSelection;
@@ -10449,6 +10460,7 @@ public partial class MainWindow : Window
             resetRemoveInternalChildRangeMs,
             resetRemoveInternalChildRangeThreadCpuMs,
             resetPanelTotalMs,
+            resetPanelThreadCpuMs,
             resetAllocatedBytes);
     }
 

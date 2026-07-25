@@ -10773,6 +10773,22 @@ public partial class App : Application
                         : filterPhaseSamples.Max(static sample => sample.PreResetMs));
                 List<MainWindow.SearchFilterCompletion> catalogProjectionDetachSamples =
                     searchPhaseSamples.Concat(filterPhaseSamples).ToList();
+                double catalogProjectionMaxResetPanelThreadCpuMs =
+                    catalogProjectionDetachSamples
+                        .Where(static sample => sample.ResetPanelThreadCpuMs >= 0)
+                        .Select(static sample => sample.ResetPanelThreadCpuMs)
+                        .DefaultIfEmpty(-1)
+                        .Max();
+                string catalogProjectionDetachBudgetBasis =
+                    catalogProjectionMaxResetPanelThreadCpuMs >= 0
+                        ? "thread-cpu"
+                        : "wall-fallback";
+                bool catalogProjectionDetachWithinBudget =
+                    catalogProjectionMaxResetPanelThreadCpuMs >= 0
+                        ? catalogProjectionMaxResetPanelThreadCpuMs
+                            <= CatalogProjectionSingleContainerDetachBudgetMs
+                        : catalogProjectionMaxSingleContainerDetachMs
+                            <= CatalogProjectionSingleContainerDetachBudgetMs;
                 MainWindow.SearchFilterCompletion catalogProjectionMaxDetachSample =
                     catalogProjectionDetachSamples.Count == 0
                         ? default
@@ -10832,7 +10848,7 @@ public partial class App : Application
                     && favoriteEvictionAutomationExact
                     && favoriteEvictionSingleRemovalExact
                     && favoriteEvictionElapsedMs <= CatalogFavoriteEvictionBudgetMs
-                    && catalogProjectionMaxSingleContainerDetachMs <= CatalogProjectionSingleContainerDetachBudgetMs
+                    && catalogProjectionDetachWithinBudget
                     && maxHeartbeatGapMs <= CatalogInteractionDispatcherHeartbeatBudgetMs
                     && heartbeatGapSamples.Count == 0
                     // Rapid churn leaves dead WPF generator/layout objects in
@@ -10928,6 +10944,10 @@ public partial class App : Application
                         CatalogProjectionSingleContainerDetachBudgetMs,
                     CatalogProjectionMaxSingleContainerDetachMs =
                         catalogProjectionMaxSingleContainerDetachMs,
+                    CatalogProjectionMaxResetPanelThreadCpuMs =
+                        catalogProjectionMaxResetPanelThreadCpuMs,
+                    CatalogProjectionDetachBudgetBasis =
+                        catalogProjectionDetachBudgetBasis,
                     CatalogProjectionMaxGeneratorRemoveMs =
                         catalogProjectionMaxGeneratorRemoveMs,
                     CatalogProjectionMaxForgetDeferredMeasureMs =
@@ -25077,6 +25097,8 @@ public partial class App : Application
         public long CatalogProjectionDiagnosticSliceTargetMs { get; init; }
         public long CatalogProjectionSingleContainerDetachBudgetMs { get; init; }
         public long CatalogProjectionMaxSingleContainerDetachMs { get; init; }
+        public double CatalogProjectionMaxResetPanelThreadCpuMs { get; init; } = -1;
+        public string CatalogProjectionDetachBudgetBasis { get; init; } = "";
         public double CatalogProjectionMaxGeneratorRemoveMs { get; init; }
         public double CatalogProjectionMaxForgetDeferredMeasureMs { get; init; }
         public double CatalogProjectionMaxRemoveInternalChildRangeMs { get; init; }

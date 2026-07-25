@@ -126,11 +126,22 @@ if ($result.favoriteEvictionBudgetMs -ne 100 -or $result.favoriteEvictionElapsed
 if ($result.catalogProjectionDiagnosticSliceTargetMs -ne 4) {
     $failures.Add("catalog projection diagnostic target was $($result.catalogProjectionDiagnosticSliceTargetMs) ms")
 }
+$detachUsesThreadCpu = $null -ne $result.catalogProjectionMaxResetPanelThreadCpuMs `
+    -and $result.catalogProjectionMaxResetPanelThreadCpuMs -ge 0
+$detachBudgetValue = if ($detachUsesThreadCpu) {
+    $result.catalogProjectionMaxResetPanelThreadCpuMs
+}
+else {
+    $result.catalogProjectionMaxSingleContainerDetachMs
+}
+$detachBudgetBasis = if ($detachUsesThreadCpu) { 'thread-cpu' } else { 'wall-fallback' }
 if ($result.catalogProjectionSingleContainerDetachBudgetMs -ne 12 `
-    -or $result.catalogProjectionMaxSingleContainerDetachMs -gt $result.catalogProjectionSingleContainerDetachBudgetMs) {
+    -or $detachBudgetValue -gt $result.catalogProjectionSingleContainerDetachBudgetMs) {
     $failures.Add(
-        "single-container reset unit was $($result.catalogProjectionMaxSingleContainerDetachMs) ms " +
+        "single-container reset unit was $detachBudgetValue ms on $detachBudgetBasis " +
         "(budget $($result.catalogProjectionSingleContainerDetachBudgetMs) ms; " +
+        "code CPU $($result.catalogProjectionMaxResetPanelThreadCpuMs) ms; " +
+        "advisory wall $($result.catalogProjectionMaxSingleContainerDetachMs) ms; " +
         "dominant $($result.catalogProjectionDominantResetSubstep); " +
         "generator $($result.catalogProjectionMaxGeneratorRemoveMs) ms; " +
         "deferred-measure $($result.catalogProjectionMaxForgetDeferredMeasureMs) ms; " +
@@ -141,7 +152,8 @@ if ($result.catalogProjectionSingleContainerDetachBudgetMs -ne 12 `
 if ($result.catalogProjectionMaxSingleContainerDetachMs -gt 0 `
     -and ($result.catalogProjectionMaxResetPanelTotalMs -le 0 `
         -or $result.catalogProjectionDominantResetSubstep -eq 'none' `
-        -or $result.catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs -lt 0)) {
+        -or ($detachUsesThreadCpu `
+            -and $result.catalogProjectionMaxRemoveInternalChildRangeThreadCpuMs -lt 0))) {
     $failures.Add('single-container reset sub-step attribution was missing')
 }
 if ($result.catalogProjectionMaxApplySliceMs -gt $result.catalogProjectionDiagnosticSliceTargetMs) {

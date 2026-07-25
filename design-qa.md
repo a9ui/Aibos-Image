@@ -586,6 +586,18 @@ final result: pending independent review and exact hosted verification
   original stale-generation semantics. It now yields after the final detach
   before currentness validation and atomic catalog publication, separating the
   final visual-tree cleanup from the publication render.
+- Ordinary distant viewport jumps now evict one obsolete realized container per
+  Render pass and reuse the existing ContextIdle continuation before removing
+  the next. The detached container enters the same bounded, parentless-only
+  reuse pool after generator and visual detachment. Off-screen UI Automation
+  and keyboard jumps no longer unlink the entire old viewport ahead of Input.
+- Catalog Reset keeps two independent budgets: total current-thread CPU for one
+  generator/deferred-measure/visual detach unit must remain at or below 12 ms,
+  and the dispatcher heartbeat must remain at or below 50 ms. If Windows thread
+  CPU timing is unavailable, the 12 ms check falls back to wall time. Wall time
+  remains advisory when CPU timing is available, so the observed 19.854 ms
+  descheduled wall sample remains visible without being misclassified as Aibos
+  work; that sample consumed 0 ms thread CPU with a 49 ms heartbeat.
 
 final result: pending clean exact verification
 

@@ -30,7 +30,8 @@ internal readonly record struct ItemsResetPreparationSlice(
     double ForgetDeferredMeasureMs,
     double RemoveInternalChildRangeMs,
     double RemoveInternalChildRangeThreadCpuMs,
-    double PanelTotalMs);
+    double PanelTotalMs,
+    double PanelThreadCpuMs);
 
 internal readonly record struct VirtualizingMeasureDiagnostic(
     string Operation,
@@ -331,6 +332,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         double forgetDeferredMeasureMs = 0;
         double removeInternalChildRangeMs = 0;
         double removeInternalChildRangeThreadCpuMs = 0;
+        long sliceCpuStarted = ReadCurrentThreadCpuTimeTicks();
         long sliceStarted = Stopwatch.GetTimestamp();
         if (_itemsResetGeneratorPosition >= 0)
         {
@@ -364,13 +366,19 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             _itemsResetGeneratorPosition--;
         }
 
+        long sliceCpuFinished = ReadCurrentThreadCpuTimeTicks();
+        double panelThreadCpuMs =
+            sliceCpuStarted >= 0 && sliceCpuFinished >= sliceCpuStarted
+                ? TimeSpan.FromTicks(sliceCpuFinished - sliceCpuStarted).TotalMilliseconds
+                : -1;
         return new ItemsResetPreparationSlice(
             _itemsResetGeneratorPosition < 0,
             generatorRemoveMs,
             forgetDeferredMeasureMs,
             removeInternalChildRangeMs,
             removeInternalChildRangeThreadCpuMs,
-            Stopwatch.GetElapsedTime(sliceStarted).TotalMilliseconds);
+            Stopwatch.GetElapsedTime(sliceStarted).TotalMilliseconds,
+            panelThreadCpuMs);
     }
 
     private static long ReadCurrentThreadCpuTimeTicks()
@@ -789,9 +797,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
         if (itemCount == 0 || _rowTops.Count == 0)
         {
-            CleanupItems(0, -1);
+            bool emptyCleanupComplete = CleanupItems(0, -1);
             UpdateRange(-1, -1, -1, -1);
             UpdateScrollInfo();
+            if (!emptyCleanupComplete)
+                ScheduleRealizationContinuation();
             return CompleteMeasure(availableSize);
         }
 
@@ -805,7 +815,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         int firstRealizedIndex = FirstItemIndexForRows(firstRealizedRow, lastRealizedRow, itemCount);
         int lastRealizedIndex = LastItemIndexForRows(firstRealizedRow, lastRealizedRow, itemCount);
 
-        CleanupItems(firstRealizedIndex, lastRealizedIndex);
+        bool cleanupComplete = CleanupItems(firstRealizedIndex, lastRealizedIndex);
         int visibleItemCount = Math.Max(0, lastVisibleIndex - firstVisibleIndex + 1);
         int containerBudget = visibleItemCount >= 128
             ? DenseContainersPerMeasure
@@ -852,7 +862,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         int reportedFirstRealizedIndex = lastProcessedIndex >= firstRealizedIndex ? firstRealizedIndex : -1;
         UpdateRange(firstVisibleIndex, lastVisibleIndex, reportedFirstRealizedIndex, lastProcessedIndex);
         UpdateScrollInfo();
-        if (!realizationComplete)
+        if (!cleanupComplete || !realizationComplete)
             ScheduleRealizationContinuation();
         else if (_realizationContinuationPending)
         {
@@ -1255,7 +1265,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         return brush;
     }
 
-    private void CleanupItems(int firstIndex, int lastIndex)
+    private bool CleanupItems(int firstIndex, int lastIndex)
     {
         IItemContainerGenerator generator = ItemContainerGenerator;
         int childIndex = InternalChildren.Count - 1;
@@ -1271,7 +1281,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 // realized slice instead of guessing and shifting every later
                 // container by one.
                 ResyncGeneratorVisuals();
-                return;
+                return true;
             }
             if (itemIndex >= firstIndex && itemIndex <= lastIndex)
             {
@@ -1279,38 +1289,25 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                 continue;
             }
 
-            int runEnd = childIndex;
-            int runStart = childIndex;
-            int firstRunItemIndex = itemIndex;
-            while (runStart > 0)
-            {
-                int previousItemIndex = generator.IndexFromGeneratorPosition(
-                    new GeneratorPosition(runStart - 1, 0));
-                if (previousItemIndex < 0)
-                {
-                    ResyncGeneratorVisuals();
-                    return;
-                }
-                if ((previousItemIndex >= firstIndex && previousItemIndex <= lastIndex)
-                    || previousItemIndex + 1 != firstRunItemIndex)
-                {
-                    break;
-                }
-                runStart--;
-                firstRunItemIndex = previousItemIndex;
-            }
-
-            int runCount = runEnd - runStart + 1;
-            GeneratorPosition runPosition = new(runStart, 0);
+            UIElement detachedChild = InternalChildren[childIndex];
             // This is an ordinary viewport eviction, not a source Reset.
             // Remove preserves ListBox.SelectedItems bookkeeping; recycling
             // the range here can leave WPF's logical selection detached from
-            // a correctly selected realized container.
-            generator.Remove(runPosition, runCount);
-            ForgetDeferredMeasureRange(runStart, runCount);
-            RemoveInternalChildRange(runStart, runCount);
-            childIndex = runStart - 1;
+            // a correctly selected realized container. Detach one card per
+            // Render pass so a distant UIA/keyboard jump cannot unlink the
+            // complete old viewport ahead of Input.
+            generator.Remove(position, 1);
+            ForgetDeferredMeasureRange(childIndex, 1);
+            RemoveInternalChildRange(childIndex, 1);
+            if (detachedChild is ListBoxItem detachedContainer
+                && ItemsControl.GetItemsOwner(this) is VirtualizedGalleryListBox owner)
+            {
+                owner.CacheDetachedContainer(detachedContainer);
+            }
+            return false;
         }
+
+        return true;
     }
 
     private void ForgetDeferredMeasureRange(int start, int count)
