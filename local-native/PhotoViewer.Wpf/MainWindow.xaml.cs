@@ -228,6 +228,8 @@ public partial class MainWindow : Window
     private long _retiredCatalogLayoutMaxMeasureMilliseconds;
     private VirtualizingMeasureDiagnostic _retiredCatalogLayoutMaxMeasureDiagnostic =
         new("", 0, 0, -1);
+    private readonly List<VirtualizingPanelPhaseDiagnostic> _retiredCatalogPanelPhaseDiagnostics = [];
+    private bool _catalogPanelPhaseDiagnosticOverflow;
     private string _catalogInteractionDiagnosticOperation = "";
     private int _thumbnailBrowserCacheHits;
     private int _lastInitialUnseenCount;
@@ -427,6 +429,7 @@ public partial class MainWindow : Window
     private TaskCompletionSource<SearchFilterCompletion>? _pendingSearchFilterCompletion;
     private long _lastCatalogProjectionApplySliceMilliseconds;
     private long _maxCatalogProjectionApplySliceMilliseconds;
+    private int _catalogSnapshotResetDepth;
     private int _catalogProjectionDiscardedCount;
     private long _catalogStatsPresentationGeneration;
     private string _displayStyle = DisplayStyleStandard;
@@ -724,7 +727,12 @@ public partial class MainWindow : Window
                 _retiredCatalogLayoutMaxMeasureDiagnostic =
                     _galleryVirtualizingPanel.MaxMeasureDiagnostic;
             }
+            _retiredCatalogPanelPhaseDiagnostics.AddRange(
+                _galleryVirtualizingPanel.CapturePhaseDiagnostics());
+            _catalogPanelPhaseDiagnosticOverflow |=
+                _galleryVirtualizingPanel.PhaseDiagnosticOverflow;
             _galleryVirtualizingPanel.RealizedRangeChanged -= GalleryVirtualizingPanel_RealizedRangeChanged;
+            _galleryVirtualizingPanel.PriorityItemMeasured -= GalleryVirtualizingPanel_PriorityItemMeasured;
         }
         _galleryVirtualizingPanel = panel;
         if (_galleryVirtualizingPanel is null)
@@ -733,6 +741,7 @@ public partial class MainWindow : Window
         SyncGalleryColumnMode();
         _galleryVirtualizingPanel.SetDiagnosticOperation(_catalogInteractionDiagnosticOperation);
         _galleryVirtualizingPanel.RealizedRangeChanged += GalleryVirtualizingPanel_RealizedRangeChanged;
+        _galleryVirtualizingPanel.PriorityItemMeasured += GalleryVirtualizingPanel_PriorityItemMeasured;
         ScheduleThumbnailViewportRange(
             _galleryVirtualizingPanel.FirstVisibleIndex,
             _galleryVirtualizingPanel.LastVisibleIndex,
@@ -753,6 +762,9 @@ public partial class MainWindow : Window
         QueuePendingGalleryFocusCompletion();
         ScheduleRememberCurrentGridViewportAnchor();
     }
+
+    private void GalleryVirtualizingPanel_PriorityItemMeasured(object? sender, EventArgs e)
+        => QueuePendingGalleryFocusCompletion();
 
     private void CardsList_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
@@ -1252,7 +1264,11 @@ public partial class MainWindow : Window
         int MaxResetDetachedContainersPerSlice = 0,
         bool InputBoundaryBeforePublication = false,
         bool InputBoundaryAfterPublication = false,
-        long ResetAllocatedBytes = 0);
+        long ResetAllocatedBytes = 0,
+        double CatalogSnapshotResetThreadCpuMs = -1,
+        int CatalogSnapshotResetCount = 0,
+        int CatalogSnapshotResetNestedCount = 0,
+        bool PublishedSingleRemoval = false);
 
     private sealed class CatalogLayoutCache
     {
@@ -1354,6 +1370,10 @@ public partial class MainWindow : Window
         bool InputBoundaryBeforePublication = false,
         bool InputBoundaryAfterPublication = false,
         long ResetAllocatedBytes = 0,
+        double CatalogSnapshotResetThreadCpuMs = -1,
+        int CatalogSnapshotResetCount = 0,
+        int CatalogSnapshotResetNestedCount = 0,
+        bool PublishedSingleRemoval = false,
         bool PreparedLayoutReady = false)
     {
         public static SearchFilterCompletion AppliedResult => new(true, false, null);
@@ -6563,13 +6583,13 @@ public partial class MainWindow : Window
         return _primarySelectedIndex;
     }
 
-    private void QueuePrimaryGalleryFocus(Tile tile, int index, bool grid)
+    private bool QueuePrimaryGalleryFocus(Tile tile, int index, bool grid)
     {
         if (index < 0
             || index >= _tiles.Count
             || !ReferenceEquals(_tiles[index], tile))
         {
-            return;
+            return false;
         }
 
         _galleryFocusRequestGeneration++;
@@ -6586,6 +6606,7 @@ public partial class MainWindow : Window
         }
 
         QueuePendingGalleryFocusCompletion();
+        return true;
     }
 
     private void QueuePendingGalleryFocusCompletion()
@@ -6626,7 +6647,9 @@ public partial class MainWindow : Window
             || index >= _tiles.Count
             || !string.Equals(_tiles[index].Path, path, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(_primarySelectedPath, path, StringComparison.OrdinalIgnoreCase)
-            || listBox.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem container
+            || RealizedGalleryContainer(listBox, index) is not ListBoxItem container
+            || container.DataContext is not Tile boundTile
+            || !ReferenceEquals(boundTile, _tiles[index])
             || !container.IsMeasureValid
             || !container.IsVisible
             || !container.IsEnabled)
@@ -6635,11 +6658,22 @@ public partial class MainWindow : Window
         }
 
         SelectRealizedContainer(listBox, _tiles[index]);
-        if (!container.Focus())
+        if (!container.Focus() || !container.IsKeyboardFocusWithin)
             return;
 
         _pendingGalleryFocusPath = null;
         _pendingGalleryFocusIndex = -1;
+    }
+
+    private ListBoxItem? RealizedGalleryContainer(ListBox listBox, int index)
+    {
+        if (ReferenceEquals(listBox, CardsList)
+            && _galleryVirtualizingPanel is { } panel)
+        {
+            return panel.RealizedContainerForIndex(index);
+        }
+        return listBox.ItemContainerGenerator.ContainerFromIndex(index)
+            as ListBoxItem;
     }
 
     private void CancelPendingGalleryFocus()
@@ -6810,16 +6844,23 @@ public partial class MainWindow : Window
         if (listBox.Visibility != Visibility.Visible)
             return;
 
-        listBox.SelectedItems.Clear();
-        if (selectedTiles.Count == 1)
+        if (selectedTiles.Count <= 1)
         {
-            // Never ask grouped ListBox.SelectedItems to resolve a distant
-            // single item. Select an existing visible container directly, or
-            // let the Render-priority resync apply it after ScrollIntoView.
-            if (listBox.ItemContainerGenerator.ContainerFromItem(selectedTiles[0]) is ListBoxItem container)
-                container.IsSelected = true;
+            // SelectedItems.Clear() asks a grouped 100k-item ListBox to resolve
+            // every stored selection index. Canonical selection already lives
+            // on Tile, so reconcile only the bounded realized containers. The
+            // target container is selected when priority realization finishes.
+            foreach (ListBoxItem container in FindVisualDescendants<ListBoxItem>(listBox))
+            {
+                bool selected = selectedTiles.Count == 1
+                    && ReferenceEquals(container.DataContext, selectedTiles[0]);
+                if (container.IsSelected != selected)
+                    container.IsSelected = selected;
+            }
             return;
         }
+
+        listBox.SelectedItems.Clear();
         foreach (Tile tile in selectedTiles)
             listBox.SelectedItems.Add(tile);
     }
@@ -6832,7 +6873,6 @@ public partial class MainWindow : Window
         // Canonical selection lives in _selectedPaths. WPF SelectedItems is
         // deliberately only a bounded visual projection for very large sets;
         // asking it to own 100k entries defeats virtualization and can hang UI.
-        listBox.SelectedItems.Clear();
         foreach (ListBoxItem container in FindVisualDescendants<ListBoxItem>(listBox))
         {
             bool selected = container.DataContext is Tile tile && _selectedPaths.Contains(tile.Path);
@@ -8135,6 +8175,14 @@ public partial class MainWindow : Window
             InputBoundaryAfterPublication =
                 applyMetrics.InputBoundaryAfterPublication,
             ResetAllocatedBytes = applyMetrics.ResetAllocatedBytes,
+            CatalogSnapshotResetThreadCpuMs =
+                applyMetrics.CatalogSnapshotResetThreadCpuMs,
+            CatalogSnapshotResetCount =
+                applyMetrics.CatalogSnapshotResetCount,
+            CatalogSnapshotResetNestedCount =
+                applyMetrics.CatalogSnapshotResetNestedCount,
+            PublishedSingleRemoval =
+                applyMetrics.PublishedSingleRemoval,
             PreparedLayoutReady = result?.PreparedLayout is not null,
         });
         if (!outcome.Applied
@@ -9749,6 +9797,22 @@ public partial class MainWindow : Window
         => CatalogLayoutMaxMeasureDiagnosticForSmoke.WallMs;
     public double CatalogLayoutMaxMeasureThreadCpuMsForSmoke
         => CatalogLayoutMaxMeasureDiagnosticForSmoke.ThreadCpuMs;
+    internal bool CatalogPanelPhaseDiagnosticOverflowForSmoke
+        => _catalogPanelPhaseDiagnosticOverflow
+            || _galleryVirtualizingPanel?.PhaseDiagnosticOverflow == true;
+    internal IReadOnlyList<VirtualizingPanelPhaseDiagnostic>
+        CaptureCatalogPanelPhaseDiagnosticsForSmoke()
+    {
+        IReadOnlyList<VirtualizingPanelPhaseDiagnostic> current =
+            _galleryVirtualizingPanel?.CapturePhaseDiagnostics() ?? [];
+        if (_retiredCatalogPanelPhaseDiagnostics.Count == 0)
+            return current;
+        var combined = new List<VirtualizingPanelPhaseDiagnostic>(
+            _retiredCatalogPanelPhaseDiagnostics.Count + current.Count);
+        combined.AddRange(_retiredCatalogPanelPhaseDiagnostics);
+        combined.AddRange(current);
+        return combined;
+    }
 
     public void SetCatalogInteractionDiagnosticOperationForSmoke(string operation)
     {
@@ -10325,6 +10389,9 @@ public partial class MainWindow : Window
         bool inputBoundaryBeforePublication = false;
         bool inputBoundaryAfterPublication = false;
         long resetAllocatedBytes = 0;
+        double catalogSnapshotResetThreadCpuMs = -1;
+        int catalogSnapshotResetCount = 0;
+        int catalogSnapshotResetNestedCount = 0;
         var slice = Stopwatch.StartNew();
 
         long FinishSlice()
@@ -10503,7 +10570,6 @@ public partial class MainWindow : Window
                 long resetAllocatedBefore = collectResetAllocation
                     ? GC.GetAllocatedBytesForCurrentThread()
                     : 0;
-                phase.Restart();
                 StageGalleryAutomationProjection(filterResult.AutomationProjection);
                 if (publishSingleRemoval)
                 {
@@ -10514,10 +10580,40 @@ public partial class MainWindow : Window
                 }
                 else
                 {
-                    _tiles.ReplaceAll(filterResult.Tiles, filterResult.Count);
+                    // The work above remains part of the app-owned
+                    // cooperative slice. The synchronous WPF Reset is an
+                    // indivisible notification and has a separate hard gate.
+                    FinishSlice();
+                    long resetCpuBefore = collectResetAllocation
+                        ? VirtualizingWrapPanel
+                            .ReadCurrentThreadCpuTimeTicksForDiagnostics()
+                        : -1;
+                    phase.Restart();
+                    if (_catalogSnapshotResetDepth != 0)
+                        catalogSnapshotResetNestedCount++;
+                    _catalogSnapshotResetDepth++;
+                    try
+                    {
+                        _tiles.ReplaceAll(filterResult.Tiles, filterResult.Count);
+                        catalogSnapshotResetCount++;
+                    }
+                    finally
+                    {
+                        _catalogSnapshotResetDepth--;
+                    }
+                    phase.Stop();
+                    resetMs = phase.ElapsedMilliseconds;
+                    long resetCpuAfter = collectResetAllocation
+                        ? VirtualizingWrapPanel
+                            .ReadCurrentThreadCpuTimeTicksForDiagnostics()
+                        : -1;
+                    catalogSnapshotResetThreadCpuMs =
+                        resetCpuBefore >= 0 && resetCpuAfter >= resetCpuBefore
+                            ? TimeSpan.FromTicks(resetCpuAfter - resetCpuBefore)
+                                .TotalMilliseconds
+                            : -1;
+                    slice.Restart();
                 }
-                phase.Stop();
-                resetMs = phase.ElapsedMilliseconds;
                 resetAllocatedBytes = collectResetAllocation
                     ? GC.GetAllocatedBytesForCurrentThread() - resetAllocatedBefore
                     : 0;
@@ -10672,7 +10768,11 @@ public partial class MainWindow : Window
             maxResetDetachedContainersPerSlice,
             inputBoundaryBeforePublication,
             inputBoundaryAfterPublication,
-            resetAllocatedBytes);
+            resetAllocatedBytes,
+            catalogSnapshotResetThreadCpuMs,
+            catalogSnapshotResetCount,
+            catalogSnapshotResetNestedCount,
+            publishSingleRemoval);
     }
 
     private void ScheduleCatalogStatsUpdate(long generation)
@@ -16629,12 +16729,25 @@ public partial class MainWindow : Window
         if (tile is null || !activeList.IsVisible || !activeList.IsEnabled)
             return false;
 
-        activeList.ScrollIntoView(tile);
-        activeList.UpdateLayout();
-        return activeList.ItemContainerGenerator.ContainerFromItem(tile) is ListBoxItem container
+        int index = ResolvePrimarySelectionIndex();
+        if (index < 0)
+            return false;
+        if (RealizedGalleryContainer(activeList, index) is ListBoxItem container
+            && container.IsMeasureValid
             && container.IsVisible
             && container.IsEnabled
-            && container.Focus();
+            && container.Focus())
+        {
+            return true;
+        }
+
+        // A 100k catalog may need two bounded realization frames: one to
+        // generate the priority container and one to measure it. Never force
+        // those frames synchronously with UpdateLayout on the input path.
+        return QueuePrimaryGalleryFocus(
+            tile,
+            index,
+            ReferenceEquals(activeList, CardsList));
     }
 
     private static string StatePath => Path.Combine(
@@ -19335,7 +19448,7 @@ public partial class MainWindow : Window
             return GalleryAutomationItemSmokeSnapshot.Unavailable(index);
 
         Tile tile = _tiles[index];
-        ListBoxItem? container = CardsList.ItemContainerGenerator.ContainerFromIndex(index) as ListBoxItem;
+        ListBoxItem? container = RealizedGalleryContainer(CardsList, index);
         AutomationPeer? peer = container is null
             ? null
             : UIElementAutomationPeer.CreatePeerForElement(container);

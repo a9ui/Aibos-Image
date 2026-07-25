@@ -40,6 +40,20 @@ internal readonly record struct VirtualizingMeasureDiagnostic(
     double WallMs,
     double ThreadCpuMs);
 
+internal readonly record struct VirtualizingPanelPhaseDiagnostic(
+    string Phase,
+    string Operation,
+    long StartTimestamp,
+    long EndTimestamp,
+    long StartCpuTicks,
+    long EndCpuTicks,
+    long LayoutGeneration,
+    int FirstVisibleIndex,
+    int LastVisibleIndex,
+    int FirstRealizedIndex,
+    int LastRealizedIndex,
+    int ContainerCount);
+
 internal readonly record struct VirtualizingLayoutContext(
     double AvailableWidth,
     double ItemWidth,
@@ -72,6 +86,7 @@ internal sealed record PreparedVirtualizingLayout(
 /// </summary>
 public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 {
+    private const int DiagnosticPhaseCapacity = 16_384;
     private const double DefaultItemWidth = 204;
     private const double DefaultItemHeight = 304;
     // Extreme thumbnail zoom can expose hundreds of cards at once. Preparing
@@ -85,12 +100,10 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private const int InteractiveContainersPerMeasure = 1;
     private const int MediumDensityContainersPerMeasure = 4;
     private const int DenseContainersPerMeasure = 16;
-    // Leave two Windows timer quanta beyond the 15 ms input heartbeat before
-    // the next progressive Render invalidation. A 20 ms delay can round into
-    // the same ~31.25 ms wakeup as the Input timer on busy hosts, letting the
-    // following Render pass win their race and extend an otherwise bounded
-    // input gap. Waiting 32 ms guarantees an intervening input opportunity.
-    private const int RealizationContinuationDelayMilliseconds = 32;
+    // Keep the progressive fill cadence short. Hosted runner descheduling is
+    // classified by independent verifier probes rather than by slowing product
+    // work to accommodate a particular timer phase.
+    private const int RealizationContinuationDelayMilliseconds = 20;
     private static readonly Brush ProgressivePlaceholderBrush = CreateProgressivePlaceholderBrush();
 
     [DllImport("kernel32.dll")]
@@ -189,8 +202,12 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private bool _diagnosticMeasureThreadCpuEnabled;
     private VirtualizingMeasureDiagnostic _maxMeasureDiagnostic =
         new("", 0, 0, -1);
+    private VirtualizingPanelPhaseDiagnostic[]? _phaseDiagnostics;
+    private int _phaseDiagnosticCount;
+    private bool _phaseDiagnosticOverflow;
 
     public event EventHandler<VirtualizingWrapPanelRangeChangedEventArgs>? RealizedRangeChanged;
+    public event EventHandler? PriorityItemMeasured;
 
     public VirtualizingWrapPanel()
         => Unloaded += (_, _) => CancelPendingRealization();
@@ -269,12 +286,25 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     internal int PreparedLayoutRejectedCount => _preparedLayoutRejectedCount;
     internal long MaxMeasureMilliseconds => _maxMeasureMilliseconds;
     internal VirtualizingMeasureDiagnostic MaxMeasureDiagnostic => _maxMeasureDiagnostic;
+    internal bool PhaseDiagnosticOverflow => _phaseDiagnosticOverflow;
 
     internal void SetDiagnosticOperation(string operation)
     {
         _diagnosticOperation = operation ?? "";
         _diagnosticMeasureThreadCpuEnabled =
             !string.IsNullOrEmpty(_diagnosticOperation);
+        if (_diagnosticMeasureThreadCpuEnabled && _phaseDiagnostics is null)
+            _phaseDiagnostics = new VirtualizingPanelPhaseDiagnostic[DiagnosticPhaseCapacity];
+    }
+
+    internal IReadOnlyList<VirtualizingPanelPhaseDiagnostic> CapturePhaseDiagnostics()
+    {
+        if (_phaseDiagnostics is null || _phaseDiagnosticCount == 0)
+            return [];
+        int count = Math.Min(_phaseDiagnosticCount, _phaseDiagnostics.Length);
+        var result = new VirtualizingPanelPhaseDiagnostic[count];
+        Array.Copy(_phaseDiagnostics, result, count);
+        return result;
     }
 
     internal void SetLayoutSource(IReadOnlyList<Tile> source)
@@ -402,6 +432,9 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             ? kernelTime + userTime
             : -1;
     }
+
+    internal static long ReadCurrentThreadCpuTimeTicksForDiagnostics()
+        => ReadCurrentThreadCpuTimeTicks();
 
     internal void CompleteItemsResetPreparation()
     {
@@ -699,6 +732,27 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         return true;
     }
 
+    internal ListBoxItem? RealizedContainerForIndex(int index)
+    {
+        ItemsControl? owner = ItemsControl.GetItemsOwner(this);
+        if (owner is null || index < 0 || index >= owner.Items.Count)
+            return null;
+
+        object expectedItem = owner.Items[index];
+        // InternalChildren is bounded to the visible/overscan window. Avoid
+        // asking ItemContainerGenerator to resolve a distant logical index in
+        // a 100k catalog when the panel already owns the realized container.
+        foreach (UIElement child in InternalChildren)
+        {
+            if (child is ListBoxItem container
+                && ReferenceEquals(container.DataContext, expectedItem))
+            {
+                return container;
+            }
+        }
+        return null;
+    }
+
     private static void OnLayoutPropertyChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs _)
     {
         if (dependencyObject is not VirtualizingWrapPanel panel)
@@ -760,6 +814,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     protected override Size MeasureOverride(Size availableSize)
     {
+        long measureStartedTimestamp = Stopwatch.GetTimestamp();
         var measureWatch = Stopwatch.StartNew();
         long measureCpuStarted = _diagnosticMeasureThreadCpuEnabled
             ? ReadCurrentThreadCpuTimeTicks()
@@ -768,6 +823,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         long measureGeneration = _layoutGeneration;
         Size CompleteMeasure(Size result)
         {
+            long measureFinishedTimestamp = Stopwatch.GetTimestamp();
             measureWatch.Stop();
             _maxMeasureMilliseconds = Math.Max(_maxMeasureMilliseconds, measureWatch.ElapsedMilliseconds);
             long measureCpuFinished = _diagnosticMeasureThreadCpuEnabled
@@ -787,6 +843,14 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                     wallMs,
                     threadCpuMs);
             }
+            RecordPhaseDiagnostic(
+                "Measure",
+                measureOperation,
+                measureStartedTimestamp,
+                measureFinishedTimestamp,
+                measureCpuStarted,
+                measureCpuFinished,
+                measureGeneration);
             return result;
         }
 
@@ -859,6 +923,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                     lastVisibleIndex,
                     priorityIndex,
                     priorityIndex);
+                PriorityItemMeasured?.Invoke(this, EventArgs.Empty);
                 UpdateScrollInfo();
                 ScheduleRealizationContinuation();
                 return CompleteMeasure(availableSize);
@@ -884,8 +949,31 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     protected override Size ArrangeOverride(Size finalSize)
     {
+        long arrangeStartedTimestamp = Stopwatch.GetTimestamp();
+        long arrangeCpuStarted = _diagnosticMeasureThreadCpuEnabled
+            ? ReadCurrentThreadCpuTimeTicks()
+            : -1;
+        string arrangeOperation = _diagnosticOperation;
+        long arrangeGeneration = _layoutGeneration;
+        Size CompleteArrange(Size result)
+        {
+            long arrangeFinishedTimestamp = Stopwatch.GetTimestamp();
+            long arrangeCpuFinished = _diagnosticMeasureThreadCpuEnabled
+                ? ReadCurrentThreadCpuTimeTicks()
+                : -1;
+            RecordPhaseDiagnostic(
+                "Arrange",
+                arrangeOperation,
+                arrangeStartedTimestamp,
+                arrangeFinishedTimestamp,
+                arrangeCpuStarted,
+                arrangeCpuFinished,
+                arrangeGeneration);
+            return result;
+        }
+
         if (_itemsResetPreparationActive)
-            return finalSize;
+            return CompleteArrange(finalSize);
         IItemContainerGenerator generator = ItemContainerGenerator;
         for (int childIndex = 0; childIndex < InternalChildren.Count; childIndex++)
         {
@@ -902,7 +990,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             double y = _rowTops[row] - _offset.Y;
             child.Arrange(new Rect(x, y, _cellWidth, _rowHeights[row]));
         }
-        return finalSize;
+        return CompleteArrange(finalSize);
     }
 
     protected override void BringIndexIntoView(int index)
@@ -1391,48 +1479,109 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
     protected override void OnRender(DrawingContext drawingContext)
     {
-        base.OnRender(drawingContext);
-        // Reset preparation deliberately yields between one-container detach
-        // units. Rendering the stale projection at every yield rebuilt all
-        // visible date-header FormattedText objects before Input could run,
-        // even though that frame was immediately replaced. Keep the last
-        // composed frame until the atomic collection publication finishes.
-        if (_itemsResetPreparationActive)
-            return;
-        DrawProgressivePlaceholders(drawingContext);
-        if (!ShowGroupHeaders || _rowHeaders.Count == 0)
-            return;
-
-        double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        var labelBrush = new SolidColorBrush(Color.FromArgb(0xD1, 0xFF, 0xFF, 0xFF));
-        var countBrush = new SolidColorBrush(Color.FromArgb(0x8C, 0xFF, 0xFF, 0xFF));
-        var linePen = new Pen(new SolidColorBrush(Color.FromArgb(0x2D, 0xFF, 0xFF, 0xFF)), 1);
-        labelBrush.Freeze();
-        countBrush.Freeze();
-        linePen.Freeze();
-
-        for (int row = 0; row < _rowHeaders.Count; row++)
+        long renderStartedTimestamp = Stopwatch.GetTimestamp();
+        long renderCpuStarted = _diagnosticMeasureThreadCpuEnabled
+            ? ReadCurrentThreadCpuTimeTicks()
+            : -1;
+        string renderOperation = _diagnosticOperation;
+        long renderGeneration = _layoutGeneration;
+        try
         {
-            VirtualizingGroupHeaderInfo? header = _rowHeaders[row];
-            if (header is null)
-                continue;
-            double y = _rowTops[row] - _offset.Y;
-            if (y + _rowHeights[row] < 0 || y > _viewport.Height)
-                continue;
+            base.OnRender(drawingContext);
+            // Reset preparation deliberately yields between one-container detach
+            // units. Rendering the stale projection at every yield rebuilt all
+            // visible date-header FormattedText objects before Input could run,
+            // even though that frame was immediately replaced. Keep the last
+            // composed frame until the atomic collection publication finishes.
+            if (_itemsResetPreparationActive)
+                return;
+            DrawProgressivePlaceholders(drawingContext);
+            if (!ShowGroupHeaders || _rowHeaders.Count == 0)
+                return;
 
-            string label = string.IsNullOrWhiteSpace(header.Value.Label) ? "Unknown date" : header.Value.Label;
-            var labelText = new FormattedText(label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                new Typeface("Segoe UI Semibold"), 14.5, labelBrush, pixelsPerDip);
-            string count = $"  ·  {header.Value.Count:N0} images";
-            var countText = new FormattedText(count, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                new Typeface("Segoe UI"), 11.5, countBrush, pixelsPerDip);
-            double baselineY = y + Math.Max(4, (_rowHeights[row] - labelText.Height) / 2);
-            drawingContext.DrawText(labelText, new Point(2, baselineY));
-            drawingContext.DrawText(countText, new Point(6 + labelText.Width, baselineY + 2));
-            double lineStart = Math.Min(_viewport.Width - 12, 18 + labelText.Width + countText.Width);
-            if (lineStart < _viewport.Width - 12)
-                drawingContext.DrawLine(linePen, new Point(lineStart, y + (_rowHeights[row] / 2)), new Point(_viewport.Width - 12, y + (_rowHeights[row] / 2)));
+            double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            var labelBrush = new SolidColorBrush(Color.FromArgb(0xD1, 0xFF, 0xFF, 0xFF));
+            var countBrush = new SolidColorBrush(Color.FromArgb(0x8C, 0xFF, 0xFF, 0xFF));
+            var linePen = new Pen(new SolidColorBrush(Color.FromArgb(0x2D, 0xFF, 0xFF, 0xFF)), 1);
+            labelBrush.Freeze();
+            countBrush.Freeze();
+            linePen.Freeze();
+
+            for (int row = 0; row < _rowHeaders.Count; row++)
+            {
+                VirtualizingGroupHeaderInfo? header = _rowHeaders[row];
+                if (header is null)
+                    continue;
+                double y = _rowTops[row] - _offset.Y;
+                if (y + _rowHeights[row] < 0 || y > _viewport.Height)
+                    continue;
+
+                string label = string.IsNullOrWhiteSpace(header.Value.Label) ? "Unknown date" : header.Value.Label;
+                var labelText = new FormattedText(label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                    new Typeface("Segoe UI Semibold"), 14.5, labelBrush, pixelsPerDip);
+                string count = $"  ·  {header.Value.Count:N0} images";
+                var countText = new FormattedText(count, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                    new Typeface("Segoe UI"), 11.5, countBrush, pixelsPerDip);
+                double baselineY = y + Math.Max(4, (_rowHeights[row] - labelText.Height) / 2);
+                drawingContext.DrawText(labelText, new Point(2, baselineY));
+                drawingContext.DrawText(countText, new Point(6 + labelText.Width, baselineY + 2));
+                double lineStart = Math.Min(_viewport.Width - 12, 18 + labelText.Width + countText.Width);
+                if (lineStart < _viewport.Width - 12)
+                    drawingContext.DrawLine(linePen, new Point(lineStart, y + (_rowHeights[row] / 2)), new Point(_viewport.Width - 12, y + (_rowHeights[row] / 2)));
+            }
         }
+        finally
+        {
+            long renderFinishedTimestamp = Stopwatch.GetTimestamp();
+            long renderCpuFinished = _diagnosticMeasureThreadCpuEnabled
+                ? ReadCurrentThreadCpuTimeTicks()
+                : -1;
+            RecordPhaseDiagnostic(
+                "Render",
+                renderOperation,
+                renderStartedTimestamp,
+                renderFinishedTimestamp,
+                renderCpuStarted,
+                renderCpuFinished,
+                renderGeneration);
+        }
+    }
+
+    private void RecordPhaseDiagnostic(
+        string phase,
+        string operation,
+        long startTimestamp,
+        long endTimestamp,
+        long startCpuTicks,
+        long endCpuTicks,
+        long generation)
+    {
+        if (!_diagnosticMeasureThreadCpuEnabled
+            || _phaseDiagnostics is not { } diagnostics)
+        {
+            return;
+        }
+
+        int slot = _phaseDiagnosticCount++;
+        if ((uint)slot >= (uint)diagnostics.Length)
+        {
+            _phaseDiagnosticOverflow = true;
+            return;
+        }
+
+        diagnostics[slot] = new VirtualizingPanelPhaseDiagnostic(
+            phase,
+            operation,
+            startTimestamp,
+            endTimestamp,
+            startCpuTicks,
+            endCpuTicks,
+            generation,
+            _firstVisibleIndex,
+            _lastVisibleIndex,
+            _firstRealizedIndex,
+            _lastRealizedIndex,
+            InternalChildren.Count);
     }
 
     private void DrawProgressivePlaceholders(DrawingContext drawingContext)
