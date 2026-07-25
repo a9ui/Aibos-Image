@@ -10072,6 +10072,7 @@ public partial class MainWindow : Window
         FilterSnapshot snapshot,
         long generation)
     {
+        const long inputYieldTargetMs = 2;
         long maxSliceMs = 0;
         long publishMs = 0;
         long statsMs = 0;
@@ -10097,10 +10098,14 @@ public partial class MainWindow : Window
             return elapsedMs;
         }
 
-        async Task<bool> YieldForInputAsync()
+        async Task<bool> YieldForInputAsync(bool force = false)
         {
+            if (!force && slice.ElapsedMilliseconds < inputYieldTargetMs)
+                return generation == _catalogProjectionGeneration;
+
             FinishSlice();
             await Dispatcher.Yield(DispatcherPriority.Background);
+            slice.Restart();
             if (generation != _catalogProjectionGeneration)
                 return false;
             return true;
@@ -10111,9 +10116,11 @@ public partial class MainWindow : Window
         VirtualizingWrapPanel? preparedPanel = _galleryVirtualizingPanel;
         CancelThumbnailViewportLoading();
         _thumbnailViewportRevision++;
-        if (!await YieldForInputAsync())
+        // Service input immediately before entering the Reset preparation and
+        // publication path. Otherwise the heartbeat can already be one timer
+        // interval old when WPF begins the unavoidable Reset/render work.
+        if (!await YieldForInputAsync(force: true))
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
-        slice.Restart();
 
         var phase = new Stopwatch();
         bool resetPreparationStarted = preparedPanel?.BeginItemsResetPreparation() == true;
@@ -10142,9 +10149,25 @@ public partial class MainWindow : Window
                     if (resetPreparationComplete)
                         break;
 
-                    FinishSlice();
-                    await Dispatcher.Yield(DispatcherPriority.Background);
-                    slice.Restart();
+                    if (!await YieldForInputAsync(force: true))
+                    {
+                        return new CatalogProjectionApplyMetrics(
+                            maxSliceMs,
+                            publishMs,
+                            statsMs,
+                            selectionMs,
+                            reconcileMs,
+                            catalogSwapMs,
+                            panelCommitMs,
+                            preResetMs,
+                            resetMs,
+                            selectionCommitMs,
+                            resetGeneratorRemoveMs,
+                            resetForgetDeferredMeasureMs,
+                            resetRemoveInternalChildRangeMs,
+                            resetRemoveInternalChildRangeThreadCpuMs,
+                            resetPanelTotalMs);
+                    }
                 }
                 while (true);
             }
@@ -10227,10 +10250,10 @@ public partial class MainWindow : Window
         }
 
         publishMs = slice.ElapsedMilliseconds;
-        if (!await YieldForInputAsync())
+        if (!await YieldForInputAsync(force: true))
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
-        slice.Restart();
 
+        phase.Restart();
         Tile? preferred = filterResult.PreferredSelection;
         if (preferred is not null)
         {
@@ -10248,22 +10271,24 @@ public partial class MainWindow : Window
         }
         if (filterResult.PreparedLayout is null)
             _galleryVirtualizingPanel?.InvalidateItemLayout();
-        statsMs = slice.ElapsedMilliseconds;
+        phase.Stop();
+        statsMs = phase.ElapsedMilliseconds;
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
-        slice.Restart();
 
+        phase.Restart();
         if (preferred is not null)
         {
             _selectionVisualSyncGeneration++;
             SynchronizeSelectionControls(filterResult.SelectedTiles);
         }
 
-        selectionMs = slice.ElapsedMilliseconds;
+        phase.Stop();
+        selectionMs = phase.ElapsedMilliseconds;
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
-        slice.Restart();
 
+        phase.Restart();
         bool primarySelectionUnchanged = preferred is not null
             && string.Equals(
                 snapshot.PreviousSelectedPath,
@@ -10274,11 +10299,12 @@ public partial class MainWindow : Window
         else if (filterResult.Count == 0)
             SelectTile(null);
 
-        selectionMs += slice.ElapsedMilliseconds;
+        phase.Stop();
+        selectionMs += phase.ElapsedMilliseconds;
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
-        slice.Restart();
 
+        phase.Restart();
         ReconcileOpenSurfacesAfterFilterChange(filterResult.ActivePreviewIncluded);
         bool restoreGalleryFocus = snapshot.RestoreGalleryFocus
             && preferred is not null
@@ -10296,7 +10322,9 @@ public partial class MainWindow : Window
                 RowsList.Visibility != Visibility.Visible);
         }
         ScheduleCatalogStatsUpdate(generation);
-        reconcileMs = FinishSlice();
+        phase.Stop();
+        reconcileMs = phase.ElapsedMilliseconds;
+        FinishSlice();
         return new CatalogProjectionApplyMetrics(
             maxSliceMs,
             publishMs,

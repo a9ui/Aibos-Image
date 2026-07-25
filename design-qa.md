@@ -496,3 +496,37 @@ final result: passed
   all passed afterward. Source fixtures and user state remained untouched.
 
 final result: passed
+
+## M3 repair 6 dispatcher publication boundary
+
+- Exact GitHub repair-5 run kept every catalog semantic, memory, and internal
+  slice contract exact but failed Favorite-only eviction at 114 ms and one
+  51 ms heartbeat during `search-match-2`. The corresponding UI-owned apply
+  slice was 2 ms, panel reset was 2.1387 ms, and interval GC pause was zero.
+- The apply pipeline had been yielding at `DispatcherPriority.Background`
+  after every 0-1 ms presentation phase. Those repeated resumptions enlarged
+  end-to-end wall time without reducing the measured UI-owned slice.
+- Repair 6 preserves mandatory input boundaries when entering the Reset
+  preparation/publication path and immediately after atomic collection
+  publication. The remaining short presentation phases now share one
+  cumulative slice and yield only when it reaches 2 ms. Maximum apply-slice
+  diagnostics measure that cumulative slice; no threshold or test subject
+  changed.
+- An intermediate tree that also removed the pre-publication input boundary
+  reduced Favorite eviction to 57 ms but moved a 54 ms heartbeat to
+  `keyboard-stale-peer-clear`. That tree was rejected. Restoring the explicit
+  pre-publication boundary kept the consolidation benefit while servicing
+  pending input before WPF Reset/render work begins.
+- The corrected changed tree passed the exact .NET 10 Release 100,000-item
+  gate: heartbeat 50 ms with zero over-budget samples, Favorite eviction
+  52 ms, search/filter/sort P95 199.95/84.8/145.75 ms, maximum cumulative
+  apply slice 1 ms, maximum single-container reset 1 ms, and normalized
+  working-set growth 6.045%. Pending-broaden, stale-peer, selection, external
+  UI Automation, virtualization, and logical-count contracts remained exact.
+- Release build remained warning 0/error 0. Source images, shared state, cache,
+  history, Browser behavior, licensing, and deployment were unchanged.
+- Independent very-high review returned CLEAR for candidate publication and
+  exact remote CI. Because the heartbeat landed exactly on its unchanged
+  50 ms ceiling, M3 closure still requires green same-SHA hosted evidence.
+
+final result: passed
