@@ -32,6 +32,12 @@ internal readonly record struct ItemsResetPreparationSlice(
     double RemoveInternalChildRangeThreadCpuMs,
     double PanelTotalMs);
 
+internal readonly record struct VirtualizingMeasureDiagnostic(
+    string Operation,
+    long LayoutGeneration,
+    double WallMs,
+    double ThreadCpuMs);
+
 internal readonly record struct VirtualizingLayoutContext(
     double AvailableWidth,
     double ItemWidth,
@@ -171,6 +177,10 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private int _preparedLayoutAppliedCount;
     private int _preparedLayoutRejectedCount;
     private long _maxMeasureMilliseconds;
+    private string _diagnosticOperation = "";
+    private bool _diagnosticMeasureThreadCpuEnabled;
+    private VirtualizingMeasureDiagnostic _maxMeasureDiagnostic =
+        new("", 0, 0, -1);
 
     public event EventHandler<VirtualizingWrapPanelRangeChangedEventArgs>? RealizedRangeChanged;
 
@@ -247,6 +257,14 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     internal int PreparedLayoutAppliedCount => _preparedLayoutAppliedCount;
     internal int PreparedLayoutRejectedCount => _preparedLayoutRejectedCount;
     internal long MaxMeasureMilliseconds => _maxMeasureMilliseconds;
+    internal VirtualizingMeasureDiagnostic MaxMeasureDiagnostic => _maxMeasureDiagnostic;
+
+    internal void SetDiagnosticOperation(string operation)
+    {
+        _diagnosticOperation = operation ?? "";
+        _diagnosticMeasureThreadCpuEnabled =
+            !string.IsNullOrEmpty(_diagnosticOperation);
+    }
 
     internal void SetLayoutSource(IReadOnlyList<Tile> source)
     {
@@ -713,10 +731,32 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     protected override Size MeasureOverride(Size availableSize)
     {
         var measureWatch = Stopwatch.StartNew();
+        long measureCpuStarted = _diagnosticMeasureThreadCpuEnabled
+            ? ReadCurrentThreadCpuTimeTicks()
+            : -1;
+        string measureOperation = _diagnosticOperation;
+        long measureGeneration = _layoutGeneration;
         Size CompleteMeasure(Size result)
         {
             measureWatch.Stop();
             _maxMeasureMilliseconds = Math.Max(_maxMeasureMilliseconds, measureWatch.ElapsedMilliseconds);
+            long measureCpuFinished = _diagnosticMeasureThreadCpuEnabled
+                ? ReadCurrentThreadCpuTimeTicks()
+                : -1;
+            double wallMs = measureWatch.Elapsed.TotalMilliseconds;
+            double threadCpuMs =
+                measureCpuStarted >= 0 && measureCpuFinished >= measureCpuStarted
+                    ? TimeSpan.FromTicks(measureCpuFinished - measureCpuStarted).TotalMilliseconds
+                    : -1;
+            if (_diagnosticMeasureThreadCpuEnabled
+                && wallMs > _maxMeasureDiagnostic.WallMs)
+            {
+                _maxMeasureDiagnostic = new VirtualizingMeasureDiagnostic(
+                    measureOperation,
+                    measureGeneration,
+                    wallMs,
+                    threadCpuMs);
+            }
             return result;
         }
 

@@ -226,6 +226,9 @@ public partial class MainWindow : Window
     private int _retiredPreparedCatalogLayoutAppliedCount;
     private int _retiredPreparedCatalogLayoutRejectedCount;
     private long _retiredCatalogLayoutMaxMeasureMilliseconds;
+    private VirtualizingMeasureDiagnostic _retiredCatalogLayoutMaxMeasureDiagnostic =
+        new("", 0, 0, -1);
+    private string _catalogInteractionDiagnosticOperation = "";
     private int _thumbnailBrowserCacheHits;
     private int _lastInitialUnseenCount;
     private int _enhancementJobsRead;
@@ -713,6 +716,12 @@ public partial class MainWindow : Window
             _retiredCatalogLayoutMaxMeasureMilliseconds = Math.Max(
                 _retiredCatalogLayoutMaxMeasureMilliseconds,
                 _galleryVirtualizingPanel.MaxMeasureMilliseconds);
+            if (_galleryVirtualizingPanel.MaxMeasureDiagnostic.WallMs
+                > _retiredCatalogLayoutMaxMeasureDiagnostic.WallMs)
+            {
+                _retiredCatalogLayoutMaxMeasureDiagnostic =
+                    _galleryVirtualizingPanel.MaxMeasureDiagnostic;
+            }
             _galleryVirtualizingPanel.RealizedRangeChanged -= GalleryVirtualizingPanel_RealizedRangeChanged;
         }
         _galleryVirtualizingPanel = panel;
@@ -720,6 +729,7 @@ public partial class MainWindow : Window
             return;
 
         SyncGalleryColumnMode();
+        _galleryVirtualizingPanel.SetDiagnosticOperation(_catalogInteractionDiagnosticOperation);
         _galleryVirtualizingPanel.RealizedRangeChanged += GalleryVirtualizingPanel_RealizedRangeChanged;
         ScheduleThumbnailViewportRange(
             _galleryVirtualizingPanel.FirstVisibleIndex,
@@ -1296,9 +1306,13 @@ public partial class MainWindow : Window
         bool Discarded,
         string? Error,
         long CaptureMs = 0,
+        long CaptureAllocatedBytes = 0,
         long ComputeMs = 0,
+        long ComputeAllocatedBytes = 0,
         long ApplyMs = 0,
+        long ApplyAllocatedBytes = 0,
         long CleanupMs = 0,
+        long CleanupAllocatedBytes = 0,
         int Gen2Collections = 0,
         int Gen0Collections = 0,
         int Gen1Collections = 0,
@@ -7816,18 +7830,29 @@ public partial class MainWindow : Window
     {
         var cts = new CancellationTokenSource();
         _catalogProjectionCts = cts;
+        bool collectAllocationDiagnostics =
+            !string.IsNullOrEmpty(_catalogInteractionDiagnosticOperation);
         int gen0Before = GC.CollectionCount(0);
         int gen1Before = GC.CollectionCount(1);
         int gen2Before = GC.CollectionCount(2);
         TimeSpan gcPauseBefore = GC.GetTotalPauseDuration();
+        long captureAllocatedBefore = collectAllocationDiagnostics
+            ? GC.GetAllocatedBytesForCurrentThread()
+            : 0;
         var captureWatch = Stopwatch.StartNew();
         FilterSnapshot snapshot = CaptureFilterSnapshot(request);
         captureWatch.Stop();
+        long captureAllocatedBytes = collectAllocationDiagnostics
+            ? GC.GetAllocatedBytesForCurrentThread() - captureAllocatedBefore
+            : 0;
         long computeMs = 0;
+        long computeAllocatedBytes = 0;
         long applyMs = 0;
+        long applyAllocatedBytes = 0;
         long maxApplySliceMs = 0;
         CatalogProjectionApplyMetrics applyMetrics = default;
         long cleanupMs;
+        long cleanupAllocatedBytes = 0;
         FilterResult? result = null;
         SearchFilterCompletion outcome;
         try
@@ -7835,6 +7860,9 @@ public partial class MainWindow : Window
             result = await Task.Run(() =>
             {
                 var computeWatch = Stopwatch.StartNew();
+                long computeAllocatedBefore = collectAllocationDiagnostics
+                    ? GC.GetAllocatedBytesForCurrentThread()
+                    : 0;
                 Thread currentThread = Thread.CurrentThread;
                 ThreadPriority previousPriority = currentThread.Priority;
                 try
@@ -7849,6 +7877,9 @@ public partial class MainWindow : Window
                         currentThread.Priority = previousPriority;
                     computeWatch.Stop();
                     computeMs = computeWatch.ElapsedMilliseconds;
+                    computeAllocatedBytes = collectAllocationDiagnostics
+                        ? GC.GetAllocatedBytesForCurrentThread() - computeAllocatedBefore
+                        : 0;
                 }
             }, cts.Token);
             if (cts.IsCancellationRequested
@@ -7863,11 +7894,17 @@ public partial class MainWindow : Window
             }
             else
             {
+                long applyAllocatedBefore = collectAllocationDiagnostics
+                    ? GC.GetAllocatedBytesForCurrentThread()
+                    : 0;
                 var applyWatch = Stopwatch.StartNew();
                 applyMetrics = await ApplyFilterResultAsync(result, snapshot, request.Generation);
                 maxApplySliceMs = applyMetrics.MaxSliceMs;
                 applyWatch.Stop();
                 applyMs = applyWatch.ElapsedMilliseconds;
+                applyAllocatedBytes = collectAllocationDiagnostics
+                    ? GC.GetAllocatedBytesForCurrentThread() - applyAllocatedBefore
+                    : 0;
                 _lastCatalogProjectionApplySliceMilliseconds = maxApplySliceMs;
                 _maxCatalogProjectionApplySliceMilliseconds = Math.Max(
                     _maxCatalogProjectionApplySliceMilliseconds,
@@ -7897,6 +7934,9 @@ public partial class MainWindow : Window
         finally
         {
             result?.AutomationProjection.ReleaseCreator();
+            long cleanupAllocatedBefore = collectAllocationDiagnostics
+                ? GC.GetAllocatedBytesForCurrentThread()
+                : 0;
             var cleanupWatch = Stopwatch.StartNew();
             if (result is not null)
                 ReturnFilterResult(result);
@@ -7906,14 +7946,21 @@ public partial class MainWindow : Window
             cts.Dispose();
             cleanupWatch.Stop();
             cleanupMs = cleanupWatch.ElapsedMilliseconds;
+            cleanupAllocatedBytes = collectAllocationDiagnostics
+                ? GC.GetAllocatedBytesForCurrentThread() - cleanupAllocatedBefore
+                : 0;
         }
 
         request.Completion?.TrySetResult(outcome with
         {
             CaptureMs = captureWatch.ElapsedMilliseconds,
+            CaptureAllocatedBytes = captureAllocatedBytes,
             ComputeMs = computeMs,
+            ComputeAllocatedBytes = computeAllocatedBytes,
             ApplyMs = applyMs,
+            ApplyAllocatedBytes = applyAllocatedBytes,
             CleanupMs = cleanupMs,
+            CleanupAllocatedBytes = cleanupAllocatedBytes,
             Gen2Collections = GC.CollectionCount(2) - gen2Before,
             Gen0Collections = GC.CollectionCount(0) - gen0Before,
             Gen1Collections = GC.CollectionCount(1) - gen1Before,
@@ -9472,6 +9519,7 @@ public partial class MainWindow : Window
     }
 
     public long LastAppliedSearchFilterGenerationForSmoke => _lastAppliedCatalogProjectionGeneration;
+    public long CatalogProjectionGenerationForSmoke => _catalogProjectionGeneration;
     public long LastCatalogProjectionApplySliceMsForSmoke => _lastCatalogProjectionApplySliceMilliseconds;
     public long MaxCatalogProjectionApplySliceMsForSmoke => _maxCatalogProjectionApplySliceMilliseconds;
     public int CatalogProjectionDiscardedCountForSmoke => _catalogProjectionDiscardedCount;
@@ -9485,6 +9533,25 @@ public partial class MainWindow : Window
         => Math.Max(
             _retiredCatalogLayoutMaxMeasureMilliseconds,
             _galleryVirtualizingPanel?.MaxMeasureMilliseconds ?? 0);
+    private VirtualizingMeasureDiagnostic CatalogLayoutMaxMeasureDiagnosticForSmoke
+        => _galleryVirtualizingPanel is { } panel
+            && panel.MaxMeasureDiagnostic.WallMs > _retiredCatalogLayoutMaxMeasureDiagnostic.WallMs
+                ? panel.MaxMeasureDiagnostic
+                : _retiredCatalogLayoutMaxMeasureDiagnostic;
+    public string CatalogLayoutMaxMeasureOperationForSmoke
+        => CatalogLayoutMaxMeasureDiagnosticForSmoke.Operation;
+    public long CatalogLayoutMaxMeasureGenerationForSmoke
+        => CatalogLayoutMaxMeasureDiagnosticForSmoke.LayoutGeneration;
+    public double CatalogLayoutMaxMeasureWallMsForSmoke
+        => CatalogLayoutMaxMeasureDiagnosticForSmoke.WallMs;
+    public double CatalogLayoutMaxMeasureThreadCpuMsForSmoke
+        => CatalogLayoutMaxMeasureDiagnosticForSmoke.ThreadCpuMs;
+
+    public void SetCatalogInteractionDiagnosticOperationForSmoke(string operation)
+    {
+        _catalogInteractionDiagnosticOperation = operation ?? "";
+        _galleryVirtualizingPanel?.SetDiagnosticOperation(_catalogInteractionDiagnosticOperation);
+    }
 
     public void SuppressStatePersistence()
     {

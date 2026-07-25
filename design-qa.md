@@ -452,3 +452,47 @@ final result: passed
   `RemoveInternalChildRange` 1.1410 ms.
 
 final result: passed
+
+## M3 final heartbeat attribution repair
+
+- Exact hosted candidate `687c4e0a8eff6bcfc58f726ba0b26f46f75a4a2e`
+  passed every large-catalog semantic and resource contract but reported one
+  60 ms Input heartbeat during the combined stale-peer lifetime exercise.
+  Search/filter/sort, pending-broaden Favorite exclusion, selection, UI
+  Automation, virtualization, reset slices, and memory stayed within contract.
+- The stale-peer exercise is now split into eight labeled substeps. Its filter
+  and clear completions retain projection generation, capture/compute/apply,
+  allocation, GC-pause, reset, and maximum-slice evidence. The virtualizing
+  panel retains the maximum Measure wall sample with operation and layout
+  generation; coarse Windows thread-CPU timing is collected only while the
+  catalog diagnostic is active.
+- The first diagnostic run failed at a different operation:
+  `filter-on-1` reached 55 ms with an 11.786 ms Gen0 pause, while its maximum
+  apply slice was 1 ms and its panel reset was 1.0957 ms. Independent
+  very-high review found that the diagnostic operation setter itself was
+  repeatedly searching the visual tree, so that measurement tree was rejected
+  rather than treated as product evidence.
+- The operation setter is now O(1): it stores the label and updates only an
+  already-attached panel. A newly attached panel inherits the stored label.
+  Heartbeat samples of at least 30 ms retain their operation, elapsed time,
+  projection generation, and interval GC pause. The unchanged raw 50 ms wall
+  gate remains authoritative. The GC baseline is restarted with each heartbeat
+  measurement window, including after the deliberate memory-baseline
+  collection, and operation attribution ignores pre-diagnostic measures.
+- The final corrected .NET 10 Release tree passed at 100,000 items:
+  - raw heartbeat 50 ms, zero over-budget samples;
+  - search/filter/sort P95 192.1/97.95/100.25 ms;
+  - Favorite eviction 89 ms against 100 ms;
+  - maximum apply slice 1 ms against the 4 ms diagnostic target;
+  - maximum single-container reset 1 ms against 12 ms;
+  - exact stale-peer unavailability, selection, external UI Automation,
+    pending-broaden, virtualization, and 100,000-item count.
+- Because the corrected measurement passed without a product allocation
+  change, the proposed matched-index pool was not added. Release build,
+  shared-root and shared-state contracts, right-panel selection, thumbnail
+  continuity, compact/high-DPI work areas, modal interaction, Album Library,
+  accessibility, enhancement workspaces, selected batch, companion path
+  boundary, Public surface, and the independently recomputed legacy ledger
+  all passed afterward. Source fixtures and user state remained untouched.
+
+final result: passed
