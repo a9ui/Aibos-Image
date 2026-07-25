@@ -170,8 +170,8 @@ if ($result.catalogProjectionSingleContainerDetachBudgetMs -ne 12) {
         "$($result.catalogProjectionSingleContainerDetachBudgetMs) ms")
 }
 if ($detachBudgetValue -gt $result.catalogProjectionSingleContainerDetachBudgetMs) {
-    Write-Warning (
-        "single-container reset diagnostic exceeded: $detachBudgetValue ms on $detachBudgetBasis " +
+    $failures.Add(
+        "single-container reset exceeded: $detachBudgetValue ms on $detachBudgetBasis " +
         "(budget $($result.catalogProjectionSingleContainerDetachBudgetMs) ms; " +
         "effective $($result.catalogProjectionMaxResetPanelBudgetMs) ms; " +
         "code CPU $($result.catalogProjectionMaxResetPanelThreadCpuMs) ms; " +
@@ -203,18 +203,111 @@ if ($result.catalogProjectionMaxSingleContainerDetachMs -gt 0 `
     $failures.Add('single-container reset sub-step attribution was missing')
 }
 if ($result.catalogProjectionMaxApplySliceMs -gt $result.catalogProjectionDiagnosticSliceTargetMs) {
-    Write-Warning (
-        "catalog projection diagnostic target exceeded: " +
+    $failures.Add(
+        "catalog projection apply slice exceeded: " +
         "$($result.catalogProjectionMaxApplySliceOperation) " +
         "$($result.catalogProjectionMaxApplySliceMs) ms > " +
         "$($result.catalogProjectionDiagnosticSliceTargetMs) ms")
 }
-if ($result.dispatcherHeartbeatBudgetMs -ne 50 `
-    -or $result.dispatcherHeartbeatMaxGapMs -gt $result.dispatcherHeartbeatBudgetMs `
-    -or @($result.heartbeatGapSamples).Count -ne 0) {
+if ($result.catalogSnapshotResetBudgetMs -ne 12 `
+    -or $result.catalogSnapshotResetMaxWallMs -gt $result.catalogSnapshotResetBudgetMs `
+    -or $result.catalogSnapshotResetCountExact -ne $true `
+    -or $result.catalogSnapshotResetCpuMeasuredExact -ne $true `
+    -or $result.catalogSnapshotResetMaxThreadCpuMs -lt 0) {
     $failures.Add(
-        "dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms " +
-        "(budget $($result.dispatcherHeartbeatBudgetMs) ms; over-budget samples $(@($result.heartbeatGapSamples).Count))")
+        "catalog snapshot Reset contract failed " +
+        "(wall $($result.catalogSnapshotResetMaxWallMs)/" +
+        "$($result.catalogSnapshotResetBudgetMs) ms; " +
+        "CPU $($result.catalogSnapshotResetMaxThreadCpuMs) ms; " +
+        "count exact $($result.catalogSnapshotResetCountExact); " +
+        "CPU exact $($result.catalogSnapshotResetCpuMeasuredExact))")
+}
+if ($result.coldGalleryFocusWarmupBudgetMs -ne 250 `
+    -or $result.coldGalleryFocusWarmupMs -gt $result.coldGalleryFocusWarmupBudgetMs) {
+    $failures.Add(
+        "cold gallery-focus warmup exceeded: " +
+        "$($result.coldGalleryFocusWarmupMs) ms > " +
+        "$($result.coldGalleryFocusWarmupBudgetMs) ms")
+}
+$controlConsensus = $result.schedulerControlConsensus
+$dispatcherDiagnostic = $result.dispatcherDiagnostic
+if ($result.dispatcherHeartbeatBudgetMs -ne 50 `
+    -or $null -eq $controlConsensus `
+    -or $null -eq $dispatcherDiagnostic) {
+    $failures.Add('dispatcher heartbeat diagnostic contract was missing')
+}
+elseif ($controlConsensus.sensorValid -ne $true `
+    -or $controlConsensus.initialSamplesReady -ne $true `
+    -or $controlConsensus.uiThreadPriorityNormal -ne $true `
+    -or $controlConsensus.initialPhaseValid -ne $true `
+    -or $controlConsensus.aboveNormalProbe.requestedPriority -ne 'AboveNormal' `
+    -or $controlConsensus.normalProbe.requestedPriority -ne 'Normal' `
+    -or $controlConsensus.aboveNormalProbe.priorityApplied -ne $true `
+    -or $controlConsensus.normalProbe.priorityApplied -ne $true `
+    -or $controlConsensus.aboveNormalProbe.highResolutionTimerCreated -ne $true `
+    -or $controlConsensus.normalProbe.highResolutionTimerCreated -ne $true `
+    -or $controlConsensus.aboveNormalProbe.threadStopped -ne $true `
+    -or $controlConsensus.normalProbe.threadStopped -ne $true `
+    -or $controlConsensus.aboveNormalProbe.bufferOverflow -ne $false `
+    -or $controlConsensus.normalProbe.bufferOverflow -ne $false `
+    -or $controlConsensus.aboveNormalProbe.timestampsMonotonic -ne $true `
+    -or $controlConsensus.normalProbe.timestampsMonotonic -ne $true `
+    -or $controlConsensus.aboveNormalProbe.cadenceValid -ne $true `
+    -or $controlConsensus.normalProbe.cadenceValid -ne $true `
+    -or $controlConsensus.aboveNormalProbe.setTimerError -ne 0 `
+    -or $controlConsensus.normalProbe.setTimerError -ne 0 `
+    -or $controlConsensus.aboveNormalProbe.waitError -ne 0 `
+    -or $controlConsensus.normalProbe.waitError -ne 0 `
+    -or $controlConsensus.probePeriodMs -ne 2 `
+    -or $controlConsensus.probePhaseOffsetMs -ne 1 `
+    -or $controlConsensus.lateIntervalEpsilonMs -ne 0.5 `
+    -or $controlConsensus.probeCadenceToleranceMs -ne 0.75 `
+    -or $controlConsensus.probeCadenceAgreementToleranceMs -ne 0.25 `
+    -or $controlConsensus.probeCadenceAgreementValid -ne $true) {
+    $failures.Add('independent high-resolution scheduler probes were invalid or incomplete')
+}
+if ($null -ne $dispatcherDiagnostic) {
+    $classifiedOverBudgetCount =
+        [int]$dispatcherDiagnostic.schedulerQueueDelayCount `
+        + [int]$dispatcherDiagnostic.activeOperationDiagnosticCount `
+        + [int]$dispatcherDiagnostic.inconclusiveCount
+    if ($dispatcherDiagnostic.sensorValid -ne $true `
+        -or $dispatcherDiagnostic.hooksStarted -ne $true `
+        -or $dispatcherDiagnostic.hooksStopped -ne $true `
+        -or $dispatcherDiagnostic.ringOverflow -ne $false `
+        -or $dispatcherDiagnostic.uiThreadCpuReadFailureCount -ne 0 `
+        -or $dispatcherDiagnostic.activeStackOverflowCount -ne 0 `
+        -or $dispatcherDiagnostic.activeStackMismatchCount -ne 0 `
+        -or $dispatcherDiagnostic.lifecycleTimestampInversionCount -ne 0 `
+        -or $dispatcherDiagnostic.startedWithoutTerminalCount -ne 0 `
+        -or $dispatcherDiagnostic.heartbeatLifecycleMissingCount -ne 0 `
+        -or $dispatcherDiagnostic.panelPhaseOverflow -ne $false `
+        -or $dispatcherDiagnostic.panelPhaseInvalidCount -ne 0 `
+        -or $classifiedOverBudgetCount -ne $dispatcherDiagnostic.rawOverBudgetCount `
+        -or $dispatcherDiagnostic.rawOverBudgetCount -ne @($result.heartbeatGapSamples).Count) {
+        $failures.Add(
+            "dispatcher diagnostic sensor was invalid or incomplete " +
+            "(raw max $($result.dispatcherHeartbeatMaxGapMs) ms; " +
+            "queue/active/inconclusive " +
+            "$($dispatcherDiagnostic.schedulerQueueDelayCount)/" +
+            "$($dispatcherDiagnostic.activeOperationDiagnosticCount)/" +
+            "$($dispatcherDiagnostic.inconclusiveCount))")
+    }
+}
+if ($result.dispatcherHeartbeatMaxGapMs -gt $result.dispatcherHeartbeatBudgetMs `
+    -and ($null -eq $dispatcherDiagnostic `
+        -or $dispatcherDiagnostic.maxProductGapMs -gt $result.dispatcherHeartbeatBudgetMs `
+        -or $dispatcherDiagnostic.activeOperationDiagnosticCount -gt 0 `
+        -or $dispatcherDiagnostic.inconclusiveCount -gt 0)) {
+    $failures.Add(
+        "raw dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms " +
+        "(budget $($result.dispatcherHeartbeatBudgetMs) ms; " +
+        "product max $($dispatcherDiagnostic.maxProductGapMs) ms; " +
+        "strict queue max $($dispatcherDiagnostic.maxStrictSchedulerQueueDelayMs) ms; " +
+        "queue/active/inconclusive " +
+        "$($dispatcherDiagnostic.schedulerQueueDelayCount)/" +
+        "$($dispatcherDiagnostic.activeOperationDiagnosticCount)/" +
+        "$($dispatcherDiagnostic.inconclusiveCount))")
 }
 if ($result.mixedLatestWins -ne $true -or $result.mixedStaleSearchDiscarded -ne $true -or $result.mixedStaleFilterDiscarded -ne $true -or $result.mixedDiscardedCount -lt 1) {
     $failures.Add('mixed search/filter/sort did not discard stale generations')

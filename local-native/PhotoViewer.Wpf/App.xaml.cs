@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
@@ -26,6 +27,8 @@ public partial class App : Application
     // to distinguish sub-quantum CPU from runner descheduling, so cloud hard
     // acceptance uses the structural one-container turn plus heartbeat.
     private const long CatalogProjectionDiagnosticSliceTargetMs = 4;
+    private const long CatalogSnapshotResetBudgetMs = 12;
+    private const long CatalogColdGalleryFocusWarmupBudgetMs = 250;
     private const long CatalogProjectionSingleContainerDetachBudgetMs = 12;
     private const long CatalogInteractionDispatcherHeartbeatBudgetMs = 50;
     private const long CatalogFavoriteEvictionBudgetMs = 100;
@@ -9789,6 +9792,8 @@ public partial class App : Application
             };
             var heartbeatWatch = Stopwatch.StartNew();
             long lastHeartbeatMs = 0;
+            long lastHeartbeatTimestamp = 0;
+            long lastHeartbeatUiThreadCpuTicks = -1;
             long maxHeartbeatGapMs = 0;
             double maxHeartbeatGapGcPauseMs = 0;
             long maxHeartbeatGapProjectionGeneration = 0;
@@ -9796,6 +9801,7 @@ public partial class App : Application
             string activeOperation = "startup";
             string maxHeartbeatGapSample = "";
             TimeSpan lastHeartbeatGcPause = GC.GetTotalPauseDuration();
+            bool lastHeartbeatGcBoundaryAmbiguous = false;
             void SetActiveOperation(string operation)
             {
                 activeOperation = operation;
@@ -9809,6 +9815,18 @@ public partial class App : Application
             ReportProgress(activeOperation);
             var heartbeatGapSamples = new List<string>();
             var heartbeatDiagnosticSamples = new List<DispatcherHeartbeatDiagnosticSample>();
+            using var dispatcherDiagnostics =
+                new CatalogDispatcherDiagnosticRecorder(
+                    window.Dispatcher,
+                    () => activeOperation);
+            dispatcherDiagnostics.Start();
+            bool uiThreadPriorityNormal =
+                Thread.CurrentThread.Priority == ThreadPriority.Normal;
+            using var schedulerControlProbes = new SchedulerControlProbePair();
+            bool schedulerControlProbesStarted =
+                schedulerControlProbes.StartAndWaitForInitialSamples(
+                    TimeSpan.FromSeconds(2));
+            long schedulerMeasurementStartTimestamp = 0;
             var layoutSamples = new List<string>();
             var accessibilityWarmupSubstepSamples = new List<CatalogInteractionSubstepSample>();
             var stalePeerSubstepSamples = new List<CatalogInteractionSubstepSample>();
@@ -9944,36 +9962,73 @@ public partial class App : Application
             }
             heartbeat.Tick += (_, _) =>
             {
-                long now = heartbeatWatch.ElapsedMilliseconds;
-                long gap = now - lastHeartbeatMs;
-                TimeSpan gcPauseNow = GC.GetTotalPauseDuration();
-                double gcPauseDeltaMs =
-                    (gcPauseNow - lastHeartbeatGcPause).TotalMilliseconds;
-                lastHeartbeatGcPause = gcPauseNow;
-                long projectionGeneration = window.CatalogProjectionGenerationForSmoke;
-                if (gap >= 30)
+                CatalogHeartbeatMarker marker =
+                    dispatcherDiagnostics.MarkHeartbeatStarted();
+                try
                 {
-                    heartbeatDiagnosticSamples.Add(new(
-                        activeOperation,
-                        now,
-                        gap,
-                        gcPauseDeltaMs,
-                        projectionGeneration));
+                    TimeSpan gcPauseBeforeTimestamp = GC.GetTotalPauseDuration();
+                    long nowTimestamp = Stopwatch.GetTimestamp();
+                    TimeSpan gcPauseAfterTimestamp = GC.GetTotalPauseDuration();
+                    long now = heartbeatWatch.ElapsedMilliseconds;
+                    long gap = now - lastHeartbeatMs;
+                    double uiThreadCpuMs =
+                        lastHeartbeatUiThreadCpuTicks >= 0
+                            && marker.UiThreadCpuTicks >= lastHeartbeatUiThreadCpuTicks
+                            ? TimeSpan.FromTicks(
+                                marker.UiThreadCpuTicks
+                                    - lastHeartbeatUiThreadCpuTicks)
+                                .TotalMilliseconds
+                            : -1;
+                    double containedGcPauseMs = Math.Max(
+                        0,
+                        (gcPauseBeforeTimestamp - lastHeartbeatGcPause)
+                            .TotalMilliseconds);
+                    double boundaryGcPauseMs = Math.Max(
+                        0,
+                        (gcPauseAfterTimestamp - gcPauseBeforeTimestamp)
+                            .TotalMilliseconds);
+                    double gcPauseDeltaMs = containedGcPauseMs + boundaryGcPauseMs;
+                    bool gcTimingAmbiguous =
+                        lastHeartbeatGcBoundaryAmbiguous || boundaryGcPauseMs > 0;
+                    lastHeartbeatGcBoundaryAmbiguous = boundaryGcPauseMs > 0;
+                    lastHeartbeatGcPause = gcPauseAfterTimestamp;
+                    long projectionGeneration = window.CatalogProjectionGenerationForSmoke;
+                    if (gap >= 30)
+                    {
+                        heartbeatDiagnosticSamples.Add(new(
+                            activeOperation,
+                            now,
+                            gap,
+                            gcPauseDeltaMs,
+                            projectionGeneration,
+                            lastHeartbeatTimestamp,
+                            nowTimestamp,
+                            gcTimingAmbiguous,
+                            marker.Tag,
+                            uiThreadCpuMs));
+                    }
+                    if (gap > maxHeartbeatGapMs)
+                    {
+                        maxHeartbeatGapMs = gap;
+                        maxHeartbeatGapGcPauseMs = gcPauseDeltaMs;
+                        maxHeartbeatGapProjectionGeneration = projectionGeneration;
+                        maxHeartbeatGapSample =
+                            $"{activeOperation}@{now}ms:{gap}ms"
+                            + $":gc={gcPauseDeltaMs:F3}ms"
+                            + $":ui-cpu={uiThreadCpuMs:F3}ms"
+                            + $":generation={projectionGeneration}";
+                    }
+                    if (gap > CatalogInteractionDispatcherHeartbeatBudgetMs)
+                        heartbeatGapSamples.Add($"{activeOperation}@{now}ms:{gap}ms");
+                    lastHeartbeatMs = now;
+                    lastHeartbeatTimestamp = nowTimestamp;
+                    lastHeartbeatUiThreadCpuTicks = marker.UiThreadCpuTicks;
+                    heartbeatCount++;
                 }
-                if (gap > maxHeartbeatGapMs)
+                finally
                 {
-                    maxHeartbeatGapMs = gap;
-                    maxHeartbeatGapGcPauseMs = gcPauseDeltaMs;
-                    maxHeartbeatGapProjectionGeneration = projectionGeneration;
-                    maxHeartbeatGapSample =
-                        $"{activeOperation}@{now}ms:{gap}ms"
-                        + $":gc={gcPauseDeltaMs:F3}ms"
-                        + $":generation={projectionGeneration}";
+                    dispatcherDiagnostics.MarkHeartbeatCompleted(marker.Tag);
                 }
-                if (gap > CatalogInteractionDispatcherHeartbeatBudgetMs)
-                    heartbeatGapSamples.Add($"{activeOperation}@{now}ms:{gap}ms");
-                lastHeartbeatMs = now;
-                heartbeatCount++;
             };
 
             try
@@ -10371,10 +10426,6 @@ public partial class App : Application
                 // one-time subsystem costs as repeated catalog churn made the
                 // normalized working-set and dispatcher gates runner-dependent.
                 ReportProgress("accessibility-warmup");
-                heartbeatWatch.Restart();
-                lastHeartbeatMs = 0;
-                lastHeartbeatGcPause = GC.GetTotalPauseDuration();
-                heartbeat.Start();
                 bool warmAccessibilitySelected =
                     MeasureAccessibilityWarmupSubstep(
                         "accessibility-warmup-select",
@@ -10457,6 +10508,15 @@ public partial class App : Application
                             && await window.WaitForPrimaryGalleryFocusForSmokeAsync()
                             && await window.WaitForGridRealizationIdleForSmokeAsync());
                 window.ResetGridAutomationLookupMetricsForSmoke();
+                heartbeatWatch.Restart();
+                lastHeartbeatMs = 0;
+                lastHeartbeatTimestamp = Stopwatch.GetTimestamp();
+                lastHeartbeatUiThreadCpuTicks =
+                    dispatcherDiagnostics.ReadUiThreadCpuTicks();
+                schedulerMeasurementStartTimestamp = lastHeartbeatTimestamp;
+                lastHeartbeatGcPause = GC.GetTotalPauseDuration();
+                lastHeartbeatGcBoundaryAmbiguous = false;
+                heartbeat.Start();
 
                 bool warmupComplete = warmSearch.Applied
                     && !warmSearch.Discarded
@@ -10494,7 +10554,11 @@ public partial class App : Application
                 long workingSetBefore = process.WorkingSet64;
                 int gen2Before = GC.CollectionCount(2);
                 lastHeartbeatMs = heartbeatWatch.ElapsedMilliseconds;
+                lastHeartbeatTimestamp = Stopwatch.GetTimestamp();
+                lastHeartbeatUiThreadCpuTicks =
+                    dispatcherDiagnostics.ReadUiThreadCpuTicks();
                 lastHeartbeatGcPause = GC.GetTotalPauseDuration();
+                lastHeartbeatGcBoundaryAmbiguous = false;
                 heartbeat.Start();
                 var searchSamples = new List<long>();
                 var searchPhaseSamples = new List<MainWindow.SearchFilterCompletion>();
@@ -10961,6 +11025,26 @@ public partial class App : Application
                 SetActiveOperation("final-settle");
                 await Task.Delay(250);
                 heartbeat.Stop();
+                long schedulerMeasurementEndTimestamp = Stopwatch.GetTimestamp();
+                SchedulerHostAttributionSummary schedulerHostAttribution =
+                    schedulerControlProbes.StopAndAnalyze(
+                        schedulerMeasurementStartTimestamp,
+                        schedulerMeasurementEndTimestamp,
+                        uiThreadPriorityNormal,
+                        schedulerControlProbesStarted,
+                        heartbeatDiagnosticSamples,
+                        maxHeartbeatGapMs,
+                        CatalogInteractionDispatcherHeartbeatBudgetMs);
+                IReadOnlyList<VirtualizingPanelPhaseDiagnostic> panelPhaseDiagnostics =
+                    window.CaptureCatalogPanelPhaseDiagnosticsForSmoke();
+                CatalogDispatcherDiagnosticSummary dispatcherDiagnostic =
+                    dispatcherDiagnostics.StopAndAnalyze(
+                        heartbeatDiagnosticSamples,
+                        panelPhaseDiagnostics,
+                        window.CatalogPanelPhaseDiagnosticOverflowForSmoke,
+                        schedulerMeasurementStartTimestamp,
+                        schedulerMeasurementEndTimestamp,
+                        CatalogInteractionDispatcherHeartbeatBudgetMs);
                 process.Refresh();
                 long workingSetAfter = process.WorkingSet64;
                 long managedMemoryAfter = GC.GetTotalMemory(forceFullCollection: false);
@@ -10979,6 +11063,11 @@ public partial class App : Application
                 double searchP95 = SmokePercentile(searchSamples, 0.95);
                 double filterP95 = SmokePercentile(filterSamples, 0.95);
                 double sortP95 = SmokePercentile(sortSamples, 0.95);
+                double coldGalleryFocusWarmupMs =
+                    accessibilityWarmupSubstepSamples
+                        .FirstOrDefault(static sample =>
+                            sample.Operation == "accessibility-warmup-focus")
+                        ?.WallMs ?? double.PositiveInfinity;
                 bool selectionStable = selected
                     && string.Equals(window.SelectedFileNameForSmoke, selectedName, StringComparison.OrdinalIgnoreCase);
                 bool bounded = window.GridItemsSourceCountForSmoke == count
@@ -11027,6 +11116,31 @@ public partial class App : Application
                     catalogProjectionDetachSamples
                         .Where(static sample => sample.Applied && !sample.Discarded)
                         .ToList();
+                long catalogSnapshotResetMaxWallMs =
+                    appliedProjectionSamples
+                        .Select(static sample => sample.ResetMs)
+                        .DefaultIfEmpty(0)
+                        .Max();
+                double catalogSnapshotResetMaxThreadCpuMs =
+                    appliedProjectionSamples
+                        .Where(static sample =>
+                            sample.CatalogSnapshotResetCount > 0)
+                        .Select(static sample =>
+                            sample.CatalogSnapshotResetThreadCpuMs)
+                        .DefaultIfEmpty(-1)
+                        .Max();
+                bool catalogSnapshotResetCountExact =
+                    appliedProjectionSamples.Count > 0
+                    && appliedProjectionSamples.All(static sample =>
+                        sample.CatalogSnapshotResetNestedCount == 0
+                        && sample.CatalogSnapshotResetCount
+                            == (sample.PublishedSingleRemoval ? 0 : 1));
+                bool catalogSnapshotResetCpuMeasuredExact =
+                    appliedProjectionSamples
+                        .Where(static sample =>
+                            sample.CatalogSnapshotResetCount > 0)
+                        .All(static sample =>
+                            sample.CatalogSnapshotResetThreadCpuMs >= 0);
                 int catalogProjectionMaxDetachedContainersPerSlice =
                     appliedProjectionSamples
                         .Select(static sample => sample.MaxResetDetachedContainersPerSlice)
@@ -11073,11 +11187,11 @@ public partial class App : Application
                 string catalogProjectionMaxApplySliceOperation =
                     catalogProjectionMaxApplySliceMs <= CatalogProjectionDiagnosticSliceTargetMs
                         ? "within-diagnostic-target"
-                        : catalogProjectionMaxSingleContainerDetachMs == catalogProjectionMaxApplySliceMs
-                            ? "single-container-reset-unit"
-                            : "code-owned-apply-slice";
+                        : "app-owned-cooperative-phase";
                 bool ok = window.CatalogCountForSmoke == count
                     && warmupComplete
+                    && coldGalleryFocusWarmupMs
+                        <= CatalogColdGalleryFocusWarmupBudgetMs
                     && countsExact
                     && completionsApplied
                     && selectionStable
@@ -11102,8 +11216,22 @@ public partial class App : Application
                     && catalogProjectionMaxDetachedContainersPerSlice <= 1
                     && catalogProjectionInputBoundaryBeforePublicationExact
                     && catalogProjectionInputBoundaryAfterPublicationExact
-                    && maxHeartbeatGapMs <= CatalogInteractionDispatcherHeartbeatBudgetMs
-                    && heartbeatGapSamples.Count == 0
+                    && catalogProjectionMaxApplySliceMs
+                        <= CatalogProjectionDiagnosticSliceTargetMs
+                    && catalogSnapshotResetMaxWallMs
+                        <= CatalogSnapshotResetBudgetMs
+                    && catalogSnapshotResetCountExact
+                    && catalogSnapshotResetCpuMeasuredExact
+                    && catalogProjectionDetachWithinBudget
+                    && dispatcherDiagnostic.SensorValid
+                    // Only strict, callback-free, zero-CPU Posted->Started
+                    // queue segments are removed from the raw heartbeat.
+                    // Active work, panel work, GC, and control-probe overlap
+                    // remain charged to the product interval.
+                    && dispatcherDiagnostic.MaxProductGapMs
+                        <= CatalogInteractionDispatcherHeartbeatBudgetMs
+                    && dispatcherDiagnostic.ActiveOperationDiagnosticCount == 0
+                    && dispatcherDiagnostic.InconclusiveCount == 0
                     // Rapid churn leaves dead WPF generator/layout objects in
                     // young generations and committed pages in the process
                     // working set. Gate the collectible live graph tightly and
@@ -11191,9 +11319,25 @@ public partial class App : Application
                     DispatcherHeartbeatMaxGapGcPauseMs = maxHeartbeatGapGcPauseMs,
                     DispatcherHeartbeatMaxGapProjectionGeneration =
                         maxHeartbeatGapProjectionGeneration,
+                    SchedulerControlConsensus = schedulerHostAttribution,
+                    DispatcherDiagnostic = dispatcherDiagnostic,
                     CatalogProjectionMaxApplySliceMs = catalogProjectionMaxApplySliceMs,
                     CatalogProjectionMaxApplySliceOperation = catalogProjectionMaxApplySliceOperation,
                     CatalogProjectionDiagnosticSliceTargetMs = CatalogProjectionDiagnosticSliceTargetMs,
+                    CatalogSnapshotResetBudgetMs =
+                        CatalogSnapshotResetBudgetMs,
+                    CatalogSnapshotResetMaxWallMs =
+                        catalogSnapshotResetMaxWallMs,
+                    CatalogSnapshotResetMaxThreadCpuMs =
+                        catalogSnapshotResetMaxThreadCpuMs,
+                    CatalogSnapshotResetCountExact =
+                        catalogSnapshotResetCountExact,
+                    CatalogSnapshotResetCpuMeasuredExact =
+                        catalogSnapshotResetCpuMeasuredExact,
+                    ColdGalleryFocusWarmupMs =
+                        coldGalleryFocusWarmupMs,
+                    ColdGalleryFocusWarmupBudgetMs =
+                        CatalogColdGalleryFocusWarmupBudgetMs,
                     CatalogProjectionSingleContainerDetachBudgetMs =
                         CatalogProjectionSingleContainerDetachBudgetMs,
                     CatalogProjectionMaxSingleContainerDetachMs =
@@ -25273,6 +25417,617 @@ public partial class App : Application
         public string Message { get; init; } = "";
     }
 
+    private sealed record SchedulerLateInterval(
+        long StartTimestamp,
+        long EndTimestamp);
+
+    private sealed class SchedulerControlProbePair : IDisposable
+    {
+        private const double ProbePeriodMs = 2;
+        private const double ProbePhaseOffsetMs = 1;
+        private const double LateIntervalEpsilonMs = 0.5;
+        // Hosted Windows runners can coalesce a requested 2 ms high-resolution
+        // period by slightly more than 0.5 ms. Keep the accepted cadence below
+        // the 3 ms late-interval threshold and require both independent probes
+        // to agree, so host variance cannot silently weaken attribution.
+        private const double ProbeCadenceToleranceMs = 0.75;
+        private const double ProbeCadenceAgreementToleranceMs = 0.25;
+        private readonly SchedulerControlProbe _aboveNormal;
+        private readonly SchedulerControlProbe _normal;
+        private bool _started;
+        private bool _stopped;
+
+        public SchedulerControlProbePair()
+        {
+            long origin = Stopwatch.GetTimestamp() + MillisecondsToTicks(20);
+            _aboveNormal = new SchedulerControlProbe(
+                "above-normal",
+                ThreadPriority.AboveNormal,
+                origin);
+            _normal = new SchedulerControlProbe(
+                "normal",
+                ThreadPriority.Normal,
+                origin + MillisecondsToTicks(ProbePhaseOffsetMs));
+        }
+
+        public bool StartAndWaitForInitialSamples(TimeSpan timeout)
+        {
+            _started = _aboveNormal.Start() && _normal.Start();
+            if (!_started)
+                return false;
+
+            var watch = Stopwatch.StartNew();
+            while (watch.Elapsed < timeout)
+            {
+                if (_aboveNormal.HasInitialSample && _normal.HasInitialSample)
+                    return true;
+                if (_aboveNormal.Finished || _normal.Finished)
+                    return false;
+                Thread.Sleep(1);
+            }
+            return false;
+        }
+
+        public SchedulerHostAttributionSummary StopAndAnalyze(
+            long measurementStartTimestamp,
+            long measurementEndTimestamp,
+            bool uiThreadPriorityNormal,
+            bool initialSamplesReady,
+            IReadOnlyList<DispatcherHeartbeatDiagnosticSample> heartbeatSamples,
+            long rawMaxGapMs,
+            long heartbeatBudgetMs)
+        {
+            if (!_stopped)
+            {
+                _aboveNormal.RequestStopAfter(measurementEndTimestamp);
+                _normal.RequestStopAfter(measurementEndTimestamp);
+                _aboveNormal.Join(TimeSpan.FromSeconds(2));
+                _normal.Join(TimeSpan.FromSeconds(2));
+                _stopped = true;
+            }
+
+            long periodTicks = MillisecondsToTicks(ProbePeriodMs);
+            long epsilonTicks = MillisecondsToTicks(LateIntervalEpsilonMs);
+            List<SchedulerLateInterval> aboveIntervals =
+                _aboveNormal.BuildLateIntervals(periodTicks, epsilonTicks);
+            List<SchedulerLateInterval> normalIntervals =
+                _normal.BuildLateIntervals(periodTicks, epsilonTicks);
+            List<SchedulerLateInterval> consensusIntervals =
+                IntersectIntervals(aboveIntervals, normalIntervals);
+            SchedulerControlProbeSummary aboveSummary =
+                _aboveNormal.CreateSummary(
+                    aboveIntervals.Count,
+                    ProbePeriodMs,
+                    ProbeCadenceToleranceMs);
+            SchedulerControlProbeSummary normalSummary =
+                _normal.CreateSummary(
+                    normalIntervals.Count,
+                    ProbePeriodMs,
+                    ProbeCadenceToleranceMs);
+            bool probeCadenceAgreementValid =
+                Math.Abs(
+                    aboveSummary.ObservedCadenceMedianMs
+                        - normalSummary.ObservedCadenceMedianMs)
+                    <= ProbeCadenceAgreementToleranceMs;
+            double observedInitialPhaseOffsetMs = TicksToMilliseconds(
+                Math.Abs(
+                    aboveSummary.FirstActualTimestamp
+                        - normalSummary.FirstActualTimestamp));
+            bool initialPhaseValid =
+                observedInitialPhaseOffsetMs >= 0.25
+                && observedInitialPhaseOffsetMs <= 1.75;
+
+            bool heartbeatTimestampsMonotonic = true;
+            long previousEndTimestamp = 0;
+            foreach (DispatcherHeartbeatDiagnosticSample sample in heartbeatSamples)
+            {
+                if (sample.StartTimestamp <= 0
+                    || sample.EndTimestamp <= sample.StartTimestamp
+                    || (previousEndTimestamp > 0
+                        && sample.StartTimestamp < previousEndTimestamp))
+                {
+                    heartbeatTimestampsMonotonic = false;
+                    break;
+                }
+                previousEndTimestamp = sample.EndTimestamp;
+            }
+
+            bool windowCovered =
+                aboveSummary.SampleCount > 0
+                && normalSummary.SampleCount > 0
+                && aboveSummary.FirstActualTimestamp <= measurementStartTimestamp
+                && normalSummary.FirstActualTimestamp <= measurementStartTimestamp
+                && aboveSummary.LastActualTimestamp >= measurementEndTimestamp
+                && normalSummary.LastActualTimestamp >= measurementEndTimestamp;
+            bool sensorValid =
+                _started
+                && initialSamplesReady
+                && uiThreadPriorityNormal
+                && measurementStartTimestamp > 0
+                && measurementEndTimestamp > measurementStartTimestamp
+                && windowCovered
+                && heartbeatTimestampsMonotonic
+                && initialPhaseValid
+                && probeCadenceAgreementValid
+                && ProbeSummaryValid(aboveSummary)
+                && ProbeSummaryValid(normalSummary);
+
+            int controlConsensusOverlapCount = 0;
+            int noControlConsensusOverlapCount = 0;
+            int inconclusiveCount = 0;
+            double unexplainedMaxGapMs = Math.Min(rawMaxGapMs, 30);
+            var attributionSamples = new List<SchedulerControlConsensusSample>(
+                heartbeatSamples.Count);
+            foreach (DispatcherHeartbeatDiagnosticSample sample in heartbeatSamples)
+            {
+                double rawGapMs = TicksToMilliseconds(
+                    Math.Max(0, sample.EndTimestamp - sample.StartTimestamp));
+                double rawAboveOverlapMs = TicksToMilliseconds(
+                    OverlapTicks(sample.StartTimestamp, sample.EndTimestamp, aboveIntervals));
+                double rawNormalOverlapMs = TicksToMilliseconds(
+                    OverlapTicks(sample.StartTimestamp, sample.EndTimestamp, normalIntervals));
+                double rawHostOverlapMs = TicksToMilliseconds(
+                    OverlapTicks(sample.StartTimestamp, sample.EndTimestamp, consensusIntervals));
+                // We do not have a callback-free timestamp for the runtime's
+                // exact GC interval. Conservatively withhold the entire reported
+                // GC pause from every possible host overlap. This is a lower
+                // bound for host-only time and guarantees that GC stays charged
+                // to the product instead of being hidden by the probes.
+                double aboveOverlapMs =
+                    Math.Max(0, rawAboveOverlapMs - sample.GcPauseMs);
+                double normalOverlapMs =
+                    Math.Max(0, rawNormalOverlapMs - sample.GcPauseMs);
+                double hostOverlapMs =
+                    Math.Max(0, rawHostOverlapMs - sample.GcPauseMs);
+                hostOverlapMs = Math.Min(rawGapMs, hostOverlapMs);
+                double productGapMs = Math.Max(0, rawGapMs - hostOverlapMs);
+                string classification = "PASS";
+
+                if (rawGapMs > heartbeatBudgetMs)
+                {
+                    if (!sensorValid)
+                    {
+                        classification = "INCONCLUSIVE";
+                        inconclusiveCount++;
+                    }
+                    else if (sample.GcTimingAmbiguous)
+                    {
+                        classification = "INCONCLUSIVE";
+                        inconclusiveCount++;
+                    }
+                    else if (hostOverlapMs > 0)
+                    {
+                        classification = "CONTROL_CONSENSUS_OVERLAP";
+                        controlConsensusOverlapCount++;
+                    }
+                    else
+                    {
+                        classification = "NO_CONTROL_CONSENSUS_OVERLAP";
+                        noControlConsensusOverlapCount++;
+                    }
+                }
+
+                unexplainedMaxGapMs = Math.Max(unexplainedMaxGapMs, productGapMs);
+                attributionSamples.Add(new(
+                    sample.Operation,
+                    rawGapMs,
+                    rawAboveOverlapMs,
+                    rawNormalOverlapMs,
+                    rawHostOverlapMs,
+                    aboveOverlapMs,
+                    normalOverlapMs,
+                    hostOverlapMs,
+                    productGapMs,
+                    classification,
+                    sample.GcPauseMs,
+                    sample.StartTimestamp,
+                    sample.EndTimestamp,
+                    sample.GcTimingAmbiguous));
+            }
+
+            return new SchedulerHostAttributionSummary
+            {
+                SensorValid = sensorValid,
+                InitialSamplesReady = initialSamplesReady,
+                UiThreadPriorityNormal = uiThreadPriorityNormal,
+                MeasurementStartTimestamp = measurementStartTimestamp,
+                MeasurementEndTimestamp = measurementEndTimestamp,
+                ProbePeriodMs = ProbePeriodMs,
+                ProbePhaseOffsetMs = ProbePhaseOffsetMs,
+                ObservedInitialPhaseOffsetMs = observedInitialPhaseOffsetMs,
+                InitialPhaseValid = initialPhaseValid,
+                LateIntervalEpsilonMs = LateIntervalEpsilonMs,
+                ProbeCadenceToleranceMs = ProbeCadenceToleranceMs,
+                ProbeCadenceAgreementToleranceMs =
+                    ProbeCadenceAgreementToleranceMs,
+                ProbeCadenceAgreementValid = probeCadenceAgreementValid,
+                AboveNormalProbe = aboveSummary,
+                NormalProbe = normalSummary,
+                ControlConsensusIntervalCount = consensusIntervals.Count,
+                ControlConsensusTotalMs = TicksToMilliseconds(
+                    consensusIntervals.Sum(
+                        static interval =>
+                            Math.Max(0, interval.EndTimestamp - interval.StartTimestamp))),
+                ControlConsensusOverlapCount = controlConsensusOverlapCount,
+                NoControlConsensusOverlapCount = noControlConsensusOverlapCount,
+                InconclusiveCount = inconclusiveCount,
+                UnexplainedMaxGapMs = unexplainedMaxGapMs,
+                HeartbeatSamples = attributionSamples,
+            };
+        }
+
+        public void Dispose()
+        {
+            if (!_stopped)
+            {
+                _aboveNormal.RequestStopImmediately();
+                _normal.RequestStopImmediately();
+                _aboveNormal.Join(TimeSpan.FromMilliseconds(500));
+                _normal.Join(TimeSpan.FromMilliseconds(500));
+                _stopped = true;
+            }
+        }
+
+        private static bool ProbeSummaryValid(SchedulerControlProbeSummary summary) =>
+            summary.PriorityApplied
+            && summary.HighResolutionTimerCreated
+            && summary.ThreadStopped
+            && summary.SetTimerError == 0
+            && summary.WaitError == 0
+            && summary.SampleCount > 0
+            && !summary.BufferOverflow
+            && summary.TimestampsMonotonic
+            && summary.CadenceValid;
+
+        private static List<SchedulerLateInterval> IntersectIntervals(
+            IReadOnlyList<SchedulerLateInterval> first,
+            IReadOnlyList<SchedulerLateInterval> second)
+        {
+            var intersections = new List<SchedulerLateInterval>();
+            int firstIndex = 0;
+            int secondIndex = 0;
+            while (firstIndex < first.Count && secondIndex < second.Count)
+            {
+                SchedulerLateInterval left = first[firstIndex];
+                SchedulerLateInterval right = second[secondIndex];
+                long start = Math.Max(left.StartTimestamp, right.StartTimestamp);
+                long end = Math.Min(left.EndTimestamp, right.EndTimestamp);
+                if (end > start)
+                    intersections.Add(new(start, end));
+                if (left.EndTimestamp <= right.EndTimestamp)
+                    firstIndex++;
+                else
+                    secondIndex++;
+            }
+            return intersections;
+        }
+
+        private static long OverlapTicks(
+            long start,
+            long end,
+            IReadOnlyList<SchedulerLateInterval> intervals)
+        {
+            long total = 0;
+            foreach (SchedulerLateInterval interval in intervals)
+            {
+                if (interval.EndTimestamp <= start)
+                    continue;
+                if (interval.StartTimestamp >= end)
+                    break;
+                total += Math.Max(
+                    0,
+                    Math.Min(end, interval.EndTimestamp)
+                        - Math.Max(start, interval.StartTimestamp));
+            }
+            return Math.Min(Math.Max(0, end - start), total);
+        }
+
+        private static long MillisecondsToTicks(double milliseconds) =>
+            Math.Max(
+                1,
+                (long)Math.Ceiling(
+                    milliseconds * Stopwatch.Frequency / 1000d));
+
+        private static double TicksToMilliseconds(long ticks) =>
+            ticks * 1000d / Stopwatch.Frequency;
+
+        private sealed class SchedulerControlProbe
+        {
+            private const int SampleCapacity = 65_536;
+            private const uint CreateWaitableTimerHighResolution = 0x00000002;
+            private const uint TimerModifyStateAndSynchronize = 0x00100002;
+            private const uint WaitObject0 = 0x00000000;
+            private const uint WaitFailed = 0xffffffff;
+            private readonly string _name;
+            private readonly ThreadPriority _requestedPriority;
+            private readonly long _initialDueTimestamp;
+            private readonly long[] _actualTimestamps = new long[SampleCapacity];
+            private readonly Thread _thread;
+            private int _sampleCount;
+            private int _finished;
+            private int _overflow;
+            private int _highResolutionTimerCreated;
+            private int _setTimerError;
+            private int _waitError;
+            private int _stopImmediately;
+            private long _stopAfterTimestamp = long.MaxValue;
+            private bool _priorityApplied;
+            private bool _startSucceeded;
+
+            public SchedulerControlProbe(
+                string name,
+                ThreadPriority requestedPriority,
+                long initialDueTimestamp)
+            {
+                _name = name;
+                _requestedPriority = requestedPriority;
+                _initialDueTimestamp = initialDueTimestamp;
+                _thread = new Thread(Run)
+                {
+                    IsBackground = true,
+                    Name = $"Aibos catalog verifier {name}",
+                };
+                try
+                {
+                    _thread.Priority = requestedPriority;
+                    _priorityApplied = _thread.Priority == requestedPriority;
+                }
+                catch
+                {
+                    _priorityApplied = false;
+                }
+            }
+
+            public bool HasInitialSample => Volatile.Read(ref _sampleCount) > 0;
+            public bool Finished => Volatile.Read(ref _finished) != 0;
+
+            public bool Start()
+            {
+                try
+                {
+                    _thread.Start();
+                    _startSucceeded = true;
+                    return true;
+                }
+                catch
+                {
+                    Volatile.Write(ref _finished, 1);
+                    return false;
+                }
+            }
+
+            public void RequestStopAfter(long timestamp) =>
+                Volatile.Write(ref _stopAfterTimestamp, timestamp);
+
+            public void RequestStopImmediately() =>
+                Volatile.Write(ref _stopImmediately, 1);
+
+            public bool Join(TimeSpan timeout) =>
+                !_startSucceeded || _thread.Join(timeout);
+
+            public List<SchedulerLateInterval> BuildLateIntervals(
+                long periodTicks,
+                long epsilonTicks)
+            {
+                int count = Math.Min(
+                    Volatile.Read(ref _sampleCount),
+                    SampleCapacity);
+                var intervals = new List<SchedulerLateInterval>();
+                for (int index = 1; index < count; index++)
+                {
+                    // Derive lateness only from consecutive observed wakes.
+                    // A synthetic periodic due sequence can drift away from the
+                    // timer after a missed pulse and make both probes share the
+                    // same unverifiable attribution error.
+                    long start =
+                        _actualTimestamps[index - 1] + periodTicks + epsilonTicks;
+                    long end = _actualTimestamps[index] - epsilonTicks;
+                    if (end <= start)
+                        continue;
+                    if (intervals.Count > 0
+                        && start <= intervals[^1].EndTimestamp)
+                    {
+                        SchedulerLateInterval previous = intervals[^1];
+                        intervals[^1] = previous with
+                        {
+                            EndTimestamp = Math.Max(previous.EndTimestamp, end),
+                        };
+                    }
+                    else
+                    {
+                        intervals.Add(new(start, end));
+                    }
+                }
+                return intervals;
+            }
+
+            public SchedulerControlProbeSummary CreateSummary(
+                int lateIntervalCount,
+                double expectedPeriodMs,
+                double cadenceToleranceMs)
+            {
+                int count = Math.Min(
+                    Volatile.Read(ref _sampleCount),
+                    SampleCapacity);
+                bool monotonic = true;
+                for (int index = 0; index < count; index++)
+                {
+                    if (_actualTimestamps[index] <= 0
+                        || (index > 0
+                            && _actualTimestamps[index]
+                                <= _actualTimestamps[index - 1]))
+                    {
+                        monotonic = false;
+                        break;
+                    }
+                }
+                double cadenceMedianMs = 0;
+                double cadenceP95Ms = 0;
+                if (count > 1)
+                {
+                    var cadenceSamples = new double[count - 1];
+                    for (int index = 1; index < count; index++)
+                    {
+                        cadenceSamples[index - 1] = TicksToMilliseconds(
+                            _actualTimestamps[index]
+                                - _actualTimestamps[index - 1]);
+                    }
+                    Array.Sort(cadenceSamples);
+                    cadenceMedianMs =
+                        cadenceSamples[cadenceSamples.Length / 2];
+                    int p95Index = Math.Clamp(
+                        (int)Math.Ceiling(cadenceSamples.Length * 0.95) - 1,
+                        0,
+                        cadenceSamples.Length - 1);
+                    cadenceP95Ms = cadenceSamples[p95Index];
+                }
+                bool cadenceValid =
+                    count > 10
+                    && cadenceMedianMs >= expectedPeriodMs - cadenceToleranceMs
+                    && cadenceMedianMs <= expectedPeriodMs + cadenceToleranceMs;
+                return new SchedulerControlProbeSummary
+                {
+                    Name = _name,
+                    RequestedPriority = _requestedPriority.ToString(),
+                    PriorityApplied = _priorityApplied,
+                    HighResolutionTimerCreated =
+                        Volatile.Read(ref _highResolutionTimerCreated) != 0,
+                    ThreadStopped = Finished,
+                    SetTimerError = Volatile.Read(ref _setTimerError),
+                    WaitError = Volatile.Read(ref _waitError),
+                    SampleCount = count,
+                    BufferOverflow = Volatile.Read(ref _overflow) != 0,
+                    TimestampsMonotonic = monotonic,
+                    CadenceValid = cadenceValid,
+                    ObservedCadenceMedianMs = cadenceMedianMs,
+                    ObservedCadenceP95Ms = cadenceP95Ms,
+                    FirstActualTimestamp =
+                        count == 0 ? 0 : _actualTimestamps[0],
+                    LastActualTimestamp =
+                        count == 0 ? 0 : _actualTimestamps[count - 1],
+                    LateIntervalCount = lateIntervalCount,
+                };
+            }
+
+            private void Run()
+            {
+                IntPtr timer = IntPtr.Zero;
+                try
+                {
+                    timer = CreateWaitableTimerExW(
+                        IntPtr.Zero,
+                        null,
+                        CreateWaitableTimerHighResolution,
+                        TimerModifyStateAndSynchronize);
+                    if (timer == IntPtr.Zero)
+                    {
+                        Volatile.Write(
+                            ref _setTimerError,
+                            Marshal.GetLastWin32Error());
+                        return;
+                    }
+                    Volatile.Write(ref _highResolutionTimerCreated, 1);
+
+                    long remainingTicks =
+                        _initialDueTimestamp - Stopwatch.GetTimestamp();
+                    long relativeDueTime100ns = -Math.Max(
+                        1,
+                        (long)Math.Ceiling(
+                            Math.Max(0, remainingTicks)
+                                * 10_000_000d
+                                / Stopwatch.Frequency));
+                    if (!SetWaitableTimerEx(
+                            timer,
+                            ref relativeDueTime100ns,
+                            (int)ProbePeriodMs,
+                            IntPtr.Zero,
+                            IntPtr.Zero,
+                            IntPtr.Zero,
+                            0))
+                    {
+                        Volatile.Write(
+                            ref _setTimerError,
+                            Marshal.GetLastWin32Error());
+                        return;
+                    }
+
+                    while (Volatile.Read(ref _stopImmediately) == 0)
+                    {
+                        uint waitResult = WaitForSingleObject(timer, uint.MaxValue);
+                        if (waitResult != WaitObject0)
+                        {
+                            Volatile.Write(
+                                ref _waitError,
+                                waitResult == WaitFailed
+                                    ? Marshal.GetLastWin32Error()
+                                    : unchecked((int)waitResult));
+                            break;
+                        }
+
+                        long actualTimestamp = Stopwatch.GetTimestamp();
+                        int index = Volatile.Read(ref _sampleCount);
+                        if (index >= SampleCapacity)
+                        {
+                            Volatile.Write(ref _overflow, 1);
+                            break;
+                        }
+                        _actualTimestamps[index] = actualTimestamp;
+                        Volatile.Write(ref _sampleCount, index + 1);
+
+                        long stopAfterTimestamp =
+                            Volatile.Read(ref _stopAfterTimestamp);
+                        if (stopAfterTimestamp != long.MaxValue
+                            && actualTimestamp >= stopAfterTimestamp)
+                        {
+                            break;
+                        }
+
+                    }
+                }
+                finally
+                {
+                    if (timer != IntPtr.Zero)
+                    {
+                        CancelWaitableTimer(timer);
+                        CloseHandle(timer);
+                    }
+                    Volatile.Write(ref _finished, 1);
+                }
+            }
+
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            private static extern IntPtr CreateWaitableTimerExW(
+                IntPtr timerAttributes,
+                string? timerName,
+                uint flags,
+                uint desiredAccess);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool SetWaitableTimerEx(
+                IntPtr timer,
+                ref long dueTime,
+                int period,
+                IntPtr completionRoutine,
+                IntPtr completionArgument,
+                IntPtr wakeContext,
+                uint tolerableDelay);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            private static extern uint WaitForSingleObject(
+                IntPtr handle,
+                uint milliseconds);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool CancelWaitableTimer(IntPtr timer);
+
+            [DllImport("kernel32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool CloseHandle(IntPtr handle);
+        }
+    }
+
     private sealed record CatalogInteractionSubstepSample(
         string Operation,
         double WallMs);
@@ -25292,7 +26047,74 @@ public partial class App : Application
         long ElapsedMs,
         long GapMs,
         double GcPauseMs,
-        long ProjectionGeneration);
+        long ProjectionGeneration,
+        long StartTimestamp,
+        long EndTimestamp,
+        bool GcTimingAmbiguous,
+        long HeartbeatTag,
+        double UiThreadCpuMs);
+
+    private sealed record SchedulerControlConsensusSample(
+        string Operation,
+        double RawGapMs,
+        double RawAboveNormalOverlapMs,
+        double RawNormalOverlapMs,
+        double RawControlConsensusOverlapMs,
+        double AboveNormalOverlapMs,
+        double NormalOverlapMs,
+        double ControlConsensusOverlapMs,
+        double UnexplainedGapMs,
+        string Classification,
+        double GcPauseMs,
+        long StartTimestamp,
+        long EndTimestamp,
+        bool GcTimingAmbiguous);
+
+    private sealed class SchedulerControlProbeSummary
+    {
+        public string Name { get; init; } = "";
+        public string RequestedPriority { get; init; } = "";
+        public bool PriorityApplied { get; init; }
+        public bool HighResolutionTimerCreated { get; init; }
+        public bool ThreadStopped { get; init; }
+        public int SetTimerError { get; init; }
+        public int WaitError { get; init; }
+        public int SampleCount { get; init; }
+        public bool BufferOverflow { get; init; }
+        public bool TimestampsMonotonic { get; init; }
+        public bool CadenceValid { get; init; }
+        public double ObservedCadenceMedianMs { get; init; }
+        public double ObservedCadenceP95Ms { get; init; }
+        public long FirstActualTimestamp { get; init; }
+        public long LastActualTimestamp { get; init; }
+        public int LateIntervalCount { get; init; }
+    }
+
+    private sealed class SchedulerHostAttributionSummary
+    {
+        public bool SensorValid { get; init; }
+        public bool InitialSamplesReady { get; init; }
+        public bool UiThreadPriorityNormal { get; init; }
+        public long MeasurementStartTimestamp { get; init; }
+        public long MeasurementEndTimestamp { get; init; }
+        public double ProbePeriodMs { get; init; }
+        public double ProbePhaseOffsetMs { get; init; }
+        public double ObservedInitialPhaseOffsetMs { get; init; }
+        public bool InitialPhaseValid { get; init; }
+        public double LateIntervalEpsilonMs { get; init; }
+        public double ProbeCadenceToleranceMs { get; init; }
+        public double ProbeCadenceAgreementToleranceMs { get; init; }
+        public bool ProbeCadenceAgreementValid { get; init; }
+        public SchedulerControlProbeSummary AboveNormalProbe { get; init; } = new();
+        public SchedulerControlProbeSummary NormalProbe { get; init; } = new();
+        public int ControlConsensusIntervalCount { get; init; }
+        public double ControlConsensusTotalMs { get; init; }
+        public int ControlConsensusOverlapCount { get; init; }
+        public int NoControlConsensusOverlapCount { get; init; }
+        public int InconclusiveCount { get; init; }
+        public double UnexplainedMaxGapMs { get; init; }
+        public List<SchedulerControlConsensusSample> HeartbeatSamples { get; init; } = [];
+    }
 
     private sealed class CatalogInteractionSmokeResult
     {
@@ -25373,9 +26195,18 @@ public partial class App : Application
         public string DispatcherHeartbeatMaxGapSample { get; init; } = "";
         public double DispatcherHeartbeatMaxGapGcPauseMs { get; init; }
         public long DispatcherHeartbeatMaxGapProjectionGeneration { get; init; }
+        public SchedulerHostAttributionSummary SchedulerControlConsensus { get; init; } = new();
+        public CatalogDispatcherDiagnosticSummary DispatcherDiagnostic { get; init; } = new();
         public long CatalogProjectionMaxApplySliceMs { get; init; }
         public string CatalogProjectionMaxApplySliceOperation { get; init; } = "";
         public long CatalogProjectionDiagnosticSliceTargetMs { get; init; }
+        public long CatalogSnapshotResetBudgetMs { get; init; }
+        public long CatalogSnapshotResetMaxWallMs { get; init; }
+        public double CatalogSnapshotResetMaxThreadCpuMs { get; init; } = -1;
+        public bool CatalogSnapshotResetCountExact { get; init; }
+        public bool CatalogSnapshotResetCpuMeasuredExact { get; init; }
+        public double ColdGalleryFocusWarmupMs { get; init; }
+        public long ColdGalleryFocusWarmupBudgetMs { get; init; }
         public long CatalogProjectionSingleContainerDetachBudgetMs { get; init; }
         public long CatalogProjectionMaxSingleContainerDetachMs { get; init; }
         public double CatalogProjectionMaxResetPanelThreadCpuMs { get; init; } = -1;
