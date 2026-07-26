@@ -13418,7 +13418,14 @@ public partial class MainWindow : Window
         }
 
         if (ModalEnhancedToggleLabel is not null)
-            ModalEnhancedToggleLabel.Text = _modalShowingEnhanced ? "UP" : "OR";
+            ModalEnhancedToggleLabel.Text = _modalShowingEnhanced ? "Enhanced" : "Original";
+        if (ModalEnhancedToggleButton is not null)
+        {
+            string currentDisplay = _modalShowingEnhanced ? "Enhanced" : "Original";
+            AutomationProperties.SetName(
+                ModalEnhancedToggleButton,
+                $"Current display: {currentDisplay}. Toggle enhanced image output");
+        }
         if (ModalSourceLabel is not null)
             ModalSourceLabel.Text = _modalShowingEnhanced ? "Enhanced output" : "Original";
     }
@@ -22009,6 +22016,20 @@ public partial class MainWindow : Window
     public string ModalEnhancementMessageForSmoke => ModalEnhancementStatusText.Text;
     public bool ModalEnhancementCancelVisibleForSmoke => ModalEnhanceCancelButton.Visibility == Visibility.Visible;
     public bool ModalEnhancedDeleteVisibleForSmoke => ModalEnhancedDeleteButton.Visibility == Visibility.Visible;
+    public bool ModalEnhancedToolbarClarityContractForSmoke
+        => string.Equals(
+                ModalEnhancedToggleLabel.Text,
+                _modalShowingEnhanced ? "Enhanced" : "Original",
+                StringComparison.Ordinal)
+            && ModalEnhancedToggleButton.Width >= 64
+            && ModalEnhancedDeleteButton.Width <= 36
+            && ModalEnhancedDeleteButton.Content is System.Windows.Shapes.Path
+            && ModalEnhancedDeleteButton.ToolTip?.ToString()?.Contains(
+                "keep the original",
+                StringComparison.OrdinalIgnoreCase) == true
+            && AutomationProperties.GetName(ModalEnhancedToggleButton).Contains(
+                _modalShowingEnhanced ? "Enhanced" : "Original",
+                StringComparison.Ordinal);
 
     public void ConfigureModalEnhancementForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,

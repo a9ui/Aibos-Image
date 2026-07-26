@@ -18857,6 +18857,8 @@ public partial class App : Application
                 bool browserSharedEnhancedReloaded = win.RefreshEnhancedStateIfChangedForSmoke()
                     && win.EnhancedForFileForSmoke(secondName)
                     && win.ModalEnhancedToggleAvailableForSmoke;
+                bool enhancedToolbarClarity =
+                    win.ModalEnhancedToolbarClarityContractForSmoke;
 
                 string lastKnownGoodJobs = File.ReadAllText(jobsPath);
                 File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[");
@@ -19283,7 +19285,8 @@ public partial class App : Application
                     && positionCounter && fullCanvasInteraction && nativeMaximizeWorkArea
                     && overlayDoesNotReduceImageArea
                     && fullScreenContract && fullScreenRestoredWindow && fullScreenButtonRoute
-                    && browserSharedEnhancedReloaded && enhancementLastKnownGood
+                    && browserSharedEnhancedReloaded && enhancedToolbarClarity
+                    && enhancementLastKnownGood
                     && enhancementLargeCatalogRefreshBounded
                     && windowCaptionControls && edgeChrome
                     && edgePercentageSetting && edgeImageIntersection
@@ -19322,6 +19325,7 @@ public partial class App : Application
                     FullScreenRestoredWindow = fullScreenRestoredWindow,
                     FullScreenButtonRoute = fullScreenButtonRoute,
                     BrowserSharedEnhancedReloaded = browserSharedEnhancedReloaded,
+                    EnhancedToolbarClarity = enhancedToolbarClarity,
                     EnhancementLastKnownGood = enhancementLastKnownGood,
                     EnhancementLargeCatalogRefreshBounded = enhancementLargeCatalogRefreshBounded,
                     EnhancementLargeCatalogCanonicalResolveCount = largeCatalogCanonicalResolveCount,
@@ -25073,6 +25077,7 @@ public partial class App : Application
         public bool FullScreenRestoredWindow { get; init; }
         public bool FullScreenButtonRoute { get; init; }
         public bool BrowserSharedEnhancedReloaded { get; init; }
+        public bool EnhancedToolbarClarity { get; init; }
         public bool EnhancementLastKnownGood { get; init; }
         public bool EnhancementLargeCatalogRefreshBounded { get; init; }
         public int EnhancementLargeCatalogCanonicalResolveCount { get; init; }

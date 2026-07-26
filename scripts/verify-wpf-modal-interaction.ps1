@@ -70,6 +70,7 @@ try {
         'fullScreenRestoredWindow',
         'fullScreenButtonRoute',
         'browserSharedEnhancedReloaded',
+        'enhancedToolbarClarity',
         'enhancementLastKnownGood',
         'enhancementLargeCatalogRefreshBounded',
         'windowCaptionControls',
