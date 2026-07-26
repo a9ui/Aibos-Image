@@ -70,6 +70,8 @@ try {
         'fullScreenRestoredWindow',
         'fullScreenButtonRoute',
         'browserSharedEnhancedReloaded',
+        'enhancementLastKnownGood',
+        'enhancementLargeCatalogRefreshBounded',
         'windowCaptionControls',
         'edgeChrome',
         'edgePercentageSetting',

@@ -13,6 +13,10 @@
     <Description>Local-first Aibos Image WPF renderer</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Brand\Generated\Aibos.App.ico</ApplicationIcon>
+    <!-- Published Aibos builds use the registered .NET 10 runtime directly.
+         This prevents an unrelated stale DOTNET_ROOT from repeatedly invoking
+         the runtime installer while keeping the portable package lightweight. -->
+    <AppHostDotNetSearch>Global</AppHostDotNetSearch>
   </PropertyGroup>
 
   <ItemGroup>

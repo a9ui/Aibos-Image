@@ -565,15 +565,21 @@ public partial class MainWindow
         return true;
     }
 
-    private void ReloadEnhancedOutputsForVisibleCatalog()
+    private bool ReloadEnhancedOutputsForVisibleCatalog()
     {
-        LoadEnhancedState();
+        if (!LoadEnhancedState())
+            return false;
+
         foreach (Tile tile in _allTiles)
         {
-            bool enhanced = TryGetEnhancedOutputForPath(tile.Path, out string? outputPath);
+            bool enhanced = TryGetCatalogManagedEnhancedOutputForPath(
+                tile.Path,
+                out ManagedEnhancedOutput output);
+            string? outputPath = enhanced ? output.OutputPath : null;
             tile.EnhancedOutputPath = outputPath;
             tile.Enhanced = enhanced;
         }
+        return true;
     }
 
     public async Task OpenEnhancementJobsForSmokeAsync()

@@ -17384,6 +17384,14 @@ public partial class App : Application
         string searchHistoryPath = Path.Combine(storeRoot, "search-history.json");
         string metadataIndexDirectory = Path.Combine(storeRoot, "metadata-index");
         string jobsPath = Path.Combine(storeRoot, "enhance", "jobs.json");
+        string companionFixtureRoot = Path.Combine(smokeRoot, "companion", "H000025_PhotoViewer");
+        string companionNestedAppBase = Path.Combine(
+            companionFixtureRoot,
+            "local-native",
+            "PhotoViewer.Wpf",
+            "bin",
+            "Portable");
+        string invalidCompanionRoot = Path.Combine(smokeRoot, "companion", "lookalike");
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
@@ -17431,6 +17439,11 @@ public partial class App : Application
             bool staleResponseDiscarded = false;
             bool passiveCompanionStartSuppressed = false;
             bool explicitCompanionAutoStart = false;
+            bool companionConfiguredRootExact = false;
+            bool companionAppBaseAncestor = false;
+            bool companionConfiguredAncestorRejected = false;
+            bool companionIdentityRejected = false;
+            bool nodeExecutableResolved = false;
             bool closeCompleted = false;
             string sourceBefore = "missing";
             string canonicalSourceBefore = "missing";
@@ -17506,6 +17519,54 @@ public partial class App : Application
                 File.WriteAllText(searchHistoryPath, "{\"version\":1,\"entries\":[],\"updatedAtUtc\":\"2026-07-23T00:00:00.000Z\",\"smokeMarker\":\"preserve-search-history\"}");
                 File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[]}");
                 jobsSeed = File.ReadAllText(jobsPath);
+
+                Directory.CreateDirectory(Path.Combine(companionFixtureRoot, "scripts"));
+                Directory.CreateDirectory(companionNestedAppBase);
+                File.WriteAllText(
+                    Path.Combine(companionFixtureRoot, "package.json"),
+                    "{\"name\":\"h000025-photoviewer\",\"private\":true}");
+                File.WriteAllText(
+                    Path.Combine(companionFixtureRoot, "project.toml"),
+                    "[project]\nid = \"H000025\"\nname = \"PhotoViewer\"\n");
+                File.WriteAllText(
+                    Path.Combine(companionFixtureRoot, "scripts", "prod_launcher.js"),
+                    "// companion identity fixture");
+                Directory.CreateDirectory(Path.Combine(invalidCompanionRoot, "scripts"));
+                File.WriteAllText(
+                    Path.Combine(invalidCompanionRoot, "package.json"),
+                    "{\"name\":\"lookalike\",\"private\":true}");
+                File.WriteAllText(
+                    Path.Combine(invalidCompanionRoot, "project.toml"),
+                    "[project]\nid = \"H000025\"\nname = \"PhotoViewer\"\n");
+                File.WriteAllText(
+                    Path.Combine(invalidCompanionRoot, "scripts", "prod_launcher.js"),
+                    "// invalid identity fixture");
+
+                string expectedCompanionRoot = ResolveFinalPathForSmoke(companionFixtureRoot);
+                companionConfiguredRootExact = string.Equals(
+                    PhotoViewer.Wpf.MainWindow.ResolveEnhancementCompanionRootForSmoke(
+                        companionFixtureRoot,
+                        invalidCompanionRoot),
+                    expectedCompanionRoot,
+                    StringComparison.OrdinalIgnoreCase);
+                companionAppBaseAncestor = string.Equals(
+                    PhotoViewer.Wpf.MainWindow.ResolveEnhancementCompanionRootForSmoke(
+                        configuredRoot: null,
+                        companionNestedAppBase),
+                    expectedCompanionRoot,
+                    StringComparison.OrdinalIgnoreCase);
+                companionConfiguredAncestorRejected =
+                    PhotoViewer.Wpf.MainWindow.ResolveEnhancementCompanionRootForSmoke(
+                        companionNestedAppBase,
+                        companionNestedAppBase) is null;
+                companionIdentityRejected =
+                    PhotoViewer.Wpf.MainWindow.ResolveEnhancementCompanionRootForSmoke(
+                        invalidCompanionRoot,
+                        invalidCompanionRoot) is null;
+                string? nodeExecutable = PhotoViewer.Wpf.MainWindow.ResolveNodeExecutablePathForSmoke();
+                nodeExecutableResolved = !string.IsNullOrWhiteSpace(nodeExecutable)
+                    && Path.IsPathFullyQualified(nodeExecutable)
+                    && File.Exists(nodeExecutable);
 
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", favoritesPath);
@@ -17740,7 +17801,10 @@ public partial class App : Application
                     && sourceIdentityCaseInsensitive && alternateLexicalIdentity && pollIdentityCanonical
                     && restartRecovery && lexicalOutputRejected && canonicalOutputRejected
                     && navigatedDuringResponse && staleResponseDiscarded
-                    && passiveCompanionStartSuppressed && explicitCompanionAutoStart;
+                    && passiveCompanionStartSuppressed && explicitCompanionAutoStart
+                    && companionConfiguredRootExact && companionAppBaseAncestor
+                    && companionConfiguredAncestorRejected && companionIdentityRejected
+                    && nodeExecutableResolved;
             }
             catch (Exception ex)
             {
@@ -17854,6 +17918,11 @@ public partial class App : Application
                 staleResponseDiscarded,
                 passiveCompanionStartSuppressed,
                 explicitCompanionAutoStart,
+                companionConfiguredRootExact,
+                companionAppBaseAncestor,
+                companionConfiguredAncestorRejected,
+                companionIdentityRejected,
+                nodeExecutableResolved,
                 closeCompleted,
                 environmentRestored,
                 pathsIsolated,
@@ -18733,6 +18802,7 @@ public partial class App : Application
         win.Dispatcher.InvokeAsync(async () =>
         {
             ModalInteractionSmokeResult result;
+            MainWindow? largeCatalogProbe = null;
             try
             {
                 // This verifier owns the full-motion modal contract. Reduced-
@@ -18787,6 +18857,46 @@ public partial class App : Application
                 bool browserSharedEnhancedReloaded = win.RefreshEnhancedStateIfChangedForSmoke()
                     && win.EnhancedForFileForSmoke(secondName)
                     && win.ModalEnhancedToggleAvailableForSmoke;
+
+                string lastKnownGoodJobs = File.ReadAllText(jobsPath);
+                File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[");
+                File.SetLastWriteTimeUtc(jobsPath, DateTime.UtcNow.AddSeconds(4));
+                bool malformedJobsRejected = !win.RefreshEnhancedStateIfChangedForSmoke();
+                bool lastKnownGoodPreserved = malformedJobsRejected
+                    && win.EnhancedForFileForSmoke(secondName)
+                    && win.ModalEnhancedToggleAvailableForSmoke
+                    && !win.EnhancementReadOkForSmoke;
+                File.WriteAllText(jobsPath, lastKnownGoodJobs);
+                File.SetLastWriteTimeUtc(jobsPath, DateTime.UtcNow.AddSeconds(6));
+                bool validJobsRecovered = win.RefreshEnhancedStateIfChangedForSmoke()
+                    && win.EnhancedForFileForSmoke(secondName)
+                    && win.ModalEnhancedToggleAvailableForSmoke
+                    && win.EnhancementReadOkForSmoke;
+                bool enhancementLastKnownGood = lastKnownGoodPreserved && validJobsRecovered;
+
+                largeCatalogProbe = HiddenWindow();
+                largeCatalogProbe.SuppressStatePersistence();
+                largeCatalogProbe.Show();
+                await largeCatalogProbe.LoadFolderAsync(folder).WaitAsync(TimeSpan.FromSeconds(15));
+                largeCatalogProbe.SeedLargeSelectionCatalogForSmoke(100_000, firstPath);
+                int largeCatalogCanonicalResolveCount = 0;
+                largeCatalogProbe.SetCanonicalPathResolverForSmoke(path =>
+                {
+                    largeCatalogCanonicalResolveCount++;
+                    return Path.GetFullPath(path);
+                });
+                File.SetLastWriteTimeUtc(jobsPath, DateTime.UtcNow.AddSeconds(8));
+                var largeCatalogRefreshWatch = Stopwatch.StartNew();
+                bool largeCatalogRefreshed =
+                    largeCatalogProbe.RefreshEnhancedStateIfChangedForSmoke();
+                largeCatalogRefreshWatch.Stop();
+                long largeCatalogRefreshElapsedMs = largeCatalogRefreshWatch.ElapsedMilliseconds;
+                bool enhancementLargeCatalogRefreshBounded = largeCatalogRefreshed
+                    && largeCatalogProbe.EnhancedTileCountForSmoke == 1
+                    && largeCatalogCanonicalResolveCount <= 64;
+                largeCatalogProbe.Close();
+                largeCatalogProbe = null;
+
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
                     && win.ModalContextMenuContractForSmoke;
@@ -18800,8 +18910,22 @@ public partial class App : Application
                 bool windowCaptionControls = win.ModalWindowCaptionControlsContractForSmoke
                     && win.ActivateModalMinimizeForSmoke()
                     && win.ActivateModalMaximizeForSmoke();
+                Rect desktopWorkArea = SystemParameters.WorkArea;
+                double nativeMaximizeLeft = desktopWorkArea.Left + Math.Min(24, desktopWorkArea.Width / 4);
+                double nativeMaximizeTop = desktopWorkArea.Top + Math.Min(32, desktopWorkArea.Height / 4);
+                double nativeMaximizeWidth = Math.Min(
+                    1120,
+                    Math.Max(1, desktopWorkArea.Right - nativeMaximizeLeft - 24));
+                double nativeMaximizeHeight = Math.Min(
+                    700,
+                    Math.Max(1, desktopWorkArea.Bottom - nativeMaximizeTop - 32));
+                var nativeMaximizeSmokeWorkArea = new Rect(
+                    nativeMaximizeLeft,
+                    nativeMaximizeTop,
+                    nativeMaximizeWidth,
+                    nativeMaximizeHeight);
                 bool nativeMaximizeWorkArea = await win.NormalizeNativeMaximizeForSmokeAsync(
-                    new Rect(24, 32, 1120, 700));
+                    nativeMaximizeSmokeWorkArea);
                 win.UpdateLayout();
                 // Opening and the caption-control smoke both queue actual-bounds
                 // refits at Loaded priority. Settle after both so clamped CI
@@ -19159,7 +19283,8 @@ public partial class App : Application
                     && positionCounter && fullCanvasInteraction && nativeMaximizeWorkArea
                     && overlayDoesNotReduceImageArea
                     && fullScreenContract && fullScreenRestoredWindow && fullScreenButtonRoute
-                    && browserSharedEnhancedReloaded
+                    && browserSharedEnhancedReloaded && enhancementLastKnownGood
+                    && enhancementLargeCatalogRefreshBounded
                     && windowCaptionControls && edgeChrome
                     && edgePercentageSetting && edgeImageIntersection
                     && zoomIndicator && filmstripLayout && contextMenuAction && manualVisiblePersistent
@@ -19197,6 +19322,10 @@ public partial class App : Application
                     FullScreenRestoredWindow = fullScreenRestoredWindow,
                     FullScreenButtonRoute = fullScreenButtonRoute,
                     BrowserSharedEnhancedReloaded = browserSharedEnhancedReloaded,
+                    EnhancementLastKnownGood = enhancementLastKnownGood,
+                    EnhancementLargeCatalogRefreshBounded = enhancementLargeCatalogRefreshBounded,
+                    EnhancementLargeCatalogCanonicalResolveCount = largeCatalogCanonicalResolveCount,
+                    EnhancementLargeCatalogRefreshElapsedMs = largeCatalogRefreshElapsedMs,
                     WindowCaptionControls = windowCaptionControls,
                     EdgeChrome = edgeChrome,
                     EdgePercentageSetting = edgePercentageSetting,
@@ -19275,6 +19404,7 @@ public partial class App : Application
             }
             finally
             {
+                try { largeCatalogProbe?.Close(); } catch { }
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", previousStatePath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", previousSeenPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", previousFavoritesPath);
@@ -24943,6 +25073,10 @@ public partial class App : Application
         public bool FullScreenRestoredWindow { get; init; }
         public bool FullScreenButtonRoute { get; init; }
         public bool BrowserSharedEnhancedReloaded { get; init; }
+        public bool EnhancementLastKnownGood { get; init; }
+        public bool EnhancementLargeCatalogRefreshBounded { get; init; }
+        public int EnhancementLargeCatalogCanonicalResolveCount { get; init; }
+        public long EnhancementLargeCatalogRefreshElapsedMs { get; init; }
         public bool WindowCaptionControls { get; init; }
         public bool EdgeChrome { get; init; }
         public bool EdgePercentageSetting { get; init; }

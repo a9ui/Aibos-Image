@@ -205,6 +205,7 @@ $environment = [ordered]@{
     PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH = $sharedFiles.searchHistory
     PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH = $jobsPath
     PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY = $metadataDirectory
+    AIBOS_H25_COMPANION_ROOT = $h25Source
 }
 $previousEnvironment = @{}
 $server = $null
@@ -280,11 +281,27 @@ try {
         return $process
     }
 
-    $server = Start-H25Companion
+    # No Browser process exists here. The first explicit WPF enhancement must
+    # discover the exact H25 root, start its loopback companion, complete the
+    # job, and then tear down the exact process tree when the WPF window closes.
+    Assert-True (
+        @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue).Count -eq 0
+    ) 'The auto-start port was already in use before the WPF explicit action.'
     $fullExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $fullResultPath -FixtureRoot $fixtureRoot -Phase 'full' -SourceName 'full-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot
     $full = Read-SmokeResult -Path $fullResultPath -ExpectedExitCode $fullExit
     Assert-True ($full.passiveRefresh -eq $true -and $full.loopbackOnly -eq $true -and $full.sourceUnchanged -eq $true) 'Full phase lost passive/loopback/source safety.'
+    $ownedCompanionStopped = $false
+    $ownedCleanupDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $ownedCleanupDeadline) {
+        if (@(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue).Count -eq 0) {
+            $ownedCompanionStopped = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-True $ownedCompanionStopped 'The WPF-owned H25 companion listener remained after the window closed.'
 
+    $server = Start-H25Companion
     $wpfInterruptedOut = Join-Path $runRoot 'wpf-interrupted.stdout.log'
     $wpfInterruptedErr = Join-Path $runRoot 'wpf-interrupted.stderr.log'
     $wpfInterrupted = Start-Process -FilePath 'dotnet.exe' `
@@ -339,7 +356,15 @@ try {
     Assert-True $immutableStoresUnchanged 'A non-Enhancement shared store changed during the exact companion E2E.'
     Assert-True ((Get-FileHash -LiteralPath $fullSourcePath -Algorithm SHA256).Hash -eq $full.sourceSha256Before) 'Full-phase source bytes changed.'
     Assert-True ((Get-FileHash -LiteralPath $interruptedSourcePath -Algorithm SHA256).Hash -eq $recovery.sourceSha256Before) 'Restart-phase source bytes changed.'
+    # A canceled native worker can finish releasing its just-deleted output a
+    # moment after the loopback listener closes. Require eventual emptiness
+    # within a short bound rather than racing that process-tree teardown.
     $managedOutputFiles = @(Get-ChildItem -LiteralPath $outputsRoot -File -Recurse -ErrorAction SilentlyContinue)
+    $outputCleanupDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ($managedOutputFiles.Count -gt 0 -and [DateTime]::UtcNow -lt $outputCleanupDeadline) {
+        Start-Sleep -Milliseconds 100
+        $managedOutputFiles = @(Get-ChildItem -LiteralPath $outputsRoot -File -Recurse -ErrorAction SilentlyContinue)
+    }
     Assert-True ($managedOutputFiles.Count -eq 0) 'Managed outputs remain after explicit WPF output deletion.'
 
     [pscustomobject]@{
@@ -350,6 +375,8 @@ try {
         h25Commit = $resolvedH25Commit
         h25Tree = $h25Tree
         loopbackAddress = '127.0.0.1'
+        explicitActionAutoStart = [bool]$full.started
+        ownedCompanionStopped = $ownedCompanionStopped
         unindexedCreate = [bool]$full.started
         cancel = [bool]$full.canceled
         retry = [bool]$full.retried

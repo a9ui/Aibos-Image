@@ -3629,24 +3629,29 @@ public partial class MainWindow : Window
         }
     }
 
-    private void LoadEnhancedState()
+    private bool LoadEnhancedState()
     {
-        _enhancedOutputs.Clear();
-        _catalogEnhancedOutputsByPath.Clear();
-        _enhancementJobsRead = 0;
-        _enhancedCandidateCount = 0;
-        _enhancementReadOk = true;
-        _enhancementReadError = null;
-
         string path = ResolvedEnhancementJobsPath;
         var jobsInfo = new FileInfo(path);
         if (!jobsInfo.Exists)
         {
+            _enhancedOutputs.Clear();
+            _catalogEnhancedOutputsByPath.Clear();
+            _enhancementJobsRead = 0;
+            _enhancedCandidateCount = 0;
+            _enhancementReadOk = true;
+            _enhancementReadError = null;
             _enhancementJobsLastWriteTimeUtc = default;
             _enhancementJobsLength = -1;
-            return;
+            return true;
         }
 
+        var nextEnhancedOutputs = new Dictionary<string, ManagedEnhancedOutput>(
+            StringComparer.OrdinalIgnoreCase);
+        var nextCatalogOutputsByPath = new Dictionary<string, ManagedEnhancedOutput>(
+            StringComparer.OrdinalIgnoreCase);
+        int nextJobsRead = 0;
+        int nextCandidateCount = 0;
         try
         {
             using var document = JsonDocument.Parse(File.ReadAllText(path));
@@ -3654,16 +3659,14 @@ public partial class MainWindow : Window
                 !document.RootElement.TryGetProperty("jobs", out var jobsElement) ||
                 jobsElement.ValueKind != JsonValueKind.Array)
             {
-                _enhancementReadOk = false;
-                _enhancementReadError = "jobs array missing";
-                return;
+                throw new InvalidDataException("jobs array missing");
             }
 
             foreach (var job in jobsElement.EnumerateArray())
             {
                 if (job.ValueKind != JsonValueKind.Object)
                     continue;
-                _enhancementJobsRead++;
+                nextJobsRead++;
                 if (!TryGetStringProperty(job, "status", out string? status) ||
                     !string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
                     continue;
@@ -3672,27 +3675,35 @@ public partial class MainWindow : Window
                         out string resolvedSource,
                         out ManagedEnhancedOutput output,
                         out IReadOnlyList<string> catalogAliases)
-                    && !_enhancedOutputs.ContainsKey(resolvedSource))
+                    && !nextEnhancedOutputs.ContainsKey(resolvedSource))
                 {
-                    _enhancedOutputs[resolvedSource] = output;
+                    nextEnhancedOutputs[resolvedSource] = output;
                     foreach (string alias in catalogAliases)
-                        _catalogEnhancedOutputsByPath.TryAdd(alias, output);
-                    _enhancedCandidateCount++;
+                        nextCatalogOutputsByPath.TryAdd(alias, output);
+                    nextCandidateCount++;
                 }
             }
-        }
-        catch (Exception ex)
-        {
+
             _enhancedOutputs.Clear();
+            foreach ((string source, ManagedEnhancedOutput output) in nextEnhancedOutputs)
+                _enhancedOutputs[source] = output;
             _catalogEnhancedOutputsByPath.Clear();
-            _enhancementReadOk = false;
-            _enhancementReadError = ex.Message;
-        }
-        finally
-        {
+            foreach ((string alias, ManagedEnhancedOutput output) in nextCatalogOutputsByPath)
+                _catalogEnhancedOutputsByPath[alias] = output;
+            _enhancementJobsRead = nextJobsRead;
+            _enhancedCandidateCount = nextCandidateCount;
+            _enhancementReadOk = true;
+            _enhancementReadError = null;
             jobsInfo.Refresh();
             _enhancementJobsLastWriteTimeUtc = jobsInfo.Exists ? jobsInfo.LastWriteTimeUtc : default;
             _enhancementJobsLength = jobsInfo.Exists ? jobsInfo.Length : -1;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _enhancementReadOk = false;
+            _enhancementReadError = ex.Message;
+            return false;
         }
     }
 
@@ -3710,8 +3721,7 @@ public partial class MainWindow : Window
 
             // Passive disk hydration only. This never contacts the Browser API,
             // starts Node, enqueues a job, or writes shared state.
-            ReloadEnhancedOutputsForVisibleCatalog();
-            return true;
+            return ReloadEnhancedOutputsForVisibleCatalog();
         }
         catch
         {
@@ -3870,9 +3880,30 @@ public partial class MainWindow : Window
     private bool TryGetManagedEnhancedOutputForPath(string path, out ManagedEnhancedOutput output)
     {
         output = null!;
-        if (_enhancedOutputs.Count == 0
-            || !TryResolveEnhancementSourceIdentity(path, out string identity)
+        if (_enhancedOutputs.Count == 0)
+            return false;
+
+        if (TryGetCatalogManagedEnhancedOutputForPath(path, out output))
+            return true;
+
+        if (!TryResolveEnhancementSourceIdentity(path, out string identity)
             || !_enhancedOutputs.TryGetValue(identity, out ManagedEnhancedOutput? stored))
+        {
+            return false;
+        }
+
+        output = stored;
+        return true;
+    }
+
+    private bool TryGetCatalogManagedEnhancedOutputForPath(
+        string path,
+        out ManagedEnhancedOutput output)
+    {
+        output = null!;
+        string? alias = NormalizeCatalogEnhancementPath(path);
+        if (alias is null
+            || !_catalogEnhancedOutputsByPath.TryGetValue(alias, out ManagedEnhancedOutput? stored))
         {
             return false;
         }
@@ -19860,10 +19891,12 @@ public partial class MainWindow : Window
                 return false;
 
             string sourceIdentity = Path.GetFullPath(tile.Path);
-            _enhancedOutputs[sourceIdentity] = new ManagedEnhancedOutput(
+            var output = new ManagedEnhancedOutput(
                 sourceIdentity,
                 0,
                 0);
+            _enhancedOutputs[sourceIdentity] = output;
+            _catalogEnhancedOutputsByPath[sourceIdentity] = output;
             return true;
         }
         catch
@@ -19881,6 +19914,7 @@ public partial class MainWindow : Window
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Unseen == true;
     public bool EnhancedForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Enhanced == true;
+    public int EnhancedTileCountForSmoke => _allTiles.Count(static tile => tile.Enhanced);
     public int EnhancementJobsReadForSmoke => _enhancementJobsRead;
     public int EnhancedCandidateCountForSmoke => _enhancedCandidateCount;
     public bool EnhancementReadOkForSmoke => _enhancementReadOk;

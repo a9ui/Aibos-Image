@@ -133,9 +133,15 @@ public partial class MainWindow
                 error = "Automatic local AI startup requires an http://127.0.0.1 loopback endpoint.";
                 return false;
             }
+            string? nodeExecutable = ResolveNodeExecutablePath();
+            if (nodeExecutable is null)
+            {
+                error = "Aibos could not find an installed Node.js executable for the local AI companion.";
+                return false;
+            }
             var startInfo = new ProcessStartInfo
             {
-                FileName = "node.exe",
+                FileName = nodeExecutable,
                 WorkingDirectory = root,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -191,34 +197,137 @@ public partial class MainWindow
     }
 
     private static string? ResolveEnhancementCompanionRoot()
-    {
-        var starts = new List<string>();
-        string? configured = Environment.GetEnvironmentVariable("AIBOS_H25_COMPANION_ROOT");
-        if (!string.IsNullOrWhiteSpace(configured))
-            starts.Add(configured);
-        starts.Add(AppContext.BaseDirectory);
-        starts.Add(Environment.CurrentDirectory);
+        => ResolveEnhancementCompanionRoot(
+            Environment.GetEnvironmentVariable("AIBOS_H25_COMPANION_ROOT"),
+            AppContext.BaseDirectory);
 
-        foreach (string start in starts)
+    private static string? ResolveEnhancementCompanionRoot(
+        string? configuredRoot,
+        string appBaseDirectory)
+    {
+        // An explicitly configured root is authoritative and must itself be
+        // the H25 project root. Never walk its parents or silently fall back.
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+            return TryValidateEnhancementCompanionRoot(configuredRoot, out string configured)
+                ? configured
+                : null;
+
+        string? current;
+        try
         {
-            string? current;
+            current = Path.GetFullPath(appBaseDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+
+        // Portable builds can live below the H25 root. AppContext.BaseDirectory
+        // is controlled by the launched app, unlike Environment.CurrentDirectory.
+        for (int depth = 0; depth < 12 && current is not null; depth++)
+        {
+            if (TryValidateEnhancementCompanionRoot(current, out string validated))
+                return validated;
+            current = Directory.GetParent(current)?.FullName;
+        }
+        return null;
+    }
+
+    private static bool TryValidateEnhancementCompanionRoot(
+        string candidateRoot,
+        out string validatedRoot)
+    {
+        validatedRoot = "";
+        try
+        {
+            string lexicalRoot = Path.GetFullPath(candidateRoot);
+            if (!Directory.Exists(lexicalRoot))
+                return false;
+
+            string canonicalRoot = ResolveFinalPathCore(lexicalRoot);
+            if (!Directory.Exists(canonicalRoot))
+                return false;
+
+            string packagePath = Path.Combine(canonicalRoot, "package.json");
+            string projectPath = Path.Combine(canonicalRoot, "project.toml");
+            string launcherPath = Path.Combine(canonicalRoot, "scripts", "prod_launcher.js");
+            foreach (string requiredPath in new[] { packagePath, projectPath, launcherPath })
+            {
+                if (!File.Exists(requiredPath))
+                    return false;
+                string canonicalRequiredPath = ResolveFinalPathCore(requiredPath);
+                if (!IsPathInside(canonicalRequiredPath, canonicalRoot))
+                    return false;
+            }
+
+            using JsonDocument package = JsonDocument.Parse(File.ReadAllText(packagePath));
+            JsonElement packageRoot = package.RootElement;
+            bool packageIdentity = packageRoot.ValueKind == JsonValueKind.Object
+                && packageRoot.TryGetProperty("name", out JsonElement name)
+                && name.ValueKind == JsonValueKind.String
+                && string.Equals(
+                    name.GetString(),
+                    "h000025-photoviewer",
+                    StringComparison.Ordinal)
+                && packageRoot.TryGetProperty("private", out JsonElement privateValue)
+                && privateValue.ValueKind is JsonValueKind.True;
+            if (!packageIdentity)
+                return false;
+
+            string[] projectLines = File.ReadAllLines(projectPath);
+            bool projectId = projectLines.Any(static line =>
+                string.Equals(line.Trim(), "id = \"H000025\"", StringComparison.Ordinal));
+            bool projectName = projectLines.Any(static line =>
+                string.Equals(line.Trim(), "name = \"PhotoViewer\"", StringComparison.Ordinal));
+            if (!projectId || !projectName)
+                return false;
+
+            validatedRoot = canonicalRoot;
+            return true;
+        }
+        catch (Exception ex) when (ex is
+            ArgumentException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            IOException or
+            JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string? ResolveNodeExecutablePath()
+    {
+        var candidates = new List<string>();
+        string? programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        if (!string.IsNullOrWhiteSpace(programFiles))
+            candidates.Add(Path.Combine(programFiles, "nodejs", "node.exe"));
+        string? programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        if (!string.IsNullOrWhiteSpace(programFilesX86))
+            candidates.Add(Path.Combine(programFilesX86, "nodejs", "node.exe"));
+
+        foreach (string entry in (Environment.GetEnvironmentVariable("PATH") ?? "")
+                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string expanded = Environment.ExpandEnvironmentVariables(entry);
+            if (Path.IsPathFullyQualified(expanded))
+                candidates.Add(Path.Combine(expanded, "node.exe"));
+        }
+
+        foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
             try
             {
-                current = Path.GetFullPath(start);
+                string fullPath = Path.GetFullPath(candidate);
+                if (File.Exists(fullPath))
+                    return ResolveFinalPathCore(fullPath);
             }
-            catch
+            catch (Exception ex) when (ex is
+                ArgumentException or
+                NotSupportedException or
+                UnauthorizedAccessException or
+                IOException)
             {
-                continue;
-            }
-
-            for (int depth = 0; depth < 12 && current is not null; depth++)
-            {
-                if (File.Exists(Path.Combine(current, "package.json"))
-                    && File.Exists(Path.Combine(current, "scripts", "prod_launcher.js")))
-                {
-                    return current;
-                }
-                current = Directory.GetParent(current)?.FullName;
             }
         }
         return null;
@@ -261,6 +370,11 @@ public partial class MainWindow
     public int EnhancementCompanionLaunchAttemptCountForSmoke => _enhancementCompanionLaunchAttemptCount;
     public string? EnhancementCompanionLaunchErrorForSmoke => _enhancementCompanionLaunchError;
     public static string? ResolveEnhancementCompanionRootForSmoke() => ResolveEnhancementCompanionRoot();
+    public static string? ResolveEnhancementCompanionRootForSmoke(
+        string? configuredRoot,
+        string appBaseDirectory)
+        => ResolveEnhancementCompanionRoot(configuredRoot, appBaseDirectory);
+    public static string? ResolveNodeExecutablePathForSmoke() => ResolveNodeExecutablePath();
     public void ConfigureEnhancementCompanionAutoStartForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
         Func<Uri, (bool Started, string Error)> starter)
