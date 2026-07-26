@@ -10321,10 +10321,21 @@ public partial class App : Application
                     window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
                 Task<MainWindow.SearchFilterCompletion> duplicateSecondProjection =
                     window.PendingCatalogProjectionForSmoke();
+                long duplicateLatestGeneration =
+                    window.FavoriteMutationGenerationForSmoke;
                 MainWindow.SearchFilterCompletion duplicateFirstResult =
                     await duplicateFirstProjection;
-                bool duplicateStillDeferredAfterFirst =
+                bool duplicateNotificationPendingAfterFirst =
                     window.FavoriteNotificationsPendingForFileForSmoke(selectedName);
+                bool duplicateLatestProjectionCompletedAtFirstObservation =
+                    duplicateSecondProjection.IsCompleted;
+                long duplicateLastFlushGenerationAtFirstObservation =
+                    window.LastDeferredFavoriteNotificationFlushGenerationForSmoke;
+                bool duplicateFirstReleaseOwnershipExact =
+                    duplicateNotificationPendingAfterFirst
+                    || (duplicateLatestProjectionCompletedAtFirstObservation
+                        && duplicateLastFlushGenerationAtFirstObservation
+                            == duplicateLatestGeneration);
                 MainWindow.SearchFilterCompletion duplicateSecondResult =
                     await duplicateSecondProjection;
                 await window.Dispatcher.InvokeAsync(
@@ -10335,10 +10346,12 @@ public partial class App : Application
                     && duplicateSecondDecrease
                     && duplicateFirstResult.Discarded
                     && !duplicateFirstResult.Applied
-                    && duplicateStillDeferredAfterFirst
+                    && duplicateFirstReleaseOwnershipExact
                     && duplicateSecondResult.Applied
                     && !duplicateSecondResult.Discarded
                     && !window.FavoriteNotificationsPendingForFileForSmoke(selectedName)
+                    && window.LastDeferredFavoriteNotificationFlushGenerationForSmoke
+                        == duplicateLatestGeneration
                     && window.FavoriteLevelForFileForSmoke(selectedName) == 0
                     && window.FilteredCountForSmoke == (count / 10) - 1;
                 MainWindow.SearchFilterCompletion duplicateFavoriteClear =
@@ -11641,6 +11654,16 @@ public partial class App : Application
                     FavoriteSortRaceExact = favoriteSortRaceExact,
                     FavoriteDuplicateEvictionRaceExact =
                         favoriteDuplicateEvictionRaceExact,
+                    FavoriteDuplicateNotificationPendingAfterFirst =
+                        duplicateNotificationPendingAfterFirst,
+                    FavoriteDuplicateLatestProjectionCompletedAtFirstObservation =
+                        duplicateLatestProjectionCompletedAtFirstObservation,
+                    FavoriteDuplicateLatestGeneration =
+                        duplicateLatestGeneration,
+                    FavoriteDuplicateLastFlushGenerationAtFirstObservation =
+                        duplicateLastFlushGenerationAtFirstObservation,
+                    FavoriteDuplicateLastFlushGeneration =
+                        window.LastDeferredFavoriteNotificationFlushGenerationForSmoke,
                     FavoriteFilteredFailureStatusExact =
                         favoriteFilteredFailureStatusExact,
                     FavoriteFilteredFailureStatus =
@@ -26762,6 +26785,11 @@ public partial class App : Application
         public bool FavoriteRapidReincludeRaceExact { get; init; }
         public bool FavoriteSortRaceExact { get; init; }
         public bool FavoriteDuplicateEvictionRaceExact { get; init; }
+        public bool FavoriteDuplicateNotificationPendingAfterFirst { get; init; }
+        public bool FavoriteDuplicateLatestProjectionCompletedAtFirstObservation { get; init; }
+        public long FavoriteDuplicateLatestGeneration { get; init; }
+        public long FavoriteDuplicateLastFlushGenerationAtFirstObservation { get; init; }
+        public long FavoriteDuplicateLastFlushGeneration { get; init; }
         public bool FavoriteFilteredFailureStatusExact { get; init; }
         public string FavoriteFilteredFailureStatus { get; init; } = "";
         public bool FavoriteFilteredRollbackProjectionExact { get; init; }

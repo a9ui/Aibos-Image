@@ -274,6 +274,7 @@ public partial class MainWindow : Window
     private long _seenMutationGeneration;
     private readonly Dictionary<Tile, long> _deferredFavoriteNotificationOwners =
         new(ReferenceEqualityComparer.Instance);
+    private long _lastDeferredFavoriteNotificationFlushGenerationForSmoke;
     private bool _favoriteWriterAdopted;
     private bool _seenWriterAdopted;
     private DispatcherTimer? _favoriteWriterPumpTimer;
@@ -4778,7 +4779,11 @@ public partial class MainWindow : Window
                         {
                             return;
                         }
-                        tile.FlushFavoriteNotifications();
+                        if (tile.FlushFavoriteNotifications())
+                        {
+                            _lastDeferredFavoriteNotificationFlushGenerationForSmoke =
+                                mutationGeneration;
+                        }
                         _deferredFavoriteNotificationOwners.Remove(tile);
                         SyncSelectionActionSurface();
                         RefreshModalFavoriteSurface();
@@ -19913,6 +19918,9 @@ public partial class MainWindow : Window
     }
     public int FavoriteLevelForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Fav ?? -1;
+    public long FavoriteMutationGenerationForSmoke => _favoriteMutationGeneration;
+    public long LastDeferredFavoriteNotificationFlushGenerationForSmoke
+        => _lastDeferredFavoriteNotificationFlushGenerationForSmoke;
     public bool FavoriteNotificationsPendingForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile =>
             string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))
@@ -23835,12 +23843,13 @@ public sealed class Tile : INotifyPropertyChanged
         RaiseFavoriteNotifications();
     }
 
-    internal void FlushFavoriteNotifications()
+    internal bool FlushFavoriteNotifications()
     {
         if (!_favoriteNotificationsPending)
-            return;
+            return false;
         _favoriteNotificationsPending = false;
         RaiseFavoriteNotifications();
+        return true;
     }
 
     private void RaiseFavoriteNotifications()
