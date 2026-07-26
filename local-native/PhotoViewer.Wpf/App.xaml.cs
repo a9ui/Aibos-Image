@@ -9990,6 +9990,9 @@ public partial class App : Application
                     TimeSpan gcPauseAfterTimestamp = GC.GetTotalPauseDuration();
                     long now = heartbeatWatch.ElapsedMilliseconds;
                     long gap = now - lastHeartbeatMs;
+                    double preciseGapMs =
+                        (nowTimestamp - lastHeartbeatTimestamp)
+                            * 1000d / Stopwatch.Frequency;
                     double uiThreadCpuMs =
                         lastHeartbeatUiThreadCpuTicks >= 0
                             && marker.UiThreadCpuTicks >= lastHeartbeatUiThreadCpuTicks
@@ -10037,8 +10040,16 @@ public partial class App : Application
                             + $":ui-cpu={uiThreadCpuMs:F3}ms"
                             + $":generation={projectionGeneration}";
                     }
-                    if (gap > CatalogInteractionDispatcherHeartbeatBudgetMs)
-                        heartbeatGapSamples.Add($"{activeOperation}@{now}ms:{gap}ms");
+                    // Keep the raw over-budget receipt on the same
+                    // high-resolution timestamps used by the dispatcher
+                    // attribution recorder. ElapsedMilliseconds truncation can
+                    // otherwise report 50 ms for a 50.x ms interval and make
+                    // the two diagnostics disagree at the exact boundary.
+                    if (preciseGapMs > CatalogInteractionDispatcherHeartbeatBudgetMs)
+                    {
+                        heartbeatGapSamples.Add(
+                            $"{activeOperation}@{now}ms:{preciseGapMs:F3}ms");
+                    }
                     lastHeartbeatMs = now;
                     lastHeartbeatTimestamp = nowTimestamp;
                     lastHeartbeatUiThreadCpuTicks = marker.UiThreadCpuTicks;
