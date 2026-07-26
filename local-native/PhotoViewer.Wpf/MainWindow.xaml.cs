@@ -22080,11 +22080,11 @@ public partial class MainWindow : Window
         return true;
     }
 
-    public async Task<bool> StartModalEnhancementForSmokeAsync()
+    public async Task<bool> StartModalEnhancementForSmokeAsync(int timeoutMilliseconds = 3000)
     {
         StartModalEnhancement_Click(this, new RoutedEventArgs());
-        await WaitForModalEnhancementRequestForSmokeAsync();
-        return _modalEnhancementJobStatus is "queued" or "running";
+        bool completed = await WaitForModalEnhancementRequestForSmokeAsync(timeoutMilliseconds);
+        return completed && _modalEnhancementJobStatus is "queued" or "running";
     }
 
     public async Task<bool> StartModalEnhancementWithShortcutForSmokeAsync()
@@ -22097,8 +22097,8 @@ public partial class MainWindow : Window
     public void BeginModalEnhancementForSmoke()
         => StartModalEnhancement_Click(this, new RoutedEventArgs());
 
-    public Task WaitForModalEnhancementRequestCompletionForSmokeAsync()
-        => WaitForModalEnhancementRequestForSmokeAsync();
+    public async Task WaitForModalEnhancementRequestCompletionForSmokeAsync(int timeoutMilliseconds = 3000)
+        => _ = await WaitForModalEnhancementRequestForSmokeAsync(timeoutMilliseconds);
 
     public async Task<bool> CancelModalEnhancementForSmokeAsync()
     {
@@ -22116,10 +22116,12 @@ public partial class MainWindow : Window
         return SelectedTile() is Tile tile && !tile.Enhanced && !_modalShowingEnhanced;
     }
 
-    private async Task WaitForModalEnhancementRequestForSmokeAsync()
+    private async Task<bool> WaitForModalEnhancementRequestForSmokeAsync(int timeoutMilliseconds = 3000)
     {
-        for (int attempt = 0; attempt < 300 && _modalEnhancementRequestPending; attempt++)
+        int attempts = Math.Max(1, (Math.Max(0, timeoutMilliseconds) + 9) / 10);
+        for (int attempt = 0; attempt < attempts && _modalEnhancementRequestPending; attempt++)
             await Task.Delay(10);
+        return !_modalEnhancementRequestPending;
     }
 
     public DisplayStyleMetrics DisplayStyleMetricsForSmoke()

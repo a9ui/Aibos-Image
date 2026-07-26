@@ -18219,13 +18219,13 @@ public partial class App : Application
 
                 if (phase == "full")
                 {
-                    started = await win.StartModalEnhancementForSmokeAsync();
+                    started = await win.StartModalEnhancementForSmokeAsync(45_000);
                     jobId = win.ModalEnhancementJobIdForSmoke;
                     RecordCheckpoint("full-start-complete");
                     canceled = await win.CancelModalEnhancementForSmokeAsync()
                         || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30));
                     RecordCheckpoint("full-cancel-complete");
-                    retried = canceled && await win.StartModalEnhancementForSmokeAsync();
+                    retried = canceled && await win.StartModalEnhancementForSmokeAsync(45_000);
                     RecordCheckpoint("full-retry-complete");
                     succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(60));
                     RecordCheckpoint("full-success-wait-complete");
@@ -18236,7 +18236,7 @@ public partial class App : Application
                 }
                 else if (phase == "start-interrupted")
                 {
-                    started = await win.StartModalEnhancementForSmokeAsync();
+                    started = await win.StartModalEnhancementForSmokeAsync(45_000);
                     jobId = win.ModalEnhancementJobIdForSmoke;
                     status = win.ModalEnhancementStatusForSmoke;
                     bool readyForInterruption = started
@@ -18262,7 +18262,7 @@ public partial class App : Application
                     canceled = restartJobObserved && (await win.CancelModalEnhancementForSmokeAsync()
                         || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30)));
                     RecordCheckpoint("recovery-cancel-complete");
-                    retried = canceled && await win.StartModalEnhancementForSmokeAsync();
+                    retried = canceled && await win.StartModalEnhancementForSmokeAsync(45_000);
                     RecordCheckpoint("recovery-retry-complete");
                     succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(60));
                     RecordCheckpoint("recovery-success-wait-complete");
@@ -18289,7 +18289,7 @@ public partial class App : Application
                     try
                     {
                         RecordCheckpoint("window-close-start");
-                        await win.WaitForModalEnhancementRequestCompletionForSmokeAsync();
+                        await win.WaitForModalEnhancementRequestCompletionForSmokeAsync(45_000);
                         RecordCheckpoint("window-request-drain-complete");
                         if (win.IsLoaded)
                             await win.CloseAndWaitForSmokeAsync();
