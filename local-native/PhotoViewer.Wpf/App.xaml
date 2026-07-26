@@ -583,7 +583,28 @@
               </Border>
               <Popup x:Name="PART_Popup" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                 <Border Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" CornerRadius="8" Padding="4" SnapsToDevicePixels="True">
-                  <Calendar x:Name="PART_Calendar" Background="{StaticResource BgElevated}" Foreground="{StaticResource TextPrimary}" BorderBrush="{StaticResource GlassBorder}"/>
+                  <Calendar x:Name="PART_Calendar"
+                            Background="{StaticResource BgElevated}"
+                            Foreground="{StaticResource TextPrimary}"
+                            BorderBrush="{StaticResource GlassBorder}"
+                            TextElement.Foreground="{StaticResource TextPrimary}"
+                            CalendarDayButtonStyle="{DynamicResource DarkCalendarDayButtonStyle}"
+                            CalendarButtonStyle="{DynamicResource DarkCalendarButtonStyle}"
+                            CalendarItemStyle="{DynamicResource DarkCalendarItemStyle}">
+                    <Calendar.Resources>
+                      <!-- The stock CalendarItem template uses system brushes for its
+                           header and weekday labels. Keep every calendar label legible
+                           without changing the Windows theme outside this popup. -->
+                      <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#111521"/>
+                      <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#111521"/>
+                      <SolidColorBrush x:Key="{x:Static SystemColors.ControlLightBrushKey}" Color="#1B2030"/>
+                      <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#F4F6FF"/>
+                      <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#F4F6FF"/>
+                      <SolidColorBrush x:Key="{x:Static SystemColors.GrayTextBrushKey}" Color="#8F97AC"/>
+                      <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#625BDA"/>
+                      <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#FFFFFF"/>
+                    </Calendar.Resources>
+                  </Calendar>
                 </Border>
               </Popup>
             </Grid>
@@ -619,7 +640,7 @@
             </Setter.Value>
           </Setter>
         </Style>
-        <Style TargetType="CalendarDayButton">
+        <Style x:Key="DarkCalendarDayButtonStyle" TargetType="CalendarDayButton">
           <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
           <Setter Property="Background" Value="Transparent"/>
           <Setter Property="BorderBrush" Value="Transparent"/>
@@ -627,7 +648,8 @@
             <Setter.Value>
               <ControlTemplate TargetType="CalendarDayButton">
                 <Border x:Name="Day" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4" Margin="1">
-                  <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    TextElement.Foreground="{TemplateBinding Foreground}"/>
                 </Border>
                 <ControlTemplate.Triggers>
                   <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions><Setter TargetName="Day" Property="Background" Value="{StaticResource HoverFill}"/></MultiTrigger>
@@ -640,7 +662,7 @@
             </Setter.Value>
           </Setter>
         </Style>
-        <Style TargetType="CalendarButton">
+        <Style x:Key="DarkCalendarButtonStyle" TargetType="CalendarButton">
           <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
           <Setter Property="Background" Value="Transparent"/>
           <Setter Property="BorderBrush" Value="Transparent"/>
@@ -648,7 +670,8 @@
             <Setter.Value>
               <ControlTemplate TargetType="CalendarButton">
                 <Border x:Name="CalendarButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4" Margin="1">
-                  <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    TextElement.Foreground="{TemplateBinding Foreground}"/>
                 </Border>
                 <ControlTemplate.Triggers>
                   <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions><Setter TargetName="CalendarButtonBorder" Property="Background" Value="{StaticResource HoverFill}"/></MultiTrigger>
@@ -657,6 +680,12 @@
               </ControlTemplate>
             </Setter.Value>
           </Setter>
+        </Style>
+        <Style x:Key="DarkCalendarItemStyle" TargetType="CalendarItem">
+          <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+          <Setter Property="TextElement.Foreground" Value="{StaticResource TextPrimary}"/>
+          <Setter Property="Background" Value="{StaticResource BgElevated}"/>
+          <Setter Property="BorderBrush" Value="{StaticResource GlassBorder}"/>
         </Style>
       </Style.Resources>
     </Style>
@@ -1020,11 +1049,12 @@
 
     <Style TargetType="ScrollBar">
       <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="Width" Value="10"/>
+      <Setter Property="Width" Value="14"/>
+      <Setter Property="MinWidth" Value="14"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ScrollBar">
-            <Grid Background="Transparent">
+            <Grid Background="Transparent" Margin="1,2">
               <Track x:Name="PART_Track" IsDirectionReversed="True">
                 <Track.Thumb><Thumb Style="{StaticResource ScrollThumb}" MinHeight="28"/></Track.Thumb>
                 <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource ScrollHidden}" Command="ScrollBar.PageDownCommand"/></Track.IncreaseRepeatButton>
@@ -1037,11 +1067,13 @@
       <Style.Triggers>
         <Trigger Property="Orientation" Value="Horizontal">
           <Setter Property="Width" Value="Auto"/>
-          <Setter Property="Height" Value="10"/>
+          <Setter Property="MinWidth" Value="0"/>
+          <Setter Property="Height" Value="14"/>
+          <Setter Property="MinHeight" Value="14"/>
           <Setter Property="Template">
             <Setter.Value>
               <ControlTemplate TargetType="ScrollBar">
-                <Grid Background="Transparent">
+                <Grid Background="Transparent" Margin="2,1">
                   <Track x:Name="PART_Track">
                     <Track.Thumb><Thumb Style="{StaticResource ScrollThumb}" MinWidth="28"/></Track.Thumb>
                     <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource ScrollHidden}" Command="ScrollBar.PageRightCommand"/></Track.IncreaseRepeatButton>

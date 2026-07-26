@@ -124,7 +124,8 @@ public partial class MainWindow
                 out HashSet<string> knownJobIds))
         {
             _batchEnhancementPreflightJobIds.UnionWith(knownJobIds);
-            foreach (BatchEnhancementItemView item in _batchEnhancementItems.Where(static item => item.IsEligible))
+            foreach (BatchEnhancementItemView item in _batchEnhancementItems.Where(
+                         static item => item.State == BatchEnhancementItemState.Ready))
             {
                 if (activeSources.Contains(item.SourceIdentity))
                     item.MarkSkipped("Already queued or running.");
@@ -258,7 +259,9 @@ public partial class MainWindow
 
     private async void StartBatchEnhancement_Click(object sender, RoutedEventArgs e)
     {
-        if (_batchEnhancementRequestPending || _batchEnhancementChecking || !_batchEnhancementCompanionReady)
+        if (_batchEnhancementRequestPending || _batchEnhancementChecking)
+            return;
+        if (!await EnsureBatchEnhancementCompanionForExplicitStartAsync())
             return;
 
         BatchEnhancementItemView[] ready = _batchEnhancementItems
@@ -269,7 +272,9 @@ public partial class MainWindow
 
     private async void RetryFailedBatchEnhancement_Click(object sender, RoutedEventArgs e)
     {
-        if (_batchEnhancementRequestPending || _batchEnhancementChecking || !_batchEnhancementCompanionReady)
+        if (_batchEnhancementRequestPending || _batchEnhancementChecking)
+            return;
+        if (!await EnsureBatchEnhancementCompanionForExplicitStartAsync())
             return;
 
         BatchEnhancementItemView[] failed = _batchEnhancementItems
@@ -278,6 +283,48 @@ public partial class MainWindow
         foreach (BatchEnhancementItemView item in failed)
             item.ResetForRetry();
         await RunBatchEnhancementAsync(failed, retry: true);
+    }
+
+    private async Task<bool> EnsureBatchEnhancementCompanionForExplicitStartAsync()
+    {
+        long generation = _batchEnhancementGeneration;
+        _batchEnhancementChecking = true;
+        BatchEnhancementCompanionStatusText.Text = "Starting the local AI companion...";
+        RefreshBatchEnhancementSurface();
+        EnhancementApiResponse response = await EnsureEnhancementCompanionReadyForExplicitActionAsync();
+        if (generation != _batchEnhancementGeneration
+            || BatchEnhancementDialog.Visibility != Visibility.Visible)
+        {
+            return false;
+        }
+
+        var activeSources = new HashSet<string>(EnhancementSourceIdentityComparer);
+        var knownJobIds = new HashSet<string>(StringComparer.Ordinal);
+        _batchEnhancementCompanionReady = response.Ok
+            && response.Payload is JsonElement payload
+            && TryReadEnhancementJobInventory(payload, out activeSources, out knownJobIds);
+        if (_batchEnhancementCompanionReady)
+        {
+            _batchEnhancementPreflightJobIds.UnionWith(knownJobIds);
+            foreach (BatchEnhancementItemView item in _batchEnhancementItems.Where(
+                         static item => item.State == BatchEnhancementItemState.Ready))
+            {
+                if (activeSources.Contains(item.SourceIdentity))
+                    item.MarkSkipped("Already queued or running.");
+            }
+            BatchEnhancementCompanionStatusText.Text = "Local AI is ready.";
+        }
+        else
+        {
+            BatchEnhancementCompanionStatusText.Text = response.Ok
+                ? "The local companion returned an invalid jobs response."
+                : response.Error;
+        }
+
+        _batchEnhancementChecking = false;
+        BatchEnhancementItemsList.ItemsSource = _batchEnhancementItems.ToArray();
+        RefreshBatchEnhancementSurface();
+        return _batchEnhancementCompanionReady;
     }
 
     private async Task RunBatchEnhancementAsync(
@@ -590,7 +637,6 @@ public partial class MainWindow
                 : Visibility.Collapsed;
         BatchEnhancementStartButton.Content = $"Enhance {eligible:N0} selected";
         BatchEnhancementStartButton.IsEnabled = !_batchEnhancementChecking
-            && _batchEnhancementCompanionReady
             && !_batchEnhancementRequestPending
             && !_batchEnhancementCompleted
             && eligible > 0;
@@ -603,7 +649,7 @@ public partial class MainWindow
             && failed > 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-        BatchEnhancementRetryFailedButton.IsEnabled = _batchEnhancementCompanionReady;
+        BatchEnhancementRetryFailedButton.IsEnabled = !_batchEnhancementChecking;
         BatchEnhancementViewJobsButton.Visibility = !_batchEnhancementRequestPending
             && (_batchEnhancementCreatedJobIds.Count > 0 || outcomeUnknown > 0)
                 ? Visibility.Visible
@@ -616,7 +662,7 @@ public partial class MainWindow
         BatchEnhancementAllowLargeCheckBox.IsEnabled = !_batchEnhancementRequestPending;
         AutomationProperties.SetHelpText(
             BatchEnhancementStartButton,
-            $"Create at most {BatchEnhancementMaxConcurrentRequests} enqueue requests at once. Opening or closing this review creates no jobs.");
+            $"Starts the local AI companion when needed, then creates at most {BatchEnhancementMaxConcurrentRequests} enqueue requests at once. Opening or closing this review creates no jobs and starts no background process.");
     }
 
     public async Task OpenBatchEnhancementForSmokeAsync()

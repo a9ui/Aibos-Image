@@ -52,6 +52,8 @@
   <sys:String x:Key="UiConfirmBeforeDeleteHelp">Moves source images to the Windows Recycle Bin; it never uses a hard-delete fallback.</sys:String>
   <sys:String x:Key="UiUnseenDots">Unseen dots</sys:String>
   <sys:String x:Key="UiUnseenDotsHelp">Shows a dot on images that have not been viewed. This display option never changes seen history.</sys:String>
+  <sys:String x:Key="UiFavoriteChangeNotifications">Favorite change notifications</sys:String>
+  <sys:String x:Key="UiFavoriteChangeNotificationsHelp">Shows brief saved and changed messages. Errors and Retry actions remain visible when this is off.</sys:String>
   <sys:String x:Key="UiAccessibilityEffects">ACCESSIBILITY EFFECTS</sys:String>
   <sys:String x:Key="UiReducedMotion">Reduced motion</sys:String>
   <sys:String x:Key="UiReducedTransparency">Reduced transparency</sys:String>

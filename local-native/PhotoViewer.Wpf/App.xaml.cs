@@ -3176,20 +3176,14 @@ public partial class App : Application
             "photoviewer-wpf-automation-metadata-index-cross-process-v1");
     }
 
-    // Automation fixtures never inherit CLI, result-file, TEMP, or shared-state
-    // paths. A GUID-named sibling of the executable output is writable in the
-    // verifier while staying outside the product's protected executable root.
+    // Automation fixtures never inherit CLI, result-file, or shared-state
+    // paths. Keep the app-owned GUID child directly under OS TEMP so a portable
+    // build located inside a source checkout does not place fixtures inside the
+    // product's protected project roots.
     private static string CreateManagedAutomationRoot()
-    {
-        string executableRoot = Path.GetFullPath(AppContext.BaseDirectory);
-        string managedParent = Directory.GetParent(executableRoot.TrimEnd(
-            Path.DirectorySeparatorChar,
-            Path.AltDirectorySeparatorChar))?.FullName
-            ?? executableRoot;
-        return Path.Combine(
-            managedParent,
-            ".aibos-automation-" + Guid.NewGuid().ToString("N"));
-    }
+        => Path.Combine(
+            Path.GetFullPath(Path.GetTempPath()),
+            "photoviewer-wpf-automation-" + Guid.NewGuid().ToString("N"));
 
     private static string ResolveLegacySharedDataRootForActivation()
     {
@@ -4178,9 +4172,15 @@ public partial class App : Application
                 bool defaultOff = !first.ShowUnseenDotsForSmoke
                     && !first.SidebarUnseenDotsCheckedForSmoke
                     && !first.AppSettingsUnseenDotsCheckedForSmoke;
+                bool favoriteNotificationsDefaultOn = first.ShowFavoriteChangeNotificationsForSmoke;
+                bool calendarContrast = first.DatePickerCalendarContrastForSmoke;
                 bool landingChrome = first.LandingCaptionControlsContractForSmoke
                     && first.ActivateLandingMinimizeForSmoke();
                 await first.LoadFolderAsync(folder);
+                first.UpdateLayout();
+                bool searchClear = first.ClearSearchButtonContractForSmoke;
+                bool sidebarScroll = first.SidebarScrollContractForSmoke
+                    && first.VisibleWorkbenchChromeContainedForSmoke;
                 string recentAfterFolderOpen = FileFingerprint(recentPath);
                 int unseenCount = first.UnseenCountForSmoke;
                 bool sidebarFocused = first.FocusSidebarUnseenDotsForSmoke() && first.IsSidebarUnseenDotsFocusedForSmoke;
@@ -4189,6 +4189,7 @@ public partial class App : Application
                 await first.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Input);
                 bool settingsFocused = first.FocusAppSettingsUnseenDotsForSmoke() && first.IsAppSettingsUnseenDotsFocusedForSmoke;
                 bool accessible = first.UnseenDotsSurfaceContractForSmoke
+                    && first.FavoriteChangeNotificationsSurfaceContractForSmoke
                     && first.SettingsFocusTrapConfiguredForSmoke
                     && first.IsSettingsDialogFocusedForSmoke;
                 bool settingsSurface = first.AppSettingsScrollContractForSmoke
@@ -4196,6 +4197,9 @@ public partial class App : Application
                     && first.SidebarSettingsPinnedForSmoke
                     && first.HoverAndTooltipContractForSmoke;
                 bool defaultSyncedInSettings = !first.SidebarUnseenDotsCheckedForSmoke && !first.AppSettingsUnseenDotsCheckedForSmoke;
+                bool favoriteNotificationsDisabled = first.SetFavoriteChangeNotificationsForSmoke(false)
+                    && !first.ShowFavoriteChangeNotificationsForSmoke
+                    && !first.FavoriteChangeNotificationsCheckedForSmoke;
 
                 first.SetAppSettingsUnseenDotsForSmoke(true);
                 bool settingsToSidebar = first.ShowUnseenDotsForSmoke
@@ -4218,6 +4222,7 @@ public partial class App : Application
                 first.SetAppSettingsUnseenDotsForSmoke(true);
                 ViewerState? persistedOn = ReadPersistedState(statePath);
                 bool persistedEnabled = persistedOn?.ShowUnseenDots == true;
+                bool favoriteNotificationsPersistedOff = persistedOn?.ShowFavoriteChangeNotifications == false;
                 first.Close();
 
                 var reload = HiddenWindow();
@@ -4228,6 +4233,8 @@ public partial class App : Application
                 bool reloadSynced = reload.ShowUnseenDotsForSmoke
                     && reload.SidebarUnseenDotsCheckedForSmoke
                     && reload.AppSettingsUnseenDotsCheckedForSmoke;
+                bool favoriteNotificationsReloadedOff = !reload.ShowFavoriteChangeNotificationsForSmoke
+                    && !reload.FavoriteChangeNotificationsCheckedForSmoke;
                 bool reloadSettingsFocused = reload.FocusAppSettingsUnseenDotsForSmoke() && reload.IsAppSettingsUnseenDotsFocusedForSmoke;
                 reload.Close();
 
@@ -4240,6 +4247,8 @@ public partial class App : Application
                 bool migrationDefaultOff = !migration.ShowUnseenDotsForSmoke
                     && !migration.SidebarUnseenDotsCheckedForSmoke
                     && !migration.AppSettingsUnseenDotsCheckedForSmoke;
+                bool favoriteNotificationsMigrationDefaultOn = migration.ShowFavoriteChangeNotificationsForSmoke
+                    && migration.FavoriteChangeNotificationsCheckedForSmoke;
                 migration.Close();
                 bool migrationUnknownPreserved = File.ReadAllText(statePath).Contains("futureDisplay", StringComparison.Ordinal);
 
@@ -4252,10 +4261,13 @@ public partial class App : Application
                 bool isolated = new[] { statePath, favoritesPath, seenPath, recentPath, jobsPath }
                     .All(path => Path.GetFullPath(path).StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase));
                 bool residueFree = NoPersistenceResidue(smokeRoot);
-                ok = defaultOff && landingChrome && defaultSyncedInSettings && sidebarFocused && settingsFocused && accessible
+                ok = defaultOff && favoriteNotificationsDefaultOn && calendarContrast && searchClear && sidebarScroll
+                    && landingChrome && defaultSyncedInSettings && sidebarFocused && settingsFocused && accessible
                     && settingsSurface && settingsInsideClick && settingsBackdropClose && shortcutEntryOpened
                     && settingsToSidebar && sidebarToSettings && settingsReopenedSynced && persistedEnabled
-                    && reloadSynced && reloadSettingsFocused && migrationDefaultOff && migrationUnknownPreserved
+                    && favoriteNotificationsDisabled && favoriteNotificationsPersistedOff
+                    && reloadSynced && favoriteNotificationsReloadedOff && reloadSettingsFocused
+                    && migrationDefaultOff && favoriteNotificationsMigrationDefaultOn && migrationUnknownPreserved
                     && seenByteIdentical && cacheIsolation && sourceUntouched && isolated && residueFree;
                 result = new
                 {
@@ -4264,6 +4276,10 @@ public partial class App : Application
                         ? "landing chrome, pinned Settings/shortcut entry, dark hover/tooltip, one-scroll backdrop-close Settings, and unseen-dot persistence passed without mutating Seen or unrelated cache"
                         : "unseen-dot Settings parity smoke did not meet its synchronization and isolation contract",
                     defaultOff,
+                    favoriteNotificationsDefaultOn,
+                    calendarContrast,
+                    searchClear,
+                    sidebarScroll,
                     landingChrome,
                     defaultSyncedInSettings,
                     sidebarFocused,
@@ -4277,9 +4293,13 @@ public partial class App : Application
                     sidebarToSettings,
                     settingsReopenedSynced,
                     persistedEnabled,
+                    favoriteNotificationsDisabled,
+                    favoriteNotificationsPersistedOff,
                     reloadSynced,
+                    favoriteNotificationsReloadedOff,
                     reloadSettingsFocused,
                     migrationDefaultOff,
+                    favoriteNotificationsMigrationDefaultOn,
                     migrationUnknownPreserved,
                     unseenCount,
                     seenByteIdentical,
@@ -17409,6 +17429,8 @@ public partial class App : Application
             bool canonicalSourceUntouched = false;
             bool navigatedDuringResponse = false;
             bool staleResponseDiscarded = false;
+            bool passiveCompanionStartSuppressed = false;
+            bool explicitCompanionAutoStart = false;
             bool closeCompleted = false;
             string sourceBefore = "missing";
             string canonicalSourceBefore = "missing";
@@ -17505,6 +17527,25 @@ public partial class App : Application
                 // observe the real project cache even if global automation setup changes.
                 win = HiddenWindow();
                 win.SuppressStatePersistence();
+                int readinessProbeCount = 0;
+                bool injectedStarterCalled = false;
+                win.ConfigureEnhancementCompanionAutoStartForSmoke(
+                    (request, _) =>
+                    {
+                        readinessProbeCount++;
+                        return Task.FromResult(readinessProbeCount >= 3
+                            ? JsonResponse(HttpStatusCode.OK, new { jobs = Array.Empty<object>() })
+                            : JsonResponse(HttpStatusCode.ServiceUnavailable, new { error = "not ready" }));
+                    },
+                    endpoint =>
+                    {
+                        injectedStarterCalled = endpoint.IsLoopback;
+                        return (injectedStarterCalled, injectedStarterCalled ? "" : "endpoint was not loopback");
+                    });
+                passiveCompanionStartSuppressed = win.EnhancementCompanionLaunchAttemptCountForSmoke == 0;
+                explicitCompanionAutoStart = await win.EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
+                    && injectedStarterCalled
+                    && win.EnhancementCompanionLaunchAttemptCountForSmoke == 1;
                 string ResolveSmokeIdentity(string path)
                 {
                     string fullPath = Path.GetFullPath(path);
@@ -17698,7 +17739,8 @@ public partial class App : Application
                     && originalPreserved && outputRemoved && createContract && routesOk
                     && sourceIdentityCaseInsensitive && alternateLexicalIdentity && pollIdentityCanonical
                     && restartRecovery && lexicalOutputRejected && canonicalOutputRejected
-                    && navigatedDuringResponse && staleResponseDiscarded;
+                    && navigatedDuringResponse && staleResponseDiscarded
+                    && passiveCompanionStartSuppressed && explicitCompanionAutoStart;
             }
             catch (Exception ex)
             {
@@ -17810,6 +17852,8 @@ public partial class App : Application
                 canonicalOutputRejected,
                 navigatedDuringResponse,
                 staleResponseDiscarded,
+                passiveCompanionStartSuppressed,
+                explicitCompanionAutoStart,
                 closeCompleted,
                 environmentRestored,
                 pathsIsolated,
@@ -18067,7 +18111,10 @@ public partial class App : Application
 
                 win = HiddenWindow();
                 win.SuppressStatePersistence();
-                win.ConfigureModalEnhancementRequestProfileForSmoke("anime-sharp-x2", "sharp-test", 2);
+                // This gate runs against a production Next server. Test-only
+                // adapters are intentionally rejected there, so exercise the
+                // same local ncnn backend used by an explicit WPF action.
+                win.ConfigureModalEnhancementRequestProfileForSmoke("anime-sharp-x2", "realesrgan-ncnn", 2);
                 win.ConfigureModalEnhancementConfirmationsForSmoke();
                 win.Show();
                 await win.LoadFolderSetAsync([imagesRoot], commitRecent: false);
@@ -18084,11 +18131,11 @@ public partial class App : Application
                     jobId = win.ModalEnhancementJobIdForSmoke;
                     RecordCheckpoint("full-start-complete");
                     canceled = await win.CancelModalEnhancementForSmokeAsync()
-                        || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(8));
+                        || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30));
                     RecordCheckpoint("full-cancel-complete");
                     retried = canceled && await win.StartModalEnhancementForSmokeAsync();
                     RecordCheckpoint("full-retry-complete");
-                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(20));
+                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(60));
                     RecordCheckpoint("full-success-wait-complete");
                     outputAccepted = succeeded && win.ModalEnhancedToggleAvailableForSmoke;
                     outputPath = win.ModalDisplayPathForSmoke;
@@ -18121,11 +18168,11 @@ public partial class App : Application
                     jobId = win.ModalEnhancementJobIdForSmoke;
                     RecordCheckpoint("recovery-stale-job-observed");
                     canceled = restartJobObserved && (await win.CancelModalEnhancementForSmokeAsync()
-                        || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(8)));
+                        || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30)));
                     RecordCheckpoint("recovery-cancel-complete");
                     retried = canceled && await win.StartModalEnhancementForSmokeAsync();
                     RecordCheckpoint("recovery-retry-complete");
-                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(20));
+                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(60));
                     RecordCheckpoint("recovery-success-wait-complete");
                     outputAccepted = succeeded && win.ModalEnhancedToggleAvailableForSmoke;
                     outputPath = win.ModalDisplayPathForSmoke;
@@ -18699,6 +18746,47 @@ public partial class App : Application
                 win.SetSortByForSmoke("name");
                 bool selected = win.SelectFileNameForSmoke(secondName);
                 bool opened = win.OpenModalForSmoke();
+                bool positionCounter = win.ModalPositionCounterContractForSmoke;
+                bool favoriteNeutralSurfaceInitial = win.ModalFavoriteNeutralSurfaceForSmoke;
+                bool overlayDoesNotReduceImageArea = win.ModalOverlayDoesNotReduceImageAreaForSmoke();
+                Rect windowedBoundsBeforeFullScreen = win.WindowBoundsForSmoke;
+                bool fullScreenEnteredByF11 = win.InvokePreviewKeyForSmoke(Key.F11);
+                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
+                bool fullScreenContract = fullScreenEnteredByF11
+                    && win.ModalFullScreenContractForSmoke
+                    && win.ModalVisibleForSmoke;
+                bool fullScreenExitedByEscape = win.InvokePreviewKeyForSmoke(Key.Escape)
+                    && !win.ModalFullScreenForSmoke
+                    && win.ModalVisibleForSmoke;
+                Rect windowedBoundsAfterFullScreen = win.WindowBoundsForSmoke;
+                bool fullScreenRestoredWindow = fullScreenExitedByEscape
+                    && Math.Abs(windowedBoundsAfterFullScreen.Left - windowedBoundsBeforeFullScreen.Left) < 1
+                    && Math.Abs(windowedBoundsAfterFullScreen.Top - windowedBoundsBeforeFullScreen.Top) < 1
+                    && Math.Abs(windowedBoundsAfterFullScreen.Width - windowedBoundsBeforeFullScreen.Width) < 1
+                    && Math.Abs(windowedBoundsAfterFullScreen.Height - windowedBoundsBeforeFullScreen.Height) < 1;
+                bool fullScreenButtonRoute = win.ToggleModalFullScreenForSmoke()
+                    && win.ModalFullScreenContractForSmoke
+                    && win.InvokePreviewKeyForSmoke(Key.F11)
+                    && !win.ModalFullScreenForSmoke
+                    && win.ModalVisibleForSmoke;
+
+                string browserSharedOutputPath = Path.Combine(
+                    Path.GetDirectoryName(jobsPath)!,
+                    "outputs",
+                    "enhanced-b-modal.png");
+                File.Copy(secondPath, browserSharedOutputPath, overwrite: true);
+                WriteEnhancedJobsFixture(
+                    jobsPath,
+                    firstPath,
+                    enhancedOutputPath,
+                    secondPath,
+                    browserSharedOutputPath,
+                    thirdPath,
+                    Path.Combine(smokeRoot, "missing-source.png"));
+                File.SetLastWriteTimeUtc(jobsPath, DateTime.UtcNow.AddSeconds(2));
+                bool browserSharedEnhancedReloaded = win.RefreshEnhancedStateIfChangedForSmoke()
+                    && win.EnhancedForFileForSmoke(secondName)
+                    && win.ModalEnhancedToggleAvailableForSmoke;
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
                     && win.ModalContextMenuContractForSmoke;
@@ -18712,11 +18800,14 @@ public partial class App : Application
                 bool windowCaptionControls = win.ModalWindowCaptionControlsContractForSmoke
                     && win.ActivateModalMinimizeForSmoke()
                     && win.ActivateModalMaximizeForSmoke();
+                bool nativeMaximizeWorkArea = await win.NormalizeNativeMaximizeForSmokeAsync(
+                    new Rect(24, 32, 1120, 700));
                 win.UpdateLayout();
                 // Opening and the caption-control smoke both queue actual-bounds
                 // refits at Loaded priority. Settle after both so clamped CI
                 // desktops measure the final restored window geometry.
                 await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
+                bool fullCanvasInteraction = win.ModalFullCanvasInteractionContractForSmoke();
                 bool edgeChrome = win.ModalEdgeChromeContractForSmoke;
                 bool edgePercentageSet = win.SetModalEdgeNavigationPercentForSmoke(12);
                 bool edgeImageIntersection = edgePercentageSet
@@ -18758,15 +18849,22 @@ public partial class App : Application
                 bool contextFavoriteRaised = win.ActivateModalContextFavoriteForSmoke(1);
                 bool favoriteLevelReadoutRaised = contextFavoriteRaised
                     && win.ModalFavoriteLevelReadoutContractForSmoke;
+                bool favoriteActiveSurface = contextFavoriteRaised
+                    && win.ModalFavoriteActiveSurfaceForSmoke;
                 bool contextFavoriteLowered = win.ActivateModalContextFavoriteForSmoke(-1);
                 bool favoriteLevelReadoutLowered = contextFavoriteLowered
                     && win.ModalFavoriteLevelReadoutContractForSmoke;
+                bool favoriteNeutralSurfaceRestored = contextFavoriteLowered
+                    && win.ModalFavoriteNeutralSurfaceForSmoke;
                 bool contextMenuAction = contextFavoriteRaised
                     && contextFavoriteLowered
                     && win.SelectedFavoriteLevelForSmoke == contextFavoriteBefore;
                 bool favoriteLevelReadout = favoriteLevelReadoutInitial
                     && favoriteLevelReadoutRaised
-                    && favoriteLevelReadoutLowered;
+                    && favoriteLevelReadoutLowered
+                    && favoriteNeutralSurfaceInitial
+                    && favoriteActiveSurface
+                    && favoriteNeutralSurfaceRestored;
 
                 win.SetModalChromeVisibleForSmoke(true);
                 await Task.Delay(1050);
@@ -18813,6 +18911,17 @@ public partial class App : Application
                     && !win.ModalFilmstripOverlayVisibleForSmoke
                     && win.ModalWindowCaptionControlsContractForSmoke
                     && string.Equals(win.ModalPointerStateForSmoke, "Hidden", StringComparison.Ordinal);
+                int hiddenFavoriteBefore = win.ModalFavoriteLevelForSmoke;
+                bool hiddenFavoriteRaised = win.AdjustModalFavoriteForSmoke(1);
+                bool favoritePulseWhileHidden = hiddenFavoriteRaised
+                    && win.ModalFavoritePulseVisibleForSmoke
+                    && win.ModalFavoritePulseLevelForSmoke == Math.Clamp(hiddenFavoriteBefore + 1, 0, 5)
+                    && !win.ModalChromeVisibleForSmoke
+                    && !win.ModalManualChromeVisibleForSmoke
+                    && win.ModalCursorHiddenForSmoke;
+                bool hiddenFavoriteRestored = win.AdjustModalFavoriteForSmoke(-1)
+                    && win.ModalFavoriteLevelForSmoke == hiddenFavoriteBefore;
+                win.HideModalFavoritePulseForSmoke();
                 win.UpdateLayout();
                 double hiddenImageHeight = win.ModalImageAreaHeightForSmoke;
 
@@ -19047,11 +19156,16 @@ public partial class App : Application
                 bool ok = fullMotionMode
                     && selected && opened && accessibility && lightweightGlass
                     && actualPixelsControl && favoriteLevelReadout && adaptiveToolbar
+                    && positionCounter && fullCanvasInteraction && nativeMaximizeWorkArea
+                    && overlayDoesNotReduceImageArea
+                    && fullScreenContract && fullScreenRestoredWindow && fullScreenButtonRoute
+                    && browserSharedEnhancedReloaded
                     && windowCaptionControls && edgeChrome
                     && edgePercentageSetting && edgeImageIntersection
                     && zoomIndicator && filmstripLayout && contextMenuAction && manualVisiblePersistent
                     && filmstripButtonStableGeometry
-                    && chromeHidden && transientReveal && transientRevealMotion && transientExpired
+                    && chromeHidden && favoritePulseWhileHidden && hiddenFavoriteRestored
+                    && transientReveal && transientRevealMotion && transientExpired
                     && pointerStateContract && controlAutoHideSuspended && panningSuppressesChrome
                     && hiddenZoomPersistence
                     && filmstripOverlay && filmstripOverlayDismissed && filmstripOverlayStableGeometry
@@ -19072,7 +19186,17 @@ public partial class App : Application
                     LightweightGlass = lightweightGlass,
                     ActualPixelsControl = actualPixelsControl,
                     FavoriteLevelReadout = favoriteLevelReadout,
+                    FavoriteNeutralSurface = favoriteNeutralSurfaceInitial && favoriteNeutralSurfaceRestored,
+                    FavoriteActiveSurface = favoriteActiveSurface,
                     AdaptiveToolbar = adaptiveToolbar,
+                    PositionCounter = positionCounter,
+                    FullCanvasInteraction = fullCanvasInteraction,
+                    NativeMaximizeWorkArea = nativeMaximizeWorkArea,
+                    OverlayDoesNotReduceImageArea = overlayDoesNotReduceImageArea,
+                    FullScreenContract = fullScreenContract,
+                    FullScreenRestoredWindow = fullScreenRestoredWindow,
+                    FullScreenButtonRoute = fullScreenButtonRoute,
+                    BrowserSharedEnhancedReloaded = browserSharedEnhancedReloaded,
                     WindowCaptionControls = windowCaptionControls,
                     EdgeChrome = edgeChrome,
                     EdgePercentageSetting = edgePercentageSetting,
@@ -19100,6 +19224,7 @@ public partial class App : Application
                     ImageClickImmediateHide = imageClickImmediateHide,
                     ImageClickImmediateShow = imageClickImmediateShow,
                     ChromeHidden = chromeHidden,
+                    FavoritePulseWhileHidden = favoritePulseWhileHidden && hiddenFavoriteRestored,
                     TransientReveal = transientReveal,
                     TransientRevealMotion = transientRevealMotion,
                     TransientExpired = transientExpired,
@@ -24807,7 +24932,17 @@ public partial class App : Application
         public bool LightweightGlass { get; init; }
         public bool ActualPixelsControl { get; init; }
         public bool FavoriteLevelReadout { get; init; }
+        public bool FavoriteNeutralSurface { get; init; }
+        public bool FavoriteActiveSurface { get; init; }
         public bool AdaptiveToolbar { get; init; }
+        public bool PositionCounter { get; init; }
+        public bool FullCanvasInteraction { get; init; }
+        public bool NativeMaximizeWorkArea { get; init; }
+        public bool OverlayDoesNotReduceImageArea { get; init; }
+        public bool FullScreenContract { get; init; }
+        public bool FullScreenRestoredWindow { get; init; }
+        public bool FullScreenButtonRoute { get; init; }
+        public bool BrowserSharedEnhancedReloaded { get; init; }
         public bool WindowCaptionControls { get; init; }
         public bool EdgeChrome { get; init; }
         public bool EdgePercentageSetting { get; init; }
@@ -24835,6 +24970,7 @@ public partial class App : Application
         public bool ImageClickImmediateHide { get; init; }
         public bool ImageClickImmediateShow { get; init; }
         public bool ChromeHidden { get; init; }
+        public bool FavoritePulseWhileHidden { get; init; }
         public bool TransientReveal { get; init; }
         public bool TransientRevealMotion { get; init; }
         public bool TransientExpired { get; init; }

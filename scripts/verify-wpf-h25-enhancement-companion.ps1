@@ -141,6 +141,14 @@ $resolvedH25Commit = (& git -C $h25Root rev-parse "$H25Commit^{commit}").Trim()
 Assert-True ($LASTEXITCODE -eq 0 -and $resolvedH25Commit -eq $H25Commit.ToLowerInvariant()) 'H25Commit could not be resolved exactly.'
 $h25Tree = (& git -C $h25Root rev-parse "$H25Commit^{tree}").Trim()
 Assert-True ($LASTEXITCODE -eq 0 -and $h25Tree -match '^[0-9a-f]{40}$') 'H25 tree could not be resolved.'
+$ncnnRoot = if ([string]::IsNullOrWhiteSpace($env:PVU_REALESRGAN_NCNN_ROOT)) {
+    'C:\AI\RealESRGAN-ncnn-vulkan'
+}
+else {
+    [IO.Path]::GetFullPath($env:PVU_REALESRGAN_NCNN_ROOT)
+}
+Assert-True (Test-Path -LiteralPath (Join-Path $ncnnRoot 'realesrgan-ncnn-vulkan.exe') -PathType Leaf) 'Real-ESRGAN ncnn-vulkan is required for the production companion E2E.'
+Assert-True (Test-Path -LiteralPath (Join-Path $ncnnRoot 'models') -PathType Container) 'Real-ESRGAN ncnn-vulkan models are required for the production companion E2E.'
 
 $aibosCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 $aibosTree = (& git -C $repoRoot rev-parse 'HEAD^{tree}').Trim()
@@ -180,6 +188,7 @@ $sharedFiles = [ordered]@{
 }
 $environment = [ordered]@{
     PVU_ENHANCE_ROOT = $enhanceRoot
+    PVU_REALESRGAN_NCNN_ROOT = $ncnnRoot
     PVU_FAVORITES_PATH = $sharedFiles.favorites
     PVU_SEEN_PATH = $sharedFiles.seen
     PVU_RECENT_FOLDERS_PATH = $sharedFiles.recent

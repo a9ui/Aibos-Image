@@ -52,6 +52,8 @@
   <sys:String x:Key="UiConfirmBeforeDeleteHelp">元画像はWindowsのごみ箱へ移動します。完全削除へ切り替えることはありません。</sys:String>
   <sys:String x:Key="UiUnseenDots">Unseen dots</sys:String>
   <sys:String x:Key="UiUnseenDotsHelp">未表示の画像にdotを出します。この設定で閲覧履歴は変わりません。</sys:String>
+  <sys:String x:Key="UiFavoriteChangeNotifications">Favorite変更の通知</sys:String>
+  <sys:String x:Key="UiFavoriteChangeNotificationsHelp">保存・変更の短い通知を表示します。OFFでもエラーとRetryは表示します。</sys:String>
   <sys:String x:Key="UiAccessibilityEffects">ACCESSIBILITY EFFECTS</sys:String>
   <sys:String x:Key="UiReducedMotion">動きを減らす</sys:String>
   <sys:String x:Key="UiReducedTransparency">透明効果を減らす</sys:String>
