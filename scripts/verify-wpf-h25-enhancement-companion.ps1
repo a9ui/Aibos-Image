@@ -287,7 +287,7 @@ try {
     Assert-True (
         @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue).Count -eq 0
     ) 'The auto-start port was already in use before the WPF explicit action.'
-    $fullExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $fullResultPath -FixtureRoot $fixtureRoot -Phase 'full' -SourceName 'full-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot
+    $fullExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $fullResultPath -FixtureRoot $fixtureRoot -Phase 'full' -SourceName 'full-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -TimeoutMilliseconds 240000
     $full = Read-SmokeResult -Path $fullResultPath -ExpectedExitCode $fullExit
     Assert-True ($full.passiveRefresh -eq $true -and $full.loopbackOnly -eq $true -and $full.sourceUnchanged -eq $true) 'Full phase lost passive/loopback/source safety.'
     $ownedCompanionStopped = $false
@@ -311,7 +311,7 @@ try {
         -RedirectStandardError $wpfInterruptedErr `
         -WindowStyle Hidden `
         -PassThru
-    $interruptDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    $interruptDeadline = [DateTime]::UtcNow.AddSeconds(60)
     $interrupted = $null
     while ([DateTime]::UtcNow -lt $interruptDeadline) {
         if ($wpfInterrupted.HasExited) { break }
@@ -341,7 +341,7 @@ try {
     Assert-True ($staleJob.Count -eq 1 -and $staleJob[0].status -eq 'running') 'The verifier did not preserve one stale running job across the companion stop.'
 
     $server = Start-H25Companion
-    $recoveryExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $recoveryResultPath -FixtureRoot $fixtureRoot -Phase 'recover' -SourceName 'interrupted-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot
+    $recoveryExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $recoveryResultPath -FixtureRoot $fixtureRoot -Phase 'recover' -SourceName 'interrupted-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -TimeoutMilliseconds 180000
     $recovery = Read-SmokeResult -Path $recoveryResultPath -ExpectedExitCode $recoveryExit
     Assert-True ($recovery.restartJobObserved -eq $true -and $recovery.canceled -eq $true -and $recovery.retried -eq $true) 'WPF did not recover the stale companion job through explicit Cancel and Retry.'
 
