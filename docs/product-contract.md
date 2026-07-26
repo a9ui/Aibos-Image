@@ -28,6 +28,10 @@ vectors. It is test input and evidence mapping, not a second specification.
   runtime.
 - Enhancement may call the separately installed H25 Browser application as an
   optional local companion, only after an explicit user action.
+- An explicit AI Start or Retry may start that local companion when it is not
+  already available. Passive browsing, preview, navigation, job inspection,
+  and state hydration never start it. WPF may stop only the exact companion
+  process tree that the current WPF process created.
 - The companion endpoint is loopback-only and must bind to `127.0.0.1`. LAN,
   tunnel, reverse-proxy, hosted, and Internet exposure are unsupported.
 - An unavailable companion must produce a bounded, actionable error and must
@@ -304,6 +308,10 @@ or stores.
   overwritten.
 - The H25 Browser companion owns the current local Enhancement API and worker.
   WPF owns its loopback client and must keep the API optional.
+- Modal and batch Start/Retry first reuse an already-ready loopback companion.
+  If none is ready, that same explicit action may launch the separately
+  installed H25 companion with Browser opening and ComfyUI autostart disabled.
+  Closing WPF stops only a launcher process tree that WPF itself created.
 - The WPF Enhancement Jobs workspace is a virtualized client view over that
   API. Opening it performs a passive jobs read only. It polls once per second
   only while the workspace is visible and at least one job is queued or

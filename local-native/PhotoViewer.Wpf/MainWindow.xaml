@@ -61,8 +61,18 @@
         <Border x:Name="SearchBoxContainer" Grid.Column="1" Height="32" MinWidth="240" MaxWidth="480" HorizontalAlignment="Stretch" Margin="10,0"
                 CornerRadius="4" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                 WindowChrome.IsHitTestVisibleInChrome="True">
-          <DockPanel Margin="12,0,10,0" LastChildFill="True">
+          <DockPanel Margin="12,0,5,0" LastChildFill="True">
             <Path DockPanel.Dock="Left" Data="M11,11 m-8,0 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 M21,21 l-4.3,-4.3" Stroke="{StaticResource TextTertiary}" StrokeThickness="1.8" Stretch="Uniform" Width="15" Height="15" Margin="0,0,8,0" VerticalAlignment="Center"/>
+            <Button x:Name="ClearSearchInputButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                    Width="26" Height="26" Margin="5,0,0,0" Visibility="Collapsed"
+                    Click="ClearSearchInput_Click" ToolTip="Clear search"
+                    AutomationProperties.Name="Clear search input"
+                    AutomationProperties.HelpText="Clear the entire current search query.">
+              <Path Data="M4,4 L16,16 M16,4 L4,16"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                    Width="11" Height="11" Stretch="Uniform"/>
+            </Button>
             <Grid>
               <TextBox Style="{StaticResource SearchBox}" x:Name="SearchInput" FontSize="13" VerticalAlignment="Center"
                        TextChanged="SearchInput_TextChanged" GotKeyboardFocus="SearchInput_GotKeyboardFocus"
@@ -165,7 +175,9 @@
             <Rectangle Width="11" Height="1.4" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
           </Button>
           <Button x:Name="MaxButton" Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="Maximize" AutomationProperties.Name="Maximize window" WindowChrome.IsHitTestVisibleInChrome="True">
-            <Rectangle Width="11" Height="11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" Fill="Transparent"/>
+            <Path x:Name="MaximizeIcon" Data="M4,4 H20 V20 H4 Z"
+                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.5" Fill="Transparent" Stretch="Uniform" Width="12" Height="12"/>
           </Button>
           <Button Style="{StaticResource CloseButton}" Click="Close_Click" ToolTip="Close" AutomationProperties.Name="Close window" WindowChrome.IsHitTestVisibleInChrome="True">
             <Path Data="M2,2 L12,12 M12,2 L2,12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" Width="12" Height="12" Stretch="Uniform"/>
@@ -793,8 +805,10 @@
         <Button x:Name="LandingMinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize window" WindowChrome.IsHitTestVisibleInChrome="True">
           <Rectangle Width="11" Height="1.4" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
         </Button>
-        <Button x:Name="LandingMaximizeButton" Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="Maximize or restore" AutomationProperties.Name="Maximize or restore window" WindowChrome.IsHitTestVisibleInChrome="True">
-          <Rectangle Width="11" Height="11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" Fill="Transparent"/>
+        <Button x:Name="LandingMaximizeButton" Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="Maximize" AutomationProperties.Name="Maximize window" WindowChrome.IsHitTestVisibleInChrome="True">
+          <Path x:Name="LandingMaximizeIcon" Data="M4,4 H20 V20 H4 Z"
+                Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                StrokeThickness="1.5" Fill="Transparent" Stretch="Uniform" Width="12" Height="12"/>
         </Button>
         <Button x:Name="LandingCloseButton" Style="{StaticResource CloseButton}" Click="Close_Click" ToolTip="Close" AutomationProperties.Name="Close window" WindowChrome.IsHitTestVisibleInChrome="True">
           <Path Data="M2,2 L12,12 M12,2 L2,12" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" Width="12" Height="12" Stretch="Uniform"/>
@@ -1223,6 +1237,8 @@
           <TextBlock x:Name="DisplaySettingsHeading" Text="DISPLAY" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Display settings section"/>
           <CheckBox x:Name="AppSettingsUnseenDotsCheckBox" Content="{DynamicResource UiUnseenDots}" Foreground="{StaticResource TextSecondary}" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="Changes dot visibility only. Seen history is not changed."/>
           <TextBlock Text="{DynamicResource UiUnseenDotsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
+          <CheckBox x:Name="FavoriteChangeNotificationsCheckBox" Content="{DynamicResource UiFavoriteChangeNotifications}" Foreground="{StaticResource TextSecondary}" Checked="FavoriteChangeNotifications_Changed" Unchecked="FavoriteChangeNotifications_Changed" AutomationProperties.Name="Show favorite change notifications"/>
+          <TextBlock Text="{DynamicResource UiFavoriteChangeNotificationsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
           <TextBlock Text="{DynamicResource UiAccessibilityEffects}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
           <Grid Margin="0,0,0,6">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -1396,9 +1412,11 @@
             <Rectangle Width="11" Height="1.4" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
           </Button>
           <Button x:Name="ModalMaximizeButton" Style="{StaticResource CaptionButton}" Click="Maximize_Click"
-                  ToolTip="Maximize or restore window" AutomationProperties.Name="Maximize or restore window"
+                  ToolTip="Maximize" AutomationProperties.Name="Maximize window"
                   WindowChrome.IsHitTestVisibleInChrome="True">
-            <Rectangle Width="11" Height="11" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" Fill="Transparent"/>
+            <Path x:Name="ModalMaximizeIcon" Data="M4,4 H20 V20 H4 Z"
+                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.5" Fill="Transparent" Stretch="Uniform" Width="12" Height="12"/>
           </Button>
           <Button x:Name="ModalWindowCloseButton" Style="{StaticResource CloseButton}" Click="Close_Click"
                   ToolTip="Close Aibos Image" AutomationProperties.Name="Close Aibos Image window"
@@ -1414,6 +1432,11 @@
         <Button DockPanel.Dock="Left" x:Name="ModalCloseBtn" Style="{StaticResource IconButton}" Click="CloseModal_Click" ToolTip="Back to gallery (Esc)" AutomationProperties.Name="Back to gallery" Width="36" Height="32" Margin="0,0,6,0">
           <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72B;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
         </Button>
+        <TextBlock x:Name="ModalPositionText" DockPanel.Dock="Left" Text="000 / 000"
+                   MinWidth="70" Margin="0,0,10,0" VerticalAlignment="Center"
+                   Foreground="{StaticResource TextTertiary}" FontFamily="{StaticResource MonoFont}"
+                   FontSize="11.5" FontWeight="SemiBold" TextAlignment="Center"
+                   AutomationProperties.Name="Image 0 of 0"/>
         <Button x:Name="ModalShortcutsButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Height="32" Width="32" Margin="0,0,4,0"
                 Click="OpenShortcuts_Click" ToolTip="{DynamicResource UiShortcutsToolTip}" AutomationProperties.Name="Open keyboard shortcuts">
           <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE765;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
@@ -1431,26 +1454,35 @@
           <Path Data="M18,13 v6 a2,2 0 0 1 -2,2 H5 a2,2 0 0 1 -2,-2 V8 a2,2 0 0 1 2,-2 h6 M15,3 h6 v6 M10,14 L21,3" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="15" Height="15"/>
         </Button>
         <Button x:Name="ModalRevealButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Show selected source in folder" AutomationProperties.Name="Show selected source in folder" Width="32" Height="32" Click="ShowSelectedInFolder_Click"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Foreground="{StaticResource TextSecondary}" FontSize="15"/></Button>
-        <Button x:Name="ModalEnhancedDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" ToolTip="Delete only the enhanced output; keep the original" AutomationProperties.Name="Delete selected enhanced output" Width="48" Height="32" Click="DeleteModalEnhancedOutput_Click" Visibility="Collapsed"><TextBlock Text="Del AI" Foreground="{StaticResource TextSecondary}" FontSize="9.5"/></Button>
+        <Button x:Name="ModalEnhancedDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" ToolTip="Delete only the enhanced output; keep the original" AutomationProperties.Name="Delete selected enhanced output" Width="32" Height="32" Click="DeleteModalEnhancedOutput_Click" Visibility="Collapsed">
+          <Path x:Name="ModalEnhancedDeleteGlyph"
+                Data="M3,4 H14 V17 H3 Z M5,13 L8,10 L10,12 L12,10 L14,12 M17,5 L22,10 M22,5 L17,10"
+                Stroke="{StaticResource TextSecondary}" StrokeThickness="1.6"
+                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                Fill="Transparent" Stretch="Uniform" Width="16" Height="16"/>
+        </Button>
         <Button x:Name="ModalEnhanceCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Cancel the running enhancement job" AutomationProperties.Name="Cancel image enhancement" MinWidth="54" Height="32" Padding="8,0" Click="CancelModalEnhancement_Click" Visibility="Collapsed"><TextBlock Text="Cancel" FontSize="10"/></Button>
-        <Button x:Name="ModalEnhanceButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Enhance with the optional local Browser companion" AutomationProperties.Name="Enhance selected image" MinWidth="54" Height="32" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="AI x2" FontSize="10" FontWeight="SemiBold"/></Button>
-        <Button x:Name="ModalEnhancedToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Toggle enhanced image output" Width="38" Height="32" Click="ToggleModalEnhanced_Click" IsEnabled="False">
-          <TextBlock x:Name="ModalEnhancedToggleLabel" Text="OR" Foreground="{StaticResource TextSecondary}" FontSize="10.5" FontWeight="SemiBold"/>
+        <Button x:Name="ModalEnhanceButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Enhance with local AI" AutomationProperties.Name="Enhance selected image with local AI" AutomationProperties.HelpText="Starts the local AI companion only after this button is pressed." MinWidth="54" Height="32" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="AI x2" FontSize="10" FontWeight="SemiBold"/></Button>
+        <Button x:Name="ModalEnhancedToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Current display: Original. Toggle enhanced image output" Width="68" Height="32" Click="ToggleModalEnhanced_Click" IsEnabled="False">
+          <TextBlock x:Name="ModalEnhancedToggleLabel" Text="Original" Foreground="{StaticResource TextSecondary}" FontSize="9.5" FontWeight="SemiBold"/>
         </Button>
         <Button x:Name="ModalFlipButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Flip horizontal (H)" AutomationProperties.Name="Flip image horizontally" Width="32" Height="32" Click="ToggleModalFlip_Click">
           <Path Data="M12,3 v18 M6,8 l-4,4 l4,4 M18,8 l4,4 l-4,4" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="16" Height="16"/>
         </Button>
-        <Border DockPanel.Dock="Right" Height="32" Margin="0,0,2,0" CornerRadius="4"
+        <Button x:Name="ModalFullScreenButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Enter full screen (F11)" AutomationProperties.Name="Enter full screen" Width="32" Height="32" Click="ToggleModalFullScreen_Click">
+          <Path x:Name="ModalFullScreenIcon" Data="M3,9 V3 H9 M15,3 H21 V9 M21,15 V21 H15 M9,21 H3 V15" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.6" Stretch="Uniform" Width="16" Height="16"/>
+        </Button>
+        <Border x:Name="ModalFavoriteControlBorder" DockPanel.Dock="Right" Height="32" Margin="0,0,2,0" CornerRadius="4"
                 Background="{StaticResource FavoriteSoft}" BorderBrush="{StaticResource Favorite}" BorderThickness="1"
                 AutomationProperties.Name="Favorite level controls">
           <StackPanel Orientation="Horizontal">
             <Button x:Name="ModalFavoriteDecreaseButton" Style="{StaticResource IconButton}" ToolTip="Favorite -1 (U)" AutomationProperties.Name="Decrease favorite level" Width="28" Height="30" Click="ModalFavoriteDecrease_Click">
-              <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource FavoriteText}" FontSize="15"/>
+              <TextBlock x:Name="ModalFavoriteDecreaseGlyph" FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource FavoriteText}" FontSize="15"/>
             </Button>
             <TextBlock x:Name="ModalFavoriteLevelText" Text="0" MinWidth="14" Foreground="{StaticResource FavoriteText}" FontSize="11" FontWeight="Bold"
                        TextAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="Favorite level 0"/>
             <Button x:Name="ModalFavoriteIncreaseButton" Style="{StaticResource IconButton}" ToolTip="Favorite +1" AutomationProperties.Name="Increase favorite level" Width="28" Height="30" Click="ModalFavoriteIncrease_Click">
-              <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{StaticResource FavoriteText}" FontSize="15"/>
+              <TextBlock x:Name="ModalFavoriteIncreaseGlyph" FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{StaticResource FavoriteText}" FontSize="15"/>
             </Button>
           </StackPanel>
         </Border>
@@ -1472,7 +1504,14 @@
       </DockPanel>
 
       <!-- image area -->
-      <Grid x:Name="ModalImageArea" Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Margin="0" Background="Transparent" MouseLeftButtonDown="ModalBackdrop_MouseLeftButtonDown" ContextMenuOpening="Modal_ContextMenuOpening" Panel.ZIndex="0">
+      <Grid x:Name="ModalImageArea" Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Margin="0"
+            Background="Transparent" ClipToBounds="True"
+            MouseLeftButtonDown="ModalBackdrop_MouseLeftButtonDown"
+            PreviewMouseLeftButtonDown="ModalImage_MouseLeftButtonDown"
+            PreviewMouseMove="ModalImage_MouseMove"
+            PreviewMouseLeftButtonUp="ModalImage_MouseLeftButtonUp"
+            LostMouseCapture="ModalImage_LostMouseCapture"
+            ContextMenuOpening="Modal_ContextMenuOpening" Panel.ZIndex="0">
         <Grid.ContextMenu>
           <ContextMenu x:Name="ModalContextMenu" AutomationProperties.Name="Image actions">
             <MenuItem Header="Favorite +1" Click="ModalFavoriteIncrease_Click" AutomationProperties.Name="Increase favorite level"/>
@@ -1483,6 +1522,7 @@
             <MenuItem Header="{DynamicResource UiShowSourceFolder}" Click="ShowSelectedInFolder_Click" AutomationProperties.Name="Show source in folder"/>
             <MenuItem Header="{DynamicResource UiAddToAlbum}" Click="AddCurrentToAlbum_Click" AutomationProperties.Name="Add current image to Album"/>
             <MenuItem Header="{DynamicResource UiToggleFilmstrip}" Click="ToggleModalFilmstrip_Click" AutomationProperties.Name="Toggle image filmstrip"/>
+            <MenuItem x:Name="ModalContextFullScreen" Header="Enter full screen (F11)" Click="ToggleModalFullScreen_Click" AutomationProperties.Name="Toggle full screen"/>
             <MenuItem Header="{DynamicResource UiShortcuts}" Click="OpenShortcuts_Click" AutomationProperties.Name="Open keyboard shortcuts"/>
             <Separator/>
             <MenuItem Header="{DynamicResource UiMoveToRecycleBin}" Click="DeleteSelected_Click" AutomationProperties.Name="Move source to Recycle Bin with confirmation"/>
@@ -1493,9 +1533,8 @@
           <ColumnDefinition x:Name="ModalCenterZoneColumn" Width="90*"/>
           <ColumnDefinition x:Name="ModalNextZoneColumn" Width="5*"/>
         </Grid.ColumnDefinitions>
-        <Border x:Name="ModalImage" Grid.ColumnSpan="3" CornerRadius="0" ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center"
-                MouseLeftButtonDown="ModalImage_MouseLeftButtonDown" MouseMove="ModalImage_MouseMove"
-                MouseLeftButtonUp="ModalImage_MouseLeftButtonUp" LostMouseCapture="ModalImage_LostMouseCapture">
+        <Border x:Name="ModalImage" Grid.ColumnSpan="3" CornerRadius="0" ClipToBounds="False"
+                HorizontalAlignment="Center" VerticalAlignment="Center">
           <Grid x:Name="ModalVisual" RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform>
               <TransformGroup>
@@ -1517,7 +1556,7 @@
         </Button>
 
         <Border x:Name="ModalMetadataSidebar" Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Center" Width="300" MaxHeight="640" Visibility="Collapsed"
-                Margin="0,0,84,0" CornerRadius="6" Background="{StaticResource GlassChrome}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" Padding="12"
+                Margin="0,0,12,0" CornerRadius="6" Background="{StaticResource GlassChrome}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" Padding="12"
                 AutomationProperties.Name="Image metadata sidebar" AutomationProperties.HelpText="Review prompt, negative prompt, generation settings, and PNG metadata.">
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
@@ -1590,6 +1629,27 @@
         </Border>
         <Border x:Name="ModalInteractionFeedback" Grid.ColumnSpan="3" VerticalAlignment="Top" HorizontalAlignment="Center" CornerRadius="4" Background="{StaticResource GlassChrome}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" Padding="10,4" Margin="0,18,0,0" Visibility="Collapsed" IsHitTestVisible="False" Panel.ZIndex="20">
           <TextBlock x:Name="ModalInteractionFeedbackText" Foreground="{StaticResource TextPrimary}" FontSize="12" FontWeight="SemiBold"/>
+        </Border>
+        <Border x:Name="ModalFavoritePulse" Grid.ColumnSpan="3"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                CornerRadius="24" Background="{StaticResource GlassChrome}"
+                BorderBrush="{StaticResource Favorite}" BorderThickness="1"
+                Padding="18,11" Visibility="Collapsed" Opacity="1"
+                IsHitTestVisible="False" Panel.ZIndex="44"
+                RenderTransformOrigin="0.5,0.5"
+                AutomationProperties.Name="Favorite level increased">
+          <Border.RenderTransform>
+            <ScaleTransform x:Name="ModalFavoritePulseScale" ScaleX="1" ScaleY="1"/>
+          </Border.RenderTransform>
+          <StackPanel Orientation="Horizontal">
+            <Path Data="M12,21 C-4,10 3,-2 12,5 C21,-2 28,10 12,21 z"
+                  Fill="{StaticResource Favorite}" Stretch="Uniform"
+                  Width="24" Height="24"/>
+            <TextBlock x:Name="ModalFavoritePulseLevelText" Text="1"
+                       Foreground="{StaticResource FavoriteText}"
+                       FontSize="17" FontWeight="Bold"
+                       Margin="9,0,0,0" VerticalAlignment="Center"/>
+          </StackPanel>
         </Border>
       </Grid>
     </Grid>

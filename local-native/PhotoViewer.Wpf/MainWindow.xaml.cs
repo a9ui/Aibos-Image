@@ -124,8 +124,16 @@ public partial class MainWindow : Window
     private const int ModalTransformQualitySettleMilliseconds = 140;
     private const int ModalChromeRevealAnimationMilliseconds = 90;
     private const int ModalChromeTransientMilliseconds = 800;
+    private const int ModalFavoritePulseMilliseconds = 620;
     private const double ModalFilmstripHoverZone = 176;
     private const int MaxModalFilmstripWindowItems = 101;
+    private const int MaxModalPromptTagCount = 160;
+    private const int MaxModalPromptScanCharacters = 65_536;
+    private const int MaxModalPromptTagCharacters = 512;
+    private const int ImmediateModalPromptChipCount = 16;
+    private const int ModalPromptChipBatchCount = 12;
+    private const string MaximizeWindowIconGeometry = "M4,4 H20 V20 H4 Z";
+    private const string RestoreWindowIconGeometry = "M7,4 H20 V17 H17 V7 H7 Z M4,7 H17 V20 H4 Z";
     private const string DisplayStyleStandard = "standard";
     private const string DisplayStyleCompact = "compact";
     private const string DisplayStylePoster = "poster";
@@ -240,9 +248,20 @@ public partial class MainWindow : Window
     private int _sharedRecentCommitSuccessCount;
     private bool _enhancementReadOk = true;
     private string? _enhancementReadError;
+    private DateTime _enhancementJobsLastWriteTimeUtc;
+    private long _enhancementJobsLength = -1;
     private Rect _restoreBounds;
     private bool _fakeMaximized;
+    private bool _normalizingNativeMaximize;
     private Func<Rect> _currentMonitorWorkArea = null!;
+    private Func<Rect> _currentMonitorBounds = null!;
+    private bool _modalFullScreen;
+    private Rect _modalFullScreenRestoreBounds;
+    private bool _modalFullScreenRestoreFakeMaximized;
+    private WindowState _modalFullScreenRestoreWindowState = WindowState.Normal;
+    private ResizeMode _modalFullScreenRestoreResizeMode = ResizeMode.CanResize;
+    private double _modalFullScreenRestoreMinWidth = DesignWindowMinWidth;
+    private double _modalFullScreenRestoreMinHeight = DesignWindowMinHeight;
     private bool _initializing = true;
     private bool _suppressStateSave;
     private bool _favoritesWriteBlocked;
@@ -255,6 +274,7 @@ public partial class MainWindow : Window
     private long _seenMutationGeneration;
     private readonly Dictionary<Tile, long> _deferredFavoriteNotificationOwners =
         new(ReferenceEqualityComparer.Instance);
+    private long _lastDeferredFavoriteNotificationFlushGenerationForSmoke;
     private bool _favoriteWriterAdopted;
     private bool _seenWriterAdopted;
     private DispatcherTimer? _favoriteWriterPumpTimer;
@@ -334,6 +354,7 @@ public partial class MainWindow : Window
     private ModalEdgeTarget _modalPressedEdgeTarget;
     private Point _modalLastPointerPosition;
     private bool _modalHasPointerPosition;
+    private Point? _modalWheelViewportAnchorForSmoke;
     private bool _modalChromePointerPressActive;
     private bool _modalManualChromeVisible = true;
     private bool _modalTransientChromeVisible;
@@ -344,6 +365,7 @@ public partial class MainWindow : Window
     private bool _syncingModalFilmstripSelection;
     private long _modalSingleClickGeneration;
     private readonly DispatcherTimer _modalFeedbackTimer;
+    private readonly DispatcherTimer _modalFavoritePulseTimer;
     private readonly DispatcherTimer _modalChromeTransientTimer;
     private readonly DispatcherTimer _modalTransformQualityTimer;
     private readonly DispatcherTimer _modalEnhancementPollTimer;
@@ -354,9 +376,11 @@ public partial class MainWindow : Window
     private string? _modalEnhancementJobStatus;
     private int _modalEnhancementProgress;
     private string? _modalEnhancementError;
+    private bool _modalEnhancementCancelRequested;
     private long _modalEnhancementGeneration;
     private Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _modalEnhancementSender
         = static (request, token) => ModalEnhancementHttpClient.SendAsync(request, token);
+    private bool _usingDefaultModalEnhancementSender = true;
     private string _modalEnhancementPresetId = "anime-sharp-x2";
     private string _modalEnhancementAdapterId = "realesrgan-ncnn";
     private int _modalEnhancementScale = 2;
@@ -390,6 +414,11 @@ public partial class MainWindow : Window
     private TaskCompletionSource<PngParametersMetadata?>? _previewMetadataCompletion;
     private PngParametersMetadata? _currentPreviewMetadata;
     private string? _currentPreviewMetadataPath;
+    private string _modalPromptChipSource = "";
+    private List<string> _modalPromptChipTags = [];
+    private int _modalPromptChipNextIndex;
+    private long _modalPromptChipGeneration;
+    private bool _modalPromptChipRealizationScheduled;
     private string _lastMetadataCopyText = "";
     private Action<string> _diagnosticsClipboardWriter = Clipboard.SetText;
     private Func<SharedDataRootActivationResult?> _sharedDataRootActivationProvider =
@@ -445,6 +474,8 @@ public partial class MainWindow : Window
     private readonly HashSet<int> _favoriteFilterLevels = [];
     private bool _showUnseenDots;
     private bool _syncingUnseenDotsControls;
+    private bool _showFavoriteChangeNotifications = true;
+    private bool _syncingFavoriteChangeNotifications;
     private ThumbnailStatusBorderSettings _thumbnailStatusBorderSettings = ThumbnailStatusBorderSettings.Default;
     private ThumbnailStatusBorderSettings _draftThumbnailStatusBorderSettings = ThumbnailStatusBorderSettings.Default;
     private bool _thumbnailStatusBorderSettingsProtected;
@@ -492,6 +523,7 @@ public partial class MainWindow : Window
     private ViewerKeyAction? _recordingKeyAction;
     private string? _keyBindingCaptureError;
     private Func<ModifierKeys> _shortcutModifierProvider = static () => Keyboard.Modifiers;
+    private IInputElement? _shortcutFocusOverrideForSmoke;
     private bool _shutdownPersistenceFlushed;
     private int _shutdownPersistenceFlushCount;
     private bool _closingDrainInProgress;
@@ -524,6 +556,7 @@ public partial class MainWindow : Window
         InitializeEnhancementJobsWorkspace();
         InitializeBatchEnhancementWorkflow();
         _currentMonitorWorkArea = ResolveCurrentMonitorWorkArea;
+        _currentMonitorBounds = ResolveCurrentMonitorBounds;
         _searchFilterTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(SearchFilterDebounceMilliseconds),
@@ -549,6 +582,11 @@ public partial class MainWindow : Window
             if (ModalInteractionFeedback is not null)
                 ModalInteractionFeedback.Visibility = Visibility.Collapsed;
         };
+        _modalFavoritePulseTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(ModalFavoritePulseMilliseconds),
+        };
+        _modalFavoritePulseTimer.Tick += (_, _) => HideModalFavoritePulse();
         _statusToastDismissTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(TransientStatusToastMilliseconds),
@@ -607,6 +645,7 @@ public partial class MainWindow : Window
             if (CardsList.Items.Count > 0)
                 CardsList.SelectedIndex = 0;
             ScheduleRememberCurrentGridViewportAnchor();
+            UpdateWindowMaximizePresentation();
         };
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
@@ -631,10 +670,13 @@ public partial class MainWindow : Window
             _enhancementWorkspacePollTimer.Stop();
             _enhancementWorkspaceGeneration++;
             Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
+            CancelOwnedEnhancementCompanionLifetime();
+            StopOwnedEnhancementCompanion();
         };
         CardsList.MouseDoubleClick += (_, _) => OpenModal();
         RowsList.MouseDoubleClick += (_, _) => OpenModal();
         SizeChanged += MainWindow_SizeChanged;
+        StateChanged += MainWindow_StateChanged;
         RefreshLandingFolderSetUi();
         RefreshPreviewTabs();
         SetPhase(landing: true);
@@ -798,7 +840,8 @@ public partial class MainWindow : Window
     {
         GridZoomAnchor? anchor = PreferredGridGeometryAnchor();
         base.OnDpiChanged(oldDpi, newDpi);
-        ConstrainWindowToCurrentWorkArea();
+        if (!_modalFullScreen)
+            ConstrainWindowToCurrentWorkArea();
         PreserveGridAnchorAfterDpiChange(anchor);
     }
 
@@ -1147,6 +1190,7 @@ public partial class MainWindow : Window
         _modalDecodeCompletion?.TrySetResult(false);
         _modalSingleClickGeneration++;
         _modalFeedbackTimer.Stop();
+        _modalFavoritePulseTimer.Stop();
         _modalChromeTransientTimer.Stop();
         _modalTransformQualityTimer.Stop();
         CancelPreviewTabHoverDecode();
@@ -1407,6 +1451,7 @@ public partial class MainWindow : Window
         int Progress,
         string? OutputPath,
         string? ErrorMessage,
+        bool CancelRequested,
         long? SourceSize,
         double? SourceMtimeMs);
 
@@ -3585,19 +3630,29 @@ public partial class MainWindow : Window
         }
     }
 
-    private void LoadEnhancedState()
+    private bool LoadEnhancedState()
     {
-        _enhancedOutputs.Clear();
-        _catalogEnhancedOutputsByPath.Clear();
-        _enhancementJobsRead = 0;
-        _enhancedCandidateCount = 0;
-        _enhancementReadOk = true;
-        _enhancementReadError = null;
-
         string path = ResolvedEnhancementJobsPath;
-        if (!File.Exists(path))
-            return;
+        var jobsInfo = new FileInfo(path);
+        if (!jobsInfo.Exists)
+        {
+            _enhancedOutputs.Clear();
+            _catalogEnhancedOutputsByPath.Clear();
+            _enhancementJobsRead = 0;
+            _enhancedCandidateCount = 0;
+            _enhancementReadOk = true;
+            _enhancementReadError = null;
+            _enhancementJobsLastWriteTimeUtc = default;
+            _enhancementJobsLength = -1;
+            return true;
+        }
 
+        var nextEnhancedOutputs = new Dictionary<string, ManagedEnhancedOutput>(
+            StringComparer.OrdinalIgnoreCase);
+        var nextCatalogOutputsByPath = new Dictionary<string, ManagedEnhancedOutput>(
+            StringComparer.OrdinalIgnoreCase);
+        int nextJobsRead = 0;
+        int nextCandidateCount = 0;
         try
         {
             using var document = JsonDocument.Parse(File.ReadAllText(path));
@@ -3605,16 +3660,14 @@ public partial class MainWindow : Window
                 !document.RootElement.TryGetProperty("jobs", out var jobsElement) ||
                 jobsElement.ValueKind != JsonValueKind.Array)
             {
-                _enhancementReadOk = false;
-                _enhancementReadError = "jobs array missing";
-                return;
+                throw new InvalidDataException("jobs array missing");
             }
 
             foreach (var job in jobsElement.EnumerateArray())
             {
                 if (job.ValueKind != JsonValueKind.Object)
                     continue;
-                _enhancementJobsRead++;
+                nextJobsRead++;
                 if (!TryGetStringProperty(job, "status", out string? status) ||
                     !string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
                     continue;
@@ -3623,21 +3676,59 @@ public partial class MainWindow : Window
                         out string resolvedSource,
                         out ManagedEnhancedOutput output,
                         out IReadOnlyList<string> catalogAliases)
-                    && !_enhancedOutputs.ContainsKey(resolvedSource))
+                    && !nextEnhancedOutputs.ContainsKey(resolvedSource))
                 {
-                    _enhancedOutputs[resolvedSource] = output;
+                    nextEnhancedOutputs[resolvedSource] = output;
                     foreach (string alias in catalogAliases)
-                        _catalogEnhancedOutputsByPath.TryAdd(alias, output);
-                    _enhancedCandidateCount++;
+                        nextCatalogOutputsByPath.TryAdd(alias, output);
+                    nextCandidateCount++;
                 }
             }
+
+            _enhancedOutputs.Clear();
+            foreach ((string source, ManagedEnhancedOutput output) in nextEnhancedOutputs)
+                _enhancedOutputs[source] = output;
+            _catalogEnhancedOutputsByPath.Clear();
+            foreach ((string alias, ManagedEnhancedOutput output) in nextCatalogOutputsByPath)
+                _catalogEnhancedOutputsByPath[alias] = output;
+            _enhancementJobsRead = nextJobsRead;
+            _enhancedCandidateCount = nextCandidateCount;
+            _enhancementReadOk = true;
+            _enhancementReadError = null;
+            jobsInfo.Refresh();
+            _enhancementJobsLastWriteTimeUtc = jobsInfo.Exists ? jobsInfo.LastWriteTimeUtc : default;
+            _enhancementJobsLength = jobsInfo.Exists ? jobsInfo.Length : -1;
+            return true;
         }
         catch (Exception ex)
         {
-            _enhancedOutputs.Clear();
-            _catalogEnhancedOutputsByPath.Clear();
             _enhancementReadOk = false;
             _enhancementReadError = ex.Message;
+            return false;
+        }
+    }
+
+    private bool RefreshEnhancedStateIfChanged()
+    {
+        try
+        {
+            var jobsInfo = new FileInfo(ResolvedEnhancementJobsPath);
+            bool changed = jobsInfo.Exists
+                ? jobsInfo.LastWriteTimeUtc != _enhancementJobsLastWriteTimeUtc
+                    || jobsInfo.Length != _enhancementJobsLength
+                : _enhancementJobsLength >= 0;
+            if (!changed)
+                return false;
+
+            // Passive disk hydration only. This never contacts the Browser API,
+            // starts Node, enqueues a job, or writes shared state.
+            return ReloadEnhancedOutputsForVisibleCatalog();
+        }
+        catch
+        {
+            // The existing validated state remains usable if another process is
+            // replacing jobs.json at the instant the modal opens.
+            return false;
         }
     }
 
@@ -3790,9 +3881,30 @@ public partial class MainWindow : Window
     private bool TryGetManagedEnhancedOutputForPath(string path, out ManagedEnhancedOutput output)
     {
         output = null!;
-        if (_enhancedOutputs.Count == 0
-            || !TryResolveEnhancementSourceIdentity(path, out string identity)
+        if (_enhancedOutputs.Count == 0)
+            return false;
+
+        if (TryGetCatalogManagedEnhancedOutputForPath(path, out output))
+            return true;
+
+        if (!TryResolveEnhancementSourceIdentity(path, out string identity)
             || !_enhancedOutputs.TryGetValue(identity, out ManagedEnhancedOutput? stored))
+        {
+            return false;
+        }
+
+        output = stored;
+        return true;
+    }
+
+    private bool TryGetCatalogManagedEnhancedOutputForPath(
+        string path,
+        out ManagedEnhancedOutput output)
+    {
+        output = null!;
+        string? alias = NormalizeCatalogEnhancementPath(path);
+        if (alias is null
+            || !_catalogEnhancedOutputsByPath.TryGetValue(alias, out ManagedEnhancedOutput? stored))
         {
             return false;
         }
@@ -4267,7 +4379,7 @@ public partial class MainWindow : Window
                     _pendingFavoriteMutations[delta.Path] = current with { DurableLevel = delta.DesiredLevel };
             }
             if (committedCurrent && _pendingFavoriteMutations.Count == 0)
-                SetTransientStatusToast("Favorites saved.");
+                ShowFavoriteChangeStatus("Favorites saved.");
             return;
         }
 
@@ -4667,7 +4779,11 @@ public partial class MainWindow : Window
                         {
                             return;
                         }
-                        tile.FlushFavoriteNotifications();
+                        if (tile.FlushFavoriteNotifications())
+                        {
+                            _lastDeferredFavoriteNotificationFlushGenerationForSmoke =
+                                mutationGeneration;
+                        }
                         _deferredFavoriteNotificationOwners.Remove(tile);
                         SyncSelectionActionSurface();
                         RefreshModalFavoriteSurface();
@@ -4679,7 +4795,7 @@ public partial class MainWindow : Window
                                 out FavoritePendingMutation? current)
                             && current.Generation == mutationGeneration)
                         {
-                            SetTransientStatusToast(status);
+                            ShowFavoriteChangeStatus(status);
                         }
                     }, DispatcherPriority.Background);
                 }
@@ -4712,10 +4828,23 @@ public partial class MainWindow : Window
 
     private void SyncFavoriteLevelReadouts(int level)
     {
-        string text = Math.Clamp(level, 0, 5).ToString(CultureInfo.InvariantCulture);
+        int normalized = Math.Clamp(level, 0, 5);
+        string text = normalized.ToString(CultureInfo.InvariantCulture);
         FavoriteLevelText.Text = text;
         ModalFavoriteLevelText.Text = text;
         AutomationProperties.SetName(ModalFavoriteLevelText, $"Favorite level {text}");
+
+        bool favorite = normalized > 0;
+        ModalFavoriteControlBorder.SetResourceReference(
+            Border.BackgroundProperty,
+            favorite ? "FavoriteSoft" : "BgTertiary");
+        ModalFavoriteControlBorder.SetResourceReference(
+            Border.BorderBrushProperty,
+            favorite ? "Favorite" : "GlassBorder");
+        string foregroundResource = favorite ? "FavoriteText" : "TextSecondary";
+        ModalFavoriteLevelText.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
+        ModalFavoriteDecreaseGlyph.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
+        ModalFavoriteIncreaseGlyph.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
     }
 
     private bool SaveFavorites()
@@ -7439,8 +7568,8 @@ public partial class MainWindow : Window
             : metadata.Settings.Count > 0
                 ? settingsText
                 : "PNG parameters loaded";
-        ModalPromptText.Text = hasPrompt ? FormatPromptTagsForDisplay(metadata!.Prompt) : "-";
         SyncModalPromptChips(hasPrompt ? metadata!.Prompt : "");
+        ModalPromptText.Text = hasPrompt ? string.Join(", ", _modalPromptChipTags) : "-";
         ModalNegativeText.Text = hasNegative ? metadata!.NegativePrompt : "-";
         CopyModalMetadataButton.IsEnabled = metadata is not null;
         CopyModalMetadataButton.ToolTip = metadata is null ? "No PNG metadata loaded" : "Copy PNG metadata";
@@ -7453,15 +7582,32 @@ public partial class MainWindow : Window
     private static List<string> ParsePromptTags(string? prompt)
     {
         var tags = new List<string>();
+        if (string.IsNullOrEmpty(prompt))
+            return tags;
+
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string rawTag in (prompt ?? "").Split(','))
+        int scanLength = Math.Min(prompt.Length, MaxModalPromptScanCharacters);
+        int segmentStart = 0;
+        for (int index = 0; index <= scanLength; index++)
         {
+            if (index < scanLength && prompt[index] != ',')
+                continue;
+
+            int segmentLength = index - segmentStart;
+            if (segmentLength <= 0 || segmentLength > MaxModalPromptTagCharacters)
+            {
+                segmentStart = index + 1;
+                continue;
+            }
+
+            string rawTag = prompt.Substring(segmentStart, segmentLength);
+            segmentStart = index + 1;
             string tag = NormalizePromptTagForDisplay(rawTag);
             if (tag.Length < 2 || tag.Contains('\n') || tag.Contains('\r'))
                 continue;
             if (seen.Add(tag))
                 tags.Add(tag);
-            if (tags.Count >= 160)
+            if (tags.Count >= MaxModalPromptTagCount)
                 break;
         }
         return tags;
@@ -7493,26 +7639,96 @@ public partial class MainWindow : Window
         if (ModalPromptChips is null)
             return;
 
-        ModalPromptChips.Children.Clear();
-        List<string> tags = ParsePromptTags(prompt);
-        ModalPromptEmptyText.Visibility = tags.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        foreach (string tag in tags)
+        if (string.Equals(_modalPromptChipSource, prompt, StringComparison.Ordinal))
         {
-            var chip = new Button
+            StartModalPromptChipRealization();
+            return;
+        }
+
+        CancelModalPromptChipRealization();
+        _modalPromptChipSource = prompt;
+        _modalPromptChipTags = ParsePromptTags(prompt);
+        _modalPromptChipNextIndex = 0;
+        ModalPromptChips.Children.Clear();
+        ModalPromptEmptyText.Visibility = _modalPromptChipTags.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        StartModalPromptChipRealization();
+    }
+
+    private bool ModalPromptChipSurfaceVisible()
+        => ModalMetadataSidebar.Visibility == Visibility.Visible
+            && ModalPromptPanel.Visibility == Visibility.Visible;
+
+    private void StartModalPromptChipRealization()
+    {
+        if (!ModalPromptChipSurfaceVisible()
+            || _modalPromptChipNextIndex >= _modalPromptChipTags.Count)
+        {
+            return;
+        }
+
+        long generation = _modalPromptChipGeneration;
+        int count = _modalPromptChipNextIndex == 0
+            ? ImmediateModalPromptChipCount
+            : ModalPromptChipBatchCount;
+        RealizeModalPromptChipBatch(generation, count);
+    }
+
+    private void RealizeModalPromptChipBatch(long generation, int count)
+    {
+        if (generation != _modalPromptChipGeneration || !ModalPromptChipSurfaceVisible())
+            return;
+
+        int end = Math.Min(_modalPromptChipNextIndex + Math.Max(1, count), _modalPromptChipTags.Count);
+        while (_modalPromptChipNextIndex < end)
+        {
+            AddModalPromptChip(_modalPromptChipTags[_modalPromptChipNextIndex]);
+            _modalPromptChipNextIndex++;
+        }
+
+        if (_modalPromptChipNextIndex >= _modalPromptChipTags.Count || _modalPromptChipRealizationScheduled)
+            return;
+
+        _modalPromptChipRealizationScheduled = true;
+        Dispatcher.BeginInvoke(
+            () =>
             {
-                Content = tag,
-                Tag = tag,
-                Style = (Style)FindResource("GhostButton"),
-                Padding = new Thickness(8, 3, 8, 3),
-                Margin = new Thickness(0, 0, 6, 6),
-                FontSize = 11.5,
-                ToolTip = $"Search for {tag}",
-            };
-            System.Windows.Automation.AutomationProperties.SetName(chip, $"Search prompt tag {tag}");
-            System.Windows.Automation.AutomationProperties.SetHelpText(chip, "Append this tag to search, close the modal, and focus search.");
-            chip.Click += ModalPromptTag_Click;
-            chip.PreviewKeyDown += ModalPromptTag_PreviewKeyDown;
-            ModalPromptChips.Children.Add(chip);
+                _modalPromptChipRealizationScheduled = false;
+                RealizeModalPromptChipBatch(generation, ModalPromptChipBatchCount);
+            },
+            DispatcherPriority.ContextIdle);
+    }
+
+    private void AddModalPromptChip(string tag)
+    {
+        var chip = new Button
+        {
+            Content = tag,
+            Tag = tag,
+            Style = (Style)FindResource("GhostButton"),
+            Padding = new Thickness(8, 3, 8, 3),
+            Margin = new Thickness(0, 0, 6, 6),
+            FontSize = 11.5,
+            ToolTip = $"Search for {tag}",
+        };
+        System.Windows.Automation.AutomationProperties.SetName(chip, $"Search prompt tag {tag}");
+        System.Windows.Automation.AutomationProperties.SetHelpText(chip, "Append this tag to search, close the modal, and focus search.");
+        chip.Click += ModalPromptTag_Click;
+        chip.PreviewKeyDown += ModalPromptTag_PreviewKeyDown;
+        ModalPromptChips.Children.Add(chip);
+    }
+
+    private void CancelModalPromptChipRealization()
+    {
+        _modalPromptChipGeneration++;
+        _modalPromptChipRealizationScheduled = false;
+    }
+
+    private void RealizeAllModalPromptChipsForSmoke()
+    {
+        while (_modalPromptChipNextIndex < _modalPromptChipTags.Count)
+        {
+            AddModalPromptChip(_modalPromptChipTags[_modalPromptChipNextIndex]);
+            _modalPromptChipNextIndex++;
         }
     }
 
@@ -8057,9 +8273,18 @@ public partial class MainWindow : Window
     {
         if (SearchWatermark is not null)
             SearchWatermark.Visibility = string.IsNullOrEmpty(SearchInput.Text) ? Visibility.Visible : Visibility.Collapsed;
+        if (ClearSearchInputButton is not null)
+            ClearSearchInputButton.Visibility = string.IsNullOrEmpty(SearchInput.Text) ? Visibility.Collapsed : Visibility.Visible;
         if (_initializing || _settingSearchQuery) return;
         ScheduleSearchFilter();
         ScheduleSearchStateSave();
+    }
+
+    private void ClearSearchInput_Click(object sender, RoutedEventArgs e)
+    {
+        SearchInput.Clear();
+        SearchInput.Focus();
+        CloseSearchHistoryAndFocusInput();
     }
 
     private void ScheduleSearchFilter()
@@ -8387,6 +8612,39 @@ public partial class MainWindow : Window
         if (_initializing || _syncingUnseenDotsControls) return;
         bool enabled = sender is CheckBox checkBox && checkBox.IsChecked == true;
         SetShowUnseenDots(enabled, persist: true);
+    }
+
+    private void FavoriteChangeNotifications_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _syncingFavoriteChangeNotifications)
+            return;
+        SetFavoriteChangeNotifications(
+            sender is CheckBox checkBox && checkBox.IsChecked == true,
+            persist: true);
+    }
+
+    private void SetFavoriteChangeNotifications(bool enabled, bool persist)
+    {
+        _showFavoriteChangeNotifications = enabled;
+        _syncingFavoriteChangeNotifications = true;
+        try
+        {
+            if (FavoriteChangeNotificationsCheckBox is not null)
+                FavoriteChangeNotificationsCheckBox.IsChecked = enabled;
+        }
+        finally
+        {
+            _syncingFavoriteChangeNotifications = false;
+        }
+
+        if (persist)
+            SaveState();
+    }
+
+    private void ShowFavoriteChangeStatus(string status)
+    {
+        if (_showFavoriteChangeNotifications)
+            SetTransientStatusToast(status);
     }
 
     private void UiLanguage_Click(object sender, RoutedEventArgs e)
@@ -9013,7 +9271,7 @@ public partial class MainWindow : Window
 
         if (RefreshFavoriteMutationSurface(selected))
             ScheduleSearchStateSave();
-        SetTransientStatusToast(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
+        ShowFavoriteChangeStatus(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
         return true;
     }
 
@@ -9056,8 +9314,14 @@ public partial class MainWindow : Window
             return false;
 
         int clamped = Math.Clamp(level, 0, 5);
+        int displayedBefore = tile.Fav;
         if (ShouldUseFavoriteWriter())
-            return QueueFavoriteLevels([(tile, clamped)], $"Set favorite level {clamped}.");
+        {
+            bool queued = QueueFavoriteLevels([(tile, clamped)], $"Set favorite level {clamped}.");
+            if (queued)
+                ShowModalFavoriteIncreaseEffect(tile, displayedBefore, clamped);
+            return queued;
+        }
 
         string key = NormalizeFavoritePath(tile.Path);
         bool hadStoredLevel = _favorites.TryGetValue(key, out int previousStoredLevel);
@@ -9081,6 +9345,7 @@ public partial class MainWindow : Window
         tile.Fav = clamped;
         if (RefreshFavoriteMutationSurface([tile]))
             ScheduleSearchStateSave();
+        ShowModalFavoriteIncreaseEffect(tile, displayedBefore, clamped);
         return true;
     }
 
@@ -9152,14 +9417,14 @@ public partial class MainWindow : Window
                 _deferredFavoriteNotificationOwners.Remove(deferredTile);
                 SyncSelectionActionSurface();
                 RefreshModalFavoriteSurface();
-                SetTransientStatusToast(status);
+                ShowFavoriteChangeStatus(status);
             }
         }
         else
         {
             if (RefreshFavoriteMutationSurface(changedTiles))
                 ScheduleSearchStateSave();
-            SetTransientStatusToast(status);
+            ShowFavoriteChangeStatus(status);
         }
         ScheduleFavoriteWriterPump();
         return true;
@@ -12992,7 +13257,9 @@ public partial class MainWindow : Window
 
     private void OpenModal()
     {
+        _ = RefreshEnhancedStateIfChanged();
         if (SelectedTile() is not Tile t) return;
+        UpdateModalPositionText(t);
         StopGalleryAutoScroll();
         bool opening = Modal.Visibility != Visibility.Visible;
         bool sourceChanged = !string.Equals(_modalSourceTilePath, t.Path, StringComparison.OrdinalIgnoreCase);
@@ -13072,6 +13339,22 @@ public partial class MainWindow : Window
             BeginModalEnhancementRefresh(t.Path);
     }
 
+    private void UpdateModalPositionText(Tile tile)
+    {
+        int total = _tiles.Count;
+        int index = total > 0 ? _tiles.IndexOf(tile) : -1;
+        int position = index >= 0 ? index + 1 : 0;
+        int digits = Math.Max(3, total.ToString(CultureInfo.InvariantCulture).Length);
+        string positionText = position.ToString($"D{digits}", CultureInfo.InvariantCulture);
+        string totalText = total.ToString($"D{digits}", CultureInfo.InvariantCulture);
+        ModalPositionText.Text = $"{positionText} / {totalText}";
+        AutomationProperties.SetName(
+            ModalPositionText,
+            total > 0 && position > 0
+                ? $"Image {position} of {total}"
+                : "No image position");
+    }
+
     private bool TryGetModalEnhancedOutput(Tile tile, out string? outputPath)
     {
         outputPath = null;
@@ -13140,7 +13423,14 @@ public partial class MainWindow : Window
         }
 
         if (ModalEnhancedToggleLabel is not null)
-            ModalEnhancedToggleLabel.Text = _modalShowingEnhanced ? "UP" : "OR";
+            ModalEnhancedToggleLabel.Text = _modalShowingEnhanced ? "Enhanced" : "Original";
+        if (ModalEnhancedToggleButton is not null)
+        {
+            string currentDisplay = _modalShowingEnhanced ? "Enhanced" : "Original";
+            AutomationProperties.SetName(
+                ModalEnhancedToggleButton,
+                $"Current display: {currentDisplay}. Toggle enhanced image output");
+        }
         if (ModalSourceLabel is not null)
             ModalSourceLabel.Text = _modalShowingEnhanced ? "Enhanced output" : "Original";
     }
@@ -13227,11 +13517,17 @@ public partial class MainWindow : Window
 
     private void CloseModal_Click(object sender, RoutedEventArgs e) => CloseModal(restoreFocus: true);
 
+    private void ToggleModalFullScreen_Click(object sender, RoutedEventArgs e)
+        => SetModalFullScreen(!_modalFullScreen);
+
     private void Modal_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
         bool enhancedAvailable = SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
         ModalContextEnhancedToggle.IsEnabled = enhancedAvailable;
         ModalContextEnhancedToggle.Header = _modalShowingEnhanced ? "Show Original" : "Show Enhanced";
+        ModalContextFullScreen.Header = _modalFullScreen
+            ? "Exit full screen (F11)"
+            : "Enter full screen (F11)";
     }
 
     private void ModalBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -13274,6 +13570,7 @@ public partial class MainWindow : Window
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
+        _modalEnhancementCancelRequested = false;
         UpdateModalEnhancementActionControls();
         _ = RefreshModalEnhancementStateAsync(sourcePath, generation, showUnavailableError: false);
     }
@@ -13377,6 +13674,8 @@ public partial class MainWindow : Window
         TryGetStringProperty(job, "sourcePath", out string? sourcePath);
         TryGetStringProperty(job, "outputPath", out string? outputPath);
         TryGetStringProperty(job, "errorMessage", out string? errorMessage);
+        bool cancelRequested = job.TryGetProperty("cancelRequested", out JsonElement cancelRequestedElement)
+            && cancelRequestedElement.ValueKind == JsonValueKind.True;
         int progress = job.TryGetProperty("progress", out JsonElement progressElement)
             && progressElement.TryGetInt32(out int parsedProgress)
             ? Math.Clamp(parsedProgress, 0, 100)
@@ -13393,7 +13692,17 @@ public partial class MainWindow : Window
                 && mtimeElement.TryGetDouble(out double parsedMtimeMs))
                 sourceMtimeMs = parsedMtimeMs;
         }
-        return new ModalEnhancementJobSnapshot(id!, sourceId ?? "", sourcePath ?? "", status!, progress, outputPath, errorMessage, sourceSize, sourceMtimeMs);
+        return new ModalEnhancementJobSnapshot(
+            id!,
+            sourceId ?? "",
+            sourcePath ?? "",
+            status!,
+            progress,
+            outputPath,
+            errorMessage,
+            cancelRequested,
+            sourceSize,
+            sourceMtimeMs);
     }
 
     private static ModalEnhancementJobSnapshot? SelectModalEnhancementJob(JsonElement payload)
@@ -13473,6 +13782,7 @@ public partial class MainWindow : Window
         _modalEnhancementJobStatus = job?.Status;
         _modalEnhancementProgress = job?.Progress ?? 0;
         _modalEnhancementError = job?.ErrorMessage;
+        _modalEnhancementCancelRequested = job?.CancelRequested == true;
 
         if (job is { Status: "succeeded", OutputPath: not null, SourceSize: not null, SourceMtimeMs: not null }
             && TryCreateManagedEnhancedOutput(tile, job.OutputPath, job.SourceSize.Value, job.SourceMtimeMs.Value, out ManagedEnhancedOutput managedOutput))
@@ -13551,6 +13861,7 @@ public partial class MainWindow : Window
 
         bool hasRealSource = SelectedTile() is { IsRealFile: true } tile && File.Exists(tile.Path);
         bool active = _modalEnhancementJobStatus is "queued" or "running";
+        bool canceling = active && _modalEnhancementCancelRequested;
         bool retryable = _modalEnhancementJobStatus is "failed" or "canceled";
         bool hasDeletableOutput = _modalEnhancementJobStatus == "succeeded"
             && !string.IsNullOrWhiteSpace(_modalEnhancementJobId)
@@ -13560,11 +13871,15 @@ public partial class MainWindow : Window
         ModalEnhanceButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
         ModalEnhanceButtonLabel.Text = _modalEnhancementRequestPending ? "Starting" : retryable ? "Retry AI" : "AI x2";
         ModalEnhanceCancelButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        ModalEnhanceCancelButton.IsEnabled = active && !_modalEnhancementRequestPending;
+        ModalEnhanceCancelButton.IsEnabled = active && !_modalEnhancementRequestPending && !canceling;
+        ModalEnhanceCancelButton.ToolTip = canceling
+            ? "Waiting for the local AI process to stop"
+            : "Cancel the running enhancement job";
         ModalEnhancedDeleteButton.Visibility = hasDeletableOutput ? Visibility.Visible : Visibility.Collapsed;
         ModalEnhancedDeleteButton.IsEnabled = hasDeletableOutput && !_modalEnhancementRequestPending;
 
         string status = _modalEnhancementRequestPending ? "AI: starting…"
+            : canceling ? "AI: canceling…"
             : _modalEnhancementJobStatus == "queued" ? "AI: queued"
             : _modalEnhancementJobStatus == "running" ? $"AI: {_modalEnhancementProgress}%"
             : _modalEnhancementJobStatus == "succeeded" ? "AI: ready"
@@ -13597,6 +13912,16 @@ public partial class MainWindow : Window
         UpdateModalEnhancementActionControls();
         try
         {
+            EnhancementApiResponse readiness = await EnsureEnhancementCompanionReadyForExplicitActionAsync(sourceIdentity);
+            if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
+                return;
+            if (!readiness.Ok)
+            {
+                _modalEnhancementError = readiness.Error;
+                SetStatusToast(readiness.Error);
+                return;
+            }
+
             bool retry = _modalEnhancementJobStatus is "failed" or "canceled"
                 && !string.IsNullOrWhiteSpace(requestJobId);
             EnhancementApiResponse response = retry
@@ -13686,8 +14011,13 @@ public partial class MainWindow : Window
                 SetStatusToast(response.Error);
                 return;
             }
-            ApplyModalEnhancementJob(tile, ParseModalEnhancementJob(jobElement));
-            ShowModalInteractionFeedback("AI enhancement canceled");
+            ModalEnhancementJobSnapshot? canceledJob = ParseModalEnhancementJob(jobElement);
+            ApplyModalEnhancementJob(tile, canceledJob);
+            ShowModalInteractionFeedback(canceledJob is { Status: "canceled" }
+                ? "AI enhancement canceled"
+                : canceledJob is { CancelRequested: true }
+                    ? "AI cancellation requested"
+                    : "AI cancellation response received");
         }
         finally
         {
@@ -13743,6 +14073,7 @@ public partial class MainWindow : Window
             _modalEnhancementJobStatus = null;
             _modalEnhancementProgress = 0;
             _modalEnhancementError = null;
+            _modalEnhancementCancelRequested = false;
             OpenModal();
             ShowModalInteractionFeedback("Enhanced output deleted; original kept");
         }
@@ -13777,6 +14108,10 @@ public partial class MainWindow : Window
         ModalPromptPanel.Visibility = activeTab == ModalMetadataPromptTab ? Visibility.Visible : Visibility.Collapsed;
         ModalNegativePanel.Visibility = activeTab == ModalMetadataNegativeTab ? Visibility.Visible : Visibility.Collapsed;
         ModalSettingsPanel.Visibility = activeTab == ModalMetadataSettingsTab ? Visibility.Visible : Visibility.Collapsed;
+        if (activeTab == ModalMetadataPromptTab)
+            StartModalPromptChipRealization();
+        else
+            CancelModalPromptChipRealization();
     }
 
     private void SetModalMetadataSidebarVisible(bool visible)
@@ -13784,6 +14119,10 @@ public partial class MainWindow : Window
         ModalMetadataSidebar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         ModalMetadataSidebarToggleButton.ToolTip = visible ? "Hide metadata sidebar" : "Show metadata sidebar";
         ModalMetadataSidebarToggleLabel.Text = visible ? ">" : "<";
+        if (visible)
+            StartModalPromptChipRealization();
+        else
+            CancelModalPromptChipRealization();
     }
 
     private void CloseModal(bool restoreFocus = false)
@@ -13791,6 +14130,8 @@ public partial class MainWindow : Window
         bool wasVisible = Modal.Visibility == Visibility.Visible;
         IInputElement? focusTarget = _modalFocusBeforeOverlay;
         _modalFocusBeforeOverlay = null;
+        if (_modalFullScreen)
+            SetModalFullScreen(false, showFeedback: false);
         CancelPendingModalSingleClick();
         EndModalPointerGesture();
         _modalCts?.Cancel();
@@ -13805,6 +14146,7 @@ public partial class MainWindow : Window
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
+        _modalEnhancementCancelRequested = false;
         _modalChromeTransientTimer.Stop();
         _modalHasPointerPosition = false;
         _modalPressedEdgeTarget = ModalEdgeTarget.None;
@@ -13815,6 +14157,8 @@ public partial class MainWindow : Window
         SetModalChromeVisible(true, showFeedback: false);
         _modalFeedbackTimer.Stop();
         ModalInteractionFeedback.Visibility = Visibility.Collapsed;
+        HideModalFavoritePulse();
+        CancelModalPromptChipRealization();
         ResetModalTransform();
         if (wasVisible && restoreFocus)
             RestoreOverlayFocus(focusTarget, preferPrimaryGallery: true);
@@ -13969,9 +14313,13 @@ public partial class MainWindow : Window
 
     private (double MaxX, double MaxY) ModalPanLimits()
     {
-        double width = ModalImage?.ActualWidth > 0 ? ModalImage.ActualWidth : 440;
-        double height = ModalImage?.ActualHeight > 0 ? ModalImage.ActualHeight : 640;
-        return (Math.Max(0, width * (_modalZoom - 1) / 2), Math.Max(0, height * (_modalZoom - 1) / 2));
+        double imageWidth = ModalImage?.ActualWidth > 0 ? ModalImage.ActualWidth : 440;
+        double imageHeight = ModalImage?.ActualHeight > 0 ? ModalImage.ActualHeight : 640;
+        double viewportWidth = ModalImageArea?.ActualWidth > 0 ? ModalImageArea.ActualWidth : imageWidth;
+        double viewportHeight = ModalImageArea?.ActualHeight > 0 ? ModalImageArea.ActualHeight : imageHeight;
+        return (
+            Math.Max(0, ((imageWidth * _modalZoom) - viewportWidth) / 2),
+            Math.Max(0, ((imageHeight * _modalZoom) - viewportHeight) / 2));
     }
 
     private void ClampModalPan()
@@ -14098,6 +14446,15 @@ public partial class MainWindow : Window
 
     private void ModalImage_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (Modal.Visibility != Visibility.Visible)
+            return;
+        if (e.OriginalSource is DependencyObject target && IsModalChromeInteractionTarget(target))
+            return;
+
+        Point start = e.GetPosition(ModalImageArea);
+        if (!IsPointInsideTransformedModalImage(start))
+            return;
+
         CancelPendingModalSingleClick();
         if (e.ClickCount == 2 && ToggleModalMetadataSidebarFromImageDoubleClick())
         {
@@ -14106,11 +14463,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (Modal.Visibility != Visibility.Visible)
-            return;
-
         BeginModalPointerInteraction();
-        Point start = e.GetPosition(ModalImage);
         _modalPointerStartPoint = start;
         _modalPointerMoved = false;
         if (_modalZoom > 1)
@@ -14118,7 +14471,7 @@ public partial class MainWindow : Window
             _modalPanStartPoint = start;
             _modalPanStartOffset = new Vector(_modalPanX, _modalPanY);
         }
-        ModalImage.CaptureMouse();
+        Mouse.Capture(ModalImageArea, CaptureMode.SubTree);
         e.Handled = true;
     }
 
@@ -14133,10 +14486,10 @@ public partial class MainWindow : Window
 
     private void ModalImage_MouseMove(object sender, MouseEventArgs e)
     {
-        if (!_modalPointerStartPoint.HasValue || !ModalImage.IsMouseCaptured)
+        if (!_modalPointerStartPoint.HasValue || !ReferenceEquals(Mouse.Captured, ModalImageArea))
             return;
 
-        Point current = e.GetPosition(ModalImage);
+        Point current = e.GetPosition(ModalImageArea);
         Vector delta = current - _modalPointerStartPoint.Value;
         if (Math.Abs(delta.X) >= SystemParameters.MinimumHorizontalDragDistance
             || Math.Abs(delta.Y) >= SystemParameters.MinimumVerticalDragDistance)
@@ -14158,7 +14511,10 @@ public partial class MainWindow : Window
 
     private void ModalImage_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        Point end = e.GetPosition(ModalImage);
+        if (!_modalPointerStartPoint.HasValue || !ReferenceEquals(Mouse.Captured, ModalImageArea))
+            return;
+
+        Point end = e.GetPosition(ModalImageArea);
         Point? start = _modalPointerStartPoint;
         bool moved = _modalPointerMoved;
         EndModalPointerGesture();
@@ -14176,8 +14532,8 @@ public partial class MainWindow : Window
     private void EndModalPan()
     {
         _modalPanStartPoint = null;
-        if (ModalImage.IsMouseCaptured)
-            ModalImage.ReleaseMouseCapture();
+        if (ReferenceEquals(Mouse.Captured, ModalImageArea))
+            ModalImageArea.ReleaseMouseCapture();
     }
 
     private void EndModalPointerGesture()
@@ -14600,10 +14956,6 @@ public partial class MainWindow : Window
             imageRectangle = ModalVisual
                 .TransformToAncestor(ModalImageArea)
                 .TransformBounds(new Rect(new Point(0, 0), ModalVisual.RenderSize));
-            Rect imageClip = ModalImage
-                .TransformToAncestor(ModalImageArea)
-                .TransformBounds(new Rect(new Point(0, 0), ModalImage.RenderSize));
-            imageRectangle.Intersect(imageClip);
             imageRectangle.Intersect(new Rect(0, 0, ModalImageArea.ActualWidth, ModalImageArea.ActualHeight));
             return !imageRectangle.IsEmpty
                 && imageRectangle.Width > 0
@@ -14825,6 +15177,72 @@ public partial class MainWindow : Window
         ModalInteractionFeedback.Visibility = Visibility.Visible;
         _modalFeedbackTimer.Stop();
         _modalFeedbackTimer.Start();
+    }
+
+    private void ShowModalFavoriteIncreaseEffect(Tile tile, int previousLevel, int currentLevel)
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || currentLevel <= previousLevel
+            || ModalChromeEffectivelyVisible
+            || !string.Equals(_modalSourceTilePath, tile.Path, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        ModalFavoritePulse.BeginAnimation(OpacityProperty, null);
+        ModalFavoritePulseScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        ModalFavoritePulseScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        ModalFavoritePulse.Opacity = 1;
+        ModalFavoritePulseScale.ScaleX = 1;
+        ModalFavoritePulseScale.ScaleY = 1;
+        ModalFavoritePulseLevelText.Text = currentLevel.ToString(CultureInfo.InvariantCulture);
+        AutomationProperties.SetName(ModalFavoritePulse, $"Favorite level increased to {currentLevel}");
+        ModalFavoritePulse.Visibility = Visibility.Visible;
+
+        if (!ReducedMotionEnabled)
+        {
+            var scale = new DoubleAnimationUsingKeyFrames
+            {
+                FillBehavior = FillBehavior.Stop,
+            };
+            scale.KeyFrames.Add(new LinearDoubleKeyFrame(0.72, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            scale.KeyFrames.Add(new EasingDoubleKeyFrame(
+                1.12,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150)),
+                new QuadraticEase { EasingMode = EasingMode.EaseOut }));
+            scale.KeyFrames.Add(new EasingDoubleKeyFrame(
+                1,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(280)),
+                new QuadraticEase { EasingMode = EasingMode.EaseInOut }));
+            ModalFavoritePulseScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
+            ModalFavoritePulseScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+
+            ModalFavoritePulse.BeginAnimation(
+                OpacityProperty,
+                new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(270))
+                {
+                    BeginTime = TimeSpan.FromMilliseconds(350),
+                    FillBehavior = FillBehavior.Stop,
+                });
+        }
+
+        _modalFavoritePulseTimer.Stop();
+        _modalFavoritePulseTimer.Start();
+    }
+
+    private void HideModalFavoritePulse()
+    {
+        _modalFavoritePulseTimer.Stop();
+        if (ModalFavoritePulse is null)
+            return;
+
+        ModalFavoritePulse.BeginAnimation(OpacityProperty, null);
+        ModalFavoritePulseScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        ModalFavoritePulseScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        ModalFavoritePulse.Opacity = 1;
+        ModalFavoritePulseScale.ScaleX = 1;
+        ModalFavoritePulseScale.ScaleY = 1;
+        ModalFavoritePulse.Visibility = Visibility.Collapsed;
     }
 
     private void ModalPrevious_Click(object sender, RoutedEventArgs e)
@@ -15771,6 +16189,7 @@ public partial class MainWindow : Window
         BeginThumbnailStatusBorderEdit();
         ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
+        SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
         RefreshSharedDataSettings();
         DiagnosticsText.Text = BuildDiagnosticsText();
         DiagnosticsStatusText.Text = "Read-only diagnostics. Copy excludes paths, image metadata, prompts, and personal state.";
@@ -16924,6 +17343,9 @@ public partial class MainWindow : Window
     {
         var state = ReadState();
         SetUiLanguage(state?.UiLanguage, persist: false);
+        SetFavoriteChangeNotifications(
+            state?.ShowFavoriteChangeNotifications ?? true,
+            persist: false);
         SetAccessibilityPreferences(
             state?.ReducedMotionOverride,
             state?.ReducedTransparencyOverride,
@@ -17113,6 +17535,7 @@ public partial class MainWindow : Window
                 ShowUnfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true,
                 FavoriteFilterLevels = _favoriteFilterLevels.Count > 0 ? _favoriteFilterLevels.OrderBy(static level => level).ToList() : null,
                 ShowUnseenDots = _showUnseenDots,
+                ShowFavoriteChangeNotifications = _showFavoriteChangeNotifications,
                 ConfirmBeforeDelete = _confirmBeforeDelete,
                 FoldersSectionExpanded = _foldersSectionExpanded,
                 ModalFilmstripOpen = _modalFilmstripOpen,
@@ -17525,10 +17948,23 @@ public partial class MainWindow : Window
         }
 
         bool modalVisible = Modal.Visibility == Visibility.Visible;
+        IInputElement? shortcutFocusedElement = _shortcutFocusOverrideForSmoke ?? Keyboard.FocusedElement;
         bool modalNativeInputFocused = modalVisible
-            && (IsModalNativeInputFocused(e.OriginalSource) || IsModalNativeInputFocused(Keyboard.FocusedElement));
+            && (IsModalNativeInputFocused(e.OriginalSource) || IsModalNativeInputFocused(shortcutFocusedElement));
         bool modalActionButtonFocused = modalVisible
-            && (IsModalActionButtonFocused(e.OriginalSource) || IsModalActionButtonFocused(Keyboard.FocusedElement));
+            && (IsModalActionButtonFocused(e.OriginalSource) || IsModalActionButtonFocused(shortcutFocusedElement));
+        if (modalVisible && key == Key.F11 && modifiers == ModifierKeys.None)
+        {
+            SetModalFullScreen(!_modalFullScreen);
+            e.Handled = true;
+            return;
+        }
+        if (modalVisible && _modalFullScreen && key == Key.Escape && modifiers == ModifierKeys.None)
+        {
+            SetModalFullScreen(false);
+            e.Handled = true;
+            return;
+        }
         // Modal close remains reachable even when a child Button owns focus.
         // Settings and Recycle confirmation use the fixed Escape rescue above.
         if (Modal.Visibility == Visibility.Visible
@@ -17558,7 +17994,7 @@ public partial class MainWindow : Window
         }
 
         if ((IsGlobalShortcutInputFocused(e.OriginalSource)
-                || IsGlobalShortcutInputFocused(Keyboard.FocusedElement))
+                || IsGlobalShortcutInputFocused(shortcutFocusedElement))
             && !modalActionButtonFocused)
         {
             base.OnPreviewKeyDown(e);
@@ -17823,9 +18259,18 @@ public partial class MainWindow : Window
         {
             if (IsModalImageWheelSource(e.OriginalSource as DependencyObject))
             {
-                Point anchor = e.GetPosition(ModalImage);
-                AdjustModalZoom(ModalWheelZoomMultiplier(e.Delta), anchor);
-                e.Handled = true;
+                Point viewportAnchor = _modalWheelViewportAnchorForSmoke
+                    ?? e.GetPosition(ModalImageArea);
+                if (IsPointInsideTransformedModalImage(viewportAnchor))
+                {
+                    Point imageAnchor = ModalImageArea.TranslatePoint(viewportAnchor, ModalImage);
+                    AdjustModalZoom(ModalWheelZoomMultiplier(e.Delta), imageAnchor);
+                    e.Handled = true;
+                }
+                else
+                {
+                    base.OnPreviewMouseWheel(e);
+                }
             }
             else
             {
@@ -17859,6 +18304,99 @@ public partial class MainWindow : Window
     // ─────────── Window chrome buttons ───────────
     private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
+    private bool SetModalFullScreen(bool enabled, bool showFeedback = true)
+    {
+        if (enabled && Modal.Visibility != Visibility.Visible)
+            return false;
+        if (_modalFullScreen == enabled)
+            return true;
+
+        if (enabled)
+        {
+            _modalFullScreenRestoreBounds = WindowState == WindowState.Normal
+                ? new Rect(Left, Top, Width, Height)
+                : RestoreBounds;
+            _modalFullScreenRestoreFakeMaximized = _fakeMaximized;
+            _modalFullScreenRestoreWindowState = WindowState;
+            _modalFullScreenRestoreResizeMode = ResizeMode;
+            _modalFullScreenRestoreMinWidth = MinWidth;
+            _modalFullScreenRestoreMinHeight = MinHeight;
+
+            Rect monitor = ResolveSafeCurrentMonitorBounds();
+            _modalFullScreen = true;
+            _fakeMaximized = false;
+            WindowState = WindowState.Normal;
+            ResizeMode = ResizeMode.NoResize;
+            MinWidth = 1;
+            MinHeight = 1;
+            Left = monitor.Left;
+            Top = monitor.Top;
+            Width = monitor.Width;
+            Height = monitor.Height;
+            // Maximized + borderless is the Windows fullscreen contract that
+            // covers the selected display, including its taskbar area.
+            WindowState = WindowState.Maximized;
+        }
+        else
+        {
+            _modalFullScreen = false;
+            WindowState = WindowState.Normal;
+            ResizeMode = _modalFullScreenRestoreResizeMode;
+            MinWidth = _modalFullScreenRestoreMinWidth;
+            MinHeight = _modalFullScreenRestoreMinHeight;
+            if (_modalFullScreenRestoreFakeMaximized)
+            {
+                Rect workArea = ResolveSafeCurrentMonitorWorkArea();
+                ApplyEffectiveWindowMinimums(workArea);
+                Left = workArea.Left;
+                Top = workArea.Top;
+                Width = workArea.Width;
+                Height = workArea.Height;
+                _fakeMaximized = true;
+            }
+            else
+            {
+                Rect restored = _modalFullScreenRestoreBounds;
+                Left = restored.Left;
+                Top = restored.Top;
+                Width = restored.Width;
+                Height = restored.Height;
+                _fakeMaximized = false;
+                if (_modalFullScreenRestoreWindowState != WindowState.Minimized)
+                    WindowState = _modalFullScreenRestoreWindowState;
+            }
+        }
+
+        UpdateModalFullScreenPresentation();
+        UpdateWindowMaximizePresentation();
+        Dispatcher.BeginInvoke(() =>
+        {
+            UpdateLayout();
+            UpdateModalFit();
+            ScheduleModalFitUpdate();
+        }, DispatcherPriority.Loaded);
+        if (showFeedback)
+            ShowModalInteractionFeedback(enabled ? "Full screen" : "Windowed");
+        return true;
+    }
+
+    private void UpdateModalFullScreenPresentation()
+    {
+        ModalWindowCaptionControls.Visibility = _modalFullScreen
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        ModalTopBar.Margin = _modalFullScreen
+            ? new Thickness(12, 7, 12, 7)
+            : new Thickness(12, 7, 150, 7);
+        string label = _modalFullScreen ? "Exit full screen" : "Enter full screen";
+        ModalFullScreenButton.ToolTip = $"{label} (F11)";
+        AutomationProperties.SetName(ModalFullScreenButton, label);
+        ModalContextFullScreen.Header = $"{label} (F11)";
+        ModalFullScreenIcon.Data = Geometry.Parse(_modalFullScreen
+            ? "M3,9 H9 V3 M15,3 V9 H21 M21,15 H15 V21 M9,21 V15 H3"
+            : "M3,9 V3 H9 M15,3 H21 V9 M21,15 V21 H15 M9,21 H3 V15");
+    }
+
     private void Maximize_Click(object sender, RoutedEventArgs e)
     {
         // Fake-maximize to the working area so the taskbar is never covered and
@@ -17887,6 +18425,92 @@ public partial class MainWindow : Window
             Height = workArea.Height;
             _fakeMaximized = true;
         }
+        UpdateWindowMaximizePresentation();
+    }
+
+    private void MainWindow_StateChanged(object? sender, EventArgs e)
+    {
+        if (_normalizingNativeMaximize)
+            return;
+
+        if (!_modalFullScreen && WindowState == WindowState.Maximized)
+        {
+            Rect workArea = ResolveSafeCurrentMonitorWorkArea();
+            Rect nativeRestoreBounds = RestoreBounds;
+            bool restoreRequested = _fakeMaximized;
+            _normalizingNativeMaximize = true;
+            try
+            {
+                WindowState = WindowState.Normal;
+                ApplyEffectiveWindowMinimums(workArea);
+                if (restoreRequested)
+                {
+                    Rect restored = NormalizeRestoreBounds(
+                        _restoreBounds,
+                        workArea,
+                        DesignWindowMinWidth,
+                        DesignWindowMinHeight);
+                    Left = restored.Left;
+                    Top = restored.Top;
+                    Width = restored.Width;
+                    Height = restored.Height;
+                    _fakeMaximized = false;
+                }
+                else
+                {
+                    _restoreBounds = NormalizeRestoreBounds(
+                        nativeRestoreBounds,
+                        workArea,
+                        DesignWindowMinWidth,
+                        DesignWindowMinHeight);
+                    Left = workArea.Left;
+                    Top = workArea.Top;
+                    Width = workArea.Width;
+                    Height = workArea.Height;
+                    _fakeMaximized = true;
+                }
+            }
+            finally
+            {
+                _normalizingNativeMaximize = false;
+            }
+        }
+
+        UpdateWindowMaximizePresentation();
+    }
+
+    private void UpdateWindowMaximizePresentation()
+    {
+        bool restore = _fakeMaximized || (!_modalFullScreen && WindowState == WindowState.Maximized);
+        Geometry geometry = Geometry.Parse(restore ? RestoreWindowIconGeometry : MaximizeWindowIconGeometry);
+        MaximizeIcon.Data = geometry;
+        LandingMaximizeIcon.Data = geometry;
+        ModalMaximizeIcon.Data = geometry;
+
+        string label = restore ? "Restore window" : "Maximize window";
+        MaxButton.ToolTip = label;
+        LandingMaximizeButton.ToolTip = label;
+        ModalMaximizeButton.ToolTip = label;
+        AutomationProperties.SetName(MaxButton, label);
+        AutomationProperties.SetName(LandingMaximizeButton, label);
+        AutomationProperties.SetName(ModalMaximizeButton, label);
+    }
+
+    private bool WindowMaximizePresentationMatches(bool restore)
+    {
+        string expectedGeometry = Geometry.Parse(
+            restore ? RestoreWindowIconGeometry : MaximizeWindowIconGeometry)
+            .ToString(CultureInfo.InvariantCulture);
+        string expectedLabel = restore ? "Restore window" : "Maximize window";
+        return new[] { MaximizeIcon, LandingMaximizeIcon, ModalMaximizeIcon }
+                .All(path => string.Equals(
+                    path.Data?.ToString(CultureInfo.InvariantCulture),
+                    expectedGeometry,
+                    StringComparison.Ordinal))
+            && new[] { MaxButton, LandingMaximizeButton, ModalMaximizeButton }
+                .All(button =>
+                    string.Equals(button.ToolTip?.ToString(), expectedLabel, StringComparison.Ordinal)
+                    && string.Equals(AutomationProperties.GetName(button), expectedLabel, StringComparison.Ordinal));
     }
 
     private void ApplyEffectiveWindowMinimums(Rect workArea)
@@ -17957,6 +18581,30 @@ public partial class MainWindow : Window
         return SystemParameters.WorkArea;
     }
 
+    private Rect ResolveSafeCurrentMonitorBounds()
+    {
+        try
+        {
+            Rect bounds = _currentMonitorBounds();
+            if (!bounds.IsEmpty
+                && double.IsFinite(bounds.Left) && double.IsFinite(bounds.Top)
+                && double.IsFinite(bounds.Width) && double.IsFinite(bounds.Height)
+                && bounds.Width > 0 && bounds.Height > 0)
+            {
+                return bounds;
+            }
+        }
+        catch
+        {
+            // Keep fullscreen reversible even if monitor discovery fails.
+        }
+
+        Rect workArea = ResolveSafeCurrentMonitorWorkArea();
+        return workArea.IsEmpty
+            ? new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight)
+            : workArea;
+    }
+
     private Rect ResolveCurrentMonitorWorkArea()
     {
         nint windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
@@ -17974,6 +18622,26 @@ public partial class MainWindow : Window
             ?? Matrix.Identity;
         Point topLeft = fromDevice.Transform(new Point(info.WorkArea.Left, info.WorkArea.Top));
         Point bottomRight = fromDevice.Transform(new Point(info.WorkArea.Right, info.WorkArea.Bottom));
+        return new Rect(topLeft, bottomRight);
+    }
+
+    private Rect ResolveCurrentMonitorBounds()
+    {
+        nint windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (windowHandle == 0)
+            return new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+        nint monitor = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
+        if (monitor == 0)
+            return new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+
+        var info = new NativeMonitorInfo { Size = (uint)Marshal.SizeOf<NativeMonitorInfo>() };
+        if (!GetMonitorInfo(monitor, ref info))
+            return new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+
+        Matrix fromDevice = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice
+            ?? Matrix.Identity;
+        Point topLeft = fromDevice.Transform(new Point(info.MonitorArea.Left, info.MonitorArea.Top));
+        Point bottomRight = fromDevice.Transform(new Point(info.MonitorArea.Right, info.MonitorArea.Bottom));
         return new Rect(topLeft, bottomRight);
     }
 
@@ -18010,6 +18678,7 @@ public partial class MainWindow : Window
     public Size EffectiveWindowMinimumForSmoke => new(MinWidth, MinHeight);
     public bool FakeMaximizedForSmoke => _fakeMaximized;
     public void SetCurrentMonitorWorkAreaForSmoke(Rect area) => _currentMonitorWorkArea = () => area;
+    public void SetCurrentMonitorBoundsForSmoke(Rect bounds) => _currentMonitorBounds = () => bounds;
     public void SetThrowingMonitorWorkAreaForSmoke() => _currentMonitorWorkArea = () => throw new InvalidOperationException("injected monitor lookup failure");
     public void ResetCurrentMonitorWorkAreaForSmoke() => _currentMonitorWorkArea = ResolveCurrentMonitorWorkArea;
     public Rect ConstrainWindowToCurrentWorkAreaForSmoke()
@@ -19221,6 +19890,8 @@ public partial class MainWindow : Window
     public int FavoriteStoreCountForSmoke => _favorites.Count(static item => item.Value > 0);
     public int SeenStoreCountForSmoke => _seenPaths.Count;
     public int EnhancedStoreCountForSmoke => _enhancedOutputs.Count;
+    public bool RefreshEnhancedStateIfChangedForSmoke()
+        => RefreshEnhancedStateIfChanged();
     internal bool InjectCatalogEnhancedStateForSmoke(string fileName)
     {
         try
@@ -19232,10 +19903,12 @@ public partial class MainWindow : Window
                 return false;
 
             string sourceIdentity = Path.GetFullPath(tile.Path);
-            _enhancedOutputs[sourceIdentity] = new ManagedEnhancedOutput(
+            var output = new ManagedEnhancedOutput(
                 sourceIdentity,
                 0,
                 0);
+            _enhancedOutputs[sourceIdentity] = output;
+            _catalogEnhancedOutputsByPath[sourceIdentity] = output;
             return true;
         }
         catch
@@ -19245,6 +19918,9 @@ public partial class MainWindow : Window
     }
     public int FavoriteLevelForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Fav ?? -1;
+    public long FavoriteMutationGenerationForSmoke => _favoriteMutationGeneration;
+    public long LastDeferredFavoriteNotificationFlushGenerationForSmoke
+        => _lastDeferredFavoriteNotificationFlushGenerationForSmoke;
     public bool FavoriteNotificationsPendingForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile =>
             string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))
@@ -19253,6 +19929,7 @@ public partial class MainWindow : Window
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Unseen == true;
     public bool EnhancedForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Enhanced == true;
+    public int EnhancedTileCountForSmoke => _allTiles.Count(static tile => tile.Enhanced);
     public int EnhancementJobsReadForSmoke => _enhancementJobsRead;
     public int EnhancedCandidateCountForSmoke => _enhancedCandidateCount;
     public bool EnhancementReadOkForSmoke => _enhancementReadOk;
@@ -19410,14 +20087,59 @@ public partial class MainWindow : Window
         => Math.Max(0, FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.FirstRealizedIndex ?? 0);
     public int GridWindowEndIndexForSmoke
         => Math.Max(GridWindowStartIndexForSmoke, (FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.LastRealizedIndex ?? -1) + 1);
-    public bool FocusSearchInputForSmoke() => SearchInput.Focus();
+    public bool FocusSearchInputForSmoke()
+    {
+        _ = SearchInput.Focus();
+        _shortcutFocusOverrideForSmoke = SearchInput;
+        return IsGlobalShortcutInputFocused(SearchInput);
+    }
     public bool SearchWatermarkVisibleForSmoke => SearchWatermark.Visibility == Visibility.Visible;
+    public bool ClearSearchButtonContractForSmoke
+    {
+        get
+        {
+            SearchInput.Text = "clear-me";
+            bool revealed = ClearSearchInputButton.Visibility == Visibility.Visible
+                && string.Equals(AutomationProperties.GetName(ClearSearchInputButton), "Clear search input", StringComparison.Ordinal);
+            ClearSearchInputButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, ClearSearchInputButton));
+            return revealed
+                && string.IsNullOrEmpty(SearchInput.Text)
+                && ClearSearchInputButton.Visibility == Visibility.Collapsed
+                && SearchInput.IsKeyboardFocusWithin;
+        }
+    }
     public bool SearchAutomationHelpTextForSmoke => string.Equals(
         AutomationProperties.GetHelpText(SearchInput),
         "Search filenames and prompts. Separate terms with commas. Focus or click to show shared search history.",
         StringComparison.Ordinal);
     public bool DatePickerAutomationNamesForSmoke => string.Equals(AutomationProperties.GetName(DateFromInput), "From date", StringComparison.Ordinal)
         && string.Equals(AutomationProperties.GetName(DateToInput), "To date", StringComparison.Ordinal);
+    public bool DatePickerCalendarContrastForSmoke
+    {
+        get
+        {
+            DateFromInput.ApplyTemplate();
+            if (DateFromInput.Template.FindName("PART_Calendar", DateFromInput) is not System.Windows.Controls.Calendar calendar
+                || calendar.Background is not SolidColorBrush background
+                || calendar.Foreground is not SolidColorBrush foreground)
+            {
+                return false;
+            }
+
+            Color bg = background.Color;
+            Color fg = foreground.Color;
+            int channelDifference = Math.Abs(fg.R - bg.R)
+                + Math.Abs(fg.G - bg.G)
+                + Math.Abs(fg.B - bg.B);
+            return channelDifference >= 180
+                && calendar.Resources[SystemColors.WindowBrushKey] is SolidColorBrush windowBrush
+                && calendar.Resources[SystemColors.WindowTextBrushKey] is SolidColorBrush windowTextBrush
+                && windowBrush.Color != windowTextBrush.Color
+                && ReferenceEquals(calendar.CalendarDayButtonStyle, TryFindResource("DarkCalendarDayButtonStyle"))
+                && ReferenceEquals(calendar.CalendarButtonStyle, TryFindResource("DarkCalendarButtonStyle"))
+                && ReferenceEquals(calendar.CalendarItemStyle, TryFindResource("DarkCalendarItemStyle"));
+        }
+    }
     public bool FocusCardsListForSmoke() => CardsList.Focus();
     public bool FocusRowsListForSmoke() => RowsList.Focus();
     public bool FocusRightPreviewActionForSmoke() => FavoriteIncreaseButton.Focus();
@@ -19674,7 +20396,19 @@ public partial class MainWindow : Window
     }
 
     public bool InvokeModalImageMouseWheelForSmoke(int delta)
-        => InvokePreviewMouseWheelForSmoke(delta, ModifierKeys.None, ModalBitmap);
+    {
+        _modalWheelViewportAnchorForSmoke = new Point(
+            Math.Max(0, ModalImageArea.ActualWidth / 2),
+            Math.Max(0, ModalImageArea.ActualHeight / 2));
+        try
+        {
+            return InvokePreviewMouseWheelForSmoke(delta, ModifierKeys.None, ModalBitmap);
+        }
+        finally
+        {
+            _modalWheelViewportAnchorForSmoke = null;
+        }
+    }
 
     public bool InvokeModalMetadataMouseWheelForSmoke(int delta)
         => InvokePreviewMouseWheelForSmoke(delta, ModifierKeys.None, ModalMetadataStatusText);
@@ -20224,6 +20958,21 @@ public partial class MainWindow : Window
     public bool ShowFavoritesOnlyForSmoke => FavoriteOnlyFilter?.IsChecked == true;
     public bool ShowUnfavoriteOnlyForSmoke => UnfavoriteOnlyFilter?.IsChecked == true;
     public bool ShowUnseenDotsForSmoke => _showUnseenDots;
+    public bool ShowFavoriteChangeNotificationsForSmoke => _showFavoriteChangeNotifications;
+    public bool FavoriteChangeNotificationsCheckedForSmoke
+        => FavoriteChangeNotificationsCheckBox.IsChecked == true;
+    public bool FavoriteChangeNotificationsSurfaceContractForSmoke
+        => string.Equals(
+                AutomationProperties.GetName(FavoriteChangeNotificationsCheckBox),
+                "Show favorite change notifications",
+                StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(FavoriteChangeNotificationsCheckBox.Content?.ToString());
+    public bool SetFavoriteChangeNotificationsForSmoke(bool enabled)
+    {
+        SetFavoriteChangeNotifications(enabled, persist: true);
+        return _showFavoriteChangeNotifications == enabled
+            && FavoriteChangeNotificationsCheckBox.IsChecked == enabled;
+    }
     public bool SidebarUnseenDotsCheckedForSmoke => ShowUnseenDots.IsChecked == true;
     public bool AppSettingsUnseenDotsCheckedForSmoke => AppSettingsUnseenDotsCheckBox.IsChecked == true;
     public bool UnseenDotsSurfaceContractForSmoke
@@ -20772,6 +21521,100 @@ public partial class MainWindow : Window
             && ModalImageAreaCoversWindowForSmoke
             && ModalImageWithinAreaForSmoke
             && ModalImageTouchesFitEdgeForSmoke;
+    public bool ModalPositionCounterContractForSmoke
+    {
+        get
+        {
+            int total = _tiles.Count;
+            int index = SelectedTile() is Tile tile ? _tiles.IndexOf(tile) : -1;
+            int position = index >= 0 ? index + 1 : 0;
+            int digits = Math.Max(3, total.ToString(CultureInfo.InvariantCulture).Length);
+            string expected = $"{position.ToString($"D{digits}", CultureInfo.InvariantCulture)} / {total.ToString($"D{digits}", CultureInfo.InvariantCulture)}";
+            return string.Equals(ModalPositionText.Text, expected, StringComparison.Ordinal)
+                && string.Equals(
+                    AutomationProperties.GetName(ModalPositionText),
+                    total > 0 && position > 0 ? $"Image {position} of {total}" : "No image position",
+                    StringComparison.Ordinal);
+        }
+    }
+    public bool ModalFullCanvasInteractionContractForSmoke()
+    {
+        if (Modal.Visibility != Visibility.Visible)
+            return false;
+
+        UpdateLayout();
+        bool clipping = ModalImageArea.ClipToBounds && !ModalImage.ClipToBounds;
+        bool chromeRouting = IsModalChromeInteractionTarget(ModalPreviousButton)
+            && IsModalChromeInteractionTarget(ModalNextButton)
+            && IsModalChromeInteractionTarget(ModalMetadataSidebar)
+            && !IsModalChromeInteractionTarget(ModalBitmap);
+        bool captured = Mouse.Capture(ModalImageArea, CaptureMode.SubTree)
+            && ReferenceEquals(Mouse.Captured, ModalImageArea);
+        if (ReferenceEquals(Mouse.Captured, ModalImageArea))
+            ModalImageArea.ReleaseMouseCapture();
+
+        bool zoomed = SetModalZoom(2, animate: false);
+        UpdateLayout();
+        (double maxX, double maxY) = ModalPanLimits();
+        bool viewportAwarePan = maxX > 0 || maxY > 0;
+        bool transformedImageAvailable = TryGetTransformedModalImageRectangle(out Rect transformed)
+            && transformed.Width > 0
+            && transformed.Height > 0
+            && transformed.Left >= -0.5
+            && transformed.Top >= -0.5
+            && transformed.Right <= ModalImageArea.ActualWidth + 0.5
+            && transformed.Bottom <= ModalImageArea.ActualHeight + 0.5;
+        ResetModalTransform(_modalTransformPath);
+        return clipping && chromeRouting && captured && zoomed && viewportAwarePan && transformedImageAvailable;
+    }
+    public bool ModalFullScreenForSmoke => _modalFullScreen;
+    public bool ToggleModalFullScreenForSmoke() => SetModalFullScreen(!_modalFullScreen);
+    public bool ModalFullScreenContractForSmoke
+        => _modalFullScreen
+            && WindowState == WindowState.Maximized
+            && ResizeMode == ResizeMode.NoResize
+            && ModalWindowCaptionControls.Visibility == Visibility.Collapsed
+            && ModalImageAreaCoversWindowForSmoke
+            && string.Equals(
+                AutomationProperties.GetName(ModalFullScreenButton),
+                "Exit full screen",
+                StringComparison.Ordinal)
+            && ModalFullScreenButton.ToolTip?.ToString()?.Contains("F11", StringComparison.Ordinal) == true;
+    public bool ModalOverlayDoesNotReduceImageAreaForSmoke()
+    {
+        if (Modal.Visibility != Visibility.Visible)
+            return false;
+
+        bool previousMetadata = ModalMetadataSidebar.Visibility == Visibility.Visible;
+        bool previousFilmstrip = _modalFilmstripOpen;
+        bool previousChrome = _modalManualChromeVisible;
+        try
+        {
+            SetModalMetadataSidebarVisible(true);
+            SetModalFilmstripOpen(true, persist: false);
+            SetModalChromeVisible(true, showFeedback: false);
+            UpdateLayout();
+            return ModalImageAreaCoversWindowForSmoke
+                && ModalImageWithinAreaForSmoke;
+        }
+        finally
+        {
+            SetModalMetadataSidebarVisible(previousMetadata);
+            SetModalFilmstripOpen(previousFilmstrip, persist: false);
+            SetModalChromeVisible(previousChrome, showFeedback: false);
+            UpdateLayout();
+        }
+    }
+    public bool ModalFavoriteNeutralSurfaceForSmoke
+        => SelectedTile()?.Fav == 0
+            && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("BgTertiary"))
+            && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("GlassBorder"))
+            && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("TextSecondary"));
+    public bool ModalFavoriteActiveSurfaceForSmoke
+        => SelectedTile()?.Fav > 0
+            && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("FavoriteSoft"))
+            && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("Favorite"))
+            && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("FavoriteText"));
     public bool ModalWindowCaptionControlsContractForSmoke
         => Modal.Visibility == Visibility.Visible
             && ModalWindowCaptionControls.Visibility == Visibility.Visible
@@ -20799,15 +21642,73 @@ public partial class MainWindow : Window
         bool before = _fakeMaximized;
         ModalMaximizeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, ModalMaximizeButton));
         bool toggled = _fakeMaximized != before;
+        bool firstPresentation = WindowMaximizePresentationMatches(_fakeMaximized);
+        Rect workArea = ResolveSafeCurrentMonitorWorkArea();
+        Rect maximized = WindowBoundsForSmoke;
+        bool insideWorkArea = !_fakeMaximized
+            || (maximized.Left >= workArea.Left - 0.5
+                && maximized.Top >= workArea.Top - 0.5
+                && maximized.Right <= workArea.Right + 0.5
+                && maximized.Bottom <= workArea.Bottom + 0.5);
         ModalMaximizeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, ModalMaximizeButton));
-        return toggled && _fakeMaximized == before;
+        return toggled
+            && firstPresentation
+            && insideWorkArea
+            && _fakeMaximized == before
+            && WindowMaximizePresentationMatches(before);
+    }
+    public async Task<bool> NormalizeNativeMaximizeForSmokeAsync(Rect workArea)
+    {
+        if (_modalFullScreen || _fakeMaximized)
+            return false;
+
+        Func<Rect> previousResolver = _currentMonitorWorkArea;
+        Rect before = WindowBoundsForSmoke;
+        Rect expectedRestored = NormalizeRestoreBounds(
+            before,
+            workArea,
+            DesignWindowMinWidth,
+            DesignWindowMinHeight);
+        try
+        {
+            _currentMonitorWorkArea = () => workArea;
+            WindowState = WindowState.Maximized;
+            // Off-screen smoke windows do not consistently receive the native
+            // state callback. Exercise the same production normalizer
+            // deterministically when Windows leaves the state unchanged.
+            if (!_fakeMaximized && WindowState == WindowState.Maximized)
+                MainWindow_StateChanged(this, EventArgs.Empty);
+            await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
+            Rect normalized = WindowBoundsForSmoke;
+            bool normalizedToWorkArea = WindowState == WindowState.Normal
+                && _fakeMaximized
+                && Math.Abs(normalized.Left - workArea.Left) < 0.5
+                && Math.Abs(normalized.Top - workArea.Top) < 0.5
+                && Math.Abs(normalized.Width - workArea.Width) < 0.5
+                && Math.Abs(normalized.Height - workArea.Height) < 0.5
+                && WindowMaximizePresentationMatches(restore: true);
+            Maximize_Click(this, new RoutedEventArgs());
+            await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
+            Rect restored = WindowBoundsForSmoke;
+            return normalizedToWorkArea
+                && !_fakeMaximized
+                && WindowMaximizePresentationMatches(restore: false)
+                && Math.Abs(restored.Left - expectedRestored.Left) < 1
+                && Math.Abs(restored.Top - expectedRestored.Top) < 1
+                && Math.Abs(restored.Width - expectedRestored.Width) < 1
+                && Math.Abs(restored.Height - expectedRestored.Height) < 1;
+        }
+        finally
+        {
+            _currentMonitorWorkArea = previousResolver;
+        }
     }
     public bool ModalTopBarPointerHitTestContractForSmoke
         => WindowChrome.GetIsHitTestVisibleInChrome(ModalTopBar)
             && new[] { ModalCloseBtn, ModalShortcutsButton, ModalDeleteButton, ModalMetadataSidebarToggleButton,
                 ModalFilmstripToggleButton, ModalOpenExternalButton, ModalRevealButton, ModalEnhanceButton,
                 ModalEnhancedToggleButton, ModalFlipButton, ModalFavoriteDecreaseButton, ModalFavoriteIncreaseButton,
-                ModalOneToOneButton }
+                ModalFullScreenButton, ModalOneToOneButton }
                 .All(button => IsDescendantOrSelf(button, ModalTopBar));
     public bool ModalLightweightGlassContractForSmoke
         => new[]
@@ -21019,7 +21920,12 @@ public partial class MainWindow : Window
     }
     public void SetModalBottomHoverForSmoke(bool visible) => SetModalFilmstripHoverVisible(visible);
     public bool ToggleModalFilmstripForSmoke() => ToggleModalFilmstrip();
-    public bool FocusModalFavoriteIncreaseForSmoke() => ModalFavoriteIncreaseButton.Focus();
+    public bool FocusModalFavoriteIncreaseForSmoke()
+    {
+        _ = ModalFavoriteIncreaseButton.Focus();
+        _shortcutFocusOverrideForSmoke = ModalFavoriteIncreaseButton;
+        return IsModalActionButtonFocused(ModalFavoriteIncreaseButton);
+    }
     public bool ModalEdgeZonesAccessibleForSmoke
         => string.Equals(System.Windows.Automation.AutomationProperties.GetName(ModalPreviousButton), "Previous image edge zone", StringComparison.Ordinal)
             && string.Equals(System.Windows.Automation.AutomationProperties.GetName(ModalNextButton), "Next image edge zone", StringComparison.Ordinal)
@@ -21062,6 +21968,12 @@ public partial class MainWindow : Window
             && TryCloseModalFromEmptySurface(ModalImageArea, blackCanvas);
     public bool ModalInteractionFeedbackVisibleForSmoke => ModalInteractionFeedback.Visibility == Visibility.Visible;
     public string ModalInteractionFeedbackForSmoke => ModalInteractionFeedbackText.Text;
+    public bool ModalFavoritePulseVisibleForSmoke => ModalFavoritePulse.Visibility == Visibility.Visible;
+    public int ModalFavoritePulseLevelForSmoke
+        => int.TryParse(ModalFavoritePulseLevelText.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int level)
+            ? level
+            : -1;
+    public void HideModalFavoritePulseForSmoke() => HideModalFavoritePulse();
     public async Task<bool> WaitForModalChromeTransientExpirationForSmokeAsync(int timeoutMilliseconds = 5000)
     {
         var watch = Stopwatch.StartNew();
@@ -21112,6 +22024,20 @@ public partial class MainWindow : Window
     public string ModalEnhancementMessageForSmoke => ModalEnhancementStatusText.Text;
     public bool ModalEnhancementCancelVisibleForSmoke => ModalEnhanceCancelButton.Visibility == Visibility.Visible;
     public bool ModalEnhancedDeleteVisibleForSmoke => ModalEnhancedDeleteButton.Visibility == Visibility.Visible;
+    public bool ModalEnhancedToolbarClarityContractForSmoke
+        => string.Equals(
+                ModalEnhancedToggleLabel.Text,
+                _modalShowingEnhanced ? "Enhanced" : "Original",
+                StringComparison.Ordinal)
+            && ModalEnhancedToggleButton.Width >= 64
+            && ModalEnhancedDeleteButton.Width <= 36
+            && ModalEnhancedDeleteButton.Content is System.Windows.Shapes.Path
+            && ModalEnhancedDeleteButton.ToolTip?.ToString()?.Contains(
+                "keep the original",
+                StringComparison.OrdinalIgnoreCase) == true
+            && AutomationProperties.GetName(ModalEnhancedToggleButton).Contains(
+                _modalShowingEnhanced ? "Enhanced" : "Original",
+                StringComparison.Ordinal);
 
     public void ConfigureModalEnhancementForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
@@ -21119,6 +22045,8 @@ public partial class MainWindow : Window
         bool confirmOutputDelete = true)
     {
         _modalEnhancementSender = sender;
+        _usingDefaultModalEnhancementSender = false;
+        _startEnhancementCompanionForSmoke = null;
         _confirmLargeEnhancementForSmoke = () => confirmLargeJob;
         _confirmEnhancedOutputDeleteForSmoke = () => confirmOutputDelete;
     }
@@ -21152,11 +22080,11 @@ public partial class MainWindow : Window
         return true;
     }
 
-    public async Task<bool> StartModalEnhancementForSmokeAsync()
+    public async Task<bool> StartModalEnhancementForSmokeAsync(int timeoutMilliseconds = 3000)
     {
         StartModalEnhancement_Click(this, new RoutedEventArgs());
-        await WaitForModalEnhancementRequestForSmokeAsync();
-        return _modalEnhancementJobStatus is "queued" or "running";
+        bool completed = await WaitForModalEnhancementRequestForSmokeAsync(timeoutMilliseconds);
+        return completed && _modalEnhancementJobStatus is "queued" or "running";
     }
 
     public async Task<bool> StartModalEnhancementWithShortcutForSmokeAsync()
@@ -21169,8 +22097,8 @@ public partial class MainWindow : Window
     public void BeginModalEnhancementForSmoke()
         => StartModalEnhancement_Click(this, new RoutedEventArgs());
 
-    public Task WaitForModalEnhancementRequestCompletionForSmokeAsync()
-        => WaitForModalEnhancementRequestForSmokeAsync();
+    public async Task WaitForModalEnhancementRequestCompletionForSmokeAsync(int timeoutMilliseconds = 3000)
+        => _ = await WaitForModalEnhancementRequestForSmokeAsync(timeoutMilliseconds);
 
     public async Task<bool> CancelModalEnhancementForSmokeAsync()
     {
@@ -21179,6 +22107,8 @@ public partial class MainWindow : Window
         return _modalEnhancementJobStatus == "canceled";
     }
 
+    public bool ModalEnhancementCancelRequestedForSmoke => _modalEnhancementCancelRequested;
+
     public async Task<bool> DeleteModalEnhancedOutputForSmokeAsync()
     {
         DeleteModalEnhancedOutput_Click(this, new RoutedEventArgs());
@@ -21186,10 +22116,12 @@ public partial class MainWindow : Window
         return SelectedTile() is Tile tile && !tile.Enhanced && !_modalShowingEnhanced;
     }
 
-    private async Task WaitForModalEnhancementRequestForSmokeAsync()
+    private async Task<bool> WaitForModalEnhancementRequestForSmokeAsync(int timeoutMilliseconds = 3000)
     {
-        for (int attempt = 0; attempt < 300 && _modalEnhancementRequestPending; attempt++)
+        int attempts = Math.Max(1, (Math.Max(0, timeoutMilliseconds) + 9) / 10);
+        for (int attempt = 0; attempt < attempts && _modalEnhancementRequestPending; attempt++)
             await Task.Delay(10);
+        return !_modalEnhancementRequestPending;
     }
 
     public DisplayStyleMetrics DisplayStyleMetricsForSmoke()
@@ -21744,6 +22676,7 @@ public partial class MainWindow : Window
 
     public PromptTagSearchSmokeSnapshot SearchModalPromptTagForSmoke(string tag)
     {
+        RealizeAllModalPromptChipsForSmoke();
         Button? chip = ModalPromptChips.Children
             .OfType<Button>()
             .FirstOrDefault(candidate => string.Equals(candidate.Tag as string, tag, StringComparison.OrdinalIgnoreCase));
@@ -21756,6 +22689,7 @@ public partial class MainWindow : Window
 
     public PromptTagSearchSmokeSnapshot SearchModalPromptTagWithKeyForSmoke(string tag, Key key)
     {
+        RealizeAllModalPromptChipsForSmoke();
         Button? chip = ModalPromptChips.Children
             .OfType<Button>()
             .FirstOrDefault(candidate => string.Equals(candidate.Tag as string, tag, StringComparison.OrdinalIgnoreCase));
@@ -21775,14 +22709,28 @@ public partial class MainWindow : Window
         return PromptTagSearchSnapshotForSmoke(applied);
     }
 
-    public List<string> ModalPromptTagsForSmoke => ModalPromptChips.Children
-        .OfType<Button>()
-        .Select(static chip => chip.Tag as string ?? "")
-        .ToList();
+    public List<string> ModalPromptTagsForSmoke
+    {
+        get
+        {
+            RealizeAllModalPromptChipsForSmoke();
+            return ModalPromptChips.Children
+                .OfType<Button>()
+                .Select(static chip => chip.Tag as string ?? "")
+                .ToList();
+        }
+    }
 
-    public bool ModalPromptTagsAccessibilityReadyForSmoke => ModalPromptChips.Children.OfType<Button>().All(chip =>
-        !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetName(chip))
-        && !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetHelpText(chip)));
+    public bool ModalPromptTagsAccessibilityReadyForSmoke
+    {
+        get
+        {
+            RealizeAllModalPromptChipsForSmoke();
+            return ModalPromptChips.Children.OfType<Button>().All(chip =>
+                !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetName(chip))
+                && !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetHelpText(chip)));
+        }
+    }
 
     public bool ModalPromptTagFallbackVisibleForSmoke => ModalPromptEmptyText.Visibility == Visibility.Visible;
 
@@ -21867,6 +22815,8 @@ public sealed class ViewerState
     public bool ShowUnfavoriteOnly { get; set; }
     public List<int>? FavoriteFilterLevels { get; set; }
     public bool ShowUnseenDots { get; set; }
+    // WPF-local presentation only. Missing in older state keeps notifications on.
+    public bool? ShowFavoriteChangeNotifications { get; set; }
     // Defaults to true for both fresh and pre-P0C state files.
     public bool ConfirmBeforeDelete { get; set; } = true;
     // Missing in v1 state means expanded, preserving the original sidebar behavior.
@@ -22895,12 +23845,13 @@ public sealed class Tile : INotifyPropertyChanged
         RaiseFavoriteNotifications();
     }
 
-    internal void FlushFavoriteNotifications()
+    internal bool FlushFavoriteNotifications()
     {
         if (!_favoriteNotificationsPending)
-            return;
+            return false;
         _favoriteNotificationsPending = false;
         RaiseFavoriteNotifications();
+        return true;
     }
 
     private void RaiseFavoriteNotifications()

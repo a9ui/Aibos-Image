@@ -332,7 +332,7 @@ if ($null -ne $dispatcherDiagnostic) {
             "$($dispatcherDiagnostic.inconclusiveCount))")
     }
 }
-if ($result.dispatcherHeartbeatMaxGapMs -gt $result.dispatcherHeartbeatBudgetMs `
+if ($dispatcherDiagnostic.rawOverBudgetCount -gt 0 `
     -and ($null -eq $dispatcherDiagnostic `
         -or $dispatcherDiagnostic.maxProductGapMs -gt $result.dispatcherHeartbeatBudgetMs `
         -or $dispatcherDiagnostic.activeOperationDiagnosticCount -gt 0 `

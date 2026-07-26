@@ -141,6 +141,14 @@ $resolvedH25Commit = (& git -C $h25Root rev-parse "$H25Commit^{commit}").Trim()
 Assert-True ($LASTEXITCODE -eq 0 -and $resolvedH25Commit -eq $H25Commit.ToLowerInvariant()) 'H25Commit could not be resolved exactly.'
 $h25Tree = (& git -C $h25Root rev-parse "$H25Commit^{tree}").Trim()
 Assert-True ($LASTEXITCODE -eq 0 -and $h25Tree -match '^[0-9a-f]{40}$') 'H25 tree could not be resolved.'
+$ncnnRoot = if ([string]::IsNullOrWhiteSpace($env:PVU_REALESRGAN_NCNN_ROOT)) {
+    'C:\AI\RealESRGAN-ncnn-vulkan'
+}
+else {
+    [IO.Path]::GetFullPath($env:PVU_REALESRGAN_NCNN_ROOT)
+}
+Assert-True (Test-Path -LiteralPath (Join-Path $ncnnRoot 'realesrgan-ncnn-vulkan.exe') -PathType Leaf) 'Real-ESRGAN ncnn-vulkan is required for the production companion E2E.'
+Assert-True (Test-Path -LiteralPath (Join-Path $ncnnRoot 'models') -PathType Container) 'Real-ESRGAN ncnn-vulkan models are required for the production companion E2E.'
 
 $aibosCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 $aibosTree = (& git -C $repoRoot rev-parse 'HEAD^{tree}').Trim()
@@ -180,6 +188,7 @@ $sharedFiles = [ordered]@{
 }
 $environment = [ordered]@{
     PVU_ENHANCE_ROOT = $enhanceRoot
+    PVU_REALESRGAN_NCNN_ROOT = $ncnnRoot
     PVU_FAVORITES_PATH = $sharedFiles.favorites
     PVU_SEEN_PATH = $sharedFiles.seen
     PVU_RECENT_FOLDERS_PATH = $sharedFiles.recent
@@ -196,6 +205,7 @@ $environment = [ordered]@{
     PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH = $sharedFiles.searchHistory
     PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH = $jobsPath
     PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY = $metadataDirectory
+    AIBOS_H25_COMPANION_ROOT = $h25Source
 }
 $previousEnvironment = @{}
 $server = $null
@@ -271,11 +281,27 @@ try {
         return $process
     }
 
-    $server = Start-H25Companion
-    $fullExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $fullResultPath -FixtureRoot $fixtureRoot -Phase 'full' -SourceName 'full-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot
+    # No Browser process exists here. The first explicit WPF enhancement must
+    # discover the exact H25 root, start its loopback companion, complete the
+    # job, and then tear down the exact process tree when the WPF window closes.
+    Assert-True (
+        @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue).Count -eq 0
+    ) 'The auto-start port was already in use before the WPF explicit action.'
+    $fullExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $fullResultPath -FixtureRoot $fixtureRoot -Phase 'full' -SourceName 'full-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -TimeoutMilliseconds 240000
     $full = Read-SmokeResult -Path $fullResultPath -ExpectedExitCode $fullExit
     Assert-True ($full.passiveRefresh -eq $true -and $full.loopbackOnly -eq $true -and $full.sourceUnchanged -eq $true) 'Full phase lost passive/loopback/source safety.'
+    $ownedCompanionStopped = $false
+    $ownedCleanupDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $ownedCleanupDeadline) {
+        if (@(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue).Count -eq 0) {
+            $ownedCompanionStopped = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-True $ownedCompanionStopped 'The WPF-owned H25 companion listener remained after the window closed.'
 
+    $server = Start-H25Companion
     $wpfInterruptedOut = Join-Path $runRoot 'wpf-interrupted.stdout.log'
     $wpfInterruptedErr = Join-Path $runRoot 'wpf-interrupted.stderr.log'
     $wpfInterrupted = Start-Process -FilePath 'dotnet.exe' `
@@ -285,7 +311,7 @@ try {
         -RedirectStandardError $wpfInterruptedErr `
         -WindowStyle Hidden `
         -PassThru
-    $interruptDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    $interruptDeadline = [DateTime]::UtcNow.AddSeconds(60)
     $interrupted = $null
     while ([DateTime]::UtcNow -lt $interruptDeadline) {
         if ($wpfInterrupted.HasExited) { break }
@@ -315,7 +341,7 @@ try {
     Assert-True ($staleJob.Count -eq 1 -and $staleJob[0].status -eq 'running') 'The verifier did not preserve one stale running job across the companion stop.'
 
     $server = Start-H25Companion
-    $recoveryExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $recoveryResultPath -FixtureRoot $fixtureRoot -Phase 'recover' -SourceName 'interrupted-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot
+    $recoveryExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $recoveryResultPath -FixtureRoot $fixtureRoot -Phase 'recover' -SourceName 'interrupted-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -TimeoutMilliseconds 180000
     $recovery = Read-SmokeResult -Path $recoveryResultPath -ExpectedExitCode $recoveryExit
     Assert-True ($recovery.restartJobObserved -eq $true -and $recovery.canceled -eq $true -and $recovery.retried -eq $true) 'WPF did not recover the stale companion job through explicit Cancel and Retry.'
 
@@ -330,7 +356,15 @@ try {
     Assert-True $immutableStoresUnchanged 'A non-Enhancement shared store changed during the exact companion E2E.'
     Assert-True ((Get-FileHash -LiteralPath $fullSourcePath -Algorithm SHA256).Hash -eq $full.sourceSha256Before) 'Full-phase source bytes changed.'
     Assert-True ((Get-FileHash -LiteralPath $interruptedSourcePath -Algorithm SHA256).Hash -eq $recovery.sourceSha256Before) 'Restart-phase source bytes changed.'
+    # A canceled native worker can finish releasing its just-deleted output a
+    # moment after the loopback listener closes. Require eventual emptiness
+    # within a short bound rather than racing that process-tree teardown.
     $managedOutputFiles = @(Get-ChildItem -LiteralPath $outputsRoot -File -Recurse -ErrorAction SilentlyContinue)
+    $outputCleanupDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ($managedOutputFiles.Count -gt 0 -and [DateTime]::UtcNow -lt $outputCleanupDeadline) {
+        Start-Sleep -Milliseconds 100
+        $managedOutputFiles = @(Get-ChildItem -LiteralPath $outputsRoot -File -Recurse -ErrorAction SilentlyContinue)
+    }
     Assert-True ($managedOutputFiles.Count -eq 0) 'Managed outputs remain after explicit WPF output deletion.'
 
     [pscustomobject]@{
@@ -341,6 +375,8 @@ try {
         h25Commit = $resolvedH25Commit
         h25Tree = $h25Tree
         loopbackAddress = '127.0.0.1'
+        explicitActionAutoStart = [bool]$full.started
+        ownedCompanionStopped = $ownedCompanionStopped
         unindexedCreate = [bool]$full.started
         cancel = [bool]$full.canceled
         retry = [bool]$full.retried

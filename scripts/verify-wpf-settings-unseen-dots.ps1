@@ -1,13 +1,30 @@
+param(
+    [string]$Configuration = 'Release'
+)
+
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$exe = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\bin\Release\net10.0-windows\PhotoViewer.Wpf.exe'
-$result = Join-Path ([IO.Path]::GetTempPath()) ("photoviewer-wpf-settings-unseen-dots-" + [guid]::NewGuid().ToString('N') + '.json')
-
-dotnet build $project -c Release --nologo
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
+$tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
+$runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('photoviewer-wpf-settings-unseen-dots-' + [guid]::NewGuid().ToString('N'))))
+$buildRoot = Join-Path $runRoot 'build'
+$result = Join-Path $runRoot 'result.json'
+$process = $null
+if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Verifier root must stay under TEMP.'
+}
 
 try {
+    New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+    $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $exe = Join-Path $buildRoot 'PhotoViewer.Wpf.exe'
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+        throw "WPF executable was not found: $exe"
+    }
+
     $process = Start-Process -FilePath $exe `
         -ArgumentList @('--settings-unseen-dots-smoke', ('"{0}"' -f $result)) `
         -WindowStyle Hidden -PassThru -Wait
@@ -19,6 +36,10 @@ try {
     $smoke = Get-Content -Raw -LiteralPath $result | ConvertFrom-Json
     $required = @(
         'defaultOff',
+        'favoriteNotificationsDefaultOn',
+        'calendarContrast',
+        'searchClear',
+        'sidebarScroll',
         'defaultSyncedInSettings',
         'sidebarFocused',
         'settingsFocused',
@@ -27,9 +48,13 @@ try {
         'sidebarToSettings',
         'settingsReopenedSynced',
         'persistedEnabled',
+        'favoriteNotificationsDisabled',
+        'favoriteNotificationsPersistedOff',
         'reloadSynced',
+        'favoriteNotificationsReloadedOff',
         'reloadSettingsFocused',
         'migrationDefaultOff',
+        'favoriteNotificationsMigrationDefaultOn',
         'migrationUnknownPreserved',
         'seenByteIdentical',
         'cacheIsolation',
@@ -45,5 +70,14 @@ try {
     $smoke | ConvertTo-Json -Depth 8
 }
 finally {
-    Remove-Item -LiteralPath $result -Force -ErrorAction SilentlyContinue
+    if ($null -ne $process -and -not $process.HasExited) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $runRoot) {
+        $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
+        if (-not $resolvedRunRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to clean a verifier path outside TEMP: $resolvedRunRoot"
+        }
+        Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
+    }
 }
