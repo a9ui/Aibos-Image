@@ -312,6 +312,9 @@ or stores.
 - The modal exposes separate explicit `AI高画質化` and `AI実写化` actions.
   Photoreal strength, structure retention, quality steps, and work resolution
   are WPF-local request defaults and do not mutate shared Browser settings.
+- New photoreal requests use the companion adapter identifier
+  `comfyui-flux2-photoreal`; older `a1111-photoreal` jobs remain readable as
+  managed historical versions.
 - Each valid succeeded output remains an independently selectable version.
   In the modal, `Ctrl+Up` and `Ctrl+Down` cycle Original and every available
   AI高画質化/AI実写化 version with wraparound. Delete removes only the selected

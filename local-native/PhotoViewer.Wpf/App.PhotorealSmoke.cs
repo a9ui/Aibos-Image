@@ -71,7 +71,7 @@ public partial class App
                     sourceId = sourcePath,
                     sourcePath,
                     sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
-                    adapterId = "a1111-photoreal",
+                    adapterId = "comfyui-flux2-photoreal",
                     status = "succeeded",
                     progress = 100,
                     outputPath = photorealOutputPath,
@@ -132,7 +132,7 @@ public partial class App
                                 sourceId = sourcePath,
                                 sourcePath,
                                 sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
-                                adapterId = "a1111-photoreal",
+                                adapterId = "comfyui-flux2-photoreal",
                                 status = "queued",
                                 progress = 0,
                             },
@@ -140,7 +140,7 @@ public partial class App
                     }
                     return JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected smoke route" });
                 });
-                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 30, 640);
+                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280);
                 window.Show();
                 await window.LoadFolderSetAsync([imageRoot], commitRecent: false);
                 selected = window.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
@@ -176,11 +176,11 @@ public partial class App
                 JsonElement body = document.RootElement;
                 requestContract = body.GetProperty("operation").GetString() == "photoreal"
                     && body.GetProperty("presetId").GetString() == "photoreal-balanced"
-                    && body.GetProperty("adapterId").GetString() == "a1111-photoreal"
+                    && body.GetProperty("adapterId").GetString() == "comfyui-flux2-photoreal"
                     && Math.Abs(body.GetProperty("strength").GetDouble() - 0.55) < 0.001
                     && Math.Abs(body.GetProperty("structureStrength").GetDouble() - 0.8) < 0.001
-                    && body.GetProperty("steps").GetInt32() == 30
-                    && body.GetProperty("maxDimension").GetInt32() == 640;
+                    && body.GetProperty("steps").GetInt32() == 8
+                    && body.GetProperty("maxDimension").GetInt32() == 1280;
                 sharedQueueRoute = requests.Any(static request => request == "POST /api/enhance/jobs")
                     && requests.All(static request => !request.Contains("/photoreal/", StringComparison.Ordinal));
                 sourceUntouched = sourceHashBefore == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)));

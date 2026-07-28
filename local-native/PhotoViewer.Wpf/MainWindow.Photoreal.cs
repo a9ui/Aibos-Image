@@ -7,10 +7,10 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
-    private const double DefaultPhotorealStrength = 0.68;
-    private const double DefaultPhotorealStructureStrength = 0.4;
-    private const int DefaultPhotorealSteps = 30;
-    private const int DefaultPhotorealMaxDimension = 768;
+    private const double DefaultPhotorealStrength = 0.8;
+    private const double DefaultPhotorealStructureStrength = 1.0;
+    private const int DefaultPhotorealSteps = 8;
+    private const int DefaultPhotorealMaxDimension = 1280;
 
     private string _modalEnhancementOperation = "upscale";
     private readonly List<ManagedEnhancementVersion> _modalEnhancementVersions = [];
@@ -374,7 +374,7 @@ public partial class MainWindow
             _modalPhotorealStrength,
             _modalPhotorealStructureStrength,
             _modalPhotorealSteps,
-            7,
+            1,
             _modalPhotorealMaxDimension);
 
     private async void StartModalPhotoreal_Click(object sender, RoutedEventArgs e)
@@ -417,11 +417,11 @@ public partial class MainWindow
         _modalPhotorealSteps = SelectedIntegerTag(
             ModalPhotorealStepsComboBox,
             DefaultPhotorealSteps,
-            [20, 24, 30, 36]);
+            [4, 6, 8]);
         _modalPhotorealMaxDimension = SelectedIntegerTag(
             ModalPhotorealSizeComboBox,
             DefaultPhotorealMaxDimension,
-            [512, 640, 768]);
+            [768, 1024, 1280]);
         if (!_initializing)
             SaveState();
     }
@@ -462,10 +462,10 @@ public partial class MainWindow
             structureStrength ?? DefaultPhotorealStructureStrength,
             0,
             1.2);
-        _modalPhotorealSteps = steps is 20 or 24 or 30 or 36
+        _modalPhotorealSteps = steps is 4 or 6 or 8
             ? steps.Value
             : DefaultPhotorealSteps;
-        _modalPhotorealMaxDimension = maxDimension is 512 or 640 or 768
+        _modalPhotorealMaxDimension = maxDimension is 768 or 1024 or 1280
             ? maxDimension.Value
             : DefaultPhotorealMaxDimension;
         SyncModalPhotorealSettingsControls();
