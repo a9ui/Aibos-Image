@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -29,6 +30,7 @@ public partial class App
             bool toolbarContract = false;
             bool requestContract = false;
             bool sharedQueueRoute = false;
+            bool versionCycleContract = false;
             bool sourceUntouched = false;
             var requests = new List<string>();
             string createBody = "";
@@ -43,6 +45,45 @@ public partial class App
                 string sourceHashBefore = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)));
                 var sourceInfo = new FileInfo(sourcePath);
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+                string enhancementRoot = Path.Combine(storesRoot, "enhance");
+                string outputsRoot = Path.Combine(enhancementRoot, "outputs");
+                string upscaleOutputPath = Path.Combine(outputsRoot, "upscale.png");
+                string photorealOutputPath = Path.Combine(outputsRoot, "photoreal.png");
+                Directory.CreateDirectory(outputsRoot);
+                File.Copy(sourcePath, upscaleOutputPath);
+                File.Copy(sourcePath, photorealOutputPath);
+                var upscaleJob = new
+                {
+                    id = "upscale-version",
+                    operation = "upscale",
+                    sourceId = sourcePath,
+                    sourcePath,
+                    sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
+                    adapterId = "realesrgan-ncnn",
+                    status = "succeeded",
+                    progress = 100,
+                    outputPath = upscaleOutputPath,
+                };
+                var photorealJob = new
+                {
+                    id = "photoreal-version",
+                    operation = "photoreal",
+                    sourceId = sourcePath,
+                    sourcePath,
+                    sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
+                    adapterId = "a1111-photoreal",
+                    status = "succeeded",
+                    progress = 100,
+                    outputPath = photorealOutputPath,
+                };
+                string jobsPath = Path.Combine(enhancementRoot, "jobs.json");
+                File.WriteAllText(
+                    jobsPath,
+                    JsonSerializer.Serialize(new
+                    {
+                        version = 1,
+                        jobs = new[] { upscaleJob, photorealJob },
+                    }));
 
                 var environment = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
@@ -53,7 +94,7 @@ public partial class App
                     ["PHOTOVIEWER_WPF_SETTINGS_PATH"] = Path.Combine(storesRoot, "settings.json"),
                     ["PHOTOVIEWER_WPF_ALBUMS_PATH"] = Path.Combine(storesRoot, "albums.json"),
                     ["PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH"] = Path.Combine(storesRoot, "search-history.json"),
-                    ["PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"] = Path.Combine(storesRoot, "enhance", "jobs.json"),
+                    ["PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"] = jobsPath,
                     ["PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY"] = Path.Combine(storesRoot, "metadata-index"),
                 };
                 foreach ((string name, string value) in environment)
@@ -75,7 +116,9 @@ public partial class App
                     string route = request.RequestUri?.AbsolutePath ?? "";
                     requests.Add($"{request.Method.Method} {route}");
                     if (request.Method == HttpMethod.Get)
-                        return JsonResponse(HttpStatusCode.OK, new { jobs = Array.Empty<object>() });
+                        return JsonResponse(
+                            HttpStatusCode.OK,
+                            new { jobs = new[] { photorealJob, upscaleJob } });
                     if (request.Method == HttpMethod.Post
                         && route.EndsWith("/api/enhance/jobs", StringComparison.Ordinal))
                     {
@@ -103,6 +146,29 @@ public partial class App
                 selected = window.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
                 opened = window.OpenModalForSmoke();
                 toolbarContract = window.ModalPhotorealToolbarContractForSmoke;
+                bool initialPhotoreal = string.Equals(
+                    window.ModalDisplayPathForSmoke,
+                    photorealOutputPath,
+                    StringComparison.OrdinalIgnoreCase);
+                bool downToUpscale = window.InvokePreviewKeyForSmoke(Key.Down, ModifierKeys.Control)
+                    && string.Equals(
+                        window.ModalDisplayPathForSmoke,
+                        upscaleOutputPath,
+                        StringComparison.OrdinalIgnoreCase);
+                bool downToOriginal = window.InvokePreviewKeyForSmoke(Key.Down, ModifierKeys.Control)
+                    && string.Equals(
+                        window.ModalDisplayPathForSmoke,
+                        sourcePath,
+                        StringComparison.OrdinalIgnoreCase);
+                bool upWrapsToUpscale = window.InvokePreviewKeyForSmoke(Key.Up, ModifierKeys.Control)
+                    && string.Equals(
+                        window.ModalDisplayPathForSmoke,
+                        upscaleOutputPath,
+                        StringComparison.OrdinalIgnoreCase);
+                versionCycleContract = initialPhotoreal
+                    && downToUpscale
+                    && downToOriginal
+                    && upWrapsToUpscale;
                 passive = requests.All(static request => request.StartsWith("GET ", StringComparison.Ordinal));
                 started = await window.StartModalPhotorealForSmokeAsync();
 
@@ -123,6 +189,7 @@ public partial class App
                     && passive
                     && started
                     && toolbarContract
+                    && versionCycleContract
                     && requestContract
                     && sharedQueueRoute
                     && sourceUntouched
@@ -154,6 +221,7 @@ public partial class App
                     passive,
                     started,
                     toolbarContract,
+                    versionCycleContract,
                     requestContract,
                     sharedQueueRoute,
                     sourceUntouched,

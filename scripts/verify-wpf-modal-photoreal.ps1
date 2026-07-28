@@ -45,6 +45,7 @@ try {
         'passive',
         'started',
         'toolbarContract',
+        'versionCycleContract',
         'requestContract',
         'sharedQueueRoute',
         'sourceUntouched'

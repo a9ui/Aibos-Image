@@ -312,6 +312,10 @@ or stores.
 - The modal exposes separate explicit `AI高画質化` and `AI実写化` actions.
   Photoreal strength, structure retention, quality steps, and work resolution
   are WPF-local request defaults and do not mutate shared Browser settings.
+- Each valid succeeded output remains an independently selectable version.
+  In the modal, `Ctrl+Up` and `Ctrl+Down` cycle Original and every available
+  AI高画質化/AI実写化 version with wraparound. Delete removes only the selected
+  managed version and never the source or sibling versions.
 - Both operations use the same companion `/api/enhance/jobs` endpoint, durable
   FIFO queue, and single worker. They must not create separate GPU queues or
   run GPU work in parallel. Retry and Cancel retain the job operation.
