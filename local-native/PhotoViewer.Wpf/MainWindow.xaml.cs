@@ -1445,6 +1445,7 @@ public partial class MainWindow : Window
 
     private sealed record ModalEnhancementJobSnapshot(
         string Id,
+        string Operation,
         string SourceId,
         string SourcePath,
         string Status,
@@ -13417,22 +13418,29 @@ public partial class MainWindow : Window
         if (ModalEnhancedToggleButton is not null)
         {
             ModalEnhancedToggleButton.IsEnabled = canShowEnhanced;
+            string outputLabel = _modalEnhancementOperation == "photoreal" ? "photoreal" : "enhanced";
             ModalEnhancedToggleButton.ToolTip = canShowEnhanced
-                ? _modalShowingEnhanced ? "Show original (E)" : "Show enhanced output (E)"
+                ? _modalShowingEnhanced ? "Show original (E)" : $"Show {outputLabel} output (E)"
                 : "No enhanced output available";
         }
 
         if (ModalEnhancedToggleLabel is not null)
-            ModalEnhancedToggleLabel.Text = _modalShowingEnhanced ? "Enhanced" : "Original";
+            ModalEnhancedToggleLabel.Text = _modalShowingEnhanced
+                ? _modalEnhancementOperation == "photoreal" ? "Photoreal" : "Enhanced"
+                : "Original";
         if (ModalEnhancedToggleButton is not null)
         {
-            string currentDisplay = _modalShowingEnhanced ? "Enhanced" : "Original";
+            string currentDisplay = _modalShowingEnhanced
+                ? _modalEnhancementOperation == "photoreal" ? "Photoreal" : "Enhanced"
+                : "Original";
             AutomationProperties.SetName(
                 ModalEnhancedToggleButton,
                 $"Current display: {currentDisplay}. Toggle enhanced image output");
         }
         if (ModalSourceLabel is not null)
-            ModalSourceLabel.Text = _modalShowingEnhanced ? "Enhanced output" : "Original";
+            ModalSourceLabel.Text = _modalShowingEnhanced
+                ? _modalEnhancementOperation == "photoreal" ? "Photoreal output" : "Enhanced output"
+                : "Original";
     }
 
     private async Task LoadModalBitmapAsync(string displayPath, string selectedPath, CancellationToken token, TaskCompletionSource<bool> completion)
@@ -13524,7 +13532,8 @@ public partial class MainWindow : Window
     {
         bool enhancedAvailable = SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
         ModalContextEnhancedToggle.IsEnabled = enhancedAvailable;
-        ModalContextEnhancedToggle.Header = _modalShowingEnhanced ? "Show Original" : "Show Enhanced";
+        string outputLabel = _modalEnhancementOperation == "photoreal" ? "Photoreal" : "Enhanced";
+        ModalContextEnhancedToggle.Header = _modalShowingEnhanced ? "Show Original" : $"Show {outputLabel}";
         ModalContextFullScreen.Header = _modalFullScreen
             ? "Exit full screen (F11)"
             : "Enter full screen (F11)";
@@ -13567,6 +13576,7 @@ public partial class MainWindow : Window
         long generation = ++_modalEnhancementGeneration;
         _modalEnhancementPollTimer.Stop();
         _modalEnhancementJobId = null;
+        _modalEnhancementOperation = "upscale";
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
@@ -13672,6 +13682,7 @@ public partial class MainWindow : Window
 
         TryGetStringProperty(job, "sourceId", out string? sourceId);
         TryGetStringProperty(job, "sourcePath", out string? sourcePath);
+        TryGetStringProperty(job, "operation", out string? operation);
         TryGetStringProperty(job, "outputPath", out string? outputPath);
         TryGetStringProperty(job, "errorMessage", out string? errorMessage);
         bool cancelRequested = job.TryGetProperty("cancelRequested", out JsonElement cancelRequestedElement)
@@ -13694,6 +13705,7 @@ public partial class MainWindow : Window
         }
         return new ModalEnhancementJobSnapshot(
             id!,
+            string.Equals(operation, "photoreal", StringComparison.Ordinal) ? "photoreal" : "upscale",
             sourceId ?? "",
             sourcePath ?? "",
             status!,
@@ -13779,6 +13791,7 @@ public partial class MainWindow : Window
         }
 
         _modalEnhancementJobId = job?.Id;
+        _modalEnhancementOperation = job?.Operation == "photoreal" ? "photoreal" : "upscale";
         _modalEnhancementJobStatus = job?.Status;
         _modalEnhancementProgress = job?.Progress ?? 0;
         _modalEnhancementError = job?.ErrorMessage;
@@ -13856,20 +13869,30 @@ public partial class MainWindow : Window
 
     private void UpdateModalEnhancementActionControls()
     {
-        if (ModalEnhanceButton is null)
+        if (ModalEnhanceButton is null || ModalPhotorealButton is null)
             return;
 
         bool hasRealSource = SelectedTile() is { IsRealFile: true } tile && File.Exists(tile.Path);
         bool active = _modalEnhancementJobStatus is "queued" or "running";
         bool canceling = active && _modalEnhancementCancelRequested;
         bool retryable = _modalEnhancementJobStatus is "failed" or "canceled";
+        bool currentIsPhotoreal = _modalEnhancementOperation == "photoreal";
         bool hasDeletableOutput = _modalEnhancementJobStatus == "succeeded"
             && !string.IsNullOrWhiteSpace(_modalEnhancementJobId)
             && SelectedTile() is Tile selected
             && TryGetModalEnhancedOutput(selected, out _);
 
         ModalEnhanceButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
-        ModalEnhanceButtonLabel.Text = _modalEnhancementRequestPending ? "Starting" : retryable ? "Retry AI" : "AI x2";
+        ModalPhotorealButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
+        ModalPhotorealSettingsButton.IsEnabled = !_modalEnhancementRequestPending && !active;
+        ModalEnhanceButtonLabel.Text = _modalEnhancementRequestPending && !currentIsPhotoreal
+            ? "開始中"
+            : retryable && !currentIsPhotoreal ? "再試行"
+            : "AI高画質化";
+        ModalPhotorealButtonLabel.Text = _modalEnhancementRequestPending && currentIsPhotoreal
+            ? "開始中"
+            : retryable && currentIsPhotoreal ? "再試行"
+            : "AI実写化";
         ModalEnhanceCancelButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         ModalEnhanceCancelButton.IsEnabled = active && !_modalEnhancementRequestPending && !canceling;
         ModalEnhanceCancelButton.ToolTip = canceling
@@ -13877,14 +13900,18 @@ public partial class MainWindow : Window
             : "Cancel the running enhancement job";
         ModalEnhancedDeleteButton.Visibility = hasDeletableOutput ? Visibility.Visible : Visibility.Collapsed;
         ModalEnhancedDeleteButton.IsEnabled = hasDeletableOutput && !_modalEnhancementRequestPending;
+        ModalEnhancedDeleteButton.ToolTip = currentIsPhotoreal
+            ? "Delete only the photoreal output; keep the original"
+            : "Delete only the enhanced output; keep the original";
 
-        string status = _modalEnhancementRequestPending ? "AI: starting…"
-            : canceling ? "AI: canceling…"
-            : _modalEnhancementJobStatus == "queued" ? "AI: queued"
-            : _modalEnhancementJobStatus == "running" ? $"AI: {_modalEnhancementProgress}%"
-            : _modalEnhancementJobStatus == "succeeded" ? "AI: ready"
-            : _modalEnhancementJobStatus == "canceled" ? "AI: canceled"
-            : _modalEnhancementJobStatus == "failed" ? $"AI failed: {_modalEnhancementError ?? "unknown error"}"
+        string operationLabel = currentIsPhotoreal ? "実写化" : "高画質化";
+        string status = _modalEnhancementRequestPending ? $"{operationLabel}: starting..."
+            : canceling ? $"{operationLabel}: canceling..."
+            : _modalEnhancementJobStatus == "queued" ? $"{operationLabel}: queued"
+            : _modalEnhancementJobStatus == "running" ? $"{operationLabel}: {_modalEnhancementProgress}%"
+            : _modalEnhancementJobStatus == "succeeded" ? $"{operationLabel}: ready"
+            : _modalEnhancementJobStatus == "canceled" ? $"{operationLabel}: canceled"
+            : _modalEnhancementJobStatus == "failed" ? $"{operationLabel} failed: {_modalEnhancementError ?? "unknown error"}"
             : _modalEnhancementError ?? "";
         ModalEnhancementStatusText.Text = status;
         ModalEnhancementStatusText.Visibility = string.IsNullOrWhiteSpace(status) ? Visibility.Collapsed : Visibility.Visible;
@@ -13892,9 +13919,18 @@ public partial class MainWindow : Window
     }
 
     private async void StartModalEnhancement_Click(object sender, RoutedEventArgs e)
+        => await StartModalEnhancementOperationAsync("upscale");
+
+    private async Task StartModalEnhancementOperationAsync(string requestedOperation)
     {
-        if (_modalEnhancementRequestPending || SelectedTile() is not Tile { IsRealFile: true } tile || !File.Exists(tile.Path))
+        bool active = _modalEnhancementJobStatus is "queued" or "running";
+        if (_modalEnhancementRequestPending
+            || active
+            || SelectedTile() is not Tile { IsRealFile: true } tile
+            || !File.Exists(tile.Path))
+        {
             return;
+        }
 
         long requestGeneration = _modalEnhancementGeneration;
         string sourcePath = tile.Path;
@@ -13907,6 +13943,9 @@ public partial class MainWindow : Window
             return;
         }
         string? requestJobId = _modalEnhancementJobId;
+        string previousOperation = _modalEnhancementOperation;
+        string normalizedOperation = requestedOperation == "photoreal" ? "photoreal" : "upscale";
+        _modalEnhancementOperation = normalizedOperation;
         _modalEnhancementRequestPending = true;
         _modalEnhancementError = null;
         UpdateModalEnhancementActionControls();
@@ -13923,21 +13962,39 @@ public partial class MainWindow : Window
             }
 
             bool retry = _modalEnhancementJobStatus is "failed" or "canceled"
+                && string.Equals(previousOperation, normalizedOperation, StringComparison.Ordinal)
                 && !string.IsNullOrWhiteSpace(requestJobId);
-            EnhancementApiResponse response = retry
-                ? await SendEnhancementApiAsync(HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId!)}/retry")
-                : await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
+            ModalPhotorealRequestSettings photoreal = CurrentModalPhotorealRequestSettings();
+            object requestBody = normalizedOperation == "photoreal"
+                ? new
                 {
                     sourceId = sourceIdentity,
+                    operation = "photoreal",
+                    presetId = "photoreal-balanced",
+                    adapterId = "a1111-photoreal",
+                    strength = photoreal.Strength,
+                    structureStrength = photoreal.StructureStrength,
+                    steps = photoreal.Steps,
+                    cfgScale = photoreal.CfgScale,
+                    maxDimension = photoreal.MaxDimension,
+                }
+                : new
+                {
+                    sourceId = sourceIdentity,
+                    operation = "upscale",
                     presetId = _modalEnhancementPresetId,
                     adapterId = _modalEnhancementAdapterId,
                     scale = _modalEnhancementScale,
-                });
+                };
+            EnhancementApiResponse response = retry
+                ? await SendEnhancementApiAsync(HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId!)}/retry")
+                : await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", requestBody);
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
 
-            bool needsConfirmation = response.StatusCode == 409
+            bool needsConfirmation = normalizedOperation == "upscale"
+                && response.StatusCode == 409
                 && response.Payload is JsonElement conflict
                 && TryGetStringProperty(conflict, "code", out string? code)
                 && string.Equals(code, "UPSCALE_REQUIRES_CONFIRMATION", StringComparison.Ordinal);
@@ -13955,6 +14012,7 @@ public partial class MainWindow : Window
                     response = await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
                     {
                         sourceId = sourceIdentity,
+                        operation = "upscale",
                         presetId = _modalEnhancementPresetId,
                         adapterId = _modalEnhancementAdapterId,
                         scale = _modalEnhancementScale,
@@ -13974,7 +14032,9 @@ public partial class MainWindow : Window
             }
 
             ApplyModalEnhancementJob(tile, ParseModalEnhancementJob(jobElement));
-            ShowModalInteractionFeedback("AI enhancement started");
+            ShowModalInteractionFeedback(normalizedOperation == "photoreal"
+                ? "AI実写化を開始しました"
+                : "AI高画質化を開始しました");
         }
         finally
         {
@@ -14070,6 +14130,7 @@ public partial class MainWindow : Window
             if (TryResolveEnhancementSourceIdentity(tile.Path, out string sourceIdentity))
                 _enhancedOutputs.Remove(sourceIdentity);
             _modalEnhancementJobId = null;
+            _modalEnhancementOperation = "upscale";
             _modalEnhancementJobStatus = null;
             _modalEnhancementProgress = 0;
             _modalEnhancementError = null;
@@ -14137,12 +14198,15 @@ public partial class MainWindow : Window
         _modalCts?.Cancel();
         _modalEnhancementPollTimer.Stop();
         _modalEnhancementGeneration++;
+        if (ModalPhotorealSettingsPopup is not null)
+            ModalPhotorealSettingsPopup.IsOpen = false;
         Modal.Visibility = Visibility.Collapsed;
         _modalShowingEnhanced = false;
         _modalSourceTilePath = null;
         _modalDisplayPath = null;
         _modalEnhancementRequestPending = false;
         _modalEnhancementJobId = null;
+        _modalEnhancementOperation = "upscale";
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
@@ -17371,6 +17435,7 @@ public partial class MainWindow : Window
         {
             SyncFavoriteFilterControls();
             SyncFoldersSectionControls();
+            RestoreModalPhotorealSettings(null, null, null, null);
             _keyBindings = KeyBindingSettings.CreateDefaults();
             _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
             ApplyKeyBindingTooltips();
@@ -17409,6 +17474,11 @@ public partial class MainWindow : Window
         SetModalEdgeNavigationPercent(
             state.ModalEdgeNavigationPercent ?? ModalEdgeNavigationDefaultPercent,
             persist: false);
+        RestoreModalPhotorealSettings(
+            state.PhotorealStrength,
+            state.PhotorealStructureStrength,
+            state.PhotorealSteps,
+            state.PhotorealMaxDimension);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -17540,6 +17610,10 @@ public partial class MainWindow : Window
                 FoldersSectionExpanded = _foldersSectionExpanded,
                 ModalFilmstripOpen = _modalFilmstripOpen,
                 ModalEdgeNavigationPercent = _modalEdgeNavigationPercent,
+                PhotorealStrength = _modalPhotorealStrength,
+                PhotorealStructureStrength = _modalPhotorealStructureStrength,
+                PhotorealSteps = _modalPhotorealSteps,
+                PhotorealMaxDimension = _modalPhotorealMaxDimension,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -22825,6 +22899,11 @@ public sealed class ViewerState
     public bool? ModalFilmstripOpen { get; set; }
     // WPF-only viewer hit zone; it does not modify the shared settings.json contract.
     public double? ModalEdgeNavigationPercent { get; set; }
+    // WPF-local request defaults for the explicit AI photorealization action.
+    public double? PhotorealStrength { get; set; }
+    public double? PhotorealStructureStrength { get; set; }
+    public int? PhotorealSteps { get; set; }
+    public int? PhotorealMaxDimension { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.

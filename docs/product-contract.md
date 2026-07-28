@@ -306,6 +306,15 @@ or stores.
   not enqueue jobs or start workers.
 - Original and managed Enhanced outputs remain distinct; source images are not
   overwritten.
+- Enhancement operation envelope v1 is an additive extension of the existing
+  version 1 job store. `operation` is `upscale` or `photoreal`; a missing value
+  on an older job means `upscale`.
+- The modal exposes separate explicit `AI高画質化` and `AI実写化` actions.
+  Photoreal strength, structure retention, quality steps, and work resolution
+  are WPF-local request defaults and do not mutate shared Browser settings.
+- Both operations use the same companion `/api/enhance/jobs` endpoint, durable
+  FIFO queue, and single worker. They must not create separate GPU queues or
+  run GPU work in parallel. Retry and Cancel retain the job operation.
 - The H25 Browser companion owns the current local Enhancement API and worker.
   WPF owns its loopback client and must keep the API optional.
 - Modal and batch Start/Retry first reuse an already-ready loopback companion.
