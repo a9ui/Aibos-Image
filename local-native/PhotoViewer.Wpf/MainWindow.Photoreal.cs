@@ -11,6 +11,13 @@ public partial class MainWindow
     private const double DefaultPhotorealStructureStrength = 1.0;
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
+    private const string DefaultPhotorealPrompt =
+        "Transform the input image into a realistic style photograph of the same cute young adult woman in her twenties, with natural youthful facial features and a fresh gentle expression. Give her a subtle contemporary Japanese beauty-photo character without changing her identity; she is clearly an adult. " +
+        "Change only the rendering medium from anime illustration to a genuine live-action photograph. " +
+        "Preserve the exact person design, face shape, expression, hair color, hairstyle, eye color, visible body shape and silhouette, pose, hand placement, camera angle, crop, outfit coverage, clothing colors and construction, accessories, background layout, and light direction. " +
+        "Reconstruct the same scene with coherent real human anatomy, natural skin texture and pores, individual hair strands, physically realistic cloth and hard-surface materials, photographic optics, and natural cinematic lighting. " +
+        "She is clearly an adult. Keep all originally covered areas covered. Do not add or remove garments. " +
+        "The result must look like a real camera photograph, not anime, not an illustration, not CGI, not a doll, not kigurumi, and not cosplay.";
 
     private string _modalEnhancementOperation = "upscale";
     private readonly List<ManagedEnhancementVersion> _modalEnhancementVersions = [];
@@ -20,6 +27,7 @@ public partial class MainWindow
     private double _modalPhotorealStructureStrength = DefaultPhotorealStructureStrength;
     private int _modalPhotorealSteps = DefaultPhotorealSteps;
     private int _modalPhotorealMaxDimension = DefaultPhotorealMaxDimension;
+    private string _modalPhotorealPrompt = DefaultPhotorealPrompt;
     private bool _syncingModalPhotorealSettings;
 
     private sealed record ModalPhotorealRequestSettings(
@@ -27,7 +35,8 @@ public partial class MainWindow
         double StructureStrength,
         int Steps,
         double CfgScale,
-        int MaxDimension);
+        int MaxDimension,
+        string Prompt);
 
     private void InitializeModalEnhancementVersions(Tile tile)
     {
@@ -375,7 +384,8 @@ public partial class MainWindow
             _modalPhotorealStructureStrength,
             _modalPhotorealSteps,
             1,
-            _modalPhotorealMaxDimension);
+            _modalPhotorealMaxDimension,
+            _modalPhotorealPrompt.Trim());
 
     private async void StartModalPhotoreal_Click(object sender, RoutedEventArgs e)
         => await StartModalEnhancementOperationAsync("photoreal");
@@ -426,6 +436,24 @@ public partial class MainWindow
             SaveState();
     }
 
+    private void ModalPhotorealPrompt_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_syncingModalPhotorealSettings || ModalPhotorealPromptTextBox is null)
+            return;
+
+        _modalPhotorealPrompt = ModalPhotorealPromptTextBox.Text;
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void ResetModalPhotorealPrompt_Click(object sender, RoutedEventArgs e)
+    {
+        _modalPhotorealPrompt = DefaultPhotorealPrompt;
+        SyncModalPhotorealSettingsControls();
+        if (!_initializing)
+            SaveState();
+    }
+
     private static int SelectedIntegerTag(ComboBox comboBox, int fallback, IReadOnlyCollection<int> supported)
     {
         if (comboBox.SelectedItem is ComboBoxItem { Tag: object tag }
@@ -455,7 +483,8 @@ public partial class MainWindow
         double? strength,
         double? structureStrength,
         int? steps,
-        int? maxDimension)
+        int? maxDimension,
+        string? prompt = null)
     {
         _modalPhotorealStrength = Math.Clamp(strength ?? DefaultPhotorealStrength, 0.2, 0.8);
         _modalPhotorealStructureStrength = Math.Clamp(
@@ -468,6 +497,10 @@ public partial class MainWindow
         _modalPhotorealMaxDimension = maxDimension is 768 or 1024 or 1280
             ? maxDimension.Value
             : DefaultPhotorealMaxDimension;
+        string restoredPrompt = prompt ?? DefaultPhotorealPrompt;
+        _modalPhotorealPrompt = restoredPrompt.Length <= 2_000
+            ? restoredPrompt
+            : restoredPrompt[..2_000];
         SyncModalPhotorealSettingsControls();
     }
 
@@ -476,7 +509,8 @@ public partial class MainWindow
         if (ModalPhotorealStrengthSlider is null
             || ModalPhotorealStructureSlider is null
             || ModalPhotorealStepsComboBox is null
-            || ModalPhotorealSizeComboBox is null)
+            || ModalPhotorealSizeComboBox is null
+            || ModalPhotorealPromptTextBox is null)
         {
             return;
         }
@@ -488,6 +522,7 @@ public partial class MainWindow
             ModalPhotorealStructureSlider.Value = _modalPhotorealStructureStrength * 100;
             SelectIntegerTag(ModalPhotorealStepsComboBox, _modalPhotorealSteps);
             SelectIntegerTag(ModalPhotorealSizeComboBox, _modalPhotorealMaxDimension);
+            ModalPhotorealPromptTextBox.Text = _modalPhotorealPrompt;
             RefreshModalPhotorealSettingLabels();
         }
         finally
@@ -504,12 +539,13 @@ public partial class MainWindow
             ModalPhotorealStructureValue.Text = $"{Math.Round(_modalPhotorealStructureStrength * 100):0}%";
     }
 
-    public (double Strength, double StructureStrength, int Steps, int MaxDimension) ModalPhotorealSettingsForSmoke
+    public (double Strength, double StructureStrength, int Steps, int MaxDimension, string Prompt) ModalPhotorealSettingsForSmoke
         => (
             _modalPhotorealStrength,
             _modalPhotorealStructureStrength,
             _modalPhotorealSteps,
-            _modalPhotorealMaxDimension);
+            _modalPhotorealMaxDimension,
+            _modalPhotorealPrompt);
 
     public string ModalEnhancementOperationForSmoke => _modalEnhancementOperation;
 
@@ -524,8 +560,14 @@ public partial class MainWindow
         double strength,
         double structureStrength,
         int steps,
-        int maxDimension)
-        => RestoreModalPhotorealSettings(strength, structureStrength, steps, maxDimension);
+        int maxDimension,
+        string prompt = "")
+        => RestoreModalPhotorealSettings(strength, structureStrength, steps, maxDimension, prompt);
+
+    public void ResetModalPhotorealPromptForSmoke()
+        => ResetModalPhotorealPrompt_Click(this, new RoutedEventArgs());
+
+    public string DefaultModalPhotorealPromptForSmoke => DefaultPhotorealPrompt;
 
     public async Task<bool> StartModalPhotorealForSmokeAsync(int timeoutMilliseconds = 3000)
     {

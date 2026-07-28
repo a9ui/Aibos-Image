@@ -29,6 +29,7 @@ public partial class App
             bool started = false;
             bool toolbarContract = false;
             bool requestContract = false;
+            bool resetPromptContract = false;
             bool sharedQueueRoute = false;
             bool versionCycleContract = false;
             bool sourceUntouched = false;
@@ -140,7 +141,13 @@ public partial class App
                     }
                     return JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected smoke route" });
                 });
-                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280);
+                const string customPrompt = "custom adult photoreal portrait";
+                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
+                bool customPromptApplied = window.ModalPhotorealSettingsForSmoke.Prompt == customPrompt;
+                window.ResetModalPhotorealPromptForSmoke();
+                resetPromptContract = customPromptApplied
+                    && window.ModalPhotorealSettingsForSmoke.Prompt == window.DefaultModalPhotorealPromptForSmoke;
+                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
                 window.Show();
                 await window.LoadFolderSetAsync([imageRoot], commitRecent: false);
                 selected = window.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
@@ -180,7 +187,8 @@ public partial class App
                     && Math.Abs(body.GetProperty("strength").GetDouble() - 0.55) < 0.001
                     && Math.Abs(body.GetProperty("structureStrength").GetDouble() - 0.8) < 0.001
                     && body.GetProperty("steps").GetInt32() == 8
-                    && body.GetProperty("maxDimension").GetInt32() == 1280;
+                    && body.GetProperty("maxDimension").GetInt32() == 1280
+                    && body.GetProperty("prompt").GetString() == customPrompt;
                 sharedQueueRoute = requests.Any(static request => request == "POST /api/enhance/jobs")
                     && requests.All(static request => !request.Contains("/photoreal/", StringComparison.Ordinal));
                 sourceUntouched = sourceHashBefore == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)));
@@ -191,6 +199,7 @@ public partial class App
                     && toolbarContract
                     && versionCycleContract
                     && requestContract
+                    && resetPromptContract
                     && sharedQueueRoute
                     && sourceUntouched
                     && window.ModalEnhancementOperationForSmoke == "photoreal";
@@ -223,6 +232,7 @@ public partial class App
                     toolbarContract,
                     versionCycleContract,
                     requestContract,
+                    resetPromptContract,
                     sharedQueueRoute,
                     sourceUntouched,
                     requests,

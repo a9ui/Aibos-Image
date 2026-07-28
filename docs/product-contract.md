@@ -310,8 +310,10 @@ or stores.
   version 1 job store. `operation` is `upscale` or `photoreal`; a missing value
   on an older job means `upscale`.
 - The modal exposes separate explicit `AI高画質化` and `AI実写化` actions.
-  Photoreal strength, structure retention, quality steps, and work resolution
-  are WPF-local request defaults and do not mutate shared Browser settings.
+  Photoreal prompt, strength, structure retention, quality steps, and work
+  resolution are WPF-local request defaults and do not mutate shared Browser
+  settings. The prompt starts with the built-in tested default, remains freely
+  editable, persists locally, and has an explicit Reset action.
 - New photoreal requests use the companion adapter identifier
   `comfyui-flux2-photoreal`; older `a1111-photoreal` jobs remain readable as
   managed historical versions.
