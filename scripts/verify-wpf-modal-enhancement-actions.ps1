@@ -1,5 +1,7 @@
 param(
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$DotnetPath = 'dotnet',
+    [string]$TargetFrameworkOverride = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,7 +77,12 @@ try {
     [Environment]::SetEnvironmentVariable('PHOTOVIEWER_BROWSER_BASE_URL', 'http://127.0.0.1:65534/', 'Process')
 
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    }
+    else {
+        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "WPF build failed with exit code $LASTEXITCODE."
     }
@@ -83,7 +90,7 @@ try {
     $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     Assert-True (Test-Path -LiteralPath $dll -PathType Leaf) "WPF build output was not found: $dll"
 
-    & dotnet $dll --modal-enhancement-actions-smoke $resultPath
+    & $DotnetPath $dll --modal-enhancement-actions-smoke $resultPath
     $childExitCode = $LASTEXITCODE
     Assert-True (Test-Path -LiteralPath $resultPath -PathType Leaf) 'Modal enhancement smoke did not produce JSON.'
 

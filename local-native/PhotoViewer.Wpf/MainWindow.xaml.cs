@@ -206,6 +206,10 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, ManagedEnhancedOutput> _enhancedOutputs = new(EnhancementSourceIdentityComparer);
     private readonly Dictionary<string, ManagedEnhancedOutput> _catalogEnhancedOutputsByPath =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<ManagedEnhancementVersion>> _enhancementVersions =
+        new(EnhancementSourceIdentityComparer);
+    private readonly Dictionary<string, List<ManagedEnhancementVersion>> _catalogEnhancementVersionsByPath =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _restoredPreviewTabPaths = [];
     private readonly SemaphoreSlim _thumbnailDecodeGate = new(MaxThumbnailDecodeWorkers, MaxThumbnailDecodeWorkers);
     private readonly ConcurrentDictionary<string, byte> _thumbnailLoadsInFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -550,6 +554,7 @@ public partial class MainWindow : Window
     {
         _tilesView = new SnapshotCollectionView<Tile>(_tiles);
         InitializeComponent();
+        InitializeFavoriteHistory();
         if (Application.Current is App app)
             app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
         InitializeKeyBindingEditor();
@@ -671,7 +676,7 @@ public partial class MainWindow : Window
             _enhancementWorkspaceGeneration++;
             Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
             CancelOwnedEnhancementCompanionLifetime();
-            StopOwnedEnhancementCompanion();
+            ReleaseOwnedEnhancementCompanion();
         };
         CardsList.MouseDoubleClick += (_, _) => OpenModal();
         RowsList.MouseDoubleClick += (_, _) => OpenModal();
@@ -1246,6 +1251,7 @@ public partial class MainWindow : Window
         bool FavoritesOnly,
         bool UnfavoriteOnly,
         bool EnhancedOnly,
+        bool PhotorealOnly,
         bool UnseenOnly,
         FrozenSet<int> FavoriteLevels,
         FrozenSet<string> HiddenFolderBuckets,
@@ -1263,6 +1269,8 @@ public partial class MainWindow : Window
         string Prompt,
         int FavoriteLevel,
         bool Enhanced,
+        bool Upscaled,
+        bool Photorealized,
         bool Unseen,
         DateTime ModifiedUtc,
         DateTime CreatedUtc);
@@ -1445,6 +1453,7 @@ public partial class MainWindow : Window
 
     private sealed record ModalEnhancementJobSnapshot(
         string Id,
+        string Operation,
         string SourceId,
         string SourcePath,
         string Status,
@@ -1456,6 +1465,18 @@ public partial class MainWindow : Window
         double? SourceMtimeMs);
 
     private sealed record ManagedEnhancedOutput(string OutputPath, long SourceSize, double SourceMtimeMs);
+
+    private sealed record ManagedEnhancementVersion(
+        string JobId,
+        string Operation,
+        ManagedEnhancedOutput Output);
+
+    private readonly record struct EnhancementAvailability(
+        bool Upscaled,
+        bool Photorealized)
+    {
+        public bool Any => Upscaled || Photorealized;
+    }
 
     private sealed record DisplayedAssetResolution(string Path, long SizeBytes, bool Enhanced, string? FallbackReason);
 
@@ -1906,7 +1927,15 @@ public partial class MainWindow : Window
                 _seenPaths.ToHashSet(StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, ManagedEnhancedOutput>(
                     _catalogEnhancedOutputsByPath,
-                    StringComparer.OrdinalIgnoreCase));
+                    StringComparer.OrdinalIgnoreCase),
+                _catalogEnhancementVersionsByPath
+                    .Where(static item => item.Value.Any(static version => version.Operation != "photoreal"))
+                    .Select(static item => item.Key)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
+                _catalogEnhancementVersionsByPath
+                    .Where(static item => item.Value.Any(static version => version.Operation == "photoreal"))
+                    .Select(static item => item.Key)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase));
             CatalogCardLayoutContext cardLayout = CaptureCardLayoutContext();
             bool showUnseenDots = _showUnseenDots;
             IReadOnlyDictionary<string, ImageDimensions> emptyDimensions =
@@ -3294,6 +3323,11 @@ public partial class MainWindow : Window
         var created = file.CreationTime;
         int paletteIndex = path.GetHashCode(StringComparison.OrdinalIgnoreCase) & int.MaxValue;
         bool enhanced = TryGetEnhancedOutputForPath(path, sharedState, out string? enhancedOutputPath);
+        string? enhancementAlias = NormalizeCatalogEnhancementPath(path);
+        bool upscaled = enhancementAlias is not null
+            && sharedState.UpscaledPaths.Contains(enhancementAlias);
+        bool photorealized = enhancementAlias is not null
+            && sharedState.PhotorealizedPaths.Contains(enhancementAlias);
         dimensions.TryGetValue(path, out var imageSize);
         prompts.TryGetValue(path, out string? indexedPrompt);
         string folderBucketCacheKey = file.DirectoryName ?? path;
@@ -3331,6 +3365,8 @@ public partial class MainWindow : Window
             ImagePixelWidth = imageSize.Width,
             ImagePixelHeight = imageSize.Height,
             Enhanced = enhanced,
+            Upscaled = upscaled,
+            Photorealized = photorealized,
             EnhancedOutputPath = enhancedOutputPath,
             SizeText = FormatBytes(file.Length),
             ModifiedText = modified.ToString("yyyy-MM-dd HH:mm"),
@@ -3638,6 +3674,8 @@ public partial class MainWindow : Window
         {
             _enhancedOutputs.Clear();
             _catalogEnhancedOutputsByPath.Clear();
+            _enhancementVersions.Clear();
+            _catalogEnhancementVersionsByPath.Clear();
             _enhancementJobsRead = 0;
             _enhancedCandidateCount = 0;
             _enhancementReadOk = true;
@@ -3651,6 +3689,10 @@ public partial class MainWindow : Window
             StringComparer.OrdinalIgnoreCase);
         var nextCatalogOutputsByPath = new Dictionary<string, ManagedEnhancedOutput>(
             StringComparer.OrdinalIgnoreCase);
+        var nextVersions = new Dictionary<string, List<ManagedEnhancementVersion>>(
+            EnhancementSourceIdentityComparer);
+        var nextCatalogVersionsByPath = new Dictionary<string, List<ManagedEnhancementVersion>>(
+            StringComparer.OrdinalIgnoreCase);
         int nextJobsRead = 0;
         int nextCandidateCount = 0;
         try
@@ -3663,7 +3705,9 @@ public partial class MainWindow : Window
                 throw new InvalidDataException("jobs array missing");
             }
 
-            foreach (var job in jobsElement.EnumerateArray())
+            // The Browser store appends jobs. Reverse it so version 1 is always
+            // the newest succeeded output, matching the Browser GET order.
+            foreach (var job in jobsElement.EnumerateArray().Reverse())
             {
                 if (job.ValueKind != JsonValueKind.Object)
                     continue;
@@ -3671,17 +3715,44 @@ public partial class MainWindow : Window
                 if (!TryGetStringProperty(job, "status", out string? status) ||
                     !string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
                     continue;
-                if (TryBuildManagedEnhancedOutput(
+                if (!TryBuildManagedEnhancedOutput(
                         job,
                         out string resolvedSource,
                         out ManagedEnhancedOutput output,
-                        out IReadOnlyList<string> catalogAliases)
-                    && !nextEnhancedOutputs.ContainsKey(resolvedSource))
+                        out IReadOnlyList<string> catalogAliases))
                 {
+                    continue;
+                }
+
+                TryGetStringProperty(job, "id", out string? jobId);
+                TryGetStringProperty(job, "operation", out string? operation);
+                var version = new ManagedEnhancementVersion(
+                    jobId ?? "",
+                    string.Equals(operation, "photoreal", StringComparison.Ordinal)
+                        ? "photoreal"
+                        : "upscale",
+                    output);
+                if (!nextVersions.TryGetValue(resolvedSource, out List<ManagedEnhancementVersion>? versions))
+                {
+                    versions = [];
+                    nextVersions[resolvedSource] = versions;
                     nextEnhancedOutputs[resolvedSource] = output;
-                    foreach (string alias in catalogAliases)
-                        nextCatalogOutputsByPath.TryAdd(alias, output);
                     nextCandidateCount++;
+                }
+                foreach (string alias in catalogAliases)
+                {
+                    nextCatalogOutputsByPath.TryAdd(
+                        alias,
+                        nextEnhancedOutputs[resolvedSource]);
+                    nextCatalogVersionsByPath.TryAdd(alias, versions);
+                }
+                if (!versions.Any(candidate =>
+                        string.Equals(
+                            candidate.Output.OutputPath,
+                            output.OutputPath,
+                            StringComparison.OrdinalIgnoreCase)))
+                {
+                    versions.Add(version);
                 }
             }
 
@@ -3691,6 +3762,12 @@ public partial class MainWindow : Window
             _catalogEnhancedOutputsByPath.Clear();
             foreach ((string alias, ManagedEnhancedOutput output) in nextCatalogOutputsByPath)
                 _catalogEnhancedOutputsByPath[alias] = output;
+            _enhancementVersions.Clear();
+            foreach ((string source, List<ManagedEnhancementVersion> versions) in nextVersions)
+                _enhancementVersions[source] = versions;
+            _catalogEnhancementVersionsByPath.Clear();
+            foreach ((string alias, List<ManagedEnhancementVersion> versions) in nextCatalogVersionsByPath)
+                _catalogEnhancementVersionsByPath[alias] = versions;
             _enhancementJobsRead = nextJobsRead;
             _enhancedCandidateCount = nextCandidateCount;
             _enhancementReadOk = true;
@@ -3911,6 +3988,55 @@ public partial class MainWindow : Window
 
         output = stored;
         return true;
+    }
+
+    private IReadOnlyList<ManagedEnhancementVersion> GetManagedEnhancementVersionsForPath(string path)
+    {
+        string? alias = NormalizeCatalogEnhancementPath(path);
+        if (alias is not null
+            && _catalogEnhancementVersionsByPath.TryGetValue(
+                alias,
+                out List<ManagedEnhancementVersion>? catalogVersions))
+        {
+            return catalogVersions;
+        }
+
+        if (TryResolveEnhancementSourceIdentity(path, out string identity)
+            && _enhancementVersions.TryGetValue(
+                identity,
+                out List<ManagedEnhancementVersion>? versions))
+        {
+            return versions;
+        }
+
+        return Array.Empty<ManagedEnhancementVersion>();
+    }
+
+    private static EnhancementAvailability GetEnhancementAvailability(
+        IEnumerable<ManagedEnhancementVersion> versions)
+    {
+        bool upscaled = false;
+        bool photorealized = false;
+        foreach (ManagedEnhancementVersion version in versions)
+        {
+            if (version.Operation == "photoreal")
+                photorealized = true;
+            else
+                upscaled = true;
+            if (upscaled && photorealized)
+                break;
+        }
+        return new EnhancementAvailability(upscaled, photorealized);
+    }
+
+    private static void ApplyTileEnhancementAvailability(
+        Tile tile,
+        IEnumerable<ManagedEnhancementVersion> versions)
+    {
+        EnhancementAvailability availability = GetEnhancementAvailability(versions);
+        tile.Upscaled = availability.Upscaled;
+        tile.Photorealized = availability.Photorealized;
+        tile.Enhanced = availability.Any;
     }
 
     private static bool TryWriteAtomicText(string path, string text)
@@ -6652,6 +6778,50 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void Gallery_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is not ListBox list)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        DependencyObject? hit = list.InputHitTest(Mouse.GetPosition(list)) as DependencyObject;
+        ListBoxItem? item = hit is null
+            ? null
+            : ItemsControl.ContainerFromElement(list, hit) as ListBoxItem;
+        item ??= list.SelectedItem is null
+            ? null
+            : list.ItemContainerGenerator.ContainerFromItem(list.SelectedItem) as ListBoxItem;
+        if (item?.DataContext is not Tile { IsRealFile: true })
+        {
+            e.Handled = true;
+            return;
+        }
+
+        list.SelectedItems.Clear();
+        item.IsSelected = true;
+        item.Focus();
+    }
+
+    private async void GalleryContextUpscale_Click(object sender, RoutedEventArgs e)
+        => await StartGalleryContextEnhancementAsync("upscale");
+
+    private async void GalleryContextPhotoreal_Click(object sender, RoutedEventArgs e)
+        => await StartGalleryContextEnhancementAsync("photoreal");
+
+    private async Task StartGalleryContextEnhancementAsync(string operation)
+    {
+        if (SelectedTile() is not Tile { IsRealFile: true })
+            return;
+
+        OpenModal();
+        if (Modal.Visibility != Visibility.Visible)
+            return;
+
+        await StartModalEnhancementOperationAsync(operation);
+    }
+
     private int ResolveGalleryNavigationTarget(ListBox listBox, Key key, int currentIndex)
     {
         if (_tiles.Count == 0)
@@ -8275,6 +8445,7 @@ public partial class MainWindow : Window
             SearchWatermark.Visibility = string.IsNullOrEmpty(SearchInput.Text) ? Visibility.Visible : Visibility.Collapsed;
         if (ClearSearchInputButton is not null)
             ClearSearchInputButton.Visibility = string.IsNullOrEmpty(SearchInput.Text) ? Visibility.Collapsed : Visibility.Visible;
+        SyncSearchTermChips(SearchInput.Text);
         if (_initializing || _settingSearchQuery) return;
         ScheduleSearchFilter();
         ScheduleSearchStateSave();
@@ -9232,20 +9403,30 @@ public partial class MainWindow : Window
 
         if (!CanStartSharedStateAction(SharedStoreKind.Favorite))
             return false;
+        List<(Tile Tile, int Before, int After)> requestedChanges = selected
+            .Select(tile => (
+                Tile: tile,
+                Before: tile.Fav,
+                After: Math.Clamp(levelSelector(tile), 0, 5)))
+            .ToList();
         if (ShouldUseFavoriteWriter())
         {
-            return QueueFavoriteLevels(
-                selected.Select(tile => (Tile: tile, Level: Math.Clamp(levelSelector(tile), 0, 5))).ToList(),
+            bool queued = QueueFavoriteLevels(
+                requestedChanges.Select(static change => (change.Tile, Level: change.After)).ToList(),
                 string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
+            if (queued)
+                RecordFavoriteHistory(requestedChanges);
+            return queued;
         }
 
         var previousFavorites = new Dictionary<string, int>(_favorites, StringComparer.OrdinalIgnoreCase);
         var previousDirtyPaths = new HashSet<string>(_favoriteDirtyPaths, StringComparer.OrdinalIgnoreCase);
         var nextLevels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (Tile tile in selected)
+        foreach (var change in requestedChanges)
         {
+            Tile tile = change.Tile;
             string key = NormalizeFavoritePath(tile.Path);
-            int next = Math.Clamp(levelSelector(tile), 0, 5);
+            int next = change.After;
             nextLevels[key] = next;
             if (next > 0)
                 _favorites[key] = next;
@@ -9271,6 +9452,7 @@ public partial class MainWindow : Window
 
         if (RefreshFavoriteMutationSurface(selected))
             ScheduleSearchStateSave();
+        RecordFavoriteHistory(requestedChanges);
         ShowFavoriteChangeStatus(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
         return true;
     }
@@ -9319,7 +9501,10 @@ public partial class MainWindow : Window
         {
             bool queued = QueueFavoriteLevels([(tile, clamped)], $"Set favorite level {clamped}.");
             if (queued)
+            {
+                RecordFavoriteHistory([(tile, displayedBefore, clamped)]);
                 ShowModalFavoriteIncreaseEffect(tile, displayedBefore, clamped);
+            }
             return queued;
         }
 
@@ -9345,6 +9530,7 @@ public partial class MainWindow : Window
         tile.Fav = clamped;
         if (RefreshFavoriteMutationSurface([tile]))
             ScheduleSearchStateSave();
+        RecordFavoriteHistory([(tile, displayedBefore, clamped)]);
         ShowModalFavoriteIncreaseEffect(tile, displayedBefore, clamped);
         return true;
     }
@@ -10265,6 +10451,8 @@ public partial class MainWindow : Window
                     tile.Prompt,
                     tile.Fav,
                     tile.Enhanced,
+                    tile.Upscaled,
+                    tile.Photorealized,
                     tile.Unseen,
                     tile.ModifiedUtc,
                     tile.CreatedUtc);
@@ -10287,6 +10475,7 @@ public partial class MainWindow : Window
             bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
             bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
             bool enhancedOnly = EnhancedOnlyFilter?.IsChecked == true;
+            bool photorealOnly = PhotorealOnlyFilter?.IsChecked == true;
             bool unseenOnly = UnseenOnlyFilter?.IsChecked == true;
             FrozenSet<int> favoriteLevels = _favoriteFilterLevels.ToFrozenSet();
             FrozenSet<string> hiddenFolderBuckets =
@@ -10296,6 +10485,7 @@ public partial class MainWindow : Window
                 && !favoritesOnly
                 && !unfavoriteOnly
                 && !enhancedOnly
+                && !photorealOnly
                 && !unseenOnly
                 && hiddenFolderBuckets.Count == 0
                 && !_dateFromLocal.HasValue
@@ -10341,6 +10531,7 @@ public partial class MainWindow : Window
                 favoritesOnly,
                 unfavoriteOnly,
                 enhancedOnly,
+                photorealOnly,
                 unseenOnly,
                 favoriteLevels,
                 hiddenFolderBuckets,
@@ -10397,6 +10588,7 @@ public partial class MainWindow : Window
             && !snapshot.FavoritesOnly
             && !snapshot.UnfavoriteOnly
             && !snapshot.EnhancedOnly
+            && !snapshot.PhotorealOnly
             && !snapshot.UnseenOnly
             && snapshot.HiddenFolderBuckets.Count == 0
             && !snapshot.DateFromLocal.HasValue
@@ -10723,7 +10915,9 @@ public partial class MainWindow : Window
             return false;
         if (snapshot.UnfavoriteOnly && tile.FavoriteLevel > 0)
             return false;
-        if (snapshot.EnhancedOnly && !tile.Enhanced)
+        if (snapshot.EnhancedOnly && !tile.Upscaled)
+            return false;
+        if (snapshot.PhotorealOnly && !tile.Photorealized)
             return false;
         if (snapshot.UnseenOnly && !tile.Unseen)
             return false;
@@ -11905,7 +12099,9 @@ public partial class MainWindow : Window
     private sealed record CatalogSharedStateSnapshot(
         IReadOnlyDictionary<string, int> Favorites,
         IReadOnlySet<string> SeenPaths,
-        IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs);
+        IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs,
+        IReadOnlySet<string> UpscaledPaths,
+        IReadOnlySet<string> PhotorealizedPaths);
 
     private readonly record struct CatalogTilePreparationResult(
         List<Tile> Tiles,
@@ -13272,7 +13468,7 @@ public partial class MainWindow : Window
             _modalSourceTilePath = t.Path;
             // Each navigation target is resolved independently. A currently valid,
             // owned succeeded output is the preferred asset for a newly selected image.
-            _modalShowingEnhanced = TryGetModalEnhancedOutput(t, out _);
+            InitializeModalEnhancementVersions(t);
         }
         var watch = Stopwatch.StartNew();
         _modalCts?.Cancel();
@@ -13358,6 +13554,14 @@ public partial class MainWindow : Window
     private bool TryGetModalEnhancedOutput(Tile tile, out string? outputPath)
     {
         outputPath = null;
+        if (tile.IsRealFile
+            && TryGetPreferredModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion selectedVersion))
+        {
+            outputPath = selectedVersion.Output.OutputPath;
+            return true;
+        }
         if (!tile.IsRealFile
             || !tile.Enhanced
             || string.IsNullOrWhiteSpace(tile.EnhancedOutputPath)
@@ -13414,25 +13618,27 @@ public partial class MainWindow : Window
 
     private void UpdateModalEnhancedControls(bool canShowEnhanced)
     {
+        string currentDisplay = CurrentModalEnhancementVersionLabel();
         if (ModalEnhancedToggleButton is not null)
         {
             ModalEnhancedToggleButton.IsEnabled = canShowEnhanced;
             ModalEnhancedToggleButton.ToolTip = canShowEnhanced
-                ? _modalShowingEnhanced ? "Show original (E)" : "Show enhanced output (E)"
+                ? _modalShowingEnhanced
+                    ? "Show original (E). Ctrl+↑ / Ctrl+↓ cycles all versions."
+                    : "Show newest AI output (E). Ctrl+↑ / Ctrl+↓ cycles all versions."
                 : "No enhanced output available";
         }
 
         if (ModalEnhancedToggleLabel is not null)
-            ModalEnhancedToggleLabel.Text = _modalShowingEnhanced ? "Enhanced" : "Original";
+            ModalEnhancedToggleLabel.Text = currentDisplay;
         if (ModalEnhancedToggleButton is not null)
         {
-            string currentDisplay = _modalShowingEnhanced ? "Enhanced" : "Original";
             AutomationProperties.SetName(
                 ModalEnhancedToggleButton,
-                $"Current display: {currentDisplay}. Toggle enhanced image output");
+                $"Current display: {currentDisplay}. Toggle with E or cycle versions with Ctrl+Up and Ctrl+Down");
         }
         if (ModalSourceLabel is not null)
-            ModalSourceLabel.Text = _modalShowingEnhanced ? "Enhanced output" : "Original";
+            ModalSourceLabel.Text = _modalShowingEnhanced ? $"{currentDisplay} output" : "Original";
     }
 
     private async Task LoadModalBitmapAsync(string displayPath, string selectedPath, CancellationToken token, TaskCompletionSource<bool> completion)
@@ -13524,7 +13730,8 @@ public partial class MainWindow : Window
     {
         bool enhancedAvailable = SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
         ModalContextEnhancedToggle.IsEnabled = enhancedAvailable;
-        ModalContextEnhancedToggle.Header = _modalShowingEnhanced ? "Show Original" : "Show Enhanced";
+        string outputLabel = _modalEnhancementOperation == "photoreal" ? "Photoreal" : "Enhanced";
+        ModalContextEnhancedToggle.Header = _modalShowingEnhanced ? "Show Original" : $"Show {outputLabel}";
         ModalContextFullScreen.Header = _modalFullScreen
             ? "Exit full screen (F11)"
             : "Enter full screen (F11)";
@@ -13567,6 +13774,7 @@ public partial class MainWindow : Window
         long generation = ++_modalEnhancementGeneration;
         _modalEnhancementPollTimer.Stop();
         _modalEnhancementJobId = null;
+        _modalEnhancementOperation = "upscale";
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
@@ -13672,6 +13880,7 @@ public partial class MainWindow : Window
 
         TryGetStringProperty(job, "sourceId", out string? sourceId);
         TryGetStringProperty(job, "sourcePath", out string? sourcePath);
+        TryGetStringProperty(job, "operation", out string? operation);
         TryGetStringProperty(job, "outputPath", out string? outputPath);
         TryGetStringProperty(job, "errorMessage", out string? errorMessage);
         bool cancelRequested = job.TryGetProperty("cancelRequested", out JsonElement cancelRequestedElement)
@@ -13694,6 +13903,7 @@ public partial class MainWindow : Window
         }
         return new ModalEnhancementJobSnapshot(
             id!,
+            string.Equals(operation, "photoreal", StringComparison.Ordinal) ? "photoreal" : "upscale",
             sourceId ?? "",
             sourcePath ?? "",
             status!,
@@ -13705,20 +13915,25 @@ public partial class MainWindow : Window
             sourceMtimeMs);
     }
 
-    private static ModalEnhancementJobSnapshot? SelectModalEnhancementJob(JsonElement payload)
+    private static IReadOnlyList<ModalEnhancementJobSnapshot> ParseModalEnhancementJobs(JsonElement payload)
     {
         if (payload.ValueKind != JsonValueKind.Object
             || !payload.TryGetProperty("jobs", out JsonElement jobs)
             || jobs.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return Array.Empty<ModalEnhancementJobSnapshot>();
         }
 
-        List<ModalEnhancementJobSnapshot> parsed = jobs.EnumerateArray()
+        return jobs.EnumerateArray()
             .Select(ParseModalEnhancementJob)
             .Where(static job => job is not null)
             .Cast<ModalEnhancementJobSnapshot>()
             .ToList();
+    }
+
+    private static ModalEnhancementJobSnapshot? SelectModalEnhancementJob(
+        IReadOnlyList<ModalEnhancementJobSnapshot> parsed)
+    {
         return parsed.FirstOrDefault(static job => job.Status is "queued" or "running")
             ?? parsed.FirstOrDefault(static job => job.Status == "succeeded" && !string.IsNullOrWhiteSpace(job.OutputPath))
             ?? parsed.FirstOrDefault();
@@ -13752,7 +13967,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        ApplyModalEnhancementJob(tile, SelectModalEnhancementJob(payload));
+        IReadOnlyList<ModalEnhancementJobSnapshot> jobs = ParseModalEnhancementJobs(payload);
+        ApplyModalEnhancementVersions(tile, jobs);
+        ApplyModalEnhancementJob(tile, SelectModalEnhancementJob(jobs));
     }
 
     private bool IsCurrentModalEnhancementContext(Tile tile, string sourcePath, long generation)
@@ -13779,6 +13996,7 @@ public partial class MainWindow : Window
         }
 
         _modalEnhancementJobId = job?.Id;
+        _modalEnhancementOperation = job?.Operation == "photoreal" ? "photoreal" : "upscale";
         _modalEnhancementJobStatus = job?.Status;
         _modalEnhancementProgress = job?.Progress ?? 0;
         _modalEnhancementError = job?.ErrorMessage;
@@ -13787,17 +14005,13 @@ public partial class MainWindow : Window
         if (job is { Status: "succeeded", OutputPath: not null, SourceSize: not null, SourceMtimeMs: not null }
             && TryCreateManagedEnhancedOutput(tile, job.OutputPath, job.SourceSize.Value, job.SourceMtimeMs.Value, out ManagedEnhancedOutput managedOutput))
         {
-            bool newlyAvailable = !TryGetModalEnhancedOutput(tile, out _);
-            tile.Enhanced = true;
             tile.EnhancedOutputPath = managedOutput.OutputPath;
-            _enhancedOutputs[tileIdentity!] = managedOutput;
+            UpsertModalEnhancementVersion(tile, job, managedOutput);
             UpdateModalEnhancedControls(canShowEnhanced: true);
-            if (newlyAvailable
-                && Modal.Visibility == Visibility.Visible
+            if (Modal.Visibility == Visibility.Visible
                 && string.Equals(_modalSourceTilePath, tile.Path, StringComparison.OrdinalIgnoreCase)
-                && !_modalShowingEnhanced)
+                && _modalShowingEnhanced)
             {
-                _modalShowingEnhanced = true;
                 OpenModal();
             }
         }
@@ -13856,20 +14070,31 @@ public partial class MainWindow : Window
 
     private void UpdateModalEnhancementActionControls()
     {
-        if (ModalEnhanceButton is null)
+        if (ModalEnhanceButton is null || ModalPhotorealButton is null)
             return;
 
         bool hasRealSource = SelectedTile() is { IsRealFile: true } tile && File.Exists(tile.Path);
         bool active = _modalEnhancementJobStatus is "queued" or "running";
         bool canceling = active && _modalEnhancementCancelRequested;
         bool retryable = _modalEnhancementJobStatus is "failed" or "canceled";
+        bool currentIsPhotoreal = _modalEnhancementOperation == "photoreal";
         bool hasDeletableOutput = _modalEnhancementJobStatus == "succeeded"
-            && !string.IsNullOrWhiteSpace(_modalEnhancementJobId)
+            && _modalShowingEnhanced
+            && !string.IsNullOrWhiteSpace(CurrentModalEnhancementVersionJobId())
             && SelectedTile() is Tile selected
             && TryGetModalEnhancedOutput(selected, out _);
 
         ModalEnhanceButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
-        ModalEnhanceButtonLabel.Text = _modalEnhancementRequestPending ? "Starting" : retryable ? "Retry AI" : "AI x2";
+        ModalPhotorealButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
+        ModalPhotorealSettingsButton.IsEnabled = !_modalEnhancementRequestPending && !active;
+        ModalEnhanceButtonLabel.Text = _modalEnhancementRequestPending && !currentIsPhotoreal
+            ? "開始中"
+            : retryable && !currentIsPhotoreal ? "再試行"
+            : "AI高画質化";
+        ModalPhotorealButtonLabel.Text = _modalEnhancementRequestPending && currentIsPhotoreal
+            ? "開始中"
+            : retryable && currentIsPhotoreal ? "再試行"
+            : "AI実写化";
         ModalEnhanceCancelButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         ModalEnhanceCancelButton.IsEnabled = active && !_modalEnhancementRequestPending && !canceling;
         ModalEnhanceCancelButton.ToolTip = canceling
@@ -13877,14 +14102,18 @@ public partial class MainWindow : Window
             : "Cancel the running enhancement job";
         ModalEnhancedDeleteButton.Visibility = hasDeletableOutput ? Visibility.Visible : Visibility.Collapsed;
         ModalEnhancedDeleteButton.IsEnabled = hasDeletableOutput && !_modalEnhancementRequestPending;
+        ModalEnhancedDeleteButton.ToolTip = CurrentModalEnhancementVersionIsPhotoreal()
+            ? "Delete only the photoreal output; keep the original"
+            : "Delete only the enhanced output; keep the original";
 
-        string status = _modalEnhancementRequestPending ? "AI: starting…"
-            : canceling ? "AI: canceling…"
-            : _modalEnhancementJobStatus == "queued" ? "AI: queued"
-            : _modalEnhancementJobStatus == "running" ? $"AI: {_modalEnhancementProgress}%"
-            : _modalEnhancementJobStatus == "succeeded" ? "AI: ready"
-            : _modalEnhancementJobStatus == "canceled" ? "AI: canceled"
-            : _modalEnhancementJobStatus == "failed" ? $"AI failed: {_modalEnhancementError ?? "unknown error"}"
+        string operationLabel = currentIsPhotoreal ? "実写化" : "高画質化";
+        string status = _modalEnhancementRequestPending ? $"{operationLabel}: starting..."
+            : canceling ? $"{operationLabel}: canceling..."
+            : _modalEnhancementJobStatus == "queued" ? $"{operationLabel}: queued"
+            : _modalEnhancementJobStatus == "running" ? $"{operationLabel}: {_modalEnhancementProgress}%"
+            : _modalEnhancementJobStatus == "succeeded" ? $"{operationLabel}: ready"
+            : _modalEnhancementJobStatus == "canceled" ? $"{operationLabel}: canceled"
+            : _modalEnhancementJobStatus == "failed" ? $"{operationLabel} failed: {_modalEnhancementError ?? "unknown error"}"
             : _modalEnhancementError ?? "";
         ModalEnhancementStatusText.Text = status;
         ModalEnhancementStatusText.Visibility = string.IsNullOrWhiteSpace(status) ? Visibility.Collapsed : Visibility.Visible;
@@ -13892,9 +14121,18 @@ public partial class MainWindow : Window
     }
 
     private async void StartModalEnhancement_Click(object sender, RoutedEventArgs e)
+        => await StartModalEnhancementOperationAsync("upscale");
+
+    private async Task StartModalEnhancementOperationAsync(string requestedOperation)
     {
-        if (_modalEnhancementRequestPending || SelectedTile() is not Tile { IsRealFile: true } tile || !File.Exists(tile.Path))
+        bool active = _modalEnhancementJobStatus is "queued" or "running";
+        if (_modalEnhancementRequestPending
+            || active
+            || SelectedTile() is not Tile { IsRealFile: true } tile
+            || !File.Exists(tile.Path))
+        {
             return;
+        }
 
         long requestGeneration = _modalEnhancementGeneration;
         string sourcePath = tile.Path;
@@ -13907,6 +14145,9 @@ public partial class MainWindow : Window
             return;
         }
         string? requestJobId = _modalEnhancementJobId;
+        string previousOperation = _modalEnhancementOperation;
+        string normalizedOperation = requestedOperation == "photoreal" ? "photoreal" : "upscale";
+        _modalEnhancementOperation = normalizedOperation;
         _modalEnhancementRequestPending = true;
         _modalEnhancementError = null;
         UpdateModalEnhancementActionControls();
@@ -13923,21 +14164,40 @@ public partial class MainWindow : Window
             }
 
             bool retry = _modalEnhancementJobStatus is "failed" or "canceled"
+                && string.Equals(previousOperation, normalizedOperation, StringComparison.Ordinal)
                 && !string.IsNullOrWhiteSpace(requestJobId);
-            EnhancementApiResponse response = retry
-                ? await SendEnhancementApiAsync(HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId!)}/retry")
-                : await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
+            ModalPhotorealRequestSettings photoreal = CurrentModalPhotorealRequestSettings();
+            object requestBody = normalizedOperation == "photoreal"
+                ? new
                 {
                     sourceId = sourceIdentity,
+                    operation = "photoreal",
+                    presetId = "photoreal-balanced",
+                    adapterId = "comfyui-flux2-photoreal",
+                    strength = photoreal.Strength,
+                    structureStrength = photoreal.StructureStrength,
+                    steps = photoreal.Steps,
+                    cfgScale = photoreal.CfgScale,
+                    maxDimension = photoreal.MaxDimension,
+                    prompt = photoreal.Prompt,
+                }
+                : new
+                {
+                    sourceId = sourceIdentity,
+                    operation = "upscale",
                     presetId = _modalEnhancementPresetId,
                     adapterId = _modalEnhancementAdapterId,
                     scale = _modalEnhancementScale,
-                });
+                };
+            EnhancementApiResponse response = retry
+                ? await SendEnhancementApiAsync(HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId!)}/retry")
+                : await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", requestBody);
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
 
-            bool needsConfirmation = response.StatusCode == 409
+            bool needsConfirmation = normalizedOperation == "upscale"
+                && response.StatusCode == 409
                 && response.Payload is JsonElement conflict
                 && TryGetStringProperty(conflict, "code", out string? code)
                 && string.Equals(code, "UPSCALE_REQUIRES_CONFIRMATION", StringComparison.Ordinal);
@@ -13955,6 +14215,7 @@ public partial class MainWindow : Window
                     response = await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
                     {
                         sourceId = sourceIdentity,
+                        operation = "upscale",
                         presetId = _modalEnhancementPresetId,
                         adapterId = _modalEnhancementAdapterId,
                         scale = _modalEnhancementScale,
@@ -13974,7 +14235,9 @@ public partial class MainWindow : Window
             }
 
             ApplyModalEnhancementJob(tile, ParseModalEnhancementJob(jobElement));
-            ShowModalInteractionFeedback("AI enhancement started");
+            ShowModalInteractionFeedback(normalizedOperation == "photoreal"
+                ? "AI実写化を開始しました"
+                : "AI高画質化を開始しました");
         }
         finally
         {
@@ -14029,16 +14292,16 @@ public partial class MainWindow : Window
     private async void DeleteModalEnhancedOutput_Click(object sender, RoutedEventArgs e)
     {
         if (_modalEnhancementRequestPending
-            || string.IsNullOrWhiteSpace(_modalEnhancementJobId)
-            || SelectedTile() is not Tile tile)
+            || SelectedTile() is not Tile tile
+            || string.IsNullOrWhiteSpace(CurrentModalEnhancementVersionJobId()))
         {
             return;
         }
 
         bool confirmed = _confirmEnhancedOutputDeleteForSmoke?.Invoke() ?? MessageBox.Show(
                 this,
-                "Delete only this enhanced output? The original image will be kept.",
-                "Delete enhanced output",
+                $"Delete only {CurrentModalEnhancementVersionLabel()}? The original image and other AI versions will be kept.",
+                "Delete AI output version",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,
                 MessageBoxResult.No) == MessageBoxResult.Yes;
@@ -14047,7 +14310,7 @@ public partial class MainWindow : Window
 
         long requestGeneration = _modalEnhancementGeneration;
         string sourcePath = tile.Path;
-        string requestJobId = _modalEnhancementJobId;
+        string requestJobId = CurrentModalEnhancementVersionJobId()!;
         _modalEnhancementRequestPending = true;
         UpdateModalEnhancementActionControls();
         try
@@ -14064,18 +14327,16 @@ public partial class MainWindow : Window
                 return;
             }
 
-            _modalShowingEnhanced = false;
-            tile.Enhanced = false;
-            tile.EnhancedOutputPath = null;
-            if (TryResolveEnhancementSourceIdentity(tile.Path, out string sourceIdentity))
-                _enhancedOutputs.Remove(sourceIdentity);
+            RemoveModalEnhancementVersion(tile, requestJobId);
             _modalEnhancementJobId = null;
+            _modalEnhancementOperation = "upscale";
             _modalEnhancementJobStatus = null;
             _modalEnhancementProgress = 0;
             _modalEnhancementError = null;
             _modalEnhancementCancelRequested = false;
             OpenModal();
-            ShowModalInteractionFeedback("Enhanced output deleted; original kept");
+            BeginModalEnhancementRefresh(tile.Path);
+            ShowModalInteractionFeedback("AI output version deleted; original and other versions kept");
         }
         finally
         {
@@ -14137,16 +14398,20 @@ public partial class MainWindow : Window
         _modalCts?.Cancel();
         _modalEnhancementPollTimer.Stop();
         _modalEnhancementGeneration++;
+        if (ModalPhotorealSettingsPopup is not null)
+            ModalPhotorealSettingsPopup.IsOpen = false;
         Modal.Visibility = Visibility.Collapsed;
         _modalShowingEnhanced = false;
         _modalSourceTilePath = null;
         _modalDisplayPath = null;
         _modalEnhancementRequestPending = false;
         _modalEnhancementJobId = null;
+        _modalEnhancementOperation = "upscale";
         _modalEnhancementJobStatus = null;
         _modalEnhancementProgress = 0;
         _modalEnhancementError = null;
         _modalEnhancementCancelRequested = false;
+        ClearModalEnhancementVersions();
         _modalChromeTransientTimer.Stop();
         _modalHasPointerPosition = false;
         _modalPressedEdgeTarget = ModalEdgeTarget.None;
@@ -14162,6 +14427,7 @@ public partial class MainWindow : Window
         ResetModalTransform();
         if (wasVisible && restoreFocus)
             RestoreOverlayFocus(focusTarget, preferPrimaryGallery: true);
+        ReturnToEnhancementJobsAfterModalClose(wasVisible);
     }
 
     private void ToggleModalEnhanced_Click(object sender, RoutedEventArgs e) => ToggleModalEnhanced();
@@ -14171,7 +14437,16 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile || !TryGetModalEnhancedOutput(tile, out _))
             return false;
 
-        _modalShowingEnhanced = !_modalShowingEnhanced;
+        if (_modalShowingEnhanced)
+        {
+            _modalEnhancementVersionIndex = 0;
+            _modalShowingEnhanced = false;
+        }
+        else
+        {
+            _modalEnhancementVersionIndex = 1;
+            _modalShowingEnhanced = true;
+        }
         OpenModal();
         return true;
     }
@@ -15757,9 +16032,7 @@ public partial class MainWindow : Window
         ModalNextButton.ToolTip = UiLanguageResources.Format("UiNextImageFormat", BindingText(ViewerKeyAction.NextImage));
         ModalFavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
         ModalFavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
-        FavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
         FavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
-        BulkFavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiBulkFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
         BulkFavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiBulkFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
         ModalDeleteButton.ToolTip = UiLanguageResources.Format("UiRecycleCurrentFormat", BindingText(ViewerKeyAction.RecycleCurrentImage));
         RestorePreviewTabButton.ToolTip = UiLanguageResources.Format("UiReopenClosedFormat", BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab));
@@ -16190,6 +16463,7 @@ public partial class MainWindow : Window
         ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
         SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
+        SyncModalPhotorealSettingsControls();
         RefreshSharedDataSettings();
         DiagnosticsText.Text = BuildDiagnosticsText();
         DiagnosticsStatusText.Text = "Read-only diagnostics. Copy excludes paths, image metadata, prompts, and personal state.";
@@ -16224,6 +16498,7 @@ public partial class MainWindow : Window
 
         (FrameworkElement Target, RadioButton Navigation) selection = section switch
         {
+            "photoreal" => (PhotorealSettingsHeading, SettingsPhotorealNav),
             "display" => (DisplaySettingsHeading, SettingsDisplayNav),
             "thumbnails" => (ThumbnailSettingsHeading, SettingsThumbnailsNav),
             "keyboard" => (KeyBindingsHeading, SettingsKeyboardNav),
@@ -17371,6 +17646,7 @@ public partial class MainWindow : Window
         {
             SyncFavoriteFilterControls();
             SyncFoldersSectionControls();
+            RestoreModalPhotorealSettings(null, null, null, null, null);
             _keyBindings = KeyBindingSettings.CreateDefaults();
             _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
             ApplyKeyBindingTooltips();
@@ -17409,6 +17685,12 @@ public partial class MainWindow : Window
         SetModalEdgeNavigationPercent(
             state.ModalEdgeNavigationPercent ?? ModalEdgeNavigationDefaultPercent,
             persist: false);
+        RestoreModalPhotorealSettings(
+            state.PhotorealStrength,
+            state.PhotorealStructureStrength,
+            state.PhotorealSteps,
+            state.PhotorealMaxDimension,
+            state.PhotorealPrompt);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -17540,6 +17822,11 @@ public partial class MainWindow : Window
                 FoldersSectionExpanded = _foldersSectionExpanded,
                 ModalFilmstripOpen = _modalFilmstripOpen,
                 ModalEdgeNavigationPercent = _modalEdgeNavigationPercent,
+                PhotorealStrength = _modalPhotorealStrength,
+                PhotorealStructureStrength = _modalPhotorealStructureStrength,
+                PhotorealSteps = _modalPhotorealSteps,
+                PhotorealMaxDimension = _modalPhotorealMaxDimension,
+                PhotorealPrompt = _modalPhotorealPrompt,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -17953,6 +18240,15 @@ public partial class MainWindow : Window
             && (IsModalNativeInputFocused(e.OriginalSource) || IsModalNativeInputFocused(shortcutFocusedElement));
         bool modalActionButtonFocused = modalVisible
             && (IsModalActionButtonFocused(e.OriginalSource) || IsModalActionButtonFocused(shortcutFocusedElement));
+        if (modalVisible
+            && !modalNativeInputFocused
+            && modifiers == ModifierKeys.Control
+            && key is Key.Up or Key.Down
+            && CycleModalEnhancementVersion(key == Key.Down ? 1 : -1))
+        {
+            e.Handled = true;
+            return;
+        }
         if (modalVisible && key == Key.F11 && modifiers == ModifierKeys.None)
         {
             SetModalFullScreen(!_modalFullScreen);
@@ -17998,6 +18294,12 @@ public partial class MainWindow : Window
             && !modalActionButtonFocused)
         {
             base.OnPreviewKeyDown(e);
+            return;
+        }
+
+        if (TryHandleFavoriteUndoRedo(key, modifiers))
+        {
+            e.Handled = true;
             return;
         }
 
@@ -19356,7 +19658,7 @@ public partial class MainWindow : Window
         => ModalCloseBtn.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.CloseModal), StringComparison.Ordinal) == true
             && ModalPreviousButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.PreviousImage), StringComparison.Ordinal) == true
             && ModalNextButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.NextImage), StringComparison.Ordinal) == true
-            && FavoriteDecreaseButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.FavoriteDecrease), StringComparison.Ordinal) == true
+            && ModalFavoriteDecreaseButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.FavoriteDecrease), StringComparison.Ordinal) == true
             && FavoriteIncreaseButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.FavoriteIncrease), StringComparison.Ordinal) == true
             && ModalDeleteButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.RecycleCurrentImage), StringComparison.Ordinal) == true
             && RestorePreviewTabButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab), StringComparison.Ordinal) == true
@@ -19907,8 +20209,14 @@ public partial class MainWindow : Window
                 sourceIdentity,
                 0,
                 0);
+            var versions = new List<ManagedEnhancementVersion>
+            {
+                new("smoke-upscale", "upscale", output),
+            };
             _enhancedOutputs[sourceIdentity] = output;
             _catalogEnhancedOutputsByPath[sourceIdentity] = output;
+            _enhancementVersions[sourceIdentity] = versions;
+            _catalogEnhancementVersionsByPath[sourceIdentity] = versions;
             return true;
         }
         catch
@@ -19929,6 +20237,10 @@ public partial class MainWindow : Window
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Unseen == true;
     public bool EnhancedForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Enhanced == true;
+    public bool UpscaledForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Upscaled == true;
+    public bool PhotorealizedForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Photorealized == true;
     public int EnhancedTileCountForSmoke => _allTiles.Count(static tile => tile.Enhanced);
     public int EnhancementJobsReadForSmoke => _enhancementJobsRead;
     public int EnhancedCandidateCountForSmoke => _enhancedCandidateCount;
@@ -19989,6 +20301,8 @@ public partial class MainWindow : Window
     public int PreviewTabHoverDecodeStartCountForSmoke => _previewTabHoverDecodeStartCount;
     public int PreviewTabHoverDecodeFailureCountForSmoke => _previewTabHoverDecodeFailureCount;
     public bool SelectedEnhancedForSmoke => SelectedTile()?.Enhanced == true;
+    public bool SelectedUpscaledForSmoke => SelectedTile()?.Upscaled == true;
+    public bool SelectedPhotorealizedForSmoke => SelectedTile()?.Photorealized == true;
     public string? SelectedEnhancedOutputPathForSmoke => SelectedTile()?.EnhancedOutputPath;
     public bool SelectedUnseenDotForSmoke => SelectedTile()?.ShowUnseenDot == true;
     public int UnseenCountForSmoke => _allTiles.Count(static tile => tile.Unseen);
@@ -20854,7 +21168,6 @@ public partial class MainWindow : Window
         {
             Button[] actions =
             [
-                FavoriteDecreaseButton,
                 FavoriteIncreaseButton,
                 RightPreviewEnhanceButton,
                 RightPreviewOpenButton,
@@ -21124,7 +21437,7 @@ public partial class MainWindow : Window
             return false;
 
         int before = tile.Fav;
-        FavoriteDecreaseButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, FavoriteDecreaseButton));
+        FavoriteDecrease_Click(this, new RoutedEventArgs());
         return tile.Fav == Math.Clamp(before - 1, 0, 5);
     }
     public bool AdjustModalFavoriteForSmoke(int delta)
@@ -21755,6 +22068,15 @@ public partial class MainWindow : Window
             && ModalContextMenu.Items.OfType<MenuItem>().All(item =>
                 !string.IsNullOrWhiteSpace(item.Header?.ToString())
                 && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(item)));
+    public bool GalleryContextMenuContractForSmoke
+        => new[] { CardsContextMenu, RowsContextMenu }.All(menu =>
+            menu.Items.OfType<MenuItem>().Count() == 2
+            && menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(item.Header?.ToString(), "AI高画質化", StringComparison.Ordinal)
+                && string.Equals(AutomationProperties.GetName(item), "AI高画質化", StringComparison.Ordinal))
+            && menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(item.Header?.ToString(), "AI実写化", StringComparison.Ordinal)
+                && string.Equals(AutomationProperties.GetName(item), "AI実写化", StringComparison.Ordinal)));
     public bool ModalEdgeChromeContractForSmoke
         => ModalPreviousZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalCenterZoneColumn.Width.GridUnitType == GridUnitType.Star
@@ -22309,6 +22631,12 @@ public partial class MainWindow : Window
         ApplyFilters();
     }
 
+    public void SetPhotorealOnlyFilterForSmoke(bool enabled)
+    {
+        PhotorealOnlyFilter.IsChecked = enabled;
+        ApplyFilters();
+    }
+
     public void SetUnseenOnlyFilterForSmoke(bool enabled)
     {
         bool changed = UnseenOnlyFilter.IsChecked != enabled;
@@ -22825,6 +23153,12 @@ public sealed class ViewerState
     public bool? ModalFilmstripOpen { get; set; }
     // WPF-only viewer hit zone; it does not modify the shared settings.json contract.
     public double? ModalEdgeNavigationPercent { get; set; }
+    // WPF-local request defaults for the explicit AI photorealization action.
+    public double? PhotorealStrength { get; set; }
+    public double? PhotorealStructureStrength { get; set; }
+    public int? PhotorealSteps { get; set; }
+    public int? PhotorealMaxDimension { get; set; }
+    public string? PhotorealPrompt { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.
@@ -23677,12 +24011,18 @@ public sealed class Tile : INotifyPropertyChanged
     public string SizeText { get; set; } = "";
     public string ModifiedText { get; set; } = "";
     public string AutomationHelpText
-        => $"{SizeText}. Favorite level {_fav}. {(_enhanced ? "AI-enhanced" : "Original")}. {(_unseen ? "Unseen" : "Seen")}.";
+        => $"{SizeText}. Favorite level {_fav}. "
+            + $"{(_upscaled ? "AI-upscaled. " : "")}"
+            + $"{(_photorealized ? "AI-photorealized. " : "")}"
+            + $"{(!_enhanced ? "Original. " : "")}"
+            + $"{(_unseen ? "Unseen" : "Seen")}.";
 
     private string _prompt = "";
     private int _imagePixelWidth;
     private int _imagePixelHeight;
     private bool _enhanced;
+    private bool _upscaled;
+    private bool _photorealized;
     private bool _showCardDetails = true;
     private bool _showCardStatusBadge = true;
     private bool _isCanonicalSelected;
@@ -23711,6 +24051,32 @@ public sealed class Tile : INotifyPropertyChanged
         }
     }
 
+    public bool Upscaled
+    {
+        get => _upscaled;
+        set
+        {
+            if (_upscaled == value) return;
+            _upscaled = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Upscaled)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public bool Photorealized
+    {
+        get => _photorealized;
+        set
+        {
+            if (_photorealized == value) return;
+            _photorealized = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Photorealized)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
     public bool ShowCardDetails
     {
         get => _showCardDetails;
@@ -23732,6 +24098,8 @@ public sealed class Tile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowCardStatusBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowEnhancedBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUnseenDotOnCard)));
         }
     }
@@ -23739,6 +24107,8 @@ public sealed class Tile : INotifyPropertyChanged
     public bool ShowFavoriteBadge => _showCardStatusBadge && _fav > 0;
     public string FavoriteGlyph => _fav > 0 ? "\uEB52" : "\uEB51";
     public bool ShowEnhancedBadge => _showCardStatusBadge && _enhanced;
+    public bool ShowUpscaleBadge => _showCardStatusBadge && _upscaled;
+    public bool ShowPhotorealBadge => _showCardStatusBadge && _photorealized;
     public bool ShowUnseenDotOnCard => _showCardStatusBadge && _showUnseenDot;
     public double CardFavoriteButtonSize => Math.Clamp(_cardWidth - 4, 18, 34);
     public bool UseCompactCardTemplate => _cardWidth < 80;

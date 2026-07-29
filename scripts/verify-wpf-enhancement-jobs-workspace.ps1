@@ -1,6 +1,8 @@
 param(
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-enhancement-jobs-workspace.json"),
+    [string]$DotnetPath = "dotnet",
+    [string]$TargetFrameworkOverride = "",
     [ValidateRange(1, 300)]
     [int]$OverallTimeoutSeconds = 90
 )
@@ -22,19 +24,24 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    }
+    else {
+        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+    }
     if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
-    $exe = Join-Path $buildRoot 'PhotoViewer.Wpf.exe'
-    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
-        throw "WPF executable was not found: $exe"
+    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+    if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
+        throw "WPF assembly was not found: $dll"
     }
     if (Test-Path -LiteralPath $fullOutputPath) {
         Remove-Item -LiteralPath $fullOutputPath -Force
     }
 
-    $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--enhancement-jobs-workspace-smoke', ('"{0}"' -f $fullOutputPath)) `
+    $process = Start-Process -FilePath $DotnetPath `
+        -ArgumentList @(('"{0}"' -f $dll), '--enhancement-jobs-workspace-smoke', ('"{0}"' -f $fullOutputPath)) `
         -WindowStyle Hidden `
         -PassThru
 
@@ -52,7 +59,19 @@ try {
     $process = $null
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 10
-    $required = @('passiveOpen', 'routesOk', 'outputOpened', 'pollingStoppedOnClose', 'sourceUnchanged', 'storesUnchanged', 'outputDeleted')
+    $required = @(
+        'passiveOpen',
+        'routesOk',
+        'outputOpened',
+        'sourceOpenedInViewer',
+        'queueInventoryOrdered',
+        'operationLabelsVisible',
+        'stableJobViews',
+        'jobsRestoredAfterViewerClose',
+        'sourceUnchanged',
+        'storesUnchanged',
+        'outputDeleted'
+    )
     $missing = @($required | Where-Object { $result.$_ -ne $true })
     if ($processExitCode -ne 0 -or $result.ok -ne $true -or $missing.Count -gt 0) {
         throw "Enhancement jobs workspace contract failed (exit $processExitCode): $($missing -join ', ')"

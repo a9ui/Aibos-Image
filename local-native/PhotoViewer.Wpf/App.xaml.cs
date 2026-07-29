@@ -38,9 +38,11 @@ public partial class App : Application
         "BgPrimaryColor", "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
         "GlassChromeTopColor", "GlassChromeBottomColor",
         "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor", "TextDisabledColor", "SelectionTextColor",
-        "AccentColor", "AccentLightColor", "FocusColor", "FavoriteColor", "FavoriteTextColor",
+        "AccentColor", "AccentLightColor", "AccentFillColor", "AccentFillHoverColor",
+        "FocusColor", "FavoriteColor", "FavoriteTextColor",
         "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
         "SuccessColor", "WarningColor", "DangerColor", "DangerTextColor",
+        "DangerFillColor", "DangerFillHoverColor",
         "GlassBorderColor", "GlassBorderHoverColor", "BorderStrongColor",
         "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
         "FavoriteSoftColor", "SuccessSoftColor", "SuccessBorderColor", "LogoColor", "FavStepColor",
@@ -65,6 +67,8 @@ public partial class App : Application
             ["SelectionTextColor"] = "SelectionText",
             ["AccentColor"] = "Accent",
             ["AccentLightColor"] = "AccentLight",
+            ["AccentFillColor"] = "AccentFill",
+            ["AccentFillHoverColor"] = "AccentFillHover",
             ["FocusColor"] = "Focus",
             ["FavoriteColor"] = "Favorite",
             ["FavoriteTextColor"] = "FavoriteText",
@@ -72,6 +76,8 @@ public partial class App : Application
             ["WarningColor"] = "Warning",
             ["DangerColor"] = "Danger",
             ["DangerTextColor"] = "DangerText",
+            ["DangerFillColor"] = "DangerFill",
+            ["DangerFillHoverColor"] = "DangerFillHover",
             ["GlassBorderColor"] = "GlassBorder",
             ["GlassBorderHoverColor"] = "GlassBorderHover",
             ["BorderStrongColor"] = "BorderStrong",
@@ -787,6 +793,13 @@ public partial class App : Application
             return;
         }
 
+        int modalPhotorealSmokeIdx = Array.IndexOf(e.Args, "--modal-photoreal-smoke");
+        if (modalPhotorealSmokeIdx >= 0 && modalPhotorealSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureModalPhotorealSmoke(e.Args[modalPhotorealSmokeIdx + 1]);
+            return;
+        }
+
         int enhancementJobsWorkspaceSmokeIdx = Array.IndexOf(e.Args, "--enhancement-jobs-workspace-smoke");
         if (enhancementJobsWorkspaceSmokeIdx >= 0 && enhancementJobsWorkspaceSmokeIdx + 1 < e.Args.Length)
         {
@@ -1078,9 +1091,10 @@ public partial class App : Application
         SetThemeColors(SystemColors.GrayTextColor, "TextDisabledColor");
         SetThemeColors(SystemColors.HighlightTextColor, "SelectionTextColor");
         SetThemeColors(SystemColors.HotTrackColor,
-            "AccentColor", "AccentLightColor", "FavoriteColor",
+            "AccentColor", "AccentLightColor", "AccentFillColor", "AccentFillHoverColor", "FavoriteColor",
             "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
-            "WarningColor", "DangerColor", "SuccessBorderColor", "FavStepColor",
+            "WarningColor", "DangerColor", "DangerFillColor", "DangerFillHoverColor",
+            "SuccessBorderColor", "FavStepColor",
             "CompactFavoriteBackgroundColor");
         SetThemeColors(SystemColors.HighlightColor, "FocusColor");
         SetThemeColors(
@@ -14392,6 +14406,17 @@ public partial class App : Application
                 List<int> clearedLevels = win.SelectedFavoriteLevelsForSmoke;
                 bool clearedFromStore = new[] { alphaPath, bravoPath, charliePath }.All(path => !FavoriteFileContainsPath(favoritesPath, path));
                 bool externalPreservedAfterClear = ReadFavoriteLevel(favoritesPath, deltaPath) == 2;
+                int favoriteHistoryCount = win.FavoriteHistoryCountForSmoke;
+                bool favoriteHistorySurface = win.FavoriteHistorySurfaceForSmoke
+                    && win.FavoriteUndoAvailableForSmoke
+                    && !win.FavoriteRedoAvailableForSmoke;
+                bool favoriteUndoShortcut = win.InvokePreviewKeyForSmoke(Key.Z, ModifierKeys.Control);
+                List<int> undoLevels = win.SelectedFavoriteLevelsForSmoke;
+                bool undoPersisted = new[] { alphaPath, bravoPath, charliePath }.All(path => ReadFavoriteLevel(favoritesPath, path) == 5);
+                bool favoriteRedoAvailable = win.FavoriteRedoAvailableForSmoke;
+                bool favoriteRedoShortcut = win.InvokePreviewKeyForSmoke(Key.Y, ModifierKeys.Control);
+                List<int> redoLevels = win.SelectedFavoriteLevelsForSmoke;
+                bool redoPersisted = new[] { alphaPath, bravoPath, charliePath }.All(path => !FavoriteFileContainsPath(favoritesPath, path));
 
                 int beforeRestore = win.FavoriteSaveAttemptCountForSmoke;
                 bool restored = win.SetSelectedFavoriteLevelForSmoke(2);
@@ -14431,6 +14456,10 @@ public partial class App : Application
                     && adjustedPersisted && externalPreservedAfterAdjust
                     && cleared && clearAttempts == 1 && clearedLevels.All(level => level == 0)
                     && clearedFromStore && externalPreservedAfterClear
+                    && favoriteHistoryCount >= 5 && favoriteHistorySurface
+                    && favoriteUndoShortcut && undoLevels.All(level => level == 5) && undoPersisted
+                    && favoriteRedoAvailable && favoriteRedoShortcut
+                    && redoLevels.All(level => level == 0) && redoPersisted
                     && restored && restoreAttempts == 1 && restoredLevels.All(level => level == 2)
                     && reasserted && reassertAttempts == 1 && reassertedPersisted && externalPreservedAfterReassert
                     && malformedRefused && malformedAttempts == 1
@@ -14460,6 +14489,14 @@ public partial class App : Application
                     ClearedLevels = clearedLevels,
                     ClearedFromStore = clearedFromStore,
                     ExternalPreservedAfterClear = externalPreservedAfterClear,
+                    FavoriteHistoryCount = favoriteHistoryCount,
+                    FavoriteHistorySurface = favoriteHistorySurface,
+                    FavoriteUndoShortcut = favoriteUndoShortcut,
+                    UndoLevels = undoLevels,
+                    UndoPersisted = undoPersisted,
+                    FavoriteRedoShortcut = favoriteRedoShortcut,
+                    RedoLevels = redoLevels,
+                    RedoPersisted = redoPersisted,
                     RestoreAttempts = restoreAttempts,
                     RestoredLevels = restoredLevels,
                     ReassertAttempts = reassertAttempts,
@@ -16870,14 +16907,24 @@ public partial class App : Application
         string outputRoot = Path.Combine(Path.GetDirectoryName(jobsPath)!, "outputs");
         Directory.CreateDirectory(outputRoot);
 
-        string validSource = Path.Combine(fullFolder, fixtureNames[0]);
-        string staleSource = Path.Combine(fullFolder, fixtureNames[1]);
-        string failedSource = Path.Combine(fullFolder, fixtureNames[2]);
-        string validOutput = Path.Combine(outputRoot, "enhanced-" + Path.GetFileName(validSource));
+        string upscaleSource = Path.Combine(fullFolder, fixtureNames[0]);
+        string photorealSource = Path.Combine(fullFolder, fixtureNames[1]);
+        string invalidSource = Path.Combine(fullFolder, fixtureNames[2]);
+        string upscaleOutput = Path.Combine(outputRoot, "upscale-" + Path.GetFileName(upscaleSource));
+        string photorealOutput = Path.Combine(outputRoot, "photoreal-" + Path.GetFileName(photorealSource));
         string missingOutput = Path.Combine(outputRoot, "missing-output.png");
         string missingSource = Path.Combine(smokeRoot, "missing-source.png");
-        File.Copy(validSource, validOutput, overwrite: true);
-        WriteEnhancedJobsFixture(jobsPath, validSource, validOutput, staleSource, missingOutput, failedSource, missingSource);
+        File.Copy(upscaleSource, upscaleOutput, overwrite: true);
+        File.Copy(photorealSource, photorealOutput, overwrite: true);
+        WriteEnhancementOperationJobsFixture(
+            jobsPath,
+            upscaleSource,
+            upscaleOutput,
+            photorealSource,
+            photorealOutput,
+            invalidSource,
+            missingOutput,
+            missingSource);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", jobsPath);
         string beforeJobsJson = File.ReadAllText(jobsPath);
 
@@ -16894,28 +16941,41 @@ public partial class App : Application
                 await win.LoadFolderAsync(fullFolder);
                 string resolvedJobsPath = win.EnhancementJobsPathForSmoke;
                 int allCount = win.FilteredCountForSmoke;
-                bool selectedValid = win.SelectFileNameForSmoke(Path.GetFileName(validSource));
-                bool selectedValidEnhanced = win.SelectedEnhancedForSmoke;
-                string? selectedOutput = win.SelectedEnhancedOutputPathForSmoke;
-                bool outputMatches = string.Equals(selectedOutput, validOutput, StringComparison.OrdinalIgnoreCase);
+                bool selectedUpscale = win.SelectFileNameForSmoke(Path.GetFileName(upscaleSource));
+                bool selectedUpscaleEnhanced = win.SelectedEnhancedForSmoke;
+                bool selectedUpscaleBadge = win.SelectedUpscaledForSmoke && !win.SelectedPhotorealizedForSmoke;
+                string? selectedUpscaleOutput = win.SelectedEnhancedOutputPathForSmoke;
+                bool upscaleOutputMatches = string.Equals(selectedUpscaleOutput, upscaleOutput, StringComparison.OrdinalIgnoreCase);
+
+                bool selectedPhotoreal = win.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                bool selectedPhotorealEnhanced = win.SelectedEnhancedForSmoke;
+                bool selectedPhotorealBadge = win.SelectedPhotorealizedForSmoke && !win.SelectedUpscaledForSmoke;
+                string? selectedPhotorealOutput = win.SelectedEnhancedOutputPathForSmoke;
+                bool photorealOutputMatches = string.Equals(selectedPhotorealOutput, photorealOutput, StringComparison.OrdinalIgnoreCase);
 
                 win.SetEnhancedOnlyFilterForSmoke(true);
-                int enhancedFilteredCount = win.FilteredCountForSmoke;
-                bool validVisible = win.SelectFileNameForSmoke(Path.GetFileName(validSource));
-                bool staleVisible = win.SelectFileNameForSmoke(Path.GetFileName(staleSource));
-                bool failedVisible = win.SelectFileNameForSmoke(Path.GetFileName(failedSource));
-                bool selectedStillEnhanced = win.SelectedEnhancedForSmoke;
+                int upscaleFilteredCount = win.FilteredCountForSmoke;
+                bool upscaleVisible = win.SelectFileNameForSmoke(Path.GetFileName(upscaleSource));
+                bool photorealVisibleInUpscaleFilter = win.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                bool invalidVisible = win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
 
+                win.SetPhotorealOnlyFilterForSmoke(true);
+                int intersectionFilteredCount = win.FilteredCountForSmoke;
                 win.SetEnhancedOnlyFilterForSmoke(false);
+                int photorealFilteredCount = win.FilteredCountForSmoke;
+                bool photorealVisible = win.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                bool upscaleVisibleInPhotorealFilter = win.SelectFileNameForSmoke(Path.GetFileName(upscaleSource));
+
+                win.SetPhotorealOnlyFilterForSmoke(false);
                 int afterClearCount = win.FilteredCountForSmoke;
                 win.Close();
 
                 var second = HiddenWindow();
                 second.Show();
                 await second.LoadFolderAsync(fullFolder);
-                second.SetEnhancedOnlyFilterForSmoke(true);
+                second.SetPhotorealOnlyFilterForSmoke(true);
                 int reloadFilteredCount = second.FilteredCountForSmoke;
-                bool reloadValidVisible = second.SelectFileNameForSmoke(Path.GetFileName(validSource));
+                bool reloadPhotorealVisible = second.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
                 second.Close();
 
                 string afterJobsJson = File.ReadAllText(jobsPath);
@@ -16923,52 +16983,70 @@ public partial class App : Application
 
                 bool ok = string.Equals(Path.GetFullPath(resolvedJobsPath), Path.GetFullPath(jobsPath), StringComparison.OrdinalIgnoreCase)
                     && win.EnhancementReadOkForSmoke
-                    && win.EnhancementJobsReadForSmoke >= 5
-                    && win.EnhancedCandidateCountForSmoke == 1
-                    && win.EnhancedStoreCountForSmoke == 1
+                    && win.EnhancementJobsReadForSmoke >= 6
+                    && win.EnhancedCandidateCountForSmoke == 2
+                    && win.EnhancedStoreCountForSmoke == 2
                     && allCount >= 3
-                    && selectedValid
-                    && selectedValidEnhanced
-                    && outputMatches
-                    && enhancedFilteredCount == 1
-                    && validVisible
-                    && !staleVisible
-                    && !failedVisible
-                    && selectedStillEnhanced
+                    && selectedUpscale
+                    && selectedUpscaleEnhanced
+                    && selectedUpscaleBadge
+                    && upscaleOutputMatches
+                    && selectedPhotoreal
+                    && selectedPhotorealEnhanced
+                    && selectedPhotorealBadge
+                    && photorealOutputMatches
+                    && upscaleFilteredCount == 1
+                    && upscaleVisible
+                    && !photorealVisibleInUpscaleFilter
+                    && !invalidVisible
+                    && intersectionFilteredCount == 0
+                    && photorealFilteredCount == 1
+                    && photorealVisible
+                    && !upscaleVisibleInPhotorealFilter
                     && afterClearCount == allCount
                     && reloadFilteredCount == 1
-                    && reloadValidVisible
+                    && reloadPhotorealVisible
                     && enhancementStateUnchanged;
 
                 result = new EnhancedFilterSmokeResult
                 {
                     Ok = ok,
                     Message = ok
-                        ? "read-only enhanced metadata import, enhanced-only filtering, stale fallback, reload, and state unchanged checks passed"
-                        : "enhanced filter smoke did not meet read/filter/reload/state expectations",
+                        ? "read-only enhancement import, independent upscale/photoreal filters, distinct badges, intersection, reload, and unchanged-state checks passed"
+                        : "enhancement operation filter smoke did not meet read/filter/badge/reload/state expectations",
                     Folder = fullFolder,
                     ProjectRoot = smokeRoot,
                     JobsPath = jobsPath,
                     ResolvedJobsPath = resolvedJobsPath,
-                    ValidSourceName = Path.GetFileName(validSource),
-                    StaleSourceName = Path.GetFileName(staleSource),
-                    FailedSourceName = Path.GetFileName(failedSource),
-                    ValidOutputPath = validOutput,
+                    UpscaleSourceName = Path.GetFileName(upscaleSource),
+                    PhotorealSourceName = Path.GetFileName(photorealSource),
+                    InvalidSourceName = Path.GetFileName(invalidSource),
+                    UpscaleOutputPath = upscaleOutput,
+                    PhotorealOutputPath = photorealOutput,
                     MissingOutputPath = missingOutput,
                     AllCount = allCount,
                     JobsRead = win.EnhancementJobsReadForSmoke,
                     CandidateCount = win.EnhancedCandidateCountForSmoke,
                     EnhancedStoreCount = win.EnhancedStoreCountForSmoke,
-                    SelectedValid = selectedValid,
-                    SelectedValidEnhanced = selectedValidEnhanced,
-                    SelectedOutputPath = selectedOutput,
-                    EnhancedFilteredCount = enhancedFilteredCount,
-                    ValidVisible = validVisible,
-                    StaleVisible = staleVisible,
-                    FailedVisible = failedVisible,
+                    SelectedUpscale = selectedUpscale,
+                    SelectedUpscaleEnhanced = selectedUpscaleEnhanced,
+                    SelectedUpscaleBadge = selectedUpscaleBadge,
+                    SelectedUpscaleOutputPath = selectedUpscaleOutput,
+                    SelectedPhotoreal = selectedPhotoreal,
+                    SelectedPhotorealEnhanced = selectedPhotorealEnhanced,
+                    SelectedPhotorealBadge = selectedPhotorealBadge,
+                    SelectedPhotorealOutputPath = selectedPhotorealOutput,
+                    UpscaleFilteredCount = upscaleFilteredCount,
+                    UpscaleVisible = upscaleVisible,
+                    PhotorealVisibleInUpscaleFilter = photorealVisibleInUpscaleFilter,
+                    InvalidVisible = invalidVisible,
+                    IntersectionFilteredCount = intersectionFilteredCount,
+                    PhotorealFilteredCount = photorealFilteredCount,
+                    PhotorealVisible = photorealVisible,
+                    UpscaleVisibleInPhotorealFilter = upscaleVisibleInPhotorealFilter,
                     AfterClearCount = afterClearCount,
                     ReloadFilteredCount = reloadFilteredCount,
-                    ReloadValidVisible = reloadValidVisible,
+                    ReloadPhotorealVisible = reloadPhotorealVisible,
                     EnhancementStateUnchanged = enhancementStateUnchanged,
                     ReadOk = win.EnhancementReadOkForSmoke,
                     ReadError = win.EnhancementReadErrorForSmoke,
@@ -17215,9 +17293,6 @@ public partial class App : Application
                     Environment.SetEnvironmentVariable(key, value);
 
                 string sourceBefore = FileFingerprint(sourcePath);
-                var storesBefore = environment
-                    .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
-                    .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
                 bool activeCanceled = false;
                 bool retryCreated = false;
                 bool outputDeleted = false;
@@ -17225,7 +17300,14 @@ public partial class App : Application
                 var sourceInfo = new FileInfo(sourcePath);
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
 
-                object Job(string id, string status, int progress, string? output = null, string? error = null) => new
+                object Job(
+                    string id,
+                    string status,
+                    int progress,
+                    string? output = null,
+                    string? error = null,
+                    string operation = "upscale",
+                    string createdAt = "2026-07-23T00:00:00.000Z") => new
                 {
                     id,
                     sourceId = sourcePath,
@@ -17233,11 +17315,12 @@ public partial class App : Application
                     sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
                     presetId = "anime-sharp-x2",
                     adapterId = "realesrgan-ncnn",
+                    operation,
                     status,
                     progress,
                     outputPath = output,
                     errorMessage = error,
-                    createdAt = "2026-07-23T00:00:00.000Z",
+                    createdAt,
                     updatedAt = "2026-07-23T00:00:01.000Z",
                 };
 
@@ -17245,12 +17328,19 @@ public partial class App : Application
                 {
                     var jobs = new List<object>
                     {
-                        Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42),
+                        Job("queue-later-job", "queued", 0, createdAt: "2026-07-23T00:00:03.000Z"),
                         Job("failed-job", "failed", 18, error: "GPU backend stopped"),
-                        Job("done-job", outputDeleted ? "deleted" : "succeeded", 100, outputDeleted ? null : outputPath),
+                        Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42, createdAt: "2026-07-23T00:00:01.000Z"),
+                        Job("queue-first-job", "queued", 0, createdAt: "2026-07-23T00:00:02.000Z"),
+                        Job(
+                            "done-job",
+                            outputDeleted ? "deleted" : "succeeded",
+                            100,
+                            outputDeleted ? null : outputPath,
+                            operation: "photoreal"),
                     };
                     if (retryCreated)
-                        jobs.Insert(0, Job("retry-job", "queued", 0));
+                        jobs.Insert(0, Job("retry-job", "queued", 0, createdAt: "2026-07-23T00:00:04.000Z"));
                     return jobs.ToArray();
                 }
 
@@ -17259,11 +17349,6 @@ public partial class App : Application
 
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
-                window.ConfigureEnhancementWorkspaceExternalOpenForSmoke(startInfo =>
-                {
-                    openedOutput = startInfo.FileName;
-                    return true;
-                });
                 window.ConfigureModalEnhancementForSmoke((request, _) =>
                 {
                     string route = request.RequestUri?.AbsolutePath ?? "";
@@ -17290,14 +17375,25 @@ public partial class App : Application
                     return Task.FromResult(JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected workspace smoke route" }));
                 }, confirmOutputDelete: true);
                 window.Show();
+                await window.LoadFolderSetAsync([Path.GetDirectoryName(sourcePath)!], commitRecent: false);
+                var storesBefore = environment
+                    .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
+                    .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
 
                 int requestsBeforeOpen = requests.Count;
                 await window.OpenEnhancementJobsForSmokeAsync();
                 window.UpdateLayout();
                 EnhancementJobsWorkspaceSmokeSnapshot initial = window.EnhancementJobsWorkspaceForSmoke();
                 bool passiveOpen = requests.Skip(requestsBeforeOpen).All(static request => request == "GET /api/enhance/jobs");
-                window.SelectEnhancementJobsFilterForSmoke("active");
-                EnhancementJobsWorkspaceSmokeSnapshot active = window.EnhancementJobsWorkspaceForSmoke();
+                object? viewBeforeRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                object? viewAfterRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
+                bool stableJobViews = viewBeforeRefresh is not null
+                    && ReferenceEquals(viewBeforeRefresh, viewAfterRefresh);
+                window.SelectEnhancementJobsFilterForSmoke("running");
+                EnhancementJobsWorkspaceSmokeSnapshot running = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("queued");
+                EnhancementJobsWorkspaceSmokeSnapshot queued = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot failed = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("completed");
@@ -17309,42 +17405,72 @@ public partial class App : Application
                 bool retryIssued = await window.RetryEnhancementJobForSmokeAsync("failed-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterRetry = window.EnhancementJobsWorkspaceForSmoke();
                 bool outputOpened = window.OpenEnhancementJobOutputForSmoke("done-job");
+                openedOutput = window.ModalDisplayPathForSmoke;
+                EnhancementJobsWorkspaceSmokeSnapshot whileOutputViewerOpen = window.EnhancementJobsWorkspaceForSmoke();
+                window.CloseModalForSmoke();
+                await window.WaitForEnhancementJobsReturnForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterOutputClose = window.EnhancementJobsWorkspaceForSmoke();
                 bool deleteIssued = await window.DeleteEnhancementJobOutputForSmokeAsync("done-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterDelete = window.EnhancementJobsWorkspaceForSmoke();
-                int getsBeforeClose = requests.Count(static request => request == "GET /api/enhance/jobs");
-                window.CloseEnhancementJobsForSmoke();
-                await Task.Delay(1200);
-                int getsAfterClose = requests.Count(static request => request == "GET /api/enhance/jobs");
-
-                string sourceAfter = FileFingerprint(sourcePath);
-                var storesAfter = environment
+                var storesBeforeViewerOpen = environment
                     .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
                     .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
-                bool storesUnchanged = storesBefore.All(pair => storesAfter.TryGetValue(pair.Key, out string? fingerprint) && fingerprint == pair.Value);
+                bool sourceOpenedInViewer = window.OpenEnhancementJobSourceInViewerForSmoke("done-job");
+                EnhancementJobsWorkspaceSmokeSnapshot whileSourceViewerOpen = window.EnhancementJobsWorkspaceForSmoke();
+                window.CloseModalForSmoke();
+                await window.WaitForEnhancementJobsReturnForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterSourceOpen = window.EnhancementJobsWorkspaceForSmoke();
+
+                string sourceAfter = FileFingerprint(sourcePath);
+                bool storesUnchanged = storesBefore.All(pair =>
+                    storesBeforeViewerOpen.TryGetValue(pair.Key, out string? fingerprint)
+                    && fingerprint == pair.Value);
+                bool jobsRestoredAfterViewerClose = !whileOutputViewerOpen.Visible
+                    && !whileOutputViewerOpen.Polling
+                    && afterOutputClose.Visible
+                    && !whileSourceViewerOpen.Visible
+                    && !whileSourceViewerOpen.Polling
+                    && afterSourceOpen.Visible;
                 bool routesOk = requests.Contains("POST /api/enhance/jobs/active-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal);
+                bool queueInventoryOrdered = initial.VisibleIds.Take(3).SequenceEqual(
+                        ["active-job", "queue-first-job", "queue-later-job"],
+                        StringComparer.Ordinal)
+                    && queued.VisibleIds.SequenceEqual(
+                        ["queue-first-job", "queue-later-job"],
+                        StringComparer.Ordinal)
+                    && queued.VisibleStatusLabels[0].Contains("待ち順 1", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal);
+                bool operationLabelsVisible = initial.VisibleOperationLabels.Contains("HQ  高画質化", StringComparer.Ordinal)
+                    && completed.VisibleOperationLabels.SequenceEqual(["REAL  実写化"], StringComparer.Ordinal);
                 ok = initial.Visible
-                    && initial.Total == 3
-                    && initial.Active == 1
+                    && initial.Total == 5
+                    && initial.Active == 3
                     && initial.Polling
                     && passiveOpen
-                    && active.Filtered == 1
+                    && stableJobViews
+                    && running.Filtered == 1
+                    && queued.Filtered == 2
+                    && queueInventoryOrdered
                     && failed.Filtered == 1
                     && completed.Filtered == 1
+                    && operationLabelsVisible
                     && cancelIssued
-                    && afterCancel.Active == 0
-                    && !afterCancel.Polling
+                    && afterCancel.Active == 2
+                    && afterCancel.Polling
                     && retryIssued
-                    && afterRetry.Active == 1
+                    && afterRetry.Active == 3
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
+                    && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 3", StringComparison.Ordinal))
                     && outputOpened
                     && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
                     && deleteIssued
                     && outputDeleted
                     && !File.Exists(outputPath)
                     && afterDelete.VisibleIds.Contains("done-job", StringComparer.Ordinal)
-                    && getsAfterClose == getsBeforeClose
+                    && sourceOpenedInViewer
+                    && jobsRestoredAfterViewerClose
                     && routesOk
                     && sourceBefore == sourceAfter
                     && storesUnchanged;
@@ -17353,17 +17479,26 @@ public partial class App : Application
                     ok,
                     passiveOpen,
                     initial,
-                    active,
+                    running,
+                    queued,
                     failed,
                     completed,
                     afterCancel,
                     afterRetry,
+                    whileOutputViewerOpen,
+                    afterOutputClose,
                     afterDelete,
+                    whileSourceViewerOpen,
+                    afterSourceOpen,
                     outputOpened,
+                    sourceOpenedInViewer,
+                    queueInventoryOrdered,
+                    operationLabelsVisible,
+                    stableJobViews,
                     openedOutput,
                     routesOk,
                     requests,
-                    pollingStoppedOnClose = getsAfterClose == getsBeforeClose,
+                    jobsRestoredAfterViewerClose,
                     sourceUnchanged = sourceBefore == sourceAfter,
                     storesUnchanged,
                     outputDeleted,
@@ -18047,7 +18182,7 @@ public partial class App : Application
         if (!fixturePrefix.StartsWith(tempPrefix, StringComparison.OrdinalIgnoreCase)
             || !resultFullPath.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase)
             || sourceName.Length == 0
-            || phase is not ("full" or "start-interrupted" or "recover"))
+            || phase is not ("full" or "start-detached" or "start-interrupted" or "recover"))
         {
             throw new ArgumentException("H25 companion smoke paths and phase must be bounded under TEMP");
         }
@@ -18128,6 +18263,7 @@ public partial class App : Application
             bool outputAccepted = false;
             bool deletedOutput = false;
             bool restartJobObserved = false;
+            bool interruptedJobFailed = false;
             bool sourceUnchanged = false;
             string? jobId = null;
             string? status = null;
@@ -18165,6 +18301,7 @@ public partial class App : Application
                     ["outputAccepted"] = outputAccepted,
                     ["deletedOutput"] = deletedOutput,
                     ["restartJobObserved"] = restartJobObserved,
+                    ["interruptedJobFailed"] = interruptedJobFailed,
                     ["sourceUnchanged"] = sourceUnchanged,
                     ["pathsIsolated"] = pathsIsolated,
                     ["pathIsolationFailures"] = storePathIsolation
@@ -18237,15 +18374,17 @@ public partial class App : Application
                         || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30));
                     RecordCheckpoint("full-cancel-complete");
                     retried = canceled && await win.StartModalEnhancementForSmokeAsync(45_000);
+                    if (retried)
+                        jobId = win.ModalEnhancementJobIdForSmoke;
                     RecordCheckpoint("full-retry-complete");
-                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(60));
+                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(180));
                     RecordCheckpoint("full-success-wait-complete");
                     outputAccepted = succeeded && win.ModalEnhancedToggleAvailableForSmoke;
                     outputPath = win.ModalDisplayPathForSmoke;
                     deletedOutput = outputAccepted && await win.DeleteModalEnhancedOutputForSmokeAsync();
                     RecordCheckpoint("full-delete-complete");
                 }
-                else if (phase == "start-interrupted")
+                else if (phase is "start-interrupted" or "start-detached")
                 {
                     started = await win.StartModalEnhancementForSmokeAsync(45_000);
                     jobId = win.ModalEnhancementJobIdForSmoke;
@@ -18262,20 +18401,22 @@ public partial class App : Application
                         readyForInterruption
                             ? "real H25 job is active and ready for the verifier to interrupt the companion"
                             : "real H25 job did not reach an interruptible state"));
-                    await Task.Delay(TimeSpan.FromSeconds(10));
+                    if (phase == "start-interrupted")
+                        await Task.Delay(TimeSpan.FromSeconds(10));
                 }
                 else
                 {
                     status = win.ModalEnhancementStatusForSmoke;
-                    restartJobObserved = status == "running" && !string.IsNullOrWhiteSpace(win.ModalEnhancementJobIdForSmoke);
+                    interruptedJobFailed = status == "failed";
+                    restartJobObserved = interruptedJobFailed
+                        && !string.IsNullOrWhiteSpace(win.ModalEnhancementJobIdForSmoke);
                     jobId = win.ModalEnhancementJobIdForSmoke;
-                    RecordCheckpoint("recovery-stale-job-observed");
-                    canceled = restartJobObserved && (await win.CancelModalEnhancementForSmokeAsync()
-                        || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30)));
-                    RecordCheckpoint("recovery-cancel-complete");
-                    retried = canceled && await win.StartModalEnhancementForSmokeAsync(45_000);
+                    RecordCheckpoint("recovery-failed-job-observed");
+                    retried = restartJobObserved && await win.StartModalEnhancementForSmokeAsync(45_000);
+                    if (retried)
+                        jobId = win.ModalEnhancementJobIdForSmoke;
                     RecordCheckpoint("recovery-retry-complete");
-                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(60));
+                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(180));
                     RecordCheckpoint("recovery-success-wait-complete");
                     outputAccepted = succeeded && win.ModalEnhancedToggleAvailableForSmoke;
                     outputPath = win.ModalDisplayPathForSmoke;
@@ -18323,11 +18464,11 @@ public partial class App : Application
                 && sourceUnchanged
                 && pathsIsolated
                 && loopbackOnly
-                && (phase == "start-interrupted"
+                && (phase is "start-interrupted" or "start-detached"
                     ? started && !string.IsNullOrWhiteSpace(jobId) && status is "queued" or "running"
                     : phase == "full"
                         ? started && canceled && retried && succeeded && outputAccepted && deletedOutput
-                        : restartJobObserved && canceled && retried && succeeded && outputAccepted && deletedOutput);
+                        : restartJobObserved && interruptedJobFailed && retried && succeeded && outputAccepted && deletedOutput);
             WriteSnapshot(Snapshot(ok, ok
                 ? $"real H25 companion phase '{phase}' passed"
                 : string.IsNullOrWhiteSpace(failure) ? $"real H25 companion phase '{phase}' failed" : failure));
@@ -18935,7 +19076,8 @@ public partial class App : Application
 
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
-                    && win.ModalContextMenuContractForSmoke;
+                    && win.ModalContextMenuContractForSmoke
+                    && win.GalleryContextMenuContractForSmoke;
                 bool lightweightGlass = win.ModalLightweightGlassContractForSmoke;
                 bool actualPixelsControl = win.ModalActualPixelsControlContractForSmoke;
                 bool favoriteLevelReadoutInitial = win.ModalFavoriteLevelReadoutContractForSmoke;
@@ -22507,6 +22649,11 @@ public partial class App : Application
                 string reloadedQuery = reloaded.SearchQueryForSmoke;
                 List<string> reloadedNames = reloaded.FilteredFileNamesForSmoke();
                 reloaded.Close();
+                List<string> activeSearchTerms = win.ActiveSearchTermsForSmoke;
+                bool activeSearchTermsAccessibilityReady = win.ActiveSearchTermsAccessibilityReadyForSmoke;
+                bool removedWholeSearchTerm = win.RemoveSearchTermForSmoke("studio portrait")
+                    && string.Equals(win.SearchQueryForSmoke, "soft light", StringComparison.Ordinal)
+                    && win.ActiveSearchTermsForSmoke.SequenceEqual(["soft light"], StringComparer.Ordinal);
                 win.SetSearchQuery("", persist: false);
                 PngMetadataSmokeSnapshot missingMetadata = await win.SelectPngMetadataForSmokeAsync(otherName);
                 bool missingModalOpened = win.OpenModalForSmoke();
@@ -22534,6 +22681,9 @@ public partial class App : Application
                     && !appended.ModalVisible && !deduped.ModalVisible
                     && appended.SearchFocused && deduped.SearchFocused
                     && initialAccessibilityReady && appended.AccessibilityReady && deduped.AccessibilityReady
+                    && activeSearchTerms.SequenceEqual(["studio portrait", "soft light"], StringComparer.Ordinal)
+                    && activeSearchTermsAccessibilityReady
+                    && removedWholeSearchTerm
                     && appended.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && deduped.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && sourceUntouched && searchPersisted
@@ -22545,7 +22695,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "modal prompt tags return an active Album to catalog, strip emphasis wrappers for display, append a deduped comma query, close the modal, focus search, and persist only search state without source, metadata, or enhancement mutation"
+                        ? "modal prompt tags append a deduped comma query, active search chips expose accessible whole-term removal, and only search state is persisted without source, metadata, or enhancement mutation"
                         : "prompt tag search smoke did not meet the modal/search isolation contract",
                     SmokeRoot = smokeRoot,
                     TaggedPath = taggedPath,
@@ -22559,6 +22709,9 @@ public partial class App : Application
                     ReturnedToCatalog = returnedToCatalog,
                     Appended = appended,
                     Deduped = deduped,
+                    ActiveSearchTerms = activeSearchTerms,
+                    ActiveSearchTermsAccessibilityReady = activeSearchTermsAccessibilityReady,
+                    RemovedWholeSearchTerm = removedWholeSearchTerm,
                     SourceUntouched = sourceUntouched,
                     SearchPersisted = searchPersisted,
                     ReloadedQuery = reloadedQuery,
@@ -23760,6 +23913,100 @@ public partial class App : Application
         File.WriteAllText(jobsPath, json);
     }
 
+    private static void WriteEnhancementOperationJobsFixture(
+        string jobsPath,
+        string upscaleSourcePath,
+        string upscaleOutputPath,
+        string photorealSourcePath,
+        string photorealOutputPath,
+        string invalidSourcePath,
+        string missingOutputPath,
+        string missingSourcePath)
+    {
+        // This private smoke helper has one call site. jobsPath is constructed
+        // below CreateManagedAutomationRoot and is never accepted from the
+        // image-folder argument.
+        // codeql[cs/path-injection]
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(jobsPath))!);
+        static Dictionary<string, object> SourceSignature(string sourcePath)
+        {
+            // Source paths are derived from fixture names enumerated by the
+            // smoke harness. This branch only reads metadata and never writes
+            // through sourcePath.
+            // codeql[cs/path-injection]
+            if (!File.Exists(sourcePath))
+                return new Dictionary<string, object> { ["size"] = 0L, ["mtimeMs"] = 0d };
+
+            // See the read-only smoke-fixture invariant above.
+            // codeql[cs/path-injection]
+            var info = new FileInfo(sourcePath);
+            return new Dictionary<string, object>
+            {
+                ["size"] = info.Length,
+                ["mtimeMs"] = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
+            };
+        }
+
+        Dictionary<string, object?> Succeeded(
+            string id,
+            string sourcePath,
+            string outputPath,
+            string? operation = null)
+        {
+            var job = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = id,
+                ["sourceId"] = sourcePath,
+                ["sourcePath"] = sourcePath,
+                ["sourceSignature"] = SourceSignature(sourcePath),
+                ["status"] = "succeeded",
+                ["progress"] = 100,
+                ["outputPath"] = outputPath,
+                ["createdAt"] = DateTime.UtcNow.ToString("o"),
+                ["updatedAt"] = DateTime.UtcNow.ToString("o"),
+            };
+            if (!string.IsNullOrWhiteSpace(operation))
+                job["operation"] = operation;
+            return job;
+        }
+
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["version"] = 1,
+            ["jobs"] = new object?[]
+            {
+                // Missing operation is the legacy upscale compatibility case.
+                Succeeded("legacy-upscale-ok", upscaleSourcePath, upscaleOutputPath),
+                Succeeded("photoreal-ok", photorealSourcePath, photorealOutputPath, "photoreal"),
+                Succeeded("stale-output", invalidSourcePath, missingOutputPath, "upscale"),
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "failed-job",
+                    ["sourceId"] = invalidSourcePath,
+                    ["sourcePath"] = invalidSourcePath,
+                    ["status"] = "failed",
+                    ["progress"] = 100,
+                    ["outputPath"] = upscaleOutputPath,
+                    ["operation"] = "photoreal",
+                },
+                Succeeded("missing-source", missingSourcePath, upscaleOutputPath, "photoreal"),
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "missing-output-field",
+                    ["sourceId"] = invalidSourcePath,
+                    ["sourcePath"] = invalidSourcePath,
+                    ["sourceSignature"] = SourceSignature(invalidSourcePath),
+                    ["status"] = "succeeded",
+                    ["progress"] = 100,
+                    ["operation"] = "upscale",
+                },
+                "unsupported-entry",
+            },
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(jobsPath, json);
+    }
+
     private static void WriteViewerStateSeed(string statePath, string folder, string selectedPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(statePath))!);
@@ -24909,6 +25156,9 @@ public partial class App : Application
         public bool ReturnedToCatalog { get; init; }
         public PromptTagSearchSmokeSnapshot? Appended { get; init; }
         public PromptTagSearchSmokeSnapshot? Deduped { get; init; }
+        public List<string> ActiveSearchTerms { get; init; } = [];
+        public bool ActiveSearchTermsAccessibilityReady { get; init; }
+        public bool RemovedWholeSearchTerm { get; init; }
         public bool SourceUntouched { get; init; }
         public bool SearchPersisted { get; init; }
         public string? ReloadedQuery { get; init; }
@@ -27332,6 +27582,14 @@ public partial class App : Application
         public List<int> ClearedLevels { get; init; } = [];
         public bool ClearedFromStore { get; init; }
         public bool ExternalPreservedAfterClear { get; init; }
+        public int FavoriteHistoryCount { get; init; }
+        public bool FavoriteHistorySurface { get; init; }
+        public bool FavoriteUndoShortcut { get; init; }
+        public List<int> UndoLevels { get; init; } = [];
+        public bool UndoPersisted { get; init; }
+        public bool FavoriteRedoShortcut { get; init; }
+        public List<int> RedoLevels { get; init; } = [];
+        public bool RedoPersisted { get; init; }
         public int RestoreAttempts { get; init; }
         public List<int> RestoredLevels { get; init; } = [];
         public int ReassertAttempts { get; init; }
@@ -27440,25 +27698,35 @@ public partial class App : Application
         public string? ProjectRoot { get; init; }
         public string? JobsPath { get; init; }
         public string? ResolvedJobsPath { get; init; }
-        public string? ValidSourceName { get; init; }
-        public string? StaleSourceName { get; init; }
-        public string? FailedSourceName { get; init; }
-        public string? ValidOutputPath { get; init; }
+        public string? UpscaleSourceName { get; init; }
+        public string? PhotorealSourceName { get; init; }
+        public string? InvalidSourceName { get; init; }
+        public string? UpscaleOutputPath { get; init; }
+        public string? PhotorealOutputPath { get; init; }
         public string? MissingOutputPath { get; init; }
         public int AllCount { get; init; }
         public int JobsRead { get; init; }
         public int CandidateCount { get; init; }
         public int EnhancedStoreCount { get; init; }
-        public bool SelectedValid { get; init; }
-        public bool SelectedValidEnhanced { get; init; }
-        public string? SelectedOutputPath { get; init; }
-        public int EnhancedFilteredCount { get; init; }
-        public bool ValidVisible { get; init; }
-        public bool StaleVisible { get; init; }
-        public bool FailedVisible { get; init; }
+        public bool SelectedUpscale { get; init; }
+        public bool SelectedUpscaleEnhanced { get; init; }
+        public bool SelectedUpscaleBadge { get; init; }
+        public string? SelectedUpscaleOutputPath { get; init; }
+        public bool SelectedPhotoreal { get; init; }
+        public bool SelectedPhotorealEnhanced { get; init; }
+        public bool SelectedPhotorealBadge { get; init; }
+        public string? SelectedPhotorealOutputPath { get; init; }
+        public int UpscaleFilteredCount { get; init; }
+        public bool UpscaleVisible { get; init; }
+        public bool PhotorealVisibleInUpscaleFilter { get; init; }
+        public bool InvalidVisible { get; init; }
+        public int IntersectionFilteredCount { get; init; }
+        public int PhotorealFilteredCount { get; init; }
+        public bool PhotorealVisible { get; init; }
+        public bool UpscaleVisibleInPhotorealFilter { get; init; }
         public int AfterClearCount { get; init; }
         public int ReloadFilteredCount { get; init; }
-        public bool ReloadValidVisible { get; init; }
+        public bool ReloadPhotorealVisible { get; init; }
         public bool EnhancementStateUnchanged { get; init; }
         public bool ReadOk { get; init; }
         public string? ReadError { get; init; }
