@@ -326,7 +326,15 @@ or stores.
   Photoreal prompt, strength, structure retention, quality steps, and work
   resolution are WPF-local request defaults and do not mutate shared Browser
   settings. The prompt starts with the built-in tested default, remains freely
-  editable, persists locally, and has an explicit Reset action.
+  editable from both the modal popup and the application settings screen,
+  persists locally as one shared value, and has an explicit Reset action.
+  Editing is saved while typing. Each job snapshots the current prompt when it
+  is enqueued; already queued or running jobs are not rewritten.
+- The built-in photoreal prompt asks the edit model to preserve the source
+  identity, expression, mood, occlusions, pose, hand placement, lighting, and
+  Japanese/East Asian facial proportions while correcting malformed visible
+  hands to five natural fingers. The operation is one model pass: no ADetailer,
+  face restoration, hidden upscale, or second generative detail pass is run.
 - New photoreal requests use the companion adapter identifier
   `comfyui-flux2-photoreal`; older `a1111-photoreal` jobs remain readable as
   managed historical versions.
@@ -359,6 +367,11 @@ or stores.
   API. Opening it performs a passive jobs read only. It polls once per second
   only while the workspace is visible and at least one job is queued or
   running, and stops polling when hidden or when all jobs are terminal.
+- Jobs may be filtered as All, Queued, Running, Completed, or Failed/Canceled.
+  Running work is shown first and queued work is inventoried in durable FIFO
+  enqueue order with an explicit waiting position. Choosing a job thumbnail
+  closes the workspace and opens its validated source in the WPF viewer when
+  that source is present in the current catalog.
 - Cancel, Retry, Open output, and Delete output remain explicit user actions.
   WPF validates source identity, source signature, and managed-output ownership
   before opening or deleting an output. The workspace does not change the

@@ -54,11 +54,12 @@ public partial class MainWindow
         StopGalleryAutoScroll();
         SearchHistoryPopup.IsOpen = false;
         _enhancementWorkspaceFocusBeforeDialog = focusToRestore ?? Keyboard.FocusedElement;
-        _enhancementWorkspaceFilter = initialFilter is "active" or "failed" or "completed"
+        _enhancementWorkspaceFilter = initialFilter is "queued" or "running" or "failed" or "completed"
             ? initialFilter
             : "all";
         EnhancementJobsAllFilter.IsChecked = _enhancementWorkspaceFilter == "all";
-        EnhancementJobsActiveFilter.IsChecked = _enhancementWorkspaceFilter == "active";
+        EnhancementJobsQueuedFilter.IsChecked = _enhancementWorkspaceFilter == "queued";
+        EnhancementJobsRunningFilter.IsChecked = _enhancementWorkspaceFilter == "running";
         EnhancementJobsFailedFilter.IsChecked = _enhancementWorkspaceFilter == "failed";
         EnhancementJobsCompletedFilter.IsChecked = _enhancementWorkspaceFilter == "completed";
         _enhancementWorkspaceHighlightedJobIds.Clear();
@@ -154,21 +155,24 @@ public partial class MainWindow
             ApplyEnhancementWorkspaceHighlights(jobs);
             _enhancementWorkspaceJobs.Clear();
             _enhancementWorkspaceJobs.AddRange(jobs);
-            bool highlightedBatchAlreadyTerminal = _enhancementWorkspaceFilter == "active"
+            bool highlightedBatchAlreadyTerminal = _enhancementWorkspaceFilter is "queued" or "running"
                 && jobs.Any(static job => job.IsHighlighted)
                 && !jobs.Any(static job => job.IsHighlighted && job.IsActive);
             if (highlightedBatchAlreadyTerminal)
             {
                 _enhancementWorkspaceFilter = "all";
                 EnhancementJobsAllFilter.IsChecked = true;
-                EnhancementJobsActiveFilter.IsChecked = false;
+                EnhancementJobsQueuedFilter.IsChecked = false;
+                EnhancementJobsRunningFilter.IsChecked = false;
             }
             ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
             int activeCount = jobs.Count(static job => job.IsActive);
+            int runningCount = jobs.Count(static job => job.Status == "running");
+            int queuedCount = jobs.Count(static job => job.Status == "queued");
             int completedCount = jobs.Count(static job => job.Status is "succeeded" or "deleted");
             EnhancementJobsHeaderSummary.Text = $"{jobs.Count:N0} total  ·  {activeCount:N0} active  ·  {completedCount:N0} completed";
             EnhancementJobsStatusText.Text = activeCount > 0
-                ? $"{activeCount:N0} active job{(activeCount == 1 ? "" : "s")}. Refreshing once per second while this workspace is visible."
+                ? $"共有GPUキューを実行順で表示中です。実行中 {runningCount:N0}、待ち {queuedCount:N0}。"
                 : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
             if (highlightedBatchAlreadyTerminal)
                 EnhancementJobsStatusText.Text += " The new batch already finished, so all highlighted jobs are shown.";
@@ -214,18 +218,54 @@ public partial class MainWindow
             return false;
         }
 
+        int apiOrdinal = 0;
         foreach (JsonElement element in jobsElement.EnumerateArray())
         {
-            EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(element);
+            EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(element, apiOrdinal++);
             if (job is not null)
                 jobs.Add(job);
         }
 
-        jobs.Sort(static (left, right) => right.UpdatedAt.CompareTo(left.UpdatedAt));
+        AssignEnhancementWorkspaceQueuePositions(jobs);
+        jobs.Sort(CompareEnhancementWorkspaceInventory);
         return true;
     }
 
-    private static EnhancementWorkspaceJobView? ParseEnhancementWorkspaceJob(JsonElement element)
+    private static void AssignEnhancementWorkspaceQueuePositions(
+        IReadOnlyCollection<EnhancementWorkspaceJobView> jobs)
+    {
+        int position = 1;
+        foreach (EnhancementWorkspaceJobView job in jobs
+                     .Where(static candidate => candidate.Status == "queued")
+                     .OrderBy(static candidate => candidate.CreatedAt)
+                     .ThenBy(static candidate => candidate.ApiOrdinal))
+        {
+            job.QueuePosition = position++;
+        }
+    }
+
+    private static int CompareEnhancementWorkspaceInventory(
+        EnhancementWorkspaceJobView left,
+        EnhancementWorkspaceJobView right)
+    {
+        if (left.IsActive != right.IsActive)
+            return left.IsActive ? -1 : 1;
+
+        if (left.IsActive)
+        {
+            if (left.Status != right.Status)
+                return left.Status == "running" ? -1 : 1;
+            int created = left.CreatedAt.CompareTo(right.CreatedAt);
+            return created != 0 ? created : left.ApiOrdinal.CompareTo(right.ApiOrdinal);
+        }
+
+        int updated = right.UpdatedAt.CompareTo(left.UpdatedAt);
+        return updated != 0 ? updated : left.ApiOrdinal.CompareTo(right.ApiOrdinal);
+    }
+
+    private static EnhancementWorkspaceJobView? ParseEnhancementWorkspaceJob(
+        JsonElement element,
+        int apiOrdinal)
     {
         if (element.ValueKind != JsonValueKind.Object
             || !TryGetStringProperty(element, "id", out string? id)
@@ -279,7 +319,8 @@ public partial class MainWindow
             createdAt,
             updatedAt,
             sourceSize,
-            sourceMtimeMs);
+            sourceMtimeMs,
+            apiOrdinal);
     }
 
     private void EnhancementJobsFilter_Click(object sender, RoutedEventArgs e)
@@ -297,6 +338,8 @@ public partial class MainWindow
             .Where(job => _enhancementWorkspaceFilter switch
             {
                 "active" => job.IsActive,
+                "queued" => job.Status == "queued",
+                "running" => job.Status == "running",
                 "failed" => job.Status is "failed" or "canceled",
                 "completed" => job.Status is "succeeded" or "deleted",
                 _ => true,
@@ -488,6 +531,38 @@ public partial class MainWindow
         }
     }
 
+    private void OpenEnhancementSourceInViewer_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: EnhancementWorkspaceJobView job })
+            TryOpenEnhancementSourceInViewer(job);
+    }
+
+    private bool TryOpenEnhancementSourceInViewer(EnhancementWorkspaceJobView job)
+    {
+        if (!TryResolveEnhancementWorkspaceSource(job, out string canonicalSource)
+            || !File.Exists(canonicalSource))
+        {
+            EnhancementJobsStatusText.Text = "元画像が見つからないため、ビューワーで開けません。";
+            return false;
+        }
+
+        Tile? tile = _tiles.FirstOrDefault(candidate =>
+            candidate.IsRealFile
+            && string.Equals(candidate.Path, canonicalSource, StringComparison.OrdinalIgnoreCase));
+        if (tile is null)
+        {
+            EnhancementJobsStatusText.Text = "元画像は現在の一覧にありません。フォルダまたは絞り込みを確認してください。";
+            return false;
+        }
+
+        CloseEnhancementJobsWorkspace(restoreFocus: false);
+        SelectTile(tile);
+        SaveState();
+        OpenModal();
+        return Modal.Visibility == Visibility.Visible
+            && string.Equals(SelectedTile()?.Path, canonicalSource, StringComparison.OrdinalIgnoreCase);
+    }
+
     private async void DeleteEnhancementOutput_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: EnhancementWorkspaceJobView job }
@@ -614,7 +689,8 @@ public partial class MainWindow
             _enhancementWorkspaceGetCount,
             _enhancementWorkspacePollCount,
             EnhancementJobsStatusText.Text,
-            visible.Select(static job => job.Id).ToArray());
+            visible.Select(static job => job.Id).ToArray(),
+            visible.Select(static job => job.StatusLabel).ToArray());
     }
 
     public async Task<bool> CancelEnhancementJobForSmokeAsync(string id)
@@ -654,6 +730,12 @@ public partial class MainWindow
         return job is not null && TryOpenEnhancementWorkspaceOutput(job);
     }
 
+    public bool OpenEnhancementJobSourceInViewerForSmoke(string id)
+    {
+        EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+        return job is not null && TryOpenEnhancementSourceInViewer(job);
+    }
+
     public void ConfigureEnhancementWorkspaceExternalOpenForSmoke(Func<ProcessStartInfo, bool> launcher)
         => _externalFileLauncher = launcher ?? throw new ArgumentNullException(nameof(launcher));
 
@@ -683,7 +765,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         DateTimeOffset createdAt,
         DateTimeOffset updatedAt,
         long? sourceSize,
-        double? sourceMtimeMs)
+        double? sourceMtimeMs,
+        int apiOrdinal)
     {
         Id = id;
         SourceId = sourceId;
@@ -698,6 +781,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         UpdatedAt = updatedAt;
         SourceSize = sourceSize;
         SourceMtimeMs = sourceMtimeMs;
+        ApiOrdinal = apiOrdinal;
     }
 
     public string Id { get; }
@@ -713,6 +797,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public DateTimeOffset UpdatedAt { get; }
     public long? SourceSize { get; }
     public double? SourceMtimeMs { get; }
+    public int ApiOrdinal { get; }
+    public int? QueuePosition { get; set; }
     public bool IsActive => Status is "queued" or "running";
     public bool CanCancel => !_isBusy && IsActive;
     public bool CanRetry => !_isBusy && Status is "failed" or "canceled";
@@ -721,8 +807,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string PresetSummary => $"{PresetId}  ·  {AdapterId}";
     public string StatusLabel => Status switch
     {
-        "queued" => $"Queued  {Progress}%",
-        "running" => $"Running  {Progress}%",
+        "queued" => $"待ち順 {QueuePosition ?? 0}  ·  Queued {Progress}%",
+        "running" => $"実行中  ·  Running {Progress}%",
         "succeeded" => "Completed",
         "failed" => "Failed",
         "canceled" => "Canceled",
@@ -793,4 +879,5 @@ public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     int GetRequests,
     int PollRequests,
     string Status,
-    string[] VisibleIds);
+    string[] VisibleIds,
+    string[] VisibleStatusLabels);

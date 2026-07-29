@@ -17293,9 +17293,6 @@ public partial class App : Application
                     Environment.SetEnvironmentVariable(key, value);
 
                 string sourceBefore = FileFingerprint(sourcePath);
-                var storesBefore = environment
-                    .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
-                    .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
                 bool activeCanceled = false;
                 bool retryCreated = false;
                 bool outputDeleted = false;
@@ -17303,7 +17300,13 @@ public partial class App : Application
                 var sourceInfo = new FileInfo(sourcePath);
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
 
-                object Job(string id, string status, int progress, string? output = null, string? error = null) => new
+                object Job(
+                    string id,
+                    string status,
+                    int progress,
+                    string? output = null,
+                    string? error = null,
+                    string createdAt = "2026-07-23T00:00:00.000Z") => new
                 {
                     id,
                     sourceId = sourcePath,
@@ -17315,7 +17318,7 @@ public partial class App : Application
                     progress,
                     outputPath = output,
                     errorMessage = error,
-                    createdAt = "2026-07-23T00:00:00.000Z",
+                    createdAt,
                     updatedAt = "2026-07-23T00:00:01.000Z",
                 };
 
@@ -17323,12 +17326,14 @@ public partial class App : Application
                 {
                     var jobs = new List<object>
                     {
-                        Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42),
+                        Job("queue-later-job", "queued", 0, createdAt: "2026-07-23T00:00:03.000Z"),
                         Job("failed-job", "failed", 18, error: "GPU backend stopped"),
+                        Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42, createdAt: "2026-07-23T00:00:01.000Z"),
+                        Job("queue-first-job", "queued", 0, createdAt: "2026-07-23T00:00:02.000Z"),
                         Job("done-job", outputDeleted ? "deleted" : "succeeded", 100, outputDeleted ? null : outputPath),
                     };
                     if (retryCreated)
-                        jobs.Insert(0, Job("retry-job", "queued", 0));
+                        jobs.Insert(0, Job("retry-job", "queued", 0, createdAt: "2026-07-23T00:00:04.000Z"));
                     return jobs.ToArray();
                 }
 
@@ -17368,14 +17373,20 @@ public partial class App : Application
                     return Task.FromResult(JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected workspace smoke route" }));
                 }, confirmOutputDelete: true);
                 window.Show();
+                await window.LoadFolderSetAsync([Path.GetDirectoryName(sourcePath)!], commitRecent: false);
+                var storesBefore = environment
+                    .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
+                    .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
 
                 int requestsBeforeOpen = requests.Count;
                 await window.OpenEnhancementJobsForSmokeAsync();
                 window.UpdateLayout();
                 EnhancementJobsWorkspaceSmokeSnapshot initial = window.EnhancementJobsWorkspaceForSmoke();
                 bool passiveOpen = requests.Skip(requestsBeforeOpen).All(static request => request == "GET /api/enhance/jobs");
-                window.SelectEnhancementJobsFilterForSmoke("active");
-                EnhancementJobsWorkspaceSmokeSnapshot active = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("running");
+                EnhancementJobsWorkspaceSmokeSnapshot running = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("queued");
+                EnhancementJobsWorkspaceSmokeSnapshot queued = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot failed = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("completed");
@@ -17389,40 +17400,54 @@ public partial class App : Application
                 bool outputOpened = window.OpenEnhancementJobOutputForSmoke("done-job");
                 bool deleteIssued = await window.DeleteEnhancementJobOutputForSmokeAsync("done-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterDelete = window.EnhancementJobsWorkspaceForSmoke();
-                int getsBeforeClose = requests.Count(static request => request == "GET /api/enhance/jobs");
-                window.CloseEnhancementJobsForSmoke();
-                await Task.Delay(1200);
-                int getsAfterClose = requests.Count(static request => request == "GET /api/enhance/jobs");
-
-                string sourceAfter = FileFingerprint(sourcePath);
-                var storesAfter = environment
+                var storesBeforeViewerOpen = environment
                     .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
                     .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
-                bool storesUnchanged = storesBefore.All(pair => storesAfter.TryGetValue(pair.Key, out string? fingerprint) && fingerprint == pair.Value);
+                bool sourceOpenedInViewer = window.OpenEnhancementJobSourceInViewerForSmoke("done-job");
+                await Task.Delay(1200);
+                EnhancementJobsWorkspaceSmokeSnapshot afterSourceOpen = window.EnhancementJobsWorkspaceForSmoke();
+
+                string sourceAfter = FileFingerprint(sourcePath);
+                bool storesUnchanged = storesBefore.All(pair =>
+                    storesBeforeViewerOpen.TryGetValue(pair.Key, out string? fingerprint)
+                    && fingerprint == pair.Value);
+                bool pollingStoppedOnClose = !afterSourceOpen.Visible && !afterSourceOpen.Polling;
                 bool routesOk = requests.Contains("POST /api/enhance/jobs/active-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal);
+                bool queueInventoryOrdered = initial.VisibleIds.Take(3).SequenceEqual(
+                        ["active-job", "queue-first-job", "queue-later-job"],
+                        StringComparer.Ordinal)
+                    && queued.VisibleIds.SequenceEqual(
+                        ["queue-first-job", "queue-later-job"],
+                        StringComparer.Ordinal)
+                    && queued.VisibleStatusLabels[0].Contains("待ち順 1", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal);
                 ok = initial.Visible
-                    && initial.Total == 3
-                    && initial.Active == 1
+                    && initial.Total == 5
+                    && initial.Active == 3
                     && initial.Polling
                     && passiveOpen
-                    && active.Filtered == 1
+                    && running.Filtered == 1
+                    && queued.Filtered == 2
+                    && queueInventoryOrdered
                     && failed.Filtered == 1
                     && completed.Filtered == 1
                     && cancelIssued
-                    && afterCancel.Active == 0
-                    && !afterCancel.Polling
+                    && afterCancel.Active == 2
+                    && afterCancel.Polling
                     && retryIssued
-                    && afterRetry.Active == 1
+                    && afterRetry.Active == 3
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
+                    && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 3", StringComparison.Ordinal))
                     && outputOpened
                     && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
                     && deleteIssued
                     && outputDeleted
                     && !File.Exists(outputPath)
                     && afterDelete.VisibleIds.Contains("done-job", StringComparer.Ordinal)
-                    && getsAfterClose == getsBeforeClose
+                    && sourceOpenedInViewer
+                    && pollingStoppedOnClose
                     && routesOk
                     && sourceBefore == sourceAfter
                     && storesUnchanged;
@@ -17431,17 +17456,21 @@ public partial class App : Application
                     ok,
                     passiveOpen,
                     initial,
-                    active,
+                    running,
+                    queued,
                     failed,
                     completed,
                     afterCancel,
                     afterRetry,
                     afterDelete,
+                    afterSourceOpen,
                     outputOpened,
+                    sourceOpenedInViewer,
+                    queueInventoryOrdered,
                     openedOutput,
                     routesOk,
                     requests,
-                    pollingStoppedOnClose = getsAfterClose == getsBeforeClose,
+                    pollingStoppedOnClose,
                     sourceUnchanged = sourceBefore == sourceAfter,
                     storesUnchanged,
                     outputDeleted,

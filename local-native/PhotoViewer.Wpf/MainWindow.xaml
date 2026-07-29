@@ -1191,10 +1191,11 @@
             <Border Grid.Column="0" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,1,0" Padding="11,14">
               <StackPanel>
                 <TextBlock Text="FILTER" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="4,0,0,8"/>
-                <RadioButton x:Name="EnhancementJobsAllFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="All" Tag="all" IsChecked="True" Click="EnhancementJobsFilter_Click"/>
-                <RadioButton x:Name="EnhancementJobsActiveFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="Active" Tag="active" Click="EnhancementJobsFilter_Click"/>
-                <RadioButton x:Name="EnhancementJobsFailedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="Failed" Tag="failed" Click="EnhancementJobsFilter_Click"/>
-                <RadioButton x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="Completed" Tag="completed" Click="EnhancementJobsFilter_Click"/>
+                <RadioButton x:Name="EnhancementJobsAllFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsFilter_Click"/>
+                <RadioButton x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="待機中" Tag="queued" Click="EnhancementJobsFilter_Click"/>
+                <RadioButton x:Name="EnhancementJobsRunningFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="処理中" Tag="running" Click="EnhancementJobsFilter_Click"/>
+                <RadioButton x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="完成したもののみ" Tag="completed" Click="EnhancementJobsFilter_Click"/>
+                <RadioButton x:Name="EnhancementJobsFailedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="失敗・中止" Tag="failed" Click="EnhancementJobsFilter_Click"/>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="9" Margin="0,16,0,0">
                   <StackPanel>
                     <TextBlock Text="Local companion" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold"/>
@@ -1236,9 +1237,14 @@
                       </Border.Style>
                       <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <Border Width="68" Height="68" CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" VerticalAlignment="Top">
-                          <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
-                        </Border>
+                        <Button Width="68" Height="68" Padding="0" BorderThickness="0" Background="Transparent"
+                                Tag="{Binding}" Click="OpenEnhancementSourceInViewer_Click"
+                                ToolTip="元画像をAibosのビューワーで開く"
+                                AutomationProperties.Name="{Binding SourceName, StringFormat=Open {0} in the Aibos viewer}">
+                          <Border CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1">
+                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
+                          </Border>
+                        </Button>
                         <Grid Grid.Column="1">
                           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                           <Grid Grid.Row="0">
@@ -1300,6 +1306,7 @@
           <Border Grid.Row="1" Grid.RowSpan="2" Grid.Column="0" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,1,0" Padding="10,11">
             <StackPanel>
               <RadioButton x:Name="SettingsGeneralNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsGeneral}" Tag="general" IsChecked="True" Click="AppSettingsNavigation_Click" AutomationProperties.Name="General settings"/>
+              <RadioButton x:Name="SettingsPhotorealNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="AI実写化" Tag="photoreal" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI photorealization settings"/>
               <RadioButton x:Name="SettingsDisplayNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsDisplay}" Tag="display" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Display settings"/>
               <RadioButton x:Name="SettingsThumbnailsNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsThumbnails}" Tag="thumbnails" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Thumbnail settings"/>
               <RadioButton x:Name="SettingsKeyboardNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsKeyboard}" Tag="keyboard" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Keyboard settings"/>
@@ -1362,6 +1369,23 @@
                        HorizontalAlignment="Right" VerticalAlignment="Center"/>
           </Grid>
           <TextBlock Text="{DynamicResource UiModalEdgeHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,18"/>
+          <TextBlock x:Name="PhotorealSettingsHeading" Text="AI実写化" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="AI photorealization settings section"/>
+          <TextBlock Text="すべてのAI実写化で使う共通プロンプトです。ここでの変更は拡大画面の設定にも即時反映され、次にAI実写化を押してキューへ追加するジョブから使われます。待機中・処理中のジョブは変更されません。" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <DockPanel LastChildFill="False" Margin="0,0,0,5">
+            <Button x:Name="ResetAppPhotorealPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetAppPhotorealPrompt_Click" MinWidth="72" AutomationProperties.Name="Reset default AI photorealization prompt"/>
+            <TextBlock Text="Prompt" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          </DockPanel>
+          <TextBox x:Name="AppPhotorealPromptTextBox"
+                   MinHeight="150" MaxHeight="230" MaxLength="2000"
+                   AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap"
+                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                   Padding="9,7" Background="{StaticResource BgPrimary}"
+                   BorderBrush="{StaticResource GlassBorderHover}" Foreground="{StaticResource TextPrimary}"
+                   SelectionBrush="{StaticResource AccentFill}" CaretBrush="{StaticResource TextPrimary}"
+                   TextChanged="AppPhotorealPrompt_TextChanged"
+                   AutomationProperties.Name="Default AI photorealization prompt"
+                   AutomationProperties.HelpText="Saved as you type and shared with the image preview photorealization settings."/>
+          <TextBlock x:Name="AppPhotorealPromptStatusText" Text="入力内容は自動保存されます。" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,18" AutomationProperties.LiveSetting="Polite"/>
           <TextBlock x:Name="ThumbnailSettingsHeading" Text="THUMBNAIL STATUS BORDERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Thumbnail settings section"/>
           <Grid Margin="0,0,0,6">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

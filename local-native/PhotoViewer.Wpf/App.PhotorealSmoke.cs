@@ -30,6 +30,8 @@ public partial class App
             bool toolbarContract = false;
             bool requestContract = false;
             bool resetPromptContract = false;
+            bool appSettingsPromptContract = false;
+            bool defaultPromptContract = false;
             bool sharedQueueRoute = false;
             bool versionCycleContract = false;
             bool sourceUntouched = false;
@@ -144,9 +146,25 @@ public partial class App
                 const string customPrompt = "custom adult photoreal portrait";
                 window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
                 bool customPromptApplied = window.ModalPhotorealSettingsForSmoke.Prompt == customPrompt;
+                const string appSettingsPrompt = "adult Japanese portrait with unchanged expression";
+                window.SetAppPhotorealPromptForSmoke(appSettingsPrompt);
+                bool appToModalSynchronized =
+                    window.ModalPhotorealSettingsForSmoke.Prompt == appSettingsPrompt;
+                window.ResetAppPhotorealPromptForSmoke();
+                appSettingsPromptContract = window.AppPhotorealPromptSurfaceForSmoke
+                    && appToModalSynchronized
+                    && window.ModalPhotorealSettingsForSmoke.Prompt == window.DefaultModalPhotorealPromptForSmoke;
+                defaultPromptContract = window.DefaultModalPhotorealPromptForSmoke.Contains(
+                        "five natural fingers per visible hand",
+                        StringComparison.Ordinal)
+                    && !window.DefaultModalPhotorealPromptForSmoke.Contains(
+                        "ADetailer",
+                        StringComparison.OrdinalIgnoreCase);
+                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
                 window.ResetModalPhotorealPromptForSmoke();
                 resetPromptContract = customPromptApplied
-                    && window.ModalPhotorealSettingsForSmoke.Prompt == window.DefaultModalPhotorealPromptForSmoke;
+                    && window.ModalPhotorealSettingsForSmoke.Prompt == window.DefaultModalPhotorealPromptForSmoke
+                    && window.AppPhotorealPromptSurfaceForSmoke;
                 window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
                 window.Show();
                 await window.LoadFolderSetAsync([imageRoot], commitRecent: false);
@@ -200,6 +218,8 @@ public partial class App
                     && versionCycleContract
                     && requestContract
                     && resetPromptContract
+                    && appSettingsPromptContract
+                    && defaultPromptContract
                     && sharedQueueRoute
                     && sourceUntouched
                     && window.ModalEnhancementOperationForSmoke == "photoreal";
@@ -233,6 +253,8 @@ public partial class App
                     versionCycleContract,
                     requestContract,
                     resetPromptContract,
+                    appSettingsPromptContract,
+                    defaultPromptContract,
                     sharedQueueRoute,
                     sourceUntouched,
                     requests,

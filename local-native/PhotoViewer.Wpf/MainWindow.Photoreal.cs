@@ -12,12 +12,11 @@ public partial class MainWindow
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
     private const string DefaultPhotorealPrompt =
-        "Transform the input image into a realistic style photograph of the same cute young adult woman in her twenties, with natural youthful facial features and a fresh gentle expression. Give her a subtle contemporary Japanese beauty-photo character without changing her identity; she is clearly an adult. " +
-        "Change only the rendering medium from anime illustration to a genuine live-action photograph. " +
-        "Preserve the exact person design, face shape, expression, hair color, hairstyle, eye color, visible body shape and silhouette, pose, hand placement, camera angle, crop, outfit coverage, clothing colors and construction, accessories, background layout, and light direction. " +
-        "Reconstruct the same scene with coherent real human anatomy, natural skin texture and pores, individual hair strands, physically realistic cloth and hard-surface materials, photographic optics, and natural cinematic lighting. " +
-        "She is clearly an adult. Keep all originally covered areas covered. Do not add or remove garments. " +
-        "The result must look like a real camera photograph, not anime, not an illustration, not CGI, not a doll, not kigurumi, and not cosplay.";
+        "Convert only the rendering medium into a real camera photograph of the same cute adult Japanese woman in her twenties. " +
+        "Preserve her identity, Japanese and East Asian facial proportions, exact expression and mood, mouth, gaze, eyelids, eyebrows, hair, body silhouette, pose, hand placement, crop, clothing, accessories, background, atmosphere, and all occlusions. Correct malformed hands to five natural fingers per visible hand. " +
+        "If a blindfold covers her eyes, preserve its shape and position and keep the eyes fully hidden. Preserve all visible adult anatomy exactly; do not censor, invent, or remove details. " +
+        "Preserve the original exposure, colors, and soft low-contrast lighting. Use natural skin, hair, materials, and photographic optics. " +
+        "Do not westernize her face, add a smile, change her mood, reveal hidden features, add or remove garments, use HDR, or apply dramatic grading. Not anime, illustration, CGI, doll, kigurumi, or cosplay.";
 
     private string _modalEnhancementOperation = "upscale";
     private readonly List<ManagedEnhancementVersion> _modalEnhancementVersions = [];
@@ -443,16 +442,55 @@ public partial class MainWindow
             return;
 
         _modalPhotorealPrompt = ModalPhotorealPromptTextBox.Text;
+        SyncAppPhotorealPromptControl();
         if (!_initializing)
             SaveState();
     }
 
     private void ResetModalPhotorealPrompt_Click(object sender, RoutedEventArgs e)
+        => ResetPhotorealPrompt();
+
+    private void AppPhotorealPrompt_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_syncingModalPhotorealSettings || AppPhotorealPromptTextBox is null)
+            return;
+
+        _modalPhotorealPrompt = AppPhotorealPromptTextBox.Text;
+        SyncModalPhotorealSettingsControls();
+        AppPhotorealPromptStatusText.Text = "保存済み。拡大画面のAI実写化設定と共通です。";
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void ResetAppPhotorealPrompt_Click(object sender, RoutedEventArgs e)
+        => ResetPhotorealPrompt();
+
+    private void ResetPhotorealPrompt()
     {
         _modalPhotorealPrompt = DefaultPhotorealPrompt;
         SyncModalPhotorealSettingsControls();
+        if (AppPhotorealPromptStatusText is not null)
+            AppPhotorealPromptStatusText.Text = "初期プロンプトに戻しました。";
         if (!_initializing)
             SaveState();
+    }
+
+    private void SyncAppPhotorealPromptControl()
+    {
+        if (AppPhotorealPromptTextBox is null)
+            return;
+
+        bool wasSyncing = _syncingModalPhotorealSettings;
+        _syncingModalPhotorealSettings = true;
+        try
+        {
+            if (!string.Equals(AppPhotorealPromptTextBox.Text, _modalPhotorealPrompt, StringComparison.Ordinal))
+                AppPhotorealPromptTextBox.Text = _modalPhotorealPrompt;
+        }
+        finally
+        {
+            _syncingModalPhotorealSettings = wasSyncing;
+        }
     }
 
     private static int SelectedIntegerTag(ComboBox comboBox, int fallback, IReadOnlyCollection<int> supported)
@@ -524,6 +562,8 @@ public partial class MainWindow
             SelectIntegerTag(ModalPhotorealStepsComboBox, _modalPhotorealSteps);
             SelectIntegerTag(ModalPhotorealSizeComboBox, _modalPhotorealMaxDimension);
             ModalPhotorealPromptTextBox.Text = _modalPhotorealPrompt;
+            if (AppPhotorealPromptTextBox is not null)
+                AppPhotorealPromptTextBox.Text = _modalPhotorealPrompt;
             RefreshModalPhotorealSettingLabels();
         }
         finally
@@ -568,6 +608,21 @@ public partial class MainWindow
 
     public void ResetModalPhotorealPromptForSmoke()
         => ResetModalPhotorealPrompt_Click(this, new RoutedEventArgs());
+
+    public bool AppPhotorealPromptSurfaceForSmoke
+        => AppPhotorealPromptTextBox.MaxLength == 2_000
+            && AppPhotorealPromptTextBox.AcceptsReturn
+            && string.Equals(
+                AutomationProperties.GetName(AppPhotorealPromptTextBox),
+                "Default AI photorealization prompt",
+                StringComparison.Ordinal)
+            && string.Equals(AppPhotorealPromptTextBox.Text, _modalPhotorealPrompt, StringComparison.Ordinal);
+
+    public void SetAppPhotorealPromptForSmoke(string prompt)
+        => AppPhotorealPromptTextBox.Text = prompt;
+
+    public void ResetAppPhotorealPromptForSmoke()
+        => ResetAppPhotorealPrompt_Click(this, new RoutedEventArgs());
 
     public string DefaultModalPhotorealPromptForSmoke => DefaultPhotorealPrompt;
 

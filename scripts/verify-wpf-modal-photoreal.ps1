@@ -47,6 +47,9 @@ try {
         'toolbarContract',
         'versionCycleContract',
         'requestContract',
+        'resetPromptContract',
+        'appSettingsPromptContract',
+        'defaultPromptContract',
         'sharedQueueRoute',
         'sourceUntouched'
     )) {

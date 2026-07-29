@@ -52,7 +52,7 @@ try {
     $process = $null
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 10
-    $required = @('passiveOpen', 'routesOk', 'outputOpened', 'pollingStoppedOnClose', 'sourceUnchanged', 'storesUnchanged', 'outputDeleted')
+    $required = @('passiveOpen', 'routesOk', 'outputOpened', 'sourceOpenedInViewer', 'queueInventoryOrdered', 'pollingStoppedOnClose', 'sourceUnchanged', 'storesUnchanged', 'outputDeleted')
     $missing = @($required | Where-Object { $result.$_ -ne $true })
     if ($processExitCode -ne 0 -or $result.ok -ne $true -or $missing.Count -gt 0) {
         throw "Enhancement jobs workspace contract failed (exit $processExitCode): $($missing -join ', ')"

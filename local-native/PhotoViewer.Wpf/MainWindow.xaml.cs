@@ -16462,6 +16462,7 @@ public partial class MainWindow : Window
         ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
         SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
+        SyncModalPhotorealSettingsControls();
         RefreshSharedDataSettings();
         DiagnosticsText.Text = BuildDiagnosticsText();
         DiagnosticsStatusText.Text = "Read-only diagnostics. Copy excludes paths, image metadata, prompts, and personal state.";
@@ -16496,6 +16497,7 @@ public partial class MainWindow : Window
 
         (FrameworkElement Target, RadioButton Navigation) selection = section switch
         {
+            "photoreal" => (PhotorealSettingsHeading, SettingsPhotorealNav),
             "display" => (DisplaySettingsHeading, SettingsDisplayNav),
             "thumbnails" => (ThumbnailSettingsHeading, SettingsThumbnailsNav),
             "keyboard" => (KeyBindingsHeading, SettingsKeyboardNav),

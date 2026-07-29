@@ -610,7 +610,7 @@ public partial class MainWindow
         IInputElement? focusToRestore = _batchEnhancementFocusBeforeDialog;
         CloseBatchEnhancementDialog(restoreFocus: false);
         await OpenEnhancementJobsWorkspaceAsync(
-            initialFilter: hasUnknownOutcome ? "all" : "active",
+            initialFilter: "all",
             highlightedJobIds: ids,
             focusToRestore: focusToRestore);
     }
