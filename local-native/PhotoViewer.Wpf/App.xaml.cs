@@ -18263,6 +18263,7 @@ public partial class App : Application
             bool outputAccepted = false;
             bool deletedOutput = false;
             bool restartJobObserved = false;
+            bool interruptedJobFailed = false;
             bool sourceUnchanged = false;
             string? jobId = null;
             string? status = null;
@@ -18300,6 +18301,7 @@ public partial class App : Application
                     ["outputAccepted"] = outputAccepted,
                     ["deletedOutput"] = deletedOutput,
                     ["restartJobObserved"] = restartJobObserved,
+                    ["interruptedJobFailed"] = interruptedJobFailed,
                     ["sourceUnchanged"] = sourceUnchanged,
                     ["pathsIsolated"] = pathsIsolated,
                     ["pathIsolationFailures"] = storePathIsolation
@@ -18405,13 +18407,12 @@ public partial class App : Application
                 else
                 {
                     status = win.ModalEnhancementStatusForSmoke;
-                    restartJobObserved = status == "running" && !string.IsNullOrWhiteSpace(win.ModalEnhancementJobIdForSmoke);
+                    interruptedJobFailed = status == "failed";
+                    restartJobObserved = interruptedJobFailed
+                        && !string.IsNullOrWhiteSpace(win.ModalEnhancementJobIdForSmoke);
                     jobId = win.ModalEnhancementJobIdForSmoke;
-                    RecordCheckpoint("recovery-stale-job-observed");
-                    canceled = restartJobObserved && (await win.CancelModalEnhancementForSmokeAsync()
-                        || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30)));
-                    RecordCheckpoint("recovery-cancel-complete");
-                    retried = canceled && await win.StartModalEnhancementForSmokeAsync(45_000);
+                    RecordCheckpoint("recovery-failed-job-observed");
+                    retried = restartJobObserved && await win.StartModalEnhancementForSmokeAsync(45_000);
                     if (retried)
                         jobId = win.ModalEnhancementJobIdForSmoke;
                     RecordCheckpoint("recovery-retry-complete");
@@ -18467,7 +18468,7 @@ public partial class App : Application
                     ? started && !string.IsNullOrWhiteSpace(jobId) && status is "queued" or "running"
                     : phase == "full"
                         ? started && canceled && retried && succeeded && outputAccepted && deletedOutput
-                        : restartJobObserved && canceled && retried && succeeded && outputAccepted && deletedOutput);
+                        : restartJobObserved && interruptedJobFailed && retried && succeeded && outputAccepted && deletedOutput);
             WriteSnapshot(Snapshot(ok, ok
                 ? $"real H25 companion phase '{phase}' passed"
                 : string.IsNullOrWhiteSpace(failure) ? $"real H25 companion phase '{phase}' failed" : failure));

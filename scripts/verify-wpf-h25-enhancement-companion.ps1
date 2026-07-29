@@ -409,7 +409,7 @@ try {
     $server = Start-H25Companion
     $recoveryExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $recoveryResultPath -FixtureRoot $fixtureRoot -Phase 'recover' -SourceName 'interrupted-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -DotnetPath $DotnetPath -TimeoutMilliseconds 300000
     $recovery = Read-SmokeResult -Path $recoveryResultPath -ExpectedExitCode $recoveryExit
-    Assert-True ($recovery.restartJobObserved -eq $true -and $recovery.canceled -eq $true -and $recovery.retried -eq $true) 'WPF did not recover the stale companion job through explicit Cancel and Retry.'
+    Assert-True ($recovery.restartJobObserved -eq $true -and $recovery.interruptedJobFailed -eq $true -and $recovery.retried -eq $true) 'WPF did not observe the interrupted job as failed and recover it through explicit Retry.'
 
     Stop-OwnedProcess -Process $server
     $server = $null
@@ -448,7 +448,7 @@ try {
         cancel = [bool]$full.canceled
         retry = [bool]$full.retried
         successOutputAccepted = [bool]$full.outputAccepted
-        companionRestartRecovery = [bool]$recovery.restartJobObserved -and [bool]$recovery.canceled -and [bool]$recovery.retried
+        companionRestartRecovery = [bool]$recovery.restartJobObserved -and [bool]$recovery.interruptedJobFailed -and [bool]$recovery.retried
         outputDelete = $independentOutputDeleted -and [bool]$full.deletedOutput -and [bool]$recovery.deletedOutput
         sourceSha256Unchanged = [bool]$detached.sourceUnchanged -and [bool]$full.sourceUnchanged -and [bool]$recovery.sourceUnchanged
         nonEnhancementStoresUnchanged = $immutableStoresUnchanged

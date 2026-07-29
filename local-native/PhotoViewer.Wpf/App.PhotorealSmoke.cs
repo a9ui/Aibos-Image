@@ -32,6 +32,7 @@ public partial class App
             bool resetPromptContract = false;
             bool appSettingsPromptContract = false;
             bool defaultPromptContract = false;
+            bool veryHighQualityContract = false;
             bool sharedQueueRoute = false;
             bool versionCycleContract = false;
             bool sourceUntouched = false;
@@ -145,6 +146,8 @@ public partial class App
                     return JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected smoke route" });
                 });
                 const string customPrompt = "custom adult photoreal portrait";
+                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 12, 1280, customPrompt);
+                veryHighQualityContract = window.ModalPhotorealSettingsForSmoke.Steps == 12;
                 window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
                 bool customPromptApplied = window.ModalPhotorealSettingsForSmoke.Prompt == customPrompt;
                 const string appSettingsPrompt = "adult Japanese portrait with unchanged expression";
@@ -236,6 +239,7 @@ public partial class App
                     && resetPromptContract
                     && appSettingsPromptContract
                     && defaultPromptContract
+                    && veryHighQualityContract
                     && independentCompanionContract
                     && sharedQueueRoute
                     && sourceUntouched
@@ -272,6 +276,7 @@ public partial class App
                     resetPromptContract,
                     appSettingsPromptContract,
                     defaultPromptContract,
+                    veryHighQualityContract,
                     independentCompanionContract,
                     sharedQueueRoute,
                     sourceUntouched,

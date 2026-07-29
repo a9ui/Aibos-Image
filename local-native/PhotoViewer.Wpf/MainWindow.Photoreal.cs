@@ -426,7 +426,7 @@ public partial class MainWindow
         _modalPhotorealSteps = SelectedIntegerTag(
             ModalPhotorealStepsComboBox,
             DefaultPhotorealSteps,
-            [4, 6, 8]);
+            [4, 6, 8, 12]);
         _modalPhotorealMaxDimension = SelectedIntegerTag(
             ModalPhotorealSizeComboBox,
             DefaultPhotorealMaxDimension,
@@ -529,7 +529,7 @@ public partial class MainWindow
             structureStrength ?? DefaultPhotorealStructureStrength,
             0,
             1.2);
-        _modalPhotorealSteps = steps is 4 or 6 or 8
+        _modalPhotorealSteps = steps is 4 or 6 or 8 or 12
             ? steps.Value
             : DefaultPhotorealSteps;
         _modalPhotorealMaxDimension = maxDimension is 768 or 1024 or 1280

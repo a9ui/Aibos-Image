@@ -330,6 +330,8 @@ or stores.
   settings. The prompt starts with the built-in tested default, remains freely
   editable from both the modal popup and the application settings screen,
   persists locally as one shared value, and has an explicit Reset action.
+  Quality offers 4, 6, 8, and opt-in `非常に高い（12 step）`; the default remains
+  the measured 8-step profile.
   Editing is saved while typing. Each job snapshots the current prompt when it
   is enqueued; already queued or running jobs are not rewritten.
 - The built-in photoreal prompt asks the edit model to preserve the source
