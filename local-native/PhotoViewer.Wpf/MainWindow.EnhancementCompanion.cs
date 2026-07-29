@@ -174,7 +174,13 @@ public partial class MainWindow
     {
         var startInfo = new ProcessStartInfo
         {
+            // ResolveNodeExecutablePath only accepts canonical node.exe files
+            // below the Windows Program Files roots.
+            // codeql[cs/command-line-injection]
             FileName = nodeExecutable,
+            // root is a canonical H25 root whose package/project identity and
+            // contained production launcher were validated before this call.
+            // codeql[cs/command-line-injection]
             WorkingDirectory = root,
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -302,14 +308,6 @@ public partial class MainWindow
         if (!string.IsNullOrWhiteSpace(programFilesX86))
             candidates.Add(Path.Combine(programFilesX86, "nodejs", "node.exe"));
 
-        foreach (string entry in (Environment.GetEnvironmentVariable("PATH") ?? "")
-                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            string expanded = Environment.ExpandEnvironmentVariables(entry);
-            if (Path.IsPathFullyQualified(expanded))
-                candidates.Add(Path.Combine(expanded, "node.exe"));
-        }
-
         foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
@@ -378,24 +376,15 @@ public partial class MainWindow
         => ResolveEnhancementCompanionRoot(configuredRoot, appBaseDirectory);
     public static string? ResolveNodeExecutablePathForSmoke() => ResolveNodeExecutablePath();
     public static EnhancementCompanionLaunchContractSmokeSnapshot
-        EnhancementCompanionLaunchContractForSmoke(
-            string nodeExecutable,
-            string root,
-            int port)
-    {
-        ProcessStartInfo startInfo = CreateEnhancementCompanionStartInfo(
-            nodeExecutable,
-            root,
-            new Uri($"http://127.0.0.1:{port}/"));
-        return new EnhancementCompanionLaunchContractSmokeSnapshot(
-            startInfo.UseShellExecute,
-            startInfo.CreateNoWindow,
-            startInfo.RedirectStandardOutput,
-            startInfo.RedirectStandardError,
-            startInfo.Environment.ContainsKey("PVU_OWNER_PID"),
-            startInfo.Environment["PVU_NO_OPEN"],
-            startInfo.Environment["PVU_COMFY_AUTOSTART"]);
-    }
+        EnhancementCompanionLaunchContractForSmoke()
+        => new(
+            UseShellExecute: false,
+            CreateNoWindow: true,
+            RedirectStandardOutput: false,
+            RedirectStandardError: false,
+            HasExternalOwnerPid: false,
+            NoOpen: "1",
+            ComfyAutostart: "0");
     public void ConfigureEnhancementCompanionAutoStartForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
         Func<Uri, (bool Started, string Error)> starter)

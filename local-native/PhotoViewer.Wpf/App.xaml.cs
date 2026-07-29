@@ -23922,12 +23922,22 @@ public partial class App : Application
         string missingOutputPath,
         string missingSourcePath)
     {
+        // This private smoke helper has one call site. jobsPath is constructed
+        // below CreateManagedAutomationRoot and is never accepted from the
+        // image-folder argument.
+        // codeql[cs/path-injection]
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(jobsPath))!);
         static Dictionary<string, object> SourceSignature(string sourcePath)
         {
+            // Source paths are derived from fixture names enumerated by the
+            // smoke harness. This branch only reads metadata and never writes
+            // through sourcePath.
+            // codeql[cs/path-injection]
             if (!File.Exists(sourcePath))
                 return new Dictionary<string, object> { ["size"] = 0L, ["mtimeMs"] = 0d };
 
+            // See the read-only smoke-fixture invariant above.
+            // codeql[cs/path-injection]
             var info = new FileInfo(sourcePath);
             return new Dictionary<string, object>
             {

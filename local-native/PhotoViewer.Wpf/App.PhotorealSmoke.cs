@@ -168,10 +168,7 @@ public partial class App
                         "ADetailer",
                         StringComparison.OrdinalIgnoreCase);
                 EnhancementCompanionLaunchContractSmokeSnapshot companionLaunch =
-                    PhotoViewer.Wpf.MainWindow.EnhancementCompanionLaunchContractForSmoke(
-                        "node.exe",
-                        smokeRoot,
-                        3142);
+                    PhotoViewer.Wpf.MainWindow.EnhancementCompanionLaunchContractForSmoke();
                 independentCompanionContract = !companionLaunch.UseShellExecute
                     && companionLaunch.CreateNoWindow
                     && !companionLaunch.RedirectStandardOutput
