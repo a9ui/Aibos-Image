@@ -25,5 +25,16 @@ if (Test-Path -LiteralPath $OutputPath) {
     $result = Get-Content -Raw -LiteralPath $OutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 8
     if ($result.ok -ne $true) { exit 1 }
+    foreach ($propertyName in @(
+        'favoriteHistorySurface',
+        'favoriteUndoShortcut',
+        'undoPersisted',
+        'favoriteRedoShortcut',
+        'redoPersisted'
+    )) {
+        if ($result.$propertyName -ne $true) {
+            throw "Favorite history invariant failed: $propertyName"
+        }
+    }
 }
 if ($process.ExitCode -ne 0) { exit $process.ExitCode }

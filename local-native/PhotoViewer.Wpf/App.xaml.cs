@@ -14406,6 +14406,17 @@ public partial class App : Application
                 List<int> clearedLevels = win.SelectedFavoriteLevelsForSmoke;
                 bool clearedFromStore = new[] { alphaPath, bravoPath, charliePath }.All(path => !FavoriteFileContainsPath(favoritesPath, path));
                 bool externalPreservedAfterClear = ReadFavoriteLevel(favoritesPath, deltaPath) == 2;
+                int favoriteHistoryCount = win.FavoriteHistoryCountForSmoke;
+                bool favoriteHistorySurface = win.FavoriteHistorySurfaceForSmoke
+                    && win.FavoriteUndoAvailableForSmoke
+                    && !win.FavoriteRedoAvailableForSmoke;
+                bool favoriteUndoShortcut = win.InvokePreviewKeyForSmoke(Key.Z, ModifierKeys.Control);
+                List<int> undoLevels = win.SelectedFavoriteLevelsForSmoke;
+                bool undoPersisted = new[] { alphaPath, bravoPath, charliePath }.All(path => ReadFavoriteLevel(favoritesPath, path) == 5);
+                bool favoriteRedoAvailable = win.FavoriteRedoAvailableForSmoke;
+                bool favoriteRedoShortcut = win.InvokePreviewKeyForSmoke(Key.Y, ModifierKeys.Control);
+                List<int> redoLevels = win.SelectedFavoriteLevelsForSmoke;
+                bool redoPersisted = new[] { alphaPath, bravoPath, charliePath }.All(path => !FavoriteFileContainsPath(favoritesPath, path));
 
                 int beforeRestore = win.FavoriteSaveAttemptCountForSmoke;
                 bool restored = win.SetSelectedFavoriteLevelForSmoke(2);
@@ -14445,6 +14456,10 @@ public partial class App : Application
                     && adjustedPersisted && externalPreservedAfterAdjust
                     && cleared && clearAttempts == 1 && clearedLevels.All(level => level == 0)
                     && clearedFromStore && externalPreservedAfterClear
+                    && favoriteHistoryCount >= 5 && favoriteHistorySurface
+                    && favoriteUndoShortcut && undoLevels.All(level => level == 5) && undoPersisted
+                    && favoriteRedoAvailable && favoriteRedoShortcut
+                    && redoLevels.All(level => level == 0) && redoPersisted
                     && restored && restoreAttempts == 1 && restoredLevels.All(level => level == 2)
                     && reasserted && reassertAttempts == 1 && reassertedPersisted && externalPreservedAfterReassert
                     && malformedRefused && malformedAttempts == 1
@@ -14474,6 +14489,14 @@ public partial class App : Application
                     ClearedLevels = clearedLevels,
                     ClearedFromStore = clearedFromStore,
                     ExternalPreservedAfterClear = externalPreservedAfterClear,
+                    FavoriteHistoryCount = favoriteHistoryCount,
+                    FavoriteHistorySurface = favoriteHistorySurface,
+                    FavoriteUndoShortcut = favoriteUndoShortcut,
+                    UndoLevels = undoLevels,
+                    UndoPersisted = undoPersisted,
+                    FavoriteRedoShortcut = favoriteRedoShortcut,
+                    RedoLevels = redoLevels,
+                    RedoPersisted = redoPersisted,
                     RestoreAttempts = restoreAttempts,
                     RestoredLevels = restoredLevels,
                     ReassertAttempts = reassertAttempts,
@@ -27486,6 +27509,14 @@ public partial class App : Application
         public List<int> ClearedLevels { get; init; } = [];
         public bool ClearedFromStore { get; init; }
         public bool ExternalPreservedAfterClear { get; init; }
+        public int FavoriteHistoryCount { get; init; }
+        public bool FavoriteHistorySurface { get; init; }
+        public bool FavoriteUndoShortcut { get; init; }
+        public List<int> UndoLevels { get; init; } = [];
+        public bool UndoPersisted { get; init; }
+        public bool FavoriteRedoShortcut { get; init; }
+        public List<int> RedoLevels { get; init; } = [];
+        public bool RedoPersisted { get; init; }
         public int RestoreAttempts { get; init; }
         public List<int> RestoredLevels { get; init; } = [];
         public int ReassertAttempts { get; init; }

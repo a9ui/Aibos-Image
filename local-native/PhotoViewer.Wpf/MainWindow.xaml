@@ -572,6 +572,68 @@
                 </Grid>
               </Border>
 
+              <Border x:Name="FavoriteHistoryToolbar" CornerRadius="8"
+                      Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
+                      Padding="8,6" Margin="0,0,0,10"
+                      AutomationProperties.Name="Favorite undo redo and history">
+                <DockPanel LastChildFill="False">
+                  <TextBlock DockPanel.Dock="Left" Text="Favorite" Foreground="{StaticResource TextSecondary}"
+                             FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,8,0"/>
+                  <Button x:Name="FavoriteUndoButton" DockPanel.Dock="Left" Style="{StaticResource IconButton}"
+                          Width="30" Height="28" Content="↶" FontSize="17" IsEnabled="False"
+                          Click="FavoriteUndo_Click" ToolTip="Undo favorite change (Ctrl+Z)"
+                          AutomationProperties.Name="Undo favorite change"/>
+                  <Button x:Name="FavoriteRedoButton" DockPanel.Dock="Left" Style="{StaticResource IconButton}"
+                          Width="30" Height="28" Content="↷" FontSize="17" IsEnabled="False" Margin="2,0,0,0"
+                          Click="FavoriteRedo_Click" ToolTip="Redo favorite change (Ctrl+Y)"
+                          AutomationProperties.Name="Redo favorite change"/>
+                  <Button x:Name="FavoriteHistoryButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                          Height="28" MinWidth="62" Padding="8,0" Content="History" Margin="6,0,0,0"
+                          Click="FavoriteHistory_Click" ToolTip="Show favorite changes made in this session"
+                          AutomationProperties.Name="Show favorite change history"/>
+                </DockPanel>
+              </Border>
+
+              <Popup x:Name="FavoriteHistoryPopup" PlacementTarget="{Binding ElementName=FavoriteHistoryButton}" Placement="Bottom"
+                     AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False">
+                <Border Width="360" MaxHeight="360" Margin="0,5,0,0" CornerRadius="7" Padding="10"
+                        Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
+                  <DockPanel LastChildFill="True">
+                    <TextBlock DockPanel.Dock="Top" Text="Favorite history" Foreground="{StaticResource TextPrimary}"
+                               FontSize="13" FontWeight="SemiBold" Margin="2,0,2,7"/>
+                    <TextBlock x:Name="FavoriteHistoryEmptyText" DockPanel.Dock="Top"
+                               Text="No favorite changes in this session." Foreground="{StaticResource TextTertiary}"
+                               FontSize="11.5" TextWrapping="Wrap" Margin="2,6"/>
+                    <ListBox x:Name="FavoriteHistoryList" Background="Transparent" BorderThickness="0"
+                             MaxHeight="300" Visibility="Collapsed"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             AutomationProperties.Name="Favorite change history">
+                      <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                          <Setter Property="Focusable" Value="False"/>
+                          <Setter Property="IsHitTestVisible" Value="False"/>
+                          <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                          <Setter Property="Padding" Value="0"/>
+                          <Setter Property="Margin" Value="0,0,0,5"/>
+                        </Style>
+                      </ListBox.ItemContainerStyle>
+                      <ListBox.ItemTemplate>
+                        <DataTemplate>
+                          <Border CornerRadius="5" Background="{StaticResource BgTertiary}" Padding="8,6">
+                            <StackPanel>
+                              <TextBlock Text="{Binding DisplayText}" Foreground="{StaticResource TextSecondary}"
+                                         FontSize="11.5" TextWrapping="Wrap"/>
+                              <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextTertiary}"
+                                         FontSize="10" Margin="0,2,0,0"/>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </DockPanel>
+                </Border>
+              </Popup>
+
               <Border x:Name="BulkFavoritePanel" Visibility="Collapsed" CornerRadius="10"
                       AutomationProperties.Name="Bulk selection actions"
                       Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
@@ -590,11 +652,9 @@
                     <Button Style="{StaticResource GhostButton}" Content="4" Tag="4" Click="BulkFavoriteLevel_Click" ToolTip="Set selected images to favorite level 4" AutomationProperties.Name="Set selected images to favorite level 4" Margin="0,0,4,0"/>
                     <Button Style="{StaticResource GhostButton}" Content="5" Tag="5" Click="BulkFavoriteLevel_Click" ToolTip="Set selected images to favorite level 5" AutomationProperties.Name="Set selected images to favorite level 5"/>
                   </UniformGrid>
-                  <UniformGrid Columns="2" Margin="0,8,0,0">
-                    <Button x:Name="BulkFavoriteDecreaseButton" Style="{StaticResource GhostButton}" Content="Decrease all" Click="FavoriteDecrease_Click"
-                            ToolTip="Decrease favorite level for selected images (U)" AutomationProperties.Name="Decrease favorite level for selected images" Margin="0,0,4,0"/>
+                  <UniformGrid Columns="1" Margin="0,8,0,0">
                     <Button x:Name="BulkFavoriteIncreaseButton" Style="{StaticResource GhostButton}" Content="Increase all" Click="FavoriteIncrease_Click"
-                            ToolTip="Increase favorite level for selected images" AutomationProperties.Name="Increase favorite level for selected images" Margin="4,0,0,0"/>
+                            ToolTip="Increase favorite level for selected images" AutomationProperties.Name="Increase favorite level for selected images"/>
                   </UniformGrid>
                   <Button x:Name="BulkEnhanceSelectedButton" Style="{StaticResource GhostButton}" Content="Enhance selected" Click="OpenBatchEnhancement_Click"
                           ToolTip="Review and create one optional local enhancement job per selected image"
@@ -612,7 +672,6 @@
                 <Border CornerRadius="4" ClipToBounds="True" BorderBrush="{StaticResource Favorite}" BorderThickness="1" Margin="0,0,3,8"
                         AutomationProperties.Name="Favorite level controls">
                   <StackPanel Orientation="Horizontal">
-                    <Button x:Name="FavoriteDecreaseButton" Style="{StaticResource StepButton}" Content="−" ToolTip="Decrease (U)" Click="FavoriteDecrease_Click" AutomationProperties.Name="Decrease favorite level"/>
                     <Border Width="28" Background="{StaticResource FavoriteSoft}">
                       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <TextBlock x:Name="FavoriteLevelText" Text="0" Foreground="{StaticResource FavoriteText}" FontWeight="Bold" FontSize="13"/>

@@ -554,6 +554,7 @@ public partial class MainWindow : Window
     {
         _tilesView = new SnapshotCollectionView<Tile>(_tiles);
         InitializeComponent();
+        InitializeFavoriteHistory();
         if (Application.Current is App app)
             app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
         InitializeKeyBindingEditor();
@@ -9402,20 +9403,30 @@ public partial class MainWindow : Window
 
         if (!CanStartSharedStateAction(SharedStoreKind.Favorite))
             return false;
+        List<(Tile Tile, int Before, int After)> requestedChanges = selected
+            .Select(tile => (
+                Tile: tile,
+                Before: tile.Fav,
+                After: Math.Clamp(levelSelector(tile), 0, 5)))
+            .ToList();
         if (ShouldUseFavoriteWriter())
         {
-            return QueueFavoriteLevels(
-                selected.Select(tile => (Tile: tile, Level: Math.Clamp(levelSelector(tile), 0, 5))).ToList(),
+            bool queued = QueueFavoriteLevels(
+                requestedChanges.Select(static change => (change.Tile, Level: change.After)).ToList(),
                 string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
+            if (queued)
+                RecordFavoriteHistory(requestedChanges);
+            return queued;
         }
 
         var previousFavorites = new Dictionary<string, int>(_favorites, StringComparer.OrdinalIgnoreCase);
         var previousDirtyPaths = new HashSet<string>(_favoriteDirtyPaths, StringComparer.OrdinalIgnoreCase);
         var nextLevels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (Tile tile in selected)
+        foreach (var change in requestedChanges)
         {
+            Tile tile = change.Tile;
             string key = NormalizeFavoritePath(tile.Path);
-            int next = Math.Clamp(levelSelector(tile), 0, 5);
+            int next = change.After;
             nextLevels[key] = next;
             if (next > 0)
                 _favorites[key] = next;
@@ -9441,6 +9452,7 @@ public partial class MainWindow : Window
 
         if (RefreshFavoriteMutationSurface(selected))
             ScheduleSearchStateSave();
+        RecordFavoriteHistory(requestedChanges);
         ShowFavoriteChangeStatus(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
         return true;
     }
@@ -9489,7 +9501,10 @@ public partial class MainWindow : Window
         {
             bool queued = QueueFavoriteLevels([(tile, clamped)], $"Set favorite level {clamped}.");
             if (queued)
+            {
+                RecordFavoriteHistory([(tile, displayedBefore, clamped)]);
                 ShowModalFavoriteIncreaseEffect(tile, displayedBefore, clamped);
+            }
             return queued;
         }
 
@@ -9515,6 +9530,7 @@ public partial class MainWindow : Window
         tile.Fav = clamped;
         if (RefreshFavoriteMutationSurface([tile]))
             ScheduleSearchStateSave();
+        RecordFavoriteHistory([(tile, displayedBefore, clamped)]);
         ShowModalFavoriteIncreaseEffect(tile, displayedBefore, clamped);
         return true;
     }
@@ -16015,9 +16031,7 @@ public partial class MainWindow : Window
         ModalNextButton.ToolTip = UiLanguageResources.Format("UiNextImageFormat", BindingText(ViewerKeyAction.NextImage));
         ModalFavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
         ModalFavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
-        FavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
         FavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
-        BulkFavoriteDecreaseButton.ToolTip = UiLanguageResources.Format("UiBulkFavoriteDecreaseFormat", BindingText(ViewerKeyAction.FavoriteDecrease));
         BulkFavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiBulkFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
         ModalDeleteButton.ToolTip = UiLanguageResources.Format("UiRecycleCurrentFormat", BindingText(ViewerKeyAction.RecycleCurrentImage));
         RestorePreviewTabButton.ToolTip = UiLanguageResources.Format("UiReopenClosedFormat", BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab));
@@ -18280,6 +18294,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (TryHandleFavoriteUndoRedo(key, modifiers))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (key is Key.Enter or Key.Return && modifiers == ModifierKeys.None)
         {
             if (Modal.Visibility == Visibility.Visible)
@@ -19635,7 +19655,7 @@ public partial class MainWindow : Window
         => ModalCloseBtn.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.CloseModal), StringComparison.Ordinal) == true
             && ModalPreviousButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.PreviousImage), StringComparison.Ordinal) == true
             && ModalNextButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.NextImage), StringComparison.Ordinal) == true
-            && FavoriteDecreaseButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.FavoriteDecrease), StringComparison.Ordinal) == true
+            && ModalFavoriteDecreaseButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.FavoriteDecrease), StringComparison.Ordinal) == true
             && FavoriteIncreaseButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.FavoriteIncrease), StringComparison.Ordinal) == true
             && ModalDeleteButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.RecycleCurrentImage), StringComparison.Ordinal) == true
             && RestorePreviewTabButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab), StringComparison.Ordinal) == true
@@ -21145,7 +21165,6 @@ public partial class MainWindow : Window
         {
             Button[] actions =
             [
-                FavoriteDecreaseButton,
                 FavoriteIncreaseButton,
                 RightPreviewEnhanceButton,
                 RightPreviewOpenButton,
@@ -21415,7 +21434,7 @@ public partial class MainWindow : Window
             return false;
 
         int before = tile.Fav;
-        FavoriteDecreaseButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, FavoriteDecreaseButton));
+        FavoriteDecrease_Click(this, new RoutedEventArgs());
         return tile.Fav == Math.Clamp(before - 1, 0, 5);
     }
     public bool AdjustModalFavoriteForSmoke(int delta)

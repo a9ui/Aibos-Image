@@ -299,6 +299,19 @@ or stores.
 - Presentation geometry and gestures not stated here remain WPF implementation
   details.
 
+## Favorite safety
+
+- Gallery compact/card/list surfaces, the right-preview action row, and the
+  bulk relative controls do not expose a Favorite decrement button. Gallery
+  users may increment or choose an explicit level 0 through 5. Modal decrement
+  and its existing keyboard binding remain available.
+- Favorite changes made in the current viewer session are recorded with image
+  name, before/after levels, action type, and time. The right preview exposes
+  History, Undo, and Redo. `Ctrl+Z` and `Ctrl+Y` apply the same Favorite-only
+  undo/redo operations when an editable input or modal is not active.
+- Favorite undo/redo never attempts to cancel or reverse Enhancement jobs,
+  source recycle operations, image files, Seen state, or Album state.
+
 ## Enhancement
 
 - Enhancement begins only from an explicit user action.

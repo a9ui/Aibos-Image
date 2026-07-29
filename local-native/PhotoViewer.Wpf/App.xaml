@@ -778,11 +778,7 @@
           </StackPanel>
           <Grid x:Name="compactFavoriteControls" VerticalAlignment="Bottom"
                 Height="{Binding CompactFavoriteControlHeight}" Opacity="0" IsHitTestVisible="False">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Button Grid.Column="0" Style="{StaticResource CompactCardFavoriteButton}" Content="-"
-                    CommandParameter="decrease" Tag="{Binding}" ToolTip="Decrease favorite level"
-                    AutomationProperties.Name="{Binding FileName, StringFormat={}Decrease favorite level for {0}}"/>
-            <Button Grid.Column="1" Style="{StaticResource CompactCardFavoriteButton}" Content="+"
+            <Button Style="{StaticResource CompactCardFavoriteButton}" Content="+"
                     CommandParameter="increase" Tag="{Binding}" ToolTip="Increase favorite level"
                     AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}"/>
           </Grid>
@@ -827,13 +823,8 @@
                              Fill="{StaticResource AccentLight}"
                              Visibility="{Binding ShowUnseenDotOnCard, Converter={StaticResource BoolToVis}}"/>
 
-                    <!-- Browser-parity direct Favorite controls. Routed Click is handled by the owning gallery. -->
+                    <!-- Safe direct Favorite increment. Relative decrement is intentionally absent from gallery surfaces. -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="2">
-                      <Button Style="{StaticResource IconButton}" Width="{Binding CardFavoriteButtonSize}" Height="{Binding CardFavoriteButtonSize}"
-                              CommandParameter="decrease" Tag="{Binding}" Margin="0,0,2,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"
-                              ToolTip="Decrease favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Decrease favorite level for {0}}">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource Favorite}" FontSize="16"/>
-                      </Button>
                       <Button Style="{StaticResource IconButton}" Width="{Binding CardFavoriteButtonSize}" Height="{Binding CardFavoriteButtonSize}"
                               CommandParameter="increase" Tag="{Binding}" ToolTip="Increase favorite level"
                               AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}">
@@ -949,10 +940,6 @@
                   <TextBlock Text="{Binding Path}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontFamily="{StaticResource MonoFont}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
-                  <Button Style="{StaticResource IconButton}" Width="28" Height="28" CommandParameter="decrease" Tag="{Binding}"
-                          ToolTip="Decrease favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Decrease favorite level for {0}}">
-                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource Favorite}" FontSize="16"/>
-                  </Button>
                   <Button Style="{StaticResource IconButton}" MinWidth="34" Width="Auto" Height="28" Padding="5,0" CommandParameter="increase" Tag="{Binding}"
                           ToolTip="Increase favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}">
                     <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="16"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0"/></StackPanel>
