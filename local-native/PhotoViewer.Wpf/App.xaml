@@ -11,14 +11,16 @@
     <Color x:Key="BgElevatedColor">#F2181D27</Color>
     <Color x:Key="AccentColor">#FF7A82FF</Color>
     <Color x:Key="AccentLightColor">#FF9AA0FF</Color>
+    <Color x:Key="AccentFillColor">#FF4E57CF</Color>
+    <Color x:Key="AccentFillHoverColor">#FF5962D9</Color>
     <Color x:Key="FavoriteColor">#FFFF4D73</Color>
     <Color x:Key="HeaderBgColor">#EB0B0F16</Color>
     <Color x:Key="GlassChromeTopColor">#D9181F2C</Color>
     <Color x:Key="GlassChromeBottomColor">#B8090E17</Color>
     <Color x:Key="TextPrimaryColor">#F2FFFFFF</Color>
     <Color x:Key="TextSecondaryColor">#B8C4CAD8</Color>
-    <Color x:Key="TextTertiaryColor">#8FAAB3C4</Color>
-    <Color x:Key="TextDisabledColor">#66FFFFFF</Color>
+    <Color x:Key="TextTertiaryColor">#B0AAB3C4</Color>
+    <Color x:Key="TextDisabledColor">#8FFFFFFF</Color>
     <Color x:Key="SelectionTextColor">#FFFFFF</Color>
     <Color x:Key="FocusColor">#B7E4FF</Color>
     <Color x:Key="FavoriteTextColor">#FFFF4D73</Color>
@@ -28,6 +30,8 @@
     <Color x:Key="WarningColor">#F4C45B</Color>
     <Color x:Key="DangerColor">#FF687F</Color>
     <Color x:Key="DangerTextColor">#FFD7DE</Color>
+    <Color x:Key="DangerFillColor">#FFB9314B</Color>
+    <Color x:Key="DangerFillHoverColor">#FFC83F59</Color>
     <Color x:Key="GlassBorderColor">#24FFFFFF</Color>
     <Color x:Key="GlassBorderHoverColor">#3DFFFFFF</Color>
     <Color x:Key="BorderStrongColor">#52FFFFFF</Color>
@@ -51,7 +55,7 @@
     <Color x:Key="ThumbnailCaptionEndColor">#00000000</Color>
     <Color x:Key="ThumbnailCaptionTextColor">#F2FFFFFF</Color>
     <Color x:Key="AiBadgeBackgroundColor">#D9142630</Color>
-    <Color x:Key="CompactFavoriteBackgroundColor">#E0F43F5E</Color>
+    <Color x:Key="CompactFavoriteBackgroundColor">#FFB9314B</Color>
     <Color x:Key="ScrollThumbColor">#22FFFFFF</Color>
     <Color x:Key="ScrollThumbHoverColor">#3CFFFFFF</Color>
 
@@ -76,6 +80,8 @@
     <SolidColorBrush x:Key="SelectionText" Color="{DynamicResource SelectionTextColor}"/>
     <SolidColorBrush x:Key="Accent" Color="{DynamicResource AccentColor}"/>
     <SolidColorBrush x:Key="AccentLight" Color="{DynamicResource AccentLightColor}"/>
+    <SolidColorBrush x:Key="AccentFill" Color="{DynamicResource AccentFillColor}"/>
+    <SolidColorBrush x:Key="AccentFillHover" Color="{DynamicResource AccentFillHoverColor}"/>
     <SolidColorBrush x:Key="Focus" Color="{DynamicResource FocusColor}"/>
     <SolidColorBrush x:Key="Favorite" Color="{DynamicResource FavoriteColor}"/>
     <SolidColorBrush x:Key="FavoriteText" Color="{DynamicResource FavoriteTextColor}"/>
@@ -85,6 +91,8 @@
     <SolidColorBrush x:Key="Warning" Color="{DynamicResource WarningColor}"/>
     <SolidColorBrush x:Key="Danger" Color="{DynamicResource DangerColor}"/>
     <SolidColorBrush x:Key="DangerText" Color="{DynamicResource DangerTextColor}"/>
+    <SolidColorBrush x:Key="DangerFill" Color="{DynamicResource DangerFillColor}"/>
+    <SolidColorBrush x:Key="DangerFillHover" Color="{DynamicResource DangerFillHoverColor}"/>
     <SolidColorBrush x:Key="GlassBorder" Color="{DynamicResource GlassBorderColor}"/>
     <SolidColorBrush x:Key="GlassBorderHover" Color="{DynamicResource GlassBorderHoverColor}"/>
     <SolidColorBrush x:Key="BorderStrong" Color="{DynamicResource BorderStrongColor}"/>
@@ -183,7 +191,7 @@
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource HoverFill}"/>
                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </Trigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -243,7 +251,7 @@
                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Opacity" Value="0.4"/>
+                <Setter Property="Opacity" Value="0.68"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource PressedFill}"/>
@@ -267,7 +275,7 @@
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentGlass}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -296,7 +304,7 @@
                 <Setter TargetName="edgeTint" Property="Background" Value="{StaticResource AccentSoft}"/>
                 <Setter Property="Foreground" Value="{StaticResource AccentLight}"/>
               </Trigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -321,7 +329,7 @@
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource HoverFill}"/>
                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -338,10 +346,10 @@
             <ControlTemplate.Triggers>
               <MultiTrigger>
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
-                <Setter TargetName="bd" Property="Background" Value="{StaticResource Danger}"/>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource DangerFill}"/>
                 <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -373,7 +381,7 @@
                 <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
                 <Setter Property="Foreground" Value="{StaticResource AccentLight}"/>
               </Trigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -395,7 +403,7 @@
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -424,7 +432,7 @@
                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </MultiTrigger>
               <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource AccentLight}"/></Trigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/><Setter Property="Cursor" Value="Arrow"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/><Setter Property="Cursor" Value="Arrow"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -448,11 +456,11 @@
                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </MultiTrigger>
               <Trigger Property="IsChecked" Value="True">
-                <Setter TargetName="bd" Property="Background" Value="{StaticResource Accent}"/>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentFill}"/>
                 <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
                 <Setter Property="FontWeight" Value="SemiBold"/>
               </Trigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -484,7 +492,7 @@
                 <Setter Property="Foreground" Value="{StaticResource AccentLight}"/>
                 <Setter Property="FontWeight" Value="SemiBold"/>
               </Trigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -512,7 +520,7 @@
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource HoverFill}"/>
                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -535,7 +543,7 @@
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource FavoriteSoft}"/>
                 <Setter Property="Foreground" Value="{StaticResource DangerText}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -618,7 +626,7 @@
                 <Setter TargetName="InputBorder" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
-                <Setter TargetName="InputBorder" Property="Opacity" Value="0.42"/>
+                <Setter TargetName="InputBorder" Property="Opacity" Value="0.68"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -653,10 +661,10 @@
                 </Border>
                 <ControlTemplate.Triggers>
                   <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions><Setter TargetName="Day" Property="Background" Value="{StaticResource HoverFill}"/></MultiTrigger>
-                  <Trigger Property="IsSelected" Value="True"><Setter TargetName="Day" Property="Background" Value="{StaticResource Accent}"/><Setter Property="Foreground" Value="White"/></Trigger>
+                  <Trigger Property="IsSelected" Value="True"><Setter TargetName="Day" Property="Background" Value="{StaticResource AccentFill}"/><Setter Property="Foreground" Value="White"/></Trigger>
                   <Trigger Property="IsToday" Value="True"><Setter TargetName="Day" Property="BorderBrush" Value="{StaticResource AccentLight}"/></Trigger>
                   <Trigger Property="IsInactive" Value="True"><Setter Property="Foreground" Value="{StaticResource TextTertiary}"/></Trigger>
-                  <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.38"/></Trigger>
+                  <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
                 </ControlTemplate.Triggers>
               </ControlTemplate>
             </Setter.Value>
@@ -675,7 +683,7 @@
                 </Border>
                 <ControlTemplate.Triggers>
                   <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions><Setter TargetName="CalendarButtonBorder" Property="Background" Value="{StaticResource HoverFill}"/></MultiTrigger>
-                  <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.38"/></Trigger>
+                  <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
                 </ControlTemplate.Triggers>
               </ControlTemplate>
             </Setter.Value>
@@ -708,7 +716,7 @@
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
                 <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -738,7 +746,7 @@
                 </MultiTrigger.Conditions>
                 <Setter TargetName="compactFavoriteButtonBackground" Property="Background" Value="{DynamicResource CompactFavoriteBackgroundBrush}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -949,16 +957,16 @@
             <ControlTemplate.Resources>
               <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource SelectionText}"/></Style>
             </ControlTemplate.Resources>
-            <Border x:Name="bd" CornerRadius="4" Padding="22,0" Background="{StaticResource Accent}">
+            <Border x:Name="bd" CornerRadius="4" Padding="22,0" Background="{StaticResource AccentFill}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
             </Border>
             <ControlTemplate.Triggers>
               <MultiTrigger>
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
-                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentLight}"/>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentFillHover}"/>
               </MultiTrigger>
               <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Opacity" Value="0.5"/>
+                <Setter Property="Opacity" Value="0.68"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -984,7 +992,7 @@
                 <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource GlassBorderHover}"/>
                 <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -1003,15 +1011,15 @@
             <ControlTemplate.Resources>
               <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource SelectionText}"/></Style>
             </ControlTemplate.Resources>
-            <Border x:Name="bd" CornerRadius="4" Padding="14,0" Background="{StaticResource Danger}">
+            <Border x:Name="bd" CornerRadius="4" Padding="14,0" Background="{StaticResource DangerFill}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
             </Border>
             <ControlTemplate.Triggers>
               <MultiTrigger>
                 <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
-                <Setter TargetName="bd" Property="Background" Value="#F87171"/>
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource DangerFillHover}"/>
               </MultiTrigger>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.68"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>

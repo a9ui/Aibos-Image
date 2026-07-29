@@ -21,13 +21,13 @@
 
   <Grid>
     <Grid.RowDefinitions>
-      <RowDefinition Height="52"/>
+      <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="28"/>
     </Grid.RowDefinitions>
 
     <!-- ═══════════════ Header ═══════════════ -->
-    <Border Grid.Row="0" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,0,1">
+    <Border Grid.Row="0" MinHeight="52" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,0,1">
       <Grid Margin="10,0">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
@@ -58,30 +58,43 @@
         </StackPanel>
 
         <!-- search -->
-        <Border x:Name="SearchBoxContainer" Grid.Column="1" Height="32" MinWidth="240" MaxWidth="480" HorizontalAlignment="Stretch" Margin="10,0"
+        <Border x:Name="SearchBoxContainer" Grid.Column="1" MinWidth="240" MaxWidth="480" HorizontalAlignment="Stretch" Margin="10,5"
                 CornerRadius="4" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                 WindowChrome.IsHitTestVisibleInChrome="True">
-          <DockPanel Margin="12,0,5,0" LastChildFill="True">
-            <Path DockPanel.Dock="Left" Data="M11,11 m-8,0 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 M21,21 l-4.3,-4.3" Stroke="{StaticResource TextTertiary}" StrokeThickness="1.8" Stretch="Uniform" Width="15" Height="15" Margin="0,0,8,0" VerticalAlignment="Center"/>
-            <Button x:Name="ClearSearchInputButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
-                    Width="26" Height="26" Margin="5,0,0,0" Visibility="Collapsed"
-                    Click="ClearSearchInput_Click" ToolTip="Clear search"
-                    AutomationProperties.Name="Clear search input"
-                    AutomationProperties.HelpText="Clear the entire current search query.">
-              <Path Data="M4,4 L16,16 M16,4 L4,16"
-                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                    StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                    Width="11" Height="11" Stretch="Uniform"/>
-            </Button>
-            <Grid>
-              <TextBox Style="{StaticResource SearchBox}" x:Name="SearchInput" FontSize="13" VerticalAlignment="Center"
-                       TextChanged="SearchInput_TextChanged" GotKeyboardFocus="SearchInput_GotKeyboardFocus"
-                       PreviewMouseLeftButtonDown="SearchInput_PreviewMouseLeftButtonDown"
-                       PreviewKeyDown="SearchInput_PreviewKeyDown" LostKeyboardFocus="SearchInput_LostKeyboardFocus"
-                       AutomationProperties.Name="Search images" AutomationProperties.HelpText="Search filenames and prompts. Separate terms with commas. Focus or click to show shared search history."/>
-              <TextBlock x:Name="SearchWatermark" Text="{DynamicResource UiSearchPlaceholder}" Foreground="{StaticResource TextTertiary}" FontSize="12.5" VerticalAlignment="Center" IsHitTestVisible="False" TextTrimming="CharacterEllipsis"/>
-            </Grid>
-          </DockPanel>
+          <Grid Margin="10,1,4,2">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="29"/>
+              <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <DockPanel Grid.Row="0" LastChildFill="True">
+              <Path DockPanel.Dock="Left" Data="M11,11 m-8,0 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 M21,21 l-4.3,-4.3" Stroke="{StaticResource TextTertiary}" StrokeThickness="1.8" Stretch="Uniform" Width="15" Height="15" Margin="0,0,8,0" VerticalAlignment="Center"/>
+              <Button x:Name="ClearSearchInputButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                      Width="26" Height="26" Margin="5,0,0,0" Visibility="Collapsed"
+                      Click="ClearSearchInput_Click" ToolTip="Clear search"
+                      AutomationProperties.Name="Clear search input"
+                      AutomationProperties.HelpText="Clear the entire current search query.">
+                <Path Data="M4,4 L16,16 M16,4 L4,16"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Width="11" Height="11" Stretch="Uniform"/>
+              </Button>
+              <Grid>
+                <TextBox Style="{StaticResource SearchBox}" x:Name="SearchInput" FontSize="13" VerticalAlignment="Center"
+                         TextChanged="SearchInput_TextChanged" GotKeyboardFocus="SearchInput_GotKeyboardFocus"
+                         PreviewMouseLeftButtonDown="SearchInput_PreviewMouseLeftButtonDown"
+                         PreviewKeyDown="SearchInput_PreviewKeyDown" LostKeyboardFocus="SearchInput_LostKeyboardFocus"
+                         AutomationProperties.Name="Search images" AutomationProperties.HelpText="Search filenames and prompts. Separate terms with commas. Each active term appears below with a remove button."/>
+                <TextBlock x:Name="SearchWatermark" Text="{DynamicResource UiSearchPlaceholder}" Foreground="{StaticResource TextTertiary}" FontSize="12.5" VerticalAlignment="Center" IsHitTestVisible="False" TextTrimming="CharacterEllipsis"/>
+              </Grid>
+            </DockPanel>
+            <ScrollViewer x:Name="SearchTermChipsScroller" Grid.Row="1" Height="23"
+                          HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
+                          CanContentScroll="True" Visibility="Collapsed"
+                          AutomationProperties.Name="Active search terms"
+                          AutomationProperties.HelpText="Each search term has a remove button.">
+              <StackPanel x:Name="SearchTermChipsPanel" Orientation="Horizontal"/>
+            </ScrollViewer>
+          </Grid>
         </Border>
 
         <Popup x:Name="SearchHistoryPopup" PlacementTarget="{Binding ElementName=SearchBoxContainer}" Placement="Bottom"
@@ -1512,35 +1525,194 @@
              AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False"
              AutomationProperties.Name="AI photorealization settings">
         <Border Width="300" Padding="14" CornerRadius="6"
-                Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1">
+                Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+          <Border.Resources>
+            <Style x:Key="PhotorealSettingsComboBoxItem" TargetType="{x:Type ComboBoxItem}">
+              <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+              <Setter Property="Background" Value="{StaticResource BgPrimary}"/>
+              <Setter Property="Padding" Value="8,5"/>
+              <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                    <Border x:Name="ItemSurface"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="Transparent" BorderThickness="1"
+                            Padding="{TemplateBinding Padding}">
+                      <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalAlignment="Center"
+                                        TextElement.Foreground="{TemplateBinding Foreground}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsHighlighted" Value="True">
+                        <Setter TargetName="ItemSurface" Property="Background" Value="{StaticResource AccentFillHover}"/>
+                        <Setter TargetName="ItemSurface" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+                        <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                      </Trigger>
+                      <Trigger Property="IsSelected" Value="True">
+                        <Setter TargetName="ItemSurface" Property="Background" Value="{StaticResource AccentFill}"/>
+                        <Setter TargetName="ItemSurface" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+                        <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                      </Trigger>
+                      <Trigger Property="IsEnabled" Value="False">
+                        <Setter TargetName="ItemSurface" Property="Background" Value="{StaticResource BgTertiary}"/>
+                        <Setter Property="Foreground" Value="{StaticResource TextDisabled}"/>
+                        <Setter Property="Opacity" Value="1"/>
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
+              <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                  <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                  <Setter Property="Background" Value="{StaticResource AccentFillHover}"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                  <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                  <Setter Property="Background" Value="{StaticResource AccentFill}"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter Property="Foreground" Value="{StaticResource TextDisabled}"/>
+                  <Setter Property="Background" Value="{StaticResource BgTertiary}"/>
+                  <Setter Property="Opacity" Value="1"/>
+                </Trigger>
+              </Style.Triggers>
+            </Style>
+            <Style x:Key="PhotorealSettingsComboBox" TargetType="{x:Type ComboBox}">
+              <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+              <Setter Property="TextElement.Foreground" Value="{StaticResource TextPrimary}"/>
+              <Setter Property="Background" Value="{StaticResource BgPrimary}"/>
+              <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}"/>
+              <Setter Property="BorderThickness" Value="1"/>
+              <Setter Property="Padding" Value="7,4"/>
+              <Setter Property="ItemContainerStyle" Value="{StaticResource PhotorealSettingsComboBoxItem}"/>
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="{x:Type ComboBox}">
+                    <Grid>
+                      <ToggleButton x:Name="DropDownToggle"
+                                    Focusable="False" ClickMode="Press"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                        <ToggleButton.Template>
+                          <ControlTemplate TargetType="{x:Type ToggleButton}">
+                            <Border x:Name="ClosedSurface"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="3">
+                              <ContentPresenter/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                              <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ClosedSurface" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+                              </Trigger>
+                              <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ClosedSurface" Property="BorderBrush" Value="{StaticResource Focus}"/>
+                              </Trigger>
+                            </ControlTemplate.Triggers>
+                          </ControlTemplate>
+                        </ToggleButton.Template>
+                        <Grid Margin="{TemplateBinding Padding}">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="18"/>
+                          </Grid.ColumnDefinitions>
+                          <ContentPresenter Grid.Column="0"
+                                            Content="{TemplateBinding SelectionBoxItem}"
+                                            ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                            ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                            TextElement.Foreground="{TemplateBinding Foreground}"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Left"
+                                            RecognizesAccessKey="True"/>
+                          <Path Grid.Column="1" Data="M 0 0 L 4 4 L 8 0 Z"
+                                Fill="{TemplateBinding Foreground}"
+                                Width="8" Height="4"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                      </ToggleButton>
+                      <Popup x:Name="PART_Popup"
+                             Placement="Bottom"
+                             IsOpen="{TemplateBinding IsDropDownOpen}"
+                             AllowsTransparency="True"
+                             Focusable="False"
+                             PopupAnimation="Fade">
+                        <Border x:Name="DropDownSurface"
+                                MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                Background="{StaticResource BgPrimary}"
+                                BorderBrush="{StaticResource BorderStrong}"
+                                BorderThickness="1"
+                                CornerRadius="3"
+                                Padding="2">
+                          <ScrollViewer CanContentScroll="True"
+                                        HorizontalScrollBarVisibility="Disabled"
+                                        VerticalScrollBarVisibility="Auto">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                          </ScrollViewer>
+                        </Border>
+                      </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                        <Setter TargetName="DropDownToggle" Property="BorderBrush" Value="{StaticResource Focus}"/>
+                      </Trigger>
+                      <Trigger Property="IsEnabled" Value="False">
+                        <Setter TargetName="DropDownToggle" Property="Background" Value="{StaticResource BgTertiary}"/>
+                        <Setter TargetName="DropDownToggle" Property="Foreground" Value="{StaticResource TextDisabled}"/>
+                        <Setter TargetName="DropDownToggle" Property="Opacity" Value="1"/>
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
+              <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter Property="Foreground" Value="{StaticResource TextDisabled}"/>
+                  <Setter Property="TextElement.Foreground" Value="{StaticResource TextDisabled}"/>
+                  <Setter Property="Background" Value="{StaticResource BgTertiary}"/>
+                  <Setter Property="Opacity" Value="1"/>
+                </Trigger>
+              </Style.Triggers>
+            </Style>
+          </Border.Resources>
           <StackPanel>
             <DockPanel LastChildFill="True" Margin="0,0,0,12">
-              <TextBlock DockPanel.Dock="Right" Text="GPU queue shared with AI高画質化" Foreground="{StaticResource TextTertiary}" FontSize="9.5" VerticalAlignment="Center"/>
+              <TextBlock DockPanel.Dock="Right" Text="GPU queue shared with AI高画質化" Foreground="{StaticResource TextSecondary}" FontSize="10" VerticalAlignment="Center"/>
               <TextBlock Text="AI実写化 設定" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="SemiBold"/>
             </DockPanel>
             <DockPanel Margin="0,0,0,4">
               <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" Padding="8,2"
+                      Foreground="{StaticResource TextPrimary}"
                       Content="Reset" Click="ResetModalPhotorealPrompt_Click"
                       AutomationProperties.Name="Reset AI photorealization prompt"/>
-              <TextBlock Text="Prompt" Foreground="{StaticResource TextSecondary}" FontSize="11.5" VerticalAlignment="Center"/>
+              <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
             </DockPanel>
             <TextBox x:Name="ModalPhotorealPromptTextBox"
                      MinHeight="76" MaxHeight="140" MaxLength="2000"
                      AcceptsReturn="True" TextWrapping="Wrap"
+                     Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                     CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                     BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6"
                      VerticalScrollBarVisibility="Auto"
                      TextChanged="ModalPhotorealPrompt_TextChanged"
                      AutomationProperties.Name="AI photorealization prompt"
                      AutomationProperties.HelpText="Edit the prompt used for AI photorealization. Reset restores the built-in default."/>
             <DockPanel Margin="0,10,0,3">
               <TextBlock x:Name="ModalPhotorealStrengthValue" DockPanel.Dock="Right" Text="80%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
-              <TextBlock Text="実写化の強さ" Foreground="{StaticResource TextSecondary}" FontSize="11.5"/>
+              <TextBlock Text="実写化の強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
             </DockPanel>
             <Slider x:Name="ModalPhotorealStrengthSlider" Minimum="20" Maximum="80" Value="80" TickFrequency="1" IsSnapToTickEnabled="True"
                     AutoToolTipPlacement="TopLeft" ValueChanged="ModalPhotorealSetting_ValueChanged"
                     AutomationProperties.Name="Photorealization strength"/>
             <DockPanel Margin="0,10,0,3">
               <TextBlock x:Name="ModalPhotorealStructureValue" DockPanel.Dock="Right" Text="100%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
-              <TextBlock Text="元の構図を保つ強さ" Foreground="{StaticResource TextSecondary}" FontSize="11.5"/>
+              <TextBlock Text="元の構図を保つ強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
             </DockPanel>
             <Slider x:Name="ModalPhotorealStructureSlider" Minimum="0" Maximum="120" Value="100" TickFrequency="5" IsSnapToTickEnabled="True"
                     AutoToolTipPlacement="TopLeft" ValueChanged="ModalPhotorealSetting_ValueChanged"
@@ -1548,23 +1720,23 @@
             <Grid Margin="0,12,0,0">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <StackPanel Grid.Column="0">
-                <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="11.5" Margin="0,0,0,4"/>
-                <ComboBox x:Name="ModalPhotorealStepsComboBox" SelectedIndex="2" SelectionChanged="ModalPhotorealSetting_SelectionChanged" AutomationProperties.Name="Photorealization quality">
+                <TextBlock Text="品質" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalPhotorealStepsComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="2" SelectionChanged="ModalPhotorealSetting_SelectionChanged" AutomationProperties.Name="Photorealization quality">
                   <ComboBoxItem Content="速い（4 step）" Tag="4"/>
                   <ComboBoxItem Content="標準（6 step）" Tag="6"/>
                   <ComboBoxItem Content="高品質（8 step）" Tag="8"/>
                 </ComboBox>
               </StackPanel>
               <StackPanel Grid.Column="2">
-                <TextBlock Text="処理解像度" Foreground="{StaticResource TextSecondary}" FontSize="11.5" Margin="0,0,0,4"/>
-                <ComboBox x:Name="ModalPhotorealSizeComboBox" SelectedIndex="2" SelectionChanged="ModalPhotorealSetting_SelectionChanged" AutomationProperties.Name="Photorealization work resolution">
+                <TextBlock Text="処理解像度" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalPhotorealSizeComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="2" SelectionChanged="ModalPhotorealSetting_SelectionChanged" AutomationProperties.Name="Photorealization work resolution">
                   <ComboBoxItem Content="768 px" Tag="768"/>
                   <ComboBoxItem Content="1024 px" Tag="1024"/>
                   <ComboBoxItem Content="1280 px" Tag="1280"/>
                 </ComboBox>
               </StackPanel>
             </Grid>
-            <TextBlock Text="設定を閉じても値は保存されます。元画像は変更しません。" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,12,0,0"/>
+            <TextBlock Text="設定を閉じても値は保存されます。元画像は変更しません。" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,12,0,0"/>
           </StackPanel>
         </Border>
       </Popup>

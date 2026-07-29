@@ -30,6 +30,9 @@ if (($result.initialTags -join '|') -ne 'studio portrait|soft light') { $failure
 if ($result.appended.searchQuery -ne 'studio portrait, soft light') { $failures += 'tag was not appended as a stable comma query' }
 if ($result.appended.modalVisible -ne $false -or $result.appended.searchFocused -ne $true) { $failures += 'modal close or search focus failed' }
 if ($result.initialAccessibilityReady -ne $true) { $failures += 'prompt chip accessibility metadata is missing' }
+if (($result.activeSearchTerms -join '|') -ne 'studio portrait|soft light') { $failures += 'active search chips did not mirror the comma-separated query' }
+if ($result.activeSearchTermsAccessibilityReady -ne $true) { $failures += 'active search chip accessibility metadata is missing' }
+if ($result.removedWholeSearchTerm -ne $true) { $failures += 'active search chip did not remove its whole term' }
 if ($result.searchPersisted -ne $true) { $failures += 'search query did not persist and reload' }
 if ($result.promptFallbackVisible -ne $true) { $failures += 'prompt chip fallback is not visible when metadata has no prompt' }
 if ($result.promptEmphasisNormalized -ne $true) { $failures += 'prompt display retained emphasis wrapper parentheses or brackets' }

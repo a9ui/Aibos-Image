@@ -1501,7 +1501,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 
             double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
             var labelBrush = new SolidColorBrush(Color.FromArgb(0xD1, 0xFF, 0xFF, 0xFF));
-            var countBrush = new SolidColorBrush(Color.FromArgb(0x8C, 0xFF, 0xFF, 0xFF));
+            var countBrush = new SolidColorBrush(Color.FromArgb(0xB0, 0xFF, 0xFF, 0xFF));
             var linePen = new Pen(new SolidColorBrush(Color.FromArgb(0x2D, 0xFF, 0xFF, 0xFF)), 1);
             labelBrush.Freeze();
             countBrush.Freeze();

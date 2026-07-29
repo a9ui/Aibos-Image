@@ -38,9 +38,11 @@ public partial class App : Application
         "BgPrimaryColor", "BgSecondaryColor", "BgTertiaryColor", "BgElevatedColor", "HeaderBgColor",
         "GlassChromeTopColor", "GlassChromeBottomColor",
         "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor", "TextDisabledColor", "SelectionTextColor",
-        "AccentColor", "AccentLightColor", "FocusColor", "FavoriteColor", "FavoriteTextColor",
+        "AccentColor", "AccentLightColor", "AccentFillColor", "AccentFillHoverColor",
+        "FocusColor", "FavoriteColor", "FavoriteTextColor",
         "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
         "SuccessColor", "WarningColor", "DangerColor", "DangerTextColor",
+        "DangerFillColor", "DangerFillHoverColor",
         "GlassBorderColor", "GlassBorderHoverColor", "BorderStrongColor",
         "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
         "FavoriteSoftColor", "SuccessSoftColor", "SuccessBorderColor", "LogoColor", "FavStepColor",
@@ -65,6 +67,8 @@ public partial class App : Application
             ["SelectionTextColor"] = "SelectionText",
             ["AccentColor"] = "Accent",
             ["AccentLightColor"] = "AccentLight",
+            ["AccentFillColor"] = "AccentFill",
+            ["AccentFillHoverColor"] = "AccentFillHover",
             ["FocusColor"] = "Focus",
             ["FavoriteColor"] = "Favorite",
             ["FavoriteTextColor"] = "FavoriteText",
@@ -72,6 +76,8 @@ public partial class App : Application
             ["WarningColor"] = "Warning",
             ["DangerColor"] = "Danger",
             ["DangerTextColor"] = "DangerText",
+            ["DangerFillColor"] = "DangerFill",
+            ["DangerFillHoverColor"] = "DangerFillHover",
             ["GlassBorderColor"] = "GlassBorder",
             ["GlassBorderHoverColor"] = "GlassBorderHover",
             ["BorderStrongColor"] = "BorderStrong",
@@ -1085,9 +1091,10 @@ public partial class App : Application
         SetThemeColors(SystemColors.GrayTextColor, "TextDisabledColor");
         SetThemeColors(SystemColors.HighlightTextColor, "SelectionTextColor");
         SetThemeColors(SystemColors.HotTrackColor,
-            "AccentColor", "AccentLightColor", "FavoriteColor",
+            "AccentColor", "AccentLightColor", "AccentFillColor", "AccentFillHoverColor", "FavoriteColor",
             "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
-            "WarningColor", "DangerColor", "SuccessBorderColor", "FavStepColor",
+            "WarningColor", "DangerColor", "DangerFillColor", "DangerFillHoverColor",
+            "SuccessBorderColor", "FavStepColor",
             "CompactFavoriteBackgroundColor");
         SetThemeColors(SystemColors.HighlightColor, "FocusColor");
         SetThemeColors(
@@ -22514,6 +22521,11 @@ public partial class App : Application
                 string reloadedQuery = reloaded.SearchQueryForSmoke;
                 List<string> reloadedNames = reloaded.FilteredFileNamesForSmoke();
                 reloaded.Close();
+                List<string> activeSearchTerms = win.ActiveSearchTermsForSmoke;
+                bool activeSearchTermsAccessibilityReady = win.ActiveSearchTermsAccessibilityReadyForSmoke;
+                bool removedWholeSearchTerm = win.RemoveSearchTermForSmoke("studio portrait")
+                    && string.Equals(win.SearchQueryForSmoke, "soft light", StringComparison.Ordinal)
+                    && win.ActiveSearchTermsForSmoke.SequenceEqual(["soft light"], StringComparer.Ordinal);
                 win.SetSearchQuery("", persist: false);
                 PngMetadataSmokeSnapshot missingMetadata = await win.SelectPngMetadataForSmokeAsync(otherName);
                 bool missingModalOpened = win.OpenModalForSmoke();
@@ -22541,6 +22553,9 @@ public partial class App : Application
                     && !appended.ModalVisible && !deduped.ModalVisible
                     && appended.SearchFocused && deduped.SearchFocused
                     && initialAccessibilityReady && appended.AccessibilityReady && deduped.AccessibilityReady
+                    && activeSearchTerms.SequenceEqual(["studio portrait", "soft light"], StringComparer.Ordinal)
+                    && activeSearchTermsAccessibilityReady
+                    && removedWholeSearchTerm
                     && appended.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && deduped.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && sourceUntouched && searchPersisted
@@ -22552,7 +22567,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "modal prompt tags return an active Album to catalog, strip emphasis wrappers for display, append a deduped comma query, close the modal, focus search, and persist only search state without source, metadata, or enhancement mutation"
+                        ? "modal prompt tags append a deduped comma query, active search chips expose accessible whole-term removal, and only search state is persisted without source, metadata, or enhancement mutation"
                         : "prompt tag search smoke did not meet the modal/search isolation contract",
                     SmokeRoot = smokeRoot,
                     TaggedPath = taggedPath,
@@ -22566,6 +22581,9 @@ public partial class App : Application
                     ReturnedToCatalog = returnedToCatalog,
                     Appended = appended,
                     Deduped = deduped,
+                    ActiveSearchTerms = activeSearchTerms,
+                    ActiveSearchTermsAccessibilityReady = activeSearchTermsAccessibilityReady,
+                    RemovedWholeSearchTerm = removedWholeSearchTerm,
                     SourceUntouched = sourceUntouched,
                     SearchPersisted = searchPersisted,
                     ReloadedQuery = reloadedQuery,
@@ -24916,6 +24934,9 @@ public partial class App : Application
         public bool ReturnedToCatalog { get; init; }
         public PromptTagSearchSmokeSnapshot? Appended { get; init; }
         public PromptTagSearchSmokeSnapshot? Deduped { get; init; }
+        public List<string> ActiveSearchTerms { get; init; } = [];
+        public bool ActiveSearchTermsAccessibilityReady { get; init; }
+        public bool RemovedWholeSearchTerm { get; init; }
         public bool SourceUntouched { get; init; }
         public bool SearchPersisted { get; init; }
         public string? ReloadedQuery { get; init; }

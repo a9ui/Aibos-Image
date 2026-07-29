@@ -100,6 +100,10 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-accessibility.ps1 -SkipBuild
 
+      - name: Color contrast smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-color-contrast.ps1
+
       - name: Optional Enhancement bridge smoke
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-enhancement-actions.ps1

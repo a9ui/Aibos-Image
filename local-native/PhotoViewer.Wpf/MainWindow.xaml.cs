@@ -8348,6 +8348,7 @@ public partial class MainWindow : Window
             SearchWatermark.Visibility = string.IsNullOrEmpty(SearchInput.Text) ? Visibility.Visible : Visibility.Collapsed;
         if (ClearSearchInputButton is not null)
             ClearSearchInputButton.Visibility = string.IsNullOrEmpty(SearchInput.Text) ? Visibility.Collapsed : Visibility.Visible;
+        SyncSearchTermChips(SearchInput.Text);
         if (_initializing || _settingSearchQuery) return;
         ScheduleSearchFilter();
         ScheduleSearchStateSave();
