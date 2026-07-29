@@ -577,7 +577,9 @@ public partial class MainWindow
                 out ManagedEnhancedOutput output);
             string? outputPath = enhanced ? output.OutputPath : null;
             tile.EnhancedOutputPath = outputPath;
-            tile.Enhanced = enhanced;
+            ApplyTileEnhancementAvailability(
+                tile,
+                GetManagedEnhancementVersionsForPath(tile.Path));
         }
         return true;
     }

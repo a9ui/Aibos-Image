@@ -1250,6 +1250,7 @@ public partial class MainWindow : Window
         bool FavoritesOnly,
         bool UnfavoriteOnly,
         bool EnhancedOnly,
+        bool PhotorealOnly,
         bool UnseenOnly,
         FrozenSet<int> FavoriteLevels,
         FrozenSet<string> HiddenFolderBuckets,
@@ -1267,6 +1268,8 @@ public partial class MainWindow : Window
         string Prompt,
         int FavoriteLevel,
         bool Enhanced,
+        bool Upscaled,
+        bool Photorealized,
         bool Unseen,
         DateTime ModifiedUtc,
         DateTime CreatedUtc);
@@ -1466,6 +1469,13 @@ public partial class MainWindow : Window
         string JobId,
         string Operation,
         ManagedEnhancedOutput Output);
+
+    private readonly record struct EnhancementAvailability(
+        bool Upscaled,
+        bool Photorealized)
+    {
+        public bool Any => Upscaled || Photorealized;
+    }
 
     private sealed record DisplayedAssetResolution(string Path, long SizeBytes, bool Enhanced, string? FallbackReason);
 
@@ -1916,7 +1926,15 @@ public partial class MainWindow : Window
                 _seenPaths.ToHashSet(StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, ManagedEnhancedOutput>(
                     _catalogEnhancedOutputsByPath,
-                    StringComparer.OrdinalIgnoreCase));
+                    StringComparer.OrdinalIgnoreCase),
+                _catalogEnhancementVersionsByPath
+                    .Where(static item => item.Value.Any(static version => version.Operation != "photoreal"))
+                    .Select(static item => item.Key)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
+                _catalogEnhancementVersionsByPath
+                    .Where(static item => item.Value.Any(static version => version.Operation == "photoreal"))
+                    .Select(static item => item.Key)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase));
             CatalogCardLayoutContext cardLayout = CaptureCardLayoutContext();
             bool showUnseenDots = _showUnseenDots;
             IReadOnlyDictionary<string, ImageDimensions> emptyDimensions =
@@ -3304,6 +3322,11 @@ public partial class MainWindow : Window
         var created = file.CreationTime;
         int paletteIndex = path.GetHashCode(StringComparison.OrdinalIgnoreCase) & int.MaxValue;
         bool enhanced = TryGetEnhancedOutputForPath(path, sharedState, out string? enhancedOutputPath);
+        string? enhancementAlias = NormalizeCatalogEnhancementPath(path);
+        bool upscaled = enhancementAlias is not null
+            && sharedState.UpscaledPaths.Contains(enhancementAlias);
+        bool photorealized = enhancementAlias is not null
+            && sharedState.PhotorealizedPaths.Contains(enhancementAlias);
         dimensions.TryGetValue(path, out var imageSize);
         prompts.TryGetValue(path, out string? indexedPrompt);
         string folderBucketCacheKey = file.DirectoryName ?? path;
@@ -3341,6 +3364,8 @@ public partial class MainWindow : Window
             ImagePixelWidth = imageSize.Width,
             ImagePixelHeight = imageSize.Height,
             Enhanced = enhanced,
+            Upscaled = upscaled,
+            Photorealized = photorealized,
             EnhancedOutputPath = enhancedOutputPath,
             SizeText = FormatBytes(file.Length),
             ModifiedText = modified.ToString("yyyy-MM-dd HH:mm"),
@@ -3984,6 +4009,33 @@ public partial class MainWindow : Window
         }
 
         return Array.Empty<ManagedEnhancementVersion>();
+    }
+
+    private static EnhancementAvailability GetEnhancementAvailability(
+        IEnumerable<ManagedEnhancementVersion> versions)
+    {
+        bool upscaled = false;
+        bool photorealized = false;
+        foreach (ManagedEnhancementVersion version in versions)
+        {
+            if (version.Operation == "photoreal")
+                photorealized = true;
+            else
+                upscaled = true;
+            if (upscaled && photorealized)
+                break;
+        }
+        return new EnhancementAvailability(upscaled, photorealized);
+    }
+
+    private static void ApplyTileEnhancementAvailability(
+        Tile tile,
+        IEnumerable<ManagedEnhancementVersion> versions)
+    {
+        EnhancementAvailability availability = GetEnhancementAvailability(versions);
+        tile.Upscaled = availability.Upscaled;
+        tile.Photorealized = availability.Photorealized;
+        tile.Enhanced = availability.Any;
     }
 
     private static bool TryWriteAtomicText(string path, string text)
@@ -6723,6 +6775,50 @@ public partial class MainWindow : Window
             QueuePrimaryGalleryFocus(target, targetIndex, grid);
         }
         e.Handled = true;
+    }
+
+    private void Gallery_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is not ListBox list)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        DependencyObject? hit = list.InputHitTest(Mouse.GetPosition(list)) as DependencyObject;
+        ListBoxItem? item = hit is null
+            ? null
+            : ItemsControl.ContainerFromElement(list, hit) as ListBoxItem;
+        item ??= list.SelectedItem is null
+            ? null
+            : list.ItemContainerGenerator.ContainerFromItem(list.SelectedItem) as ListBoxItem;
+        if (item?.DataContext is not Tile { IsRealFile: true })
+        {
+            e.Handled = true;
+            return;
+        }
+
+        list.SelectedItems.Clear();
+        item.IsSelected = true;
+        item.Focus();
+    }
+
+    private async void GalleryContextUpscale_Click(object sender, RoutedEventArgs e)
+        => await StartGalleryContextEnhancementAsync("upscale");
+
+    private async void GalleryContextPhotoreal_Click(object sender, RoutedEventArgs e)
+        => await StartGalleryContextEnhancementAsync("photoreal");
+
+    private async Task StartGalleryContextEnhancementAsync(string operation)
+    {
+        if (SelectedTile() is not Tile { IsRealFile: true })
+            return;
+
+        OpenModal();
+        if (Modal.Visibility != Visibility.Visible)
+            return;
+
+        await StartModalEnhancementOperationAsync(operation);
     }
 
     private int ResolveGalleryNavigationTarget(ListBox listBox, Key key, int currentIndex)
@@ -10339,6 +10435,8 @@ public partial class MainWindow : Window
                     tile.Prompt,
                     tile.Fav,
                     tile.Enhanced,
+                    tile.Upscaled,
+                    tile.Photorealized,
                     tile.Unseen,
                     tile.ModifiedUtc,
                     tile.CreatedUtc);
@@ -10361,6 +10459,7 @@ public partial class MainWindow : Window
             bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
             bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
             bool enhancedOnly = EnhancedOnlyFilter?.IsChecked == true;
+            bool photorealOnly = PhotorealOnlyFilter?.IsChecked == true;
             bool unseenOnly = UnseenOnlyFilter?.IsChecked == true;
             FrozenSet<int> favoriteLevels = _favoriteFilterLevels.ToFrozenSet();
             FrozenSet<string> hiddenFolderBuckets =
@@ -10370,6 +10469,7 @@ public partial class MainWindow : Window
                 && !favoritesOnly
                 && !unfavoriteOnly
                 && !enhancedOnly
+                && !photorealOnly
                 && !unseenOnly
                 && hiddenFolderBuckets.Count == 0
                 && !_dateFromLocal.HasValue
@@ -10415,6 +10515,7 @@ public partial class MainWindow : Window
                 favoritesOnly,
                 unfavoriteOnly,
                 enhancedOnly,
+                photorealOnly,
                 unseenOnly,
                 favoriteLevels,
                 hiddenFolderBuckets,
@@ -10471,6 +10572,7 @@ public partial class MainWindow : Window
             && !snapshot.FavoritesOnly
             && !snapshot.UnfavoriteOnly
             && !snapshot.EnhancedOnly
+            && !snapshot.PhotorealOnly
             && !snapshot.UnseenOnly
             && snapshot.HiddenFolderBuckets.Count == 0
             && !snapshot.DateFromLocal.HasValue
@@ -10797,7 +10899,9 @@ public partial class MainWindow : Window
             return false;
         if (snapshot.UnfavoriteOnly && tile.FavoriteLevel > 0)
             return false;
-        if (snapshot.EnhancedOnly && !tile.Enhanced)
+        if (snapshot.EnhancedOnly && !tile.Upscaled)
+            return false;
+        if (snapshot.PhotorealOnly && !tile.Photorealized)
             return false;
         if (snapshot.UnseenOnly && !tile.Unseen)
             return false;
@@ -11979,7 +12083,9 @@ public partial class MainWindow : Window
     private sealed record CatalogSharedStateSnapshot(
         IReadOnlyDictionary<string, int> Favorites,
         IReadOnlySet<string> SeenPaths,
-        IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs);
+        IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs,
+        IReadOnlySet<string> UpscaledPaths,
+        IReadOnlySet<string> PhotorealizedPaths);
 
     private readonly record struct CatalogTilePreparationResult(
         List<Tile> Tiles,
@@ -13883,7 +13989,6 @@ public partial class MainWindow : Window
         if (job is { Status: "succeeded", OutputPath: not null, SourceSize: not null, SourceMtimeMs: not null }
             && TryCreateManagedEnhancedOutput(tile, job.OutputPath, job.SourceSize.Value, job.SourceMtimeMs.Value, out ManagedEnhancedOutput managedOutput))
         {
-            tile.Enhanced = true;
             tile.EnhancedOutputPath = managedOutput.OutputPath;
             UpsertModalEnhancementVersion(tile, job, managedOutput);
             UpdateModalEnhancedControls(canShowEnhanced: true);
@@ -20081,8 +20186,14 @@ public partial class MainWindow : Window
                 sourceIdentity,
                 0,
                 0);
+            var versions = new List<ManagedEnhancementVersion>
+            {
+                new("smoke-upscale", "upscale", output),
+            };
             _enhancedOutputs[sourceIdentity] = output;
             _catalogEnhancedOutputsByPath[sourceIdentity] = output;
+            _enhancementVersions[sourceIdentity] = versions;
+            _catalogEnhancementVersionsByPath[sourceIdentity] = versions;
             return true;
         }
         catch
@@ -20103,6 +20214,10 @@ public partial class MainWindow : Window
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Unseen == true;
     public bool EnhancedForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Enhanced == true;
+    public bool UpscaledForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Upscaled == true;
+    public bool PhotorealizedForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase))?.Photorealized == true;
     public int EnhancedTileCountForSmoke => _allTiles.Count(static tile => tile.Enhanced);
     public int EnhancementJobsReadForSmoke => _enhancementJobsRead;
     public int EnhancedCandidateCountForSmoke => _enhancedCandidateCount;
@@ -20163,6 +20278,8 @@ public partial class MainWindow : Window
     public int PreviewTabHoverDecodeStartCountForSmoke => _previewTabHoverDecodeStartCount;
     public int PreviewTabHoverDecodeFailureCountForSmoke => _previewTabHoverDecodeFailureCount;
     public bool SelectedEnhancedForSmoke => SelectedTile()?.Enhanced == true;
+    public bool SelectedUpscaledForSmoke => SelectedTile()?.Upscaled == true;
+    public bool SelectedPhotorealizedForSmoke => SelectedTile()?.Photorealized == true;
     public string? SelectedEnhancedOutputPathForSmoke => SelectedTile()?.EnhancedOutputPath;
     public bool SelectedUnseenDotForSmoke => SelectedTile()?.ShowUnseenDot == true;
     public int UnseenCountForSmoke => _allTiles.Count(static tile => tile.Unseen);
@@ -21929,6 +22046,15 @@ public partial class MainWindow : Window
             && ModalContextMenu.Items.OfType<MenuItem>().All(item =>
                 !string.IsNullOrWhiteSpace(item.Header?.ToString())
                 && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(item)));
+    public bool GalleryContextMenuContractForSmoke
+        => new[] { CardsContextMenu, RowsContextMenu }.All(menu =>
+            menu.Items.OfType<MenuItem>().Count() == 2
+            && menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(item.Header?.ToString(), "AI高画質化", StringComparison.Ordinal)
+                && string.Equals(AutomationProperties.GetName(item), "AI高画質化", StringComparison.Ordinal))
+            && menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(item.Header?.ToString(), "AI実写化", StringComparison.Ordinal)
+                && string.Equals(AutomationProperties.GetName(item), "AI実写化", StringComparison.Ordinal)));
     public bool ModalEdgeChromeContractForSmoke
         => ModalPreviousZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalCenterZoneColumn.Width.GridUnitType == GridUnitType.Star
@@ -22480,6 +22606,12 @@ public partial class MainWindow : Window
     public void SetEnhancedOnlyFilterForSmoke(bool enabled)
     {
         EnhancedOnlyFilter.IsChecked = enabled;
+        ApplyFilters();
+    }
+
+    public void SetPhotorealOnlyFilterForSmoke(bool enabled)
+    {
+        PhotorealOnlyFilter.IsChecked = enabled;
         ApplyFilters();
     }
 
@@ -23857,12 +23989,18 @@ public sealed class Tile : INotifyPropertyChanged
     public string SizeText { get; set; } = "";
     public string ModifiedText { get; set; } = "";
     public string AutomationHelpText
-        => $"{SizeText}. Favorite level {_fav}. {(_enhanced ? "AI-enhanced" : "Original")}. {(_unseen ? "Unseen" : "Seen")}.";
+        => $"{SizeText}. Favorite level {_fav}. "
+            + $"{(_upscaled ? "AI-upscaled. " : "")}"
+            + $"{(_photorealized ? "AI-photorealized. " : "")}"
+            + $"{(!_enhanced ? "Original. " : "")}"
+            + $"{(_unseen ? "Unseen" : "Seen")}.";
 
     private string _prompt = "";
     private int _imagePixelWidth;
     private int _imagePixelHeight;
     private bool _enhanced;
+    private bool _upscaled;
+    private bool _photorealized;
     private bool _showCardDetails = true;
     private bool _showCardStatusBadge = true;
     private bool _isCanonicalSelected;
@@ -23891,6 +24029,32 @@ public sealed class Tile : INotifyPropertyChanged
         }
     }
 
+    public bool Upscaled
+    {
+        get => _upscaled;
+        set
+        {
+            if (_upscaled == value) return;
+            _upscaled = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Upscaled)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public bool Photorealized
+    {
+        get => _photorealized;
+        set
+        {
+            if (_photorealized == value) return;
+            _photorealized = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Photorealized)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
     public bool ShowCardDetails
     {
         get => _showCardDetails;
@@ -23912,6 +24076,8 @@ public sealed class Tile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowCardStatusBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowEnhancedBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUnseenDotOnCard)));
         }
     }
@@ -23919,6 +24085,8 @@ public sealed class Tile : INotifyPropertyChanged
     public bool ShowFavoriteBadge => _showCardStatusBadge && _fav > 0;
     public string FavoriteGlyph => _fav > 0 ? "\uEB52" : "\uEB51";
     public bool ShowEnhancedBadge => _showCardStatusBadge && _enhanced;
+    public bool ShowUpscaleBadge => _showCardStatusBadge && _upscaled;
+    public bool ShowPhotorealBadge => _showCardStatusBadge && _photorealized;
     public bool ShowUnseenDotOnCard => _showCardStatusBadge && _showUnseenDot;
     public double CardFavoriteButtonSize => Math.Clamp(_cardWidth - 4, 18, 34);
     public bool UseCompactCardTemplate => _cardWidth < 80;

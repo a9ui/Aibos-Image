@@ -255,7 +255,8 @@
                   <CheckBox x:Name="FavoriteLevel5Filter" Content="Lv 5" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
                 </WrapPanel>
                 <TextBlock x:Name="FavoriteFilterSummary" Text="{DynamicResource UiAllRatings}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6"/>
-                <CheckBox x:Name="EnhancedOnlyFilter" Content="Enhanced only" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="Read-only filter from .cache/enhance/jobs.json"/>
+                <CheckBox x:Name="EnhancedOnlyFilter" Content="AI高画質化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI高画質化の完了画像だけを表示"/>
+                <CheckBox x:Name="PhotorealOnlyFilter" Content="AI実写化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI実写化の完了画像だけを表示"/>
                 <CheckBox x:Name="UnseenOnlyFilter" Content="Unseen only" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
                 <CheckBox x:Name="ShowUnseenDots" Content="Unseen dots" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="Changes dot visibility only. Seen history is not changed."/>
                 <TextBlock Text="DATE" Foreground="{StaticResource TextTertiary}" FontSize="9.5" FontWeight="Bold" Margin="0,0,0,4"/>
@@ -456,10 +457,17 @@
                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                  ItemsPanel="{StaticResource VirtualizedCardItemsPanel}"
                  ItemContainerStyle="{StaticResource CardItem}" SelectionMode="Extended" SelectionChanged="CardsList_SelectionChanged"
+                 ContextMenuOpening="Gallery_ContextMenuOpening"
                  PreviewKeyDown="GalleryList_PreviewKeyDown"
                  PreviewMouseDown="GalleryAutoScroll_PreviewMouseDown" PreviewMouseUp="GalleryAutoScroll_PreviewMouseUp" LostMouseCapture="GalleryAutoScroll_LostMouseCapture"
                  PreviewMouseLeftButtonDown="FileDragSurface_PreviewMouseLeftButtonDown" PreviewMouseMove="FileDragSurface_PreviewMouseMove" PreviewMouseLeftButtonUp="FileDragSurface_PreviewMouseLeftButtonUp"
                  ToolTip="Drag images to Explorer to copy file paths" AutomationProperties.Name="Image grid" AutomationProperties.HelpText="Select images, then drag beyond the system threshold to copy the real files to Explorer.">
+          <ListBox.ContextMenu>
+            <ContextMenu x:Name="CardsContextMenu" AutomationProperties.Name="Image grid actions">
+              <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
+              <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
+            </ContextMenu>
+          </ListBox.ContextMenu>
           <ListBox.GroupStyle>
             <GroupStyle>
               <GroupStyle.HeaderTemplate>
@@ -485,12 +493,19 @@
         <!-- List mode -->
         <local:VirtualizedGalleryListBox x:Name="RowsList" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="8,8,4,24"
                  ItemContainerStyle="{StaticResource ListRowItem}" SelectionMode="Extended" SelectionChanged="CardsList_SelectionChanged"
+                 ContextMenuOpening="Gallery_ContextMenuOpening"
                  PreviewKeyDown="GalleryList_PreviewKeyDown"
                  PreviewMouseDown="GalleryAutoScroll_PreviewMouseDown" PreviewMouseUp="GalleryAutoScroll_PreviewMouseUp" LostMouseCapture="GalleryAutoScroll_LostMouseCapture"
                  PreviewMouseLeftButtonDown="FileDragSurface_PreviewMouseLeftButtonDown" PreviewMouseMove="FileDragSurface_PreviewMouseMove" PreviewMouseLeftButtonUp="FileDragSurface_PreviewMouseLeftButtonUp"
                  ToolTip="Drag images to Explorer to copy file paths" AutomationProperties.Name="Image list" AutomationProperties.HelpText="Select images, then drag beyond the system threshold to copy the real files to Explorer."
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.IsVirtualizingWhenGrouping="True" VirtualizingPanel.VirtualizationMode="Recycling">
+          <ListBox.ContextMenu>
+            <ContextMenu x:Name="RowsContextMenu" AutomationProperties.Name="Image list actions">
+              <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
+              <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
+            </ContextMenu>
+          </ListBox.ContextMenu>
           <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
           <ListBox.GroupStyle>
             <GroupStyle>

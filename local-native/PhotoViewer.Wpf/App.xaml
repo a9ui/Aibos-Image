@@ -763,6 +763,19 @@
                   IsHitTestVisible="False" Visibility="{Binding Enhanced, Converter={StaticResource BoolToVis}}"/>
           <Border CornerRadius="2" Margin="2" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                   IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3"
+                      IsHitTestVisible="False">
+            <Border Padding="2,0" CornerRadius="3" Margin="0,0,2,0"
+                    Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
+                    Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}">
+              <TextBlock Text="H" Foreground="#FFBAE6FD" FontSize="7.5" FontWeight="Bold"/>
+            </Border>
+            <Border Padding="2,0" CornerRadius="3"
+                    Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFC084FC" BorderThickness="1"
+                    Visibility="{Binding ShowPhotorealBadge, Converter={StaticResource BoolToVis}}">
+              <TextBlock Text="R" Foreground="#FFE9D5FF" FontSize="7.5" FontWeight="Bold"/>
+            </Border>
+          </StackPanel>
           <Grid x:Name="compactFavoriteControls" VerticalAlignment="Bottom"
                 Height="{Binding CompactFavoriteControlHeight}" Opacity="0" IsHitTestVisible="False">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -850,11 +863,19 @@
                             IsHitTestVisible="False" Visibility="{Binding Enhanced, Converter={StaticResource BoolToVis}}"/>
                     <Border CornerRadius="2" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
-                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="5" Padding="4,1" CornerRadius="4"
-                            Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
-                            IsHitTestVisible="False" Visibility="{Binding ShowEnhancedBadge, Converter={StaticResource BoolToVis}}">
-                      <TextBlock Text="AI" Foreground="#FFBAE6FD" FontSize="9" FontWeight="SemiBold"/>
-                    </Border>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="5"
+                                IsHitTestVisible="False">
+                      <Border Padding="4,1" CornerRadius="4" Margin="0,0,3,0"
+                              Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
+                              Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="HQ" Foreground="#FFBAE6FD" FontSize="9" FontWeight="Bold"/>
+                      </Border>
+                      <Border Padding="4,1" CornerRadius="4"
+                              Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFC084FC" BorderThickness="1"
+                              Visibility="{Binding ShowPhotorealBadge, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="REAL" Foreground="#FFE9D5FF" FontSize="9" FontWeight="Bold"/>
+                      </Border>
+                    </StackPanel>
                   </Grid>
                 </Border>
               </Grid>
@@ -908,6 +929,19 @@
                     <Border CornerRadius="4" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
                     <Ellipse Width="8" Height="8" Margin="7" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource AccentLight}" Visibility="{Binding ShowUnseenDot, Converter={StaticResource BoolToVis}}"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4"
+                                IsHitTestVisible="False">
+                      <Border Padding="3,0" CornerRadius="3" Margin="0,0,2,0"
+                              Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
+                              Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="HQ" Foreground="#FFBAE6FD" FontSize="8" FontWeight="Bold"/>
+                      </Border>
+                      <Border Padding="3,0" CornerRadius="3"
+                              Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFC084FC" BorderThickness="1"
+                              Visibility="{Binding ShowPhotorealBadge, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="REAL" Foreground="#FFE9D5FF" FontSize="8" FontWeight="Bold"/>
+                      </Border>
+                    </StackPanel>
                   </Grid>
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">

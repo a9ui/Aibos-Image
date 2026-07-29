@@ -324,6 +324,18 @@ or stores.
 - Both operations use the same companion `/api/enhance/jobs` endpoint, durable
   FIFO queue, and single worker. They must not create separate GPU queues or
   run GPU work in parallel. Retry and Cancel retain the job operation.
+- The gallery exposes independent `AI高画質化済みのみ` and `AI実写化済みのみ`
+  filters. Enabling both uses intersection semantics. Cyan `HQ` and violet
+  `REAL` thumbnail markers may appear together when both completed operation
+  types exist for one source.
+- Grid and list right-click menus expose explicit `AI高画質化` and `AI実写化`
+  actions for the clicked real source image. Opening a context menu remains
+  passive; only choosing either action may start the companion and enqueue
+  work.
+- New managed outputs are flat within the companion-owned
+  `enhance/outputs/高画質化/` and `enhance/outputs/実写化/` operation folders.
+  Existing recorded nested output paths remain valid and are not migrated
+  automatically.
 - The H25 Browser companion owns the current local Enhancement API and worker.
   WPF owns its loopback client and must keep the API optional.
 - Modal and batch Start/Retry first reuse an already-ready loopback companion.

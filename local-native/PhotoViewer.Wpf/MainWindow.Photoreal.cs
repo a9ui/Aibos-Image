@@ -206,7 +206,7 @@ public partial class MainWindow
         {
             _modalEnhancementVersionIndex = 0;
             _modalShowingEnhanced = false;
-            tile.Enhanced = false;
+            ApplyTileEnhancementAvailability(tile, _modalEnhancementVersions);
             tile.EnhancedOutputPath = null;
             _enhancedOutputs.Remove(sourceIdentity);
             _enhancementVersions.Remove(sourceIdentity);
@@ -231,7 +231,7 @@ public partial class MainWindow
                 : keepEnhancedSelected ? 1 : 0;
             _modalShowingEnhanced = _modalEnhancementVersionIndex > 0;
             ManagedEnhancedOutput latest = _modalEnhancementVersions[0].Output;
-            tile.Enhanced = true;
+            ApplyTileEnhancementAvailability(tile, _modalEnhancementVersions);
             tile.EnhancedOutputPath = latest.OutputPath;
             _enhancedOutputs[sourceIdentity] = latest;
             _enhancementVersions[sourceIdentity] = [.. _modalEnhancementVersions];
@@ -270,6 +270,7 @@ public partial class MainWindow
             new ManagedEnhancementVersion(job.Id, job.Operation, output));
         _modalEnhancementVersionIndex = 1;
         _modalShowingEnhanced = true;
+        ApplyTileEnhancementAvailability(tile, _modalEnhancementVersions);
 
         if (TryResolveEnhancementSourceIdentity(tile.Path, out string sourceIdentity))
         {
@@ -296,7 +297,7 @@ public partial class MainWindow
 
         if (_modalEnhancementVersions.Count == 0)
         {
-            tile.Enhanced = false;
+            ApplyTileEnhancementAvailability(tile, _modalEnhancementVersions);
             tile.EnhancedOutputPath = null;
             _enhancedOutputs.Remove(sourceIdentity);
             _enhancementVersions.Remove(sourceIdentity);
@@ -310,7 +311,7 @@ public partial class MainWindow
         }
 
         ManagedEnhancedOutput latest = _modalEnhancementVersions[0].Output;
-        tile.Enhanced = true;
+        ApplyTileEnhancementAvailability(tile, _modalEnhancementVersions);
         tile.EnhancedOutputPath = latest.OutputPath;
         _enhancedOutputs[sourceIdentity] = latest;
         _enhancementVersions[sourceIdentity] = [.. _modalEnhancementVersions];
@@ -554,7 +555,8 @@ public partial class MainWindow
             && string.Equals(ModalEnhanceButtonLabel.Text, "AI高画質化", StringComparison.Ordinal)
             && string.Equals(ModalPhotorealButtonLabel.Text, "AI実写化", StringComparison.Ordinal)
             && AutomationProperties.GetName(ModalPhotorealButton) == "AI実写化"
-            && ModalPhotorealSettingsPopup is not null;
+            && ModalPhotorealSettingsPopup is not null
+            && GalleryContextMenuContractForSmoke;
 
     public void ConfigureModalPhotorealSettingsForSmoke(
         double strength,

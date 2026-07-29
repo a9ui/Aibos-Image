@@ -16884,14 +16884,24 @@ public partial class App : Application
         string outputRoot = Path.Combine(Path.GetDirectoryName(jobsPath)!, "outputs");
         Directory.CreateDirectory(outputRoot);
 
-        string validSource = Path.Combine(fullFolder, fixtureNames[0]);
-        string staleSource = Path.Combine(fullFolder, fixtureNames[1]);
-        string failedSource = Path.Combine(fullFolder, fixtureNames[2]);
-        string validOutput = Path.Combine(outputRoot, "enhanced-" + Path.GetFileName(validSource));
+        string upscaleSource = Path.Combine(fullFolder, fixtureNames[0]);
+        string photorealSource = Path.Combine(fullFolder, fixtureNames[1]);
+        string invalidSource = Path.Combine(fullFolder, fixtureNames[2]);
+        string upscaleOutput = Path.Combine(outputRoot, "upscale-" + Path.GetFileName(upscaleSource));
+        string photorealOutput = Path.Combine(outputRoot, "photoreal-" + Path.GetFileName(photorealSource));
         string missingOutput = Path.Combine(outputRoot, "missing-output.png");
         string missingSource = Path.Combine(smokeRoot, "missing-source.png");
-        File.Copy(validSource, validOutput, overwrite: true);
-        WriteEnhancedJobsFixture(jobsPath, validSource, validOutput, staleSource, missingOutput, failedSource, missingSource);
+        File.Copy(upscaleSource, upscaleOutput, overwrite: true);
+        File.Copy(photorealSource, photorealOutput, overwrite: true);
+        WriteEnhancementOperationJobsFixture(
+            jobsPath,
+            upscaleSource,
+            upscaleOutput,
+            photorealSource,
+            photorealOutput,
+            invalidSource,
+            missingOutput,
+            missingSource);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", jobsPath);
         string beforeJobsJson = File.ReadAllText(jobsPath);
 
@@ -16908,28 +16918,41 @@ public partial class App : Application
                 await win.LoadFolderAsync(fullFolder);
                 string resolvedJobsPath = win.EnhancementJobsPathForSmoke;
                 int allCount = win.FilteredCountForSmoke;
-                bool selectedValid = win.SelectFileNameForSmoke(Path.GetFileName(validSource));
-                bool selectedValidEnhanced = win.SelectedEnhancedForSmoke;
-                string? selectedOutput = win.SelectedEnhancedOutputPathForSmoke;
-                bool outputMatches = string.Equals(selectedOutput, validOutput, StringComparison.OrdinalIgnoreCase);
+                bool selectedUpscale = win.SelectFileNameForSmoke(Path.GetFileName(upscaleSource));
+                bool selectedUpscaleEnhanced = win.SelectedEnhancedForSmoke;
+                bool selectedUpscaleBadge = win.SelectedUpscaledForSmoke && !win.SelectedPhotorealizedForSmoke;
+                string? selectedUpscaleOutput = win.SelectedEnhancedOutputPathForSmoke;
+                bool upscaleOutputMatches = string.Equals(selectedUpscaleOutput, upscaleOutput, StringComparison.OrdinalIgnoreCase);
+
+                bool selectedPhotoreal = win.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                bool selectedPhotorealEnhanced = win.SelectedEnhancedForSmoke;
+                bool selectedPhotorealBadge = win.SelectedPhotorealizedForSmoke && !win.SelectedUpscaledForSmoke;
+                string? selectedPhotorealOutput = win.SelectedEnhancedOutputPathForSmoke;
+                bool photorealOutputMatches = string.Equals(selectedPhotorealOutput, photorealOutput, StringComparison.OrdinalIgnoreCase);
 
                 win.SetEnhancedOnlyFilterForSmoke(true);
-                int enhancedFilteredCount = win.FilteredCountForSmoke;
-                bool validVisible = win.SelectFileNameForSmoke(Path.GetFileName(validSource));
-                bool staleVisible = win.SelectFileNameForSmoke(Path.GetFileName(staleSource));
-                bool failedVisible = win.SelectFileNameForSmoke(Path.GetFileName(failedSource));
-                bool selectedStillEnhanced = win.SelectedEnhancedForSmoke;
+                int upscaleFilteredCount = win.FilteredCountForSmoke;
+                bool upscaleVisible = win.SelectFileNameForSmoke(Path.GetFileName(upscaleSource));
+                bool photorealVisibleInUpscaleFilter = win.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                bool invalidVisible = win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
 
+                win.SetPhotorealOnlyFilterForSmoke(true);
+                int intersectionFilteredCount = win.FilteredCountForSmoke;
                 win.SetEnhancedOnlyFilterForSmoke(false);
+                int photorealFilteredCount = win.FilteredCountForSmoke;
+                bool photorealVisible = win.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                bool upscaleVisibleInPhotorealFilter = win.SelectFileNameForSmoke(Path.GetFileName(upscaleSource));
+
+                win.SetPhotorealOnlyFilterForSmoke(false);
                 int afterClearCount = win.FilteredCountForSmoke;
                 win.Close();
 
                 var second = HiddenWindow();
                 second.Show();
                 await second.LoadFolderAsync(fullFolder);
-                second.SetEnhancedOnlyFilterForSmoke(true);
+                second.SetPhotorealOnlyFilterForSmoke(true);
                 int reloadFilteredCount = second.FilteredCountForSmoke;
-                bool reloadValidVisible = second.SelectFileNameForSmoke(Path.GetFileName(validSource));
+                bool reloadPhotorealVisible = second.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
                 second.Close();
 
                 string afterJobsJson = File.ReadAllText(jobsPath);
@@ -16937,52 +16960,70 @@ public partial class App : Application
 
                 bool ok = string.Equals(Path.GetFullPath(resolvedJobsPath), Path.GetFullPath(jobsPath), StringComparison.OrdinalIgnoreCase)
                     && win.EnhancementReadOkForSmoke
-                    && win.EnhancementJobsReadForSmoke >= 5
-                    && win.EnhancedCandidateCountForSmoke == 1
-                    && win.EnhancedStoreCountForSmoke == 1
+                    && win.EnhancementJobsReadForSmoke >= 6
+                    && win.EnhancedCandidateCountForSmoke == 2
+                    && win.EnhancedStoreCountForSmoke == 2
                     && allCount >= 3
-                    && selectedValid
-                    && selectedValidEnhanced
-                    && outputMatches
-                    && enhancedFilteredCount == 1
-                    && validVisible
-                    && !staleVisible
-                    && !failedVisible
-                    && selectedStillEnhanced
+                    && selectedUpscale
+                    && selectedUpscaleEnhanced
+                    && selectedUpscaleBadge
+                    && upscaleOutputMatches
+                    && selectedPhotoreal
+                    && selectedPhotorealEnhanced
+                    && selectedPhotorealBadge
+                    && photorealOutputMatches
+                    && upscaleFilteredCount == 1
+                    && upscaleVisible
+                    && !photorealVisibleInUpscaleFilter
+                    && !invalidVisible
+                    && intersectionFilteredCount == 0
+                    && photorealFilteredCount == 1
+                    && photorealVisible
+                    && !upscaleVisibleInPhotorealFilter
                     && afterClearCount == allCount
                     && reloadFilteredCount == 1
-                    && reloadValidVisible
+                    && reloadPhotorealVisible
                     && enhancementStateUnchanged;
 
                 result = new EnhancedFilterSmokeResult
                 {
                     Ok = ok,
                     Message = ok
-                        ? "read-only enhanced metadata import, enhanced-only filtering, stale fallback, reload, and state unchanged checks passed"
-                        : "enhanced filter smoke did not meet read/filter/reload/state expectations",
+                        ? "read-only enhancement import, independent upscale/photoreal filters, distinct badges, intersection, reload, and unchanged-state checks passed"
+                        : "enhancement operation filter smoke did not meet read/filter/badge/reload/state expectations",
                     Folder = fullFolder,
                     ProjectRoot = smokeRoot,
                     JobsPath = jobsPath,
                     ResolvedJobsPath = resolvedJobsPath,
-                    ValidSourceName = Path.GetFileName(validSource),
-                    StaleSourceName = Path.GetFileName(staleSource),
-                    FailedSourceName = Path.GetFileName(failedSource),
-                    ValidOutputPath = validOutput,
+                    UpscaleSourceName = Path.GetFileName(upscaleSource),
+                    PhotorealSourceName = Path.GetFileName(photorealSource),
+                    InvalidSourceName = Path.GetFileName(invalidSource),
+                    UpscaleOutputPath = upscaleOutput,
+                    PhotorealOutputPath = photorealOutput,
                     MissingOutputPath = missingOutput,
                     AllCount = allCount,
                     JobsRead = win.EnhancementJobsReadForSmoke,
                     CandidateCount = win.EnhancedCandidateCountForSmoke,
                     EnhancedStoreCount = win.EnhancedStoreCountForSmoke,
-                    SelectedValid = selectedValid,
-                    SelectedValidEnhanced = selectedValidEnhanced,
-                    SelectedOutputPath = selectedOutput,
-                    EnhancedFilteredCount = enhancedFilteredCount,
-                    ValidVisible = validVisible,
-                    StaleVisible = staleVisible,
-                    FailedVisible = failedVisible,
+                    SelectedUpscale = selectedUpscale,
+                    SelectedUpscaleEnhanced = selectedUpscaleEnhanced,
+                    SelectedUpscaleBadge = selectedUpscaleBadge,
+                    SelectedUpscaleOutputPath = selectedUpscaleOutput,
+                    SelectedPhotoreal = selectedPhotoreal,
+                    SelectedPhotorealEnhanced = selectedPhotorealEnhanced,
+                    SelectedPhotorealBadge = selectedPhotorealBadge,
+                    SelectedPhotorealOutputPath = selectedPhotorealOutput,
+                    UpscaleFilteredCount = upscaleFilteredCount,
+                    UpscaleVisible = upscaleVisible,
+                    PhotorealVisibleInUpscaleFilter = photorealVisibleInUpscaleFilter,
+                    InvalidVisible = invalidVisible,
+                    IntersectionFilteredCount = intersectionFilteredCount,
+                    PhotorealFilteredCount = photorealFilteredCount,
+                    PhotorealVisible = photorealVisible,
+                    UpscaleVisibleInPhotorealFilter = upscaleVisibleInPhotorealFilter,
                     AfterClearCount = afterClearCount,
                     ReloadFilteredCount = reloadFilteredCount,
-                    ReloadValidVisible = reloadValidVisible,
+                    ReloadPhotorealVisible = reloadPhotorealVisible,
                     EnhancementStateUnchanged = enhancementStateUnchanged,
                     ReadOk = win.EnhancementReadOkForSmoke,
                     ReadError = win.EnhancementReadErrorForSmoke,
@@ -18949,7 +18990,8 @@ public partial class App : Application
 
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
-                    && win.ModalContextMenuContractForSmoke;
+                    && win.ModalContextMenuContractForSmoke
+                    && win.GalleryContextMenuContractForSmoke;
                 bool lightweightGlass = win.ModalLightweightGlassContractForSmoke;
                 bool actualPixelsControl = win.ModalActualPixelsControlContractForSmoke;
                 bool favoriteLevelReadoutInitial = win.ModalFavoriteLevelReadoutContractForSmoke;
@@ -23785,6 +23827,90 @@ public partial class App : Application
         File.WriteAllText(jobsPath, json);
     }
 
+    private static void WriteEnhancementOperationJobsFixture(
+        string jobsPath,
+        string upscaleSourcePath,
+        string upscaleOutputPath,
+        string photorealSourcePath,
+        string photorealOutputPath,
+        string invalidSourcePath,
+        string missingOutputPath,
+        string missingSourcePath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(jobsPath))!);
+        static Dictionary<string, object> SourceSignature(string sourcePath)
+        {
+            if (!File.Exists(sourcePath))
+                return new Dictionary<string, object> { ["size"] = 0L, ["mtimeMs"] = 0d };
+
+            var info = new FileInfo(sourcePath);
+            return new Dictionary<string, object>
+            {
+                ["size"] = info.Length,
+                ["mtimeMs"] = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
+            };
+        }
+
+        Dictionary<string, object?> Succeeded(
+            string id,
+            string sourcePath,
+            string outputPath,
+            string? operation = null)
+        {
+            var job = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = id,
+                ["sourceId"] = sourcePath,
+                ["sourcePath"] = sourcePath,
+                ["sourceSignature"] = SourceSignature(sourcePath),
+                ["status"] = "succeeded",
+                ["progress"] = 100,
+                ["outputPath"] = outputPath,
+                ["createdAt"] = DateTime.UtcNow.ToString("o"),
+                ["updatedAt"] = DateTime.UtcNow.ToString("o"),
+            };
+            if (!string.IsNullOrWhiteSpace(operation))
+                job["operation"] = operation;
+            return job;
+        }
+
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["version"] = 1,
+            ["jobs"] = new object?[]
+            {
+                // Missing operation is the legacy upscale compatibility case.
+                Succeeded("legacy-upscale-ok", upscaleSourcePath, upscaleOutputPath),
+                Succeeded("photoreal-ok", photorealSourcePath, photorealOutputPath, "photoreal"),
+                Succeeded("stale-output", invalidSourcePath, missingOutputPath, "upscale"),
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "failed-job",
+                    ["sourceId"] = invalidSourcePath,
+                    ["sourcePath"] = invalidSourcePath,
+                    ["status"] = "failed",
+                    ["progress"] = 100,
+                    ["outputPath"] = upscaleOutputPath,
+                    ["operation"] = "photoreal",
+                },
+                Succeeded("missing-source", missingSourcePath, upscaleOutputPath, "photoreal"),
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "missing-output-field",
+                    ["sourceId"] = invalidSourcePath,
+                    ["sourcePath"] = invalidSourcePath,
+                    ["sourceSignature"] = SourceSignature(invalidSourcePath),
+                    ["status"] = "succeeded",
+                    ["progress"] = 100,
+                    ["operation"] = "upscale",
+                },
+                "unsupported-entry",
+            },
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(jobsPath, json);
+    }
+
     private static void WriteViewerStateSeed(string statePath, string folder, string selectedPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(statePath))!);
@@ -27468,25 +27594,35 @@ public partial class App : Application
         public string? ProjectRoot { get; init; }
         public string? JobsPath { get; init; }
         public string? ResolvedJobsPath { get; init; }
-        public string? ValidSourceName { get; init; }
-        public string? StaleSourceName { get; init; }
-        public string? FailedSourceName { get; init; }
-        public string? ValidOutputPath { get; init; }
+        public string? UpscaleSourceName { get; init; }
+        public string? PhotorealSourceName { get; init; }
+        public string? InvalidSourceName { get; init; }
+        public string? UpscaleOutputPath { get; init; }
+        public string? PhotorealOutputPath { get; init; }
         public string? MissingOutputPath { get; init; }
         public int AllCount { get; init; }
         public int JobsRead { get; init; }
         public int CandidateCount { get; init; }
         public int EnhancedStoreCount { get; init; }
-        public bool SelectedValid { get; init; }
-        public bool SelectedValidEnhanced { get; init; }
-        public string? SelectedOutputPath { get; init; }
-        public int EnhancedFilteredCount { get; init; }
-        public bool ValidVisible { get; init; }
-        public bool StaleVisible { get; init; }
-        public bool FailedVisible { get; init; }
+        public bool SelectedUpscale { get; init; }
+        public bool SelectedUpscaleEnhanced { get; init; }
+        public bool SelectedUpscaleBadge { get; init; }
+        public string? SelectedUpscaleOutputPath { get; init; }
+        public bool SelectedPhotoreal { get; init; }
+        public bool SelectedPhotorealEnhanced { get; init; }
+        public bool SelectedPhotorealBadge { get; init; }
+        public string? SelectedPhotorealOutputPath { get; init; }
+        public int UpscaleFilteredCount { get; init; }
+        public bool UpscaleVisible { get; init; }
+        public bool PhotorealVisibleInUpscaleFilter { get; init; }
+        public bool InvalidVisible { get; init; }
+        public int IntersectionFilteredCount { get; init; }
+        public int PhotorealFilteredCount { get; init; }
+        public bool PhotorealVisible { get; init; }
+        public bool UpscaleVisibleInPhotorealFilter { get; init; }
         public int AfterClearCount { get; init; }
         public int ReloadFilteredCount { get; init; }
-        public bool ReloadValidVisible { get; init; }
+        public bool ReloadPhotorealVisible { get; init; }
         public bool EnhancementStateUnchanged { get; init; }
         public bool ReadOk { get; init; }
         public string? ReadError { get; init; }
