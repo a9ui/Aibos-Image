@@ -37,8 +37,12 @@ companion. That companion must remain bound to `127.0.0.1`; LAN, tunnel,
 reverse-proxy, hosted, and Internet exposure are outside the product boundary.
 If the companion is not already running, pressing an AI Start/Retry action may
 start it without opening the Browser UI. Aibos never starts it during browsing,
-preview, search, navigation, or passive job inspection, and stops only the
-exact companion process tree that the current Aibos process created.
+preview, search, navigation, or passive job inspection. Before the companion
+reports ready, Aibos may stop only that exact failed or canceled launch attempt.
+After readiness, the companion becomes an independent durable worker and keeps
+processing the shared FIFO queue when Aibos closes. Reopening Aibos reads the
+persisted queue, operation type, status, and latest saved progress from the
+companion.
 
 ## Cross-repository durable state
 

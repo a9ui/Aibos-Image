@@ -139,30 +139,16 @@ public partial class MainWindow
                 error = "Aibos could not find an installed Node.js executable for the local AI companion.";
                 return false;
             }
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = nodeExecutable,
-                WorkingDirectory = root,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            startInfo.ArgumentList.Add(Path.Combine(root, "scripts", "prod_launcher.js"));
-            startInfo.ArgumentList.Add("--port");
-            startInfo.ArgumentList.Add(endpoint.Port.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            startInfo.Environment["PVU_NO_OPEN"] = "1";
-            startInfo.Environment["PVU_COMFY_AUTOSTART"] = "0";
-            startInfo.Environment["PVU_OWNER_PID"] = Environment.ProcessId.ToString(
-                System.Globalization.CultureInfo.InvariantCulture);
+            ProcessStartInfo startInfo = CreateEnhancementCompanionStartInfo(
+                nodeExecutable,
+                root,
+                endpoint);
 
             var process = new Process
             {
                 StartInfo = startInfo,
-                EnableRaisingEvents = true,
+                EnableRaisingEvents = false,
             };
-            process.OutputDataReceived += OwnedEnhancementCompanion_OutputDataReceived;
-            process.ErrorDataReceived += OwnedEnhancementCompanion_OutputDataReceived;
             if (!process.Start())
             {
                 process.Dispose();
@@ -170,8 +156,6 @@ public partial class MainWindow
                 return false;
             }
 
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
             _ownedEnhancementCompanion = process;
             _enhancementCompanionLaunchAttemptCount++;
             return true;
@@ -183,17 +167,29 @@ public partial class MainWindow
         }
     }
 
-    private void OwnedEnhancementCompanion_OutputDataReceived(object sender, DataReceivedEventArgs e)
+    private static ProcessStartInfo CreateEnhancementCompanionStartInfo(
+        string nodeExecutable,
+        string root,
+        Uri endpoint)
     {
-        if (string.IsNullOrWhiteSpace(e.Data))
-            return;
-
-        string line = e.Data.Trim();
-        if (line.Contains("failed", StringComparison.OrdinalIgnoreCase)
-            || line.Contains("error", StringComparison.OrdinalIgnoreCase))
+        var startInfo = new ProcessStartInfo
         {
-            _enhancementCompanionLaunchError = line.Length <= 320 ? line : line[^320..];
-        }
+            FileName = nodeExecutable,
+            WorkingDirectory = root,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = false,
+            RedirectStandardError = false,
+        };
+        startInfo.ArgumentList.Add(Path.Combine(root, "scripts", "prod_launcher.js"));
+        startInfo.ArgumentList.Add("--port");
+        startInfo.ArgumentList.Add(endpoint.Port.ToString(
+            System.Globalization.CultureInfo.InvariantCulture));
+        startInfo.Environment["PVU_NO_OPEN"] = "1";
+        startInfo.Environment["PVU_COMFY_AUTOSTART"] = "0";
+        // Do not set PVU_OWNER_PID. The companion owns the durable FIFO worker
+        // after an explicit AI action and must outlive the WPF viewer process.
+        return startInfo;
     }
 
     private static string? ResolveEnhancementCompanionRoot()
@@ -341,8 +337,6 @@ public partial class MainWindow
 
         try
         {
-            process.OutputDataReceived -= OwnedEnhancementCompanion_OutputDataReceived;
-            process.ErrorDataReceived -= OwnedEnhancementCompanion_OutputDataReceived;
             if (!process.HasExited)
                 process.Kill(entireProcessTree: true);
         }
@@ -354,6 +348,14 @@ public partial class MainWindow
         {
             process.Dispose();
         }
+    }
+
+    private void ReleaseOwnedEnhancementCompanion()
+    {
+        // Disposing a Process wrapper does not stop the OS process. Once the
+        // loopback companion is ready, it is an independent durable worker so
+        // queued/running jobs continue while Aibos is closed.
+        Interlocked.Exchange(ref _ownedEnhancementCompanion, null)?.Dispose();
     }
 
     private void CancelOwnedEnhancementCompanionLifetime()
@@ -375,6 +377,25 @@ public partial class MainWindow
         string appBaseDirectory)
         => ResolveEnhancementCompanionRoot(configuredRoot, appBaseDirectory);
     public static string? ResolveNodeExecutablePathForSmoke() => ResolveNodeExecutablePath();
+    public static EnhancementCompanionLaunchContractSmokeSnapshot
+        EnhancementCompanionLaunchContractForSmoke(
+            string nodeExecutable,
+            string root,
+            int port)
+    {
+        ProcessStartInfo startInfo = CreateEnhancementCompanionStartInfo(
+            nodeExecutable,
+            root,
+            new Uri($"http://127.0.0.1:{port}/"));
+        return new EnhancementCompanionLaunchContractSmokeSnapshot(
+            startInfo.UseShellExecute,
+            startInfo.CreateNoWindow,
+            startInfo.RedirectStandardOutput,
+            startInfo.RedirectStandardError,
+            startInfo.Environment.ContainsKey("PVU_OWNER_PID"),
+            startInfo.Environment["PVU_NO_OPEN"],
+            startInfo.Environment["PVU_COMFY_AUTOSTART"]);
+    }
     public void ConfigureEnhancementCompanionAutoStartForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
         Func<Uri, (bool Started, string Error)> starter)
@@ -390,3 +411,12 @@ public partial class MainWindow
         return response.Ok;
     }
 }
+
+public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
+    bool UseShellExecute,
+    bool CreateNoWindow,
+    bool RedirectStandardOutput,
+    bool RedirectStandardError,
+    bool HasExternalOwnerPid,
+    string? NoOpen,
+    string? ComfyAutostart);

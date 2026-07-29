@@ -7,6 +7,8 @@ param(
     [string]$H25Commit,
 
     [string]$Configuration = 'Release',
+    [string]$DotnetPath = 'dotnet.exe',
+    [string]$TargetFrameworkOverride = '',
     [switch]$KeepArtifacts
 )
 
@@ -56,10 +58,29 @@ function Stop-OwnedProcess {
     }
 }
 
+function Stop-LoopbackCompanionByPort {
+    param([int]$Port)
+
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    foreach ($listener in $listeners) {
+        if ($listener.LocalAddress -eq '127.0.0.1' -and $listener.OwningProcess -gt 0) {
+            Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (@(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue).Count -eq 0) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    return $false
+}
+
 function Read-SmokeResult {
     param([string]$Path, [int]$ExpectedExitCode)
     Assert-True (Test-Path -LiteralPath $Path -PathType Leaf) "Smoke result is missing: $Path"
-    $result = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $result = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-True ($ExpectedExitCode -eq 0) "WPF smoke exited with $ExpectedExitCode."
     Assert-True ($result.ok -eq $true) "WPF smoke failed: $($result.message)"
     return $result
@@ -74,12 +95,13 @@ function Invoke-WpfPhase {
         [string]$SourceName,
         [string]$WorkingDirectory,
         [string]$LogRoot,
+        [string]$DotnetPath,
         [int]$TimeoutMilliseconds = 60000
     )
 
     $stdout = Join-Path $LogRoot ("wpf-$Phase.stdout.log")
     $stderr = Join-Path $LogRoot ("wpf-$Phase.stderr.log")
-    $process = Start-Process -FilePath 'dotnet.exe' `
+    $process = Start-Process -FilePath $DotnetPath `
         -ArgumentList @($WpfDll, '--h25-enhancement-companion-smoke', $ResultPath, '--fixture-root', $FixtureRoot, '--phase', $Phase, '--source-name', $SourceName) `
         -WorkingDirectory $WorkingDirectory `
         -RedirectStandardOutput $stdout `
@@ -171,9 +193,11 @@ $buildRoot = Join-Path $runRoot 'b'
 $archivePath = Join-Path $runRoot 'h.tar'
 $serverOut = Join-Path $runRoot 'h25.stdout.log'
 $serverErr = Join-Path $runRoot 'h25.stderr.log'
+$detachedResultPath = Join-Path $fixtureRoot 'detached-result.json'
 $fullResultPath = Join-Path $fixtureRoot 'full-result.json'
 $interruptedResultPath = Join-Path $fixtureRoot 'interrupted-result.json'
 $recoveryResultPath = Join-Path $fixtureRoot 'recovery-result.json'
+$detachedSourcePath = Join-Path $fixtureRoot 'images\detached-source.png'
 $fullSourcePath = Join-Path $fixtureRoot 'images\full-source.png'
 $interruptedSourcePath = Join-Path $fixtureRoot 'images\interrupted-source.png'
 $metadataDirectory = Join-Path $wpfLocalRoot 'metadata-index'
@@ -226,7 +250,11 @@ try {
     }
 
     [IO.File]::WriteAllText($sharedFiles.favorites, '{}', [Text.UTF8Encoding]::new($false))
-    $seenSeed = [ordered]@{ $fullSourcePath = $true; $interruptedSourcePath = $true } | ConvertTo-Json -Compress
+    $seenSeed = [ordered]@{
+        $detachedSourcePath = $true
+        $fullSourcePath = $true
+        $interruptedSourcePath = $true
+    } | ConvertTo-Json -Compress
     [IO.File]::WriteAllText($sharedFiles.seen, $seenSeed, [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($sharedFiles.recent, '{"version":1,"lastFolderSet":[],"recentFolderSets":[],"updatedAtUtc":"2026-07-23T00:00:00.000Z","e2eMarker":"preserve"}', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($sharedFiles.settings, '{"version":1,"e2eMarker":"preserve"}', [Text.UTF8Encoding]::new($false))
@@ -258,7 +286,12 @@ try {
 
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    }
+    else {
+        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+    }
     Assert-True ($LASTEXITCODE -eq 0) 'Exact Aibos WPF build failed.'
     $wpfDll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     Assert-True (Test-Path -LiteralPath $wpfDll -PathType Leaf) 'Aibos WPF DLL is missing.'
@@ -282,29 +315,62 @@ try {
     }
 
     # No Browser process exists here. The first explicit WPF enhancement must
-    # discover the exact H25 root, start its loopback companion, complete the
-    # job, and then tear down the exact process tree when the WPF window closes.
+    # discover the exact H25 root and start its loopback companion. WPF closes
+    # while the native job is active; the detached durable worker must finish it.
     Assert-True (
         @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue).Count -eq 0
     ) 'The auto-start port was already in use before the WPF explicit action.'
-    $fullExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $fullResultPath -FixtureRoot $fixtureRoot -Phase 'full' -SourceName 'full-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -TimeoutMilliseconds 240000
-    $full = Read-SmokeResult -Path $fullResultPath -ExpectedExitCode $fullExit
-    Assert-True ($full.passiveRefresh -eq $true -and $full.loopbackOnly -eq $true -and $full.sourceUnchanged -eq $true) 'Full phase lost passive/loopback/source safety.'
-    $ownedCompanionStopped = $false
-    $ownedCleanupDeadline = [DateTime]::UtcNow.AddSeconds(15)
-    while ([DateTime]::UtcNow -lt $ownedCleanupDeadline) {
+    $detachedExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $detachedResultPath -FixtureRoot $fixtureRoot -Phase 'start-detached' -SourceName 'detached-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -DotnetPath $DotnetPath -TimeoutMilliseconds 180000
+    $detached = Read-SmokeResult -Path $detachedResultPath -ExpectedExitCode $detachedExit
+    Assert-True ($detached.passiveRefresh -eq $true -and $detached.loopbackOnly -eq $true -and $detached.sourceUnchanged -eq $true) 'Detached phase lost passive/loopback/source safety.'
+    $independentCompanionContinued = $false
+    $independentDeadline = [DateTime]::UtcNow.AddSeconds(300)
+    while ([DateTime]::UtcNow -lt $independentDeadline) {
+        $listener = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
+        if ($listener.Count -gt 0) {
+            try {
+                $jobsResponse = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/enhance/jobs" -TimeoutSec 2
+                $persistedDetachedJob = @($jobsResponse.jobs | Where-Object { $_.id -eq $detached.jobId })
+                $persistedProgress = if ($persistedDetachedJob.Count -eq 1) {
+                    [int]($persistedDetachedJob[0].progress)
+                }
+                else {
+                    -1
+                }
+                if ($persistedDetachedJob.Count -eq 1 -and
+                    $persistedDetachedJob[0].status -eq 'succeeded' -and
+                    $persistedProgress -eq 100) {
+                    $independentCompanionContinued = $true
+                    break
+                }
+            }
+            catch {
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-True $independentCompanionContinued 'The durable H25 companion did not finish the active job after the Aibos window closed.'
+    $detachedDelete = Invoke-RestMethod -Method Delete -Uri "http://127.0.0.1:$port/api/enhance/jobs/$($detached.jobId)/output" -TimeoutSec 10
+    $independentOutputDeleted = $detachedDelete.job.status -eq 'deleted'
+    Assert-True $independentOutputDeleted 'The detached-phase managed output could not be deleted explicitly.'
+    Assert-True (Stop-LoopbackCompanionByPort -Port $port) 'The isolated auto-start companion could not be stopped after the lifetime check.'
+
+    $portFreeDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $portFreeDeadline) {
         if (@(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue).Count -eq 0) {
-            $ownedCompanionStopped = $true
             break
         }
         Start-Sleep -Milliseconds 100
     }
-    Assert-True $ownedCompanionStopped 'The WPF-owned H25 companion listener remained after the window closed.'
 
     $server = Start-H25Companion
+    $fullExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $fullResultPath -FixtureRoot $fixtureRoot -Phase 'full' -SourceName 'full-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -DotnetPath $DotnetPath -TimeoutMilliseconds 300000
+    $full = Read-SmokeResult -Path $fullResultPath -ExpectedExitCode $fullExit
+    Assert-True ($full.passiveRefresh -eq $true -and $full.loopbackOnly -eq $true -and $full.sourceUnchanged -eq $true) 'Full phase lost passive/loopback/source safety.'
+
     $wpfInterruptedOut = Join-Path $runRoot 'wpf-interrupted.stdout.log'
     $wpfInterruptedErr = Join-Path $runRoot 'wpf-interrupted.stderr.log'
-    $wpfInterrupted = Start-Process -FilePath 'dotnet.exe' `
+    $wpfInterrupted = Start-Process -FilePath $DotnetPath `
         -ArgumentList @($wpfDll, '--h25-enhancement-companion-smoke', $interruptedResultPath, '--fixture-root', $fixtureRoot, '--phase', 'start-interrupted', '--source-name', 'interrupted-source.png') `
         -WorkingDirectory $repoRoot `
         -RedirectStandardOutput $wpfInterruptedOut `
@@ -317,7 +383,7 @@ try {
         if ($wpfInterrupted.HasExited) { break }
         if (Test-Path -LiteralPath $interruptedResultPath -PathType Leaf) {
             try {
-                $candidate = Get-Content -LiteralPath $interruptedResultPath -Raw | ConvertFrom-Json
+                $candidate = Get-Content -LiteralPath $interruptedResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
                 if ($candidate.ok -eq $true -and $candidate.status -in @('queued', 'running')) {
                     $interrupted = $candidate
                     break
@@ -336,12 +402,12 @@ try {
     Assert-True $wpfInterrupted.HasExited 'Interrupted WPF smoke did not exit after the companion stopped.'
     $wpfInterrupted = $null
 
-    $jobsAfterInterruption = Get-Content -LiteralPath $jobsPath -Raw | ConvertFrom-Json
+    $jobsAfterInterruption = Get-Content -LiteralPath $jobsPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $staleJob = @($jobsAfterInterruption.jobs | Where-Object { $_.id -eq $interrupted.jobId })
     Assert-True ($staleJob.Count -eq 1 -and $staleJob[0].status -eq 'running') 'The verifier did not preserve one stale running job across the companion stop.'
 
     $server = Start-H25Companion
-    $recoveryExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $recoveryResultPath -FixtureRoot $fixtureRoot -Phase 'recover' -SourceName 'interrupted-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -TimeoutMilliseconds 180000
+    $recoveryExit = Invoke-WpfPhase -WpfDll $wpfDll -ResultPath $recoveryResultPath -FixtureRoot $fixtureRoot -Phase 'recover' -SourceName 'interrupted-source.png' -WorkingDirectory $repoRoot -LogRoot $runRoot -DotnetPath $DotnetPath -TimeoutMilliseconds 300000
     $recovery = Read-SmokeResult -Path $recoveryResultPath -ExpectedExitCode $recoveryExit
     Assert-True ($recovery.restartJobObserved -eq $true -and $recovery.canceled -eq $true -and $recovery.retried -eq $true) 'WPF did not recover the stale companion job through explicit Cancel and Retry.'
 
@@ -354,6 +420,7 @@ try {
         if ($after -ne $immutableHashesBefore[$entry.Key]) { $immutableStoresUnchanged = $false }
     }
     Assert-True $immutableStoresUnchanged 'A non-Enhancement shared store changed during the exact companion E2E.'
+    Assert-True ((Get-FileHash -LiteralPath $detachedSourcePath -Algorithm SHA256).Hash -eq $detached.sourceSha256Before) 'Detached-phase source bytes changed.'
     Assert-True ((Get-FileHash -LiteralPath $fullSourcePath -Algorithm SHA256).Hash -eq $full.sourceSha256Before) 'Full-phase source bytes changed.'
     Assert-True ((Get-FileHash -LiteralPath $interruptedSourcePath -Algorithm SHA256).Hash -eq $recovery.sourceSha256Before) 'Restart-phase source bytes changed.'
     # A canceled native worker can finish releasing its just-deleted output a
@@ -376,14 +443,14 @@ try {
         h25Tree = $h25Tree
         loopbackAddress = '127.0.0.1'
         explicitActionAutoStart = [bool]$full.started
-        ownedCompanionStopped = $ownedCompanionStopped
+        independentCompanionContinued = $independentCompanionContinued
         unindexedCreate = [bool]$full.started
         cancel = [bool]$full.canceled
         retry = [bool]$full.retried
         successOutputAccepted = [bool]$full.outputAccepted
         companionRestartRecovery = [bool]$recovery.restartJobObserved -and [bool]$recovery.canceled -and [bool]$recovery.retried
-        outputDelete = [bool]$full.deletedOutput -and [bool]$recovery.deletedOutput
-        sourceSha256Unchanged = [bool]$full.sourceUnchanged -and [bool]$recovery.sourceUnchanged
+        outputDelete = $independentOutputDeleted -and [bool]$full.deletedOutput -and [bool]$recovery.deletedOutput
+        sourceSha256Unchanged = [bool]$detached.sourceUnchanged -and [bool]$full.sourceUnchanged -and [bool]$recovery.sourceUnchanged
         nonEnhancementStoresUnchanged = $immutableStoresUnchanged
         managedOutputsEmpty = $managedOutputFiles.Count -eq 0
     } | ConvertTo-Json -Depth 5
@@ -395,6 +462,9 @@ catch {
 finally {
     Stop-OwnedProcess -Process $server
     Stop-OwnedProcess -Process $wpfInterrupted
+    if ($port -gt 0) {
+        Stop-LoopbackCompanionByPort -Port $port | Out-Null
+    }
     foreach ($name in $environment.Keys) {
         [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
     }

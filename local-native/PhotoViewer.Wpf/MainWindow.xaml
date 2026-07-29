@@ -1264,7 +1264,21 @@
                               </TextBlock.Style>
                             </TextBlock>
                           </Grid>
-                          <TextBlock Grid.Row="1" Text="{Binding PresetSummary}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+                          <DockPanel Grid.Row="1" Margin="0,3,0,0" LastChildFill="True">
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding OperationLabel}" FontSize="10.8" FontWeight="Bold" Margin="0,0,9,0">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Foreground" Value="#67E8F9"/>
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Operation}" Value="photoreal">
+                                      <Setter Property="Foreground" Value="#C4B5FD"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding PresetSummary}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextTrimming="CharacterEllipsis"/>
+                          </DockPanel>
                           <ProgressBar Grid.Row="2" Height="4" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}" Margin="0,7,0,0"/>
                           <TextBlock Grid.Row="3" Text="{Binding DetailText}" Foreground="{StaticResource TextTertiary}" FontSize="10.8" TextWrapping="Wrap" MaxHeight="34" Margin="0,6,0,0"/>
                           <DockPanel Grid.Row="4" Margin="0,8,0,0" LastChildFill="True">
@@ -1272,7 +1286,8 @@
                             <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
                               <Button Style="{StaticResource GhostButton}" Content="Cancel" Tag="{Binding}" Click="CancelEnhancementJob_Click" Height="28" MinWidth="62" Margin="6,0,0,0" Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}"/>
                               <Button Style="{StaticResource GhostButton}" Content="Retry" Tag="{Binding}" Click="RetryEnhancementJob_Click" Height="28" MinWidth="58" Margin="6,0,0,0" Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}"/>
-                              <Button Style="{StaticResource GhostButton}" Content="Open output" Tag="{Binding}" Click="OpenEnhancementOutput_Click" Height="28" MinWidth="88" Margin="6,0,0,0" Visibility="{Binding CanUseOutput, Converter={StaticResource BoolToVis}}"/>
+                              <Button Style="{StaticResource GhostButton}" Content="Open output" Tag="{Binding}" Click="OpenEnhancementOutput_Click" Height="28" MinWidth="88" Margin="6,0,0,0"
+                                      ToolTip="Open this exact managed version in the Aibos viewer" Visibility="{Binding CanUseOutput, Converter={StaticResource BoolToVis}}"/>
                               <Button Style="{StaticResource DangerButton}" Content="Delete output" Tag="{Binding}" Click="DeleteEnhancementOutput_Click" Height="28" MinWidth="94" Margin="6,0,0,0" Visibility="{Binding CanUseOutput, Converter={StaticResource BoolToVis}}"/>
                             </WrapPanel>
                           </DockPanel>

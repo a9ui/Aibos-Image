@@ -676,7 +676,7 @@ public partial class MainWindow : Window
             _enhancementWorkspaceGeneration++;
             Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
             CancelOwnedEnhancementCompanionLifetime();
-            StopOwnedEnhancementCompanion();
+            ReleaseOwnedEnhancementCompanion();
         };
         CardsList.MouseDoubleClick += (_, _) => OpenModal();
         RowsList.MouseDoubleClick += (_, _) => OpenModal();
@@ -14427,6 +14427,7 @@ public partial class MainWindow : Window
         ResetModalTransform();
         if (wasVisible && restoreFocus)
             RestoreOverlayFocus(focusTarget, preferPrimaryGallery: true);
+        ReturnToEnhancementJobsAfterModalClose(wasVisible);
     }
 
     private void ToggleModalEnhanced_Click(object sender, RoutedEventArgs e) => ToggleModalEnhanced();

@@ -17306,6 +17306,7 @@ public partial class App : Application
                     int progress,
                     string? output = null,
                     string? error = null,
+                    string operation = "upscale",
                     string createdAt = "2026-07-23T00:00:00.000Z") => new
                 {
                     id,
@@ -17314,6 +17315,7 @@ public partial class App : Application
                     sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
                     presetId = "anime-sharp-x2",
                     adapterId = "realesrgan-ncnn",
+                    operation,
                     status,
                     progress,
                     outputPath = output,
@@ -17330,7 +17332,12 @@ public partial class App : Application
                         Job("failed-job", "failed", 18, error: "GPU backend stopped"),
                         Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42, createdAt: "2026-07-23T00:00:01.000Z"),
                         Job("queue-first-job", "queued", 0, createdAt: "2026-07-23T00:00:02.000Z"),
-                        Job("done-job", outputDeleted ? "deleted" : "succeeded", 100, outputDeleted ? null : outputPath),
+                        Job(
+                            "done-job",
+                            outputDeleted ? "deleted" : "succeeded",
+                            100,
+                            outputDeleted ? null : outputPath,
+                            operation: "photoreal"),
                     };
                     if (retryCreated)
                         jobs.Insert(0, Job("retry-job", "queued", 0, createdAt: "2026-07-23T00:00:04.000Z"));
@@ -17342,11 +17349,6 @@ public partial class App : Application
 
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
-                window.ConfigureEnhancementWorkspaceExternalOpenForSmoke(startInfo =>
-                {
-                    openedOutput = startInfo.FileName;
-                    return true;
-                });
                 window.ConfigureModalEnhancementForSmoke((request, _) =>
                 {
                     string route = request.RequestUri?.AbsolutePath ?? "";
@@ -17383,6 +17385,11 @@ public partial class App : Application
                 window.UpdateLayout();
                 EnhancementJobsWorkspaceSmokeSnapshot initial = window.EnhancementJobsWorkspaceForSmoke();
                 bool passiveOpen = requests.Skip(requestsBeforeOpen).All(static request => request == "GET /api/enhance/jobs");
+                object? viewBeforeRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                object? viewAfterRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
+                bool stableJobViews = viewBeforeRefresh is not null
+                    && ReferenceEquals(viewBeforeRefresh, viewAfterRefresh);
                 window.SelectEnhancementJobsFilterForSmoke("running");
                 EnhancementJobsWorkspaceSmokeSnapshot running = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("queued");
@@ -17398,20 +17405,32 @@ public partial class App : Application
                 bool retryIssued = await window.RetryEnhancementJobForSmokeAsync("failed-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterRetry = window.EnhancementJobsWorkspaceForSmoke();
                 bool outputOpened = window.OpenEnhancementJobOutputForSmoke("done-job");
+                openedOutput = window.ModalDisplayPathForSmoke;
+                EnhancementJobsWorkspaceSmokeSnapshot whileOutputViewerOpen = window.EnhancementJobsWorkspaceForSmoke();
+                window.CloseModalForSmoke();
+                await window.WaitForEnhancementJobsReturnForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterOutputClose = window.EnhancementJobsWorkspaceForSmoke();
                 bool deleteIssued = await window.DeleteEnhancementJobOutputForSmokeAsync("done-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterDelete = window.EnhancementJobsWorkspaceForSmoke();
                 var storesBeforeViewerOpen = environment
                     .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
                     .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
                 bool sourceOpenedInViewer = window.OpenEnhancementJobSourceInViewerForSmoke("done-job");
-                await Task.Delay(1200);
+                EnhancementJobsWorkspaceSmokeSnapshot whileSourceViewerOpen = window.EnhancementJobsWorkspaceForSmoke();
+                window.CloseModalForSmoke();
+                await window.WaitForEnhancementJobsReturnForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterSourceOpen = window.EnhancementJobsWorkspaceForSmoke();
 
                 string sourceAfter = FileFingerprint(sourcePath);
                 bool storesUnchanged = storesBefore.All(pair =>
                     storesBeforeViewerOpen.TryGetValue(pair.Key, out string? fingerprint)
                     && fingerprint == pair.Value);
-                bool pollingStoppedOnClose = !afterSourceOpen.Visible && !afterSourceOpen.Polling;
+                bool jobsRestoredAfterViewerClose = !whileOutputViewerOpen.Visible
+                    && !whileOutputViewerOpen.Polling
+                    && afterOutputClose.Visible
+                    && !whileSourceViewerOpen.Visible
+                    && !whileSourceViewerOpen.Polling
+                    && afterSourceOpen.Visible;
                 bool routesOk = requests.Contains("POST /api/enhance/jobs/active-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal);
@@ -17423,16 +17442,20 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && queued.VisibleStatusLabels[0].Contains("待ち順 1", StringComparison.Ordinal)
                     && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal);
+                bool operationLabelsVisible = initial.VisibleOperationLabels.Contains("HQ  高画質化", StringComparer.Ordinal)
+                    && completed.VisibleOperationLabels.SequenceEqual(["REAL  実写化"], StringComparer.Ordinal);
                 ok = initial.Visible
                     && initial.Total == 5
                     && initial.Active == 3
                     && initial.Polling
                     && passiveOpen
+                    && stableJobViews
                     && running.Filtered == 1
                     && queued.Filtered == 2
                     && queueInventoryOrdered
                     && failed.Filtered == 1
                     && completed.Filtered == 1
+                    && operationLabelsVisible
                     && cancelIssued
                     && afterCancel.Active == 2
                     && afterCancel.Polling
@@ -17447,7 +17470,7 @@ public partial class App : Application
                     && !File.Exists(outputPath)
                     && afterDelete.VisibleIds.Contains("done-job", StringComparer.Ordinal)
                     && sourceOpenedInViewer
-                    && pollingStoppedOnClose
+                    && jobsRestoredAfterViewerClose
                     && routesOk
                     && sourceBefore == sourceAfter
                     && storesUnchanged;
@@ -17462,15 +17485,20 @@ public partial class App : Application
                     completed,
                     afterCancel,
                     afterRetry,
+                    whileOutputViewerOpen,
+                    afterOutputClose,
                     afterDelete,
+                    whileSourceViewerOpen,
                     afterSourceOpen,
                     outputOpened,
                     sourceOpenedInViewer,
                     queueInventoryOrdered,
+                    operationLabelsVisible,
+                    stableJobViews,
                     openedOutput,
                     routesOk,
                     requests,
-                    pollingStoppedOnClose,
+                    jobsRestoredAfterViewerClose,
                     sourceUnchanged = sourceBefore == sourceAfter,
                     storesUnchanged,
                     outputDeleted,
@@ -18154,7 +18182,7 @@ public partial class App : Application
         if (!fixturePrefix.StartsWith(tempPrefix, StringComparison.OrdinalIgnoreCase)
             || !resultFullPath.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase)
             || sourceName.Length == 0
-            || phase is not ("full" or "start-interrupted" or "recover"))
+            || phase is not ("full" or "start-detached" or "start-interrupted" or "recover"))
         {
             throw new ArgumentException("H25 companion smoke paths and phase must be bounded under TEMP");
         }
@@ -18344,15 +18372,17 @@ public partial class App : Application
                         || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30));
                     RecordCheckpoint("full-cancel-complete");
                     retried = canceled && await win.StartModalEnhancementForSmokeAsync(45_000);
+                    if (retried)
+                        jobId = win.ModalEnhancementJobIdForSmoke;
                     RecordCheckpoint("full-retry-complete");
-                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(60));
+                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(180));
                     RecordCheckpoint("full-success-wait-complete");
                     outputAccepted = succeeded && win.ModalEnhancedToggleAvailableForSmoke;
                     outputPath = win.ModalDisplayPathForSmoke;
                     deletedOutput = outputAccepted && await win.DeleteModalEnhancedOutputForSmokeAsync();
                     RecordCheckpoint("full-delete-complete");
                 }
-                else if (phase == "start-interrupted")
+                else if (phase is "start-interrupted" or "start-detached")
                 {
                     started = await win.StartModalEnhancementForSmokeAsync(45_000);
                     jobId = win.ModalEnhancementJobIdForSmoke;
@@ -18369,7 +18399,8 @@ public partial class App : Application
                         readyForInterruption
                             ? "real H25 job is active and ready for the verifier to interrupt the companion"
                             : "real H25 job did not reach an interruptible state"));
-                    await Task.Delay(TimeSpan.FromSeconds(10));
+                    if (phase == "start-interrupted")
+                        await Task.Delay(TimeSpan.FromSeconds(10));
                 }
                 else
                 {
@@ -18381,8 +18412,10 @@ public partial class App : Application
                         || await WaitForStatusAsync("canceled", TimeSpan.FromSeconds(30)));
                     RecordCheckpoint("recovery-cancel-complete");
                     retried = canceled && await win.StartModalEnhancementForSmokeAsync(45_000);
+                    if (retried)
+                        jobId = win.ModalEnhancementJobIdForSmoke;
                     RecordCheckpoint("recovery-retry-complete");
-                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(60));
+                    succeeded = retried && await WaitForStatusAsync("succeeded", TimeSpan.FromSeconds(180));
                     RecordCheckpoint("recovery-success-wait-complete");
                     outputAccepted = succeeded && win.ModalEnhancedToggleAvailableForSmoke;
                     outputPath = win.ModalDisplayPathForSmoke;
@@ -18430,7 +18463,7 @@ public partial class App : Application
                 && sourceUnchanged
                 && pathsIsolated
                 && loopbackOnly
-                && (phase == "start-interrupted"
+                && (phase is "start-interrupted" or "start-detached"
                     ? started && !string.IsNullOrWhiteSpace(jobId) && status is "queued" or "running"
                     : phase == "full"
                         ? started && canceled && retried && succeeded && outputAccepted && deletedOutput

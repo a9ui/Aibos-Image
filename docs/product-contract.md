@@ -30,8 +30,10 @@ vectors. It is test input and evidence mapping, not a second specification.
   optional local companion, only after an explicit user action.
 - An explicit AI Start or Retry may start that local companion when it is not
   already available. Passive browsing, preview, navigation, job inspection,
-  and state hydration never start it. WPF may stop only the exact companion
-  process tree that the current WPF process created.
+  and state hydration never start it. Before readiness, WPF may stop only the
+  exact failed or canceled launch attempt it created. After readiness, the
+  companion is an independent durable worker and must not be stopped merely
+  because WPF closes.
 - The companion endpoint is loopback-only and must bind to `127.0.0.1`. LAN,
   tunnel, reverse-proxy, hosted, and Internet exposure are unsupported.
 - An unavailable companion must produce a bounded, actionable error and must
@@ -362,16 +364,25 @@ or stores.
 - Modal and batch Start/Retry first reuse an already-ready loopback companion.
   If none is ready, that same explicit action may launch the separately
   installed H25 companion with Browser opening and ComfyUI autostart disabled.
-  Closing WPF stops only a launcher process tree that WPF itself created.
+  A successful ready companion continues the durable FIFO queue after WPF
+  closes. Reopening WPF passively reads the persisted queue, operation type,
+  status, and latest saved integer progress. If the companion process or PC is
+  interrupted, queued jobs remain queued; the interrupted running job becomes
+  Failed at its last persisted progress and requires an explicit Retry rather
+  than pretending to resume an in-memory model pass.
 - The WPF Enhancement Jobs workspace is a virtualized client view over that
   API. Opening it performs a passive jobs read only. It polls once per second
   only while the workspace is visible and at least one job is queued or
   running, and stops polling when hidden or when all jobs are terminal.
 - Jobs may be filtered as All, Queued, Running, Completed, or Failed/Canceled.
   Running work is shown first and queued work is inventoried in durable FIFO
-  enqueue order with an explicit waiting position. Choosing a job thumbnail
-  closes the workspace and opens its validated source in the WPF viewer when
-  that source is present in the current catalog.
+  enqueue order with an explicit waiting position. Stable job-view and
+  thumbnail instances are updated in place so polling does not make thumbnails
+  flash. Each row visibly identifies `HQ`/高画質化 or `REAL`/実写化.
+- Choosing a job thumbnail closes the workspace and opens its validated source
+  in the WPF viewer when that source is present in the current catalog. Open
+  output opens the exact validated managed version in that same viewer. Closing
+  either image returns to the Jobs workspace with the prior filter preserved.
 - Cancel, Retry, Open output, and Delete output remain explicit user actions.
   WPF validates source identity, source signature, and managed-output ownership
   before opening or deleting an output. The workspace does not change the

@@ -35,6 +35,7 @@ public partial class App
             bool sharedQueueRoute = false;
             bool versionCycleContract = false;
             bool sourceUntouched = false;
+            bool independentCompanionContract = false;
             var requests = new List<string>();
             string createBody = "";
             try
@@ -155,11 +156,29 @@ public partial class App
                     && appToModalSynchronized
                     && window.ModalPhotorealSettingsForSmoke.Prompt == window.DefaultModalPhotorealPromptForSmoke;
                 defaultPromptContract = window.DefaultModalPhotorealPromptForSmoke.Contains(
-                        "five natural fingers per visible hand",
+                        "five natural fingers",
+                        StringComparison.Ordinal)
+                    && window.DefaultModalPhotorealPromptForSmoke.Contains(
+                        "exact expression and emotion",
+                        StringComparison.Ordinal)
+                    && window.DefaultModalPhotorealPromptForSmoke.Contains(
+                        "Do not add a smile unless the source is smiling",
                         StringComparison.Ordinal)
                     && !window.DefaultModalPhotorealPromptForSmoke.Contains(
                         "ADetailer",
                         StringComparison.OrdinalIgnoreCase);
+                EnhancementCompanionLaunchContractSmokeSnapshot companionLaunch =
+                    PhotoViewer.Wpf.MainWindow.EnhancementCompanionLaunchContractForSmoke(
+                        "node.exe",
+                        smokeRoot,
+                        3142);
+                independentCompanionContract = !companionLaunch.UseShellExecute
+                    && companionLaunch.CreateNoWindow
+                    && !companionLaunch.RedirectStandardOutput
+                    && !companionLaunch.RedirectStandardError
+                    && !companionLaunch.HasExternalOwnerPid
+                    && companionLaunch.NoOpen == "1"
+                    && companionLaunch.ComfyAutostart == "0";
                 window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
                 window.ResetModalPhotorealPromptForSmoke();
                 resetPromptContract = customPromptApplied
@@ -220,6 +239,7 @@ public partial class App
                     && resetPromptContract
                     && appSettingsPromptContract
                     && defaultPromptContract
+                    && independentCompanionContract
                     && sharedQueueRoute
                     && sourceUntouched
                     && window.ModalEnhancementOperationForSmoke == "photoreal";
@@ -255,6 +275,7 @@ public partial class App
                     resetPromptContract,
                     appSettingsPromptContract,
                     defaultPromptContract,
+                    independentCompanionContract,
                     sharedQueueRoute,
                     sourceUntouched,
                     requests,

@@ -50,6 +50,7 @@ try {
         'resetPromptContract',
         'appSettingsPromptContract',
         'defaultPromptContract',
+        'independentCompanionContract',
         'sharedQueueRoute',
         'sourceUntouched'
     )) {

@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -30,6 +29,7 @@ public partial class MainWindow
     private IInputElement? _enhancementWorkspaceFocusBeforeDialog;
     private int _enhancementWorkspaceGetCount;
     private int _enhancementWorkspacePollCount;
+    private bool _returnToEnhancementJobsAfterModalClose;
 
     private void InitializeEnhancementJobsWorkspace()
     {
@@ -153,8 +153,7 @@ public partial class MainWindow
             }
 
             ApplyEnhancementWorkspaceHighlights(jobs);
-            _enhancementWorkspaceJobs.Clear();
-            _enhancementWorkspaceJobs.AddRange(jobs);
+            ReconcileEnhancementWorkspaceJobs(jobs);
             bool highlightedBatchAlreadyTerminal = _enhancementWorkspaceFilter is "queued" or "running"
                 && jobs.Any(static job => job.IsHighlighted)
                 && !jobs.Any(static job => job.IsHighlighted && job.IsActive);
@@ -201,6 +200,28 @@ public partial class MainWindow
         }
         foreach (EnhancementWorkspaceJobView job in jobs)
             job.IsHighlighted = _enhancementWorkspaceHighlightedJobIds.Contains(job.Id);
+    }
+
+    private void ReconcileEnhancementWorkspaceJobs(IReadOnlyList<EnhancementWorkspaceJobView> jobs)
+    {
+        Dictionary<string, EnhancementWorkspaceJobView> existingById =
+            _enhancementWorkspaceJobs.ToDictionary(static job => job.Id, StringComparer.Ordinal);
+        var reconciled = new List<EnhancementWorkspaceJobView>(jobs.Count);
+        foreach (EnhancementWorkspaceJobView candidate in jobs)
+        {
+            if (existingById.TryGetValue(candidate.Id, out EnhancementWorkspaceJobView? existing))
+            {
+                existing.RefreshFrom(candidate);
+                reconciled.Add(existing);
+            }
+            else
+            {
+                reconciled.Add(candidate);
+            }
+        }
+
+        _enhancementWorkspaceJobs.Clear();
+        _enhancementWorkspaceJobs.AddRange(reconciled);
     }
 
     private static bool TryParseEnhancementWorkspaceJobs(
@@ -282,6 +303,7 @@ public partial class MainWindow
         TryGetStringProperty(element, "sourcePath", out string? sourcePath);
         TryGetStringProperty(element, "presetId", out string? presetId);
         TryGetStringProperty(element, "adapterId", out string? adapterId);
+        TryGetStringProperty(element, "operation", out string? rawOperation);
         TryGetStringProperty(element, "outputPath", out string? outputPath);
         TryGetStringProperty(element, "errorMessage", out string? errorMessage);
         TryGetStringProperty(element, "createdAt", out string? createdAtText);
@@ -312,6 +334,9 @@ public partial class MainWindow
             sourcePath ?? "",
             presetId ?? "Default preset",
             adapterId ?? "local companion",
+            string.Equals(rawOperation?.Trim(), "photoreal", StringComparison.OrdinalIgnoreCase)
+                ? "photoreal"
+                : "upscale",
             status,
             progress,
             outputPath,
@@ -345,7 +370,13 @@ public partial class MainWindow
                 _ => true,
             })
             .ToArray();
-        EnhancementJobsList.ItemsSource = filtered;
+        EnhancementWorkspaceJobView[] current =
+            (EnhancementJobsList.ItemsSource as IEnumerable<EnhancementWorkspaceJobView>)?.ToArray()
+            ?? [];
+        bool sameItems = current.Length == filtered.Length
+            && current.Zip(filtered, static (left, right) => ReferenceEquals(left, right)).All(static same => same);
+        if (!sameItems)
+            EnhancementJobsList.ItemsSource = filtered;
         EnhancementJobsEmptyText.Visibility = filtered.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (loadThumbnails)
             BeginEnhancementWorkspaceThumbnailLoad(filtered);
@@ -353,14 +384,18 @@ public partial class MainWindow
 
     private void BeginEnhancementWorkspaceThumbnailLoad(IReadOnlyList<EnhancementWorkspaceJobView> jobs)
     {
-        Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
-        if (EnhancementJobsDialog.Visibility != Visibility.Visible || jobs.Count == 0)
+        EnhancementWorkspaceJobView[] missing = jobs
+            .Where(static job => job.Thumbnail is null)
+            .Take(EnhancementJobsThumbnailLimit)
+            .ToArray();
+        if (EnhancementJobsDialog.Visibility != Visibility.Visible || missing.Length == 0)
             return;
 
+        Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
         var cts = new CancellationTokenSource();
         _enhancementWorkspaceThumbnailCts = cts;
         long generation = _enhancementWorkspaceGeneration;
-        _ = LoadEnhancementWorkspaceThumbnailsAsync(jobs.Take(EnhancementJobsThumbnailLimit).ToArray(), generation, cts);
+        _ = LoadEnhancementWorkspaceThumbnailsAsync(missing, generation, cts);
     }
 
     private async Task LoadEnhancementWorkspaceThumbnailsAsync(
@@ -510,25 +545,13 @@ public partial class MainWindow
 
     private bool TryOpenEnhancementWorkspaceOutput(EnhancementWorkspaceJobView job)
     {
-        if (!TryResolveManagedEnhancementWorkspaceOutput(job, out string outputPath, out string reason))
+        if (!TryResolveManagedEnhancementWorkspaceOutput(job, out ManagedEnhancedOutput output, out string reason))
         {
             EnhancementJobsStatusText.Text = $"Open output unavailable: {reason}. The source image was not changed.";
             return false;
         }
 
-        try
-        {
-            if (!_externalFileLauncher(new ProcessStartInfo(outputPath) { UseShellExecute = true }))
-                throw new InvalidOperationException("No default application accepted the output.");
-            EnhancementJobsStatusText.Text = "Opened the managed enhanced output. The source image remains separate.";
-            return true;
-        }
-        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException)
-        {
-            Trace.TraceWarning($"Enhancement workspace output open failed: {ex.GetType().Name}");
-            EnhancementJobsStatusText.Text = "The enhanced output could not be opened. Check its default application and try again.";
-            return false;
-        }
+        return TryOpenEnhancementJobInViewer(job, output);
     }
 
     private void OpenEnhancementSourceInViewer_Click(object sender, RoutedEventArgs e)
@@ -538,6 +561,11 @@ public partial class MainWindow
     }
 
     private bool TryOpenEnhancementSourceInViewer(EnhancementWorkspaceJobView job)
+        => TryOpenEnhancementJobInViewer(job, preferredOutput: null);
+
+    private bool TryOpenEnhancementJobInViewer(
+        EnhancementWorkspaceJobView job,
+        ManagedEnhancedOutput? preferredOutput)
     {
         if (!TryResolveEnhancementWorkspaceSource(job, out string canonicalSource)
             || !File.Exists(canonicalSource))
@@ -555,12 +583,61 @@ public partial class MainWindow
             return false;
         }
 
+        _returnToEnhancementJobsAfterModalClose = true;
         CloseEnhancementJobsWorkspace(restoreFocus: false);
         SelectTile(tile);
         SaveState();
         OpenModal();
-        return Modal.Visibility == Visibility.Visible
-            && string.Equals(SelectedTile()?.Path, canonicalSource, StringComparison.OrdinalIgnoreCase);
+        if (Modal.Visibility != Visibility.Visible
+            || !string.Equals(SelectedTile()?.Path, canonicalSource, StringComparison.OrdinalIgnoreCase))
+        {
+            _returnToEnhancementJobsAfterModalClose = false;
+            return false;
+        }
+
+        if (preferredOutput is null)
+            return true;
+
+        int versionIndex = _modalEnhancementVersions.FindIndex(candidate =>
+            string.Equals(candidate.JobId, job.Id, StringComparison.Ordinal)
+            || string.Equals(
+                candidate.Output.OutputPath,
+                preferredOutput.OutputPath,
+                StringComparison.OrdinalIgnoreCase));
+        if (versionIndex < 0)
+        {
+            _modalEnhancementVersions.Add(
+                new ManagedEnhancementVersion(job.Id, job.Operation, preferredOutput));
+            versionIndex = _modalEnhancementVersions.Count - 1;
+        }
+
+        _modalEnhancementVersionIndex = versionIndex + 1;
+        _modalShowingEnhanced = true;
+        OpenModal();
+        bool opened = _modalShowingEnhanced
+            && string.Equals(
+                _modalDisplayPath,
+                preferredOutput.OutputPath,
+                StringComparison.OrdinalIgnoreCase);
+        if (!opened)
+            SetStatusToast("The managed output could not be selected in the Aibos viewer.");
+        return opened;
+    }
+
+    private void ReturnToEnhancementJobsAfterModalClose(bool modalWasVisible)
+    {
+        if (!_returnToEnhancementJobsAfterModalClose || !modalWasVisible)
+            return;
+
+        _returnToEnhancementJobsAfterModalClose = false;
+        string filter = _enhancementWorkspaceFilter;
+        _ = Dispatcher.BeginInvoke(
+            new Action(async () =>
+            {
+                if (IsLoaded && IsVisible && EnhancementJobsDialog.Visibility != Visibility.Visible)
+                    await OpenEnhancementJobsWorkspaceAsync(filter, focusToRestore: OpenEnhancementJobsButton);
+            }),
+            DispatcherPriority.Background);
     }
 
     private async void DeleteEnhancementOutput_Click(object sender, RoutedEventArgs e)
@@ -617,10 +694,10 @@ public partial class MainWindow
 
     private bool TryResolveManagedEnhancementWorkspaceOutput(
         EnhancementWorkspaceJobView job,
-        out string outputPath,
+        out ManagedEnhancedOutput managedOutput,
         out string reason)
     {
-        outputPath = "";
+        managedOutput = null!;
         reason = "the output is missing, stale, or outside managed storage";
         if (job.Status != "succeeded"
             || string.IsNullOrWhiteSpace(job.OutputPath)
@@ -632,10 +709,14 @@ public partial class MainWindow
         }
 
         var tile = new Tile { Path = canonicalSource, IsRealFile = true };
-        if (!TryCreateManagedEnhancedOutput(tile, job.OutputPath, job.SourceSize.Value, job.SourceMtimeMs.Value, out ManagedEnhancedOutput managed))
+        if (!TryCreateManagedEnhancedOutput(
+                tile,
+                job.OutputPath,
+                job.SourceSize.Value,
+                job.SourceMtimeMs.Value,
+                out managedOutput))
             return false;
 
-        outputPath = managed.OutputPath;
         reason = "";
         return true;
     }
@@ -690,7 +771,8 @@ public partial class MainWindow
             _enhancementWorkspacePollCount,
             EnhancementJobsStatusText.Text,
             visible.Select(static job => job.Id).ToArray(),
-            visible.Select(static job => job.StatusLabel).ToArray());
+            visible.Select(static job => job.StatusLabel).ToArray(),
+            visible.Select(static job => job.OperationLabel).ToArray());
     }
 
     public async Task<bool> CancelEnhancementJobForSmokeAsync(string id)
@@ -736,8 +818,27 @@ public partial class MainWindow
         return job is not null && TryOpenEnhancementSourceInViewer(job);
     }
 
-    public void ConfigureEnhancementWorkspaceExternalOpenForSmoke(Func<ProcessStartInfo, bool> launcher)
-        => _externalFileLauncher = launcher ?? throw new ArgumentNullException(nameof(launcher));
+    public object? EnhancementJobViewIdentityForSmoke(string id)
+        => _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+
+    public async Task RefreshEnhancementJobsForSmokeAsync()
+    {
+        await RefreshEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration, isPoll: false);
+        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+    }
+
+    public async Task WaitForEnhancementJobsReturnForSmokeAsync()
+    {
+        for (int attempt = 0; attempt < 400; attempt++)
+        {
+            if (EnhancementJobsDialog.Visibility == Visibility.Visible
+                && !_enhancementWorkspaceRefreshPending)
+            {
+                return;
+            }
+            await Task.Delay(10);
+        }
+    }
 
     private async Task WaitForEnhancementWorkspaceIdleForSmokeAsync()
     {
@@ -758,6 +859,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         string sourcePath,
         string presetId,
         string adapterId,
+        string operation,
         string status,
         int progress,
         string? outputPath,
@@ -773,6 +875,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         SourcePath = sourcePath;
         PresetId = presetId;
         AdapterId = adapterId;
+        Operation = operation;
         Status = status;
         Progress = progress;
         OutputPath = outputPath;
@@ -789,12 +892,13 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string SourcePath { get; }
     public string PresetId { get; }
     public string AdapterId { get; }
-    public string Status { get; }
-    public int Progress { get; }
-    public string? OutputPath { get; }
-    public string? ErrorMessage { get; }
+    public string Operation { get; }
+    public string Status { get; private set; }
+    public int Progress { get; private set; }
+    public string? OutputPath { get; private set; }
+    public string? ErrorMessage { get; private set; }
     public DateTimeOffset CreatedAt { get; }
-    public DateTimeOffset UpdatedAt { get; }
+    public DateTimeOffset UpdatedAt { get; private set; }
     public long? SourceSize { get; }
     public double? SourceMtimeMs { get; }
     public int ApiOrdinal { get; }
@@ -805,6 +909,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool CanUseOutput => !_isBusy && Status == "succeeded" && !string.IsNullOrWhiteSpace(OutputPath);
     public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "Unknown source" : Path.GetFileName(SourcePath);
     public string PresetSummary => $"{PresetId}  ·  {AdapterId}";
+    public string OperationLabel => Operation == "photoreal" ? "REAL  実写化" : "HQ  高画質化";
     public string StatusLabel => Status switch
     {
         "queued" => $"待ち順 {QueuePosition ?? 0}  ·  Queued {Progress}%",
@@ -825,7 +930,43 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string TimestampText => UpdatedAt == DateTimeOffset.MinValue
         ? "Time unavailable"
         : $"Updated {UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
-    public string AccessibleName => $"{SourceName}, {StatusLabel}, {PresetId}";
+    public string AccessibleName => $"{SourceName}, {OperationLabel}, {StatusLabel}, {PresetId}";
+
+    public void RefreshFrom(EnhancementWorkspaceJobView candidate)
+    {
+        bool statusChanged = !string.Equals(Status, candidate.Status, StringComparison.Ordinal);
+        bool progressChanged = Progress != candidate.Progress;
+        bool outputChanged = !string.Equals(OutputPath, candidate.OutputPath, StringComparison.OrdinalIgnoreCase);
+        bool errorChanged = !string.Equals(ErrorMessage, candidate.ErrorMessage, StringComparison.Ordinal);
+        bool updatedChanged = UpdatedAt != candidate.UpdatedAt;
+        bool queueChanged = QueuePosition != candidate.QueuePosition;
+
+        Status = candidate.Status;
+        Progress = candidate.Progress;
+        OutputPath = candidate.OutputPath;
+        ErrorMessage = candidate.ErrorMessage;
+        UpdatedAt = candidate.UpdatedAt;
+        QueuePosition = candidate.QueuePosition;
+        IsHighlighted = candidate.IsHighlighted;
+
+        if (progressChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
+        if (statusChanged || progressChanged || queueChanged)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCancel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRetry)));
+        }
+        if (statusChanged || outputChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUseOutput)));
+        if (statusChanged || outputChanged || errorChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
+        if (updatedChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TimestampText)));
+        if (statusChanged || progressChanged || queueChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
+    }
 
     public bool IsHighlighted
     {
@@ -880,4 +1021,5 @@ public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     int PollRequests,
     string Status,
     string[] VisibleIds,
-    string[] VisibleStatusLabels);
+    string[] VisibleStatusLabels,
+    string[] VisibleOperationLabels);

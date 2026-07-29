@@ -12,11 +12,10 @@ public partial class MainWindow
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
     private const string DefaultPhotorealPrompt =
-        "Convert only the rendering medium into a real camera photograph of the same cute adult Japanese woman in her twenties. " +
-        "Preserve her identity, Japanese and East Asian facial proportions, exact expression and mood, mouth, gaze, eyelids, eyebrows, hair, body silhouette, pose, hand placement, crop, clothing, accessories, background, atmosphere, and all occlusions. Correct malformed hands to five natural fingers per visible hand. " +
-        "If a blindfold covers her eyes, preserve its shape and position and keep the eyes fully hidden. Preserve all visible adult anatomy exactly; do not censor, invent, or remove details. " +
-        "Preserve the original exposure, colors, and soft low-contrast lighting. Use natural skin, hair, materials, and photographic optics. " +
-        "Do not westernize her face, add a smile, change her mood, reveal hidden features, add or remove garments, use HDR, or apply dramatic grading. Not anime, illustration, CGI, doll, kigurumi, or cosplay.";
+        "Turn the input into a real camera photograph of the same adult Japanese woman. " +
+        "Preserve her identity, Japanese and East Asian facial proportions, and the exact expression and emotion in the source, especially her eyebrows, eyes, eyelids, mouth, gaze, tears, blush, and tension. Do not add a smile unless the source is smiling. " +
+        "Preserve her hair, body, pose, hands, crop, clothing, accessories, background, lighting, atmosphere, occlusions, and visible adult anatomy. Keep blindfolded eyes hidden and correct visible hands to five natural fingers. " +
+        "Use natural skin, hair, materials, soft low-contrast exposure, and photographic optics. Do not westernize, censor, change her mood, reveal hidden features, alter garments, use HDR, or produce anime, CGI, or doll imagery.";
 
     private string _modalEnhancementOperation = "upscale";
     private readonly List<ManagedEnhancementVersion> _modalEnhancementVersions = [];
