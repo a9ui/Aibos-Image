@@ -10974,7 +10974,8 @@ public partial class App : Application
                     && recycledHeadContainer.ContainerBoundToExpectedItem
                     && string.Equals(recycledHeadContainer.Name, headName, StringComparison.Ordinal)
                     && recycledHeadContainer.HelpText.Contains("Favorite level 5", StringComparison.Ordinal)
-                    && recycledHeadContainer.HelpText.Contains("AI-enhanced", StringComparison.Ordinal)
+                    && recycledHeadContainer.HelpText.Contains("AI-upscaled", StringComparison.Ordinal)
+                    && recycledHeadContainer.HelpText.Contains("AI-photorealized", StringComparison.Ordinal)
                     && !string.Equals(recycledHeadContainer.Name, tailName, StringComparison.Ordinal);
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 

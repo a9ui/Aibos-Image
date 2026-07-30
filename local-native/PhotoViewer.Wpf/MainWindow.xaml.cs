@@ -21192,6 +21192,8 @@ public partial class MainWindow : Window
                 ArtGlow = template.ArtGlow,
                 Fav = index % 10 == 0 ? 5 : 0,
                 Enhanced = index % 20 == 0,
+                Upscaled = index % 20 == 0,
+                Photorealized = index % 40 == 0,
                 Unseen = index % 3 != 0,
             });
         }

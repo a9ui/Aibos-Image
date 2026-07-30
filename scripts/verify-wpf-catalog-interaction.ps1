@@ -1,5 +1,8 @@
 param(
     [string]$Configuration = 'Release',
+    [ValidateSet('net8.0-windows', 'net10.0-windows')]
+    [string]$TargetFramework = 'net10.0-windows',
+    [string]$DotnetPath = 'dotnet',
     [switch]$SkipBuild,
     [int]$Count = 100000,
     [string]$OutputPath = (Join-Path $env:TEMP ('photoviewer-wpf-catalog-interaction-' + [guid]::NewGuid().ToString('N') + '.json')),
@@ -13,7 +16,7 @@ if ($OverallTimeoutSeconds -lt 1) { throw 'OverallTimeoutSeconds must be positiv
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\$TargetFramework\PhotoViewer.Wpf.exe"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 $outputFullPath = [IO.Path]::GetFullPath($OutputPath)
 $progressPath = $outputFullPath + '.progress'
@@ -22,7 +25,15 @@ if (-not $outputFullPath.StartsWith($tempRoot, [StringComparison]::OrdinalIgnore
 }
 
 if (-not $SkipBuild) {
-    dotnet build $project -c $Configuration --nologo
+    if ($TargetFramework -eq 'net10.0-windows') {
+        & $DotnetPath build $project -c $Configuration --nologo
+    }
+    else {
+        & $DotnetPath msbuild $project -restore `
+            "-property:TargetFramework=$TargetFramework" `
+            "-property:Configuration=$Configuration" `
+            -nologo -verbosity:minimal
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "WPF executable was not found: $exe" }
