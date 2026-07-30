@@ -17271,6 +17271,13 @@ public partial class App : Application
         string smokeRoot = Directory.CreateTempSubdirectory("aibos-enhancement-jobs-workspace-").FullName;
         string sourcePath = Path.Combine(smokeRoot, "images", "workspace-source.png");
         string outputPath = Path.Combine(smokeRoot, "stores", "enhance", "outputs", "workspace-output.webp");
+        string videoOutputPath = Path.Combine(
+            smokeRoot,
+            "stores",
+            "enhance",
+            "outputs",
+            "Videos",
+            "workspace-video.mp4");
         string statePath = Path.Combine(smokeRoot, "stores", "state.json");
         string favoritesPath = Path.Combine(smokeRoot, "stores", "favorites.json");
         string seenPath = Path.Combine(smokeRoot, "stores", "seen.json");
@@ -17352,7 +17359,7 @@ public partial class App : Application
                     int progress,
                     string? output = null,
                     string? error = null,
-                    string operation = "upscale",
+                    string? operation = "upscale",
                     string createdAt = "2026-07-23T00:00:00.000Z",
                     int? queueOrder = null) => new
                 {
@@ -17368,6 +17375,24 @@ public partial class App : Application
                     queueOrder,
                     outputPath = output,
                     errorMessage = error,
+                    createdAt,
+                    updatedAt = "2026-07-23T00:00:01.000Z",
+                };
+
+                object LegacyJob(
+                    string id,
+                    string status,
+                    int progress,
+                    string createdAt = "2026-07-23T00:00:00.000Z") => new
+                {
+                    id,
+                    sourceId = sourcePath,
+                    sourcePath,
+                    sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
+                    presetId = "anime-sharp-x2",
+                    adapterId = "realesrgan-ncnn",
+                    status,
+                    progress,
                     createdAt,
                     updatedAt = "2026-07-23T00:00:01.000Z",
                 };
@@ -17398,6 +17423,25 @@ public partial class App : Application
                             outputDeleted ? null : outputPath,
                             operation: "photoreal"),
                         Job("canceled-job", "canceled", 11, error: "Canceled by user"),
+                        LegacyJob("legacy-reader-job", "canceled", 7),
+                        Job(
+                            "video-reader-job",
+                            "succeeded",
+                            100,
+                            output: videoOutputPath,
+                            operation: "video"),
+                        Job(
+                            "future-reader-job",
+                            "failed",
+                            0,
+                            error: "future operation",
+                            operation: "future-motion-v2"),
+                        Job(
+                            "null-operation-reader-job",
+                            "failed",
+                            0,
+                            error: "null operation",
+                            operation: null),
                     };
                     if (retryCreated)
                         jobs.Insert(0, Job(
@@ -17595,6 +17639,14 @@ public partial class App : Application
                     1024,
                     "workspace rerun prompt",
                     1.4);
+                File.WriteAllText(
+                    jobsPath,
+                    JsonSerializer.Serialize(new
+                    {
+                        version = 1,
+                        jobs = CurrentJobs(),
+                        smokeMarker = "keep-jobs",
+                    }));
                 window.Show();
                 await window.LoadFolderSetAsync([Path.GetDirectoryName(sourcePath)!], commitRecent: false);
                 var storesBefore = environment
@@ -17657,6 +17709,57 @@ public partial class App : Application
                 window.SelectEnhancementJobsFilterForSmoke("canceled");
                 EnhancementJobsWorkspaceSmokeSnapshot canceled = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("all");
+
+                var videoReaderView =
+                    window.EnhancementJobViewIdentityForSmoke("video-reader-job")
+                        as EnhancementWorkspaceJobView;
+                var futureReaderView =
+                    window.EnhancementJobViewIdentityForSmoke("future-reader-job")
+                        as EnhancementWorkspaceJobView;
+                var nullOperationReaderView =
+                    window.EnhancementJobViewIdentityForSmoke("null-operation-reader-job")
+                        as EnhancementWorkspaceJobView;
+                var legacyReaderView =
+                    window.EnhancementJobViewIdentityForSmoke("legacy-reader-job")
+                        as EnhancementWorkspaceJobView;
+                int requestsBeforeReaderOnlyActions = requests.Count;
+                bool videoReaderSafe = videoReaderView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        CanCancel: false,
+                        CanRetry: false,
+                        CanReorder: false,
+                        CanUseOutput: false,
+                    }
+                    && !window.OpenEnhancementJobOutputForSmoke("video-reader-job")
+                    && !await window.DeleteEnhancementJobOutputForSmokeAsync("video-reader-job");
+                bool unknownOperationSafe = futureReaderView is
+                    {
+                        Operation: "unsupported",
+                        CanCancel: false,
+                        CanRetry: false,
+                        CanReorder: false,
+                        CanUseOutput: false,
+                    }
+                    && nullOperationReaderView is
+                    {
+                        Operation: "unsupported",
+                        CanCancel: false,
+                        CanRetry: false,
+                        CanReorder: false,
+                        CanUseOutput: false,
+                    }
+                    && !await window.CancelEnhancementJobForSmokeAsync("future-reader-job")
+                    && !await window.RetryEnhancementJobForSmokeAsync("future-reader-job")
+                    && !await window.CancelEnhancementJobForSmokeAsync("null-operation-reader-job")
+                    && !await window.RetryEnhancementJobForSmokeAsync("null-operation-reader-job");
+                bool legacyMissingOperation =
+                    legacyReaderView?.Operation == "upscale";
+                bool readerOnlyNoMutation =
+                    requests.Count == requestsBeforeReaderOnlyActions;
+                bool imageVersionsExcludeVideo =
+                    window.EnhancedCandidateCountForSmoke == 1;
 
                 bool moveNextIssued = await window.MoveEnhancementJobForSmokeAsync(
                     "queue-later-job",
@@ -17736,7 +17839,10 @@ public partial class App : Application
                         ["active-job", "queue-later-job", "queue-first-job"],
                         StringComparer.Ordinal);
                 bool operationLabelsVisible = initial.VisibleOperationLabels.Contains("HQ  高画質化", StringComparer.Ordinal)
-                    && completed.VisibleOperationLabels.SequenceEqual(["REAL  実写化"], StringComparer.Ordinal);
+                    && initial.VisibleOperationLabels.Contains("VIDEO  動画化", StringComparer.Ordinal)
+                    && initial.VisibleOperationLabels.Contains("UNSUPPORTED  未対応", StringComparer.Ordinal)
+                    && completed.VisibleOperationLabels.Contains("REAL  実写化", StringComparer.Ordinal)
+                    && completed.VisibleOperationLabels.Contains("VIDEO  動画化", StringComparer.Ordinal);
                 bool rerunSettingsContract = false;
                 if (!string.IsNullOrWhiteSpace(rerunBody))
                 {
@@ -17752,7 +17858,7 @@ public partial class App : Application
                         && body.GetProperty("maxDimension").GetInt32() == 1024;
                 }
                 ok = initial.Visible
-                    && initial.Total == 7
+                    && initial.Total == 11
                     && initial.Active == 3
                     && initial.Polling
                     && passiveOpen
@@ -17767,32 +17873,37 @@ public partial class App : Application
                     && running.Filtered == 1
                     && queued.Filtered == 2
                     && queueInventoryOrdered
-                    && failed.Filtered == 2
-                    && completed.Filtered == 1
-                    && canceled.Filtered == 1
+                    && failed.Filtered == 4
+                    && completed.Filtered == 2
+                    && canceled.Filtered == 2
                     && operationLabelsVisible
+                    && videoReaderSafe
+                    && unknownOperationSafe
+                    && legacyMissingOperation
+                    && readerOnlyNoMutation
+                    && imageVersionsExcludeVideo
                     && moveNextIssued
                     && cancelIssued
-                    && afterCancel.Total == 7
+                    && afterCancel.Total == 11
                     && afterCancel.Active == 2
                     && afterCancel.Polling
                     && failedCancelIssued
-                    && afterFailedCancel.Total == 7
+                    && afterFailedCancel.Total == 11
                     && afterFailedCancel.Active == 2
                     && afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
-                    && canceledAfterActions.Filtered == 3
+                    && canceledAfterActions.Filtered == 4
                     && retryIssued
-                    && afterRetry.Total == 8
+                    && afterRetry.Total == 12
                     && afterRetry.Active == 3
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 3", StringComparison.Ordinal))
                     && canceledRetryIssued
-                    && afterCanceledRetry.Total == 9
+                    && afterCanceledRetry.Total == 13
                     && afterCanceledRetry.Active == 4
                     && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
                     && rerunIssued
                     && rerunSettingsContract
-                    && afterRerun.Total == 10
+                    && afterRerun.Total == 14
                     && afterRerun.Active == 5
                     && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
                     && clearQueuedIssued
@@ -17859,6 +17970,11 @@ public partial class App : Application
                     closeButtonClosedWorkspace,
                     queueInventoryOrdered,
                     operationLabelsVisible,
+                    videoReaderSafe,
+                    unknownOperationSafe,
+                    legacyMissingOperation,
+                    readerOnlyNoMutation,
+                    imageVersionsExcludeVideo,
                     stableJobViews,
                     openedOutput,
                     routesOk,

@@ -1949,7 +1949,7 @@ public partial class MainWindow : Window
                     _catalogEnhancedOutputsByPath,
                     StringComparer.OrdinalIgnoreCase),
                 _catalogEnhancementVersionsByPath
-                    .Where(static item => item.Value.Any(static version => version.Operation != "photoreal"))
+                    .Where(static item => item.Value.Any(static version => version.Operation == "upscale"))
                     .Select(static item => item.Key)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase),
                 _catalogEnhancementVersionsByPath
@@ -3755,6 +3755,9 @@ public partial class MainWindow : Window
                 if (!TryGetStringProperty(job, "status", out string? status) ||
                     !string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
                     continue;
+                string operation = ReadEnhancementOperation(job);
+                if (!IsImageEnhancementOperation(operation))
+                    continue;
                 if (!TryBuildManagedEnhancedOutput(
                         job,
                         out string resolvedSource,
@@ -3765,12 +3768,9 @@ public partial class MainWindow : Window
                 }
 
                 TryGetStringProperty(job, "id", out string? jobId);
-                TryGetStringProperty(job, "operation", out string? operation);
                 var version = new ManagedEnhancementVersion(
                     jobId ?? "",
-                    string.Equals(operation, "photoreal", StringComparison.Ordinal)
-                        ? "photoreal"
-                        : "upscale",
+                    operation,
                     output);
                 if (!nextVersions.TryGetValue(resolvedSource, out List<ManagedEnhancementVersion>? versions))
                 {
@@ -4159,7 +4159,7 @@ public partial class MainWindow : Window
         {
             if (version.Operation == "photoreal")
                 photorealized = true;
-            else
+            else if (version.Operation == "upscale")
                 upscaled = true;
             if (upscaled && photorealized)
                 break;
@@ -6978,11 +6978,16 @@ public partial class MainWindow : Window
 
     private async Task StartGalleryContextEnhancementAsync(string operation)
     {
+        if (!IsImageEnhancementOperation(operation))
+        {
+            SetStatusToast("Unsupported Enhancement operation.");
+            return;
+        }
         if (SelectedTile() is not Tile { IsRealFile: true } tile
             || !File.Exists(tile.Path))
             return;
 
-        string normalizedOperation = operation == "photoreal" ? "photoreal" : "upscale";
+        string normalizedOperation = operation;
         string sourcePath = tile.Path;
         if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity)
             || !File.Exists(sourceIdentity))
@@ -14146,7 +14151,6 @@ public partial class MainWindow : Window
 
         TryGetStringProperty(job, "sourceId", out string? sourceId);
         TryGetStringProperty(job, "sourcePath", out string? sourcePath);
-        TryGetStringProperty(job, "operation", out string? operation);
         TryGetStringProperty(job, "outputPath", out string? outputPath);
         TryGetStringProperty(job, "errorMessage", out string? errorMessage);
         bool cancelRequested = job.TryGetProperty("cancelRequested", out JsonElement cancelRequestedElement)
@@ -14169,7 +14173,7 @@ public partial class MainWindow : Window
         }
         return new ModalEnhancementJobSnapshot(
             id!,
-            string.Equals(operation, "photoreal", StringComparison.Ordinal) ? "photoreal" : "upscale",
+            ReadEnhancementOperation(job),
             sourceId ?? "",
             sourcePath ?? "",
             status!,
@@ -14200,9 +14204,11 @@ public partial class MainWindow : Window
     private static ModalEnhancementJobSnapshot? SelectModalEnhancementJob(
         IReadOnlyList<ModalEnhancementJobSnapshot> parsed)
     {
-        return parsed.FirstOrDefault(static job => job.Status is "queued" or "running")
-            ?? parsed.FirstOrDefault(static job => job.Status == "succeeded" && !string.IsNullOrWhiteSpace(job.OutputPath))
-            ?? parsed.FirstOrDefault();
+        IEnumerable<ModalEnhancementJobSnapshot> imageJobs =
+            parsed.Where(static job => IsImageEnhancementOperation(job.Operation));
+        return imageJobs.FirstOrDefault(static job => job.Status is "queued" or "running")
+            ?? imageJobs.FirstOrDefault(static job => job.Status == "succeeded" && !string.IsNullOrWhiteSpace(job.OutputPath))
+            ?? imageJobs.FirstOrDefault();
     }
 
     private async Task RefreshModalEnhancementStateAsync(string sourcePath, long generation, bool showUnavailableError)
@@ -14247,6 +14253,9 @@ public partial class MainWindow : Window
 
     private void ApplyModalEnhancementJob(Tile tile, ModalEnhancementJobSnapshot? job)
     {
+        if (job is not null && !IsImageEnhancementOperation(job.Operation))
+            job = null;
+
         // A filtered endpoint should only return jobs for the requested image,
         // but keep the desktop client defensive: never attach another image's
         // job/output to the currently selected tile.
@@ -14262,7 +14271,7 @@ public partial class MainWindow : Window
         }
 
         _modalEnhancementJobId = job?.Id;
-        _modalEnhancementOperation = job?.Operation == "photoreal" ? "photoreal" : "upscale";
+        _modalEnhancementOperation = job?.Operation ?? "upscale";
         _modalEnhancementJobStatus = job?.Status;
         _modalEnhancementProgress = job?.Progress ?? 0;
         _modalEnhancementError = job?.ErrorMessage;
@@ -14397,6 +14406,12 @@ public partial class MainWindow : Window
 
     private async Task StartModalEnhancementOperationAsync(string requestedOperation)
     {
+        if (!IsImageEnhancementOperation(requestedOperation))
+        {
+            _modalEnhancementError = "Unsupported Enhancement operation.";
+            UpdateModalEnhancementActionControls();
+            return;
+        }
         bool active = _modalEnhancementJobStatus is "queued" or "running";
         if (_modalEnhancementRequestPending
             || active
@@ -14418,7 +14433,7 @@ public partial class MainWindow : Window
         }
         string? requestJobId = _modalEnhancementJobId;
         string previousOperation = _modalEnhancementOperation;
-        string normalizedOperation = requestedOperation == "photoreal" ? "photoreal" : "upscale";
+        string normalizedOperation = requestedOperation;
         _modalEnhancementOperation = normalizedOperation;
         _modalEnhancementRequestPending = true;
         _modalEnhancementError = null;

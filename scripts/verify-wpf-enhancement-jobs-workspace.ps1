@@ -12,6 +12,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
 $queueContractPath = Join-Path $repoRoot "contracts\enhancement-queue-order-v1.json"
 $healthContractPath = Join-Path $repoRoot "contracts\enhancement-health-v1.json"
+$videoContractPath = Join-Path $repoRoot "contracts\enhancement-video-v1.json"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-enhancement-jobs-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -71,6 +72,50 @@ try {
     if ($healthContractChecks -contains $false) {
         throw "Enhancement health contract fields are invalid."
     }
+    if (-not (Test-Path -LiteralPath $videoContractPath -PathType Leaf)) {
+        throw "Enhancement video contract was not found: $videoContractPath"
+    }
+    $videoContract = Get-Content -LiteralPath $videoContractPath -Raw | ConvertFrom-Json
+    $videoContractChecks = @(
+        ($videoContract.schemaVersion -eq 1)
+        ($videoContract.contractId -eq "PV-ENHANCE-VIDEO-001")
+        ($videoContract.protocol -eq "aibos.enhancement-video/v1")
+        ($videoContract.jobStoreVersion -eq 1)
+        (($videoContract.operationEnvelope.acceptedValues -join ",") -eq
+            "upscale,photoreal,video")
+        ($videoContract.operationEnvelope.legacyMissingOperation -eq "upscale")
+        ($videoContract.operationEnvelope.storeVersionChange -eq $false)
+        ($videoContract.normalV1.presetId -eq "wan22-ti2v-5b-normal-v1")
+        ($videoContract.normalV1.backendId -eq "wan22-ti2v-5b-core-v1")
+        ($videoContract.normalV1.nominalDurationSeconds -eq 6)
+        ($videoContract.normalV1.playbackFps -eq 16)
+        ($videoContract.normalV1.frameCount -eq 97)
+        ($videoContract.normalV1.maximumPixelArea -eq 409600)
+        ($videoContract.normalV1.alignment -eq 32)
+        ($videoContract.normalV1.steps -eq 20)
+        ($videoContract.normalV1.cfg -eq 5)
+        ($videoContract.normalV1.sampler -eq "uni_pc")
+        ($videoContract.normalV1.scheduler -eq "simple")
+        ($videoContract.normalV1.shift -eq 8)
+        ($videoContract.normalV1.seedRange.maximum -eq 2147483647)
+        ($videoContract.normalV1.seedRange.fixedAtEnqueue -eq $true)
+        ($videoContract.managedOutput.folder -eq "Videos")
+        ($videoContract.managedOutput.flat -eq $true)
+        ($videoContract.readerFirst.wpfWriterEnabled -eq $false)
+        ($videoContract.readerFirst.h25WriterEnabled -eq $false)
+        ($videoContract.readerFixture.expectedOperations.'legacy-missing-operation' -eq "upscale")
+        ($videoContract.readerFixture.expectedOperations.'explicit-video' -eq "video")
+        ($videoContract.readerFixture.expectedOperations.'future-operation' -eq "unsupported")
+        ($videoContract.readerFixture.expectedOperations.'null-operation' -eq "unsupported")
+        (($videoContract.readerFixture.expectedImageVersionIds -join ",") -eq
+            "legacy-missing-operation,explicit-upscale,explicit-photoreal")
+        (($videoContract.readerFixture.expectedReaderOnlyIds -join ",") -eq
+            "explicit-video,future-operation,null-operation")
+        ($videoContract.readerFixture.expectedMutationRequests -eq 0)
+    )
+    if ($videoContractChecks -contains $false) {
+        throw "Enhancement video contract fields are invalid."
+    }
 
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
@@ -123,6 +168,11 @@ try {
         'sourceOpenedInViewer',
         'queueInventoryOrdered',
         'operationLabelsVisible',
+        'videoReaderSafe',
+        'unknownOperationSafe',
+        'legacyMissingOperation',
+        'readerOnlyNoMutation',
+        'imageVersionsExcludeVideo',
         'stableJobViews',
         'failedCancelIssued',
         'moveNextIssued',

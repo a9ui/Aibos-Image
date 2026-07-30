@@ -53,7 +53,9 @@ include:
 - `favorites.json`, `seen.json`, `settings.json`, `albums.json`,
   `search-history.json`, and `recent-folders.json`;
 - `enhance/jobs.json`, plus managed outputs at the parent selected by
-  `enhance/output-root.txt` (falling back to `enhance/outputs/**`).
+  `enhance/output-root.txt` (falling back to `enhance/outputs/**`). Image
+  outputs remain under `Upscaled/` and `Photorealized/`; the reader-first
+  managed-video contract reserves the sibling flat `Videos/` folder.
 
 Renderer-local presentation state, including WPF window geometry, panel sizes,
 keyboard bindings, current selection, preview layout, and named AI

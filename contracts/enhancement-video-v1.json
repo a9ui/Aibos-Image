@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-001",
+  "protocol": "aibos.enhancement-video/v1",
+  "jobStoreVersion": 1,
+  "operationEnvelope": {
+    "acceptedValues": [
+      "upscale",
+      "photoreal",
+      "video"
+    ],
+    "legacyMissingOperation": "upscale",
+    "presentInvalidOrUnknownOperation": "reader-only unsupported row; never coerce, execute, retry, reorder, open, or delete as an image enhancement",
+    "storeVersionChange": false
+  },
+  "videoSnapshot": {
+    "mediaKind": "video",
+    "field": "video",
+    "requiredFields": [
+      "presetId",
+      "backendId",
+      "requested.durationSeconds",
+      "requested.playbackFps",
+      "requested.prompt",
+      "effective.frameCount",
+      "effective.width",
+      "effective.height",
+      "effective.positivePrompt",
+      "effective.negativePrompt",
+      "seed",
+      "codec",
+      "bitDepth"
+    ],
+    "unknownFields": "preserve when a compatible writer rewrites the row",
+    "retry": "reuse the complete persisted snapshot and seed"
+  },
+  "normalV1": {
+    "presetId": "wan22-ti2v-5b-normal-v1",
+    "backendId": "wan22-ti2v-5b-core-v1",
+    "model": "wan2.2_ti2v_5B_fp16.safetensors",
+    "nominalDurationSeconds": 6,
+    "playbackFps": 16,
+    "frameCount": 97,
+    "maximumPixelArea": 409600,
+    "alignment": 32,
+    "steps": 20,
+    "cfg": 5,
+    "sampler": "uni_pc",
+    "scheduler": "simple",
+    "shift": 8,
+    "denoise": 1,
+    "seedRange": {
+      "minimum": 0,
+      "maximum": 2147483647,
+      "fixedAtEnqueue": true
+    },
+    "codec": "h264",
+    "container": "mp4",
+    "bitDepth": 8,
+    "blankPrompt": "built-in conservative anime idle motion with identity, line-art, composition, first-frame, and locked-camera preservation",
+    "customPrompt": "preservation preamble plus the user's instruction; blank-only idle and locked-camera clauses must not contradict an explicit custom motion request"
+  },
+  "normalization": {
+    "frameCount": "4 * floor(durationSeconds * playbackFps / 4) + 1",
+    "resolution": [
+      "A = 409600 and r = sourceWidth / sourceHeight",
+      "w0 = sqrt(A * r) and h0 = sqrt(A / r)",
+      "round both dimensions to the nearest multiple of 32",
+      "while width * height exceeds A, reduce by 32 the dimension that produces the smaller source-aspect error",
+      "prepare a separate contain-resized, edge-padded PNG at the exact bucket; never crop or rewrite the source"
+    ],
+    "examples": {
+      "16:9": "832x480",
+      "3:2": "768x512",
+      "4:3": "736x544",
+      "1:1": "640x640"
+    }
+  },
+  "managedOutput": {
+    "folder": "Videos",
+    "flat": true,
+    "extension": ".mp4",
+    "identity": "job id, safe source name, source signature hash, and video preset hash",
+    "sourceMutation": false,
+    "staging": "a core SaveVideo staging file is allowed only as an exact adapter-owned transient and must be removed after success, cancel, or failure"
+  },
+  "readerFirst": {
+    "canonicalAuthority": "a9ui/Aibos-Image",
+    "wpfWriterEnabled": false,
+    "h25WriterEnabled": false,
+    "requirements": [
+      "Aibos reads the canonical fixture without treating video as an image version",
+      "H25 vendors this exact fixture revision and fails closed on unknown operations",
+      "both exact readers pass before H25 can emit operation=video",
+      "rollback keeps the video-capable readers after any video row is written"
+    ]
+  },
+  "readerFixture": {
+    "jobs": [
+      {
+        "id": "legacy-missing-operation",
+        "status": "succeeded",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "outputPath": "${OUTPUT_ROOT}/Upscaled/legacy.webp"
+      },
+      {
+        "id": "explicit-upscale",
+        "operation": "upscale",
+        "status": "succeeded",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "outputPath": "${OUTPUT_ROOT}/Upscaled/upscale.webp"
+      },
+      {
+        "id": "explicit-photoreal",
+        "operation": "photoreal",
+        "status": "succeeded",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "outputPath": "${OUTPUT_ROOT}/Photorealized/photoreal.png"
+      },
+      {
+        "id": "explicit-video",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "succeeded",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "outputPath": "${OUTPUT_ROOT}/Videos/video.mp4",
+        "presetId": "wan22-ti2v-5b-normal-v1",
+        "video": {
+          "presetId": "wan22-ti2v-5b-normal-v1",
+          "backendId": "wan22-ti2v-5b-core-v1",
+          "requested": {
+            "durationSeconds": 6,
+            "playbackFps": 16,
+            "prompt": ""
+          },
+          "effective": {
+            "frameCount": 97,
+            "width": 832,
+            "height": 480,
+            "positivePrompt": "fixture-positive",
+            "negativePrompt": "fixture-negative"
+          },
+          "seed": 123456789,
+          "codec": "h264",
+          "bitDepth": 8,
+          "futureVideoField": {
+            "keep": true
+          }
+        }
+      },
+      {
+        "id": "future-operation",
+        "operation": "future-motion-v2",
+        "status": "queued",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "futureJobField": {
+          "keep": true
+        }
+      },
+      {
+        "id": "null-operation",
+        "operation": null,
+        "status": "failed",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png"
+      }
+    ],
+    "expectedOperations": {
+      "legacy-missing-operation": "upscale",
+      "explicit-upscale": "upscale",
+      "explicit-photoreal": "photoreal",
+      "explicit-video": "video",
+      "future-operation": "unsupported",
+      "null-operation": "unsupported"
+    },
+    "expectedImageVersionIds": [
+      "legacy-missing-operation",
+      "explicit-upscale",
+      "explicit-photoreal"
+    ],
+    "expectedReaderOnlyIds": [
+      "explicit-video",
+      "future-operation",
+      "null-operation"
+    ],
+    "expectedMutationRequests": 0
+  }
+}
