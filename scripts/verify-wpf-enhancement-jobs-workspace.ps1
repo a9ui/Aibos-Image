@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
+$queueContractPath = Join-Path $repoRoot "contracts\enhancement-queue-order-v1.json"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-enhancement-jobs-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -22,6 +23,28 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
 try {
+    if (-not (Test-Path -LiteralPath $queueContractPath -PathType Leaf)) {
+        throw "Enhancement queue ordering contract was not found: $queueContractPath"
+    }
+    $queueContract = Get-Content -LiteralPath $queueContractPath -Raw | ConvertFrom-Json
+    $queueContractChecks = @(
+        ($queueContract.schemaVersion -eq 1)
+        ($queueContract.contractId -eq "PV-ENHANCE-QUEUE-001")
+        ($queueContract.protocol -eq "aibos.enhancement-queue-order/v1")
+        ($queueContract.queueOrder.field -eq "queueOrder")
+        ($queueContract.queueOrder.type -eq "non-negative integer")
+        ($queueContract.workerRules.singleWorker -eq $true)
+        ($queueContract.workerRules.runningJobIsNeverPreemptedByReorder -eq $true)
+        ($queueContract.workerRules.pumpAfterRunningCancel -eq $true)
+        ($queueContract.workerRules.pumpAfterStartupRecovery -eq $true)
+        (($queueContract.readerFixture.expectedVisibleOrder -join ",") -eq
+            "running,ordered-first,ordered-second,legacy-earlier,invalid-negative,legacy-later")
+        ($queueContract.readerFixture.expectedClaimedQueuedJob -eq "ordered-first")
+    )
+    if ($queueContractChecks -contains $false) {
+        throw "Enhancement queue ordering contract fields are invalid."
+    }
+
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
@@ -68,6 +91,10 @@ try {
         'operationLabelsVisible',
         'stableJobViews',
         'failedCancelIssued',
+        'moveNextIssued',
+        'canceledRetryIssued',
+        'rerunSettingsContract',
+        'clearQueuedIssued',
         'jobsRestoredAfterViewerClose',
         'sourceUnchanged',
         'storesUnchanged',

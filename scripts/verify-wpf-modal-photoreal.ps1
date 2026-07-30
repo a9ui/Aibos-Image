@@ -49,6 +49,7 @@ try {
         'requestContract',
         'resetPromptContract',
         'appSettingsPromptContract',
+        'appSettingsControlsContract',
         'styleContract',
         'stylePersistenceContract',
         'styleReloadContract',
