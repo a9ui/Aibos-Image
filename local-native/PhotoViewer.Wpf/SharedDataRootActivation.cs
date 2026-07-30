@@ -42,6 +42,9 @@ internal static class SharedDataRootActivation
     internal const string SearchHistoryEnvironmentVariable = "PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH";
     internal const string RecentFoldersEnvironmentVariable = "PHOTOVIEWER_WPF_RECENT_PATH";
     internal const string EnhancementJobsEnvironmentVariable = "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH";
+    internal const string EnhancementOutputRootEnvironmentVariable = "PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT";
+    internal const string SharedEnhancementOutputRootEnvironmentVariable = "PVU_ENHANCE_OUTPUT_ROOT";
+    internal const string EnhancementOutputRootConfigFileName = "output-root.txt";
 
     private static readonly (string EnvironmentVariable, string[] RelativeSegments)[] Stores =
     [
@@ -230,10 +233,39 @@ internal static class SharedDataRootActivation
     }
 
     internal static string ManagedOutputsRoot(SharedDataRootActivationResult activation)
-        => Path.Combine(
-            Path.GetDirectoryName(
-                activation.Paths[EnhancementJobsEnvironmentVariable])!,
-            "outputs");
+        => ResolveManagedOutputsRoot(
+            activation.Paths[EnhancementJobsEnvironmentVariable]);
+
+    internal static string ResolveManagedOutputsRoot(string enhancementJobsPath)
+    {
+        string? configuredRoot =
+            Environment.GetEnvironmentVariable(EnhancementOutputRootEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            configuredRoot =
+                Environment.GetEnvironmentVariable(SharedEnhancementOutputRootEnvironmentVariable);
+        }
+
+        string enhanceStateRoot = Path.GetDirectoryName(
+            Path.GetFullPath(enhancementJobsPath))!;
+        if (string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            string configPath = Path.Combine(
+                enhanceStateRoot,
+                EnhancementOutputRootConfigFileName);
+            if (File.Exists(configPath))
+                configuredRoot = File.ReadAllText(configPath).Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(configuredRoot))
+            return Path.Combine(enhanceStateRoot, "outputs");
+        if (!Path.IsPathFullyQualified(configuredRoot))
+        {
+            throw new InvalidDataException(
+                $"{EnhancementOutputRootConfigFileName} must contain an absolute path.");
+        }
+        return Path.GetFullPath(configuredRoot);
+    }
 
     internal static void DisposeProcessLease()
     {

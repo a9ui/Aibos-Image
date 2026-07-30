@@ -3946,7 +3946,8 @@ public partial class MainWindow : Window
     }
 
     private static string ResolvedManagedEnhancementOutputsRoot
-        => Path.Combine(Path.GetDirectoryName(ResolvedEnhancementJobsPath)!, "outputs");
+        => SharedDataRootActivation.ResolveManagedOutputsRoot(
+            ResolvedEnhancementJobsPath);
 
     private bool TryResolveEnhancementSourceIdentity(string? path, out string identity)
     {

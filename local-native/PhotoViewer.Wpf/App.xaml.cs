@@ -16907,11 +16907,19 @@ public partial class App : Application
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousJobsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH");
+        string? previousOutputRoot = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT");
+        string? previousSharedOutputRoot = Environment.GetEnvironmentVariable("PVU_ENHANCE_OUTPUT_ROOT");
 
         PrepareSharedSeenSmokeEnvironment(smokeRoot);
         string jobsPath = Path.Combine(smokeRoot, ".cache", "enhance", "jobs.json");
-        string outputRoot = Path.Combine(Path.GetDirectoryName(jobsPath)!, "outputs");
+        string outputRoot = Path.Combine(smokeRoot, "external-managed-outputs");
         Directory.CreateDirectory(outputRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
+        File.WriteAllText(
+            Path.Combine(
+                Path.GetDirectoryName(jobsPath)!,
+                SharedDataRootActivation.EnhancementOutputRootConfigFileName),
+            outputRoot);
 
         string upscaleSource = Path.Combine(fullFolder, fixtureNames[0]);
         string photorealSource = Path.Combine(fullFolder, fixtureNames[1]);
@@ -16932,6 +16940,8 @@ public partial class App : Application
             missingOutput,
             missingSource);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", jobsPath);
+        Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT", null);
+        Environment.SetEnvironmentVariable("PVU_ENHANCE_OUTPUT_ROOT", null);
         string beforeJobsJson = File.ReadAllText(jobsPath);
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -17070,6 +17080,8 @@ public partial class App : Application
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", previousFavoritesPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", previousStatePath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", previousJobsPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT", previousOutputRoot);
+                Environment.SetEnvironmentVariable("PVU_ENHANCE_OUTPUT_ROOT", previousSharedOutputRoot);
             }
 
             WriteEnhancedFilterSmokeResult(resultFullPath, result);
