@@ -376,7 +376,9 @@ or stores.
   API. Opening it performs a passive jobs read only. It polls once per second
   only while the workspace is visible and at least one job is queued or
   running, and stops polling when hidden or when all jobs are terminal.
-- Jobs may be filtered as All, Queued, Running, Completed, or Failed/Canceled.
+  - Jobs may be filtered as All, Queued, Running, Completed, or Failed.
+    Canceled records remain durable for audit and queue safety but are hidden
+    from the Jobs workspace.
   Running work is shown first and queued work is inventoried in durable FIFO
   enqueue order with an explicit waiting position. Stable job-view and
   thumbnail instances are updated in place so polling does not make thumbnails
@@ -385,7 +387,10 @@ or stores.
   in the WPF viewer when that source is present in the current catalog. Open
   output opens the exact validated managed version in that same viewer. Closing
   either image returns to the Jobs workspace with the prior filter preserved.
-- Cancel, Retry, Open output, and Delete output remain explicit user actions.
+  - Queued, running, and failed rows expose Cancel. Failed rows also expose
+    Retry. Cancel never deletes the source, a managed output, or failure
+    diagnostics; the canceled row disappears from the Jobs workspace.
+    Cancel, Retry, Open output, and Delete output remain explicit user actions.
   WPF validates source identity, source signature, and managed-output ownership
   before opening or deleting an output. The workspace does not change the
   `enhance/jobs.json` schema and never starts a worker from ordinary browsing.

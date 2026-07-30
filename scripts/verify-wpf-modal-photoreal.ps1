@@ -51,6 +51,9 @@ try {
         'appSettingsPromptContract',
         'defaultPromptContract',
         'independentCompanionContract',
+        'galleryContextNoModal',
+        'galleryContextDirectContract',
+        'modalPhotorealOperation',
         'sharedQueueRoute',
         'sourceUntouched'
     )) {

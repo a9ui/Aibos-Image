@@ -243,7 +243,7 @@ public partial class MainWindow
         foreach (JsonElement element in jobsElement.EnumerateArray())
         {
             EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(element, apiOrdinal++);
-            if (job is not null)
+            if (job is not null && job.Status != "canceled")
                 jobs.Add(job);
         }
 
@@ -365,7 +365,7 @@ public partial class MainWindow
                 "active" => job.IsActive,
                 "queued" => job.Status == "queued",
                 "running" => job.Status == "running",
-                "failed" => job.Status is "failed" or "canceled",
+                "failed" => job.Status == "failed",
                 "completed" => job.Status is "succeeded" or "deleted",
                 _ => true,
             })
@@ -726,6 +726,12 @@ public partial class MainWindow
         if (!LoadEnhancedState())
             return false;
 
+        ApplyEnhancedOutputsToVisibleCatalog();
+        return true;
+    }
+
+    private void ApplyEnhancedOutputsToVisibleCatalog()
+    {
         foreach (Tile tile in _allTiles)
         {
             bool enhanced = TryGetCatalogManagedEnhancedOutputForPath(
@@ -735,9 +741,8 @@ public partial class MainWindow
             tile.EnhancedOutputPath = outputPath;
             ApplyTileEnhancementAvailability(
                 tile,
-                GetManagedEnhancementVersionsForPath(tile.Path));
+                GetCatalogManagedEnhancementVersionsForPath(tile.Path));
         }
-        return true;
     }
 
     public async Task OpenEnhancementJobsForSmokeAsync()
@@ -778,7 +783,7 @@ public partial class MainWindow
     public async Task<bool> CancelEnhancementJobForSmokeAsync(string id)
     {
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
-        if (job is null)
+        if (job is null || !job.CanCancel)
             return false;
         await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel", "Cancel requested.");
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
@@ -788,7 +793,7 @@ public partial class MainWindow
     public async Task<bool> RetryEnhancementJobForSmokeAsync(string id)
     {
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
-        if (job is null)
+        if (job is null || !job.CanRetry)
             return false;
         await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry", "Retry queued as a new job.");
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
@@ -904,8 +909,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public int ApiOrdinal { get; }
     public int? QueuePosition { get; set; }
     public bool IsActive => Status is "queued" or "running";
-    public bool CanCancel => !_isBusy && IsActive;
-    public bool CanRetry => !_isBusy && Status is "failed" or "canceled";
+    public bool CanCancel => !_isBusy && Status is "queued" or "running" or "failed";
+    public bool CanRetry => !_isBusy && Status == "failed";
     public bool CanUseOutput => !_isBusy && Status == "succeeded" && !string.IsNullOrWhiteSpace(OutputPath);
     public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "Unknown source" : Path.GetFileName(SourcePath);
     public string PresetSummary => $"{PresetId}  ·  {AdapterId}";

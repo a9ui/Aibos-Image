@@ -37,6 +37,9 @@ public partial class App
             bool versionCycleContract = false;
             bool sourceUntouched = false;
             bool independentCompanionContract = false;
+            bool galleryContextNoModal = false;
+            bool galleryContextDirectContract = false;
+            bool modalPhotorealOperation = false;
             var requests = new List<string>();
             string createBody = "";
             try
@@ -52,9 +55,10 @@ public partial class App
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
                 string enhancementRoot = Path.Combine(storesRoot, "enhance");
                 string outputsRoot = Path.Combine(enhancementRoot, "outputs");
-                string upscaleOutputPath = Path.Combine(outputsRoot, "upscale.png");
-                string photorealOutputPath = Path.Combine(outputsRoot, "photoreal.png");
-                Directory.CreateDirectory(outputsRoot);
+                string upscaleOutputPath = Path.Combine(outputsRoot, "upscale", "upscale.png");
+                string photorealOutputPath = Path.Combine(outputsRoot, "photoreal", "photoreal.png");
+                Directory.CreateDirectory(Path.GetDirectoryName(upscaleOutputPath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(photorealOutputPath)!);
                 File.Copy(sourcePath, upscaleOutputPath);
                 File.Copy(sourcePath, photorealOutputPath);
                 var upscaleJob = new
@@ -215,6 +219,15 @@ public partial class App
                     && upWrapsToUpscale;
                 passive = requests.All(static request => request.StartsWith("GET ", StringComparison.Ordinal));
                 started = await window.StartModalPhotorealForSmokeAsync();
+                modalPhotorealOperation =
+                    window.ModalEnhancementOperationForSmoke == "photoreal";
+                int createRequestsBeforeGalleryContext = requests.Count(static request =>
+                    request == "POST /api/enhance/jobs");
+                window.CloseModalForSmoke();
+                galleryContextNoModal = await window.StartGalleryContextEnhancementForSmokeAsync("photoreal");
+                galleryContextDirectContract = galleryContextNoModal
+                    && requests.Count(static request => request == "POST /api/enhance/jobs")
+                        == createRequestsBeforeGalleryContext + 1;
 
                 using JsonDocument document = JsonDocument.Parse(createBody);
                 JsonElement body = document.RootElement;
@@ -241,9 +254,10 @@ public partial class App
                     && defaultPromptContract
                     && veryHighQualityContract
                     && independentCompanionContract
+                    && galleryContextDirectContract
                     && sharedQueueRoute
                     && sourceUntouched
-                    && window.ModalEnhancementOperationForSmoke == "photoreal";
+                    && modalPhotorealOperation;
             }
             catch (Exception ex)
             {
@@ -278,6 +292,9 @@ public partial class App
                     defaultPromptContract,
                     veryHighQualityContract,
                     independentCompanionContract,
+                    galleryContextNoModal,
+                    galleryContextDirectContract,
+                    modalPhotorealOperation,
                     sharedQueueRoute,
                     sourceUntouched,
                     requests,

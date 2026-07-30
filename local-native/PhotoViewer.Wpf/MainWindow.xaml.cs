@@ -254,6 +254,11 @@ public partial class MainWindow : Window
     private string? _enhancementReadError;
     private DateTime _enhancementJobsLastWriteTimeUtc;
     private long _enhancementJobsLength = -1;
+    private CancellationTokenSource? _enhancedStateRefreshCts;
+    private Task _enhancedStateRefreshTask = Task.CompletedTask;
+    private long _enhancedStateRefreshGeneration;
+    private DateTime _enhancedStateQueuedWriteTimeUtc;
+    private long _enhancedStateQueuedLength = -1;
     private Rect _restoreBounds;
     private bool _fakeMaximized;
     private bool _normalizingNativeMaximize;
@@ -665,6 +670,11 @@ public partial class MainWindow : Window
                 app.AccessibilityPaletteChanged -= App_AccessibilityPaletteChanged;
             Interlocked.Increment(ref _activeAlbumAsyncGeneration);
             Interlocked.Exchange(ref _activeAlbumAvailabilityCts, null)?.Cancel();
+            _enhancedStateRefreshGeneration++;
+            CancellationTokenSource? enhancedStateRefreshCts =
+                Interlocked.Exchange(ref _enhancedStateRefreshCts, null);
+            enhancedStateRefreshCts?.Cancel();
+            enhancedStateRefreshCts?.Dispose();
             CancelPreviewTabHoverDecode();
             CancelThumbnailViewportLoading();
             _favoriteWriterPumpTimer?.Stop();
@@ -1481,6 +1491,16 @@ public partial class MainWindow : Window
     private sealed record DisplayedAssetResolution(string Path, long SizeBytes, bool Enhanced, string? FallbackReason);
 
     private sealed record EnhancementApiResponse(bool Ok, int StatusCode, JsonElement? Payload, string Error);
+    private sealed record EnhancedStateSnapshot(
+        Dictionary<string, ManagedEnhancedOutput> Outputs,
+        Dictionary<string, ManagedEnhancedOutput> CatalogOutputsByPath,
+        Dictionary<string, List<ManagedEnhancementVersion>> Versions,
+        Dictionary<string, List<ManagedEnhancementVersion>> CatalogVersionsByPath,
+        int JobsRead,
+        int CandidateCount,
+        DateTime LastWriteTimeUtc,
+        long Length);
+    private sealed record EnhancedStateReadResult(EnhancedStateSnapshot? Snapshot, string? Error);
 
     private async void OpenFolder_Click(object sender, RoutedEventArgs e) => await ChooseAndLoadFolderAsync();
 
@@ -3668,23 +3688,38 @@ public partial class MainWindow : Window
 
     private bool LoadEnhancedState()
     {
-        string path = ResolvedEnhancementJobsPath;
+        EnhancedStateReadResult result = ReadEnhancedStateSnapshot(ResolvedEnhancementJobsPath);
+        if (result.Snapshot is null)
+        {
+            _enhancementReadOk = false;
+            _enhancementReadError = result.Error;
+            return false;
+        }
+
+        ApplyEnhancedStateSnapshot(result.Snapshot);
+        return true;
+    }
+
+    private EnhancedStateReadResult ReadEnhancedStateSnapshot(string path)
+    {
         var jobsInfo = new FileInfo(path);
         if (!jobsInfo.Exists)
         {
-            _enhancedOutputs.Clear();
-            _catalogEnhancedOutputsByPath.Clear();
-            _enhancementVersions.Clear();
-            _catalogEnhancementVersionsByPath.Clear();
-            _enhancementJobsRead = 0;
-            _enhancedCandidateCount = 0;
-            _enhancementReadOk = true;
-            _enhancementReadError = null;
-            _enhancementJobsLastWriteTimeUtc = default;
-            _enhancementJobsLength = -1;
-            return true;
+            return new EnhancedStateReadResult(
+                new EnhancedStateSnapshot(
+                    new Dictionary<string, ManagedEnhancedOutput>(StringComparer.OrdinalIgnoreCase),
+                    new Dictionary<string, ManagedEnhancedOutput>(StringComparer.OrdinalIgnoreCase),
+                    new Dictionary<string, List<ManagedEnhancementVersion>>(EnhancementSourceIdentityComparer),
+                    new Dictionary<string, List<ManagedEnhancementVersion>>(StringComparer.OrdinalIgnoreCase),
+                    0,
+                    0,
+                    default,
+                    -1),
+                null);
         }
 
+        DateTime observedWriteTimeUtc = jobsInfo.LastWriteTimeUtc;
+        long observedLength = jobsInfo.Length;
         var nextEnhancedOutputs = new Dictionary<string, ManagedEnhancedOutput>(
             StringComparer.OrdinalIgnoreCase);
         var nextCatalogOutputsByPath = new Dictionary<string, ManagedEnhancedOutput>(
@@ -3697,7 +3732,12 @@ public partial class MainWindow : Window
         int nextCandidateCount = 0;
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var document = JsonDocument.Parse(stream);
             if (document.RootElement.ValueKind != JsonValueKind.Object ||
                 !document.RootElement.TryGetProperty("jobs", out var jobsElement) ||
                 jobsElement.ValueKind != JsonValueKind.Array)
@@ -3756,33 +3796,44 @@ public partial class MainWindow : Window
                 }
             }
 
-            _enhancedOutputs.Clear();
-            foreach ((string source, ManagedEnhancedOutput output) in nextEnhancedOutputs)
-                _enhancedOutputs[source] = output;
-            _catalogEnhancedOutputsByPath.Clear();
-            foreach ((string alias, ManagedEnhancedOutput output) in nextCatalogOutputsByPath)
-                _catalogEnhancedOutputsByPath[alias] = output;
-            _enhancementVersions.Clear();
-            foreach ((string source, List<ManagedEnhancementVersion> versions) in nextVersions)
-                _enhancementVersions[source] = versions;
-            _catalogEnhancementVersionsByPath.Clear();
-            foreach ((string alias, List<ManagedEnhancementVersion> versions) in nextCatalogVersionsByPath)
-                _catalogEnhancementVersionsByPath[alias] = versions;
-            _enhancementJobsRead = nextJobsRead;
-            _enhancedCandidateCount = nextCandidateCount;
-            _enhancementReadOk = true;
-            _enhancementReadError = null;
-            jobsInfo.Refresh();
-            _enhancementJobsLastWriteTimeUtc = jobsInfo.Exists ? jobsInfo.LastWriteTimeUtc : default;
-            _enhancementJobsLength = jobsInfo.Exists ? jobsInfo.Length : -1;
-            return true;
+            return new EnhancedStateReadResult(
+                new EnhancedStateSnapshot(
+                    nextEnhancedOutputs,
+                    nextCatalogOutputsByPath,
+                    nextVersions,
+                    nextCatalogVersionsByPath,
+                    nextJobsRead,
+                    nextCandidateCount,
+                    observedWriteTimeUtc,
+                    observedLength),
+                null);
         }
         catch (Exception ex)
         {
-            _enhancementReadOk = false;
-            _enhancementReadError = ex.Message;
-            return false;
+            return new EnhancedStateReadResult(null, ex.Message);
         }
+    }
+
+    private void ApplyEnhancedStateSnapshot(EnhancedStateSnapshot snapshot)
+    {
+        _enhancedOutputs.Clear();
+        foreach ((string source, ManagedEnhancedOutput output) in snapshot.Outputs)
+            _enhancedOutputs[source] = output;
+        _catalogEnhancedOutputsByPath.Clear();
+        foreach ((string alias, ManagedEnhancedOutput output) in snapshot.CatalogOutputsByPath)
+            _catalogEnhancedOutputsByPath[alias] = output;
+        _enhancementVersions.Clear();
+        foreach ((string source, List<ManagedEnhancementVersion> versions) in snapshot.Versions)
+            _enhancementVersions[source] = versions;
+        _catalogEnhancementVersionsByPath.Clear();
+        foreach ((string alias, List<ManagedEnhancementVersion> versions) in snapshot.CatalogVersionsByPath)
+            _catalogEnhancementVersionsByPath[alias] = versions;
+        _enhancementJobsRead = snapshot.JobsRead;
+        _enhancedCandidateCount = snapshot.CandidateCount;
+        _enhancementReadOk = true;
+        _enhancementReadError = null;
+        _enhancementJobsLastWriteTimeUtc = snapshot.LastWriteTimeUtc;
+        _enhancementJobsLength = snapshot.Length;
     }
 
     private bool RefreshEnhancedStateIfChanged()
@@ -3806,6 +3857,81 @@ public partial class MainWindow : Window
             // The existing validated state remains usable if another process is
             // replacing jobs.json at the instant the modal opens.
             return false;
+        }
+    }
+
+    private void QueueEnhancedStateRefreshIfChanged()
+    {
+        try
+        {
+            var jobsInfo = new FileInfo(ResolvedEnhancementJobsPath);
+            DateTime writeTimeUtc = jobsInfo.Exists ? jobsInfo.LastWriteTimeUtc : default;
+            long length = jobsInfo.Exists ? jobsInfo.Length : -1;
+            bool changed = writeTimeUtc != _enhancementJobsLastWriteTimeUtc
+                || length != _enhancementJobsLength;
+            bool alreadyQueued = writeTimeUtc == _enhancedStateQueuedWriteTimeUtc
+                && length == _enhancedStateQueuedLength;
+            if (!changed || alreadyQueued)
+                return;
+
+            _enhancedStateQueuedWriteTimeUtc = writeTimeUtc;
+            _enhancedStateQueuedLength = length;
+            _enhancedStateRefreshCts?.Cancel();
+            _enhancedStateRefreshCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _enhancedStateRefreshCts = cts;
+            long generation = ++_enhancedStateRefreshGeneration;
+            _enhancedStateRefreshTask = RefreshEnhancedStateInBackgroundAsync(
+                ResolvedEnhancementJobsPath,
+                generation,
+                cts.Token);
+        }
+        catch
+        {
+            // Keep the validated in-memory state if the worker is replacing
+            // jobs.json at the exact instant the modal opens.
+        }
+    }
+
+    private async Task RefreshEnhancedStateInBackgroundAsync(
+        string path,
+        long generation,
+        CancellationToken token)
+    {
+        try
+        {
+            EnhancedStateReadResult result = await Task.Run(
+                () => ReadEnhancedStateSnapshot(path),
+                token);
+            token.ThrowIfCancellationRequested();
+            if (generation != _enhancedStateRefreshGeneration)
+                return;
+
+            if (result.Snapshot is null)
+            {
+                _enhancementReadOk = false;
+                _enhancementReadError = result.Error;
+                return;
+            }
+
+            ApplyEnhancedStateSnapshot(result.Snapshot);
+            ApplyEnhancedOutputsToVisibleCatalog();
+            if (Modal.Visibility == Visibility.Visible && SelectedTile() is Tile selected)
+            {
+                InitializeModalEnhancementVersions(selected);
+                UpdateModalEnhancedControls(TryGetModalEnhancedOutput(selected, out _));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (generation == _enhancedStateRefreshGeneration)
+            {
+                _enhancedStateQueuedWriteTimeUtc = default;
+                _enhancedStateQueuedLength = -1;
+            }
         }
     }
 
@@ -4010,6 +4136,17 @@ public partial class MainWindow : Window
         }
 
         return Array.Empty<ManagedEnhancementVersion>();
+    }
+
+    private IReadOnlyList<ManagedEnhancementVersion> GetCatalogManagedEnhancementVersionsForPath(string path)
+    {
+        string? alias = NormalizeCatalogEnhancementPath(path);
+        return alias is not null
+            && _catalogEnhancementVersionsByPath.TryGetValue(
+                alias,
+                out List<ManagedEnhancementVersion>? versions)
+            ? versions
+            : Array.Empty<ManagedEnhancementVersion>();
     }
 
     private static EnhancementAvailability GetEnhancementAvailability(
@@ -5866,6 +6003,34 @@ public partial class MainWindow : Window
         }
     }
 
+    private static async Task<BitmapSource?> LoadBitmapWithRetryAsync(
+        string path,
+        int decodePixelWidth,
+        CancellationToken token)
+    {
+        for (int attempt = 0; attempt < MaxThumbnailDecodeAttempts; attempt++)
+        {
+            token.ThrowIfCancellationRequested();
+            BitmapSource? bitmap = await Task.Run(
+                () => LoadBitmap(path, decodePixelWidth),
+                token);
+            if (bitmap is not null)
+                return bitmap;
+            if (attempt >= MaxThumbnailDecodeAttempts - 1)
+                break;
+
+            int delayMilliseconds = attempt switch
+            {
+                0 => FirstThumbnailDecodeRetryDelayMilliseconds,
+                1 => SecondThumbnailDecodeRetryDelayMilliseconds,
+                _ => ThirdThumbnailDecodeRetryDelayMilliseconds,
+            };
+            await Task.Delay(delayMilliseconds, token);
+        }
+
+        return null;
+    }
+
     private static BitmapDecodePlan? BuildBitmapDecodePlan(string path, int requestedPixelWidth)
     {
         if (requestedPixelWidth <= 0 || !TryReadBitmapSize(path, out int sourceWidth, out int sourceHeight))
@@ -6812,14 +6977,93 @@ public partial class MainWindow : Window
 
     private async Task StartGalleryContextEnhancementAsync(string operation)
     {
-        if (SelectedTile() is not Tile { IsRealFile: true })
+        if (SelectedTile() is not Tile { IsRealFile: true } tile
+            || !File.Exists(tile.Path))
             return;
 
-        OpenModal();
-        if (Modal.Visibility != Visibility.Visible)
+        string normalizedOperation = operation == "photoreal" ? "photoreal" : "upscale";
+        string sourcePath = tile.Path;
+        if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity)
+            || !File.Exists(sourceIdentity))
+        {
+            SetStatusToast("The selected source path could not be resolved for Enhancement.");
             return;
+        }
 
-        await StartModalEnhancementOperationAsync(operation);
+        ModalPhotorealRequestSettings photoreal = CurrentModalPhotorealRequestSettings();
+        EnhancementApiResponse readiness = await EnsureEnhancementCompanionReadyForExplicitActionAsync(sourceIdentity);
+        if (!readiness.Ok)
+        {
+            SetStatusToast(readiness.Error);
+            return;
+        }
+
+        object requestBody = normalizedOperation == "photoreal"
+            ? new
+            {
+                sourceId = sourceIdentity,
+                operation = "photoreal",
+                presetId = "photoreal-balanced",
+                adapterId = "comfyui-flux2-photoreal",
+                strength = photoreal.Strength,
+                structureStrength = photoreal.StructureStrength,
+                steps = photoreal.Steps,
+                cfgScale = photoreal.CfgScale,
+                maxDimension = photoreal.MaxDimension,
+                prompt = photoreal.Prompt,
+            }
+            : new
+            {
+                sourceId = sourceIdentity,
+                operation = "upscale",
+                presetId = _modalEnhancementPresetId,
+                adapterId = _modalEnhancementAdapterId,
+                scale = _modalEnhancementScale,
+            };
+        EnhancementApiResponse response = await SendEnhancementApiAsync(
+            HttpMethod.Post,
+            "api/enhance/jobs",
+            requestBody);
+
+        bool needsConfirmation = normalizedOperation == "upscale"
+            && response.StatusCode == 409
+            && response.Payload is JsonElement conflict
+            && TryGetStringProperty(conflict, "code", out string? code)
+            && string.Equals(code, "UPSCALE_REQUIRES_CONFIRMATION", StringComparison.Ordinal);
+        if (needsConfirmation)
+        {
+            bool confirmed = _confirmLargeEnhancementForSmoke?.Invoke() ?? MessageBox.Show(
+                    this,
+                    "This AI upscale is large and may take several minutes. Start it anyway?",
+                    "Aibos AI enhancement",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.No) == MessageBoxResult.Yes;
+            if (!confirmed)
+                return;
+
+            response = await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
+            {
+                sourceId = sourceIdentity,
+                operation = "upscale",
+                presetId = _modalEnhancementPresetId,
+                adapterId = _modalEnhancementAdapterId,
+                scale = _modalEnhancementScale,
+                confirmLargeJob = true,
+            });
+        }
+
+        if (!response.Ok || response.Payload is not JsonElement payload
+            || !payload.TryGetProperty("job", out _))
+        {
+            SetStatusToast(response.Error);
+            return;
+        }
+
+        SetTransientStatusToast(
+            normalizedOperation == "photoreal"
+                ? $"{tile.FileName}: AI実写化をキューに追加しました。"
+                : $"{tile.FileName}: AI高画質化をキューに追加しました。");
     }
 
     private int ResolveGalleryNavigationTarget(ListBox listBox, Key key, int currentIndex)
@@ -7551,18 +7795,25 @@ public partial class MainWindow : Window
         PreviewDecodeResult decoded;
         try
         {
-            decoded = await Task.Run(
+            if (_previewDecodeDelayForSmokeMs > 0)
+                await Task.Delay(_previewDecodeDelayForSmokeMs, token);
+            var watch = Stopwatch.StartNew();
+            BitmapSource? bitmap = await LoadBitmapWithRetryAsync(path, 900, token);
+            (bool HasSize, int Width, int Height) dimensions = await Task.Run(
                 () =>
                 {
-                    if (_previewDecodeDelayForSmokeMs > 0)
-                        Thread.Sleep(_previewDecodeDelayForSmokeMs);
-                    var watch = Stopwatch.StartNew();
-                    var bitmap = LoadBitmap(path, 900);
                     bool hasSize = TryReadBitmapSize(path, out int width, out int height);
-                    watch.Stop();
-                    return new PreviewDecodeResult(path, bitmap, hasSize ? width : 0, hasSize ? height : 0, watch.ElapsedMilliseconds, Applied: false);
+                    return (hasSize, width, height);
                 },
                 token);
+            watch.Stop();
+            decoded = new PreviewDecodeResult(
+                path,
+                bitmap,
+                dimensions.HasSize ? dimensions.Width : 0,
+                dimensions.HasSize ? dimensions.Height : 0,
+                watch.ElapsedMilliseconds,
+                Applied: false);
         }
         catch (OperationCanceledException)
         {
@@ -12598,7 +12849,7 @@ public partial class MainWindow : Window
         RightCol.MaxWidth = MaxRightPanelWidth;
         RightCol.Width = open ? new GridLength(_rightPanelWidth) : new GridLength(0);
         PreviewImageCanvas.Height = 320;
-        PreviewBitmap.Stretch = Stretch.UniformToFill;
+        PreviewBitmap.Stretch = Stretch.Uniform;
     }
 
     private void ApplyAdaptiveWorkbenchLayout(double width, bool preserveGridAnchor = true)
@@ -13453,7 +13704,11 @@ public partial class MainWindow : Window
 
     private void OpenModal()
     {
-        _ = RefreshEnhancedStateIfChanged();
+        // jobs.json changes on every AI progress update and can contain years
+        // of history. Never parse and validate it synchronously on the input
+        // path; open the image immediately and hydrate fresh job state in the
+        // background.
+        QueueEnhancedStateRefreshIfChanged();
         if (SelectedTile() is not Tile t) return;
         UpdateModalPositionText(t);
         StopGalleryAutoScroll();
@@ -13646,12 +13901,9 @@ public partial class MainWindow : Window
         BitmapSource? bitmap;
         try
         {
-            bitmap = await Task.Run(() =>
-            {
-                if (_modalDecodeDelayForSmokeMs > 0)
-                    Thread.Sleep(_modalDecodeDelayForSmokeMs);
-                return LoadBitmap(displayPath, 1400);
-            }, token);
+            if (_modalDecodeDelayForSmokeMs > 0)
+                await Task.Delay(_modalDecodeDelayForSmokeMs, token);
+            bitmap = await LoadBitmapWithRetryAsync(displayPath, 1400, token);
         }
         catch (OperationCanceledException)
         {
@@ -17479,7 +17731,7 @@ public partial class MainWindow : Window
             || _deleteStatus.Contains("is busy in another Aibos window", StringComparison.OrdinalIgnoreCase);
         if (!previousIsRecoverableStatus)
         {
-            SetStatusToast(currentFailure);
+            SetTransientStatusToast(currentFailure);
             return;
         }
 
@@ -20194,6 +20446,19 @@ public partial class MainWindow : Window
     public int EnhancedStoreCountForSmoke => _enhancedOutputs.Count;
     public bool RefreshEnhancedStateIfChangedForSmoke()
         => RefreshEnhancedStateIfChanged();
+    public async Task<bool> WaitForEnhancedStateRefreshForSmokeAsync(int timeoutMilliseconds = 10_000)
+    {
+        Task refresh = _enhancedStateRefreshTask;
+        try
+        {
+            await refresh.WaitAsync(TimeSpan.FromMilliseconds(Math.Max(1, timeoutMilliseconds)));
+            return refresh.IsCompletedSuccessfully;
+        }
+        catch
+        {
+            return false;
+        }
+    }
     internal bool InjectCatalogEnhancedStateForSmoke(string fileName)
     {
         try
@@ -20454,17 +20719,43 @@ public partial class MainWindow : Window
                 && ReferenceEquals(calendar.CalendarItemStyle, TryFindResource("DarkCalendarItemStyle"));
         }
     }
-    public bool FocusCardsListForSmoke() => CardsList.Focus();
-    public bool FocusRowsListForSmoke() => RowsList.Focus();
-    public bool FocusRightPreviewActionForSmoke() => FavoriteIncreaseButton.Focus();
+    public bool FocusCardsListForSmoke()
+    {
+        bool focused = CardsList.Focus();
+        _shortcutFocusOverrideForSmoke = CardsList;
+        return focused;
+    }
+    public bool FocusRowsListForSmoke()
+    {
+        bool focused = RowsList.Focus();
+        _shortcutFocusOverrideForSmoke = RowsList;
+        return focused;
+    }
+    public bool FocusRightPreviewActionForSmoke()
+    {
+        bool focused = FavoriteIncreaseButton.Focus();
+        _shortcutFocusOverrideForSmoke = FavoriteIncreaseButton;
+        return focused;
+    }
     public bool FocusSelectedGalleryItemForSmoke() => TryFocusPrimaryGalleryItem();
     public bool FocusDateFromInputForSmoke()
     {
         if (DateFromInput.Focus())
+        {
+            _shortcutFocusOverrideForSmoke = DateFromInput;
             return true;
-        return FindVisualDescendant<DatePickerTextBox>(DateFromInput)?.Focus() == true;
+        }
+        DatePickerTextBox? input = FindVisualDescendant<DatePickerTextBox>(DateFromInput);
+        bool focused = input?.Focus() == true;
+        _shortcutFocusOverrideForSmoke = input;
+        return focused;
     }
-    public bool FocusAppSettingsButtonForSmoke() => OpenAppSettingsButton.Focus();
+    public bool FocusAppSettingsButtonForSmoke()
+    {
+        bool focused = OpenAppSettingsButton.Focus();
+        _shortcutFocusOverrideForSmoke = OpenAppSettingsButton;
+        return focused;
+    }
     public bool IsGlobalShortcutInputFocusedForSmoke => IsGlobalShortcutInputFocused(Keyboard.FocusedElement);
     public bool IsGlobalShortcutSuppressedForSmoke(IInputElement focused) => IsGlobalShortcutInputFocused(focused);
     public bool SearchInputSuppressesGlobalShortcutForSmoke => IsGlobalShortcutInputFocused(SearchInput);
@@ -21162,6 +21453,11 @@ public partial class MainWindow : Window
     public double RightPanelWidthForSmoke => RightPanel.ActualWidth;
     public double RightPanelStoredWidthForSmoke => _rightPanelWidth;
     public bool RightPanelOpenForSmoke => RightPanel.Visibility == Visibility.Visible;
+    public bool RightPreviewShowsWholeImageForSmoke => PreviewBitmap.Stretch == Stretch.Uniform;
+    public bool FavoriteHistoryCommandsInHeaderForSmoke
+        => ReferenceEquals(FavoriteUndoButton.Parent, HeaderLeftActions)
+            && ReferenceEquals(FavoriteRedoButton.Parent, HeaderLeftActions)
+            && ReferenceEquals(FavoriteHistoryButton.Parent, HeaderLeftActions);
     public bool RightPreviewActionAccessibilityForSmoke
     {
         get
@@ -22407,6 +22703,14 @@ public partial class MainWindow : Window
         StartModalEnhancement_Click(this, new RoutedEventArgs());
         bool completed = await WaitForModalEnhancementRequestForSmokeAsync(timeoutMilliseconds);
         return completed && _modalEnhancementJobStatus is "queued" or "running";
+    }
+
+    public async Task<bool> StartGalleryContextEnhancementForSmokeAsync(string operation)
+    {
+        if (Modal.Visibility == Visibility.Visible)
+            CloseModal();
+        await StartGalleryContextEnhancementAsync(operation);
+        return Modal.Visibility != Visibility.Visible;
     }
 
     public async Task<bool> StartModalEnhancementWithShortcutForSmokeAsync()
