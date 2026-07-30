@@ -1224,6 +1224,7 @@ public partial class MainWindow
             ApplyTileEnhancementAvailability(
                 tile,
                 GetCatalogManagedEnhancementVersionsForPath(tile.Path));
+            ApplyTileVideoAvailability(tile);
         }
     }
 
@@ -1506,7 +1507,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string DetailText => !string.IsNullOrWhiteSpace(ErrorMessage)
         ? ErrorMessage
         : IsVideoOperation
-            ? "Video metadata is readable. Mutations and playback stay disabled until the exact H25 writer contract is active."
+            ? "Managed video metadata is readable. Jobs mutations stay disabled until the exact H25 writer contract is active."
             : !IsImageOperation
                 ? "This operation is unsupported and protected from image actions."
                 : Status == "succeeded"

@@ -16927,16 +16927,57 @@ public partial class App : Application
         string invalidSource = Path.Combine(fullFolder, fixtureNames[2]);
         string upscaleOutput = Path.Combine(outputRoot, "upscale-" + Path.GetFileName(upscaleSource));
         string photorealOutput = Path.Combine(outputRoot, "photoreal-" + Path.GetFileName(photorealSource));
+        string videoOutputDirectory = Path.GetFullPath(Path.Combine(outputRoot, "Videos"));
+        string managedOutputPrefix =
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputRoot))
+            + Path.DirectorySeparatorChar;
+        if (!videoOutputDirectory.StartsWith(
+                managedOutputPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Video smoke output escaped its app-owned TEMP root.");
+        }
+        string videoOutput = Path.GetFullPath(
+            Path.Combine(videoOutputDirectory, "video-newest.mp4"));
+        string olderVideoOutput = Path.GetFullPath(
+            Path.Combine(videoOutputDirectory, "video-older.mp4"));
+        string videoOutputPrefix =
+            Path.TrimEndingDirectorySeparator(videoOutputDirectory)
+            + Path.DirectorySeparatorChar;
+        if (!videoOutput.StartsWith(videoOutputPrefix, StringComparison.OrdinalIgnoreCase)
+            || !olderVideoOutput.StartsWith(
+                videoOutputPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Video smoke fixture escaped its app-owned Videos directory.");
+        }
         string missingOutput = Path.Combine(outputRoot, "missing-output.png");
         string missingSource = Path.Combine(smokeRoot, "missing-source.png");
         File.Copy(upscaleSource, upscaleOutput, overwrite: true);
         File.Copy(photorealSource, photorealOutput, overwrite: true);
+        // These smoke-only paths are normalized and proven above to stay
+        // inside the app-owned GUID TEMP root and its fixed Videos child.
+        // Instance operations keep the only child names as fixed literals.
+        static void WriteMinimalSmokeMp4(string path)
+        {
+            using FileStream output = new FileInfo(path).Create();
+            output.Write([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
+        }
+
+        new DirectoryInfo(videoOutputDirectory).Create();
+        WriteMinimalSmokeMp4(videoOutput);
+        WriteMinimalSmokeMp4(olderVideoOutput);
         WriteEnhancementOperationJobsFixture(
             jobsPath,
             upscaleSource,
             upscaleOutput,
             photorealSource,
             photorealOutput,
+            invalidSource,
+            videoOutput,
+            olderVideoOutput,
             invalidSource,
             missingOutput,
             missingSource);
@@ -16985,6 +17026,117 @@ public partial class App : Application
 
                 win.SetPhotorealOnlyFilterForSmoke(false);
                 int afterClearCount = win.FilteredCountForSmoke;
+                win.SetVideoOnlyFilterForSmoke(true);
+                int videoFilteredCount = win.FilteredCountForSmoke;
+                bool videoVisible = win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
+                bool selectedVideoBadge =
+                    win.VideoGeneratedForFileForSmoke(Path.GetFileName(invalidSource));
+                string? selectedVideoOutput =
+                    win.VideoOutputPathForFileForSmoke(Path.GetFileName(invalidSource));
+                bool videoOutputMatches = string.Equals(
+                    selectedVideoOutput,
+                    videoOutput,
+                    StringComparison.OrdinalIgnoreCase);
+                win.EnableModalVideoTransportStubForSmoke();
+                bool videoModalOpened = win.OpenModalForSmoke();
+                bool videoAutoplay =
+                    win.ModalShowingVideoForSmoke && win.ModalVideoPlayingForSmoke;
+                bool videoVersionInventory = win.VideoVersionCountForSmoke == 2
+                    && win.ModalVideoVersionIndexForSmoke == 0;
+                bool videoPaused = win.ToggleModalVideoPlaybackForSmoke()
+                    && win.ModalShowingVideoForSmoke
+                    && !win.ModalVideoPlayingForSmoke;
+                bool olderVideoSelected = win.SelectModalVideoVersionForSmoke(1)
+                    && win.ModalShowingVideoForSmoke
+                    && win.ModalVideoPlayingForSmoke
+                    && string.Equals(
+                        win.ModalVideoPathForSmoke,
+                        olderVideoOutput,
+                        StringComparison.OrdinalIgnoreCase);
+                win.CloseModalForSmoke();
+
+                win.SetVideoOnlyFilterForSmoke(false);
+                bool ordinaryVideoSourceSelected =
+                    win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
+                bool ordinaryModalOpened = win.OpenModalForSmoke();
+                bool ordinaryModalStayedImage = !win.ModalShowingVideoForSmoke
+                    && !win.ModalVideoPlayingForSmoke;
+                bool manualVideoStarted = win.ToggleModalVideoPlaybackForSmoke()
+                    && win.ModalShowingVideoForSmoke
+                    && win.ModalVideoPlayingForSmoke;
+                bool ordinaryNeighborNavigated = win.NavigateModalForSmoke(1);
+                bool ordinaryNeighborStayedImage = !win.ModalShowingVideoForSmoke
+                    && !win.ModalVideoPlayingForSmoke;
+                win.CloseModalForSmoke();
+                bool videoDefaults = win.VideoGenerationSettingsForSmoke
+                    is (6, 16, 409600, "");
+                win.ConfigureVideoGenerationForSmoke(
+                    4,
+                    12,
+                    307200,
+                    "pan left slowly");
+                string videoRequestJson = "";
+                win.ConfigureModalEnhancementForSmoke(async (request, token) =>
+                {
+                    if (request.Method == HttpMethod.Get)
+                    {
+                        return new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent(
+                                "{\"jobs\":[],\"counts\":{\"queued\":0,\"running\":0,\"succeeded\":0,\"failed\":0,\"canceled\":0}}",
+                                Encoding.UTF8,
+                                "application/json"),
+                        };
+                    }
+
+                    videoRequestJson = request.Content is null
+                        ? ""
+                        : await request.Content.ReadAsStringAsync(token);
+                    return new HttpResponseMessage(HttpStatusCode.Created)
+                    {
+                        Content = new StringContent(
+                            "{\"job\":{\"id\":\"video-smoke-job\",\"operation\":\"video\",\"status\":\"queued\"}}",
+                            Encoding.UTF8,
+                            "application/json"),
+                    };
+                });
+                bool videoBoardSourceSelected =
+                    win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
+                bool videoBoardModalOpened = win.OpenModalForSmoke();
+                bool videoBoardOpened = win.OpenVideoGenerationBoardForSmoke();
+                bool videoSurface = win.VideoGenerationSurfaceForSmoke;
+                bool videoQueueSucceeded =
+                    await win.QueueVideoGenerationForSmokeAsync();
+                bool videoRequestExact = false;
+                if (!string.IsNullOrWhiteSpace(videoRequestJson))
+                {
+                    using JsonDocument videoRequestDocument =
+                        JsonDocument.Parse(videoRequestJson);
+                    JsonElement videoRequest = videoRequestDocument.RootElement;
+                    videoRequestExact = videoRequest.TryGetProperty(
+                            "operation",
+                            out JsonElement videoOperation)
+                        && videoOperation.GetString() == "video"
+                        && videoRequest.TryGetProperty(
+                            "mediaKind",
+                            out JsonElement mediaKind)
+                        && mediaKind.GetString() == "video"
+                        && videoRequest.TryGetProperty(
+                            "presetId",
+                            out JsonElement videoPresetId)
+                        && videoPresetId.GetString() == "wan22-ti2v-5b-normal-v1"
+                        && videoRequest.TryGetProperty(
+                            "adapterId",
+                            out JsonElement videoAdapterId)
+                        && videoAdapterId.GetString() == "wan22-ti2v-5b-core-v1"
+                        && videoRequest.TryGetProperty("video", out JsonElement videoRequestMedia)
+                        && videoRequestMedia.TryGetProperty("requested", out JsonElement requestedVideo)
+                        && requestedVideo.GetProperty("durationSeconds").GetInt32() == 4
+                        && requestedVideo.GetProperty("playbackFps").GetInt32() == 12
+                        && requestedVideo.GetProperty("maximumPixelArea").GetInt32() == 307200
+                        && requestedVideo.GetProperty("prompt").GetString() == "pan left slowly";
+                }
+                win.CloseModalForSmoke();
                 win.Close();
 
                 var second = HiddenWindow();
@@ -16993,6 +17145,13 @@ public partial class App : Application
                 second.SetPhotorealOnlyFilterForSmoke(true);
                 int reloadFilteredCount = second.FilteredCountForSmoke;
                 bool reloadPhotorealVisible = second.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                second.SetPhotorealOnlyFilterForSmoke(false);
+                second.SetVideoOnlyFilterForSmoke(true);
+                int reloadVideoFilteredCount = second.FilteredCountForSmoke;
+                bool reloadVideoVisible =
+                    second.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
+                bool reloadVideoSettings = second.VideoGenerationSettingsForSmoke
+                    is (4, 12, 307200, "pan left slowly");
                 second.OpenAppSettingsForSmoke();
                 bool outputRootSettingsSurface = second.AppEnhancementOutputRootSurfaceForSmoke;
                 string alternateOutputRoot = Path.Combine(smokeRoot, "alternate-managed-outputs");
@@ -17035,8 +17194,34 @@ public partial class App : Application
                     && photorealVisible
                     && !upscaleVisibleInPhotorealFilter
                     && afterClearCount == allCount
+                    && win.VideoCandidateCountForSmoke == 1
+                    && videoFilteredCount == 1
+                    && videoVisible
+                    && selectedVideoBadge
+                    && videoOutputMatches
+                    && videoModalOpened
+                    && videoAutoplay
+                    && videoVersionInventory
+                    && videoPaused
+                    && olderVideoSelected
+                    && ordinaryVideoSourceSelected
+                    && ordinaryModalOpened
+                    && ordinaryModalStayedImage
+                    && manualVideoStarted
+                    && ordinaryNeighborNavigated
+                    && ordinaryNeighborStayedImage
+                    && videoDefaults
+                    && videoBoardSourceSelected
+                    && videoBoardModalOpened
+                    && videoBoardOpened
+                    && videoSurface
+                    && videoQueueSucceeded
+                    && videoRequestExact
                     && reloadFilteredCount == 1
                     && reloadPhotorealVisible
+                    && reloadVideoFilteredCount == 1
+                    && reloadVideoVisible
+                    && reloadVideoSettings
                     && outputRootSettingsSurface
                     && outputRootChanged
                     && outputRootRestored
@@ -17046,8 +17231,8 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "read-only enhancement import, independent upscale/photoreal filters, distinct badges, intersection, reload, and unchanged-state checks passed"
-                        : "enhancement operation filter smoke did not meet read/filter/badge/reload/state expectations",
+                        ? "managed-video read/filter/playback, explicit board request, persisted settings, reload, and unchanged jobs-state checks passed"
+                        : "enhancement operation filter smoke did not meet video read/filter/playback/board/persistence/state expectations",
                     Folder = fullFolder,
                     ProjectRoot = smokeRoot,
                     JobsPath = jobsPath,
@@ -17079,8 +17264,30 @@ public partial class App : Application
                     PhotorealVisible = photorealVisible,
                     UpscaleVisibleInPhotorealFilter = upscaleVisibleInPhotorealFilter,
                     AfterClearCount = afterClearCount,
+                    VideoCandidateCount = win.VideoCandidateCountForSmoke,
+                    VideoFilteredCount = videoFilteredCount,
+                    VideoVisible = videoVisible,
+                    SelectedVideoBadge = selectedVideoBadge,
+                    SelectedVideoOutputPath = selectedVideoOutput,
+                    VideoModalOpened = videoModalOpened,
+                    VideoAutoplay = videoAutoplay,
+                    VideoVersionInventory = videoVersionInventory,
+                    VideoPaused = videoPaused,
+                    OlderVideoSelected = olderVideoSelected,
+                    OrdinaryModalStayedImage = ordinaryModalStayedImage,
+                    ManualVideoStarted = manualVideoStarted,
+                    OrdinaryNeighborNavigated = ordinaryNeighborNavigated,
+                    OrdinaryNeighborStayedImage = ordinaryNeighborStayedImage,
+                    VideoDefaults = videoDefaults,
+                    VideoBoardOpened = videoBoardOpened,
+                    VideoSurface = videoSurface,
+                    VideoQueueSucceeded = videoQueueSucceeded,
+                    VideoRequestExact = videoRequestExact,
                     ReloadFilteredCount = reloadFilteredCount,
                     ReloadPhotorealVisible = reloadPhotorealVisible,
+                    ReloadVideoFilteredCount = reloadVideoFilteredCount,
+                    ReloadVideoVisible = reloadVideoVisible,
+                    ReloadVideoSettings = reloadVideoSettings,
                     OutputRootSettingsSurface = outputRootSettingsSurface,
                     OutputRootChanged = outputRootChanged,
                     OutputRootRestored = outputRootRestored,
@@ -24457,6 +24664,9 @@ public partial class App : Application
         string upscaleOutputPath,
         string photorealSourcePath,
         string photorealOutputPath,
+        string videoSourcePath,
+        string videoOutputPath,
+        string olderVideoOutputPath,
         string invalidSourcePath,
         string missingOutputPath,
         string missingSourcePath)
@@ -24508,6 +24718,49 @@ public partial class App : Application
             return job;
         }
 
+        Dictionary<string, object?> SucceededVideo(
+            string id,
+            string outputPath,
+            int seed)
+            => new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = id,
+                ["sourceId"] = videoSourcePath,
+                ["sourcePath"] = videoSourcePath,
+                ["sourceSignature"] = SourceSignature(videoSourcePath),
+                ["presetId"] = "wan22-ti2v-5b-normal-v1",
+                ["adapterId"] = "wan22-ti2v-5b-core-v1",
+                ["operation"] = "video",
+                ["mediaKind"] = "video",
+                ["status"] = "succeeded",
+                ["progress"] = 100,
+                ["outputPath"] = outputPath,
+                ["createdAt"] = DateTime.UtcNow.ToString("o"),
+                ["updatedAt"] = DateTime.UtcNow.ToString("o"),
+                ["video"] = new Dictionary<string, object?>
+                {
+                    ["presetId"] = "wan22-ti2v-5b-normal-v1",
+                    ["backendId"] = "wan22-ti2v-5b-core-v1",
+                    ["requested"] = new Dictionary<string, object?>
+                    {
+                        ["durationSeconds"] = 6,
+                        ["playbackFps"] = 16,
+                        ["prompt"] = "",
+                    },
+                    ["effective"] = new Dictionary<string, object?>
+                    {
+                        ["frameCount"] = 97,
+                        ["width"] = 832,
+                        ["height"] = 480,
+                        ["positivePrompt"] = "fixture-positive",
+                        ["negativePrompt"] = "fixture-negative",
+                    },
+                    ["seed"] = seed,
+                    ["codec"] = "h264",
+                    ["bitDepth"] = 8,
+                },
+            };
+
         var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["version"] = 1,
@@ -24516,6 +24769,8 @@ public partial class App : Application
                 // Missing operation is the legacy upscale compatibility case.
                 Succeeded("legacy-upscale-ok", upscaleSourcePath, upscaleOutputPath),
                 Succeeded("photoreal-ok", photorealSourcePath, photorealOutputPath, "photoreal"),
+                SucceededVideo("video-older", olderVideoOutputPath, 123456788),
+                SucceededVideo("video-newest", videoOutputPath, 123456789),
                 Succeeded("stale-output", invalidSourcePath, missingOutputPath, "upscale"),
                 new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                 {
@@ -28269,8 +28524,30 @@ public partial class App : Application
         public bool PhotorealVisible { get; init; }
         public bool UpscaleVisibleInPhotorealFilter { get; init; }
         public int AfterClearCount { get; init; }
+        public int VideoCandidateCount { get; init; }
+        public int VideoFilteredCount { get; init; }
+        public bool VideoVisible { get; init; }
+        public bool SelectedVideoBadge { get; init; }
+        public string? SelectedVideoOutputPath { get; init; }
+        public bool VideoModalOpened { get; init; }
+        public bool VideoAutoplay { get; init; }
+        public bool VideoVersionInventory { get; init; }
+        public bool VideoPaused { get; init; }
+        public bool OlderVideoSelected { get; init; }
+        public bool OrdinaryModalStayedImage { get; init; }
+        public bool ManualVideoStarted { get; init; }
+        public bool OrdinaryNeighborNavigated { get; init; }
+        public bool OrdinaryNeighborStayedImage { get; init; }
+        public bool VideoDefaults { get; init; }
+        public bool VideoBoardOpened { get; init; }
+        public bool VideoSurface { get; init; }
+        public bool VideoQueueSucceeded { get; init; }
+        public bool VideoRequestExact { get; init; }
         public int ReloadFilteredCount { get; init; }
         public bool ReloadPhotorealVisible { get; init; }
+        public int ReloadVideoFilteredCount { get; init; }
+        public bool ReloadVideoVisible { get; init; }
+        public bool ReloadVideoSettings { get; init; }
         public bool OutputRootSettingsSurface { get; init; }
         public bool OutputRootChanged { get; init; }
         public bool OutputRootRestored { get; init; }
