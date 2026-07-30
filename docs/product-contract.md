@@ -325,8 +325,11 @@ or stores.
 - Original and managed Enhanced outputs remain distinct; source images are not
   overwritten.
 - Enhancement operation envelope v1 is an additive extension of the existing
-  version 1 job store. `operation` is `upscale` or `photoreal`; a missing value
-  on an older job means `upscale`.
+  version 1 job store. `operation` is `upscale`, `photoreal`, or `video`; only
+  a genuinely missing value on an older job means `upscale`. A present null,
+  malformed, or unknown value is unsupported and fails closed. It must never
+  be coerced to `upscale`, executed, retried, reordered, opened, or deleted as
+  an image Enhancement.
 - The modal exposes separate explicit `AI高画質化` and `AI実写化` actions.
   Photoreal prompt, strength, structure retention, CFG scale, quality steps,
   and work resolution are WPF-local request defaults and do not mutate shared
@@ -453,6 +456,52 @@ or stores.
   absolute Enhancement root for `jobs.json` and `outputs/**`, WPF output
   ownership checks, restart recovery, unchanged source bytes, and zero writes
   to user-owned state or caches.
+
+### `PV-ENHANCE-VIDEO-001` — Reader-first managed video operation
+
+`video` is a distinct managed-media operation. It is not an AI-upscaled or
+photoreal image version, and an MP4 must never enter an image decode, image
+version cycle, or image-output deletion path. The canonical additive fixture
+is `contracts/enhancement-video-v1.json`.
+
+- A video job keeps `mediaKind: "video"` and a media-specific `video` snapshot
+  alongside the existing version 1 job envelope. The snapshot records the
+  requested duration, playback FPS, and user prompt; the effective frame
+  count, width, height, positive prompt, and negative prompt; the enqueue-time
+  seed; model/preset identities; codec; and bit depth. Retry reuses the whole
+  persisted snapshot and seed. Compatible unknown fields are preserved.
+- Normal v1 uses Wan2.2 TI2V 5B FP16, nominal 6 seconds, 16 fps, 97 frames,
+  an aspect-preserving 32-pixel-aligned bucket at or below 409,600 pixels,
+  20 steps, CFG 5, `uni_pc` with `simple`, shift 8, denoise 1, an int32 seed
+  fixed at enqueue, and 8-bit H.264 in MP4. A blank prompt means the built-in
+  conservative anime idle-motion instruction. A custom prompt uses the
+  preservation preamble plus the user's instruction and is not contradicted by
+  blank-only idle or locked-camera wording.
+- The prepared input is a separate contain-resized, edge-padded PNG at the
+  exact effective bucket. The source is never cropped, rewritten, or used as
+  a temporary output.
+- Final video outputs use the fixed flat `Videos/` folder below the same
+  configured Enhancement output parent. The filename includes job, source,
+  and preset identities. A core ComfyUI staging file is allowed only as an
+  exact adapter-owned transient and must be removed after success, cancel, or
+  failure; the final residue audit is zero.
+- Video generation shares the existing durable ordered queue, worker, and
+  exclusive GPU lease with upscale and photoreal jobs. There is no second
+  worker, parallel inference, forced high-VRAM mode, or automatic fallback
+  model.
+- Reader rollout precedes writer rollout. Aibos first recognizes `video` as
+  reader-only media and protects unknown operations. H25 must then pass the
+  exact canonical fixture and retain the same fail-closed rule. Only after
+  both exact readers are green may H25 emit a video row, followed by the WPF
+  enqueue/UI writer. Once a video row exists, rollback may disable video
+  enqueue but must not deploy a pre-video reader.
+- The reader-only WPF phase may inventory a video row as `VIDEO` in Jobs, but
+  it does not retry, cancel, reorder, open, or delete that row until the exact
+  H25 writer and managed-video ownership contract are active. Passive reads
+  remain read-only and never start the companion or ComfyUI.
+- A 14B/HQ preset, 24 fps, and an approximately 704p default remain deferred
+  until measured evidence on the supported 12GB GPU establishes memory,
+  latency, playback, and anime temporal-quality bounds.
 
 ## Change rule
 

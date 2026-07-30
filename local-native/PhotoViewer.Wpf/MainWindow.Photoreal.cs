@@ -172,7 +172,8 @@ public partial class MainWindow
         var next = new List<ManagedEnhancementVersion>();
         foreach (ModalEnhancementJobSnapshot job in jobs)
         {
-            if (job is not
+            if (!IsImageEnhancementOperation(job.Operation)
+                || job is not
                 {
                     Status: "succeeded",
                     OutputPath: not null,
@@ -261,6 +262,9 @@ public partial class MainWindow
         ModalEnhancementJobSnapshot job,
         ManagedEnhancedOutput output)
     {
+        if (!IsImageEnhancementOperation(job.Operation))
+            return;
+
         if (!string.Equals(
                 _modalEnhancementVersionsSourcePath,
                 tile.Path,
