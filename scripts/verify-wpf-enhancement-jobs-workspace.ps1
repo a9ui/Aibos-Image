@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
 $queueContractPath = Join-Path $repoRoot "contracts\enhancement-queue-order-v1.json"
+$healthContractPath = Join-Path $repoRoot "contracts\enhancement-health-v1.json"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-enhancement-jobs-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -43,6 +44,32 @@ try {
     )
     if ($queueContractChecks -contains $false) {
         throw "Enhancement queue ordering contract fields are invalid."
+    }
+    if (-not (Test-Path -LiteralPath $healthContractPath -PathType Leaf)) {
+        throw "Enhancement health contract was not found: $healthContractPath"
+    }
+    $healthContract = Get-Content -LiteralPath $healthContractPath -Raw | ConvertFrom-Json
+    $healthContractChecks = @(
+        ($healthContract.schemaVersion -eq 1)
+        ($healthContract.contractId -eq "PV-ENHANCE-HEALTH-001")
+        ($healthContract.protocol -eq "aibos.enhancement-health/v1")
+        ($healthContract.route.method -eq "GET")
+        ($healthContract.route.path -eq "/api/enhance/health")
+        ($healthContract.route.cacheControl -eq "no-store")
+        ($healthContract.route.loopbackOnly -eq $true)
+        ($healthContract.passiveRead.createsJobs -eq $false)
+        ($healthContract.passiveRead.startsWorker -eq $false)
+        ($healthContract.passiveRead.wakesQueue -eq $false)
+        ($healthContract.passiveRead.claimsJobs -eq $false)
+        ($healthContract.passiveRead.retriesJobs -eq $false)
+        ($healthContract.passiveRead.pollsComfyUi -eq $false)
+        (($healthContract.status -join ",") -eq "healthy,working,needs-attention")
+        ($healthContract.workingFixture.expectedDisplay.state -eq "Working")
+        ($healthContract.workingFixture.expectedDisplay.detail -eq "1 running / 4 queued")
+        ($healthContract.workingFixture.expectedDisplay.sourceRevisionPrefix -eq "69684954")
+    )
+    if ($healthContractChecks -contains $false) {
+        throw "Enhancement health contract fields are invalid."
     }
 
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
@@ -84,6 +111,13 @@ try {
     $result | ConvertTo-Json -Depth 10
     $required = @(
         'passiveOpen',
+        'healthVisible',
+        'healthProvenance',
+        'healthPassive',
+        'legacyHealthFallback',
+        'futureHealthFallback',
+        'unknownIssueSafe',
+        'healthRecovered',
         'routesOk',
         'outputOpened',
         'sourceOpenedInViewer',

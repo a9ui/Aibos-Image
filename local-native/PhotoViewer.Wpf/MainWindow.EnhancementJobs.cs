@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shell;
 using System.Windows.Threading;
@@ -30,6 +31,8 @@ public partial class MainWindow
     private IInputElement? _enhancementWorkspaceFocusBeforeDialog;
     private int _enhancementWorkspaceGetCount;
     private int _enhancementWorkspacePollCount;
+    private int _enhancementWorkspaceHealthGetCount;
+    private bool? _enhancementWorkspaceHealthEndpointSupported;
     private bool _returnToEnhancementJobsAfterModalClose;
     private Tile? _enhancementJobsTemporaryVisibleTile;
     private string? _enhancementJobsTrustedModalSourcePath;
@@ -81,6 +84,8 @@ public partial class MainWindow
         }
         EnhancementJobsDialog.Visibility = Visibility.Visible;
         EnhancementJobsStatusText.Text = "Loading jobs from the local companion...";
+        _enhancementWorkspaceHealthEndpointSupported = null;
+        ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
         EnhancementJobsEmptyText.Visibility = Visibility.Collapsed;
         EnhancementJobsList.ItemsSource = null;
         long generation = ++_enhancementWorkspaceGeneration;
@@ -188,6 +193,8 @@ public partial class MainWindow
                 _enhancementWorkspacePollTimer.Start();
             else
                 _enhancementWorkspacePollTimer.Stop();
+
+            await RefreshEnhancementQueueHealthAsync(generation, isPoll);
         }
         finally
         {
@@ -198,6 +205,192 @@ public partial class MainWindow
                     EnhancementJobsRefreshButton.IsEnabled = true;
             }
         }
+    }
+
+    private async Task RefreshEnhancementQueueHealthAsync(long generation, bool isPoll)
+    {
+        if (isPoll && _enhancementWorkspaceHealthEndpointSupported == false)
+            return;
+
+        _enhancementWorkspaceHealthGetCount++;
+        EnhancementApiResponse response =
+            await SendEnhancementApiAsync(HttpMethod.Get, "api/enhance/health");
+        if (generation != _enhancementWorkspaceGeneration
+            || EnhancementJobsDialog.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        if (response.StatusCode == 404)
+        {
+            _enhancementWorkspaceHealthEndpointSupported = false;
+            ApplyEnhancementQueueHealthUnavailable(
+                "Update the local companion to show queue health.");
+            return;
+        }
+
+        _enhancementWorkspaceHealthEndpointSupported = true;
+        if (!response.Ok || response.Payload is not JsonElement payload)
+        {
+            ApplyEnhancementQueueHealthUnavailable(
+                "Queue health could not be read. Jobs remain available.");
+            return;
+        }
+
+        if (!TryParseEnhancementQueueHealth(payload, out EnhancementQueueHealthView health))
+        {
+            ApplyEnhancementQueueHealthUnavailable(
+                "The companion returned an unsupported health response.");
+            return;
+        }
+
+        ApplyEnhancementQueueHealth(health);
+    }
+
+    private static bool TryParseEnhancementQueueHealth(
+        JsonElement payload,
+        out EnhancementQueueHealthView health)
+    {
+        health = default;
+        if (payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("version", out JsonElement versionElement)
+            || !versionElement.TryGetInt32(out int version)
+            || version != 1
+            || !payload.TryGetProperty("status", out JsonElement statusElement)
+            || statusElement.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        string? status = statusElement.GetString();
+        if (status is not ("healthy" or "working" or "needs-attention")
+            || !payload.TryGetProperty("issues", out JsonElement issuesElement)
+            || issuesElement.ValueKind != JsonValueKind.Array
+            || !payload.TryGetProperty("jobs", out JsonElement jobsElement)
+            || jobsElement.ValueKind != JsonValueKind.Object
+            || !jobsElement.TryGetProperty("counts", out JsonElement countsElement)
+            || countsElement.ValueKind != JsonValueKind.Object
+            || !TryReadNonNegativeCount(countsElement, "queued", out int queued)
+            || !TryReadNonNegativeCount(countsElement, "running", out int running)
+            || !TryReadNonNegativeCount(countsElement, "succeeded", out _)
+            || !TryReadNonNegativeCount(countsElement, "failed", out _)
+            || !TryReadNonNegativeCount(countsElement, "canceled", out _)
+            || !TryReadNonNegativeCount(countsElement, "deleted", out _)
+            || !payload.TryGetProperty("runtime", out JsonElement runtimeElement)
+            || runtimeElement.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        string? firstIssue = null;
+        foreach (JsonElement issueElement in issuesElement.EnumerateArray())
+        {
+            if (issueElement.ValueKind != JsonValueKind.String)
+                return false;
+            firstIssue ??= DescribeEnhancementQueueHealthIssue(issueElement.GetString());
+        }
+
+        string revision = "H25 revision unavailable";
+        if (runtimeElement.TryGetProperty("sourceRevision", out JsonElement revisionElement))
+        {
+            if (revisionElement.ValueKind == JsonValueKind.String)
+            {
+                string? sourceRevision = revisionElement.GetString();
+                if (!string.IsNullOrWhiteSpace(sourceRevision))
+                {
+                    string prefix = sourceRevision.Length > 8
+                        ? sourceRevision[..8]
+                        : sourceRevision;
+                    revision = $"H25 {prefix}";
+                }
+            }
+            else if (revisionElement.ValueKind != JsonValueKind.Null)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+
+        if (runtimeElement.TryGetProperty("sourceDirty", out JsonElement dirtyElement))
+        {
+            if (dirtyElement.ValueKind == JsonValueKind.True)
+                revision += " · modified";
+            else if (dirtyElement.ValueKind is not (JsonValueKind.False or JsonValueKind.Null))
+                return false;
+        }
+        else
+        {
+            return false;
+        }
+
+        string stateLabel = status switch
+        {
+            "healthy" => "Healthy",
+            "working" => "Working",
+            _ => "Needs attention",
+        };
+        string detail = status == "needs-attention"
+            ? firstIssue ?? "Queue attention is required."
+            : running == 0 && queued == 0
+                ? "Queue is idle"
+                : $"{running:N0} running / {queued:N0} queued";
+        string foregroundResource = status switch
+        {
+            "healthy" => "Success",
+            "working" => "AccentLight",
+            _ => "Warning",
+        };
+        health = new EnhancementQueueHealthView(
+            stateLabel,
+            detail,
+            revision,
+            foregroundResource);
+        return true;
+    }
+
+    private static bool TryReadNonNegativeCount(
+        JsonElement counts,
+        string propertyName,
+        out int value)
+    {
+        value = 0;
+        return counts.TryGetProperty(propertyName, out JsonElement countElement)
+            && countElement.TryGetInt32(out value)
+            && value >= 0;
+    }
+
+    private static string DescribeEnhancementQueueHealthIssue(string? issue)
+        => issue switch
+        {
+            "multiple-running-jobs" => "More than one job is marked running.",
+            "running-without-worker-identity" => "The running job has no worker identity.",
+            "running-without-local-pump" => "A job is running without this process's queue pump.",
+            "queued-without-pump" => "Queued work is waiting without a queue pump.",
+            "worker-loop-failing" => "The worker loop reported a failure.",
+            "non-loopback-server" => "The local companion is not loopback-only.",
+            "non-loopback-comfyui" => "ComfyUI is not loopback-only.",
+            _ => "Queue attention is required.",
+        };
+
+    private void ApplyEnhancementQueueHealth(EnhancementQueueHealthView health)
+    {
+        EnhancementJobsHealthStateText.Text = health.State;
+        EnhancementJobsHealthStateText.Foreground =
+            (Brush)FindResource(health.ForegroundResource);
+        EnhancementJobsHealthDetailText.Text = health.Detail;
+        EnhancementJobsHealthRevisionText.Text = health.Revision;
+    }
+
+    private void ApplyEnhancementQueueHealthUnavailable(string detail)
+    {
+        EnhancementJobsHealthStateText.Text = "Health unavailable";
+        EnhancementJobsHealthStateText.Foreground =
+            (Brush)FindResource("TextTertiary");
+        EnhancementJobsHealthDetailText.Text = detail;
+        EnhancementJobsHealthRevisionText.Text = "";
     }
 
     private void ApplyEnhancementWorkspaceHighlights(IReadOnlyList<EnhancementWorkspaceJobView> jobs)
@@ -1024,6 +1217,10 @@ public partial class MainWindow
             _enhancementWorkspaceGetCount,
             _enhancementWorkspacePollCount,
             EnhancementJobsStatusText.Text,
+            _enhancementWorkspaceHealthGetCount,
+            EnhancementJobsHealthStateText.Text,
+            EnhancementJobsHealthDetailText.Text,
+            EnhancementJobsHealthRevisionText.Text,
             visible.Select(static job => job.Id).ToArray(),
             visible.Select(static job => job.StatusLabel).ToArray(),
             visible.Select(static job => job.OperationLabel).ToArray());
@@ -1345,6 +1542,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
+internal readonly record struct EnhancementQueueHealthView(
+    string State,
+    string Detail,
+    string Revision,
+    string ForegroundResource);
+
 public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     bool Visible,
     int Total,
@@ -1355,6 +1558,10 @@ public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     int GetRequests,
     int PollRequests,
     string Status,
+    int HealthGetRequests,
+    string HealthState,
+    string HealthDetail,
+    string HealthRevision,
     string[] VisibleIds,
     string[] VisibleStatusLabels,
     string[] VisibleOperationLabels);

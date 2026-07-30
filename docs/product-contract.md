@@ -434,6 +434,19 @@ or stores.
   WPF validates source identity, source signature, and managed-output ownership
   before opening or deleting an output. The workspace does not change the
   `enhance/jobs.json` schema and never starts a worker from ordinary browsing.
+- `PV-ENHANCE-HEALTH-001` defines the optional read-only
+  `GET /api/enhance/health` companion contract. The Jobs workspace may request
+  it alongside its existing passive jobs refresh and display `Healthy`,
+  `Working`, `Needs attention`, or `Health unavailable`, active counts, and a
+  bounded H25 source-revision prefix. The health request never creates,
+  retries, claims, or reorders a job; starts or wakes a worker; polls ComfyUI;
+  or launches a missing companion. A missing route, unavailable companion, or
+  malformed/future payload leaves the jobs response usable and produces only
+  the unavailable health state. Unknown response fields are ignored. An
+  unknown issue retains a valid `needs-attention` state with a generic message.
+  WPF does not infer a stall from elapsed time alone until a measured threshold
+  is adopted. The canonical reader fixture is
+  `contracts/enhancement-health-v1.json`.
 - Removing the in-repository Browser backend is not merge-ready until a named
   H25 commit passes an isolated TEMP compatibility test against the exact WPF
   candidate. That test must prove request and response compatibility, one

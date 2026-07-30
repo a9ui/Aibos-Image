@@ -17340,6 +17340,7 @@ public partial class App : Application
                 bool queueLaterFirst = false;
                 bool allQueuedCanceled = false;
                 bool outputDeleted = false;
+                string healthMode = "available";
                 string? openedOutput = null;
                 string rerunBody = "";
                 var sourceInfo = new FileInfo(sourcePath);
@@ -17423,6 +17424,88 @@ public partial class App : Application
                     return jobs.ToArray();
                 }
 
+                object CurrentHealth()
+                {
+                    var counts = new Dictionary<string, int>(StringComparer.Ordinal)
+                    {
+                        ["queued"] = 0,
+                        ["running"] = 0,
+                        ["succeeded"] = 0,
+                        ["failed"] = 0,
+                        ["canceled"] = 0,
+                        ["deleted"] = 0,
+                    };
+                    foreach (object job in CurrentJobs())
+                    {
+                        using JsonDocument jobDocument =
+                            JsonDocument.Parse(JsonSerializer.Serialize(job));
+                        string status =
+                            jobDocument.RootElement.GetProperty("status").GetString() ?? "";
+                        if (counts.ContainsKey(status))
+                            counts[status]++;
+                    }
+
+                    return new
+                    {
+                        version = 1,
+                        generatedAt = "2026-07-30T13:30:00.000Z",
+                        status = healthMode switch
+                        {
+                            "unknown-status" => "future-health-state",
+                            "unknown-issue" => "needs-attention",
+                            _ => counts["running"] + counts["queued"] > 0
+                                ? "working"
+                                : "healthy",
+                        },
+                        issues = healthMode == "unknown-issue"
+                            ? new[] { "future-health-issue" }
+                            : Array.Empty<string>(),
+                        runtime = new
+                        {
+                            sourceRevision = "696849546ad61383def4d6d050e6fcb66a5fb3cd",
+                            sourceDirty = false,
+                            buildId = "aibos-health-smoke",
+                            serverHost = "127.0.0.1",
+                            serverPort = 3000,
+                            serverStartedAtUtc = "2026-07-30T13:00:00.000Z",
+                            processId = 1234,
+                        },
+                        store = new { version = 1 },
+                        jobs = new
+                        {
+                            counts = new
+                            {
+                                queued = counts["queued"],
+                                running = counts["running"],
+                                succeeded = counts["succeeded"],
+                                failed = counts["failed"],
+                                canceled = counts["canceled"],
+                                deleted = counts["deleted"],
+                            },
+                            current = (object?)null,
+                            lastClaimAt = (string?)null,
+                            lastProgressAt = (string?)null,
+                            lastTerminalAt = (string?)null,
+                        },
+                        worker = new
+                        {
+                            pumpRunning = counts["running"] + counts["queued"] > 0,
+                            processWorkerInstanceId = "smoke-worker",
+                            consecutiveWorkerFailures = 0,
+                            lastWorkerError = (string?)null,
+                            lastWorkerErrorAt = (string?)null,
+                            lastLeaseContentionAt = (string?)null,
+                        },
+                        comfyUi = new
+                        {
+                            endpoint = "http://127.0.0.1:8190",
+                            loopback = true,
+                            promptId = (string?)null,
+                            submissionState = "not-active",
+                        },
+                    };
+                }
+
                 static HttpResponseMessage JsonResponse(HttpStatusCode status, object payload)
                     => new(status) { Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json") };
 
@@ -17434,6 +17517,12 @@ public partial class App : Application
                     requests.Add($"{request.Method.Method} {route}");
                     if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/jobs", StringComparison.Ordinal))
                         return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { jobs = CurrentJobs() }));
+                    if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/health", StringComparison.Ordinal))
+                    {
+                        return Task.FromResult(healthMode != "missing"
+                            ? JsonResponse(HttpStatusCode.OK, CurrentHealth())
+                            : JsonResponse(HttpStatusCode.NotFound, new { error = "health route unavailable" }));
+                    }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/active-job/cancel", StringComparison.Ordinal))
                     {
                         activeCanceled = true;
@@ -17516,9 +17605,44 @@ public partial class App : Application
                 await window.OpenEnhancementJobsForSmokeAsync();
                 window.UpdateLayout();
                 EnhancementJobsWorkspaceSmokeSnapshot initial = window.EnhancementJobsWorkspaceForSmoke();
-                bool passiveOpen = requests.Skip(requestsBeforeOpen).All(static request => request == "GET /api/enhance/jobs");
+                string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
+                bool passiveOpen = passiveOpenRequests.All(static request =>
+                        request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
+                    && passiveOpenRequests.Contains("GET /api/enhance/jobs", StringComparer.Ordinal)
+                    && passiveOpenRequests.Contains("GET /api/enhance/health", StringComparer.Ordinal);
+                bool healthVisible = initial.HealthState == "Working"
+                    && initial.HealthDetail == "1 running / 2 queued";
+                bool healthProvenance = initial.HealthRevision == "H25 69684954";
+                bool healthPassive = initial.HealthGetRequests >= 1 && passiveOpen;
                 object? viewBeforeRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
+                healthMode = "missing";
                 await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot legacyHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool legacyHealthFallback = legacyHealth.HealthState == "Health unavailable"
+                    && legacyHealth.Total == initial.Total
+                    && legacyHealth.Active == initial.Active
+                    && legacyHealth.Polling;
+                healthMode = "unknown-status";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot futureHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool futureHealthFallback = futureHealth.HealthState == "Health unavailable"
+                    && futureHealth.Total == initial.Total
+                    && futureHealth.Active == initial.Active;
+                healthMode = "unknown-issue";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot unknownIssueHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool unknownIssueSafe = unknownIssueHealth.HealthState == "Needs attention"
+                    && unknownIssueHealth.HealthDetail == "Queue attention is required."
+                    && unknownIssueHealth.Total == initial.Total;
+                healthMode = "available";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot recoveredHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool healthRecovered = recoveredHealth.HealthState == "Working"
+                    && recoveredHealth.HealthRevision == "H25 69684954";
                 object? viewAfterRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
                 bool stableJobViews = viewBeforeRefresh is not null
                     && ReferenceEquals(viewBeforeRefresh, viewAfterRefresh);
@@ -17632,6 +17756,13 @@ public partial class App : Application
                     && initial.Active == 3
                     && initial.Polling
                     && passiveOpen
+                    && healthVisible
+                    && healthProvenance
+                    && healthPassive
+                    && legacyHealthFallback
+                    && futureHealthFallback
+                    && unknownIssueSafe
+                    && healthRecovered
                     && stableJobViews
                     && running.Filtered == 1
                     && queued.Filtered == 2
@@ -17685,7 +17816,18 @@ public partial class App : Application
                 {
                     ok,
                     passiveOpen,
+                    healthVisible,
+                    healthProvenance,
+                    healthPassive,
+                    legacyHealthFallback,
+                    futureHealthFallback,
+                    unknownIssueSafe,
+                    healthRecovered,
                     initial,
+                    legacyHealth,
+                    futureHealth,
+                    unknownIssueHealth,
+                    recoveredHealth,
                     running,
                     queued,
                     failed,
