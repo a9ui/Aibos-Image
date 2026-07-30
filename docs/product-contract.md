@@ -333,6 +333,13 @@ or stores.
   settings. The prompt starts with the built-in tested default, remains freely
   editable from both the modal popup and the application settings screen,
   persists locally as one shared value, and has an explicit Reset action.
+- A named photoreal Style is WPF-local and snapshots the prompt, strength,
+  structure retention, quality steps, and work resolution. Up to 32 Styles
+  with names of at most 40 characters are persisted in WPF `state.json`.
+  Selecting a Style from either the modal popup or application settings applies
+  all five values; later manual edits return to the unsaved Custom selection
+  without modifying the stored Style. Saving the same name replaces that Style,
+  and deleting one leaves the current request values unchanged.
   Quality offers 4, 6, 8, and opt-in `非常に高い（12 step）`; the default remains
   the measured 8-step profile.
   Editing is saved while typing. Each job snapshots the current prompt when it

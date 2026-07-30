@@ -16730,6 +16730,7 @@ public partial class MainWindow : Window
         SetShowUnseenDots(_showUnseenDots, persist: false);
         SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
         SyncModalPhotorealSettingsControls();
+        RefreshPhotorealStyleControls(updateNameFields: false);
         RefreshEnhancementOutputRootSettings();
         RefreshSharedDataSettings();
         DiagnosticsText.Text = BuildDiagnosticsText();
@@ -17916,6 +17917,7 @@ public partial class MainWindow : Window
             SyncFavoriteFilterControls();
             SyncFoldersSectionControls();
             RestoreModalPhotorealSettings(null, null, null, null, null);
+            RestorePhotorealStyles(null, null);
             _keyBindings = KeyBindingSettings.CreateDefaults();
             _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
             ApplyKeyBindingTooltips();
@@ -17960,6 +17962,7 @@ public partial class MainWindow : Window
             state.PhotorealSteps,
             state.PhotorealMaxDimension,
             state.PhotorealPrompt);
+        RestorePhotorealStyles(state.PhotorealStyles, state.SelectedPhotorealStyleName);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -18096,6 +18099,8 @@ public partial class MainWindow : Window
                 PhotorealSteps = _modalPhotorealSteps,
                 PhotorealMaxDimension = _modalPhotorealMaxDimension,
                 PhotorealPrompt = _modalPhotorealPrompt,
+                PhotorealStyles = SnapshotPhotorealStyles(),
+                SelectedPhotorealStyleName = _selectedPhotorealStyleName,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -23480,6 +23485,8 @@ public sealed class ViewerState
     public int? PhotorealSteps { get; set; }
     public int? PhotorealMaxDimension { get; set; }
     public string? PhotorealPrompt { get; set; }
+    public List<PhotorealStyleState>? PhotorealStyles { get; set; }
+    public string? SelectedPhotorealStyleName { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.
@@ -23497,6 +23504,16 @@ public sealed class ViewerState
     public Dictionary<string, JsonElement>? KeyBindings { get; set; }
     [System.Text.Json.Serialization.JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+}
+
+public sealed class PhotorealStyleState
+{
+    public string Name { get; set; } = "";
+    public double Strength { get; set; }
+    public double StructureStrength { get; set; }
+    public int Steps { get; set; }
+    public int MaxDimension { get; set; }
+    public string Prompt { get; set; } = "";
 }
 
 public readonly record struct RecycleBinDeleteResult(bool Succeeded, string Reason)

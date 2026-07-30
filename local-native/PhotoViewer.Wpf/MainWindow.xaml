@@ -1396,6 +1396,84 @@
           <TextBlock Text="{DynamicResource UiModalEdgeHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,18"/>
           <TextBlock x:Name="PhotorealSettingsHeading" Text="AI実写化" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="AI photorealization settings section"/>
           <TextBlock Text="すべてのAI実写化で使う共通プロンプトです。ここでの変更は拡大画面の設定にも即時反映され、次にAI実写化を押してキューへ追加するジョブから使われます。待機中・処理中のジョブは変更されません。" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <TextBlock Text="Style" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
+            <StackPanel>
+              <ListBox x:Name="AppPhotorealStyleListBox"
+                       MinHeight="42" MaxHeight="112"
+                       Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                       Foreground="{StaticResource TextPrimary}"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       IsSynchronizedWithCurrentItem="False"
+                       SelectionChanged="PhotorealStyle_SelectionChanged"
+                       AutomationProperties.Name="Saved AI photorealization styles"
+                       AutomationProperties.HelpText="Choose a saved style or the current unsaved settings.">
+                <ListBox.ItemContainerStyle>
+                  <Style TargetType="{x:Type ListBoxItem}">
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                    <Setter Property="Background" Value="{StaticResource BgPrimary}"/>
+                    <Setter Property="Padding" Value="8,5"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Template">
+                      <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                          <Border x:Name="StyleItemSurface"
+                                  Background="{TemplateBinding Background}"
+                                  BorderBrush="Transparent" BorderThickness="1"
+                                  Padding="{TemplateBinding Padding}">
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+                          </Border>
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                              <Setter TargetName="StyleItemSurface" Property="Background" Value="{StaticResource AccentFillHover}"/>
+                              <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                              <Setter TargetName="StyleItemSurface" Property="Background" Value="{StaticResource AccentFill}"/>
+                              <Setter TargetName="StyleItemSurface" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+                              <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                            </Trigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Setter.Value>
+                    </Setter>
+                  </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"/>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <Grid Margin="0,7,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="AppPhotorealStyleNameTextBox" Grid.Column="0"
+                         MaxLength="40" Padding="7,5" Margin="0,0,6,0"
+                         Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                         BorderBrush="{StaticResource BorderStrong}"
+                         AutomationProperties.Name="AI photorealization style name"/>
+                <Button x:Name="SaveAppPhotorealStyleButton" Grid.Column="1"
+                        Style="{StaticResource GhostButton}" Content="保存" Click="SavePhotorealStyle_Click"
+                        MinWidth="64" Margin="0,0,6,0"
+                        AutomationProperties.Name="Save current AI photorealization settings as a style"/>
+                <Button x:Name="DeleteAppPhotorealStyleButton" Grid.Column="2"
+                        Style="{StaticResource GhostButton}" Content="削除" Click="DeletePhotorealStyle_Click"
+                        MinWidth="64"
+                        AutomationProperties.Name="Delete selected AI photorealization style"/>
+              </Grid>
+              <TextBlock x:Name="AppPhotorealStyleSummaryText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,6,0,0"/>
+              <TextBlock x:Name="AppPhotorealStyleStatusText"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,3,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </Border>
           <DockPanel LastChildFill="False" Margin="0,0,0,5">
             <Button x:Name="ResetAppPhotorealPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetAppPhotorealPrompt_Click" MinWidth="72" AutomationProperties.Name="Reset default AI photorealization prompt"/>
             <TextBlock Text="Prompt" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
@@ -1831,6 +1909,41 @@
               <TextBlock DockPanel.Dock="Right" Text="GPU queue shared with AI高画質化" Foreground="{StaticResource TextSecondary}" FontSize="10" VerticalAlignment="Center"/>
               <TextBlock Text="AI実写化 設定" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="SemiBold"/>
             </DockPanel>
+            <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalPhotorealStyleComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}"
+                      DisplayMemberPath="Label"
+                      IsSynchronizedWithCurrentItem="False"
+                      SelectionChanged="PhotorealStyle_SelectionChanged"
+                      AutomationProperties.Name="AI photorealization style"
+                      AutomationProperties.HelpText="Apply a saved prompt, strength, composition, quality, and resolution style."/>
+            <Grid Margin="0,6,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBox x:Name="ModalPhotorealStyleNameTextBox" Grid.Column="0"
+                       MaxLength="40" Padding="7,4" Margin="0,0,5,0"
+                       Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}"
+                       AutomationProperties.Name="AI photorealization style name"/>
+              <Button x:Name="SaveModalPhotorealStyleButton" Grid.Column="1"
+                      Style="{StaticResource GhostButton}" Content="保存" Click="SavePhotorealStyle_Click"
+                      MinWidth="54" Height="27" Padding="7,2" Margin="0,0,5,0"
+                      Foreground="{StaticResource TextPrimary}"
+                      AutomationProperties.Name="Save current AI photorealization settings as a style"/>
+              <Button x:Name="DeleteModalPhotorealStyleButton" Grid.Column="2"
+                      Style="{StaticResource GhostButton}" Content="削除" Click="DeletePhotorealStyle_Click"
+                      MinWidth="54" Height="27" Padding="7,2"
+                      Foreground="{StaticResource TextPrimary}"
+                      AutomationProperties.Name="Delete selected AI photorealization style"/>
+            </Grid>
+            <TextBlock x:Name="ModalPhotorealStyleStatusText"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10"
+                       TextWrapping="Wrap" Margin="0,-5,0,8"
+                       AutomationProperties.LiveSetting="Polite"/>
             <DockPanel Margin="0,0,0,4">
               <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" Padding="8,2"
                       Foreground="{StaticResource TextPrimary}"
