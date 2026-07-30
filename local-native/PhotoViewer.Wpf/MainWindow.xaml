@@ -480,6 +480,7 @@
                 <TextBlock x:Name="FavoriteFilterSummary" Text="{DynamicResource UiAllRatings}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6"/>
                 <CheckBox x:Name="EnhancedOnlyFilter" Content="AI高画質化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI高画質化の完了画像だけを表示"/>
                 <CheckBox x:Name="PhotorealOnlyFilter" Content="AI実写化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI実写化の完了画像だけを表示"/>
+                <CheckBox x:Name="VideoOnlyFilter" Content="動画化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="動画が完成している元画像だけを表示。この表示中に画像を開くと動画を自動再生します。"/>
                 <CheckBox x:Name="UnseenOnlyFilter" Content="Unseen only" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
                 <CheckBox x:Name="ShowUnseenDots" Content="Unseen dots" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="Changes dot visibility only. Seen history is not changed."/>
                 <TextBlock Text="DATE" Foreground="{StaticResource TextTertiary}" FontSize="9.5" FontWeight="Bold" Margin="0,0,0,4"/>
@@ -689,6 +690,7 @@
             <ContextMenu x:Name="CardsContextMenu" AutomationProperties.Name="Image grid actions">
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
+              <MenuItem Header="動画化..." Click="GalleryContextVideo_Click" AutomationProperties.Name="Open video generation board"/>
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.GroupStyle>
@@ -727,6 +729,7 @@
             <ContextMenu x:Name="RowsContextMenu" AutomationProperties.Name="Image list actions">
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
+              <MenuItem Header="動画化..." Click="GalleryContextVideo_Click" AutomationProperties.Name="Open video generation board"/>
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -1504,6 +1507,7 @@
             <StackPanel>
               <RadioButton x:Name="SettingsGeneralNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsGeneral}" Tag="general" IsChecked="True" Click="AppSettingsNavigation_Click" AutomationProperties.Name="General settings"/>
               <RadioButton x:Name="SettingsPhotorealNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="AI実写化" Tag="photoreal" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI photorealization settings"/>
+              <RadioButton x:Name="SettingsVideoNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="動画化" Tag="video" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Video generation settings"/>
               <RadioButton x:Name="SettingsDisplayNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsDisplay}" Tag="display" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Display settings"/>
               <RadioButton x:Name="SettingsThumbnailsNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsThumbnails}" Tag="thumbnails" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Thumbnail settings"/>
               <RadioButton x:Name="SettingsKeyboardNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsKeyboard}" Tag="keyboard" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Keyboard settings"/>
@@ -1566,6 +1570,80 @@
                        HorizontalAlignment="Right" VerticalAlignment="Center"/>
           </Grid>
           <TextBlock Text="{DynamicResource UiModalEdgeHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,18"/>
+          <TextBlock x:Name="AppVideoSettingsHeading" Text="動画化"
+                     Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold"
+                     Margin="0,0,0,6" AutomationProperties.Name="Video generation settings section"/>
+          <TextBlock Text="Wan2.2 TI2V 5B Normalを使う動画ジョブの初期値です。変更は次に明示的に追加するジョブから使われ、待機中・処理中のジョブは変わりません。"
+                     Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
+                  BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+            <StackPanel>
+              <TextBlock Text="Model · Wan2.2 TI2V 5B FP16 / Normal"
+                         Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,9"/>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="1.35*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="時間" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoDurationComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="1"
+                            SelectionChanged="VideoGenerationSetting_SelectionChanged"
+                            AutomationProperties.Name="Default video duration">
+                    <ComboBoxItem Content="4秒" Tag="4"/>
+                    <ComboBoxItem Content="6秒（推奨）" Tag="6"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="FPS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoFpsComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="1"
+                            SelectionChanged="VideoGenerationSetting_SelectionChanged"
+                            AutomationProperties.Name="Default video playback FPS">
+                    <ComboBoxItem Content="12 fps" Tag="12"/>
+                    <ComboBoxItem Content="16 fps（推奨）" Tag="16"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="4">
+                  <TextBlock Text="解像度" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoResolutionComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="2"
+                            SelectionChanged="VideoGenerationSetting_SelectionChanged"
+                            AutomationProperties.Name="Default video resolution budget">
+                    <ComboBoxItem Content="軽量 · 230k px" Tag="230400"/>
+                    <ComboBoxItem Content="標準 · 307k px" Tag="307200"/>
+                    <ComboBoxItem Content="高品質 · 409k px（推奨）" Tag="409600"/>
+                  </ComboBox>
+                </StackPanel>
+              </Grid>
+              <DockPanel Margin="0,11,0,4">
+                <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                        Content="Reset" Height="25" Padding="8,2"
+                        Click="ResetVideoGenerationSettings_Click"
+                        AutomationProperties.Name="Reset default video generation settings"/>
+                <TextBlock Text="Default prompt" Foreground="{StaticResource TextSecondary}" FontSize="10.5" VerticalAlignment="Center"/>
+              </DockPanel>
+              <TextBox x:Name="AppVideoPromptTextBox"
+                       MinHeight="78" MaxHeight="132" MaxLength="2000"
+                       AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                       Padding="8,6" Background="{StaticResource BgPrimary}"
+                       BorderBrush="{StaticResource BorderStrong}" Foreground="{StaticResource TextPrimary}"
+                       SelectionBrush="{StaticResource AccentFill}" CaretBrush="{StaticResource TextPrimary}"
+                       TextChanged="VideoGenerationPrompt_TextChanged"
+                       AutomationProperties.Name="Default video generation prompt"
+                       AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt."/>
+              <TextBlock Text="空欄はNormalの既定モーション。元画像比率を保ち、32px単位、最大409,600px、1 worker、GPU並列なし。"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,7,0,0"/>
+              <TextBlock x:Name="AppVideoSettingsStatusText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,5,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </Border>
           <TextBlock x:Name="PhotorealSettingsHeading" Text="AI実写化" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="AI photorealization settings section"/>
           <TextBlock Text="すべてのAI実写化で使う共通設定です。ここでの変更は拡大画面にも即時反映され、次にキューへ追加するジョブから使われます。待機中・処理中のジョブは変更されません。" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
@@ -1712,7 +1790,7 @@
                    AutomationProperties.HelpText="Saved as you type and shared with the image preview photorealization settings."/>
           <TextBlock x:Name="AppPhotorealPromptStatusText" Text="入力内容は自動保存されます。" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,18" AutomationProperties.LiveSetting="Polite"/>
           <TextBlock Text="AI処理の出力先" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
-          <TextBlock Text="AI高画質化とAI実写化の共通の親フォルダです。出力はその中の Upscaled と Photorealized に分けて保存されます。変更は次に処理を開始する待機ジョブから使われ、既存画像は移動しません。"
+          <TextBlock Text="AI高画質化・AI実写化・動画化の共通の親フォルダです。出力は Upscaled、Photorealized、Videos の固定フォルダに分けて保存されます。変更は次に処理を開始する待機ジョブから使われ、既存成果物は移動しません。"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,18">
             <StackPanel>
@@ -1723,7 +1801,7 @@
                        Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}"
                        Foreground="{StaticResource TextSecondary}"
                        AutomationProperties.Name="AI enhancement output root"
-                       AutomationProperties.HelpText="Parent folder containing the fixed Upscaled and Photorealized output folders."/>
+                       AutomationProperties.HelpText="Parent folder containing the fixed Upscaled, Photorealized, and Videos output folders."/>
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,8,0,0">
                 <Button x:Name="ChangeEnhancementOutputRootButton" Style="{StaticResource GhostButton}" Content="変更..." Click="ChangeEnhancementOutputRoot_Click" MinWidth="92" Margin="0,0,8,0"
                         AutomationProperties.Name="Change AI enhancement output folder"/>
@@ -1920,6 +1998,13 @@
                 Fill="Transparent" Stretch="Uniform" Width="16" Height="16"/>
         </Button>
         <Button x:Name="ModalEnhanceCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Cancel the running enhancement job" AutomationProperties.Name="Cancel image enhancement" MinWidth="92" Height="32" Padding="8,0" Click="CancelModalEnhancement_Click" Visibility="Collapsed"><TextBlock x:Name="ModalEnhanceCancelButtonLabel" Text="処理を中止" FontSize="10"/></Button>
+        <Button x:Name="ModalVideoGenerateButton" DockPanel.Dock="Right"
+                Style="{StaticResource GhostButton}" ToolTip="この画像から動画を生成"
+                AutomationProperties.Name="Open video generation board"
+                AutomationProperties.HelpText="Opens settings first. Video generation starts only after the explicit execute button."
+                MinWidth="68" Height="32" Padding="8,0" Click="OpenModalVideoGeneration_Click">
+          <TextBlock Text="動画化" FontSize="9.5" FontWeight="SemiBold"/>
+        </Button>
         <Button x:Name="ModalPhotorealSettingsButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="AI実写化の設定" AutomationProperties.Name="Open AI photorealization settings" Width="32" Height="32" Click="ToggleModalPhotorealSettings_Click">
           <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" Foreground="{StaticResource TextSecondary}" FontSize="14"/>
         </Button>
@@ -2074,6 +2159,102 @@
         </Border>
       </Popup>
 
+      <Popup x:Name="ModalVideoGenerationPopup"
+             PlacementTarget="{Binding ElementName=ModalVideoGenerateButton}"
+             Placement="Bottom" HorizontalOffset="-270" VerticalOffset="7"
+             AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False"
+             AutomationProperties.Name="Video generation board">
+        <Border Width="390" Padding="16" CornerRadius="7"
+                Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+          <StackPanel>
+            <DockPanel LastChildFill="True" Margin="0,0,0,12">
+              <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                      Width="28" Height="28" Click="CloseVideoGenerationBoard_Click"
+                      ToolTip="Close video generation board"
+                      AutomationProperties.Name="Close video generation board">
+                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE711;" Foreground="{StaticResource TextSecondary}" FontSize="12"/>
+              </Button>
+              <StackPanel>
+                <TextBlock Text="動画化" Foreground="{StaticResource TextPrimary}" FontSize="16" FontWeight="SemiBold"/>
+                <TextBlock x:Name="ModalVideoPresetText" Text="Wan2.2 TI2V 5B · Normal"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,2,0,0"/>
+              </StackPanel>
+            </DockPanel>
+            <TextBlock Text="選んだ画像を最初のフレームとして使います。空欄なら、構図とキャラクターを保つ穏やかなNormalモーションを使います。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+            <DockPanel Margin="0,0,0,4">
+              <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                      Content="Reset" Height="24" Padding="8,2"
+                      Click="ResetVideoGenerationSettings_Click"
+                      AutomationProperties.Name="Reset video generation settings"/>
+              <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
+            </DockPanel>
+            <TextBox x:Name="ModalVideoPromptTextBox"
+                     MinHeight="92" MaxHeight="154" MaxLength="2000"
+                     AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                     CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                     BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6"
+                     TextChanged="VideoGenerationPrompt_TextChanged"
+                     AutomationProperties.Name="Video generation prompt"
+                     AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt."/>
+            <Grid Margin="0,12,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="8"/>
+                <ColumnDefinition Width="1.35*"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0">
+                <TextBlock Text="時間" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalVideoDurationComboBox"
+                          Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="1"
+                          SelectionChanged="VideoGenerationSetting_SelectionChanged"
+                          AutomationProperties.Name="Video duration">
+                  <ComboBoxItem Content="4秒" Tag="4"/>
+                  <ComboBoxItem Content="6秒（推奨）" Tag="6"/>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+                <TextBlock Text="FPS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalVideoFpsComboBox"
+                          Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="1"
+                          SelectionChanged="VideoGenerationSetting_SelectionChanged"
+                          AutomationProperties.Name="Video playback FPS">
+                  <ComboBoxItem Content="12 fps" Tag="12"/>
+                  <ComboBoxItem Content="16 fps（推奨）" Tag="16"/>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Grid.Column="4">
+                <TextBlock Text="解像度" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalVideoResolutionComboBox"
+                          Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="2"
+                          SelectionChanged="VideoGenerationSetting_SelectionChanged"
+                          AutomationProperties.Name="Video resolution budget">
+                  <ComboBoxItem Content="軽量 · 230k px" Tag="230400"/>
+                  <ComboBoxItem Content="標準 · 307k px" Tag="307200"/>
+                  <ComboBoxItem Content="高品質 · 409k px（推奨）" Tag="409600"/>
+                </ComboBox>
+              </StackPanel>
+            </Grid>
+            <TextBlock Text="元画像のアスペクト比を保ち、32px単位で自動調整します。1 worker・GPU推論の並列化なし。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,0"/>
+            <TextBlock x:Name="VideoGenerationStatusText"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,8,0,0"
+                       AutomationProperties.LiveSetting="Polite"/>
+            <Button x:Name="QueueVideoGenerationButton"
+                    Style="{StaticResource GhostButton}" Content="動画化を実行"
+                    Height="34" Margin="0,12,0,0" HorizontalAlignment="Stretch"
+                    Click="QueueVideoGeneration_Click"
+                    AutomationProperties.Name="Add video generation job"
+                    AutomationProperties.HelpText="Explicitly adds one video job to the same durable GPU queue used by image enhancements."/>
+          </StackPanel>
+        </Border>
+      </Popup>
+
       <!-- image area -->
       <Grid x:Name="ModalImageArea" Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Margin="0"
             Background="Transparent" ClipToBounds="True"
@@ -2088,6 +2269,7 @@
             <MenuItem Header="Favorite +1" Click="ModalFavoriteIncrease_Click" AutomationProperties.Name="Increase favorite level"/>
             <MenuItem Header="Favorite -1" Click="ModalFavoriteDecrease_Click" AutomationProperties.Name="Decrease favorite level"/>
             <Separator/>
+            <MenuItem Header="動画化..." Click="ModalContextVideo_Click" AutomationProperties.Name="Open video generation board"/>
             <MenuItem x:Name="ModalContextEnhancedToggle" Header="Show Enhanced / Original" Click="ToggleModalEnhanced_Click" AutomationProperties.Name="Toggle enhanced image output"/>
             <MenuItem Header="{DynamicResource UiOpenExternally}" Click="OpenSelectedExternally_Click" AutomationProperties.Name="Open displayed image externally"/>
             <MenuItem Header="{DynamicResource UiShowSourceFolder}" Click="ShowSelectedInFolder_Click" AutomationProperties.Name="Show source in folder"/>
@@ -2116,6 +2298,13 @@
             <Rectangle x:Name="ModalArtBase"/>
             <Rectangle x:Name="ModalArtGlow"/>
             <Image x:Name="ModalBitmap" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+            <MediaElement x:Name="ModalVideo" Stretch="Uniform" Visibility="Collapsed"
+                          LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                          ScrubbingEnabled="True" IsHitTestVisible="False"
+                          MediaOpened="ModalVideo_MediaOpened"
+                          MediaEnded="ModalVideo_MediaEnded"
+                          MediaFailed="ModalVideo_MediaFailed"
+                          AutomationProperties.Name="Generated video playback"/>
           </Grid>
         </Border>
 
@@ -2190,6 +2379,18 @@
             <Button x:Name="ModalZoomOutButton" Style="{StaticResource GhostButton}" Content="−" ToolTip="Zoom out (-)" AutomationProperties.Name="Zoom image out" Height="32" MinWidth="32" Padding="6,0" Click="ModalZoomOut_Click"/>
             <Button x:Name="ModalZoomResetButton" Style="{StaticResource GhostButton}" Content="Fit" ToolTip="Reset to fit (0)" AutomationProperties.Name="Fit image to preview" Height="32" MinWidth="48" Padding="7,0" Margin="4,0" Click="ModalFit_Click"/>
             <Button x:Name="ModalZoomInButton" Style="{StaticResource GhostButton}" Content="+" ToolTip="Zoom in (+)" AutomationProperties.Name="Zoom image in" Height="32" MinWidth="32" Padding="6,0" Margin="4,0,0,0" Click="ModalZoomIn_Click"/>
+            <Button x:Name="ModalVideoPlaybackButton"
+                    Style="{StaticResource GhostButton}" MinWidth="76" Height="32" Padding="8,0"
+                    Margin="8,0,4,0" Visibility="Collapsed" Click="ModalVideoPlayback_Click"
+                    AutomationProperties.Name="Play generated video"
+                    AutomationProperties.HelpText="Plays only an already-completed managed video and never starts generation.">
+              <TextBlock x:Name="ModalVideoPlaybackButtonLabel" Text="動画再生" FontSize="9.5" FontWeight="SemiBold"/>
+            </Button>
+            <ComboBox x:Name="ModalVideoVersionComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}" DisplayMemberPath="Label"
+                      Width="168" Height="32" Margin="0,0,4,0" Visibility="Collapsed"
+                      SelectionChanged="ModalVideoVersion_SelectionChanged"
+                      AutomationProperties.Name="Generated video version"/>
             <TextBlock x:Name="ModalShortcutHintText" Text="   ← → navigate   ·   Esc close" Foreground="{StaticResource TextTertiary}" FontSize="11" VerticalAlignment="Center" Margin="6,0,4,0"/>
           </StackPanel>
         </Border>

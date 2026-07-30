@@ -51,7 +51,25 @@ try {
         'selectedPhotorealBadge',
         'upscaleVisible',
         'photorealVisible',
+        'videoVisible',
+        'selectedVideoBadge',
+        'videoModalOpened',
+        'videoAutoplay',
+        'videoVersionInventory',
+        'videoPaused',
+        'olderVideoSelected',
+        'ordinaryModalStayedImage',
+        'manualVideoStarted',
+        'ordinaryNeighborNavigated',
+        'ordinaryNeighborStayedImage',
+        'videoDefaults',
+        'videoBoardOpened',
+        'videoSurface',
+        'videoQueueSucceeded',
+        'videoRequestExact',
         'reloadPhotorealVisible',
+        'reloadVideoVisible',
+        'reloadVideoSettings',
         'enhancementStateUnchanged',
         'readOk'
     )) {
@@ -59,6 +77,9 @@ try {
     }
     Assert-True ($result.upscaleFilteredCount -eq 1) 'Upscale-only filter did not isolate one source.'
     Assert-True ($result.photorealFilteredCount -eq 1) 'Photoreal-only filter did not isolate one source.'
+    Assert-True ($result.videoCandidateCount -eq 1) 'Managed-video reader did not isolate one source.'
+    Assert-True ($result.videoFilteredCount -eq 1) 'Video-only filter did not isolate one source.'
+    Assert-True ($result.reloadVideoFilteredCount -eq 1) 'Video-only filter did not survive a clean reload.'
     Assert-True ($result.intersectionFilteredCount -eq 0) 'Combined filters did not use intersection semantics.'
     $result | ConvertTo-Json -Depth 5
 }

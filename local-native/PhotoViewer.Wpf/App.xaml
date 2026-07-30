@@ -770,10 +770,15 @@
                     Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}">
               <TextBlock Text="H" Foreground="#FFBAE6FD" FontSize="7.5" FontWeight="Bold"/>
             </Border>
-            <Border Padding="2,0" CornerRadius="3"
+            <Border Padding="2,0" CornerRadius="3" Margin="0,0,2,0"
                     Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFC084FC" BorderThickness="1"
                     Visibility="{Binding ShowPhotorealBadge, Converter={StaticResource BoolToVis}}">
               <TextBlock Text="R" Foreground="#FFE9D5FF" FontSize="7.5" FontWeight="Bold"/>
+            </Border>
+            <Border Padding="2,0" CornerRadius="3"
+                    Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFF59E0B" BorderThickness="1"
+                    Visibility="{Binding ShowVideoBadge, Converter={StaticResource BoolToVis}}">
+              <TextBlock Text="V" Foreground="#FFFFE7B0" FontSize="7.5" FontWeight="Bold"/>
             </Border>
           </StackPanel>
           <Grid x:Name="compactFavoriteControls" VerticalAlignment="Bottom"
@@ -861,10 +866,15 @@
                               Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="HQ" Foreground="#FFBAE6FD" FontSize="9" FontWeight="Bold"/>
                       </Border>
-                      <Border Padding="4,1" CornerRadius="4"
+                      <Border Padding="4,1" CornerRadius="4" Margin="0,0,3,0"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFC084FC" BorderThickness="1"
                               Visibility="{Binding ShowPhotorealBadge, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="REAL" Foreground="#FFE9D5FF" FontSize="9" FontWeight="Bold"/>
+                      </Border>
+                      <Border Padding="4,1" CornerRadius="4"
+                              Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFF59E0B" BorderThickness="1"
+                              Visibility="{Binding ShowVideoBadge, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="VIDEO" Foreground="#FFFFE7B0" FontSize="9" FontWeight="Bold"/>
                       </Border>
                     </StackPanel>
                   </Grid>
@@ -927,10 +937,15 @@
                               Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="HQ" Foreground="#FFBAE6FD" FontSize="8" FontWeight="Bold"/>
                       </Border>
-                      <Border Padding="3,0" CornerRadius="3"
+                      <Border Padding="3,0" CornerRadius="3" Margin="0,0,2,0"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFC084FC" BorderThickness="1"
                               Visibility="{Binding ShowPhotorealBadge, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="REAL" Foreground="#FFE9D5FF" FontSize="8" FontWeight="Bold"/>
+                      </Border>
+                      <Border Padding="3,0" CornerRadius="3"
+                              Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFF59E0B" BorderThickness="1"
+                              Visibility="{Binding ShowVideoBadge, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="VIDEO" Foreground="#FFFFE7B0" FontSize="8" FontWeight="Bold"/>
                       </Border>
                     </StackPanel>
                   </Grid>

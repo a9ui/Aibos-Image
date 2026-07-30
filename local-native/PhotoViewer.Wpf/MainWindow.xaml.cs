@@ -1262,6 +1262,7 @@ public partial class MainWindow : Window
         bool UnfavoriteOnly,
         bool EnhancedOnly,
         bool PhotorealOnly,
+        bool VideoOnly,
         bool UnseenOnly,
         FrozenSet<int> FavoriteLevels,
         FrozenSet<string> HiddenFolderBuckets,
@@ -1281,6 +1282,7 @@ public partial class MainWindow : Window
         bool Enhanced,
         bool Upscaled,
         bool Photorealized,
+        bool VideoGenerated,
         bool Unseen,
         DateTime ModifiedUtc,
         DateTime CreatedUtc);
@@ -1496,8 +1498,11 @@ public partial class MainWindow : Window
         Dictionary<string, ManagedEnhancedOutput> CatalogOutputsByPath,
         Dictionary<string, List<ManagedEnhancementVersion>> Versions,
         Dictionary<string, List<ManagedEnhancementVersion>> CatalogVersionsByPath,
+        Dictionary<string, List<ManagedVideoVersion>> VideoVersions,
+        Dictionary<string, List<ManagedVideoVersion>> CatalogVideoVersionsByPath,
         int JobsRead,
         int CandidateCount,
+        int VideoCandidateCount,
         DateTime LastWriteTimeUtc,
         long Length);
     private sealed record EnhancedStateReadResult(EnhancedStateSnapshot? Snapshot, string? Error);
@@ -1955,7 +1960,17 @@ public partial class MainWindow : Window
                 _catalogEnhancementVersionsByPath
                     .Where(static item => item.Value.Any(static version => version.Operation == "photoreal"))
                     .Select(static item => item.Key)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase));
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
+                _catalogVideoVersionsByPath
+                    .Where(static item => item.Value.Count > 0)
+                    .Select(static item => item.Key)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
+                _catalogVideoVersionsByPath
+                    .Where(static item => item.Value.Count > 0)
+                    .ToDictionary(
+                        static item => item.Key,
+                        static item => item.Value[0].Output.OutputPath,
+                        StringComparer.OrdinalIgnoreCase));
             CatalogCardLayoutContext cardLayout = CaptureCardLayoutContext();
             bool showUnseenDots = _showUnseenDots;
             IReadOnlyDictionary<string, ImageDimensions> emptyDimensions =
@@ -3348,6 +3363,13 @@ public partial class MainWindow : Window
             && sharedState.UpscaledPaths.Contains(enhancementAlias);
         bool photorealized = enhancementAlias is not null
             && sharedState.PhotorealizedPaths.Contains(enhancementAlias);
+        bool videoGenerated = enhancementAlias is not null
+            && sharedState.VideoPaths.Contains(enhancementAlias);
+        string? videoOutputPath = videoGenerated
+            && enhancementAlias is not null
+            && sharedState.VideoOutputs.TryGetValue(enhancementAlias, out string? knownVideoOutput)
+                ? knownVideoOutput
+                : null;
         dimensions.TryGetValue(path, out var imageSize);
         prompts.TryGetValue(path, out string? indexedPrompt);
         string folderBucketCacheKey = file.DirectoryName ?? path;
@@ -3387,6 +3409,8 @@ public partial class MainWindow : Window
             Enhanced = enhanced,
             Upscaled = upscaled,
             Photorealized = photorealized,
+            VideoGenerated = videoGenerated,
+            VideoOutputPath = videoOutputPath,
             EnhancedOutputPath = enhancedOutputPath,
             SizeText = FormatBytes(file.Length),
             ModifiedText = modified.ToString("yyyy-MM-dd HH:mm"),
@@ -3711,6 +3735,9 @@ public partial class MainWindow : Window
                     new Dictionary<string, ManagedEnhancedOutput>(StringComparer.OrdinalIgnoreCase),
                     new Dictionary<string, List<ManagedEnhancementVersion>>(EnhancementSourceIdentityComparer),
                     new Dictionary<string, List<ManagedEnhancementVersion>>(StringComparer.OrdinalIgnoreCase),
+                    new Dictionary<string, List<ManagedVideoVersion>>(EnhancementSourceIdentityComparer),
+                    new Dictionary<string, List<ManagedVideoVersion>>(StringComparer.OrdinalIgnoreCase),
+                    0,
                     0,
                     0,
                     default,
@@ -3728,8 +3755,13 @@ public partial class MainWindow : Window
             EnhancementSourceIdentityComparer);
         var nextCatalogVersionsByPath = new Dictionary<string, List<ManagedEnhancementVersion>>(
             StringComparer.OrdinalIgnoreCase);
+        var nextVideoVersions = new Dictionary<string, List<ManagedVideoVersion>>(
+            EnhancementSourceIdentityComparer);
+        var nextCatalogVideoVersionsByPath = new Dictionary<string, List<ManagedVideoVersion>>(
+            StringComparer.OrdinalIgnoreCase);
         int nextJobsRead = 0;
         int nextCandidateCount = 0;
+        int nextVideoCandidateCount = 0;
         try
         {
             using var stream = new FileStream(
@@ -3756,6 +3788,37 @@ public partial class MainWindow : Window
                     !string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
                     continue;
                 string operation = ReadEnhancementOperation(job);
+                if (operation == "video")
+                {
+                    if (!TryBuildManagedVideoVersion(
+                            job,
+                            out string resolvedVideoSource,
+                            out ManagedVideoVersion videoVersion,
+                            out IReadOnlyList<string> videoCatalogAliases))
+                    {
+                        continue;
+                    }
+
+                    if (!nextVideoVersions.TryGetValue(
+                            resolvedVideoSource,
+                            out List<ManagedVideoVersion>? videoVersions))
+                    {
+                        videoVersions = [];
+                        nextVideoVersions[resolvedVideoSource] = videoVersions;
+                        nextVideoCandidateCount++;
+                    }
+                    foreach (string alias in videoCatalogAliases)
+                        nextCatalogVideoVersionsByPath.TryAdd(alias, videoVersions);
+                    if (!videoVersions.Any(candidate =>
+                            string.Equals(
+                                candidate.Output.OutputPath,
+                                videoVersion.Output.OutputPath,
+                                StringComparison.OrdinalIgnoreCase)))
+                    {
+                        videoVersions.Add(videoVersion);
+                    }
+                    continue;
+                }
                 if (!IsImageEnhancementOperation(operation))
                     continue;
                 if (!TryBuildManagedEnhancedOutput(
@@ -3802,8 +3865,11 @@ public partial class MainWindow : Window
                     nextCatalogOutputsByPath,
                     nextVersions,
                     nextCatalogVersionsByPath,
+                    nextVideoVersions,
+                    nextCatalogVideoVersionsByPath,
                     nextJobsRead,
                     nextCandidateCount,
+                    nextVideoCandidateCount,
                     observedWriteTimeUtc,
                     observedLength),
                 null);
@@ -3828,8 +3894,15 @@ public partial class MainWindow : Window
         _catalogEnhancementVersionsByPath.Clear();
         foreach ((string alias, List<ManagedEnhancementVersion> versions) in snapshot.CatalogVersionsByPath)
             _catalogEnhancementVersionsByPath[alias] = versions;
+        _videoVersions.Clear();
+        foreach ((string source, List<ManagedVideoVersion> versions) in snapshot.VideoVersions)
+            _videoVersions[source] = versions;
+        _catalogVideoVersionsByPath.Clear();
+        foreach ((string alias, List<ManagedVideoVersion> versions) in snapshot.CatalogVideoVersionsByPath)
+            _catalogVideoVersionsByPath[alias] = versions;
         _enhancementJobsRead = snapshot.JobsRead;
         _enhancedCandidateCount = snapshot.CandidateCount;
+        _videoCandidateCount = snapshot.VideoCandidateCount;
         _enhancementReadOk = true;
         _enhancementReadError = null;
         _enhancementJobsLastWriteTimeUtc = snapshot.LastWriteTimeUtc;
@@ -3919,6 +3992,7 @@ public partial class MainWindow : Window
             if (Modal.Visibility == Visibility.Visible && SelectedTile() is Tile selected)
             {
                 InitializeModalEnhancementVersions(selected);
+                InitializeModalVideoVersions(selected);
                 UpdateModalEnhancedControls(TryGetModalEnhancedOutput(selected, out _));
             }
         }
@@ -10710,6 +10784,7 @@ public partial class MainWindow : Window
                     tile.Enhanced,
                     tile.Upscaled,
                     tile.Photorealized,
+                    tile.VideoGenerated,
                     tile.Unseen,
                     tile.ModifiedUtc,
                     tile.CreatedUtc);
@@ -10733,6 +10808,7 @@ public partial class MainWindow : Window
             bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
             bool enhancedOnly = EnhancedOnlyFilter?.IsChecked == true;
             bool photorealOnly = PhotorealOnlyFilter?.IsChecked == true;
+            bool videoOnly = VideoOnlyFilter?.IsChecked == true;
             bool unseenOnly = UnseenOnlyFilter?.IsChecked == true;
             FrozenSet<int> favoriteLevels = _favoriteFilterLevels.ToFrozenSet();
             FrozenSet<string> hiddenFolderBuckets =
@@ -10743,6 +10819,7 @@ public partial class MainWindow : Window
                 && !unfavoriteOnly
                 && !enhancedOnly
                 && !photorealOnly
+                && !videoOnly
                 && !unseenOnly
                 && hiddenFolderBuckets.Count == 0
                 && !_dateFromLocal.HasValue
@@ -10789,6 +10866,7 @@ public partial class MainWindow : Window
                 unfavoriteOnly,
                 enhancedOnly,
                 photorealOnly,
+                videoOnly,
                 unseenOnly,
                 favoriteLevels,
                 hiddenFolderBuckets,
@@ -10846,6 +10924,7 @@ public partial class MainWindow : Window
             && !snapshot.UnfavoriteOnly
             && !snapshot.EnhancedOnly
             && !snapshot.PhotorealOnly
+            && !snapshot.VideoOnly
             && !snapshot.UnseenOnly
             && snapshot.HiddenFolderBuckets.Count == 0
             && !snapshot.DateFromLocal.HasValue
@@ -11175,6 +11254,8 @@ public partial class MainWindow : Window
         if (snapshot.EnhancedOnly && !tile.Upscaled)
             return false;
         if (snapshot.PhotorealOnly && !tile.Photorealized)
+            return false;
+        if (snapshot.VideoOnly && !tile.VideoGenerated)
             return false;
         if (snapshot.UnseenOnly && !tile.Unseen)
             return false;
@@ -12358,7 +12439,9 @@ public partial class MainWindow : Window
         IReadOnlySet<string> SeenPaths,
         IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs,
         IReadOnlySet<string> UpscaledPaths,
-        IReadOnlySet<string> PhotorealizedPaths);
+        IReadOnlySet<string> PhotorealizedPaths,
+        IReadOnlySet<string> VideoPaths,
+        IReadOnlyDictionary<string, string> VideoOutputs);
 
     private readonly record struct CatalogTilePreparationResult(
         List<Tile> Tiles,
@@ -13726,10 +13809,12 @@ public partial class MainWindow : Window
             ResetModalTransform(t.Path);
         if (sourceChanged)
         {
+            StopAndHideModalVideo(clearSource: true);
             _modalSourceTilePath = t.Path;
             // Each navigation target is resolved independently. A currently valid,
             // owned succeeded output is the preferred asset for a newly selected image.
             InitializeModalEnhancementVersions(t);
+            InitializeModalVideoVersions(t);
         }
         var watch = Stopwatch.StartNew();
         _modalCts?.Cancel();
@@ -13754,6 +13839,7 @@ public partial class MainWindow : Window
         _modalDisplayPath = displayPath;
         ModalFileSizeText.Text = FormatFileSizeMb(displayedAsset.SizeBytes);
         UpdateModalEnhancedControls(canShowEnhanced);
+        UpdateVideoGenerationActionControls();
 
         var immediate = _modalShowingEnhanced ? null : PreviewBitmap.Source as BitmapSource ?? t.Thumbnail;
         ModalBitmap.Source = immediate;
@@ -13770,6 +13856,8 @@ public partial class MainWindow : Window
         Modal.UpdateLayout();
         UpdateModalFit();
         ScheduleModalFitUpdate();
+        if (sourceChanged && ShouldAutoplayModalVideo())
+            ShowModalVideoVersion(_modalVideoVersionIndex, autoplay: true);
         if (opening)
         {
             _modalHasPointerPosition = false;
@@ -14687,6 +14775,8 @@ public partial class MainWindow : Window
         _modalEnhancementGeneration++;
         if (ModalPhotorealSettingsPopup is not null)
             ModalPhotorealSettingsPopup.IsOpen = false;
+        if (ModalVideoGenerationPopup is not null)
+            ModalVideoGenerationPopup.IsOpen = false;
         Modal.Visibility = Visibility.Collapsed;
         _modalShowingEnhanced = false;
         _modalSourceTilePath = null;
@@ -14699,6 +14789,7 @@ public partial class MainWindow : Window
         _modalEnhancementError = null;
         _modalEnhancementCancelRequested = false;
         ClearModalEnhancementVersions();
+        ClearModalVideoVersions();
         _modalChromeTransientTimer.Stop();
         _modalHasPointerPosition = false;
         _modalPressedEdgeTarget = ModalEdgeTarget.None;
@@ -14724,6 +14815,8 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile || !TryGetModalEnhancedOutput(tile, out _))
             return false;
 
+        if (_modalShowingVideo)
+            StopAndHideModalVideo(clearSource: true);
         if (_modalShowingEnhanced)
         {
             _modalEnhancementVersionIndex = 0;
@@ -16325,6 +16418,7 @@ public partial class MainWindow : Window
         RestorePreviewTabButton.ToolTip = UiLanguageResources.Format("UiReopenClosedFormat", BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab));
         ModalFlipButton.ToolTip = UiLanguageResources.Format("UiFlipHorizontalFormat", BindingText(ViewerKeyAction.FlipHorizontal));
         ModalEnhancedToggleButton.ToolTip = UiLanguageResources.Format("UiToggleEnhancedFormat", BindingText(ViewerKeyAction.ToggleEnhancedPreview));
+        UpdateModalVideoPlaybackPresentation();
         ModalEnhanceButton.ToolTip = UiLanguageResources.Format("UiEnhanceCurrentFormat", BindingText(ViewerKeyAction.EnhanceCurrentImage));
         ModalZoomOutButton.ToolTip = UiLanguageResources.Format("UiZoomOutFormat", BindingText(ViewerKeyAction.ModalZoomOut));
         ModalZoomResetButton.ToolTip = UiLanguageResources.Format("UiResetFitFormat", BindingText(ViewerKeyAction.ModalZoomReset));
@@ -16784,11 +16878,14 @@ public partial class MainWindow : Window
     {
         if (string.Equals(section, "storage", StringComparison.Ordinal))
             RefreshSharedDataSettings();
+        else if (string.Equals(section, "video", StringComparison.Ordinal))
+            SyncVideoGenerationSettingsControls();
         else if (string.Equals(section, "photoreal", StringComparison.Ordinal))
             RefreshEnhancementOutputRootSettings();
 
         (FrameworkElement Target, RadioButton Navigation) selection = section switch
         {
+            "video" => (AppVideoSettingsHeading, SettingsVideoNav),
             "photoreal" => (PhotorealSettingsHeading, SettingsPhotorealNav),
             "display" => (DisplaySettingsHeading, SettingsDisplayNav),
             "thumbnails" => (ThumbnailSettingsHeading, SettingsThumbnailsNav),
@@ -17939,6 +18036,7 @@ public partial class MainWindow : Window
             SyncFoldersSectionControls();
             RestoreModalPhotorealSettings(null, null, null, null, null);
             RestorePhotorealStyles(null, null);
+            RestoreVideoGenerationSettings(null, null, null, null);
             _keyBindings = KeyBindingSettings.CreateDefaults();
             _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
             ApplyKeyBindingTooltips();
@@ -17985,6 +18083,11 @@ public partial class MainWindow : Window
             state.PhotorealPrompt,
             state.PhotorealCfgScale);
         RestorePhotorealStyles(state.PhotorealStyles, state.SelectedPhotorealStyleName);
+        RestoreVideoGenerationSettings(
+            state.VideoDurationSeconds,
+            state.VideoPlaybackFps,
+            state.VideoMaximumPixelArea,
+            state.VideoPrompt);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -18124,6 +18227,10 @@ public partial class MainWindow : Window
                 PhotorealPrompt = _modalPhotorealPrompt,
                 PhotorealStyles = SnapshotPhotorealStyles(),
                 SelectedPhotorealStyleName = _selectedPhotorealStyleName,
+                VideoDurationSeconds = _videoDurationSeconds,
+                VideoPlaybackFps = _videoPlaybackFps,
+                VideoMaximumPixelArea = _videoMaximumPixelArea,
+                VideoPrompt = _videoPrompt,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -18483,6 +18590,12 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (ModalVideoGenerationPopup?.IsOpen == true)
+        {
+            ModalVideoGenerationPopup.IsOpen = false;
+            return true;
+        }
+
         if (Modal.Visibility != Visibility.Visible)
             return false;
 
@@ -18497,6 +18610,14 @@ public partial class MainWindow : Window
         if (_galleryAutoScrollSurface is not null && key == Key.Escape)
         {
             StopGalleryAutoScroll();
+            e.Handled = true;
+            return;
+        }
+        if (ModalVideoGenerationPopup?.IsOpen == true
+            && key == Key.Escape
+            && modifiers == ModifierKeys.None)
+        {
+            ModalVideoGenerationPopup.IsOpen = false;
             e.Handled = true;
             return;
         }
@@ -18651,6 +18772,8 @@ public partial class MainWindow : Window
                 return ToggleModalFlip();
             if (MatchesBinding(ViewerKeyAction.ToggleEnhancedPreview, key, modifiers))
                 return ToggleModalEnhanced();
+            if (MatchesBinding(ViewerKeyAction.ToggleVideoPlayback, key, modifiers))
+                return ToggleModalVideoPlayback();
             if (MatchesBinding(ViewerKeyAction.EnhanceCurrentImage, key, modifiers)
                 && ModalEnhanceButton.IsEnabled)
             {
@@ -22363,7 +22486,8 @@ public partial class MainWindow : Window
         => WindowChrome.GetIsHitTestVisibleInChrome(ModalTopBar)
             && new[] { ModalCloseBtn, ModalShortcutsButton, ModalDeleteButton, ModalMetadataSidebarToggleButton,
                 ModalFilmstripToggleButton, ModalOpenExternalButton, ModalRevealButton, ModalEnhanceButton,
-                ModalEnhancedToggleButton, ModalFlipButton, ModalFavoriteDecreaseButton, ModalFavoriteIncreaseButton,
+                ModalVideoGenerateButton, ModalEnhancedToggleButton, ModalFlipButton,
+                ModalFavoriteDecreaseButton, ModalFavoriteIncreaseButton,
                 ModalFullScreenButton, ModalOneToOneButton }
                 .All(button => IsDescendantOrSelf(button, ModalTopBar));
     public bool ModalLightweightGlassContractForSmoke
@@ -22413,13 +22537,19 @@ public partial class MainWindow : Window
                 && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(item)));
     public bool GalleryContextMenuContractForSmoke
         => new[] { CardsContextMenu, RowsContextMenu }.All(menu =>
-            menu.Items.OfType<MenuItem>().Count() == 2
+            menu.Items.OfType<MenuItem>().Count() == 3
             && menu.Items.OfType<MenuItem>().Any(item =>
                 string.Equals(item.Header?.ToString(), "AI高画質化", StringComparison.Ordinal)
                 && string.Equals(AutomationProperties.GetName(item), "AI高画質化", StringComparison.Ordinal))
             && menu.Items.OfType<MenuItem>().Any(item =>
                 string.Equals(item.Header?.ToString(), "AI実写化", StringComparison.Ordinal)
-                && string.Equals(AutomationProperties.GetName(item), "AI実写化", StringComparison.Ordinal)));
+                && string.Equals(AutomationProperties.GetName(item), "AI実写化", StringComparison.Ordinal))
+            && menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(item.Header?.ToString(), "動画化...", StringComparison.Ordinal)
+                && string.Equals(
+                    AutomationProperties.GetName(item),
+                    "Open video generation board",
+                    StringComparison.Ordinal)));
     public bool ModalEdgeChromeContractForSmoke
         => ModalPreviousZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalCenterZoneColumn.Width.GridUnitType == GridUnitType.Star
@@ -23513,6 +23643,11 @@ public sealed class ViewerState
     public string? PhotorealPrompt { get; set; }
     public List<PhotorealStyleState>? PhotorealStyles { get; set; }
     public string? SelectedPhotorealStyleName { get; set; }
+    // WPF-local request defaults for the explicit managed-video action.
+    public int? VideoDurationSeconds { get; set; }
+    public int? VideoPlaybackFps { get; set; }
+    public int? VideoMaximumPixelArea { get; set; }
+    public string? VideoPrompt { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.
@@ -24368,6 +24503,7 @@ public sealed class Tile : INotifyPropertyChanged
     public string FolderBucketKey { get; set; } = "";
     public string FolderBucketLabel { get; set; } = "";
     public string? EnhancedOutputPath { get; set; }
+    public string? VideoOutputPath { get; set; }
     public DateTime ModifiedUtc { get; set; }
     public DateTime CreatedUtc { get; set; }
     public long SourceLength { get; set; }
@@ -24379,6 +24515,7 @@ public sealed class Tile : INotifyPropertyChanged
         => $"{SizeText}. Favorite level {_fav}. "
             + $"{(_upscaled ? "AI-upscaled. " : "")}"
             + $"{(_photorealized ? "AI-photorealized. " : "")}"
+            + $"{(_videoGenerated ? "Generated video available. " : "")}"
             + $"{(!_enhanced ? "Original. " : "")}"
             + $"{(_unseen ? "Unseen" : "Seen")}.";
 
@@ -24388,6 +24525,7 @@ public sealed class Tile : INotifyPropertyChanged
     private bool _enhanced;
     private bool _upscaled;
     private bool _photorealized;
+    private bool _videoGenerated;
     private bool _showCardDetails = true;
     private bool _showCardStatusBadge = true;
     private bool _isCanonicalSelected;
@@ -24442,6 +24580,19 @@ public sealed class Tile : INotifyPropertyChanged
         }
     }
 
+    public bool VideoGenerated
+    {
+        get => _videoGenerated;
+        set
+        {
+            if (_videoGenerated == value) return;
+            _videoGenerated = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoGenerated)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
     public bool ShowCardDetails
     {
         get => _showCardDetails;
@@ -24465,6 +24616,7 @@ public sealed class Tile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowEnhancedBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUnseenDotOnCard)));
         }
     }
@@ -24474,6 +24626,7 @@ public sealed class Tile : INotifyPropertyChanged
     public bool ShowEnhancedBadge => _showCardStatusBadge && _enhanced;
     public bool ShowUpscaleBadge => _showCardStatusBadge && _upscaled;
     public bool ShowPhotorealBadge => _showCardStatusBadge && _photorealized;
+    public bool ShowVideoBadge => _showCardStatusBadge && _videoGenerated;
     public bool ShowUnseenDotOnCard => _showCardStatusBadge && _showUnseenDot;
     public double CardFavoriteButtonSize => Math.Clamp(_cardWidth - 4, 18, 34);
     public bool UseCompactCardTemplate => _cardWidth < 80;
