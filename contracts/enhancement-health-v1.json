@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-HEALTH-001",
+  "protocol": "aibos.enhancement-health/v1",
+  "route": {
+    "method": "GET",
+    "path": "/api/enhance/health",
+    "cacheControl": "no-store",
+    "loopbackOnly": true
+  },
+  "passiveRead": {
+    "createsJobs": false,
+    "startsWorker": false,
+    "wakesQueue": false,
+    "claimsJobs": false,
+    "retriesJobs": false,
+    "pollsComfyUi": false
+  },
+  "status": [
+    "healthy",
+    "working",
+    "needs-attention"
+  ],
+  "issues": [
+    "multiple-running-jobs",
+    "running-without-worker-identity",
+    "running-without-local-pump",
+    "queued-without-pump",
+    "worker-loop-failing",
+    "non-loopback-server",
+    "non-loopback-comfyui"
+  ],
+  "requiredFields": [
+    "version",
+    "generatedAt",
+    "status",
+    "issues",
+    "runtime.sourceRevision",
+    "runtime.sourceDirty",
+    "runtime.buildId",
+    "runtime.serverHost",
+    "runtime.serverPort",
+    "runtime.serverStartedAtUtc",
+    "runtime.processId",
+    "store.version",
+    "jobs.counts",
+    "jobs.current",
+    "jobs.lastClaimAt",
+    "jobs.lastProgressAt",
+    "jobs.lastTerminalAt",
+    "worker.pumpRunning",
+    "worker.processWorkerInstanceId",
+    "worker.consecutiveWorkerFailures",
+    "worker.lastWorkerError",
+    "worker.lastWorkerErrorAt",
+    "worker.lastLeaseContentionAt",
+    "comfyUi.endpoint",
+    "comfyUi.loopback",
+    "comfyUi.promptId",
+    "comfyUi.submissionState"
+  ],
+  "readerRules": {
+    "missingRoute": "show health unavailable without blocking the existing jobs response",
+    "invalidPayload": "show health unavailable without mutating jobs or starting the companion",
+    "unknownFields": "ignore",
+    "unknownStatus": "treat the health payload as unavailable",
+    "unknownIssue": "preserve the needs-attention status and show a generic attention message",
+    "polling": "request health only while the Jobs workspace performs its existing passive refresh",
+    "timeoutPolicy": "do not infer a stall from elapsed time alone until a measured threshold is adopted"
+  },
+  "workingFixture": {
+    "payload": {
+      "version": 1,
+      "generatedAt": "2026-07-30T13:30:00.000Z",
+      "status": "working",
+      "issues": [],
+      "runtime": {
+        "sourceRevision": "696849546ad61383def4d6d050e6fcb66a5fb3cd",
+        "sourceDirty": false,
+        "buildId": "fixture-build",
+        "serverHost": "127.0.0.1",
+        "serverPort": 3000,
+        "serverStartedAtUtc": "2026-07-30T13:00:00.000Z",
+        "processId": 1234
+      },
+      "store": {
+        "version": 1
+      },
+      "jobs": {
+        "counts": {
+          "queued": 4,
+          "running": 1,
+          "succeeded": 12,
+          "failed": 1,
+          "canceled": 2,
+          "deleted": 0
+        },
+        "current": {
+          "id": "fixture-running",
+          "operation": "photoreal",
+          "adapterId": "comfyui-flux2-photoreal",
+          "progress": 42,
+          "workerInstanceId": "fixture-worker",
+          "startedAt": "2026-07-30T13:20:00.000Z",
+          "updatedAt": "2026-07-30T13:29:55.000Z",
+          "lastHeartbeatAt": "2026-07-30T13:29:55.000Z",
+          "lastProgressAt": "2026-07-30T13:29:50.000Z",
+          "externalPromptId": "fixture-prompt"
+        },
+        "lastClaimAt": "2026-07-30T13:20:00.000Z",
+        "lastProgressAt": "2026-07-30T13:29:50.000Z",
+        "lastTerminalAt": "2026-07-30T13:10:00.000Z"
+      },
+      "worker": {
+        "pumpRunning": true,
+        "processWorkerInstanceId": "fixture-worker",
+        "consecutiveWorkerFailures": 0,
+        "lastWorkerError": null,
+        "lastWorkerErrorAt": null,
+        "lastLeaseContentionAt": null
+      },
+      "comfyUi": {
+        "endpoint": "http://127.0.0.1:8190",
+        "loopback": true,
+        "promptId": "fixture-prompt",
+        "submissionState": "submitted"
+      }
+    },
+    "expectedDisplay": {
+      "state": "Working",
+      "detail": "1 running / 4 queued",
+      "sourceRevisionPrefix": "69684954"
+    }
+  }
+}
