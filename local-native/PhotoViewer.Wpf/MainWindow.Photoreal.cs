@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -464,6 +467,124 @@ public partial class MainWindow
     private void ResetAppPhotorealPrompt_Click(object sender, RoutedEventArgs e)
         => ResetPhotorealPrompt();
 
+    private void RefreshEnhancementOutputRootSettings()
+    {
+        if (EnhancementOutputRootTextBox is null
+            || ChangeEnhancementOutputRootButton is null
+            || OpenEnhancementOutputRootButton is null
+            || EnhancementOutputRootStatusText is null)
+        {
+            return;
+        }
+
+        try
+        {
+            string root = ResolvedManagedEnhancementOutputsRoot;
+            EnhancementOutputRootTextBox.Text = root;
+            EnhancementOutputRootTextBox.ToolTip = root;
+            bool environmentOverride =
+                SharedDataRootActivation.TryGetManagedOutputsRootEnvironmentOverride(
+                    out _,
+                    out string? environmentVariable);
+            ChangeEnhancementOutputRootButton.IsEnabled = !environmentOverride;
+            OpenEnhancementOutputRootButton.IsEnabled = Directory.Exists(root);
+            EnhancementOutputRootStatusText.Text = environmentOverride
+                ? $"{environmentVariable} が優先されています。アプリから変更するには環境変数を解除してください。"
+                : Directory.Exists(root)
+                    ? "現在の出力先です。変更後は、次に処理を開始する待機ジョブから使われます。"
+                    : "設定先が見つかりません。既存のフォルダを選び直してください。";
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or NotSupportedException
+            or System.Security.SecurityException)
+        {
+            EnhancementOutputRootTextBox.Text = "";
+            EnhancementOutputRootTextBox.ToolTip = null;
+            ChangeEnhancementOutputRootButton.IsEnabled = false;
+            OpenEnhancementOutputRootButton.IsEnabled = false;
+            EnhancementOutputRootStatusText.Text =
+                $"出力先設定を読み込めませんでした（{ex.GetType().Name}）。";
+        }
+    }
+
+    private void ChangeEnhancementOutputRoot_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshEnhancementOutputRootSettings();
+        if (!ChangeEnhancementOutputRootButton.IsEnabled)
+            return;
+
+        string currentRoot = EnhancementOutputRootTextBox.Text;
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "AI高画質化・AI実写化の出力先を選択",
+            Multiselect = false,
+        };
+        if (Directory.Exists(currentRoot))
+            dialog.InitialDirectory = currentRoot;
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        if (!SharedDataRootActivation.TryWriteManagedOutputsRoot(
+                ResolvedEnhancementJobsPath,
+                dialog.FolderName,
+                out string normalizedRoot,
+                out string? error))
+        {
+            EnhancementOutputRootStatusText.Text =
+                error ?? "出力先を変更できませんでした。";
+            return;
+        }
+
+        RefreshEnhancementOutputRootSettings();
+        EnhancementOutputRootStatusText.Text =
+            $"{normalizedRoot} に変更しました。次に処理を開始する待機ジョブから使われます。";
+    }
+
+    private void OpenEnhancementOutputRoot_Click(object sender, RoutedEventArgs e)
+        => TryOpenEnhancementOutputRoot();
+
+    private bool TryOpenEnhancementOutputRoot()
+    {
+        RefreshEnhancementOutputRootSettings();
+        string root = EnhancementOutputRootTextBox.Text;
+        if (!Directory.Exists(root))
+            return false;
+
+        try
+        {
+            var startInfo = new ProcessStartInfo("explorer.exe")
+            {
+                UseShellExecute = true,
+            };
+            startInfo.ArgumentList.Add(root);
+            if (!_explorerLauncher(startInfo))
+            {
+                EnhancementOutputRootStatusText.Text =
+                    "出力先フォルダを開けませんでした。アクセスを確認してください。";
+                return false;
+            }
+
+            EnhancementOutputRootStatusText.Text = "出力先フォルダを開きました。";
+            return true;
+        }
+        catch (Exception ex) when (ex is Win32Exception
+            or IOException
+            or UnauthorizedAccessException
+            or InvalidOperationException
+            or ArgumentException
+            or NotSupportedException
+            or System.Security.SecurityException)
+        {
+            Trace.TraceWarning(
+                $"Enhancement output root open failed: {ex.GetType().Name}");
+            EnhancementOutputRootStatusText.Text =
+                "出力先フォルダを開けませんでした。アクセスを確認してください。";
+            return false;
+        }
+    }
+
     private void ResetPhotorealPrompt()
     {
         _modalPhotorealPrompt = DefaultPhotorealPrompt;
@@ -616,6 +737,28 @@ public partial class MainWindow
                 "Default AI photorealization prompt",
                 StringComparison.Ordinal)
             && string.Equals(AppPhotorealPromptTextBox.Text, _modalPhotorealPrompt, StringComparison.Ordinal);
+
+    public bool AppEnhancementOutputRootSurfaceForSmoke
+        => EnhancementOutputRootTextBox.IsReadOnly
+            && string.Equals(
+                AutomationProperties.GetName(EnhancementOutputRootTextBox),
+                "AI enhancement output root",
+                StringComparison.Ordinal)
+            && string.Equals(
+                EnhancementOutputRootTextBox.Text,
+                ResolvedManagedEnhancementOutputsRoot,
+                StringComparison.OrdinalIgnoreCase);
+
+    public bool SetEnhancementOutputRootForSmoke(string root)
+    {
+        bool saved = SharedDataRootActivation.TryWriteManagedOutputsRoot(
+            ResolvedEnhancementJobsPath,
+            root,
+            out _,
+            out _);
+        RefreshEnhancementOutputRootSettings();
+        return saved;
+    }
 
     public void SetAppPhotorealPromptForSmoke(string prompt)
         => AppPhotorealPromptTextBox.Text = prompt;

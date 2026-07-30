@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
+using System.Windows.Shell;
 using System.Windows.Threading;
 
 namespace PhotoViewer.Wpf;
@@ -30,6 +31,11 @@ public partial class MainWindow
     private int _enhancementWorkspaceGetCount;
     private int _enhancementWorkspacePollCount;
     private bool _returnToEnhancementJobsAfterModalClose;
+    private Tile? _enhancementJobsTemporaryVisibleTile;
+    private string? _enhancementJobsTrustedModalSourcePath;
+    private readonly List<string> _enhancementJobsPreviousSelectionPaths = [];
+    private string? _enhancementJobsPreviousPrimaryPath;
+    private bool _enhancementJobsModalSelectionCaptured;
 
     private void InitializeEnhancementJobsWorkspace()
     {
@@ -574,24 +580,31 @@ public partial class MainWindow
             return false;
         }
 
-        Tile? tile = _tiles.FirstOrDefault(candidate =>
+        Tile? tile = _allTiles.FirstOrDefault(candidate =>
             candidate.IsRealFile
             && string.Equals(candidate.Path, canonicalSource, StringComparison.OrdinalIgnoreCase));
         if (tile is null)
         {
-            EnhancementJobsStatusText.Text = "元画像は現在の一覧にありません。フォルダまたは絞り込みを確認してください。";
-            return false;
+            var sourceInfo = new FileInfo(canonicalSource);
+            tile = new Tile
+            {
+                Path = canonicalSource,
+                FileName = Path.GetFileName(canonicalSource),
+                IsRealFile = true,
+                ModifiedUtc = sourceInfo.LastWriteTimeUtc,
+            };
         }
 
+        PrepareEnhancementJobsModalTile(tile, canonicalSource);
         _returnToEnhancementJobsAfterModalClose = true;
         CloseEnhancementJobsWorkspace(restoreFocus: false);
         SelectTile(tile);
-        SaveState();
         OpenModal();
         if (Modal.Visibility != Visibility.Visible
             || !string.Equals(SelectedTile()?.Path, canonicalSource, StringComparison.OrdinalIgnoreCase))
         {
             _returnToEnhancementJobsAfterModalClose = false;
+            RestoreEnhancementJobsModalSelection();
             return false;
         }
 
@@ -624,12 +637,93 @@ public partial class MainWindow
         return opened;
     }
 
+    private void PrepareEnhancementJobsModalTile(Tile tile, string canonicalSource)
+    {
+        RestoreEnhancementJobsModalSelection();
+        _enhancementJobsPreviousSelectionPaths.AddRange(_selectedPaths);
+        _enhancementJobsPreviousPrimaryPath = _primarySelectedPath;
+        _enhancementJobsModalSelectionCaptured = true;
+        _enhancementJobsTrustedModalSourcePath = canonicalSource;
+        if (!_tiles.Contains(tile))
+        {
+            _tiles.Add(tile);
+            _enhancementJobsTemporaryVisibleTile = tile;
+        }
+    }
+
+    private bool IsEnhancementJobsTrustedModalSource(Tile tile)
+        => !string.IsNullOrWhiteSpace(_enhancementJobsTrustedModalSourcePath)
+            && string.Equals(
+                tile.Path,
+                _enhancementJobsTrustedModalSourcePath,
+                StringComparison.OrdinalIgnoreCase);
+
+    private bool TryResolveEnhancementJobsTrustedModalSource(
+        Tile tile,
+        out string canonicalSource,
+        out string reason)
+    {
+        canonicalSource = "";
+        reason = "the Jobs source is unavailable";
+        if (!IsEnhancementJobsTrustedModalSource(tile)
+            || string.IsNullOrWhiteSpace(tile.Path)
+            || !Path.IsPathFullyQualified(tile.Path)
+            || !SupportedImageExtensions.Contains(Path.GetExtension(tile.Path)))
+        {
+            return false;
+        }
+
+        try
+        {
+            canonicalSource = _resolveFinalPath(Path.GetFullPath(tile.Path));
+            if (!File.Exists(canonicalSource))
+                return false;
+            reason = "";
+            return true;
+        }
+        catch
+        {
+            canonicalSource = "";
+            return false;
+        }
+    }
+
+    private void RestoreEnhancementJobsModalSelection()
+    {
+        if (!_enhancementJobsModalSelectionCaptured)
+            return;
+
+        _enhancementJobsModalSelectionCaptured = false;
+        Tile? temporaryTile = _enhancementJobsTemporaryVisibleTile;
+        _enhancementJobsTemporaryVisibleTile = null;
+        _enhancementJobsTrustedModalSourcePath = null;
+        if (temporaryTile is not null)
+            _tiles.Remove(temporaryTile);
+
+        var previousPaths = new HashSet<string>(
+            _enhancementJobsPreviousSelectionPaths,
+            StringComparer.OrdinalIgnoreCase);
+        List<Tile> restored = _tiles
+            .Where(tile => previousPaths.Contains(tile.Path))
+            .ToList();
+        Tile? primary = restored.FirstOrDefault(tile =>
+            string.Equals(
+                tile.Path,
+                _enhancementJobsPreviousPrimaryPath,
+                StringComparison.OrdinalIgnoreCase))
+            ?? restored.LastOrDefault();
+        _enhancementJobsPreviousSelectionPaths.Clear();
+        _enhancementJobsPreviousPrimaryPath = null;
+        SetSelection(restored, primary);
+    }
+
     private void ReturnToEnhancementJobsAfterModalClose(bool modalWasVisible)
     {
         if (!_returnToEnhancementJobsAfterModalClose || !modalWasVisible)
             return;
 
         _returnToEnhancementJobsAfterModalClose = false;
+        RestoreEnhancementJobsModalSelection();
         string filter = _enhancementWorkspaceFilter;
         _ = Dispatcher.BeginInvoke(
             new Action(async () =>
@@ -821,6 +915,17 @@ public partial class MainWindow
     {
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
         return job is not null && TryOpenEnhancementSourceInViewer(job);
+    }
+
+    public bool EnhancementJobsHeaderChromeContractForSmoke
+        => WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsCloseButton)
+            && WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsRefreshButton);
+
+    public bool ActivateEnhancementJobsCloseForSmoke()
+    {
+        EnhancementJobsCloseButton.RaiseEvent(
+            new RoutedEventArgs(Button.ClickEvent));
+        return EnhancementJobsDialog.Visibility != Visibility.Visible;
     }
 
     public object? EnhancementJobViewIdentityForSmoke(string id)

@@ -65,7 +65,8 @@ The shared durable set is:
 - `albums.json`;
 - `search-history.json`;
 - `recent-folders.json`;
-- `enhance/jobs.json` and managed outputs under `enhance/outputs/**`.
+- `enhance/jobs.json`, `enhance/output-root.txt`, and managed outputs below the
+  configured parent (with `enhance/outputs/**` retained as the fallback).
 
 The current shared `settings.json` allowlist includes
 `confirmBeforeDelete` and `thumbnailStatusBorders`. WPF adopts the shared
@@ -157,9 +158,11 @@ The version 1 locator is UTF-8 JSON no larger than 65,536 bytes:
 
 sharedDataRoot names the data directory that directly contains favorites.json,
 seen.json, settings.json, albums.json, search-history.json, and
-recent-folders.json, plus enhance/jobs.json and enhance/outputs/**. It is not a
-repository root. It may therefore point at an existing legacy .cache directory
-without copying or rewriting any durable data.
+recent-folders.json, plus enhance/jobs.json and the output-root configuration.
+The actual managed output files may live below that configured absolute parent;
+without a configuration they remain below enhance/outputs/**. The shared data
+root is not a repository root. It may therefore point at an existing legacy
+.cache directory without copying or rewriting any durable data.
 
 - Both required fields occur exactly once. Duplicate required fields,
   malformed JSON, unsupported versions, relative roots, unavailable roots, and
@@ -357,10 +360,18 @@ or stores.
   actions for the clicked real source image. Opening a context menu remains
   passive; only choosing either action may start the companion and enqueue
   work.
-- New managed outputs are flat within the companion-owned
-  `enhance/outputs/高画質化/` and `enhance/outputs/実写化/` operation folders.
-  Existing recorded nested output paths remain valid and are not migrated
-  automatically.
+- `PV-ENHANCE-OUTPUT-001` defines one configurable parent for both operations.
+  The parent is selected in the WPF AI実写化 settings section and stored as one
+  absolute path in `enhance/output-root.txt`; the fixed flat operation folders
+  below it are `Upscaled/` and `Photorealized/`. WPF's dedicated environment
+  override and then `PVU_ENHANCE_OUTPUT_ROOT` take precedence and make this
+  setting read-only. Without any override or configuration, the legacy
+  `enhance/outputs` parent remains the fallback.
+- Changing the parent is an explicit atomic settings write. It does not create
+  operation folders, move or delete existing outputs, or rewrite recorded job
+  paths. A queued job resolves the current parent when it starts processing;
+  a running job keeps its already recorded destination. Existing recorded
+  absolute output paths remain readable.
 - The H25 Browser companion owns the current local Enhancement API and worker.
   WPF owns its loopback client and must keep the API optional.
 - Modal and batch Start/Retry first reuse an already-ready loopback companion.
@@ -384,9 +395,11 @@ or stores.
   thumbnail instances are updated in place so polling does not make thumbnails
   flash. Each row visibly identifies `HQ`/高画質化 or `REAL`/実写化.
 - Choosing a job thumbnail closes the workspace and opens its validated source
-  in the WPF viewer when that source is present in the current catalog. Open
-  output opens the exact validated managed version in that same viewer. Closing
-  either image returns to the Jobs workspace with the prior filter preserved.
+  in the WPF viewer. Open output opens the exact validated managed version in
+  that same viewer even when the source is currently hidden by gallery filters
+  or belongs to another loaded catalog. This temporary Jobs viewer context does
+  not add the source to the durable catalog. Closing either image restores the
+  prior gallery selection and returns to Jobs with its filter preserved.
   - Queued, running, and failed rows expose Cancel. Failed rows also expose
     Retry. Cancel never deletes the source, a managed output, or failure
     diagnostics; the canceled row disappears from the Jobs workspace.

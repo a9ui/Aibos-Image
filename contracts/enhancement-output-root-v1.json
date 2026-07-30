@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-OUTPUT-001",
+  "protocol": "aibos.enhancement-output-root/v1",
+  "configFile": "enhance/output-root.txt",
+  "configEncoding": "UTF-8",
+  "configuredValue": "fully-qualified existing parent directory",
+  "resolutionPriority": [
+    "PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT",
+    "PVU_ENHANCE_OUTPUT_ROOT",
+    "enhance/output-root.txt",
+    "enhance/outputs"
+  ],
+  "operationFolders": {
+    "upscale": "Upscaled",
+    "photoreal": "Photorealized"
+  },
+  "allocationTime": "when a queued job starts processing",
+  "existingJobs": "recorded absolute output paths remain authoritative and are never rewritten by a settings change",
+  "settingsMutation": {
+    "trigger": "explicit user folder selection",
+    "write": "sibling temporary file with write-through flush, then replace",
+    "movesExistingOutputs": false,
+    "createsOperationFolders": false,
+    "environmentOverride": "read-only in the application settings surface"
+  }
+}

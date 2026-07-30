@@ -16992,6 +16992,20 @@ public partial class App : Application
                 second.SetPhotorealOnlyFilterForSmoke(true);
                 int reloadFilteredCount = second.FilteredCountForSmoke;
                 bool reloadPhotorealVisible = second.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                second.OpenAppSettingsForSmoke();
+                bool outputRootSettingsSurface = second.AppEnhancementOutputRootSurfaceForSmoke;
+                string alternateOutputRoot = Path.Combine(smokeRoot, "alternate-managed-outputs");
+                Directory.CreateDirectory(alternateOutputRoot);
+                bool outputRootChanged = second.SetEnhancementOutputRootForSmoke(alternateOutputRoot)
+                    && string.Equals(
+                        SharedDataRootActivation.ResolveManagedOutputsRoot(jobsPath),
+                        alternateOutputRoot,
+                        StringComparison.OrdinalIgnoreCase);
+                bool outputRootRestored = second.SetEnhancementOutputRootForSmoke(outputRoot)
+                    && string.Equals(
+                        SharedDataRootActivation.ResolveManagedOutputsRoot(jobsPath),
+                        outputRoot,
+                        StringComparison.OrdinalIgnoreCase);
                 second.Close();
 
                 string afterJobsJson = File.ReadAllText(jobsPath);
@@ -17022,6 +17036,9 @@ public partial class App : Application
                     && afterClearCount == allCount
                     && reloadFilteredCount == 1
                     && reloadPhotorealVisible
+                    && outputRootSettingsSurface
+                    && outputRootChanged
+                    && outputRootRestored
                     && enhancementStateUnchanged;
 
                 result = new EnhancedFilterSmokeResult
@@ -17063,6 +17080,9 @@ public partial class App : Application
                     AfterClearCount = afterClearCount,
                     ReloadFilteredCount = reloadFilteredCount,
                     ReloadPhotorealVisible = reloadPhotorealVisible,
+                    OutputRootSettingsSurface = outputRootSettingsSurface,
+                    OutputRootChanged = outputRootChanged,
+                    OutputRootRestored = outputRootRestored,
                     EnhancementStateUnchanged = enhancementStateUnchanged,
                     ReadOk = win.EnhancementReadOkForSmoke,
                     ReadError = win.EnhancementReadErrorForSmoke,
@@ -17431,6 +17451,8 @@ public partial class App : Application
                 EnhancementJobsWorkspaceSmokeSnapshot afterFailedCancel = window.EnhancementJobsWorkspaceForSmoke();
                 bool retryIssued = await window.RetryEnhancementJobForSmokeAsync("failed-retry-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterRetry = window.EnhancementJobsWorkspaceForSmoke();
+                await window.SetSearchInputForSmokeAsync("__jobs_source_hidden_from_gallery__");
+                bool sourceHiddenFromVisibleGallery = window.FilteredCountForSmoke == 0;
                 bool outputOpened = window.OpenEnhancementJobOutputForSmoke("done-job");
                 openedOutput = window.ModalDisplayPathForSmoke;
                 EnhancementJobsWorkspaceSmokeSnapshot whileOutputViewerOpen = window.EnhancementJobsWorkspaceForSmoke();
@@ -17447,6 +17469,8 @@ public partial class App : Application
                 window.CloseModalForSmoke();
                 await window.WaitForEnhancementJobsReturnForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterSourceOpen = window.EnhancementJobsWorkspaceForSmoke();
+                bool jobsHeaderChromeContract = window.EnhancementJobsHeaderChromeContractForSmoke;
+                bool closeButtonClosedWorkspace = window.ActivateEnhancementJobsCloseForSmoke();
 
                 string sourceAfter = FileFingerprint(sourcePath);
                 bool storesUnchanged = storesBefore.All(pair =>
@@ -17497,6 +17521,7 @@ public partial class App : Application
                     && afterRetry.Active == 3
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 3", StringComparison.Ordinal))
+                    && sourceHiddenFromVisibleGallery
                     && outputOpened
                     && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
                     && deleteIssued
@@ -17505,6 +17530,8 @@ public partial class App : Application
                     && afterDelete.VisibleIds.Contains("done-job", StringComparer.Ordinal)
                     && sourceOpenedInViewer
                     && jobsRestoredAfterViewerClose
+                    && jobsHeaderChromeContract
+                    && closeButtonClosedWorkspace
                     && routesOk
                     && sourceBefore == sourceAfter
                     && storesUnchanged;
@@ -17528,6 +17555,9 @@ public partial class App : Application
                     afterSourceOpen,
                     outputOpened,
                     sourceOpenedInViewer,
+                    sourceHiddenFromVisibleGallery,
+                    jobsHeaderChromeContract,
+                    closeButtonClosedWorkspace,
                     queueInventoryOrdered,
                     operationLabelsVisible,
                     stableJobViews,
@@ -27797,6 +27827,9 @@ public partial class App : Application
         public int AfterClearCount { get; init; }
         public int ReloadFilteredCount { get; init; }
         public bool ReloadPhotorealVisible { get; init; }
+        public bool OutputRootSettingsSurface { get; init; }
+        public bool OutputRootChanged { get; init; }
+        public bool OutputRootRestored { get; init; }
         public bool EnhancementStateUnchanged { get; init; }
         public bool ReadOk { get; init; }
         public string? ReadError { get; init; }

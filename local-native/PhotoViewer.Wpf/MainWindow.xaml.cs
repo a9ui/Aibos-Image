@@ -13839,8 +13839,21 @@ public partial class MainWindow : Window
         out string failureReason)
     {
         resolution = null!;
-        if (!TryValidateFileDropTile(tile, out string canonicalSource, out failureReason))
+        string canonicalSource;
+        if (IsEnhancementJobsTrustedModalSource(tile))
+        {
+            if (!TryResolveEnhancementJobsTrustedModalSource(
+                    tile,
+                    out canonicalSource,
+                    out failureReason))
+            {
+                return false;
+            }
+        }
+        else if (!TryValidateFileDropTile(tile, out canonicalSource, out failureReason))
+        {
             return false;
+        }
 
         var sourceInfo = new FileInfo(canonicalSource);
         if (requestEnhanced)
@@ -16717,6 +16730,7 @@ public partial class MainWindow : Window
         SetShowUnseenDots(_showUnseenDots, persist: false);
         SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
         SyncModalPhotorealSettingsControls();
+        RefreshEnhancementOutputRootSettings();
         RefreshSharedDataSettings();
         DiagnosticsText.Text = BuildDiagnosticsText();
         DiagnosticsStatusText.Text = "Read-only diagnostics. Copy excludes paths, image metadata, prompts, and personal state.";
@@ -16748,6 +16762,8 @@ public partial class MainWindow : Window
     {
         if (string.Equals(section, "storage", StringComparison.Ordinal))
             RefreshSharedDataSettings();
+        else if (string.Equals(section, "photoreal", StringComparison.Ordinal))
+            RefreshEnhancementOutputRootSettings();
 
         (FrameworkElement Target, RadioButton Navigation) selection = section switch
         {

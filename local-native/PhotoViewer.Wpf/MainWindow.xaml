@@ -1183,11 +1183,13 @@
           <Grid.RowDefinitions><RowDefinition Height="54"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
           <DockPanel Grid.Row="0" Margin="16,0,10,0" LastChildFill="True">
             <Button x:Name="EnhancementJobsCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseEnhancementJobs_Click"
-                    ToolTip="Close jobs workspace" AutomationProperties.Name="Close AI enhancement jobs">
+                    ToolTip="Close jobs workspace" AutomationProperties.Name="Close AI enhancement jobs"
+                    WindowChrome.IsHitTestVisibleInChrome="True">
               <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
             </Button>
             <Button x:Name="EnhancementJobsRefreshButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Refresh" Click="RefreshEnhancementJobs_Click"
-                    Height="30" MinWidth="72" Margin="0,0,6,0" AutomationProperties.Name="Refresh AI enhancement jobs"/>
+                    Height="30" MinWidth="72" Margin="0,0,6,0" AutomationProperties.Name="Refresh AI enhancement jobs"
+                    WindowChrome.IsHitTestVisibleInChrome="True"/>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
               <TextBlock Text="AI jobs" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/>
               <TextBlock x:Name="EnhancementJobsHeaderSummary" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="12,2,0,0"/>
@@ -1409,6 +1411,28 @@
                    AutomationProperties.Name="Default AI photorealization prompt"
                    AutomationProperties.HelpText="Saved as you type and shared with the image preview photorealization settings."/>
           <TextBlock x:Name="AppPhotorealPromptStatusText" Text="入力内容は自動保存されます。" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,18" AutomationProperties.LiveSetting="Polite"/>
+          <TextBlock Text="AI処理の出力先" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
+          <TextBlock Text="AI高画質化とAI実写化の共通の親フォルダです。出力はその中の Upscaled と Photorealized に分けて保存されます。変更は次に処理を開始する待機ジョブから使われ、既存画像は移動しません。"
+                     Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,18">
+            <StackPanel>
+              <TextBox x:Name="EnhancementOutputRootTextBox"
+                       IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                       TextWrapping="NoWrap" Padding="7,5"
+                       Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}"
+                       Foreground="{StaticResource TextSecondary}"
+                       AutomationProperties.Name="AI enhancement output root"
+                       AutomationProperties.HelpText="Parent folder containing the fixed Upscaled and Photorealized output folders."/>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,8,0,0">
+                <Button x:Name="ChangeEnhancementOutputRootButton" Style="{StaticResource GhostButton}" Content="変更..." Click="ChangeEnhancementOutputRoot_Click" MinWidth="92" Margin="0,0,8,0"
+                        AutomationProperties.Name="Change AI enhancement output folder"/>
+                <Button x:Name="OpenEnhancementOutputRootButton" Style="{StaticResource GhostButton}" Content="フォルダを開く" Click="OpenEnhancementOutputRoot_Click" MinWidth="116"
+                        AutomationProperties.Name="Open AI enhancement output folder"/>
+              </StackPanel>
+              <TextBlock x:Name="EnhancementOutputRootStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </Border>
           <TextBlock x:Name="ThumbnailSettingsHeading" Text="THUMBNAIL STATUS BORDERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Thumbnail settings section"/>
           <Grid Margin="0,0,0,6">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
