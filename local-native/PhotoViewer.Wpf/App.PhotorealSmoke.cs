@@ -31,6 +31,7 @@ public partial class App
             bool requestContract = false;
             bool resetPromptContract = false;
             bool appSettingsPromptContract = false;
+            bool appSettingsControlsContract = false;
             bool styleContract = false;
             bool stylePersistenceContract = false;
             bool styleReloadContract = false;
@@ -158,7 +159,7 @@ public partial class App
                 bool customPromptApplied = window.ModalPhotorealSettingsForSmoke.Prompt == customPrompt;
                 const string styleName = "Soft Japanese portrait";
                 const string stylePrompt = "adult Japanese portrait preserving the source expression";
-                window.ConfigureModalPhotorealSettingsForSmoke(0.4, 1.1, 6, 1024, stylePrompt);
+                window.ConfigureModalPhotorealSettingsForSmoke(0.4, 1.1, 6, 1024, stylePrompt, 1.35);
                 bool styleSaved = window.SavePhotorealStyleForSmoke(styleName);
                 window.FlushStateForSmoke();
                 ViewerState? persistedStyleState = JsonSerializer.Deserialize<ViewerState>(
@@ -169,6 +170,7 @@ public partial class App
                     && persistedStyle.Name == styleName
                     && Math.Abs(persistedStyle.Strength - 0.4) < 0.001
                     && Math.Abs(persistedStyle.StructureStrength - 1.1) < 0.001
+                    && Math.Abs((persistedStyle.CfgScale ?? 0) - 1.35) < 0.001
                     && persistedStyle.Steps == 6
                     && persistedStyle.MaxDimension == 1024
                     && persistedStyle.Prompt == stylePrompt
@@ -183,6 +185,7 @@ public partial class App
                             StringComparer.OrdinalIgnoreCase)
                         && Math.Abs(reloadedStyleSettings.Strength - 0.4) < 0.001
                         && Math.Abs(reloadedStyleSettings.StructureStrength - 1.1) < 0.001
+                        && Math.Abs(reloadedStyleSettings.CfgScale - 1.35) < 0.001
                         && reloadedStyleSettings.Steps == 6
                         && reloadedStyleSettings.MaxDimension == 1024
                         && reloadedStyleSettings.Prompt == stylePrompt;
@@ -196,6 +199,7 @@ public partial class App
                 var appliedStyle = window.ModalPhotorealSettingsForSmoke;
                 bool styleApplied = Math.Abs(appliedStyle.Strength - 0.4) < 0.001
                     && Math.Abs(appliedStyle.StructureStrength - 1.1) < 0.001
+                    && Math.Abs(appliedStyle.CfgScale - 1.35) < 0.001
                     && appliedStyle.Steps == 6
                     && appliedStyle.MaxDimension == 1024
                     && appliedStyle.Prompt == stylePrompt;
@@ -214,6 +218,22 @@ public partial class App
                 appSettingsPromptContract = window.AppPhotorealPromptSurfaceForSmoke
                     && appToModalSynchronized
                     && window.ModalPhotorealSettingsForSmoke.Prompt == window.DefaultModalPhotorealPromptForSmoke;
+                window.ConfigureModalPhotorealSettingsForSmoke(
+                    0.3,
+                    0.4,
+                    12,
+                    768,
+                    "temporary reset contract",
+                    1.75);
+                window.ResetAppPhotorealSettingsForSmoke();
+                var resetSettings = window.ModalPhotorealSettingsForSmoke;
+                appSettingsControlsContract = window.AppPhotorealSettingsSurfaceForSmoke
+                    && Math.Abs(resetSettings.Strength - 0.8) < 0.001
+                    && Math.Abs(resetSettings.StructureStrength - 1.0) < 0.001
+                    && Math.Abs(resetSettings.CfgScale - 1.0) < 0.001
+                    && resetSettings.Steps == 8
+                    && resetSettings.MaxDimension == 1280
+                    && resetSettings.Prompt == window.DefaultModalPhotorealPromptForSmoke;
                 defaultPromptContract = window.DefaultModalPhotorealPromptForSmoke.Contains(
                         "five natural fingers",
                         StringComparison.Ordinal)
@@ -235,12 +255,12 @@ public partial class App
                     && !companionLaunch.HasExternalOwnerPid
                     && companionLaunch.NoOpen == "1"
                     && companionLaunch.ComfyAutostart == "0";
-                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
+                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt, 1.25);
                 window.ResetModalPhotorealPromptForSmoke();
                 resetPromptContract = customPromptApplied
                     && window.ModalPhotorealSettingsForSmoke.Prompt == window.DefaultModalPhotorealPromptForSmoke
                     && window.AppPhotorealPromptSurfaceForSmoke;
-                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt);
+                window.ConfigureModalPhotorealSettingsForSmoke(0.55, 0.8, 8, 1280, customPrompt, 1.25);
                 window.Show();
                 await window.LoadFolderSetAsync([imageRoot], commitRecent: false);
                 selected = window.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
@@ -288,6 +308,7 @@ public partial class App
                     && body.GetProperty("adapterId").GetString() == "comfyui-flux2-photoreal"
                     && Math.Abs(body.GetProperty("strength").GetDouble() - 0.55) < 0.001
                     && Math.Abs(body.GetProperty("structureStrength").GetDouble() - 0.8) < 0.001
+                    && Math.Abs(body.GetProperty("cfgScale").GetDouble() - 1.25) < 0.001
                     && body.GetProperty("steps").GetInt32() == 8
                     && body.GetProperty("maxDimension").GetInt32() == 1280
                     && body.GetProperty("prompt").GetString() == customPrompt;
@@ -303,6 +324,7 @@ public partial class App
                     && requestContract
                     && resetPromptContract
                     && appSettingsPromptContract
+                    && appSettingsControlsContract
                     && styleContract
                     && stylePersistenceContract
                     && styleReloadContract
@@ -344,6 +366,7 @@ public partial class App
                     requestContract,
                     resetPromptContract,
                     appSettingsPromptContract,
+                    appSettingsControlsContract,
                     styleContract,
                     stylePersistenceContract,
                     styleReloadContract,

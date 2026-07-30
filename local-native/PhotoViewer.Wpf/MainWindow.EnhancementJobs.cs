@@ -60,13 +60,14 @@ public partial class MainWindow
         StopGalleryAutoScroll();
         SearchHistoryPopup.IsOpen = false;
         _enhancementWorkspaceFocusBeforeDialog = focusToRestore ?? Keyboard.FocusedElement;
-        _enhancementWorkspaceFilter = initialFilter is "queued" or "running" or "failed" or "completed"
+        _enhancementWorkspaceFilter = initialFilter is "queued" or "running" or "failed" or "canceled" or "completed"
             ? initialFilter
             : "all";
         EnhancementJobsAllFilter.IsChecked = _enhancementWorkspaceFilter == "all";
         EnhancementJobsQueuedFilter.IsChecked = _enhancementWorkspaceFilter == "queued";
         EnhancementJobsRunningFilter.IsChecked = _enhancementWorkspaceFilter == "running";
         EnhancementJobsFailedFilter.IsChecked = _enhancementWorkspaceFilter == "failed";
+        EnhancementJobsCanceledFilter.IsChecked = _enhancementWorkspaceFilter == "canceled";
         EnhancementJobsCompletedFilter.IsChecked = _enhancementWorkspaceFilter == "completed";
         _enhancementWorkspaceHighlightedJobIds.Clear();
         if (highlightedJobIds is not null)
@@ -175,6 +176,8 @@ public partial class MainWindow
             int runningCount = jobs.Count(static job => job.Status == "running");
             int queuedCount = jobs.Count(static job => job.Status == "queued");
             int completedCount = jobs.Count(static job => job.Status is "succeeded" or "deleted");
+            EnhancementJobsClearQueuedButton.IsEnabled =
+                queuedCount > 0 && !_enhancementWorkspaceMutationPending;
             EnhancementJobsHeaderSummary.Text = $"{jobs.Count:N0} total  ·  {activeCount:N0} active  ·  {completedCount:N0} completed";
             EnhancementJobsStatusText.Text = activeCount > 0
                 ? $"共有GPUキューを実行順で表示中です。実行中 {runningCount:N0}、待ち {queuedCount:N0}。"
@@ -249,7 +252,7 @@ public partial class MainWindow
         foreach (JsonElement element in jobsElement.EnumerateArray())
         {
             EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(element, apiOrdinal++);
-            if (job is not null && job.Status != "canceled")
+            if (job is not null)
                 jobs.Add(job);
         }
 
@@ -262,12 +265,16 @@ public partial class MainWindow
         IReadOnlyCollection<EnhancementWorkspaceJobView> jobs)
     {
         int position = 1;
-        foreach (EnhancementWorkspaceJobView job in jobs
-                     .Where(static candidate => candidate.Status == "queued")
-                     .OrderBy(static candidate => candidate.CreatedAt)
-                     .ThenBy(static candidate => candidate.ApiOrdinal))
+        EnhancementWorkspaceJobView[] queued = jobs
+            .Where(static candidate => candidate.Status == "queued")
+            .OrderBy(static candidate => candidate.QueueOrder ?? int.MaxValue)
+            .ThenBy(static candidate => candidate.CreatedAt)
+            .ThenBy(static candidate => candidate.ApiOrdinal)
+            .ToArray();
+        foreach (EnhancementWorkspaceJobView job in queued)
         {
             job.QueuePosition = position++;
+            job.QueueCount = queued.Length;
         }
     }
 
@@ -282,6 +289,13 @@ public partial class MainWindow
         {
             if (left.Status != right.Status)
                 return left.Status == "running" ? -1 : 1;
+            if (left.Status == "queued")
+            {
+                int position = (left.QueuePosition ?? int.MaxValue)
+                    .CompareTo(right.QueuePosition ?? int.MaxValue);
+                if (position != 0)
+                    return position;
+            }
             int created = left.CreatedAt.CompareTo(right.CreatedAt);
             return created != 0 ? created : left.ApiOrdinal.CompareTo(right.ApiOrdinal);
         }
@@ -318,6 +332,12 @@ public partial class MainWindow
             && progressElement.TryGetInt32(out int parsedProgress)
             ? Math.Clamp(parsedProgress, 0, 100)
             : 0;
+        int? queueOrder = element.TryGetProperty("queueOrder", out JsonElement queueOrderElement)
+            && queueOrderElement.ValueKind == JsonValueKind.Number
+            && queueOrderElement.TryGetInt32(out int parsedQueueOrder)
+            && parsedQueueOrder >= 0
+            ? parsedQueueOrder
+            : null;
         long? sourceSize = null;
         double? sourceMtimeMs = null;
         if (element.TryGetProperty("sourceSignature", out JsonElement signature)
@@ -351,6 +371,7 @@ public partial class MainWindow
             updatedAt,
             sourceSize,
             sourceMtimeMs,
+            queueOrder,
             apiOrdinal);
     }
 
@@ -372,6 +393,7 @@ public partial class MainWindow
                 "queued" => job.Status == "queued",
                 "running" => job.Status == "running",
                 "failed" => job.Status == "failed",
+                "canceled" => job.Status == "canceled",
                 "completed" => job.Status is "succeeded" or "deleted",
                 _ => true,
             })
@@ -510,11 +532,144 @@ public partial class MainWindow
             await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry", "Retry queued as a new job.");
     }
 
+    private async void MoveEnhancementJobInQueue_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button
+            {
+                Tag: EnhancementWorkspaceJobView job,
+                CommandParameter: string move,
+            }
+            || move is not ("up" or "down" or "next")
+            || !job.CanReorder)
+        {
+            return;
+        }
+
+        string message = move == "next"
+            ? "このジョブを次の待機位置へ移動しました。"
+            : "待機順を変更しました。";
+        await RunEnhancementWorkspaceMutationAsync(
+            job,
+            HttpMethod.Post,
+            $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/queue",
+            message,
+            new { move });
+    }
+
+    private async void CancelAllQueuedEnhancementJobs_Click(object sender, RoutedEventArgs e)
+    {
+        if (_enhancementWorkspaceMutationPending
+            || EnhancementJobsDialog.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _enhancementWorkspaceMutationPending = true;
+        EnhancementJobsClearQueuedButton.IsEnabled = false;
+        long generation = _enhancementWorkspaceGeneration;
+        try
+        {
+            EnhancementApiResponse response = await SendEnhancementApiAsync(
+                HttpMethod.Delete,
+                "api/enhance/jobs/queued");
+            if (generation != _enhancementWorkspaceGeneration
+                || EnhancementJobsDialog.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+            if (!response.Ok)
+            {
+                EnhancementJobsStatusText.Text = response.Error;
+                return;
+            }
+
+            EnhancementJobsStatusText.Text = "待機中のジョブをすべてキャンセルしました。実行中のジョブは変更していません。";
+            await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
+        }
+        finally
+        {
+            _enhancementWorkspaceMutationPending = false;
+            EnhancementJobsClearQueuedButton.IsEnabled =
+                _enhancementWorkspaceJobs.Any(static job => job.Status == "queued");
+        }
+    }
+
+    private async void RerunPhotorealJob_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: EnhancementWorkspaceJobView job }
+            || _enhancementWorkspaceMutationPending
+            || !job.CanRerunWithCurrentSettings
+            || !TryResolveEnhancementWorkspaceSource(job, out string sourceIdentity))
+        {
+            if (sender is Button { Tag: EnhancementWorkspaceJobView })
+                EnhancementJobsStatusText.Text = "元画像を検証できないため、現在設定で再実写化できません。";
+            return;
+        }
+
+        _enhancementWorkspaceMutationPending = true;
+        job.IsBusy = true;
+        long generation = _enhancementWorkspaceGeneration;
+        try
+        {
+            EnhancementApiResponse readiness =
+                await EnsureEnhancementCompanionReadyForExplicitActionAsync(sourceIdentity);
+            if (generation != _enhancementWorkspaceGeneration
+                || EnhancementJobsDialog.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+            if (!readiness.Ok)
+            {
+                EnhancementJobsStatusText.Text = readiness.Error;
+                return;
+            }
+
+            ModalPhotorealRequestSettings settings =
+                CurrentModalPhotorealRequestSettings();
+            EnhancementApiResponse response = await SendEnhancementApiAsync(
+                HttpMethod.Post,
+                "api/enhance/jobs",
+                new
+                {
+                    sourceId = sourceIdentity,
+                    operation = "photoreal",
+                    presetId = "photoreal-balanced",
+                    adapterId = "comfyui-flux2-photoreal",
+                    strength = settings.Strength,
+                    structureStrength = settings.StructureStrength,
+                    steps = settings.Steps,
+                    cfgScale = settings.CfgScale,
+                    maxDimension = settings.MaxDimension,
+                    prompt = settings.Prompt,
+                });
+            if (generation != _enhancementWorkspaceGeneration
+                || EnhancementJobsDialog.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+            if (!response.Ok)
+            {
+                EnhancementJobsStatusText.Text = response.Error;
+                return;
+            }
+
+            EnhancementJobsStatusText.Text =
+                "現在のPrompt・強さ・構図・CFG・品質・解像度で再実写化を待機列へ追加しました。";
+            await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
+        }
+        finally
+        {
+            job.IsBusy = false;
+            _enhancementWorkspaceMutationPending = false;
+        }
+    }
+
     private async Task RunEnhancementWorkspaceMutationAsync(
         EnhancementWorkspaceJobView job,
         HttpMethod method,
         string route,
-        string successMessage)
+        string successMessage,
+        object? body = null)
     {
         if (_enhancementWorkspaceMutationPending || job.IsBusy || EnhancementJobsDialog.Visibility != Visibility.Visible)
             return;
@@ -524,7 +679,7 @@ public partial class MainWindow
         long generation = _enhancementWorkspaceGeneration;
         try
         {
-            EnhancementApiResponse response = await SendEnhancementApiAsync(method, route);
+            EnhancementApiResponse response = await SendEnhancementApiAsync(method, route, body);
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
                 return;
             if (!response.Ok)
@@ -894,6 +1049,42 @@ public partial class MainWindow
         return true;
     }
 
+    public async Task<bool> MoveEnhancementJobForSmokeAsync(string id, string move)
+    {
+        EnhancementWorkspaceJobView? job =
+            _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+        if (job is null || !job.CanReorder || move is not ("up" or "down" or "next"))
+            return false;
+        await RunEnhancementWorkspaceMutationAsync(
+            job,
+            HttpMethod.Post,
+            $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/queue",
+            "Queue order changed.",
+            new { move });
+        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+        return true;
+    }
+
+    public async Task<bool> CancelAllQueuedEnhancementJobsForSmokeAsync()
+    {
+        if (!_enhancementWorkspaceJobs.Any(static job => job.Status == "queued"))
+            return false;
+        CancelAllQueuedEnhancementJobs_Click(this, new RoutedEventArgs());
+        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+        return true;
+    }
+
+    public async Task<bool> RerunPhotorealJobForSmokeAsync(string id)
+    {
+        EnhancementWorkspaceJobView? job =
+            _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+        if (job is null || !job.CanRerunWithCurrentSettings)
+            return false;
+        RerunPhotorealJob_Click(new Button { Tag = job }, new RoutedEventArgs());
+        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+        return true;
+    }
+
     public async Task<bool> DeleteEnhancementJobOutputForSmokeAsync(string id)
     {
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
@@ -978,6 +1169,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         DateTimeOffset updatedAt,
         long? sourceSize,
         double? sourceMtimeMs,
+        int? queueOrder,
         int apiOrdinal)
     {
         Id = id;
@@ -994,6 +1186,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         UpdatedAt = updatedAt;
         SourceSize = sourceSize;
         SourceMtimeMs = sourceMtimeMs;
+        QueueOrder = queueOrder;
         ApiOrdinal = apiOrdinal;
     }
 
@@ -1011,12 +1204,29 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public DateTimeOffset UpdatedAt { get; private set; }
     public long? SourceSize { get; }
     public double? SourceMtimeMs { get; }
+    public int? QueueOrder { get; private set; }
     public int ApiOrdinal { get; }
     public int? QueuePosition { get; set; }
+    public int QueueCount { get; set; }
     public bool IsActive => Status is "queued" or "running";
     public bool CanCancel => !_isBusy && Status is "queued" or "running" or "failed";
-    public bool CanRetry => !_isBusy && Status == "failed";
+    public bool CanRetry => !_isBusy && Status is "failed" or "canceled";
+    public bool CanReorder => !_isBusy && Status == "queued";
+    public bool CanMoveUp => CanReorder && QueuePosition is > 1;
+    public bool CanMoveDown => CanReorder
+        && QueuePosition is int position
+        && position < QueueCount;
+    public bool CanMoveNext => CanMoveUp;
+    public bool CanRerunWithCurrentSettings =>
+        !_isBusy && Status == "succeeded" && Operation == "photoreal";
     public bool CanUseOutput => !_isBusy && Status == "succeeded" && !string.IsNullOrWhiteSpace(OutputPath);
+    public string CancelLabel => Status switch
+    {
+        "queued" => "待機を削除",
+        "running" when Operation == "photoreal" => "実写化を中止",
+        "running" => "高画質化を中止",
+        _ => "キャンセル済みにする",
+    };
     public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "Unknown source" : Path.GetFileName(SourcePath);
     public string PresetSummary => $"{PresetId}  ·  {AdapterId}";
     public string OperationLabel => Operation == "photoreal" ? "REAL  実写化" : "HQ  高画質化";
@@ -1050,23 +1260,33 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         bool errorChanged = !string.Equals(ErrorMessage, candidate.ErrorMessage, StringComparison.Ordinal);
         bool updatedChanged = UpdatedAt != candidate.UpdatedAt;
         bool queueChanged = QueuePosition != candidate.QueuePosition;
+        bool queueCountChanged = QueueCount != candidate.QueueCount;
+        bool queueOrderChanged = QueueOrder != candidate.QueueOrder;
 
         Status = candidate.Status;
         Progress = candidate.Progress;
         OutputPath = candidate.OutputPath;
         ErrorMessage = candidate.ErrorMessage;
         UpdatedAt = candidate.UpdatedAt;
+        QueueOrder = candidate.QueueOrder;
         QueuePosition = candidate.QueuePosition;
+        QueueCount = candidate.QueueCount;
         IsHighlighted = candidate.IsHighlighted;
 
         if (progressChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
-        if (statusChanged || progressChanged || queueChanged)
+        if (statusChanged || progressChanged || queueChanged || queueCountChanged || queueOrderChanged)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Status)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCancel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRetry)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanReorder)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveUp)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveDown)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveNext)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CancelLabel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRerunWithCurrentSettings)));
         }
         if (statusChanged || outputChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUseOutput)));
@@ -1113,6 +1333,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsBusy)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCancel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRetry)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanReorder)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveUp)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveDown)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveNext)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRerunWithCurrentSettings)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUseOutput)));
         }
     }

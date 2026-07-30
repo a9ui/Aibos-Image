@@ -12,6 +12,7 @@ public partial class MainWindow
 {
     private const double DefaultPhotorealStrength = 0.8;
     private const double DefaultPhotorealStructureStrength = 1.0;
+    private const double DefaultPhotorealCfgScale = 1.0;
     private const int DefaultPhotorealSteps = 8;
     private const int DefaultPhotorealMaxDimension = 1280;
     private const int MaxPhotorealStyleCount = 32;
@@ -29,6 +30,7 @@ public partial class MainWindow
     private string? _modalEnhancementVersionsSourcePath;
     private double _modalPhotorealStrength = DefaultPhotorealStrength;
     private double _modalPhotorealStructureStrength = DefaultPhotorealStructureStrength;
+    private double _modalPhotorealCfgScale = DefaultPhotorealCfgScale;
     private int _modalPhotorealSteps = DefaultPhotorealSteps;
     private int _modalPhotorealMaxDimension = DefaultPhotorealMaxDimension;
     private string _modalPhotorealPrompt = DefaultPhotorealPrompt;
@@ -392,7 +394,7 @@ public partial class MainWindow
             _modalPhotorealStrength,
             _modalPhotorealStructureStrength,
             _modalPhotorealSteps,
-            1,
+            _modalPhotorealCfgScale,
             _modalPhotorealMaxDimension,
             _modalPhotorealPrompt.Trim());
 
@@ -412,15 +414,37 @@ public partial class MainWindow
     {
         if (_syncingModalPhotorealSettings
             || ModalPhotorealStrengthSlider is null
-            || ModalPhotorealStructureSlider is null)
+            || ModalPhotorealStructureSlider is null
+            || ModalPhotorealCfgScaleSlider is null)
         {
             return;
         }
 
         _modalPhotorealStrength = Math.Clamp(ModalPhotorealStrengthSlider.Value / 100d, 0.2, 0.8);
         _modalPhotorealStructureStrength = Math.Clamp(ModalPhotorealStructureSlider.Value / 100d, 0, 1.2);
+        _modalPhotorealCfgScale = Math.Clamp(ModalPhotorealCfgScaleSlider.Value / 100d, 1, 2);
         MarkPhotorealStyleAsCustom();
         RefreshModalPhotorealSettingLabels();
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void AppPhotorealSetting_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncingModalPhotorealSettings
+            || AppPhotorealStrengthSlider is null
+            || AppPhotorealStructureSlider is null
+            || AppPhotorealCfgScaleSlider is null)
+        {
+            return;
+        }
+
+        _modalPhotorealStrength = Math.Clamp(AppPhotorealStrengthSlider.Value / 100d, 0.2, 0.8);
+        _modalPhotorealStructureStrength = Math.Clamp(AppPhotorealStructureSlider.Value / 100d, 0, 1.2);
+        _modalPhotorealCfgScale = Math.Clamp(AppPhotorealCfgScaleSlider.Value / 100d, 1, 2);
+        MarkPhotorealStyleAsCustom();
+        SyncModalPhotorealSettingsControls();
+        SetPhotorealSettingsStatus("保存済み。次に追加する実写化ジョブから使われます。");
         if (!_initializing)
             SaveState();
     }
@@ -443,6 +467,30 @@ public partial class MainWindow
             DefaultPhotorealMaxDimension,
             [768, 1024, 1280]);
         MarkPhotorealStyleAsCustom();
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void AppPhotorealSetting_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingModalPhotorealSettings
+            || AppPhotorealStepsComboBox is null
+            || AppPhotorealSizeComboBox is null)
+        {
+            return;
+        }
+
+        _modalPhotorealSteps = SelectedIntegerTag(
+            AppPhotorealStepsComboBox,
+            DefaultPhotorealSteps,
+            [4, 6, 8, 12]);
+        _modalPhotorealMaxDimension = SelectedIntegerTag(
+            AppPhotorealSizeComboBox,
+            DefaultPhotorealMaxDimension,
+            [768, 1024, 1280]);
+        MarkPhotorealStyleAsCustom();
+        SyncModalPhotorealSettingsControls();
+        SetPhotorealSettingsStatus("保存済み。次に追加する実写化ジョブから使われます。");
         if (!_initializing)
             SaveState();
     }
@@ -512,7 +560,8 @@ public partial class MainWindow
             style.StructureStrength,
             style.Steps,
             style.MaxDimension,
-            style.Prompt);
+            style.Prompt,
+            style.CfgScale);
         RefreshPhotorealStyleControls(updateNameFields: true);
         SetPhotorealStyleStatus($"「{style.Name}」を反映しました。次に追加するAI実写化ジョブから使われます。");
         if (!_initializing)
@@ -612,6 +661,8 @@ public partial class MainWindow
         if (!IsValidPhotorealStyleName(name)
             || !double.IsFinite(candidate.Strength)
             || !double.IsFinite(candidate.StructureStrength)
+            || (candidate.CfgScale is double cfgScale
+                && (!double.IsFinite(cfgScale) || cfgScale is < 1 or > 2))
             || candidate.Steps is not (4 or 6 or 8 or 12)
             || candidate.MaxDimension is not (768 or 1024 or 1280))
         {
@@ -626,6 +677,9 @@ public partial class MainWindow
             Name = name,
             Strength = Math.Clamp(candidate.Strength, 0.2, 0.8),
             StructureStrength = Math.Clamp(candidate.StructureStrength, 0, 1.2),
+            CfgScale = candidate.CfgScale is double persistedCfgScale
+                ? Math.Clamp(persistedCfgScale, 1, 2)
+                : DefaultPhotorealCfgScale,
             Steps = candidate.Steps,
             MaxDimension = candidate.MaxDimension,
             Prompt = prompt,
@@ -642,6 +696,7 @@ public partial class MainWindow
             Name = name,
             Strength = _modalPhotorealStrength,
             StructureStrength = _modalPhotorealStructureStrength,
+            CfgScale = _modalPhotorealCfgScale,
             Steps = _modalPhotorealSteps,
             MaxDimension = _modalPhotorealMaxDimension,
             Prompt = _modalPhotorealPrompt,
@@ -656,6 +711,7 @@ public partial class MainWindow
     private bool PhotorealStyleMatchesCurrent(PhotorealStyleState style)
         => Math.Abs(style.Strength - _modalPhotorealStrength) < 0.0001
             && Math.Abs(style.StructureStrength - _modalPhotorealStructureStrength) < 0.0001
+            && Math.Abs((style.CfgScale ?? DefaultPhotorealCfgScale) - _modalPhotorealCfgScale) < 0.0001
             && style.Steps == _modalPhotorealSteps
             && style.MaxDimension == _modalPhotorealMaxDimension
             && string.Equals(style.Prompt, _modalPhotorealPrompt, StringComparison.Ordinal);
@@ -731,7 +787,7 @@ public partial class MainWindow
             return;
 
         AppPhotorealStyleSummaryText.Text =
-            $"現在: {Math.Round(_modalPhotorealStrength * 100):0}% / 構図 {Math.Round(_modalPhotorealStructureStrength * 100):0}% / {_modalPhotorealSteps} step / {_modalPhotorealMaxDimension} px";
+            $"現在: 強さ {Math.Round(_modalPhotorealStrength * 100):0}% / 構図 {Math.Round(_modalPhotorealStructureStrength * 100):0}% / CFG {_modalPhotorealCfgScale:0.00} / {_modalPhotorealSteps} step / {_modalPhotorealMaxDimension} px";
     }
 
     private void SetPhotorealStyleStatus(string message)
@@ -750,6 +806,7 @@ public partial class MainWindow
                 Name = style.Name,
                 Strength = style.Strength,
                 StructureStrength = style.StructureStrength,
+                CfgScale = style.CfgScale,
                 Steps = style.Steps,
                 MaxDimension = style.MaxDimension,
                 Prompt = style.Prompt,
@@ -884,6 +941,28 @@ public partial class MainWindow
             SaveState();
     }
 
+    private void ResetAppPhotorealSettings_Click(object sender, RoutedEventArgs e)
+    {
+        _selectedPhotorealStyleName = null;
+        RestoreModalPhotorealSettings(
+            DefaultPhotorealStrength,
+            DefaultPhotorealStructureStrength,
+            DefaultPhotorealSteps,
+            DefaultPhotorealMaxDimension,
+            DefaultPhotorealPrompt,
+            DefaultPhotorealCfgScale);
+        RefreshPhotorealStyleControls(updateNameFields: true);
+        SetPhotorealSettingsStatus("実写化設定を既定値に戻しました。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void SetPhotorealSettingsStatus(string message)
+    {
+        if (AppPhotorealSettingsStatusText is not null)
+            AppPhotorealSettingsStatusText.Text = message;
+    }
+
     private void SyncAppPhotorealPromptControl()
     {
         if (AppPhotorealPromptTextBox is null)
@@ -932,13 +1011,18 @@ public partial class MainWindow
         double? structureStrength,
         int? steps,
         int? maxDimension,
-        string? prompt = null)
+        string? prompt = null,
+        double? cfgScale = null)
     {
         _modalPhotorealStrength = Math.Clamp(strength ?? DefaultPhotorealStrength, 0.2, 0.8);
         _modalPhotorealStructureStrength = Math.Clamp(
             structureStrength ?? DefaultPhotorealStructureStrength,
             0,
             1.2);
+        _modalPhotorealCfgScale = Math.Clamp(
+            cfgScale ?? DefaultPhotorealCfgScale,
+            1,
+            2);
         _modalPhotorealSteps = steps is 4 or 6 or 8 or 12
             ? steps.Value
             : DefaultPhotorealSteps;
@@ -956,6 +1040,7 @@ public partial class MainWindow
     {
         if (ModalPhotorealStrengthSlider is null
             || ModalPhotorealStructureSlider is null
+            || ModalPhotorealCfgScaleSlider is null
             || ModalPhotorealStepsComboBox is null
             || ModalPhotorealSizeComboBox is null
             || ModalPhotorealPromptTextBox is null)
@@ -968,11 +1053,22 @@ public partial class MainWindow
         {
             ModalPhotorealStrengthSlider.Value = _modalPhotorealStrength * 100;
             ModalPhotorealStructureSlider.Value = _modalPhotorealStructureStrength * 100;
+            ModalPhotorealCfgScaleSlider.Value = _modalPhotorealCfgScale * 100;
             SelectIntegerTag(ModalPhotorealStepsComboBox, _modalPhotorealSteps);
             SelectIntegerTag(ModalPhotorealSizeComboBox, _modalPhotorealMaxDimension);
             ModalPhotorealPromptTextBox.Text = _modalPhotorealPrompt;
             if (AppPhotorealPromptTextBox is not null)
                 AppPhotorealPromptTextBox.Text = _modalPhotorealPrompt;
+            if (AppPhotorealStrengthSlider is not null)
+                AppPhotorealStrengthSlider.Value = _modalPhotorealStrength * 100;
+            if (AppPhotorealStructureSlider is not null)
+                AppPhotorealStructureSlider.Value = _modalPhotorealStructureStrength * 100;
+            if (AppPhotorealCfgScaleSlider is not null)
+                AppPhotorealCfgScaleSlider.Value = _modalPhotorealCfgScale * 100;
+            if (AppPhotorealStepsComboBox is not null)
+                SelectIntegerTag(AppPhotorealStepsComboBox, _modalPhotorealSteps);
+            if (AppPhotorealSizeComboBox is not null)
+                SelectIntegerTag(AppPhotorealSizeComboBox, _modalPhotorealMaxDimension);
             RefreshModalPhotorealSettingLabels();
             RefreshPhotorealStyleSummary();
         }
@@ -988,13 +1084,22 @@ public partial class MainWindow
             ModalPhotorealStrengthValue.Text = $"{Math.Round(_modalPhotorealStrength * 100):0}%";
         if (ModalPhotorealStructureValue is not null)
             ModalPhotorealStructureValue.Text = $"{Math.Round(_modalPhotorealStructureStrength * 100):0}%";
+        if (ModalPhotorealCfgScaleValue is not null)
+            ModalPhotorealCfgScaleValue.Text = _modalPhotorealCfgScale.ToString("0.00", CultureInfo.InvariantCulture);
+        if (AppPhotorealStrengthValue is not null)
+            AppPhotorealStrengthValue.Text = $"{Math.Round(_modalPhotorealStrength * 100):0}%";
+        if (AppPhotorealStructureValue is not null)
+            AppPhotorealStructureValue.Text = $"{Math.Round(_modalPhotorealStructureStrength * 100):0}%";
+        if (AppPhotorealCfgScaleValue is not null)
+            AppPhotorealCfgScaleValue.Text = _modalPhotorealCfgScale.ToString("0.00", CultureInfo.InvariantCulture);
     }
 
-    public (double Strength, double StructureStrength, int Steps, int MaxDimension, string Prompt) ModalPhotorealSettingsForSmoke
+    public (double Strength, double StructureStrength, int Steps, double CfgScale, int MaxDimension, string Prompt) ModalPhotorealSettingsForSmoke
         => (
             _modalPhotorealStrength,
             _modalPhotorealStructureStrength,
             _modalPhotorealSteps,
+            _modalPhotorealCfgScale,
             _modalPhotorealMaxDimension,
             _modalPhotorealPrompt);
 
@@ -1013,9 +1118,10 @@ public partial class MainWindow
         double structureStrength,
         int steps,
         int maxDimension,
-        string prompt = "")
+        string prompt = "",
+        double cfgScale = DefaultPhotorealCfgScale)
     {
-        RestoreModalPhotorealSettings(strength, structureStrength, steps, maxDimension, prompt);
+        RestoreModalPhotorealSettings(strength, structureStrength, steps, maxDimension, prompt, cfgScale);
         MarkPhotorealStyleAsCustom();
     }
 
@@ -1030,6 +1136,16 @@ public partial class MainWindow
                 "Default AI photorealization prompt",
                 StringComparison.Ordinal)
             && string.Equals(AppPhotorealPromptTextBox.Text, _modalPhotorealPrompt, StringComparison.Ordinal);
+
+    public bool AppPhotorealSettingsSurfaceForSmoke
+        => AppPhotorealStrengthSlider.Minimum == 20
+            && AppPhotorealStrengthSlider.Maximum == 80
+            && AppPhotorealStructureSlider.Minimum == 0
+            && AppPhotorealStructureSlider.Maximum == 120
+            && AppPhotorealCfgScaleSlider.Minimum == 100
+            && AppPhotorealCfgScaleSlider.Maximum == 200
+            && AppPhotorealStepsComboBox.Items.Count == 4
+            && AppPhotorealSizeComboBox.Items.Count == 3;
 
     public bool PhotorealStyleSurfaceForSmoke
         => ModalPhotorealStyleComboBox is not null
@@ -1098,6 +1214,9 @@ public partial class MainWindow
 
     public void ResetAppPhotorealPromptForSmoke()
         => ResetAppPhotorealPrompt_Click(this, new RoutedEventArgs());
+
+    public void ResetAppPhotorealSettingsForSmoke()
+        => ResetAppPhotorealSettings_Click(this, new RoutedEventArgs());
 
     public string DefaultModalPhotorealPromptForSmoke => DefaultPhotorealPrompt;
 

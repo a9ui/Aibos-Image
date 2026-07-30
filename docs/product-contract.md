@@ -328,16 +328,18 @@ or stores.
   version 1 job store. `operation` is `upscale` or `photoreal`; a missing value
   on an older job means `upscale`.
 - The modal exposes separate explicit `AI高画質化` and `AI実写化` actions.
-  Photoreal prompt, strength, structure retention, quality steps, and work
-  resolution are WPF-local request defaults and do not mutate shared Browser
-  settings. The prompt starts with the built-in tested default, remains freely
-  editable from both the modal popup and the application settings screen,
-  persists locally as one shared value, and has an explicit Reset action.
+  Photoreal prompt, strength, structure retention, CFG scale, quality steps,
+  and work resolution are WPF-local request defaults and do not mutate shared
+  Browser settings. All six values are exposed by the application settings
+  screen and kept synchronized with the modal popup. The prompt starts with
+  the built-in tested default, remains freely editable from both surfaces,
+  persists locally as one shared value, and has an explicit prompt Reset.
+  Application settings also provide one explicit Reset for all six values.
 - A named photoreal Style is WPF-local and snapshots the prompt, strength,
-  structure retention, quality steps, and work resolution. Up to 32 Styles
-  with names of at most 40 characters are persisted in WPF `state.json`.
+  structure retention, CFG scale, quality steps, and work resolution. Up to 32
+  Styles with names of at most 40 characters are persisted in WPF `state.json`.
   Selecting a Style from either the modal popup or application settings applies
-  all five values; later manual edits return to the unsaved Custom selection
+  all six values; later manual edits return to the unsaved Custom selection
   without modifying the stored Style. Saving the same name replaces that Style,
   and deleting one leaves the current request values unchanged.
   Quality offers 4, 6, 8, and opt-in `非常に高い（12 step）`; the default remains
@@ -357,8 +359,9 @@ or stores.
   AI高画質化/AI実写化 version with wraparound. Delete removes only the selected
   managed version and never the source or sibling versions.
 - Both operations use the same companion `/api/enhance/jobs` endpoint, durable
-  FIFO queue, and single worker. They must not create separate GPU queues or
-  run GPU work in parallel. Retry and Cancel retain the job operation.
+  ordered queue, and single worker. New jobs append in FIFO order by default.
+  They must not create separate GPU queues or run GPU work in parallel. Retry
+  and Cancel retain the job operation.
 - The gallery exposes independent `AI高画質化済みのみ` and `AI実写化済みのみ`
   filters. Enabling both uses intersection semantics. Cyan `HQ` and violet
   `REAL` thumbnail markers may appear together when both completed operation
@@ -384,33 +387,50 @@ or stores.
 - Modal and batch Start/Retry first reuse an already-ready loopback companion.
   If none is ready, that same explicit action may launch the separately
   installed H25 companion with Browser opening and ComfyUI autostart disabled.
-  A successful ready companion continues the durable FIFO queue after WPF
+  A successful ready companion continues the durable ordered queue after WPF
   closes. Reopening WPF passively reads the persisted queue, operation type,
-  status, and latest saved integer progress. If the companion process or PC is
-  interrupted, queued jobs remain queued; the interrupted running job becomes
-  Failed at its last persisted progress and requires an explicit Retry rather
-  than pretending to resume an in-memory model pass.
+  status, and latest saved integer progress. On companion startup, the worker
+  first recovers an interrupted running job as Failed and then immediately
+  pumps the remaining queued work without requiring a new enqueue or Retry.
+  Queued jobs remain queued across interruption; the interrupted running job
+  requires an explicit Retry rather than pretending to resume an in-memory
+  model pass.
 - The WPF Enhancement Jobs workspace is a virtualized client view over that
   API. Opening it performs a passive jobs read only. It polls once per second
   only while the workspace is visible and at least one job is queued or
   running, and stops polling when hidden or when all jobs are terminal.
-  - Jobs may be filtered as All, Queued, Running, Completed, or Failed.
-    Canceled records remain durable for audit and queue safety but are hidden
-    from the Jobs workspace.
-  Running work is shown first and queued work is inventoried in durable FIFO
-  enqueue order with an explicit waiting position. Stable job-view and
-  thumbnail instances are updated in place so polling does not make thumbnails
-  flash. Each row visibly identifies `HQ`/高画質化 or `REAL`/実写化.
+  - Jobs may be filtered as All, Queued, Running, Completed, Failed, or
+    Canceled. Canceled records remain durable and visible for audit, Retry, and
+    queue safety.
+  Running work is shown first and never reordered. Queued work is inventoried
+  in persisted `queueOrder` order with an explicit waiting position. A missing,
+  null, invalid, or duplicate order in a legacy reader payload falls back
+  deterministically to enqueue time and a stable reader tie-breaker. New jobs
+  append by default; queued rows alone may move one place up, one place down,
+  or become the next queued job. Reordering never interrupts the running job
+  and survives a companion restart. The canonical additive reader fixture is
+  `contracts/enhancement-queue-order-v1.json`.
+  Stable job-view and thumbnail instances are updated in place so polling does
+  not make thumbnails flash. Each row visibly identifies `HQ`/高画質化 or
+  `REAL`/実写化.
 - Choosing a job thumbnail closes the workspace and opens its validated source
   in the WPF viewer. Open output opens the exact validated managed version in
   that same viewer even when the source is currently hidden by gallery filters
   or belongs to another loaded catalog. This temporary Jobs viewer context does
   not add the source to the durable catalog. Closing either image restores the
   prior gallery selection and returns to Jobs with its filter preserved.
-  - Queued, running, and failed rows expose Cancel. Failed rows also expose
-    Retry. Cancel never deletes the source, a managed output, or failure
-    diagnostics; the canceled row disappears from the Jobs workspace.
-    Cancel, Retry, Open output, and Delete output remain explicit user actions.
+  - Queued, running, and failed rows expose Cancel. Canceling a running job
+    interrupts that job and the worker must claim the next queued job without
+    requiring another enqueue or Retry. One explicit bulk action cancels queued
+    rows only and does not change the running job.
+  - Failed and Canceled rows expose Retry, which copies the original job
+    snapshot and operation into a newly appended queued job. A completed
+    photoreal row exposes `現在設定で再実写化`, which creates a new job from the
+    current WPF prompt, strength, structure retention, CFG scale, steps, and
+    work resolution rather than silently reusing the old snapshot.
+  - Cancel never deletes the source, a managed output, or failure diagnostics.
+    Cancel, Retry, re-run, Open output, and Delete output remain explicit user
+    actions.
   WPF validates source identity, source signature, and managed-output ownership
   before opening or deleting an output. The workspace does not change the
   `enhance/jobs.json` schema and never starts a worker from ordinary browsing.

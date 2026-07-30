@@ -14361,6 +14361,12 @@ public partial class MainWindow : Window
             ? "開始中"
             : retryable && currentIsPhotoreal ? "再試行"
             : "AI実写化";
+        ModalEnhanceCancelButtonLabel.Text = currentIsPhotoreal
+            ? "実写化を中止"
+            : "高画質化を中止";
+        AutomationProperties.SetName(
+            ModalEnhanceCancelButton,
+            ModalEnhanceCancelButtonLabel.Text);
         ModalEnhanceCancelButton.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         ModalEnhanceCancelButton.IsEnabled = active && !_modalEnhancementRequestPending && !canceling;
         ModalEnhanceCancelButton.ToolTip = canceling
@@ -17961,7 +17967,8 @@ public partial class MainWindow : Window
             state.PhotorealStructureStrength,
             state.PhotorealSteps,
             state.PhotorealMaxDimension,
-            state.PhotorealPrompt);
+            state.PhotorealPrompt,
+            state.PhotorealCfgScale);
         RestorePhotorealStyles(state.PhotorealStyles, state.SelectedPhotorealStyleName);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
@@ -18096,6 +18103,7 @@ public partial class MainWindow : Window
                 ModalEdgeNavigationPercent = _modalEdgeNavigationPercent,
                 PhotorealStrength = _modalPhotorealStrength,
                 PhotorealStructureStrength = _modalPhotorealStructureStrength,
+                PhotorealCfgScale = _modalPhotorealCfgScale,
                 PhotorealSteps = _modalPhotorealSteps,
                 PhotorealMaxDimension = _modalPhotorealMaxDimension,
                 PhotorealPrompt = _modalPhotorealPrompt,
@@ -23484,6 +23492,7 @@ public sealed class ViewerState
     // WPF-local request defaults for the explicit AI photorealization action.
     public double? PhotorealStrength { get; set; }
     public double? PhotorealStructureStrength { get; set; }
+    public double? PhotorealCfgScale { get; set; }
     public int? PhotorealSteps { get; set; }
     public int? PhotorealMaxDimension { get; set; }
     public string? PhotorealPrompt { get; set; }
@@ -23513,6 +23522,7 @@ public sealed class PhotorealStyleState
     public string Name { get; set; } = "";
     public double Strength { get; set; }
     public double StructureStrength { get; set; }
+    public double? CfgScale { get; set; }
     public int Steps { get; set; }
     public int MaxDimension { get; set; }
     public string Prompt { get; set; } = "";

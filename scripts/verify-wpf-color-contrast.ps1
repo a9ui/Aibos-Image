@@ -211,6 +211,11 @@ $photorealXaml = $mainWindowXaml.Substring(
 if ($photorealXaml -match '(Foreground|Background|TextElement\.Foreground)="#[0-9A-Fa-f]{6,8}"') {
     throw 'Photoreal settings contains a direct foreground/background color instead of shared theme resources.'
 }
+if ($photorealXaml.IndexOf(
+    'Style="{StaticResource PhotorealSettingsComboBox}"',
+    [StringComparison]::Ordinal) -lt 0) {
+    throw 'Photoreal dropdowns must use the contrast-safe shared ComboBox style.'
+}
 foreach ($requiredFragment in @(
     'PhotorealSettingsComboBoxItem',
     'PhotorealSettingsComboBox',
@@ -218,7 +223,7 @@ foreach ($requiredFragment in @(
     'Property="Background" Value="{StaticResource AccentFill}"',
     'Property="Background" Value="{StaticResource AccentFillHover}"',
     'Property="Foreground" Value="{StaticResource TextDisabled}"')) {
-    if ($photorealXaml.IndexOf($requiredFragment, [StringComparison]::Ordinal) -lt 0) {
+    if ($mainWindowXaml.IndexOf($requiredFragment, [StringComparison]::Ordinal) -lt 0) {
         throw "Photoreal dropdown is missing contrast-safe template fragment: $requiredFragment"
     }
 }

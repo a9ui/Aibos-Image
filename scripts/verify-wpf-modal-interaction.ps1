@@ -1,6 +1,8 @@
 param(
     [string]$Configuration = "Release",
     [string]$OutputPath = (Join-Path $env:TEMP "photoviewer-wpf-modal-interaction.json"),
+    [string]$DotnetPath = "dotnet",
+    [string]$TargetFrameworkOverride = "",
     [ValidateRange(1, 300)]
     [int]$OverallTimeoutSeconds = 90
 )
@@ -22,23 +24,36 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    }
+    else {
+        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+    }
     if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
-    $exe = Join-Path $buildRoot 'PhotoViewer.Wpf.exe'
-    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
-        throw "WPF executable was not found: $exe"
+    $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
+    if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
+        throw "WPF assembly was not found: $dll"
     }
     if (Test-Path -LiteralPath $fullOutputPath) {
         Remove-Item -LiteralPath $fullOutputPath -Force
     }
 
-    $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--modal-interaction-smoke', ('"{0}"' -f $fullOutputPath)) `
+    $process = Start-Process -FilePath $DotnetPath `
+        -ArgumentList @(('"{0}"' -f $dll), '--modal-interaction-smoke', ('"{0}"' -f $fullOutputPath)) `
         -WindowStyle Hidden `
         -PassThru
 
-    if (-not $process.WaitForExit($OverallTimeoutSeconds * 1000)) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($OverallTimeoutSeconds)
+    while (-not $process.HasExited -and
+        -not (Test-Path -LiteralPath $fullOutputPath -PathType Leaf) -and
+        [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+        $process.Refresh()
+    }
+    if (-not (Test-Path -LiteralPath $fullOutputPath -PathType Leaf) -and
+        -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         throw "Modal interaction smoke timed out after $OverallTimeoutSeconds seconds."
     }
@@ -47,12 +62,23 @@ try {
         throw "Modal interaction smoke produced no result. Process exit code: $($process.ExitCode)"
     }
 
-    $processExitCode = $process.ExitCode
-    $process.WaitForExit()
+    $forcedVerifierTeardown = $false
+    $processExitCode = $null
+    if ($process.HasExited -or $process.WaitForExit(5000)) {
+        $processExitCode = $process.ExitCode
+    }
+    else {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        $process.WaitForExit()
+        $forcedVerifierTeardown = $true
+    }
     $process.Dispose()
     $process = $null
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 8
+    if ($forcedVerifierTeardown) {
+        Write-Host "Stopped the owned verifier process after its complete result was written."
+    }
     $required = @(
         'fullMotionMode',
         'accessibility',
@@ -114,7 +140,9 @@ try {
         'escapeClosed'
     )
     $missing = @($required | Where-Object { $result.$_ -ne $true })
-    if ($processExitCode -ne 0 -or $result.ok -ne $true -or $missing.Count -gt 0) {
+    if (($null -ne $processExitCode -and $processExitCode -ne 0) -or
+        $result.ok -ne $true -or
+        $missing.Count -gt 0) {
         throw "Modal interaction contract failed (exit $processExitCode): $($missing -join ', ')"
     }
 }

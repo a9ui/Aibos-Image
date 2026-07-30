@@ -17335,8 +17335,13 @@ public partial class App : Application
                 bool activeCanceled = false;
                 bool failedCanceled = false;
                 bool retryCreated = false;
+                bool canceledRetryCreated = false;
+                bool rerunCreated = false;
+                bool queueLaterFirst = false;
+                bool allQueuedCanceled = false;
                 bool outputDeleted = false;
                 string? openedOutput = null;
+                string rerunBody = "";
                 var sourceInfo = new FileInfo(sourcePath);
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
 
@@ -17347,7 +17352,8 @@ public partial class App : Application
                     string? output = null,
                     string? error = null,
                     string operation = "upscale",
-                    string createdAt = "2026-07-23T00:00:00.000Z") => new
+                    string createdAt = "2026-07-23T00:00:00.000Z",
+                    int? queueOrder = null) => new
                 {
                     id,
                     sourceId = sourcePath,
@@ -17358,6 +17364,7 @@ public partial class App : Application
                     operation,
                     status,
                     progress,
+                    queueOrder,
                     outputPath = output,
                     errorMessage = error,
                     createdAt,
@@ -17368,20 +17375,51 @@ public partial class App : Application
                 {
                     var jobs = new List<object>
                     {
-                        Job("queue-later-job", "queued", 0, createdAt: "2026-07-23T00:00:03.000Z"),
+                        Job(
+                            "queue-later-job",
+                            allQueuedCanceled ? "canceled" : "queued",
+                            0,
+                            createdAt: "2026-07-23T00:00:03.000Z",
+                            queueOrder: queueLaterFirst ? 0 : 1),
                         Job("failed-cancel-job", failedCanceled ? "canceled" : "failed", 18, error: "GPU backend stopped"),
                         Job("failed-retry-job", "failed", 27, error: "Model runtime stopped"),
                         Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42, createdAt: "2026-07-23T00:00:01.000Z"),
-                        Job("queue-first-job", "queued", 0, createdAt: "2026-07-23T00:00:02.000Z"),
+                        Job(
+                            "queue-first-job",
+                            allQueuedCanceled ? "canceled" : "queued",
+                            0,
+                            createdAt: "2026-07-23T00:00:02.000Z",
+                            queueOrder: queueLaterFirst ? 1 : 0),
                         Job(
                             "done-job",
                             outputDeleted ? "deleted" : "succeeded",
                             100,
                             outputDeleted ? null : outputPath,
                             operation: "photoreal"),
+                        Job("canceled-job", "canceled", 11, error: "Canceled by user"),
                     };
                     if (retryCreated)
-                        jobs.Insert(0, Job("retry-job", "queued", 0, createdAt: "2026-07-23T00:00:04.000Z"));
+                        jobs.Insert(0, Job(
+                            "retry-job",
+                            allQueuedCanceled ? "canceled" : "queued",
+                            0,
+                            createdAt: "2026-07-23T00:00:04.000Z",
+                            queueOrder: 2));
+                    if (canceledRetryCreated)
+                        jobs.Insert(0, Job(
+                            "canceled-retry-job",
+                            allQueuedCanceled ? "canceled" : "queued",
+                            0,
+                            createdAt: "2026-07-23T00:00:05.000Z",
+                            queueOrder: 3));
+                    if (rerunCreated)
+                        jobs.Insert(0, Job(
+                            "rerun-job",
+                            allQueuedCanceled ? "canceled" : "queued",
+                            0,
+                            operation: "photoreal",
+                            createdAt: "2026-07-23T00:00:06.000Z",
+                            queueOrder: 4));
                     return jobs.ToArray();
                 }
 
@@ -17411,6 +17449,47 @@ public partial class App : Application
                         retryCreated = true;
                         return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new { job = Job("retry-job", "queued", 0) }));
                     }
+                    if (request.Method == HttpMethod.Post && route.EndsWith("/canceled-job/retry", StringComparison.Ordinal))
+                    {
+                        canceledRetryCreated = true;
+                        return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new { job = Job("canceled-retry-job", "queued", 0) }));
+                    }
+                    if (request.Method == HttpMethod.Post && route.EndsWith("/queue-later-job/queue", StringComparison.Ordinal))
+                    {
+                        string body = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "";
+                        using JsonDocument moveDocument = JsonDocument.Parse(body);
+                        queueLaterFirst = moveDocument.RootElement.GetProperty("move").GetString() == "next";
+                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new
+                        {
+                            moved = queueLaterFirst,
+                            job = Job("queue-later-job", "queued", 0, queueOrder: 0),
+                            queue = CurrentJobs(),
+                        }));
+                    }
+                    if (request.Method == HttpMethod.Delete && route.EndsWith("/api/enhance/jobs/queued", StringComparison.Ordinal))
+                    {
+                        allQueuedCanceled = true;
+                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new
+                        {
+                            canceledCount = CurrentJobs().Count(job =>
+                                JsonSerializer.Serialize(job).Contains("\"status\":\"canceled\"", StringComparison.Ordinal)),
+                            jobs = CurrentJobs(),
+                        }));
+                    }
+                    if (request.Method == HttpMethod.Post && route.EndsWith("/api/enhance/jobs", StringComparison.Ordinal))
+                    {
+                        rerunBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "";
+                        rerunCreated = true;
+                        return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new
+                        {
+                            job = Job(
+                                "rerun-job",
+                                "queued",
+                                0,
+                                operation: "photoreal",
+                                queueOrder: 4),
+                        }));
+                    }
                     if (request.Method == HttpMethod.Delete && route.EndsWith("/done-job/output", StringComparison.Ordinal))
                     {
                         if (File.Exists(outputPath))
@@ -17420,6 +17499,13 @@ public partial class App : Application
                     }
                     return Task.FromResult(JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected workspace smoke route" }));
                 }, confirmOutputDelete: true);
+                window.ConfigureModalPhotorealSettingsForSmoke(
+                    0.45,
+                    0.75,
+                    6,
+                    1024,
+                    "workspace rerun prompt",
+                    1.4);
                 window.Show();
                 await window.LoadFolderSetAsync([Path.GetDirectoryName(sourcePath)!], commitRecent: false);
                 var storesBefore = environment
@@ -17444,14 +17530,37 @@ public partial class App : Application
                 EnhancementJobsWorkspaceSmokeSnapshot failed = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("completed");
                 EnhancementJobsWorkspaceSmokeSnapshot completed = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("canceled");
+                EnhancementJobsWorkspaceSmokeSnapshot canceled = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("all");
 
+                bool moveNextIssued = await window.MoveEnhancementJobForSmokeAsync(
+                    "queue-later-job",
+                    "next");
+                EnhancementJobsWorkspaceSmokeSnapshot afterMove =
+                    window.EnhancementJobsWorkspaceForSmoke();
                 bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterCancel = window.EnhancementJobsWorkspaceForSmoke();
                 bool failedCancelIssued = await window.CancelEnhancementJobForSmokeAsync("failed-cancel-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterFailedCancel = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("canceled");
+                EnhancementJobsWorkspaceSmokeSnapshot canceledAfterActions =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("all");
                 bool retryIssued = await window.RetryEnhancementJobForSmokeAsync("failed-retry-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterRetry = window.EnhancementJobsWorkspaceForSmoke();
+                bool canceledRetryIssued =
+                    await window.RetryEnhancementJobForSmokeAsync("canceled-job");
+                EnhancementJobsWorkspaceSmokeSnapshot afterCanceledRetry =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool rerunIssued =
+                    await window.RerunPhotorealJobForSmokeAsync("done-job");
+                EnhancementJobsWorkspaceSmokeSnapshot afterRerun =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool clearQueuedIssued =
+                    await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterClearQueued =
+                    window.EnhancementJobsWorkspaceForSmoke();
                 await window.SetSearchInputForSmokeAsync("__jobs_source_hidden_from_gallery__");
                 bool sourceHiddenFromVisibleGallery = window.FilteredCountForSmoke == 0;
                 bool outputOpened = window.OpenEnhancementJobOutputForSmoke("done-job");
@@ -17486,6 +17595,10 @@ public partial class App : Application
                 bool routesOk = requests.Contains("POST /api/enhance/jobs/active-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-cancel-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-retry-job/retry", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/canceled-job/retry", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/queue-later-job/queue", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs", StringComparer.Ordinal)
+                    && requests.Contains("DELETE /api/enhance/jobs/queued", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal);
                 bool queueInventoryOrdered = initial.VisibleIds.Take(3).SequenceEqual(
                         ["active-job", "queue-first-job", "queue-later-job"],
@@ -17494,11 +17607,28 @@ public partial class App : Application
                         ["queue-first-job", "queue-later-job"],
                         StringComparer.Ordinal)
                     && queued.VisibleStatusLabels[0].Contains("待ち順 1", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal);
+                    && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal)
+                    && afterMove.VisibleIds.Take(3).SequenceEqual(
+                        ["active-job", "queue-later-job", "queue-first-job"],
+                        StringComparer.Ordinal);
                 bool operationLabelsVisible = initial.VisibleOperationLabels.Contains("HQ  高画質化", StringComparer.Ordinal)
                     && completed.VisibleOperationLabels.SequenceEqual(["REAL  実写化"], StringComparer.Ordinal);
+                bool rerunSettingsContract = false;
+                if (!string.IsNullOrWhiteSpace(rerunBody))
+                {
+                    using JsonDocument rerunDocument = JsonDocument.Parse(rerunBody);
+                    JsonElement body = rerunDocument.RootElement;
+                    rerunSettingsContract =
+                        body.GetProperty("operation").GetString() == "photoreal"
+                        && body.GetProperty("prompt").GetString() == "workspace rerun prompt"
+                        && Math.Abs(body.GetProperty("strength").GetDouble() - 0.45) < 0.001
+                        && Math.Abs(body.GetProperty("structureStrength").GetDouble() - 0.75) < 0.001
+                        && Math.Abs(body.GetProperty("cfgScale").GetDouble() - 1.4) < 0.001
+                        && body.GetProperty("steps").GetInt32() == 6
+                        && body.GetProperty("maxDimension").GetInt32() == 1024;
+                }
                 ok = initial.Visible
-                    && initial.Total == 6
+                    && initial.Total == 7
                     && initial.Active == 3
                     && initial.Polling
                     && passiveOpen
@@ -17508,20 +17638,35 @@ public partial class App : Application
                     && queueInventoryOrdered
                     && failed.Filtered == 2
                     && completed.Filtered == 1
+                    && canceled.Filtered == 1
                     && operationLabelsVisible
+                    && moveNextIssued
                     && cancelIssued
-                    && afterCancel.Total == 5
+                    && afterCancel.Total == 7
                     && afterCancel.Active == 2
                     && afterCancel.Polling
                     && failedCancelIssued
-                    && afterFailedCancel.Total == 4
+                    && afterFailedCancel.Total == 7
                     && afterFailedCancel.Active == 2
-                    && !afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
+                    && afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
+                    && canceledAfterActions.Filtered == 3
                     && retryIssued
-                    && afterRetry.Total == 5
+                    && afterRetry.Total == 8
                     && afterRetry.Active == 3
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 3", StringComparison.Ordinal))
+                    && canceledRetryIssued
+                    && afterCanceledRetry.Total == 9
+                    && afterCanceledRetry.Active == 4
+                    && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
+                    && rerunIssued
+                    && rerunSettingsContract
+                    && afterRerun.Total == 10
+                    && afterRerun.Active == 5
+                    && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
+                    && clearQueuedIssued
+                    && afterClearQueued.Active == 0
+                    && !afterClearQueued.Polling
                     && sourceHiddenFromVisibleGallery
                     && outputOpened
                     && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
@@ -17545,10 +17690,21 @@ public partial class App : Application
                     queued,
                     failed,
                     completed,
+                    canceled,
+                    moveNextIssued,
+                    afterMove,
                     afterCancel,
                     failedCancelIssued,
                     afterFailedCancel,
+                    canceledAfterActions,
                     afterRetry,
+                    canceledRetryIssued,
+                    afterCanceledRetry,
+                    rerunIssued,
+                    rerunSettingsContract,
+                    afterRerun,
+                    clearQueuedIssued,
+                    afterClearQueued,
                     whileOutputViewerOpen,
                     afterOutputClose,
                     afterDelete,
@@ -19686,8 +19842,37 @@ public partial class App : Application
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", previousJobsPath);
             }
 
+            try
+            {
+                SharedWriteStatus[] closeWrites = await win
+                    .DrainSharedStoreWritersForSmokeAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10));
+                if (closeWrites.Any(static status => status != SharedWriteStatus.Succeeded))
+                {
+                    result = new ModalInteractionSmokeResult
+                    {
+                        Message = "modal interaction checks passed, but shared TEMP writes could not drain before shutdown",
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                result = new ModalInteractionSmokeResult
+                {
+                    Message = $"modal interaction teardown could not drain shared TEMP writes: {ex.Message}",
+                };
+            }
+
             WriteModalInteractionSmokeResult(resultFullPath, result);
-            win.Close();
+            try
+            {
+                await win.CloseAndWaitForSmokeAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch
+            {
+                Shutdown(1);
+                return;
+            }
             try { if (Directory.Exists(smokeRoot)) Directory.Delete(smokeRoot, recursive: true); } catch { }
             Shutdown(result.Ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);

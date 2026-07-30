@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-QUEUE-001",
+  "protocol": "aibos.enhancement-queue-order/v1",
+  "jobStoreVersion": 1,
+  "queueOrder": {
+    "field": "queueOrder",
+    "appliesTo": "queued jobs",
+    "type": "non-negative integer",
+    "optionalForLegacyReaders": true,
+    "defaultForNewJobs": "append after every currently queued job",
+    "persistence": "stored atomically in enhance/jobs.json"
+  },
+  "readerOrdering": [
+    "running job first without changing it",
+    "queued jobs with a valid queueOrder by ascending queueOrder",
+    "equal valid queueOrder values by createdAt then a stable reader tie-breaker",
+    "queued jobs with missing, null, negative, fractional, or non-numeric queueOrder by createdAt then a stable reader tie-breaker",
+    "terminal jobs by the existing workspace inventory order"
+  ],
+  "mutations": {
+    "up": "swap the selected queued job with the queued job immediately before it",
+    "down": "swap the selected queued job with the queued job immediately after it",
+    "next": "place the selected queued job first among queued jobs",
+    "bulkCancel": "cancel queued jobs only; do not alter the running job",
+    "normalization": "after a queue mutation, persist contiguous queueOrder values starting at zero"
+  },
+  "workerRules": {
+    "claim": "claim the first queued job in reader ordering",
+    "singleWorker": true,
+    "runningJobIsNeverPreemptedByReorder": true,
+    "pumpAfterRunningCancel": true,
+    "pumpAfterStartupRecovery": true
+  },
+  "readerFixture": {
+    "jobs": [
+      {
+        "id": "running",
+        "status": "running",
+        "queueOrder": 99,
+        "createdAt": "2026-07-30T00:00:00.000Z"
+      },
+      {
+        "id": "ordered-second",
+        "status": "queued",
+        "queueOrder": 1,
+        "createdAt": "2026-07-30T00:00:01.000Z"
+      },
+      {
+        "id": "legacy-later",
+        "status": "queued",
+        "queueOrder": null,
+        "createdAt": "2026-07-30T00:00:05.000Z"
+      },
+      {
+        "id": "ordered-first",
+        "status": "queued",
+        "queueOrder": 0,
+        "createdAt": "2026-07-30T00:00:03.000Z"
+      },
+      {
+        "id": "invalid-negative",
+        "status": "queued",
+        "queueOrder": -1,
+        "createdAt": "2026-07-30T00:00:04.000Z"
+      },
+      {
+        "id": "legacy-earlier",
+        "status": "queued",
+        "createdAt": "2026-07-30T00:00:02.000Z"
+      }
+    ],
+    "expectedVisibleOrder": [
+      "running",
+      "ordered-first",
+      "ordered-second",
+      "legacy-earlier",
+      "invalid-negative",
+      "legacy-later"
+    ],
+    "expectedClaimedQueuedJob": "ordered-first"
+  }
+}
