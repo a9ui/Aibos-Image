@@ -49,8 +49,14 @@ try {
         'requestContract',
         'resetPromptContract',
         'appSettingsPromptContract',
+        'styleContract',
+        'stylePersistenceContract',
+        'styleReloadContract',
         'defaultPromptContract',
         'independentCompanionContract',
+        'galleryContextNoModal',
+        'galleryContextDirectContract',
+        'modalPhotorealOperation',
         'sharedQueueRoute',
         'sourceUntouched'
     )) {

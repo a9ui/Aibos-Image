@@ -37,7 +37,7 @@
         </Grid.ColumnDefinitions>
 
         <!-- left cluster -->
-        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+        <StackPanel x:Name="HeaderLeftActions" Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
           <Button x:Name="ToggleSidebar" Style="{StaticResource IconButtonActive}" Click="ToggleSidebar_Click"
                   ToolTip="Hide sidebar" AutomationProperties.Name="Toggle sidebar" WindowChrome.IsHitTestVisibleInChrome="True">
             <Path Data="M3,4 h18 v16 h-18 z M9,4 v16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Stretch="Uniform" Width="18" Height="18"/>
@@ -55,7 +55,77 @@
           <Button Style="{StaticResource IconButton}" ToolTip="Refresh active folder" AutomationProperties.Name="Refresh active folder" Click="RefreshActiveFolder_Click" WindowChrome.IsHitTestVisibleInChrome="True">
             <Path Data="M22,11 a10,10 0 1 1 -3,-7 M22,4 v5 h-5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Stretch="Uniform" Width="17" Height="17"/>
           </Button>
+          <Button x:Name="FavoriteUndoButton" Style="{StaticResource IconButton}"
+                  Width="30" Height="28" IsEnabled="False" Margin="4,0,0,0"
+                  Click="FavoriteUndo_Click" ToolTip="Undo favorite change (Ctrl+Z)"
+                  AutomationProperties.Name="Undo favorite change"
+                  WindowChrome.IsHitTestVisibleInChrome="True">
+            <Path Data="M9,7 L4,12 L9,17 M5,12 H14 A6,6 0 0 1 20,18"
+                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  StrokeLineJoin="Round" Width="17" Height="17" Stretch="Uniform"/>
+          </Button>
+          <Button x:Name="FavoriteRedoButton" Style="{StaticResource IconButton}"
+                  Width="30" Height="28" IsEnabled="False" Margin="2,0,0,0"
+                  Click="FavoriteRedo_Click" ToolTip="Redo favorite change (Ctrl+Y)"
+                  AutomationProperties.Name="Redo favorite change"
+                  WindowChrome.IsHitTestVisibleInChrome="True">
+            <Path Data="M15,7 L20,12 L15,17 M19,12 H10 A6,6 0 0 0 4,18"
+                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  StrokeLineJoin="Round" Width="17" Height="17" Stretch="Uniform"/>
+          </Button>
+          <Button x:Name="FavoriteHistoryButton" Style="{StaticResource IconButton}"
+                  Width="30" Height="28" Margin="2,0,0,0"
+                  Click="FavoriteHistory_Click" ToolTip="Show favorite changes made in this session"
+                  AutomationProperties.Name="Show favorite change history"
+                  WindowChrome.IsHitTestVisibleInChrome="True">
+            <Path Data="M12,4 A8,8 0 1 1 5.2,7.8 M5,4 V8 H9 M12,8 V12 L15,14"
+                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  StrokeLineJoin="Round" Width="17" Height="17" Stretch="Uniform"/>
+          </Button>
         </StackPanel>
+
+        <Popup x:Name="FavoriteHistoryPopup" PlacementTarget="{Binding ElementName=FavoriteHistoryButton}" Placement="Bottom"
+               AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False">
+          <Border Width="360" MaxHeight="360" Margin="0,5,0,0" CornerRadius="7" Padding="10"
+                  Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
+            <DockPanel LastChildFill="True">
+              <TextBlock DockPanel.Dock="Top" Text="Favorite history" Foreground="{StaticResource TextPrimary}"
+                         FontSize="13" FontWeight="SemiBold" Margin="2,0,2,7"/>
+              <TextBlock x:Name="FavoriteHistoryEmptyText" DockPanel.Dock="Top"
+                         Text="No favorite changes in this session." Foreground="{StaticResource TextTertiary}"
+                         FontSize="11.5" TextWrapping="Wrap" Margin="2,6"/>
+              <ListBox x:Name="FavoriteHistoryList" Background="Transparent" BorderThickness="0"
+                       MaxHeight="300" Visibility="Collapsed"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       AutomationProperties.Name="Favorite change history">
+                <ListBox.ItemContainerStyle>
+                  <Style TargetType="ListBoxItem">
+                    <Setter Property="Focusable" Value="False"/>
+                    <Setter Property="IsHitTestVisible" Value="False"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Padding" Value="0"/>
+                    <Setter Property="Margin" Value="0,0,0,5"/>
+                  </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Border CornerRadius="5" Background="{StaticResource BgTertiary}" Padding="8,6">
+                      <StackPanel>
+                        <TextBlock Text="{Binding DisplayText}" Foreground="{StaticResource TextSecondary}"
+                                   FontSize="11.5" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextTertiary}"
+                                   FontSize="10" Margin="0,2,0,0"/>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
+          </Border>
+        </Popup>
 
         <!-- search -->
         <Border x:Name="SearchBoxContainer" Grid.Column="1" MinWidth="240" MaxWidth="480" HorizontalAlignment="Stretch" Margin="10,5"
@@ -568,71 +638,9 @@
                 <Grid x:Name="PreviewImageCanvas" Height="320">
                   <Rectangle x:Name="PreviewArtBase"/>
                   <Rectangle x:Name="PreviewArtGlow"/>
-                  <Image x:Name="PreviewBitmap" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"/>
+                  <Image x:Name="PreviewBitmap" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
                 </Grid>
               </Border>
-
-              <Border x:Name="FavoriteHistoryToolbar" CornerRadius="8"
-                      Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
-                      Padding="8,6" Margin="0,0,0,10"
-                      AutomationProperties.Name="Favorite undo redo and history">
-                <DockPanel LastChildFill="False">
-                  <TextBlock DockPanel.Dock="Left" Text="Favorite" Foreground="{StaticResource TextSecondary}"
-                             FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,8,0"/>
-                  <Button x:Name="FavoriteUndoButton" DockPanel.Dock="Left" Style="{StaticResource IconButton}"
-                          Width="30" Height="28" Content="↶" FontSize="17" IsEnabled="False"
-                          Click="FavoriteUndo_Click" ToolTip="Undo favorite change (Ctrl+Z)"
-                          AutomationProperties.Name="Undo favorite change"/>
-                  <Button x:Name="FavoriteRedoButton" DockPanel.Dock="Left" Style="{StaticResource IconButton}"
-                          Width="30" Height="28" Content="↷" FontSize="17" IsEnabled="False" Margin="2,0,0,0"
-                          Click="FavoriteRedo_Click" ToolTip="Redo favorite change (Ctrl+Y)"
-                          AutomationProperties.Name="Redo favorite change"/>
-                  <Button x:Name="FavoriteHistoryButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
-                          Height="28" MinWidth="62" Padding="8,0" Content="History" Margin="6,0,0,0"
-                          Click="FavoriteHistory_Click" ToolTip="Show favorite changes made in this session"
-                          AutomationProperties.Name="Show favorite change history"/>
-                </DockPanel>
-              </Border>
-
-              <Popup x:Name="FavoriteHistoryPopup" PlacementTarget="{Binding ElementName=FavoriteHistoryButton}" Placement="Bottom"
-                     AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False">
-                <Border Width="360" MaxHeight="360" Margin="0,5,0,0" CornerRadius="7" Padding="10"
-                        Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
-                  <DockPanel LastChildFill="True">
-                    <TextBlock DockPanel.Dock="Top" Text="Favorite history" Foreground="{StaticResource TextPrimary}"
-                               FontSize="13" FontWeight="SemiBold" Margin="2,0,2,7"/>
-                    <TextBlock x:Name="FavoriteHistoryEmptyText" DockPanel.Dock="Top"
-                               Text="No favorite changes in this session." Foreground="{StaticResource TextTertiary}"
-                               FontSize="11.5" TextWrapping="Wrap" Margin="2,6"/>
-                    <ListBox x:Name="FavoriteHistoryList" Background="Transparent" BorderThickness="0"
-                             MaxHeight="300" Visibility="Collapsed"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                             AutomationProperties.Name="Favorite change history">
-                      <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
-                          <Setter Property="Focusable" Value="False"/>
-                          <Setter Property="IsHitTestVisible" Value="False"/>
-                          <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                          <Setter Property="Padding" Value="0"/>
-                          <Setter Property="Margin" Value="0,0,0,5"/>
-                        </Style>
-                      </ListBox.ItemContainerStyle>
-                      <ListBox.ItemTemplate>
-                        <DataTemplate>
-                          <Border CornerRadius="5" Background="{StaticResource BgTertiary}" Padding="8,6">
-                            <StackPanel>
-                              <TextBlock Text="{Binding DisplayText}" Foreground="{StaticResource TextSecondary}"
-                                         FontSize="11.5" TextWrapping="Wrap"/>
-                              <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource TextTertiary}"
-                                         FontSize="10" Margin="0,2,0,0"/>
-                            </StackPanel>
-                          </Border>
-                        </DataTemplate>
-                      </ListBox.ItemTemplate>
-                    </ListBox>
-                  </DockPanel>
-                </Border>
-              </Popup>
 
               <Border x:Name="BulkFavoritePanel" Visibility="Collapsed" CornerRadius="10"
                       AutomationProperties.Name="Bulk selection actions"
@@ -1168,18 +1176,20 @@
           MouseLeftButtonDown="EnhancementJobsBackdrop_MouseLeftButtonDown"
           AutomationProperties.Name="AI enhancement jobs workspace"
           AutomationProperties.HelpText="Review enhancement jobs. Escape or a backdrop click closes this workspace.">
-      <Border x:Name="EnhancementJobsDialogSurface" MaxWidth="1120" MaxHeight="720" Margin="42" CornerRadius="6"
+      <Border x:Name="EnhancementJobsDialogSurface" MaxWidth="1120" MaxHeight="1040" Margin="32,10" CornerRadius="6"
               Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
               HorizontalAlignment="Stretch" VerticalAlignment="Stretch" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
         <Grid>
           <Grid.RowDefinitions><RowDefinition Height="54"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
           <DockPanel Grid.Row="0" Margin="16,0,10,0" LastChildFill="True">
             <Button x:Name="EnhancementJobsCloseButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="CloseEnhancementJobs_Click"
-                    ToolTip="Close jobs workspace" AutomationProperties.Name="Close AI enhancement jobs">
+                    ToolTip="Close jobs workspace" AutomationProperties.Name="Close AI enhancement jobs"
+                    WindowChrome.IsHitTestVisibleInChrome="True">
               <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
             </Button>
             <Button x:Name="EnhancementJobsRefreshButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Refresh" Click="RefreshEnhancementJobs_Click"
-                    Height="30" MinWidth="72" Margin="0,0,6,0" AutomationProperties.Name="Refresh AI enhancement jobs"/>
+                    Height="30" MinWidth="72" Margin="0,0,6,0" AutomationProperties.Name="Refresh AI enhancement jobs"
+                    WindowChrome.IsHitTestVisibleInChrome="True"/>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
               <TextBlock Text="AI jobs" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/>
               <TextBlock x:Name="EnhancementJobsHeaderSummary" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="12,2,0,0"/>
@@ -1195,7 +1205,7 @@
                 <RadioButton x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="待機中" Tag="queued" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsRunningFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="処理中" Tag="running" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="完成したもののみ" Tag="completed" Click="EnhancementJobsFilter_Click"/>
-                <RadioButton x:Name="EnhancementJobsFailedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="失敗・中止" Tag="failed" Click="EnhancementJobsFilter_Click"/>
+                <RadioButton x:Name="EnhancementJobsFailedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="失敗" Tag="failed" Click="EnhancementJobsFilter_Click"/>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="9" Margin="0,16,0,0">
                   <StackPanel>
                     <TextBlock Text="Local companion" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold"/>
@@ -1386,6 +1396,84 @@
           <TextBlock Text="{DynamicResource UiModalEdgeHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,18"/>
           <TextBlock x:Name="PhotorealSettingsHeading" Text="AI実写化" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="AI photorealization settings section"/>
           <TextBlock Text="すべてのAI実写化で使う共通プロンプトです。ここでの変更は拡大画面の設定にも即時反映され、次にAI実写化を押してキューへ追加するジョブから使われます。待機中・処理中のジョブは変更されません。" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <TextBlock Text="Style" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
+            <StackPanel>
+              <ListBox x:Name="AppPhotorealStyleListBox"
+                       MinHeight="42" MaxHeight="112"
+                       Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                       Foreground="{StaticResource TextPrimary}"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       IsSynchronizedWithCurrentItem="False"
+                       SelectionChanged="PhotorealStyle_SelectionChanged"
+                       AutomationProperties.Name="Saved AI photorealization styles"
+                       AutomationProperties.HelpText="Choose a saved style or the current unsaved settings.">
+                <ListBox.ItemContainerStyle>
+                  <Style TargetType="{x:Type ListBoxItem}">
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                    <Setter Property="Background" Value="{StaticResource BgPrimary}"/>
+                    <Setter Property="Padding" Value="8,5"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Template">
+                      <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                          <Border x:Name="StyleItemSurface"
+                                  Background="{TemplateBinding Background}"
+                                  BorderBrush="Transparent" BorderThickness="1"
+                                  Padding="{TemplateBinding Padding}">
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+                          </Border>
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                              <Setter TargetName="StyleItemSurface" Property="Background" Value="{StaticResource AccentFillHover}"/>
+                              <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                              <Setter TargetName="StyleItemSurface" Property="Background" Value="{StaticResource AccentFill}"/>
+                              <Setter TargetName="StyleItemSurface" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+                              <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                            </Trigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Setter.Value>
+                    </Setter>
+                  </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"/>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <Grid Margin="0,7,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="AppPhotorealStyleNameTextBox" Grid.Column="0"
+                         MaxLength="40" Padding="7,5" Margin="0,0,6,0"
+                         Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                         BorderBrush="{StaticResource BorderStrong}"
+                         AutomationProperties.Name="AI photorealization style name"/>
+                <Button x:Name="SaveAppPhotorealStyleButton" Grid.Column="1"
+                        Style="{StaticResource GhostButton}" Content="保存" Click="SavePhotorealStyle_Click"
+                        MinWidth="64" Margin="0,0,6,0"
+                        AutomationProperties.Name="Save current AI photorealization settings as a style"/>
+                <Button x:Name="DeleteAppPhotorealStyleButton" Grid.Column="2"
+                        Style="{StaticResource GhostButton}" Content="削除" Click="DeletePhotorealStyle_Click"
+                        MinWidth="64"
+                        AutomationProperties.Name="Delete selected AI photorealization style"/>
+              </Grid>
+              <TextBlock x:Name="AppPhotorealStyleSummaryText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,6,0,0"/>
+              <TextBlock x:Name="AppPhotorealStyleStatusText"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,3,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </Border>
           <DockPanel LastChildFill="False" Margin="0,0,0,5">
             <Button x:Name="ResetAppPhotorealPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetAppPhotorealPrompt_Click" MinWidth="72" AutomationProperties.Name="Reset default AI photorealization prompt"/>
             <TextBlock Text="Prompt" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
@@ -1401,6 +1489,28 @@
                    AutomationProperties.Name="Default AI photorealization prompt"
                    AutomationProperties.HelpText="Saved as you type and shared with the image preview photorealization settings."/>
           <TextBlock x:Name="AppPhotorealPromptStatusText" Text="入力内容は自動保存されます。" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,18" AutomationProperties.LiveSetting="Polite"/>
+          <TextBlock Text="AI処理の出力先" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
+          <TextBlock Text="AI高画質化とAI実写化の共通の親フォルダです。出力はその中の Upscaled と Photorealized に分けて保存されます。変更は次に処理を開始する待機ジョブから使われ、既存画像は移動しません。"
+                     Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,18">
+            <StackPanel>
+              <TextBox x:Name="EnhancementOutputRootTextBox"
+                       IsReadOnly="True" IsReadOnlyCaretVisible="True"
+                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                       TextWrapping="NoWrap" Padding="7,5"
+                       Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}"
+                       Foreground="{StaticResource TextSecondary}"
+                       AutomationProperties.Name="AI enhancement output root"
+                       AutomationProperties.HelpText="Parent folder containing the fixed Upscaled and Photorealized output folders."/>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,8,0,0">
+                <Button x:Name="ChangeEnhancementOutputRootButton" Style="{StaticResource GhostButton}" Content="変更..." Click="ChangeEnhancementOutputRoot_Click" MinWidth="92" Margin="0,0,8,0"
+                        AutomationProperties.Name="Change AI enhancement output folder"/>
+                <Button x:Name="OpenEnhancementOutputRootButton" Style="{StaticResource GhostButton}" Content="フォルダを開く" Click="OpenEnhancementOutputRoot_Click" MinWidth="116"
+                        AutomationProperties.Name="Open AI enhancement output folder"/>
+              </StackPanel>
+              <TextBlock x:Name="EnhancementOutputRootStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </Border>
           <TextBlock x:Name="ThumbnailSettingsHeading" Text="THUMBNAIL STATUS BORDERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Thumbnail settings section"/>
           <Grid Margin="0,0,0,6">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -1799,6 +1909,41 @@
               <TextBlock DockPanel.Dock="Right" Text="GPU queue shared with AI高画質化" Foreground="{StaticResource TextSecondary}" FontSize="10" VerticalAlignment="Center"/>
               <TextBlock Text="AI実写化 設定" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="SemiBold"/>
             </DockPanel>
+            <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalPhotorealStyleComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}"
+                      DisplayMemberPath="Label"
+                      IsSynchronizedWithCurrentItem="False"
+                      SelectionChanged="PhotorealStyle_SelectionChanged"
+                      AutomationProperties.Name="AI photorealization style"
+                      AutomationProperties.HelpText="Apply a saved prompt, strength, composition, quality, and resolution style."/>
+            <Grid Margin="0,6,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBox x:Name="ModalPhotorealStyleNameTextBox" Grid.Column="0"
+                       MaxLength="40" Padding="7,4" Margin="0,0,5,0"
+                       Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}"
+                       AutomationProperties.Name="AI photorealization style name"/>
+              <Button x:Name="SaveModalPhotorealStyleButton" Grid.Column="1"
+                      Style="{StaticResource GhostButton}" Content="保存" Click="SavePhotorealStyle_Click"
+                      MinWidth="54" Height="27" Padding="7,2" Margin="0,0,5,0"
+                      Foreground="{StaticResource TextPrimary}"
+                      AutomationProperties.Name="Save current AI photorealization settings as a style"/>
+              <Button x:Name="DeleteModalPhotorealStyleButton" Grid.Column="2"
+                      Style="{StaticResource GhostButton}" Content="削除" Click="DeletePhotorealStyle_Click"
+                      MinWidth="54" Height="27" Padding="7,2"
+                      Foreground="{StaticResource TextPrimary}"
+                      AutomationProperties.Name="Delete selected AI photorealization style"/>
+            </Grid>
+            <TextBlock x:Name="ModalPhotorealStyleStatusText"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10"
+                       TextWrapping="Wrap" Margin="0,-5,0,8"
+                       AutomationProperties.LiveSetting="Polite"/>
             <DockPanel Margin="0,0,0,4">
               <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" Padding="8,2"
                       Foreground="{StaticResource TextPrimary}"

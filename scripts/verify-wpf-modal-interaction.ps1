@@ -73,6 +73,8 @@ try {
         'enhancedToolbarClarity',
         'enhancementLastKnownGood',
         'enhancementLargeCatalogRefreshBounded',
+        'enhancementRefreshDoesNotBlockModal',
+        'enhancementBackgroundRefreshCompleted',
         'windowCaptionControls',
         'edgeChrome',
         'edgePercentageSetting',

@@ -10974,7 +10974,8 @@ public partial class App : Application
                     && recycledHeadContainer.ContainerBoundToExpectedItem
                     && string.Equals(recycledHeadContainer.Name, headName, StringComparison.Ordinal)
                     && recycledHeadContainer.HelpText.Contains("Favorite level 5", StringComparison.Ordinal)
-                    && recycledHeadContainer.HelpText.Contains("AI-enhanced", StringComparison.Ordinal)
+                    && recycledHeadContainer.HelpText.Contains("AI-upscaled", StringComparison.Ordinal)
+                    && recycledHeadContainer.HelpText.Contains("AI-photorealized", StringComparison.Ordinal)
                     && !string.Equals(recycledHeadContainer.Name, tailName, StringComparison.Ordinal);
                 keyboardMaxRealized = Math.Max(keyboardMaxRealized, window.GridRealizedCountForSmoke);
 
@@ -16701,6 +16702,8 @@ public partial class App : Application
                     && narrowActions.RowCount == 2
                     && wideActions.Fits
                     && wideActions.RowCount == 1;
+                bool wholeImagePreview = third.RightPreviewShowsWholeImageForSmoke;
+                bool favoriteHistoryInHeader = third.FavoriteHistoryCommandsInHeaderForSmoke;
                 bool selectionProjection = selected
                     && initialSelection.CanonicalSelected
                     && initialSelection.CanonicalMarkerVisible
@@ -16738,6 +16741,8 @@ public partial class App : Application
                     && adaptiveLayout
                     && wideLayoutRestored
                     && responsiveActions
+                    && wholeImagePreview
+                    && favoriteHistoryInHeader
                     && selectionProjection;
                 result = new RightPanelSmokeResult
                 {
@@ -16761,6 +16766,8 @@ public partial class App : Application
                     AdaptiveLayout = adaptiveLayout,
                     WideLayoutRestored = wideLayoutRestored,
                     ResponsiveActions = responsiveActions,
+                    WholeImagePreview = wholeImagePreview,
+                    FavoriteHistoryInHeader = favoriteHistoryInHeader,
                     NarrowActionRows = narrowActions.RowCount,
                     WideActionRows = wideActions.RowCount,
                     SelectionProjection = selectionProjection,
@@ -16901,11 +16908,19 @@ public partial class App : Application
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousJobsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH");
+        string? previousOutputRoot = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT");
+        string? previousSharedOutputRoot = Environment.GetEnvironmentVariable("PVU_ENHANCE_OUTPUT_ROOT");
 
         PrepareSharedSeenSmokeEnvironment(smokeRoot);
         string jobsPath = Path.Combine(smokeRoot, ".cache", "enhance", "jobs.json");
-        string outputRoot = Path.Combine(Path.GetDirectoryName(jobsPath)!, "outputs");
+        string outputRoot = Path.Combine(smokeRoot, "external-managed-outputs");
         Directory.CreateDirectory(outputRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
+        File.WriteAllText(
+            Path.Combine(
+                Path.GetDirectoryName(jobsPath)!,
+                SharedDataRootActivation.EnhancementOutputRootConfigFileName),
+            outputRoot);
 
         string upscaleSource = Path.Combine(fullFolder, fixtureNames[0]);
         string photorealSource = Path.Combine(fullFolder, fixtureNames[1]);
@@ -16926,6 +16941,8 @@ public partial class App : Application
             missingOutput,
             missingSource);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", jobsPath);
+        Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT", null);
+        Environment.SetEnvironmentVariable("PVU_ENHANCE_OUTPUT_ROOT", null);
         string beforeJobsJson = File.ReadAllText(jobsPath);
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -16976,6 +16993,20 @@ public partial class App : Application
                 second.SetPhotorealOnlyFilterForSmoke(true);
                 int reloadFilteredCount = second.FilteredCountForSmoke;
                 bool reloadPhotorealVisible = second.SelectFileNameForSmoke(Path.GetFileName(photorealSource));
+                second.OpenAppSettingsForSmoke();
+                bool outputRootSettingsSurface = second.AppEnhancementOutputRootSurfaceForSmoke;
+                string alternateOutputRoot = Path.Combine(smokeRoot, "alternate-managed-outputs");
+                Directory.CreateDirectory(alternateOutputRoot);
+                bool outputRootChanged = second.SetEnhancementOutputRootForSmoke(alternateOutputRoot)
+                    && string.Equals(
+                        SharedDataRootActivation.ResolveManagedOutputsRoot(jobsPath),
+                        alternateOutputRoot,
+                        StringComparison.OrdinalIgnoreCase);
+                bool outputRootRestored = second.SetEnhancementOutputRootForSmoke(outputRoot)
+                    && string.Equals(
+                        SharedDataRootActivation.ResolveManagedOutputsRoot(jobsPath),
+                        outputRoot,
+                        StringComparison.OrdinalIgnoreCase);
                 second.Close();
 
                 string afterJobsJson = File.ReadAllText(jobsPath);
@@ -17006,6 +17037,9 @@ public partial class App : Application
                     && afterClearCount == allCount
                     && reloadFilteredCount == 1
                     && reloadPhotorealVisible
+                    && outputRootSettingsSurface
+                    && outputRootChanged
+                    && outputRootRestored
                     && enhancementStateUnchanged;
 
                 result = new EnhancedFilterSmokeResult
@@ -17047,6 +17081,9 @@ public partial class App : Application
                     AfterClearCount = afterClearCount,
                     ReloadFilteredCount = reloadFilteredCount,
                     ReloadPhotorealVisible = reloadPhotorealVisible,
+                    OutputRootSettingsSurface = outputRootSettingsSurface,
+                    OutputRootChanged = outputRootChanged,
+                    OutputRootRestored = outputRootRestored,
                     EnhancementStateUnchanged = enhancementStateUnchanged,
                     ReadOk = win.EnhancementReadOkForSmoke,
                     ReadError = win.EnhancementReadErrorForSmoke,
@@ -17064,6 +17101,8 @@ public partial class App : Application
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", previousFavoritesPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", previousStatePath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", previousJobsPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT", previousOutputRoot);
+                Environment.SetEnvironmentVariable("PVU_ENHANCE_OUTPUT_ROOT", previousSharedOutputRoot);
             }
 
             WriteEnhancedFilterSmokeResult(resultFullPath, result);
@@ -17294,6 +17333,7 @@ public partial class App : Application
 
                 string sourceBefore = FileFingerprint(sourcePath);
                 bool activeCanceled = false;
+                bool failedCanceled = false;
                 bool retryCreated = false;
                 bool outputDeleted = false;
                 string? openedOutput = null;
@@ -17329,7 +17369,8 @@ public partial class App : Application
                     var jobs = new List<object>
                     {
                         Job("queue-later-job", "queued", 0, createdAt: "2026-07-23T00:00:03.000Z"),
-                        Job("failed-job", "failed", 18, error: "GPU backend stopped"),
+                        Job("failed-cancel-job", failedCanceled ? "canceled" : "failed", 18, error: "GPU backend stopped"),
+                        Job("failed-retry-job", "failed", 27, error: "Model runtime stopped"),
                         Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42, createdAt: "2026-07-23T00:00:01.000Z"),
                         Job("queue-first-job", "queued", 0, createdAt: "2026-07-23T00:00:02.000Z"),
                         Job(
@@ -17360,7 +17401,12 @@ public partial class App : Application
                         activeCanceled = true;
                         return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { job = Job("active-job", "canceled", 43) }));
                     }
-                    if (request.Method == HttpMethod.Post && route.EndsWith("/failed-job/retry", StringComparison.Ordinal))
+                    if (request.Method == HttpMethod.Post && route.EndsWith("/failed-cancel-job/cancel", StringComparison.Ordinal))
+                    {
+                        failedCanceled = true;
+                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { job = Job("failed-cancel-job", "canceled", 18) }));
+                    }
+                    if (request.Method == HttpMethod.Post && route.EndsWith("/failed-retry-job/retry", StringComparison.Ordinal))
                     {
                         retryCreated = true;
                         return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new { job = Job("retry-job", "queued", 0) }));
@@ -17402,8 +17448,12 @@ public partial class App : Application
 
                 bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterCancel = window.EnhancementJobsWorkspaceForSmoke();
-                bool retryIssued = await window.RetryEnhancementJobForSmokeAsync("failed-job");
+                bool failedCancelIssued = await window.CancelEnhancementJobForSmokeAsync("failed-cancel-job");
+                EnhancementJobsWorkspaceSmokeSnapshot afterFailedCancel = window.EnhancementJobsWorkspaceForSmoke();
+                bool retryIssued = await window.RetryEnhancementJobForSmokeAsync("failed-retry-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterRetry = window.EnhancementJobsWorkspaceForSmoke();
+                await window.SetSearchInputForSmokeAsync("__jobs_source_hidden_from_gallery__");
+                bool sourceHiddenFromVisibleGallery = window.FilteredCountForSmoke == 0;
                 bool outputOpened = window.OpenEnhancementJobOutputForSmoke("done-job");
                 openedOutput = window.ModalDisplayPathForSmoke;
                 EnhancementJobsWorkspaceSmokeSnapshot whileOutputViewerOpen = window.EnhancementJobsWorkspaceForSmoke();
@@ -17420,6 +17470,8 @@ public partial class App : Application
                 window.CloseModalForSmoke();
                 await window.WaitForEnhancementJobsReturnForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterSourceOpen = window.EnhancementJobsWorkspaceForSmoke();
+                bool jobsHeaderChromeContract = window.EnhancementJobsHeaderChromeContractForSmoke;
+                bool closeButtonClosedWorkspace = window.ActivateEnhancementJobsCloseForSmoke();
 
                 string sourceAfter = FileFingerprint(sourcePath);
                 bool storesUnchanged = storesBefore.All(pair =>
@@ -17432,7 +17484,8 @@ public partial class App : Application
                     && !whileSourceViewerOpen.Polling
                     && afterSourceOpen.Visible;
                 bool routesOk = requests.Contains("POST /api/enhance/jobs/active-job/cancel", StringComparer.Ordinal)
-                    && requests.Contains("POST /api/enhance/jobs/failed-job/retry", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/failed-cancel-job/cancel", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/failed-retry-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal);
                 bool queueInventoryOrdered = initial.VisibleIds.Take(3).SequenceEqual(
                         ["active-job", "queue-first-job", "queue-later-job"],
@@ -17445,7 +17498,7 @@ public partial class App : Application
                 bool operationLabelsVisible = initial.VisibleOperationLabels.Contains("HQ  高画質化", StringComparer.Ordinal)
                     && completed.VisibleOperationLabels.SequenceEqual(["REAL  実写化"], StringComparer.Ordinal);
                 ok = initial.Visible
-                    && initial.Total == 5
+                    && initial.Total == 6
                     && initial.Active == 3
                     && initial.Polling
                     && passiveOpen
@@ -17453,16 +17506,23 @@ public partial class App : Application
                     && running.Filtered == 1
                     && queued.Filtered == 2
                     && queueInventoryOrdered
-                    && failed.Filtered == 1
+                    && failed.Filtered == 2
                     && completed.Filtered == 1
                     && operationLabelsVisible
                     && cancelIssued
+                    && afterCancel.Total == 5
                     && afterCancel.Active == 2
                     && afterCancel.Polling
+                    && failedCancelIssued
+                    && afterFailedCancel.Total == 4
+                    && afterFailedCancel.Active == 2
+                    && !afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
                     && retryIssued
+                    && afterRetry.Total == 5
                     && afterRetry.Active == 3
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 3", StringComparison.Ordinal))
+                    && sourceHiddenFromVisibleGallery
                     && outputOpened
                     && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
                     && deleteIssued
@@ -17471,6 +17531,8 @@ public partial class App : Application
                     && afterDelete.VisibleIds.Contains("done-job", StringComparer.Ordinal)
                     && sourceOpenedInViewer
                     && jobsRestoredAfterViewerClose
+                    && jobsHeaderChromeContract
+                    && closeButtonClosedWorkspace
                     && routesOk
                     && sourceBefore == sourceAfter
                     && storesUnchanged;
@@ -17484,6 +17546,8 @@ public partial class App : Application
                     failed,
                     completed,
                     afterCancel,
+                    failedCancelIssued,
+                    afterFailedCancel,
                     afterRetry,
                     whileOutputViewerOpen,
                     afterOutputClose,
@@ -17492,6 +17556,9 @@ public partial class App : Application
                     afterSourceOpen,
                     outputOpened,
                     sourceOpenedInViewer,
+                    sourceHiddenFromVisibleGallery,
+                    jobsHeaderChromeContract,
+                    closeButtonClosedWorkspace,
                     queueInventoryOrdered,
                     operationLabelsVisible,
                     stableJobViews,
@@ -19074,6 +19141,29 @@ public partial class App : Application
                 largeCatalogProbe.Close();
                 largeCatalogProbe = null;
 
+                int backgroundRefreshResolverCount = 0;
+                win.SetCanonicalPathResolverForSmoke(path =>
+                {
+                    Interlocked.Increment(ref backgroundRefreshResolverCount);
+                    Thread.Sleep(60);
+                    return Path.GetFullPath(path);
+                });
+                File.SetLastWriteTimeUtc(jobsPath, DateTime.UtcNow.AddSeconds(10));
+                win.CloseModalForSmoke();
+                var nonBlockingOpenWatch = Stopwatch.StartNew();
+                bool nonBlockingOpenReturned = win.OpenModalForSmoke();
+                nonBlockingOpenWatch.Stop();
+                long nonBlockingOpenElapsedMs = nonBlockingOpenWatch.ElapsedMilliseconds;
+                bool backgroundRefreshCompleted =
+                    await win.WaitForEnhancedStateRefreshForSmokeAsync();
+                bool enhancementRefreshDoesNotBlockModal = nonBlockingOpenReturned
+                    && nonBlockingOpenElapsedMs < 1_500
+                    && backgroundRefreshCompleted
+                    && backgroundRefreshResolverCount >= 10
+                    && nonBlockingOpenElapsedMs * 2
+                        < backgroundRefreshResolverCount * 60;
+                win.ResetCanonicalPathResolverForSmoke();
+
                 bool accessibility = win.ModalEdgeZonesAccessibleForSmoke
                     && win.ModalTopBarPointerHitTestContractForSmoke
                     && win.ModalContextMenuContractForSmoke
@@ -19464,6 +19554,7 @@ public partial class App : Application
                     && browserSharedEnhancedReloaded && enhancedToolbarClarity
                     && enhancementLastKnownGood
                     && enhancementLargeCatalogRefreshBounded
+                    && enhancementRefreshDoesNotBlockModal
                     && windowCaptionControls && edgeChrome
                     && edgePercentageSetting && edgeImageIntersection
                     && zoomIndicator && filmstripLayout && contextMenuAction && manualVisiblePersistent
@@ -19506,6 +19597,10 @@ public partial class App : Application
                     EnhancementLargeCatalogRefreshBounded = enhancementLargeCatalogRefreshBounded,
                     EnhancementLargeCatalogCanonicalResolveCount = largeCatalogCanonicalResolveCount,
                     EnhancementLargeCatalogRefreshElapsedMs = largeCatalogRefreshElapsedMs,
+                    EnhancementRefreshDoesNotBlockModal = enhancementRefreshDoesNotBlockModal,
+                    EnhancementBackgroundRefreshCompleted = backgroundRefreshCompleted,
+                    EnhancementBackgroundResolverCount = backgroundRefreshResolverCount,
+                    EnhancementNonBlockingOpenElapsedMs = nonBlockingOpenElapsedMs,
                     WindowCaptionControls = windowCaptionControls,
                     EdgeChrome = edgeChrome,
                     EdgePercentageSetting = edgePercentageSetting,
@@ -25366,6 +25461,10 @@ public partial class App : Application
         public bool EnhancementLargeCatalogRefreshBounded { get; init; }
         public int EnhancementLargeCatalogCanonicalResolveCount { get; init; }
         public long EnhancementLargeCatalogRefreshElapsedMs { get; init; }
+        public bool EnhancementRefreshDoesNotBlockModal { get; init; }
+        public bool EnhancementBackgroundRefreshCompleted { get; init; }
+        public int EnhancementBackgroundResolverCount { get; init; }
+        public long EnhancementNonBlockingOpenElapsedMs { get; init; }
         public bool WindowCaptionControls { get; init; }
         public bool EdgeChrome { get; init; }
         public bool EdgePercentageSetting { get; init; }
@@ -27673,6 +27772,8 @@ public partial class App : Application
         public bool AdaptiveLayout { get; init; }
         public bool WideLayoutRestored { get; init; }
         public bool ResponsiveActions { get; init; }
+        public bool WholeImagePreview { get; init; }
+        public bool FavoriteHistoryInHeader { get; init; }
         public int NarrowActionRows { get; init; }
         public int WideActionRows { get; init; }
         public bool SelectionProjection { get; init; }
@@ -27727,6 +27828,9 @@ public partial class App : Application
         public int AfterClearCount { get; init; }
         public int ReloadFilteredCount { get; init; }
         public bool ReloadPhotorealVisible { get; init; }
+        public bool OutputRootSettingsSurface { get; init; }
+        public bool OutputRootChanged { get; init; }
+        public bool OutputRootRestored { get; init; }
         public bool EnhancementStateUnchanged { get; init; }
         public bool ReadOk { get; init; }
         public string? ReadError { get; init; }

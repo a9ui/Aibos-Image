@@ -67,6 +67,7 @@ try {
         'queueInventoryOrdered',
         'operationLabelsVisible',
         'stableJobViews',
+        'failedCancelIssued',
         'jobsRestoredAfterViewerClose',
         'sourceUnchanged',
         'storesUnchanged',

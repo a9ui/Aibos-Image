@@ -42,6 +42,9 @@ internal static class SharedDataRootActivation
     internal const string SearchHistoryEnvironmentVariable = "PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH";
     internal const string RecentFoldersEnvironmentVariable = "PHOTOVIEWER_WPF_RECENT_PATH";
     internal const string EnhancementJobsEnvironmentVariable = "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH";
+    internal const string EnhancementOutputRootEnvironmentVariable = "PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT";
+    internal const string SharedEnhancementOutputRootEnvironmentVariable = "PVU_ENHANCE_OUTPUT_ROOT";
+    internal const string EnhancementOutputRootConfigFileName = "output-root.txt";
 
     private static readonly (string EnvironmentVariable, string[] RelativeSegments)[] Stores =
     [
@@ -230,10 +233,147 @@ internal static class SharedDataRootActivation
     }
 
     internal static string ManagedOutputsRoot(SharedDataRootActivationResult activation)
-        => Path.Combine(
-            Path.GetDirectoryName(
-                activation.Paths[EnhancementJobsEnvironmentVariable])!,
-            "outputs");
+        => ResolveManagedOutputsRoot(
+            activation.Paths[EnhancementJobsEnvironmentVariable]);
+
+    internal static string EnhancementOutputRootConfigPath(string enhancementJobsPath)
+    {
+        string enhanceStateRoot = Path.GetDirectoryName(
+            Path.GetFullPath(enhancementJobsPath))!;
+        return Path.Combine(
+            enhanceStateRoot,
+            EnhancementOutputRootConfigFileName);
+    }
+
+    internal static bool TryGetManagedOutputsRootEnvironmentOverride(
+        out string? configuredRoot,
+        out string? environmentVariable)
+    {
+        configuredRoot =
+            Environment.GetEnvironmentVariable(EnhancementOutputRootEnvironmentVariable);
+        environmentVariable = EnhancementOutputRootEnvironmentVariable;
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+            return true;
+
+        configuredRoot =
+            Environment.GetEnvironmentVariable(SharedEnhancementOutputRootEnvironmentVariable);
+        environmentVariable = SharedEnhancementOutputRootEnvironmentVariable;
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+            return true;
+
+        configuredRoot = null;
+        environmentVariable = null;
+        return false;
+    }
+
+    internal static string ResolveManagedOutputsRoot(string enhancementJobsPath)
+    {
+        TryGetManagedOutputsRootEnvironmentOverride(
+            out string? configuredRoot,
+            out _);
+
+        string enhanceStateRoot = Path.GetDirectoryName(
+            Path.GetFullPath(enhancementJobsPath))!;
+        if (string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            string configPath = EnhancementOutputRootConfigPath(enhancementJobsPath);
+            if (File.Exists(configPath))
+                configuredRoot = File.ReadAllText(configPath).Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(configuredRoot))
+            return Path.Combine(enhanceStateRoot, "outputs");
+        if (!Path.IsPathFullyQualified(configuredRoot))
+        {
+            throw new InvalidDataException(
+                $"{EnhancementOutputRootConfigFileName} must contain an absolute path.");
+        }
+        return Path.GetFullPath(configuredRoot);
+    }
+
+    internal static bool TryWriteManagedOutputsRoot(
+        string enhancementJobsPath,
+        string selectedRoot,
+        out string normalizedRoot,
+        out string? error)
+    {
+        normalizedRoot = "";
+        error = null;
+        string? temporaryPath = null;
+        try
+        {
+            if (TryGetManagedOutputsRootEnvironmentOverride(
+                    out _,
+                    out string? environmentVariable))
+            {
+                error = $"{environmentVariable} is active, so the app setting cannot override it.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(selectedRoot)
+                || !Path.IsPathFullyQualified(selectedRoot))
+            {
+                error = "Select an absolute output folder.";
+                return false;
+            }
+
+            normalizedRoot = Path.GetFullPath(selectedRoot);
+            if (!Directory.Exists(normalizedRoot))
+            {
+                error = "The selected output folder does not exist.";
+                return false;
+            }
+
+            string configPath = EnhancementOutputRootConfigPath(enhancementJobsPath);
+            string configDirectory = Path.GetDirectoryName(configPath)!;
+            if (!Directory.Exists(configDirectory))
+            {
+                error = "The shared Enhancement data folder is unavailable.";
+                return false;
+            }
+
+            temporaryPath = Path.Combine(
+                configDirectory,
+                $".{EnhancementOutputRootConfigFileName}.{Guid.NewGuid():N}.tmp");
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       4096,
+                       FileOptions.WriteThrough))
+            using (var writer = new StreamWriter(
+                       stream,
+                       new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+            {
+                writer.Write(normalizedRoot);
+                writer.WriteLine();
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporaryPath, configPath, overwrite: true);
+            temporaryPath = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or NotSupportedException
+            or System.Security.SecurityException)
+        {
+            error = $"The output folder setting could not be saved ({ex.GetType().Name}).";
+            return false;
+        }
+        finally
+        {
+            if (temporaryPath is not null)
+            {
+                try { File.Delete(temporaryPath); }
+                catch { }
+            }
+        }
+    }
 
     internal static void DisposeProcessLease()
     {
