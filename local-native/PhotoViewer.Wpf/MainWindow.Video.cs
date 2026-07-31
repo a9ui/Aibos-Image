@@ -122,6 +122,27 @@ public partial class MainWindow
             return false;
         }
 
+        int outputPlaybackFps = playbackFps;
+        int outputFrameCount = frameCount;
+        if (video.TryGetProperty("delivery", out _))
+        {
+            if (video.EnumerateObject().Count(static property =>
+                    property.NameEquals("delivery")) != 1
+                || !durationElement.TryGetInt32(
+                    out int deliveryDurationSeconds)
+                || durationSeconds != deliveryDurationSeconds
+                || deliveryDurationSeconds is not (4 or 6)
+                || !IsVideoDeliveryMutationSafe(
+                    video,
+                    deliveryDurationSeconds))
+            {
+                return false;
+            }
+
+            outputPlaybackFps = 30;
+            outputFrameCount = checked(deliveryDurationSeconds * 30);
+        }
+
         try
         {
             if (!TryResolveEnhancementSourceIdentity(sourcePath, out string resolvedSourcePath)
@@ -175,8 +196,8 @@ public partial class MainWindow
                 presetId!,
                 backendId!,
                 durationSeconds,
-                playbackFps,
-                frameCount,
+                outputPlaybackFps,
+                outputFrameCount,
                 width,
                 height,
                 requestedPrompt!,
@@ -307,7 +328,8 @@ public partial class MainWindow
                 .Select((version, index) => new ModalVideoVersionChoice(
                     index,
                     $"V{index + 1} · {version.DurationSeconds:0.#}s · "
-                        + $"{version.PlaybackFps}fps · {version.Width}×{version.Height}"))
+                        + $"{version.PlaybackFps}fps · {version.FrameCount}f · "
+                        + $"{version.Width}×{version.Height}"))
                 .ToArray();
             ModalVideoVersionComboBox.SelectedIndex = _modalVideoVersions.Count == 0
                 ? -1
@@ -574,6 +596,17 @@ public partial class MainWindow
             : null;
     public string? ModalVideoMediaFailureForSmoke =>
         _modalVideoMediaFailureForSmoke;
+    public string[] ModalVideoVersionLabelsForSmoke =>
+        ModalVideoVersionComboBox.Items
+            .OfType<ModalVideoVersionChoice>()
+            .Select(static choice => choice.Label)
+            .ToArray();
+    public (int PlaybackFps, int FrameCount)[]
+        ModalVideoVersionPlaybackMetadataForSmoke =>
+            _modalVideoVersions
+                .Select(static version =>
+                    (version.PlaybackFps, version.FrameCount))
+                .ToArray();
     public bool ModalVideoHasNaturalDurationForSmoke =>
         _modalVideoTransportStubForSmoke
         || (ModalVideo.NaturalDuration.HasTimeSpan

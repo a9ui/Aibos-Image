@@ -97,17 +97,7 @@ public partial class MainWindow
             || !IsLowerHex(presetHash, 12)
             || !job.TryGetProperty("video", out JsonElement video)
             || video.ValueKind != JsonValueKind.Object
-            || !HasExactProperties(
-                video,
-                "presetId",
-                "backendId",
-                "modelName",
-                "requested",
-                "effective",
-                "seed",
-                "codec",
-                "container",
-                "bitDepth")
+            || !HasExactVideoSnapshotProperties(video)
             || !TryGetExactStringProperty(
                 video,
                 "presetId",
@@ -207,7 +197,10 @@ public partial class MainWindow
             || !TryGetExactStringProperty(effective, "sampler", "uni_pc")
             || !TryGetExactStringProperty(effective, "scheduler", "simple")
             || !HasExactInt32(effective, "shift", 8)
-            || !HasExactInt32(effective, "denoise", 1))
+            || !HasExactInt32(effective, "denoise", 1)
+            || !IsVideoDeliveryMutationSafe(
+                video,
+                durationSeconds))
         {
             return false;
         }
@@ -269,6 +262,74 @@ public partial class MainWindow
             && actualNames
                 .ToHashSet(StringComparer.Ordinal)
                 .SetEquals(expectedNames);
+    }
+
+    private static bool HasExactVideoSnapshotProperties(
+        JsonElement video)
+        => video.TryGetProperty("delivery", out _)
+            ? HasExactProperties(
+                video,
+                "presetId",
+                "backendId",
+                "modelName",
+                "requested",
+                "effective",
+                "delivery",
+                "seed",
+                "codec",
+                "container",
+                "bitDepth")
+            : HasExactProperties(
+                video,
+                "presetId",
+                "backendId",
+                "modelName",
+                "requested",
+                "effective",
+                "seed",
+                "codec",
+                "container",
+                "bitDepth");
+
+    private static bool IsVideoDeliveryMutationSafe(
+        JsonElement video,
+        int durationSeconds)
+    {
+        if (!video.TryGetProperty("delivery", out JsonElement delivery))
+            return true;
+
+        return delivery.ValueKind == JsonValueKind.Object
+            && HasExactProperties(
+                delivery,
+                "backendId",
+                "model",
+                "targetFps",
+                "frameCount",
+                "durationSeconds",
+                "pixelFormat",
+                "audio")
+            && TryGetExactStringProperty(
+                delivery,
+                "backendId",
+                "vs-rife-5.7.0-rife-4.25-v1")
+            && TryGetExactStringProperty(delivery, "model", "4.25")
+            && HasExactInt32(delivery, "targetFps", 30)
+            && HasExactInt32(
+                delivery,
+                "frameCount",
+                checked(durationSeconds * 30))
+            && HasExactInt32(
+                delivery,
+                "durationSeconds",
+                durationSeconds)
+            && TryGetExactStringProperty(
+                delivery,
+                "pixelFormat",
+                "yuv420p")
+            && delivery.TryGetProperty(
+                "audio",
+                out JsonElement audioElement)
+            && audioElement.ValueKind == JsonValueKind.False;
     }
 
     private static string BuildVideoOutputFileName(

@@ -100,18 +100,64 @@ try {
         ($videoContract.normalV1.shift -eq 8)
         ($videoContract.normalV1.seedRange.maximum -eq 2147483647)
         ($videoContract.normalV1.seedRange.fixedAtEnqueue -eq $true)
+        ($videoContract.deliveryV1.field -eq "video.delivery")
+        ($videoContract.deliveryV1.additiveWithinProtocol -eq $true)
+        ($videoContract.deliveryV1.backendId -eq
+            "vs-rife-5.7.0-rife-4.25-v1")
+        ($videoContract.deliveryV1.model -eq "4.25")
+        ($videoContract.deliveryV1.targetFps -eq 30)
+        ($videoContract.deliveryV1.frameCountByDuration.'4' -eq 120)
+        ($videoContract.deliveryV1.frameCountByDuration.'6' -eq 180)
+        ($videoContract.deliveryV1.pixelFormat -eq "yuv420p")
+        ($videoContract.deliveryV1.audio -eq $false)
+        ($videoContract.mutationSafetyVectors[0].id -eq
+            "legacy-delivery-absent-6s")
+        ($videoContract.mutationSafetyVectors[0].expectedMutationSafe -eq
+            $true)
+        ($videoContract.mutationSafetyVectors[0].expectedPlaybackFps -eq 16)
+        ($videoContract.mutationSafetyVectors[0].expectedPlaybackFrameCount -eq
+            97)
+        ($videoContract.mutationSafetyVectors[1].delivery.frameCount -eq 120)
+        ($videoContract.mutationSafetyVectors[1].expectedMutationSafe -eq
+            $true)
+        ($videoContract.mutationSafetyVectors[2].delivery.frameCount -eq 180)
+        ($videoContract.mutationSafetyVectors[2].expectedMutationSafe -eq
+            $true)
+        ($videoContract.mutationSafetyVectors[3].delivery.frameCount -eq 179)
+        ($videoContract.mutationSafetyVectors[3].expectedMutationSafe -eq
+            $false)
+        (($videoContract.normalization.resolution -join " ").Contains(
+            "relativeAspectError + 0.25 * unusedAreaRatio"))
+        ($videoContract.normalization.examples.'bird-975x1614' -eq
+            "480x800")
+        ($videoContract.normalization.refinementFixture.sourceWidth -eq 975)
+        ($videoContract.normalization.refinementFixture.sourceHeight -eq 1614)
+        ($videoContract.normalization.refinementFixture.maximumPixelArea -eq
+            409600)
+        ($videoContract.normalization.refinementFixture.expectedWidth -eq 480)
+        ($videoContract.normalization.refinementFixture.expectedHeight -eq
+            800)
         ($videoContract.managedOutput.folder -eq "Videos")
         ($videoContract.managedOutput.flat -eq $true)
         ($videoContract.readerFirst.wpfWriterEnabled -eq $false)
         ($videoContract.readerFirst.h25WriterEnabled -eq $false)
         ($videoContract.readerFixture.expectedOperations.'legacy-missing-operation' -eq "upscale")
         ($videoContract.readerFixture.expectedOperations.'explicit-video' -eq "video")
+        ($videoContract.readerFixture.expectedOperations.'explicit-video-delivery' -eq "video")
+        ($videoContract.readerFixture.expectedOperations.'malformed-video-delivery' -eq "video")
         ($videoContract.readerFixture.expectedOperations.'future-operation' -eq "unsupported")
         ($videoContract.readerFixture.expectedOperations.'null-operation' -eq "unsupported")
+        ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video'.fps -eq 16)
+        ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video'.frameCount -eq 97)
+        ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video-delivery'.fps -eq 30)
+        ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video-delivery'.frameCount -eq 180)
+        ($videoContract.readerFixture.expectedPlaybackMetadata.'malformed-video-delivery' -eq "protected")
         (($videoContract.readerFixture.expectedImageVersionIds -join ",") -eq
             "legacy-missing-operation,explicit-upscale,explicit-photoreal")
         (($videoContract.readerFixture.expectedReaderOnlyIds -join ",") -eq
-            "explicit-video,future-operation,null-operation")
+            "explicit-video,explicit-video-delivery,malformed-video-delivery,future-operation,null-operation")
+        (($videoContract.readerFixture.expectedMalformedDeliveryIds -join ",") -eq
+            "malformed-video-delivery")
         ($videoContract.readerFixture.expectedMutationRequests -eq 0)
     )
     if ($videoContractChecks -contains $false) {
@@ -129,15 +175,52 @@ try {
         ($videoActivation.codeReady.h25Wan22Writer -eq $true)
         ($videoActivation.codeReady.h25Commit -eq
             "1bd9673c6f92ba448b99552ed5bb230294bbafad")
+        ($videoActivation.deliveryExtension.issue -eq
+            "a9ui/tools-h000025-photoviewer#356")
+        ($videoActivation.deliveryExtension.backendId -eq
+            "vs-rife-5.7.0-rife-4.25-v1")
+        ($videoActivation.deliveryExtension.model -eq "4.25")
+        ($videoActivation.deliveryExtension.targetFps -eq 30)
+        ($videoActivation.deliveryExtension.durationFrameCounts.'4' -eq 120)
+        ($videoActivation.deliveryExtension.durationFrameCounts.'6' -eq 180)
+        ($videoActivation.deliveryExtension.pixelFormat -eq "yuv420p")
+        ($videoActivation.deliveryExtension.audio -eq $false)
+        ([string]$videoActivation.deliveryExtension.h25CandidateCommit -ceq
+            'e10cc052572da8e5b6e0cb9da06b928a44deb3e7')
         ($videoActivation.liveRuntime.wpfMutationClientEnabled -eq $false)
         ($videoActivation.liveRuntime.h25WriterEnabled -eq $false)
         ($videoActivation.liveRuntime.productionProcessesRestarted -eq $false)
         ($videoActivation.candidateEvidence.durationSeconds -eq 6)
         ($videoActivation.candidateEvidence.playbackFps -eq 16)
         ($videoActivation.candidateEvidence.frameCount -eq 97)
+        ($videoActivation.candidateEvidence.width -eq 832)
+        ($videoActivation.candidateEvidence.height -eq 480)
         ($videoActivation.candidateEvidence.maximumPixelArea -eq 409600)
         ($videoActivation.candidateEvidence.codec -eq "h264")
         ($videoActivation.candidateEvidence.pixelFormat -eq "yuv420p")
+        ($videoActivation.candidateEvidence.delivery.elapsedMilliseconds -eq
+            11768)
+        ($videoActivation.candidateEvidence.delivery.targetFps -eq 30)
+        ($videoActivation.candidateEvidence.delivery.frameCount -eq 180)
+        ($videoActivation.candidateEvidence.delivery.pixelFormat -eq
+            "yuv420p")
+        ($videoActivation.candidateEvidence.delivery.audio -eq $false)
+        ($videoActivation.portraitTimingUpperEvidence.width -eq 480)
+        ($videoActivation.portraitTimingUpperEvidence.height -eq 832)
+        ($videoActivation.portraitTimingUpperEvidence.wanElapsedMilliseconds -eq
+            202942)
+        ($videoActivation.portraitTimingUpperEvidence.deliveryElapsedMilliseconds -eq
+            15318)
+        ($videoActivation.portraitTimingUpperEvidence.totalElapsedMilliseconds -eq
+            218810)
+        ($videoActivation.refinedPortraitCandidateEvidence.width -eq 480)
+        ($videoActivation.refinedPortraitCandidateEvidence.height -eq 800)
+        ($videoActivation.refinedPortraitCandidateEvidence.totalElapsedMilliseconds -eq
+            177458)
+        ($videoActivation.refinedPortraitCandidateEvidence.peakVramMiB -eq
+            11765)
+        ($videoActivation.refinedPortraitCandidateEvidence.qualityAdjudication -eq
+            "adopted for anime M1 smoke")
         ($videoActivation.candidateEvidence.mediaFoundationPlayback -eq $true)
         ($videoActivation.candidateEvidence.mediaFoundationInCi -eq $false)
         ($videoActivation.cutover.requiresControlledRestart -eq $true)
@@ -201,6 +284,8 @@ try {
         'queueInventoryOrdered',
         'operationLabelsVisible',
         'videoActionsEnabled',
+        'legacyVideoMutationSafe',
+        'deliveryVideoMutationSafe',
         'readerOnlyVideoSafe',
         'videoCancelPendingSafe',
         'videoCancelSettled',

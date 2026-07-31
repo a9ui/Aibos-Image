@@ -17121,6 +17121,21 @@ public partial class App : Application
                     win.ModalShowingVideoForSmoke && win.ModalVideoPlayingForSmoke;
                 bool videoVersionInventory = win.VideoVersionCountForSmoke == 2
                     && win.ModalVideoVersionIndexForSmoke == 0;
+                string[] videoVersionLabels =
+                    win.ModalVideoVersionLabelsForSmoke;
+                (int PlaybackFps, int FrameCount)[] videoPlaybackMetadata =
+                    win.ModalVideoVersionPlaybackMetadataForSmoke;
+                bool videoDeliveryMetadata =
+                    videoVersionLabels.Length == 2
+                    && videoPlaybackMetadata.Length == 2
+                    && videoPlaybackMetadata[0] is (30, 180)
+                    && videoVersionLabels[0].Contains(
+                        "30fps · 180f",
+                        StringComparison.Ordinal)
+                    && videoPlaybackMetadata[1] is (16, 97)
+                    && videoVersionLabels[1].Contains(
+                        "16fps · 97f",
+                        StringComparison.Ordinal);
                 bool videoPaused = videoPlaybackProgress
                     && win.ToggleModalVideoPlaybackForSmoke()
                     && win.ModalShowingVideoForSmoke
@@ -17166,7 +17181,8 @@ public partial class App : Application
                 win.CloseModalForSmoke();
                 bool videoDefaults = win.VideoGenerationSettingsForSmoke
                         is (6, 16, 409600, "")
-                    && win.VideoGenerationEstimateForSmoke is (97, 147);
+                    && win.VideoGenerationEstimateForSmoke
+                        is (97, 158, 219);
                 win.ConfigureVideoGenerationForSmoke(
                     4,
                     12,
@@ -17202,7 +17218,8 @@ public partial class App : Application
                 bool videoBoardModalOpened = win.OpenModalForSmoke();
                 bool videoBoardOpened = win.OpenVideoGenerationBoardForSmoke();
                 bool videoSurface = win.VideoGenerationSurfaceForSmoke
-                    && win.VideoGenerationEstimateForSmoke is (49, 56);
+                    && win.VideoGenerationEstimateForSmoke
+                        is (49, 61, 85);
                 bool videoQueueSucceeded =
                     await win.QueueVideoGenerationForSmokeAsync();
                 bool videoRequestExact = false;
@@ -17310,6 +17327,7 @@ public partial class App : Application
                     && videoPlaybackProgress
                     && videoAutoplay
                     && videoVersionInventory
+                    && videoDeliveryMetadata
                     && videoPaused
                     && videoPauseSettled
                     && olderVideoMediaOpened
@@ -17393,6 +17411,7 @@ public partial class App : Application
                     VideoPlaybackProgress = videoPlaybackProgress,
                     VideoAutoplay = videoAutoplay,
                     VideoVersionInventory = videoVersionInventory,
+                    VideoDeliveryMetadata = videoDeliveryMetadata,
                     VideoPaused = videoPaused,
                     VideoPauseSettled = videoPauseSettled,
                     OlderVideoMediaOpened = olderVideoMediaOpened,
@@ -17614,7 +17633,7 @@ public partial class App : Application
             "enhance",
             "outputs",
             "Videos",
-            "video-reader-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__22467069a81f.mp4");
+            "video-reader-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__f102bafe68e9.mp4");
         string videoSiblingOutputPath = Path.Combine(
             smokeRoot,
             "stores",
@@ -17622,13 +17641,13 @@ public partial class App : Application
             "outputs",
             "Videos",
             "video-sibling-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__22467069a81f.mp4");
-        string videoTamperedOutputPath = Path.Combine(
+        string videoMalformedDeliveryOutputPath = Path.Combine(
             smokeRoot,
             "stores",
             "enhance",
             "outputs",
             "Videos",
-            "workspace-video-tampered.mp4");
+            "video-reader-only-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__0b6b30d0ae9d.mp4");
         string statePath = Path.Combine(smokeRoot, "stores", "state.json");
         string favoritesPath = Path.Combine(smokeRoot, "stores", "favorites.json");
         string seenPath = Path.Combine(smokeRoot, "stores", "seen.json");
@@ -17688,7 +17707,7 @@ public partial class App : Application
                     overwrite: true);
                 File.Copy(
                     videoOutputPath,
-                    videoTamperedOutputPath,
+                    videoMalformedDeliveryOutputPath,
                     overwrite: true);
                 File.WriteAllText(statePath, "{\"version\":2}");
                 File.WriteAllText(favoritesPath, "{}");
@@ -17757,45 +17776,29 @@ public partial class App : Application
                     int? queueOrder = null,
                     string requestedPrompt = "",
                     string? effectivePositivePrompt = null,
-                    string presetHash = "22467069a81f") => new
+                    string presetHash = "22467069a81f",
+                    string delivery = "legacy",
+                    int durationSeconds = 6,
+                    int playbackFps = 16,
+                    int nativeFrameCount = 97)
                 {
-                    id,
-                    sourceId = sourcePath,
-                    sourcePath,
-                    sourceSignature = new
+                    var video = new Dictionary<string, object?>(
+                        StringComparer.Ordinal)
                     {
-                        size = sourceInfo.Length,
-                        mtimeMs = sourceMtimeMs,
-                    },
-                    sourceSha256 = new string('a', 64),
-                    presetId = "wan22-ti2v-5b-normal-v1",
-                    presetHash,
-                    adapterId = "wan22-ti2v-5b-core-v1",
-                    operation = "video",
-                    mediaKind = "video",
-                    status,
-                    cancelRequested,
-                    progress,
-                    queueOrder,
-                    outputPath = output,
-                    errorMessage = error,
-                    createdAt,
-                    updatedAt = "2026-07-23T00:00:01.000Z",
-                    video = new
-                    {
-                        presetId = "wan22-ti2v-5b-normal-v1",
-                        backendId = "wan22-ti2v-5b-core-v1",
-                        modelName = "wan2.2_ti2v_5B_fp16.safetensors",
-                        requested = new
+                        ["presetId"] = "wan22-ti2v-5b-normal-v1",
+                        ["backendId"] = "wan22-ti2v-5b-core-v1",
+                        ["modelName"] =
+                            "wan2.2_ti2v_5B_fp16.safetensors",
+                        ["requested"] = new
                         {
-                            durationSeconds = 6,
-                            playbackFps = 16,
+                            durationSeconds,
+                            playbackFps,
                             maximumPixelArea = 409600,
                             prompt = requestedPrompt,
                         },
-                        effective = new
+                        ["effective"] = new
                         {
-                            frameCount = 97,
+                            frameCount = nativeFrameCount,
                             width = 736,
                             height = 544,
                             positivePrompt = effectivePositivePrompt
@@ -17814,12 +17817,57 @@ public partial class App : Application
                             shift = 8,
                             denoise = 1,
                         },
-                        seed = 123456789,
-                        codec = "h264",
-                        container = "mp4",
-                        bitDepth = 8,
-                    },
-                };
+                        ["seed"] = 123456789,
+                        ["codec"] = "h264",
+                        ["container"] = "mp4",
+                        ["bitDepth"] = 8,
+                    };
+                    if (delivery is "current" or "malformed")
+                    {
+                        video["delivery"] = new
+                        {
+                            backendId =
+                                "vs-rife-5.7.0-rife-4.25-v1",
+                            model = "4.25",
+                            targetFps = 30,
+                            frameCount = delivery == "current"
+                                ? checked(durationSeconds * 30)
+                                : checked(durationSeconds * 30 - 1),
+                            durationSeconds,
+                            pixelFormat = "yuv420p",
+                            audio = false,
+                        };
+                    }
+
+                    return new Dictionary<string, object?>(
+                        StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["id"] = id,
+                        ["sourceId"] = sourcePath,
+                        ["sourcePath"] = sourcePath,
+                        ["sourceSignature"] = new
+                        {
+                            size = sourceInfo.Length,
+                            mtimeMs = sourceMtimeMs,
+                        },
+                        ["sourceSha256"] = new string('a', 64),
+                        ["presetId"] = "wan22-ti2v-5b-normal-v1",
+                        ["presetHash"] = presetHash,
+                        ["adapterId"] = "wan22-ti2v-5b-core-v1",
+                        ["operation"] = "video",
+                        ["mediaKind"] = "video",
+                        ["status"] = status,
+                        ["cancelRequested"] = cancelRequested,
+                        ["progress"] = progress,
+                        ["queueOrder"] = queueOrder,
+                        ["outputPath"] = output,
+                        ["errorMessage"] = error,
+                        ["createdAt"] = createdAt,
+                        ["updatedAt"] =
+                            "2026-07-23T00:00:01.000Z",
+                        ["video"] = video,
+                    };
+                }
 
                 object LegacyJob(
                     string id,
@@ -17849,6 +17897,17 @@ public partial class App : Application
                             0,
                             createdAt: "2026-07-23T00:00:03.000Z",
                             queueOrder: queueLaterFirst ? 0 : 1),
+                        VideoJob(
+                            "delivery-queue-job",
+                            allQueuedCanceled ? "canceled" : "queued",
+                            0,
+                            createdAt: "2026-07-23T00:00:03.500Z",
+                            queueOrder: 2,
+                            presetHash: "603e9622ace8",
+                            delivery: "current",
+                            durationSeconds: 4,
+                            playbackFps: 12,
+                            nativeFrameCount: 49),
                         Job("failed-cancel-job", failedCanceled ? "canceled" : "failed", 18, error: "GPU backend stopped"),
                         VideoJob(
                             "failed-retry-job",
@@ -17862,6 +17921,13 @@ public partial class App : Application
                                 + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
                                 + "Follow this motion direction: 髪を揺らす",
                             presetHash: "ef83960a4509"),
+                        VideoJob(
+                            "delivery-failed-job",
+                            "failed",
+                            29,
+                            error: "Delivery runtime stopped",
+                            presetHash: "f102bafe68e9",
+                            delivery: "current"),
                         VideoJob(
                             "active-job",
                             activeCanceled ? "canceled" : "running",
@@ -17886,7 +17952,9 @@ public partial class App : Application
                             "video-reader-job",
                             videoOutputDeleted ? "deleted" : "succeeded",
                             100,
-                            output: videoOutputDeleted ? null : videoOutputPath),
+                            output: videoOutputDeleted ? null : videoOutputPath,
+                            presetHash: "f102bafe68e9",
+                            delivery: "current"),
                         VideoJob(
                             "video-sibling-job",
                             "succeeded",
@@ -17895,9 +17963,12 @@ public partial class App : Application
                             createdAt: "2026-07-23T00:00:02.000Z"),
                         VideoJob(
                             "video-reader-only-job",
-                            "succeeded",
+                            "failed",
                             100,
-                            output: videoTamperedOutputPath),
+                            output: videoMalformedDeliveryOutputPath,
+                            error: "Malformed delivery metadata",
+                            presetHash: "0b6b30d0ae9d",
+                            delivery: "malformed"),
                         Job(
                             "future-reader-job",
                             "failed",
@@ -17917,14 +17988,14 @@ public partial class App : Application
                             allQueuedCanceled ? "canceled" : "queued",
                             0,
                             createdAt: "2026-07-23T00:00:04.000Z",
-                            queueOrder: 2));
+                            queueOrder: 3));
                     if (canceledRetryCreated)
                         jobs.Insert(0, Job(
                             "canceled-retry-job",
                             allQueuedCanceled ? "canceled" : "queued",
                             0,
                             createdAt: "2026-07-23T00:00:05.000Z",
-                            queueOrder: 3));
+                            queueOrder: 4));
                     if (rerunCreated)
                         jobs.Insert(0, Job(
                             "rerun-job",
@@ -17932,7 +18003,7 @@ public partial class App : Application
                             0,
                             operation: "photoreal",
                             createdAt: "2026-07-23T00:00:06.000Z",
-                            queueOrder: 4));
+                            queueOrder: 5));
                     return jobs.ToArray();
                 }
 
@@ -18113,7 +18184,7 @@ public partial class App : Application
                                 "queued",
                                 0,
                                 operation: "photoreal",
-                                queueOrder: 4),
+                                queueOrder: 5),
                         }));
                     }
                     if (request.Method == HttpMethod.Delete && route.EndsWith("/done-job/output", StringComparison.Ordinal))
@@ -18130,7 +18201,15 @@ public partial class App : Application
                         videoOutputDeleted = true;
                         return Task.FromResult(JsonResponse(
                             HttpStatusCode.OK,
-                            new { job = VideoJob("video-reader-job", "deleted", 100) }));
+                            new
+                            {
+                                job = VideoJob(
+                                    "video-reader-job",
+                                    "deleted",
+                                    100,
+                                    presetHash: "f102bafe68e9",
+                                    delivery: "current"),
+                            }));
                     }
                     return Task.FromResult(JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected workspace smoke route" }));
                 }, confirmOutputDelete: true);
@@ -18165,7 +18244,7 @@ public partial class App : Application
                     && passiveOpenRequests.Contains("GET /api/enhance/jobs", StringComparer.Ordinal)
                     && passiveOpenRequests.Contains("GET /api/enhance/health", StringComparer.Ordinal);
                 bool healthVisible = initial.HealthState == "Working"
-                    && initial.HealthDetail == "1 running / 2 queued";
+                    && initial.HealthDetail == "1 running / 3 queued";
                 bool healthProvenance = initial.HealthRevision == "H25 69684954";
                 bool healthPassive = initial.HealthGetRequests >= 1 && passiveOpen;
                 object? viewBeforeRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
@@ -18224,6 +18303,14 @@ public partial class App : Application
                 var failedVideoView =
                     window.EnhancementJobViewIdentityForSmoke("failed-retry-job")
                         as EnhancementWorkspaceJobView;
+                var deliveryQueuedVideoView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "delivery-queue-job")
+                        as EnhancementWorkspaceJobView;
+                var deliveryFailedVideoView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "delivery-failed-job")
+                        as EnhancementWorkspaceJobView;
                 var readerOnlyVideoView =
                     window.EnhancementJobViewIdentityForSmoke(
                         "video-reader-only-job")
@@ -18238,34 +18325,57 @@ public partial class App : Application
                     window.EnhancementJobViewIdentityForSmoke("legacy-reader-job")
                         as EnhancementWorkspaceJobView;
                 int requestsBeforeUnsupportedActions = requests.Count;
-                bool videoActionsEnabled = videoReaderView is
+                bool legacyVideoMutationSafe = activeVideoView is
                     {
                         Operation: "video",
                         IsVideoOperation: true,
-                        CanCancel: false,
-                        CanRetry: false,
-                        CanReorder: false,
-                        CanUseOutput: true,
-                    }
-                    && activeVideoView is
-                    {
-                        Operation: "video",
-                        IsVideoOperation: true,
+                        VideoMutationSafe: true,
                         CanCancel: true,
                     }
                     && queuedVideoView is
                     {
                         Operation: "video",
                         IsVideoOperation: true,
+                        VideoMutationSafe: true,
+                        CanCancel: true,
                         CanReorder: true,
                     }
                     && failedVideoView is
                     {
                         Operation: "video",
                         IsVideoOperation: true,
+                        VideoMutationSafe: true,
                         CanCancel: true,
                         CanRetry: true,
                     };
+                bool deliveryVideoMutationSafe = deliveryQueuedVideoView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        VideoMutationSafe: true,
+                        CanCancel: true,
+                        CanReorder: true,
+                    }
+                    && deliveryFailedVideoView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        VideoMutationSafe: true,
+                        CanCancel: true,
+                        CanRetry: true,
+                    };
+                bool videoActionsEnabled = videoReaderView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        VideoMutationSafe: true,
+                        CanCancel: false,
+                        CanRetry: false,
+                        CanReorder: false,
+                        CanUseOutput: true,
+                    }
+                    && legacyVideoMutationSafe
+                    && deliveryVideoMutationSafe;
                 bool readerOnlyVideoSafe = readerOnlyVideoView is
                     {
                         Operation: "video",
@@ -18280,7 +18390,14 @@ public partial class App : Application
                         "video-reader-only-job")
                     && !await window.DeleteEnhancementJobOutputForSmokeAsync(
                         "video-reader-only-job")
-                    && File.Exists(videoTamperedOutputPath);
+                    && !await window.CancelEnhancementJobForSmokeAsync(
+                        "video-reader-only-job")
+                    && !await window.RetryEnhancementJobForSmokeAsync(
+                        "video-reader-only-job")
+                    && !await window.MoveEnhancementJobForSmokeAsync(
+                        "video-reader-only-job",
+                        "up")
+                    && File.Exists(videoMalformedDeliveryOutputPath);
                 bool unknownOperationSafe = futureReaderView is
                     {
                         Operation: "unsupported",
@@ -18431,16 +18548,31 @@ public partial class App : Application
                     && requests.Contains("DELETE /api/enhance/jobs/queued", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/video-reader-job/output", StringComparer.Ordinal);
-                bool queueInventoryOrdered = initial.VisibleIds.Take(3).SequenceEqual(
-                        ["active-job", "queue-first-job", "queue-later-job"],
+                bool queueInventoryOrdered = initial.VisibleIds.Take(4).SequenceEqual(
+                        [
+                            "active-job",
+                            "queue-first-job",
+                            "queue-later-job",
+                            "delivery-queue-job",
+                        ],
                         StringComparer.Ordinal)
                     && queued.VisibleIds.SequenceEqual(
-                        ["queue-first-job", "queue-later-job"],
+                        [
+                            "queue-first-job",
+                            "queue-later-job",
+                            "delivery-queue-job",
+                        ],
                         StringComparer.Ordinal)
                     && queued.VisibleStatusLabels[0].Contains("待ち順 1", StringComparison.Ordinal)
                     && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal)
-                    && afterMove.VisibleIds.Take(3).SequenceEqual(
-                        ["active-job", "queue-later-job", "queue-first-job"],
+                    && queued.VisibleStatusLabels[2].Contains("待ち順 3", StringComparison.Ordinal)
+                    && afterMove.VisibleIds.Take(4).SequenceEqual(
+                        [
+                            "active-job",
+                            "queue-later-job",
+                            "queue-first-job",
+                            "delivery-queue-job",
+                        ],
                         StringComparer.Ordinal);
                 bool operationLabelsVisible = initial.VisibleOperationLabels.Contains("HQ  高画質化", StringComparer.Ordinal)
                     && initial.VisibleOperationLabels.Contains("VIDEO  動画化", StringComparer.Ordinal)
@@ -18462,8 +18594,8 @@ public partial class App : Application
                         && body.GetProperty("maxDimension").GetInt32() == 1024;
                 }
                 ok = initial.Visible
-                    && initial.Total == 13
-                    && initial.Active == 3
+                    && initial.Total == 15
+                    && initial.Active == 4
                     && initial.Polling
                     && passiveOpen
                     && healthVisible
@@ -18475,13 +18607,15 @@ public partial class App : Application
                     && healthRecovered
                     && stableJobViews
                     && running.Filtered == 1
-                    && queued.Filtered == 2
+                    && queued.Filtered == 3
                     && queueInventoryOrdered
-                    && failed.Filtered == 4
-                    && completed.Filtered == 4
+                    && failed.Filtered == 6
+                    && completed.Filtered == 3
                     && canceled.Filtered == 2
                     && operationLabelsVisible
                     && videoActionsEnabled
+                    && legacyVideoMutationSafe
+                    && deliveryVideoMutationSafe
                     && readerOnlyVideoSafe
                     && unknownOperationSafe
                     && legacyMissingOperation
@@ -18489,30 +18623,30 @@ public partial class App : Application
                     && imageVersionsExcludeVideo
                     && moveNextIssued
                     && cancelIssued
-                    && afterCancel.Total == 13
-                    && afterCancel.Active == 3
+                    && afterCancel.Total == 15
+                    && afterCancel.Active == 4
                     && afterCancel.Polling
                     && videoCancelPendingSafe
                     && videoCancelSettled
-                    && afterVideoCancelSettled.Active == 2
+                    && afterVideoCancelSettled.Active == 3
                     && failedCancelIssued
-                    && afterFailedCancel.Total == 13
-                    && afterFailedCancel.Active == 2
+                    && afterFailedCancel.Total == 15
+                    && afterFailedCancel.Active == 3
                     && afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
                     && canceledAfterActions.Filtered == 4
                     && retryIssued
-                    && afterRetry.Total == 14
-                    && afterRetry.Active == 3
+                    && afterRetry.Total == 16
+                    && afterRetry.Active == 4
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
-                    && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 3", StringComparison.Ordinal))
+                    && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 4", StringComparison.Ordinal))
                     && canceledRetryIssued
-                    && afterCanceledRetry.Total == 15
-                    && afterCanceledRetry.Active == 4
+                    && afterCanceledRetry.Total == 17
+                    && afterCanceledRetry.Active == 5
                     && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
                     && rerunIssued
                     && rerunSettingsContract
-                    && afterRerun.Total == 16
-                    && afterRerun.Active == 5
+                    && afterRerun.Total == 18
+                    && afterRerun.Active == 6
                     && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
                     && clearQueuedIssued
                     && afterClearQueued.Active == 0
@@ -18598,6 +18732,8 @@ public partial class App : Application
                     queueInventoryOrdered,
                     operationLabelsVisible,
                     videoActionsEnabled,
+                    legacyVideoMutationSafe,
+                    deliveryVideoMutationSafe,
                     readerOnlyVideoSafe,
                     unknownOperationSafe,
                     legacyMissingOperation,
@@ -25148,8 +25284,47 @@ public partial class App : Application
         Dictionary<string, object?> SucceededVideo(
             string id,
             string outputPath,
-            int seed)
-            => new(StringComparer.OrdinalIgnoreCase)
+            int seed,
+            bool includeDelivery,
+            string createdAt)
+        {
+            var video = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["presetId"] = "wan22-ti2v-5b-normal-v1",
+                ["backendId"] = "wan22-ti2v-5b-core-v1",
+                ["requested"] = new Dictionary<string, object?>
+                {
+                    ["durationSeconds"] = 6,
+                    ["playbackFps"] = 16,
+                    ["prompt"] = "",
+                },
+                ["effective"] = new Dictionary<string, object?>
+                {
+                    ["frameCount"] = 97,
+                    ["width"] = 832,
+                    ["height"] = 480,
+                    ["positivePrompt"] = "fixture-positive",
+                    ["negativePrompt"] = "fixture-negative",
+                },
+                ["seed"] = seed,
+                ["codec"] = "h264",
+                ["bitDepth"] = 8,
+            };
+            if (includeDelivery)
+            {
+                video["delivery"] = new Dictionary<string, object?>
+                {
+                    ["backendId"] = "vs-rife-5.7.0-rife-4.25-v1",
+                    ["model"] = "4.25",
+                    ["targetFps"] = 30,
+                    ["frameCount"] = 180,
+                    ["durationSeconds"] = 6,
+                    ["pixelFormat"] = "yuv420p",
+                    ["audio"] = false,
+                };
+            }
+
+            return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
                 ["id"] = id,
                 ["sourceId"] = videoSourcePath,
@@ -25162,31 +25337,11 @@ public partial class App : Application
                 ["status"] = "succeeded",
                 ["progress"] = 100,
                 ["outputPath"] = outputPath,
-                ["createdAt"] = DateTime.UtcNow.ToString("o"),
-                ["updatedAt"] = DateTime.UtcNow.ToString("o"),
-                ["video"] = new Dictionary<string, object?>
-                {
-                    ["presetId"] = "wan22-ti2v-5b-normal-v1",
-                    ["backendId"] = "wan22-ti2v-5b-core-v1",
-                    ["requested"] = new Dictionary<string, object?>
-                    {
-                        ["durationSeconds"] = 6,
-                        ["playbackFps"] = 16,
-                        ["prompt"] = "",
-                    },
-                    ["effective"] = new Dictionary<string, object?>
-                    {
-                        ["frameCount"] = 97,
-                        ["width"] = 832,
-                        ["height"] = 480,
-                        ["positivePrompt"] = "fixture-positive",
-                        ["negativePrompt"] = "fixture-negative",
-                    },
-                    ["seed"] = seed,
-                    ["codec"] = "h264",
-                    ["bitDepth"] = 8,
-                },
+                ["createdAt"] = createdAt,
+                ["updatedAt"] = createdAt,
+                ["video"] = video,
             };
+        }
 
         var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -25196,8 +25351,18 @@ public partial class App : Application
                 // Missing operation is the legacy upscale compatibility case.
                 Succeeded("legacy-upscale-ok", upscaleSourcePath, upscaleOutputPath),
                 Succeeded("photoreal-ok", photorealSourcePath, photorealOutputPath, "photoreal"),
-                SucceededVideo("video-older", olderVideoOutputPath, 123456788),
-                SucceededVideo("video-newest", videoOutputPath, 123456789),
+                SucceededVideo(
+                    "video-older",
+                    olderVideoOutputPath,
+                    123456788,
+                    includeDelivery: false,
+                    createdAt: "2026-07-30T00:00:00.000Z"),
+                SucceededVideo(
+                    "video-newest",
+                    videoOutputPath,
+                    123456789,
+                    includeDelivery: true,
+                    createdAt: "2026-07-30T00:00:01.000Z"),
                 Succeeded("stale-output", invalidSourcePath, missingOutputPath, "upscale"),
                 new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                 {
@@ -28964,6 +29129,7 @@ public partial class App : Application
         public bool VideoPlaybackProgress { get; init; }
         public bool VideoAutoplay { get; init; }
         public bool VideoVersionInventory { get; init; }
+        public bool VideoDeliveryMetadata { get; init; }
         public bool VideoPaused { get; init; }
         public bool VideoPauseSettled { get; init; }
         public bool OlderVideoMediaOpened { get; init; }

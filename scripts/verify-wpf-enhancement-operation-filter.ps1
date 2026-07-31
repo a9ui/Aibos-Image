@@ -78,6 +78,7 @@ try {
         'videoPlaybackProgress',
         'videoAutoplay',
         'videoVersionInventory',
+        'videoDeliveryMetadata',
         'videoPaused',
         'videoPauseSettled',
         'olderVideoMediaOpened',
