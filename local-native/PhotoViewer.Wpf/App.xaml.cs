@@ -16893,6 +16893,30 @@ public partial class App : Application
         }
 
         string fullFolder = Path.GetFullPath(folder);
+        string? videoFixtureArgument = ArgValue(args, "--video-fixture");
+        string? videoFixturePath = null;
+        if (!string.IsNullOrWhiteSpace(videoFixtureArgument))
+        {
+            videoFixturePath = Path.GetFullPath(videoFixtureArgument);
+            if (!File.Exists(videoFixturePath)
+                || !string.Equals(
+                    Path.GetExtension(videoFixturePath),
+                    ".mp4",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                WriteEnhancedFilterSmokeResult(
+                    resultPath,
+                    new EnhancedFilterSmokeResult
+                    {
+                        Ok = false,
+                        Message =
+                            "--video-fixture must name an existing MP4 file",
+                        Folder = fullFolder,
+                    });
+                Shutdown(1);
+                return;
+            }
+        }
         string[] fixtureNames = GetSmokeImageFileNames(fullFolder);
         if (fixtureNames.Length < 3)
         {
@@ -16966,9 +16990,43 @@ public partial class App : Application
             output.Write([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
         }
 
+        static async Task<bool> DeleteVideoFixtureAfterPlaybackAsync(
+            string path)
+        {
+            for (int attempt = 0; attempt < 30; attempt++)
+            {
+                try
+                {
+                    using (File.Open(
+                               path,
+                               FileMode.Open,
+                               FileAccess.Read,
+                               FileShare.None))
+                    {
+                    }
+                    File.Delete(path);
+                    return !File.Exists(path);
+                }
+                catch (Exception ex) when (
+                    ex is IOException or UnauthorizedAccessException)
+                {
+                    await Task.Delay(100);
+                }
+            }
+            return false;
+        }
+
         new DirectoryInfo(videoOutputDirectory).Create();
-        WriteMinimalSmokeMp4(videoOutput);
-        WriteMinimalSmokeMp4(olderVideoOutput);
+        if (videoFixturePath is null)
+        {
+            WriteMinimalSmokeMp4(videoOutput);
+            WriteMinimalSmokeMp4(olderVideoOutput);
+        }
+        else
+        {
+            File.Copy(videoFixturePath, videoOutput, overwrite: true);
+            File.Copy(videoFixturePath, olderVideoOutput, overwrite: true);
+        }
         WriteEnhancementOperationJobsFixture(
             jobsPath,
             upscaleSource,
@@ -17037,16 +17095,34 @@ public partial class App : Application
                     selectedVideoOutput,
                     videoOutput,
                     StringComparison.OrdinalIgnoreCase);
-                win.EnableModalVideoTransportStubForSmoke();
+                if (videoFixturePath is null)
+                    win.EnableModalVideoTransportStubForSmoke();
                 bool videoModalOpened = win.OpenModalForSmoke();
+                bool videoMediaOpened = videoModalOpened
+                    && await win.WaitForModalVideoMediaOpenedForSmokeAsync();
+                bool videoNaturalDuration = videoMediaOpened
+                    && win.ModalVideoHasNaturalDurationForSmoke;
+                bool videoPlaybackProgress = videoNaturalDuration
+                    && await win.WaitForModalVideoPlaybackProgressForSmokeAsync();
                 bool videoAutoplay =
                     win.ModalShowingVideoForSmoke && win.ModalVideoPlayingForSmoke;
                 bool videoVersionInventory = win.VideoVersionCountForSmoke == 2
                     && win.ModalVideoVersionIndexForSmoke == 0;
-                bool videoPaused = win.ToggleModalVideoPlaybackForSmoke()
+                bool videoPaused = videoPlaybackProgress
+                    && win.ToggleModalVideoPlaybackForSmoke()
                     && win.ModalShowingVideoForSmoke
                     && !win.ModalVideoPlayingForSmoke;
-                bool olderVideoSelected = win.SelectModalVideoVersionForSmoke(1)
+                bool videoPauseSettled = videoPaused
+                    && await win
+                        .WaitForModalVideoPauseSettledForSmokeAsync();
+                bool olderVideoSelectionStarted =
+                    win.SelectModalVideoVersionForSmoke(1);
+                bool olderVideoMediaOpened = olderVideoSelectionStarted
+                    && await win.WaitForModalVideoMediaOpenedForSmokeAsync();
+                bool olderVideoPlaybackProgress = olderVideoMediaOpened
+                    && win.ModalVideoHasNaturalDurationForSmoke
+                    && await win.WaitForModalVideoPlaybackProgressForSmokeAsync();
+                bool olderVideoSelected = olderVideoPlaybackProgress
                     && win.ModalShowingVideoForSmoke
                     && win.ModalVideoPlayingForSmoke
                     && string.Equals(
@@ -17061,7 +17137,14 @@ public partial class App : Application
                 bool ordinaryModalOpened = win.OpenModalForSmoke();
                 bool ordinaryModalStayedImage = !win.ModalShowingVideoForSmoke
                     && !win.ModalVideoPlayingForSmoke;
-                bool manualVideoStarted = win.ToggleModalVideoPlaybackForSmoke()
+                bool manualVideoStartRequested =
+                    win.ToggleModalVideoPlaybackForSmoke();
+                bool manualVideoMediaOpened = manualVideoStartRequested
+                    && await win.WaitForModalVideoMediaOpenedForSmokeAsync();
+                bool manualVideoPlaybackProgress = manualVideoMediaOpened
+                    && win.ModalVideoHasNaturalDurationForSmoke
+                    && await win.WaitForModalVideoPlaybackProgressForSmokeAsync();
+                bool manualVideoStarted = manualVideoPlaybackProgress
                     && win.ModalShowingVideoForSmoke
                     && win.ModalVideoPlayingForSmoke;
                 bool ordinaryNeighborNavigated = win.NavigateModalForSmoke(1);
@@ -17137,7 +17220,6 @@ public partial class App : Application
                         && requestedVideo.GetProperty("prompt").GetString() == "pan left slowly";
                 }
                 win.CloseModalForSmoke();
-                win.Close();
 
                 var second = HiddenWindow();
                 second.Show();
@@ -17167,6 +17249,16 @@ public partial class App : Application
                         outputRoot,
                         StringComparison.OrdinalIgnoreCase);
                 second.Close();
+                string? videoMediaFailure =
+                    win.ModalVideoMediaFailureForSmoke;
+                await win.Dispatcher.InvokeAsync(
+                    static () => { },
+                    DispatcherPriority.ContextIdle);
+                bool videoHandlesReleased =
+                    await DeleteVideoFixtureAfterPlaybackAsync(videoOutput)
+                    && await DeleteVideoFixtureAfterPlaybackAsync(
+                        olderVideoOutput);
+                win.Close();
 
                 string afterJobsJson = File.ReadAllText(jobsPath);
                 bool enhancementStateUnchanged = string.Equals(beforeJobsJson, afterJobsJson, StringComparison.Ordinal);
@@ -17200,13 +17292,21 @@ public partial class App : Application
                     && selectedVideoBadge
                     && videoOutputMatches
                     && videoModalOpened
+                    && videoMediaOpened
+                    && videoNaturalDuration
+                    && videoPlaybackProgress
                     && videoAutoplay
                     && videoVersionInventory
                     && videoPaused
+                    && videoPauseSettled
+                    && olderVideoMediaOpened
+                    && olderVideoPlaybackProgress
                     && olderVideoSelected
                     && ordinaryVideoSourceSelected
                     && ordinaryModalOpened
                     && ordinaryModalStayedImage
+                    && manualVideoMediaOpened
+                    && manualVideoPlaybackProgress
                     && manualVideoStarted
                     && ordinaryNeighborNavigated
                     && ordinaryNeighborStayedImage
@@ -17225,6 +17325,7 @@ public partial class App : Application
                     && outputRootSettingsSurface
                     && outputRootChanged
                     && outputRootRestored
+                    && videoHandlesReleased
                     && enhancementStateUnchanged;
 
                 result = new EnhancedFilterSmokeResult
@@ -17269,15 +17370,31 @@ public partial class App : Application
                     VideoVisible = videoVisible,
                     SelectedVideoBadge = selectedVideoBadge,
                     SelectedVideoOutputPath = selectedVideoOutput,
+                    RealVideoFixtureUsed = videoFixturePath is not null,
+                    VideoTransport = videoFixturePath is null
+                        ? "smoke-stub"
+                        : "media-foundation",
                     VideoModalOpened = videoModalOpened,
+                    VideoMediaOpened = videoMediaOpened,
+                    VideoNaturalDuration = videoNaturalDuration,
+                    VideoPlaybackProgress = videoPlaybackProgress,
                     VideoAutoplay = videoAutoplay,
                     VideoVersionInventory = videoVersionInventory,
                     VideoPaused = videoPaused,
+                    VideoPauseSettled = videoPauseSettled,
+                    OlderVideoMediaOpened = olderVideoMediaOpened,
+                    OlderVideoPlaybackProgress =
+                        olderVideoPlaybackProgress,
                     OlderVideoSelected = olderVideoSelected,
                     OrdinaryModalStayedImage = ordinaryModalStayedImage,
+                    ManualVideoMediaOpened = manualVideoMediaOpened,
+                    ManualVideoPlaybackProgress =
+                        manualVideoPlaybackProgress,
                     ManualVideoStarted = manualVideoStarted,
                     OrdinaryNeighborNavigated = ordinaryNeighborNavigated,
                     OrdinaryNeighborStayedImage = ordinaryNeighborStayedImage,
+                    VideoHandlesReleased = videoHandlesReleased,
+                    VideoMediaFailure = videoMediaFailure,
                     VideoDefaults = videoDefaults,
                     VideoBoardOpened = videoBoardOpened,
                     VideoSurface = videoSurface,
@@ -17484,7 +17601,21 @@ public partial class App : Application
             "enhance",
             "outputs",
             "Videos",
-            "workspace-video.mp4");
+            "video-reader-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__22467069a81f.mp4");
+        string videoSiblingOutputPath = Path.Combine(
+            smokeRoot,
+            "stores",
+            "enhance",
+            "outputs",
+            "Videos",
+            "video-sibling-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__22467069a81f.mp4");
+        string videoTamperedOutputPath = Path.Combine(
+            smokeRoot,
+            "stores",
+            "enhance",
+            "outputs",
+            "Videos",
+            "workspace-video-tampered.mp4");
         string statePath = Path.Combine(smokeRoot, "stores", "state.json");
         string favoritesPath = Path.Combine(smokeRoot, "stores", "favorites.json");
         string seenPath = Path.Combine(smokeRoot, "stores", "seen.json");
@@ -17530,10 +17661,22 @@ public partial class App : Application
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(videoOutputPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
                 Directory.CreateDirectory(metadataIndexDirectory);
                 WriteSmokePng(sourcePath, 96, 72, Color.FromRgb(78, 128, 214));
                 WriteSmokePng(outputPath, 192, 144, Color.FromRgb(86, 180, 214));
+                File.WriteAllBytes(
+                    videoOutputPath,
+                    [0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
+                File.Copy(
+                    videoOutputPath,
+                    videoSiblingOutputPath,
+                    overwrite: true);
+                File.Copy(
+                    videoOutputPath,
+                    videoTamperedOutputPath,
+                    overwrite: true);
                 File.WriteAllText(statePath, "{\"version\":2}");
                 File.WriteAllText(favoritesPath, "{}");
                 File.WriteAllText(seenPath, "{}");
@@ -17547,6 +17690,8 @@ public partial class App : Application
 
                 string sourceBefore = FileFingerprint(sourcePath);
                 bool activeCanceled = false;
+                bool activeCancelRequested = false;
+                int activeCancelPendingJobReads = 0;
                 bool failedCanceled = false;
                 bool retryCreated = false;
                 bool canceledRetryCreated = false;
@@ -17554,8 +17699,10 @@ public partial class App : Application
                 bool queueLaterFirst = false;
                 bool allQueuedCanceled = false;
                 bool outputDeleted = false;
+                bool videoOutputDeleted = false;
                 string healthMode = "available";
                 string? openedOutput = null;
+                string? openedVideoOutput = null;
                 string rerunBody = "";
                 var sourceInfo = new FileInfo(sourcePath);
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
@@ -17586,6 +17733,81 @@ public partial class App : Application
                     updatedAt = "2026-07-23T00:00:01.000Z",
                 };
 
+                object VideoJob(
+                    string id,
+                    string status,
+                    int progress,
+                    string? output = null,
+                    string? error = null,
+                    bool cancelRequested = false,
+                    string createdAt = "2026-07-23T00:00:00.000Z",
+                    int? queueOrder = null,
+                    string requestedPrompt = "",
+                    string? effectivePositivePrompt = null,
+                    string presetHash = "22467069a81f") => new
+                {
+                    id,
+                    sourceId = sourcePath,
+                    sourcePath,
+                    sourceSignature = new
+                    {
+                        size = sourceInfo.Length,
+                        mtimeMs = sourceMtimeMs,
+                    },
+                    sourceSha256 = new string('a', 64),
+                    presetId = "wan22-ti2v-5b-normal-v1",
+                    presetHash,
+                    adapterId = "wan22-ti2v-5b-core-v1",
+                    operation = "video",
+                    mediaKind = "video",
+                    status,
+                    cancelRequested,
+                    progress,
+                    queueOrder,
+                    outputPath = output,
+                    errorMessage = error,
+                    createdAt,
+                    updatedAt = "2026-07-23T00:00:01.000Z",
+                    video = new
+                    {
+                        presetId = "wan22-ti2v-5b-normal-v1",
+                        backendId = "wan22-ti2v-5b-core-v1",
+                        modelName = "wan2.2_ti2v_5B_fp16.safetensors",
+                        requested = new
+                        {
+                            durationSeconds = 6,
+                            playbackFps = 16,
+                            maximumPixelArea = 409600,
+                            prompt = requestedPrompt,
+                        },
+                        effective = new
+                        {
+                            frameCount = 97,
+                            width = 736,
+                            height = 544,
+                            positivePrompt = effectivePositivePrompt
+                                ??
+                                "Animate the supplied image as the exact first frame. "
+                                + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
+                                + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
+                                + "Use subtle natural idle motion only: gentle breathing, an occasional blink, and restrained secondary motion in hair and clothing. "
+                                + "Keep the camera locked and preserve the original framing.",
+                            negativePrompt =
+                                "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark",
+                            steps = 20,
+                            cfg = 5,
+                            sampler = "uni_pc",
+                            scheduler = "simple",
+                            shift = 8,
+                            denoise = 1,
+                        },
+                        seed = 123456789,
+                        codec = "h264",
+                        container = "mp4",
+                        bitDepth = 8,
+                    },
+                };
+
                 object LegacyJob(
                     string id,
                     string status,
@@ -17608,15 +17830,31 @@ public partial class App : Application
                 {
                     var jobs = new List<object>
                     {
-                        Job(
+                        VideoJob(
                             "queue-later-job",
                             allQueuedCanceled ? "canceled" : "queued",
                             0,
                             createdAt: "2026-07-23T00:00:03.000Z",
                             queueOrder: queueLaterFirst ? 0 : 1),
                         Job("failed-cancel-job", failedCanceled ? "canceled" : "failed", 18, error: "GPU backend stopped"),
-                        Job("failed-retry-job", "failed", 27, error: "Model runtime stopped"),
-                        Job("active-job", activeCanceled ? "canceled" : "running", activeCanceled ? 43 : 42, createdAt: "2026-07-23T00:00:01.000Z"),
+                        VideoJob(
+                            "failed-retry-job",
+                            "failed",
+                            27,
+                            error: "Model runtime stopped",
+                            requestedPrompt: "髪を揺らす",
+                            effectivePositivePrompt:
+                                "Animate the supplied image as the exact first frame. "
+                                + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
+                                + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
+                                + "Follow this motion direction: 髪を揺らす",
+                            presetHash: "ef83960a4509"),
+                        VideoJob(
+                            "active-job",
+                            activeCanceled ? "canceled" : "running",
+                            activeCanceled ? 43 : 42,
+                            cancelRequested: activeCancelRequested,
+                            createdAt: "2026-07-23T00:00:01.000Z"),
                         Job(
                             "queue-first-job",
                             allQueuedCanceled ? "canceled" : "queued",
@@ -17631,12 +17869,22 @@ public partial class App : Application
                             operation: "photoreal"),
                         Job("canceled-job", "canceled", 11, error: "Canceled by user"),
                         LegacyJob("legacy-reader-job", "canceled", 7),
-                        Job(
+                        VideoJob(
                             "video-reader-job",
+                            videoOutputDeleted ? "deleted" : "succeeded",
+                            100,
+                            output: videoOutputDeleted ? null : videoOutputPath),
+                        VideoJob(
+                            "video-sibling-job",
                             "succeeded",
                             100,
-                            output: videoOutputPath,
-                            operation: "video"),
+                            output: videoSiblingOutputPath,
+                            createdAt: "2026-07-23T00:00:02.000Z"),
+                        VideoJob(
+                            "video-reader-only-job",
+                            "succeeded",
+                            100,
+                            output: videoTamperedOutputPath),
                         Job(
                             "future-reader-job",
                             "failed",
@@ -17651,7 +17899,7 @@ public partial class App : Application
                             operation: null),
                     };
                     if (retryCreated)
-                        jobs.Insert(0, Job(
+                        jobs.Insert(0, VideoJob(
                             "retry-job",
                             allQueuedCanceled ? "canceled" : "queued",
                             0,
@@ -17767,7 +18015,16 @@ public partial class App : Application
                     string route = request.RequestUri?.AbsolutePath ?? "";
                     requests.Add($"{request.Method.Method} {route}");
                     if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/jobs", StringComparison.Ordinal))
+                    {
+                        if (activeCancelRequested && !activeCanceled)
+                        {
+                            if (activeCancelPendingJobReads == 0)
+                                activeCanceled = true;
+                            else
+                                activeCancelPendingJobReads--;
+                        }
                         return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { jobs = CurrentJobs() }));
+                    }
                     if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/health", StringComparison.Ordinal))
                     {
                         return Task.FromResult(healthMode != "missing"
@@ -17776,8 +18033,18 @@ public partial class App : Application
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/active-job/cancel", StringComparison.Ordinal))
                     {
-                        activeCanceled = true;
-                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { job = Job("active-job", "canceled", 43) }));
+                        activeCancelRequested = true;
+                        activeCancelPendingJobReads = 1;
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.Accepted,
+                            new
+                            {
+                                job = VideoJob(
+                                    "active-job",
+                                    "running",
+                                    43,
+                                    cancelRequested: true),
+                            }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/failed-cancel-job/cancel", StringComparison.Ordinal))
                     {
@@ -17787,7 +18054,9 @@ public partial class App : Application
                     if (request.Method == HttpMethod.Post && route.EndsWith("/failed-retry-job/retry", StringComparison.Ordinal))
                     {
                         retryCreated = true;
-                        return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new { job = Job("retry-job", "queued", 0) }));
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.Accepted,
+                            new { job = VideoJob("retry-job", "queued", 0) }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/canceled-job/retry", StringComparison.Ordinal))
                     {
@@ -17802,7 +18071,11 @@ public partial class App : Application
                         return Task.FromResult(JsonResponse(HttpStatusCode.OK, new
                         {
                             moved = queueLaterFirst,
-                            job = Job("queue-later-job", "queued", 0, queueOrder: 0),
+                            job = VideoJob(
+                                "queue-later-job",
+                                "queued",
+                                0,
+                                queueOrder: 0),
                             queue = CurrentJobs(),
                         }));
                     }
@@ -17836,6 +18109,15 @@ public partial class App : Application
                             File.Delete(outputPath);
                         outputDeleted = true;
                         return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { job = Job("done-job", "deleted", 100) }));
+                    }
+                    if (request.Method == HttpMethod.Delete && route.EndsWith("/video-reader-job/output", StringComparison.Ordinal))
+                    {
+                        if (File.Exists(videoOutputPath))
+                            File.Delete(videoOutputPath);
+                        videoOutputDeleted = true;
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.OK,
+                            new { job = VideoJob("video-reader-job", "deleted", 100) }));
                     }
                     return Task.FromResult(JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected workspace smoke route" }));
                 }, confirmOutputDelete: true);
@@ -17920,6 +18202,19 @@ public partial class App : Application
                 var videoReaderView =
                     window.EnhancementJobViewIdentityForSmoke("video-reader-job")
                         as EnhancementWorkspaceJobView;
+                var activeVideoView =
+                    window.EnhancementJobViewIdentityForSmoke("active-job")
+                        as EnhancementWorkspaceJobView;
+                var queuedVideoView =
+                    window.EnhancementJobViewIdentityForSmoke("queue-later-job")
+                        as EnhancementWorkspaceJobView;
+                var failedVideoView =
+                    window.EnhancementJobViewIdentityForSmoke("failed-retry-job")
+                        as EnhancementWorkspaceJobView;
+                var readerOnlyVideoView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "video-reader-only-job")
+                        as EnhancementWorkspaceJobView;
                 var futureReaderView =
                     window.EnhancementJobViewIdentityForSmoke("future-reader-job")
                         as EnhancementWorkspaceJobView;
@@ -17929,18 +18224,50 @@ public partial class App : Application
                 var legacyReaderView =
                     window.EnhancementJobViewIdentityForSmoke("legacy-reader-job")
                         as EnhancementWorkspaceJobView;
-                int requestsBeforeReaderOnlyActions = requests.Count;
-                bool videoReaderSafe = videoReaderView is
+                int requestsBeforeUnsupportedActions = requests.Count;
+                bool videoActionsEnabled = videoReaderView is
                     {
                         Operation: "video",
                         IsVideoOperation: true,
                         CanCancel: false,
                         CanRetry: false,
                         CanReorder: false,
+                        CanUseOutput: true,
+                    }
+                    && activeVideoView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        CanCancel: true,
+                    }
+                    && queuedVideoView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        CanReorder: true,
+                    }
+                    && failedVideoView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        CanCancel: true,
+                        CanRetry: true,
+                    };
+                bool readerOnlyVideoSafe = readerOnlyVideoView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        VideoMutationSafe: false,
+                        CanCancel: false,
+                        CanRetry: false,
+                        CanReorder: false,
                         CanUseOutput: false,
                     }
-                    && !window.OpenEnhancementJobOutputForSmoke("video-reader-job")
-                    && !await window.DeleteEnhancementJobOutputForSmokeAsync("video-reader-job");
+                    && !window.OpenEnhancementJobOutputForSmoke(
+                        "video-reader-only-job")
+                    && !await window.DeleteEnhancementJobOutputForSmokeAsync(
+                        "video-reader-only-job")
+                    && File.Exists(videoTamperedOutputPath);
                 bool unknownOperationSafe = futureReaderView is
                     {
                         Operation: "unsupported",
@@ -17963,8 +18290,8 @@ public partial class App : Application
                     && !await window.RetryEnhancementJobForSmokeAsync("null-operation-reader-job");
                 bool legacyMissingOperation =
                     legacyReaderView?.Operation == "upscale";
-                bool readerOnlyNoMutation =
-                    requests.Count == requestsBeforeReaderOnlyActions;
+                bool unsupportedNoMutation =
+                    requests.Count == requestsBeforeUnsupportedActions;
                 bool imageVersionsExcludeVideo =
                     window.EnhancedCandidateCountForSmoke == 1;
 
@@ -17975,6 +18302,31 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterCancel = window.EnhancementJobsWorkspaceForSmoke();
+                var cancelPendingVideoView =
+                    window.EnhancementJobViewIdentityForSmoke("active-job")
+                        as EnhancementWorkspaceJobView;
+                bool videoCancelPendingSafe = cancelPendingVideoView is
+                    {
+                        Operation: "video",
+                        Status: "running",
+                        CancelRequested: true,
+                        CanCancel: false,
+                    };
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterVideoCancelSettled =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                var canceledVideoView =
+                    window.EnhancementJobViewIdentityForSmoke("active-job")
+                        as EnhancementWorkspaceJobView;
+                bool videoCancelSettled = canceledVideoView is
+                    {
+                        Operation: "video",
+                        Status: "canceled",
+                        CancelRequested: true,
+                    }
+                    && !canceledVideoView.DetailText.Contains(
+                        "Waiting for the exact GPU prompt",
+                        StringComparison.Ordinal);
                 bool failedCancelIssued = await window.CancelEnhancementJobForSmokeAsync("failed-cancel-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterFailedCancel = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("canceled");
@@ -18003,6 +18355,34 @@ public partial class App : Application
                 window.CloseModalForSmoke();
                 await window.WaitForEnhancementJobsReturnForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterOutputClose = window.EnhancementJobsWorkspaceForSmoke();
+                window.EnableModalVideoTransportStubForSmoke();
+                bool videoOutputOpened =
+                    window.OpenEnhancementJobOutputForSmoke("video-reader-job");
+                openedVideoOutput = window.ModalVideoPathForSmoke;
+                bool videoOutputOpenedPaused =
+                    window.ModalShowingVideoForSmoke
+                    && !window.ModalVideoPlayingForSmoke;
+                EnhancementJobsWorkspaceSmokeSnapshot whileVideoViewerOpen =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                window.CloseModalForSmoke();
+                await window.WaitForEnhancementJobsReturnForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterVideoClose =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool videoDeleteIssued =
+                    await window.DeleteEnhancementJobOutputForSmokeAsync(
+                        "video-reader-job");
+                EnhancementJobsWorkspaceSmokeSnapshot afterVideoDelete =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool videoSiblingPreserved =
+                    File.Exists(videoSiblingOutputPath)
+                    && window.EnhancementJobViewIdentityForSmoke(
+                        "video-sibling-job")
+                        is EnhancementWorkspaceJobView
+                        {
+                            Operation: "video",
+                            VideoMutationSafe: true,
+                            CanUseOutput: true,
+                        };
                 bool deleteIssued = await window.DeleteEnhancementJobOutputForSmokeAsync("done-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterDelete = window.EnhancementJobsWorkspaceForSmoke();
                 var storesBeforeViewerOpen = environment
@@ -18023,6 +18403,9 @@ public partial class App : Application
                 bool jobsRestoredAfterViewerClose = !whileOutputViewerOpen.Visible
                     && !whileOutputViewerOpen.Polling
                     && afterOutputClose.Visible
+                    && !whileVideoViewerOpen.Visible
+                    && !whileVideoViewerOpen.Polling
+                    && afterVideoClose.Visible
                     && !whileSourceViewerOpen.Visible
                     && !whileSourceViewerOpen.Polling
                     && afterSourceOpen.Visible;
@@ -18033,7 +18416,8 @@ public partial class App : Application
                     && requests.Contains("POST /api/enhance/jobs/queue-later-job/queue", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/queued", StringComparer.Ordinal)
-                    && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal);
+                    && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal)
+                    && requests.Contains("DELETE /api/enhance/jobs/video-reader-job/output", StringComparer.Ordinal);
                 bool queueInventoryOrdered = initial.VisibleIds.Take(3).SequenceEqual(
                         ["active-job", "queue-first-job", "queue-later-job"],
                         StringComparer.Ordinal)
@@ -18065,7 +18449,7 @@ public partial class App : Application
                         && body.GetProperty("maxDimension").GetInt32() == 1024;
                 }
                 ok = initial.Visible
-                    && initial.Total == 11
+                    && initial.Total == 13
                     && initial.Active == 3
                     && initial.Polling
                     && passiveOpen
@@ -18081,36 +18465,40 @@ public partial class App : Application
                     && queued.Filtered == 2
                     && queueInventoryOrdered
                     && failed.Filtered == 4
-                    && completed.Filtered == 2
+                    && completed.Filtered == 4
                     && canceled.Filtered == 2
                     && operationLabelsVisible
-                    && videoReaderSafe
+                    && videoActionsEnabled
+                    && readerOnlyVideoSafe
                     && unknownOperationSafe
                     && legacyMissingOperation
-                    && readerOnlyNoMutation
+                    && unsupportedNoMutation
                     && imageVersionsExcludeVideo
                     && moveNextIssued
                     && cancelIssued
-                    && afterCancel.Total == 11
-                    && afterCancel.Active == 2
+                    && afterCancel.Total == 13
+                    && afterCancel.Active == 3
                     && afterCancel.Polling
+                    && videoCancelPendingSafe
+                    && videoCancelSettled
+                    && afterVideoCancelSettled.Active == 2
                     && failedCancelIssued
-                    && afterFailedCancel.Total == 11
+                    && afterFailedCancel.Total == 13
                     && afterFailedCancel.Active == 2
                     && afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
                     && canceledAfterActions.Filtered == 4
                     && retryIssued
-                    && afterRetry.Total == 12
+                    && afterRetry.Total == 14
                     && afterRetry.Active == 3
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 3", StringComparison.Ordinal))
                     && canceledRetryIssued
-                    && afterCanceledRetry.Total == 13
+                    && afterCanceledRetry.Total == 15
                     && afterCanceledRetry.Active == 4
                     && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
                     && rerunIssued
                     && rerunSettingsContract
-                    && afterRerun.Total == 14
+                    && afterRerun.Total == 16
                     && afterRerun.Active == 5
                     && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
                     && clearQueuedIssued
@@ -18119,6 +18507,19 @@ public partial class App : Application
                     && sourceHiddenFromVisibleGallery
                     && outputOpened
                     && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
+                    && videoOutputOpened
+                    && videoOutputOpenedPaused
+                    && string.Equals(
+                        openedVideoOutput,
+                        videoOutputPath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && videoDeleteIssued
+                    && videoOutputDeleted
+                    && !File.Exists(videoOutputPath)
+                    && videoSiblingPreserved
+                    && afterVideoDelete.VisibleIds.Contains(
+                        "video-reader-job",
+                        StringComparer.Ordinal)
                     && deleteIssued
                     && outputDeleted
                     && !File.Exists(outputPath)
@@ -18154,6 +18555,9 @@ public partial class App : Application
                     moveNextIssued,
                     afterMove,
                     afterCancel,
+                    videoCancelPendingSafe,
+                    afterVideoCancelSettled,
+                    videoCancelSettled,
                     failedCancelIssued,
                     afterFailedCancel,
                     canceledAfterActions,
@@ -18167,6 +18571,9 @@ public partial class App : Application
                     afterClearQueued,
                     whileOutputViewerOpen,
                     afterOutputClose,
+                    whileVideoViewerOpen,
+                    afterVideoClose,
+                    afterVideoDelete,
                     afterDelete,
                     whileSourceViewerOpen,
                     afterSourceOpen,
@@ -18177,19 +18584,26 @@ public partial class App : Application
                     closeButtonClosedWorkspace,
                     queueInventoryOrdered,
                     operationLabelsVisible,
-                    videoReaderSafe,
+                    videoActionsEnabled,
+                    readerOnlyVideoSafe,
                     unknownOperationSafe,
                     legacyMissingOperation,
-                    readerOnlyNoMutation,
+                    unsupportedNoMutation,
                     imageVersionsExcludeVideo,
                     stableJobViews,
                     openedOutput,
+                    videoOutputOpened,
+                    videoOutputOpenedPaused,
+                    openedVideoOutput,
+                    videoDeleteIssued,
+                    videoSiblingPreserved,
                     routesOk,
                     requests,
                     jobsRestoredAfterViewerClose,
                     sourceUnchanged = sourceBefore == sourceAfter,
                     storesUnchanged,
                     outputDeleted,
+                    videoOutputDeleted,
                 };
             }
             catch (Exception ex)
@@ -28529,15 +28943,27 @@ public partial class App : Application
         public bool VideoVisible { get; init; }
         public bool SelectedVideoBadge { get; init; }
         public string? SelectedVideoOutputPath { get; init; }
+        public bool RealVideoFixtureUsed { get; init; }
+        public string? VideoTransport { get; init; }
         public bool VideoModalOpened { get; init; }
+        public bool VideoMediaOpened { get; init; }
+        public bool VideoNaturalDuration { get; init; }
+        public bool VideoPlaybackProgress { get; init; }
         public bool VideoAutoplay { get; init; }
         public bool VideoVersionInventory { get; init; }
         public bool VideoPaused { get; init; }
+        public bool VideoPauseSettled { get; init; }
+        public bool OlderVideoMediaOpened { get; init; }
+        public bool OlderVideoPlaybackProgress { get; init; }
         public bool OlderVideoSelected { get; init; }
         public bool OrdinaryModalStayedImage { get; init; }
+        public bool ManualVideoMediaOpened { get; init; }
+        public bool ManualVideoPlaybackProgress { get; init; }
         public bool ManualVideoStarted { get; init; }
         public bool OrdinaryNeighborNavigated { get; init; }
         public bool OrdinaryNeighborStayedImage { get; init; }
+        public bool VideoHandlesReleased { get; init; }
+        public string? VideoMediaFailure { get; init; }
         public bool VideoDefaults { get; init; }
         public bool VideoBoardOpened { get; init; }
         public bool VideoSurface { get; init; }
