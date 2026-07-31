@@ -504,18 +504,22 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   RIFE 4.25 output.
 - WPF completion estimates include both Wan generation and RIFE delivery.
   The measured RTX 4070 SUPER 12GB landscape baseline at 832x480 is
-  146.691 seconds plus 11.768 seconds. The measured portrait baseline at
+  146.691 seconds plus 11.768 seconds. The earlier portrait baseline at
   480x832 is 202.942 seconds plus 15.318 seconds, with 218.810 seconds observed
   end to end. That first portrait output was rejected for visible replicated
-  edge padding, but its valid timing remains the conservative ETA upper bound.
+  edge padding, so its timing remains evidence but is no longer the
+  conservative ETA upper bound.
   The refined 480x800 portrait output was adopted for the anime M1 smoke at
   158.825 seconds plus 18.070 seconds, 177.458 seconds end to end, and
-  11,765 / 12,282 MiB sampled peak VRAM. WPF scales Wan by native frame count
-  and maximum pixel budget, scales delivery by duration and the same maximum
-  pixel budget, and presents the landscape-to-portrait result as a range
-  because orientation, content, and cold-run effects remain material.
-  Defaults display about 2:38 to 3:39; the 4-second, 12-generation-fps,
-  307,200-pixel setting displays about 1:01 to 1:25. Queue wait is excluded.
+  11,765 / 12,282 MiB sampled peak VRAM. A later 512x768 photoreal-input run
+  measured 274.801 seconds for Wan plus 17.560 seconds for delivery and
+  292.702 seconds end to end; it is the current conservative ETA upper
+  baseline. WPF scales Wan by native frame count and maximum pixel budget,
+  scales delivery by duration and the same maximum pixel budget, and presents
+  the landscape-to-portrait result as a range because orientation, content,
+  motion, and cold-run effects remain material. Defaults display about 2:38
+  to 4:53; the 4-second, 12-generation-fps, 307,200-pixel setting displays
+  about 1:01 to 1:53. Queue wait is excluded.
 - The prepared input is a separate contain-resized, edge-padded PNG at the
   exact effective bucket. After the ordinary over-budget convergence, bucket
   refinement compares the current bucket with each valid width-minus-32 and
