@@ -75,6 +75,9 @@ public partial class MainWindow
 
     private static bool IsVideoMutationSafe(JsonElement job)
     {
+        if (!TryReadOptionalVideoSourceProducerJobId(job, out _))
+            return false;
+
         if ((job.TryGetProperty(
                     "cancelRequested",
                     out JsonElement cancelRequestedElement)
@@ -248,6 +251,35 @@ public partial class MainWindow
         {
             return false;
         }
+    }
+
+    private static bool TryReadOptionalVideoSourceProducerJobId(
+        JsonElement job,
+        out string? sourceProducerJobId)
+    {
+        sourceProducerJobId = null;
+        JsonElement sourceProducerElement = default;
+        int propertyCount = 0;
+        foreach (JsonProperty property in job.EnumerateObject())
+        {
+            if (!property.NameEquals("sourceProducerJobId"))
+                continue;
+            propertyCount++;
+            if (propertyCount > 1)
+                return false;
+            sourceProducerElement = property.Value;
+        }
+
+        if (propertyCount == 0)
+            return true;
+        if (sourceProducerElement.ValueKind != JsonValueKind.String)
+            return false;
+
+        string? value = sourceProducerElement.GetString();
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 128)
+            return false;
+        sourceProducerJobId = value;
+        return true;
     }
 
     private static bool HasExactProperties(
@@ -961,6 +993,10 @@ public partial class MainWindow
 
         TryGetStringProperty(element, "sourceId", out string? sourceId);
         TryGetStringProperty(element, "sourcePath", out string? sourcePath);
+        TryGetStringProperty(
+            element,
+            "sourceProducerJobId",
+            out string? sourceProducerJobId);
         TryGetStringProperty(element, "presetId", out string? presetId);
         TryGetStringProperty(element, "adapterId", out string? adapterId);
         TryGetStringProperty(element, "outputPath", out string? outputPath);
@@ -1003,6 +1039,7 @@ public partial class MainWindow
             id!,
             sourceId ?? "",
             sourcePath ?? "",
+            sourceProducerJobId,
             presetId ?? "Default preset",
             adapterId ?? "local companion",
             operation,
@@ -1081,7 +1118,9 @@ public partial class MainWindow
             foreach (EnhancementWorkspaceJobView job in jobs)
             {
                 cts.Token.ThrowIfCancellationRequested();
-                if (!TryResolveEnhancementWorkspaceSource(job, out string canonicalSource))
+                if (!TryResolveEnhancementWorkspaceInput(
+                        job,
+                        out string canonicalSource))
                 {
                     continue;
                 }
@@ -1136,30 +1175,81 @@ public partial class MainWindow
         }
     }
 
-    private bool TryResolveEnhancementWorkspaceSource(EnhancementWorkspaceJobView job, out string canonicalSource)
+    private bool TryResolveEnhancementWorkspaceCatalogSource(
+        EnhancementWorkspaceJobView job,
+        out string canonicalSource)
     {
         canonicalSource = "";
+        if (!TryResolveEnhancementSourceIdentity(
+                job.SourceId,
+                out string sourceIdIdentity)
+            || !File.Exists(sourceIdIdentity)
+            || !SupportedImageExtensions.Contains(
+                Path.GetExtension(sourceIdIdentity)))
+        {
+            return false;
+        }
+
+        canonicalSource = sourceIdIdentity;
+        return true;
+    }
+
+    private bool TryResolveEnhancementWorkspaceInput(
+        EnhancementWorkspaceJobView job,
+        out string canonicalInput)
+    {
+        canonicalInput = "";
         if (job.SourceSize is null
             || job.SourceMtimeMs is null
-            || !TryResolveEnhancementSourceIdentity(job.SourcePath, out string sourcePathIdentity)
-            || !TryResolveEnhancementSourceIdentity(job.SourceId, out string sourceIdIdentity)
-            || !EnhancementSourceIdentityComparer.Equals(sourcePathIdentity, sourceIdIdentity)
+            || !TryResolveEnhancementWorkspaceCatalogSource(
+                job,
+                out string canonicalCatalogSource)
+            || !TryResolveEnhancementSourceIdentity(
+                job.SourcePath,
+                out string sourcePathIdentity)
             || !File.Exists(sourcePathIdentity)
-            || !SupportedImageExtensions.Contains(Path.GetExtension(sourcePathIdentity)))
+            || !SupportedImageExtensions.Contains(
+                Path.GetExtension(sourcePathIdentity)))
         {
             return false;
         }
 
         try
         {
+            bool usesPhotorealInput = job.IsVideoOperation
+                && !string.IsNullOrWhiteSpace(job.SourceProducerJobId);
+            if (usesPhotorealInput)
+            {
+                string lexicalInput = Path.GetFullPath(job.SourcePath);
+                string lexicalRoot =
+                    Path.GetFullPath(ResolvedManagedEnhancementOutputsRoot);
+                string canonicalRoot = Path.GetFullPath(
+                    _resolveFinalPath(lexicalRoot));
+                if (!IsPathInside(lexicalInput, lexicalRoot)
+                    || !IsPathInside(sourcePathIdentity, canonicalRoot))
+                {
+                    return false;
+                }
+            }
+            else if (!EnhancementSourceIdentityComparer.Equals(
+                         sourcePathIdentity,
+                         canonicalCatalogSource))
+            {
+                return false;
+            }
+
             var info = new FileInfo(sourcePathIdentity);
             double currentMtimeMs = new DateTimeOffset(info.LastWriteTimeUtc).ToUnixTimeMilliseconds();
             if (info.Length != job.SourceSize.Value || Math.Abs(currentMtimeMs - job.SourceMtimeMs.Value) > 1)
                 return false;
-            canonicalSource = sourcePathIdentity;
+            canonicalInput = sourcePathIdentity;
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or NotSupportedException
+                or ArgumentException)
         {
             return false;
         }
@@ -1245,7 +1335,9 @@ public partial class MainWindow
         if (sender is not Button { Tag: EnhancementWorkspaceJobView job }
             || _enhancementWorkspaceMutationPending
             || !job.CanRerunWithCurrentSettings
-            || !TryResolveEnhancementWorkspaceSource(job, out string sourceIdentity))
+            || !TryResolveEnhancementWorkspaceInput(
+                job,
+                out string sourceIdentity))
         {
             if (sender is Button { Tag: EnhancementWorkspaceJobView })
                 EnhancementJobsStatusText.Text = "元画像を検証できないため、現在設定で再実写化できません。";
@@ -1394,7 +1486,9 @@ public partial class MainWindow
         EnhancementWorkspaceJobView job,
         ManagedEnhancedOutput? preferredOutput)
     {
-        if (!TryResolveEnhancementWorkspaceSource(job, out string canonicalSource)
+        if (!TryResolveEnhancementWorkspaceCatalogSource(
+                job,
+                out string canonicalSource)
             || !File.Exists(canonicalSource))
         {
             EnhancementJobsStatusText.Text = "元画像が見つからないため、ビューワーで開けません。";
@@ -1660,7 +1754,9 @@ public partial class MainWindow
             || string.IsNullOrWhiteSpace(job.OutputPath)
             || job.SourceSize is null
             || job.SourceMtimeMs is null
-            || !TryResolveEnhancementWorkspaceSource(job, out string canonicalSource))
+            || !TryResolveEnhancementWorkspaceInput(
+                job,
+                out string canonicalSource))
         {
             return false;
         }
@@ -1690,7 +1786,9 @@ public partial class MainWindow
             || string.IsNullOrWhiteSpace(job.OutputPath)
             || job.SourceSize is null
             || job.SourceMtimeMs is null
-            || !TryResolveEnhancementWorkspaceSource(job, out string canonicalSource)
+            || !TryResolveEnhancementWorkspaceCatalogSource(
+                job,
+                out string canonicalSource)
             || !ReloadEnhancedOutputsForVisibleCatalog())
         {
             return false;
@@ -1929,6 +2027,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         string id,
         string sourceId,
         string sourcePath,
+        string? sourceProducerJobId,
         string presetId,
         string adapterId,
         string operation,
@@ -1948,6 +2047,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         Id = id;
         SourceId = sourceId;
         SourcePath = sourcePath;
+        SourceProducerJobId = sourceProducerJobId;
         PresetId = presetId;
         AdapterId = adapterId;
         Operation = operation;
@@ -1968,6 +2068,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string Id { get; }
     public string SourceId { get; }
     public string SourcePath { get; }
+    public string? SourceProducerJobId { get; }
     public string PresetId { get; }
     public string AdapterId { get; }
     public string Operation { get; }
@@ -2027,7 +2128,13 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => "キャンセル済みにする",
     };
     public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "Unknown source" : Path.GetFileName(SourcePath);
-    public string PresetSummary => $"{PresetId}  ·  {AdapterId}";
+    public string SourceVersionLabel => IsVideoOperation
+        && !string.IsNullOrWhiteSpace(SourceProducerJobId)
+            ? "実写版"
+            : "Original";
+    public string PresetSummary => IsVideoOperation
+        ? $"{(PresetId == "wan22-ti2v-5b-normal-v1" ? "Wan2.2 TI2V 5B · アニメ・汎用／標準" : PresetId)}  ·  {SourceVersionLabel}"
+        : $"{PresetId}  ·  {AdapterId}";
     public string OperationLabel => Operation switch
     {
         "upscale" => "HQ  高画質化",
@@ -2055,8 +2162,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             ? !VideoMutationSafe
                 ? "This video row is incomplete or incompatible and remains protected from mutations."
                 : Status == "succeeded"
-                    ? "Managed video output is separate from the original source image."
-                    : "Video generation uses the same durable queue and GPU worker as image Enhancement."
+                    ? $"Managed video output from {SourceVersionLabel} is separate from the original source image."
+                    : $"Video generation from {SourceVersionLabel} uses the same durable queue and GPU worker as image Enhancement."
             : !IsImageOperation
                 ? "This operation is unsupported and protected from image actions."
                 : Status == "succeeded"
@@ -2072,6 +2179,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool HasSameImmutableIdentity(EnhancementWorkspaceJobView candidate)
         => string.Equals(SourceId, candidate.SourceId, StringComparison.Ordinal)
             && string.Equals(SourcePath, candidate.SourcePath, StringComparison.Ordinal)
+            && string.Equals(
+                SourceProducerJobId,
+                candidate.SourceProducerJobId,
+                StringComparison.Ordinal)
             && string.Equals(PresetId, candidate.PresetId, StringComparison.Ordinal)
             && string.Equals(AdapterId, candidate.AdapterId, StringComparison.Ordinal)
             && string.Equals(Operation, candidate.Operation, StringComparison.Ordinal)

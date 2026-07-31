@@ -42,6 +42,22 @@
     "unknownFields": "preserve when a compatible writer rewrites the row",
     "retry": "reuse the complete persisted snapshot and seed"
   },
+  "sourceSelectionV1": {
+    "requestField": "sourceProducerJobId",
+    "absent": "use sourceId as the indexed Original source",
+    "present": "the server resolves the id to one succeeded photoreal job; clients never provide its managed output path",
+    "producerRequirements": [
+      "operation is exactly photoreal",
+      "status is succeeded and outputPath is present",
+      "producer sourceId, sourcePath, and sourceSignature still match the current indexed Original",
+      "output passes lexical and canonical managed-root ownership checks",
+      "output is an existing supported still image"
+    ],
+    "persistedIdentity": "video sourceId remains the Original catalog identity; sourcePath, sourceSignature, and sourceSha256 identify the actual Original or photoreal input; sourceProducerJobId records photoreal provenance",
+    "retry": "preserve sourceProducerJobId and revalidate the producer plus pinned source identity",
+    "deletion": "do not delete a photoreal output while a queued or running video job depends on its producer id",
+    "wpf": "the modal captures the currently displayed photoreal version; gallery context actions explicitly choose Original or latest photoreal"
+  },
   "normalV1": {
     "presetId": "wan22-ti2v-5b-normal-v1",
     "backendId": "wan22-ti2v-5b-core-v1",

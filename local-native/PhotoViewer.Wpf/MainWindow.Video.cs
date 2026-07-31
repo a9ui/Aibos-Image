@@ -38,6 +38,7 @@ public partial class MainWindow
         string JobId,
         string PresetId,
         string BackendId,
+        string? SourceProducerJobId,
         double DurationSeconds,
         int PlaybackFps,
         int FrameCount,
@@ -53,9 +54,15 @@ public partial class MainWindow
         ManagedVideoOutput Output);
 
     private sealed record ModalVideoVersionChoice(int Index, string Label);
+    private sealed record ManagedPhotorealVideoSource(
+        string ResolvedSource,
+        string OutputPath,
+        IReadOnlyList<string> CatalogAliases);
 
     private bool TryBuildManagedVideoVersion(
         JsonElement job,
+        IReadOnlyDictionary<string, ManagedPhotorealVideoSource>
+            photorealSources,
         out string resolvedSource,
         out ManagedVideoVersion version,
         out IReadOnlyList<string> catalogAliases)
@@ -122,6 +129,13 @@ public partial class MainWindow
             return false;
         }
 
+        if (!TryReadOptionalVideoSourceProducerJobId(
+                job,
+                out string? sourceProducerJobId))
+        {
+            return false;
+        }
+
         int outputPlaybackFps = playbackFps;
         int outputFrameCount = frameCount;
         if (video.TryGetProperty("delivery", out _))
@@ -146,14 +160,47 @@ public partial class MainWindow
         try
         {
             if (!TryResolveEnhancementSourceIdentity(sourcePath, out string resolvedSourcePath)
-                || !TryResolveEnhancementSourceIdentity(sourceId, out string resolvedSourceId)
-                || !EnhancementSourceIdentityComparer.Equals(resolvedSourcePath, resolvedSourceId)
-                || !File.Exists(resolvedSourcePath))
+                || !TryResolveEnhancementSourceIdentity(
+                    sourceId,
+                    out string resolvedSourceId))
             {
                 return false;
             }
 
-            var sourceInfo = new FileInfo(resolvedSourcePath);
+            string resolvedInputPath = resolvedSourcePath;
+            IReadOnlyList<string> producerAliases = [];
+            if (sourceProducerJobId is null)
+            {
+                if (!EnhancementSourceIdentityComparer.Equals(
+                        resolvedSourcePath,
+                        resolvedSourceId))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (!photorealSources.TryGetValue(
+                        sourceProducerJobId,
+                        out ManagedPhotorealVideoSource? producer)
+                    || !EnhancementSourceIdentityComparer.Equals(
+                        producer.ResolvedSource,
+                        resolvedSourceId)
+                    || !string.Equals(
+                        producer.OutputPath,
+                        resolvedSourcePath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                resolvedSourceId = producer.ResolvedSource;
+                resolvedInputPath = producer.OutputPath;
+                producerAliases = producer.CatalogAliases;
+            }
+            if (!File.Exists(resolvedInputPath))
+                return false;
+
+            var sourceInfo = new FileInfo(resolvedInputPath);
             double currentMtimeMs =
                 new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
             if (sourceInfo.Length != sourceSize || Math.Abs(currentMtimeMs - sourceMtimeMs) > 1)
@@ -190,11 +237,12 @@ public partial class MainWindow
                     DateTimeStyles.RoundtripKind,
                     out createdAt);
 
-            resolvedSource = resolvedSourcePath;
+            resolvedSource = resolvedSourceId;
             version = new ManagedVideoVersion(
                 jobId!,
                 presetId!,
                 backendId!,
+                sourceProducerJobId,
                 durationSeconds,
                 outputPlaybackFps,
                 outputFrameCount,
@@ -208,7 +256,8 @@ public partial class MainWindow
                 bitDepth,
                 createdAt,
                 new ManagedVideoOutput(canonicalOutput, sourceSize, sourceMtimeMs));
-            catalogAliases = new[] { sourcePath, sourceId, resolvedSourcePath }
+            catalogAliases = producerAliases
+                .Concat(new[] { sourceId, resolvedSourceId })
                 .Select(NormalizeCatalogEnhancementPath)
                 .Where(static path => path is not null)
                 .Select(static path => path!)
