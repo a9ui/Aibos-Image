@@ -14032,6 +14032,7 @@ public partial class MainWindow : Window
     private void UpdateModalEnhancedControls(bool canShowEnhanced)
     {
         string currentDisplay = CurrentModalEnhancementVersionLabel();
+        RefreshModalEnhancementVersionSelector(canShowEnhanced);
         if (ModalEnhancedToggleButton is not null)
         {
             ModalEnhancedToggleButton.IsEnabled = canShowEnhanced;
@@ -22902,6 +22903,16 @@ public partial class MainWindow : Window
         => string.Equals(
                 ModalEnhancedToggleLabel.Text,
                 _modalShowingEnhanced ? "Enhanced" : "Original",
+                StringComparison.Ordinal)
+            && ModalEnhancementVersionComboBox.Visibility == Visibility.Visible
+            && ModalEnhancementVersionComboBox.Items.Count
+                == _modalEnhancementVersions.Count + 1
+            && ModalEnhancementVersionComboBox.SelectedItem
+                is ModalEnhancementVersionChoice selectedChoice
+            && selectedChoice.VersionIndex
+                == (_modalShowingEnhanced ? _modalEnhancementVersionIndex : 0)
+            && AutomationProperties.GetName(ModalEnhancementVersionComboBox).Contains(
+                "AI処理版を選択",
                 StringComparison.Ordinal)
             && ModalEnhancedToggleButton.Width >= 64
             && ModalEnhancedDeleteButton.Width <= 36

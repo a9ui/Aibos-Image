@@ -37,8 +37,10 @@ public partial class MainWindow
     private bool _syncingModalPhotorealSettings;
     private readonly List<PhotorealStyleState> _photorealStyles = [];
     private string? _selectedPhotorealStyleName;
+    private bool _syncingModalEnhancementVersionSelection;
 
     private sealed record PhotorealStyleChoice(string Label, string? StyleName);
+    private sealed record ModalEnhancementVersionChoice(int VersionIndex, string Label);
 
     private sealed record ModalPhotorealRequestSettings(
         double Strength,
@@ -378,6 +380,101 @@ public partial class MainWindow
         return _modalEnhancementVersions.Count == 1
             ? version.Operation == "photoreal" ? "Photoreal" : "Enhanced"
             : $"{operation} {_modalEnhancementVersionIndex}/{_modalEnhancementVersions.Count}";
+    }
+
+    private string ModalEnhancementVersionChoiceLabel(int versionIndex)
+    {
+        if (versionIndex <= 0
+            || versionIndex > _modalEnhancementVersions.Count)
+        {
+            return "Original";
+        }
+
+        ManagedEnhancementVersion version =
+            _modalEnhancementVersions[versionIndex - 1];
+        int operationTotal = _modalEnhancementVersions.Count(candidate =>
+            string.Equals(candidate.Operation, version.Operation, StringComparison.Ordinal));
+        int operationIndex = _modalEnhancementVersions
+            .Take(versionIndex)
+            .Count(candidate => string.Equals(
+                candidate.Operation,
+                version.Operation,
+                StringComparison.Ordinal));
+        string operation = string.Equals(
+            version.Operation,
+            "photoreal",
+            StringComparison.Ordinal)
+                ? "実写"
+                : "高画質";
+        string latest = operationIndex == 1 ? "（最新）" : "";
+        return $"{operation} {operationIndex}/{operationTotal}{latest}";
+    }
+
+    private void RefreshModalEnhancementVersionSelector(bool canShowEnhanced)
+    {
+        if (ModalEnhancementVersionComboBox is null)
+            return;
+
+        var choices = new List<ModalEnhancementVersionChoice>
+        {
+            new(0, "Original"),
+        };
+        choices.AddRange(Enumerable.Range(1, _modalEnhancementVersions.Count)
+            .Select(index => new ModalEnhancementVersionChoice(
+                index,
+                ModalEnhancementVersionChoiceLabel(index))));
+        int selectedIndex = _modalShowingEnhanced
+            ? Math.Clamp(_modalEnhancementVersionIndex, 1, _modalEnhancementVersions.Count)
+            : 0;
+
+        _syncingModalEnhancementVersionSelection = true;
+        try
+        {
+            ModalEnhancementVersionComboBox.ItemsSource = choices;
+            ModalEnhancementVersionComboBox.SelectedItem = choices.First(choice =>
+                choice.VersionIndex == selectedIndex);
+            ModalEnhancementVersionComboBox.IsEnabled = canShowEnhanced;
+            ModalEnhancementVersionComboBox.ToolTip = canShowEnhanced
+                ? "Original、高画質化、実写化の全保存版を選択"
+                : "AI処理済み画像はありません";
+            AutomationProperties.SetName(
+                ModalEnhancementVersionComboBox,
+                $"表示中: {choices.First(choice => choice.VersionIndex == selectedIndex).Label}. AI処理版を選択");
+        }
+        finally
+        {
+            _syncingModalEnhancementVersionSelection = false;
+        }
+    }
+
+    private void ModalEnhancementVersion_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_syncingModalEnhancementVersionSelection
+            || sender is not ComboBox
+            {
+                SelectedItem: ModalEnhancementVersionChoice choice,
+            }
+            || Modal.Visibility != Visibility.Visible
+            || choice.VersionIndex < 0
+            || choice.VersionIndex > _modalEnhancementVersions.Count)
+        {
+            return;
+        }
+
+        int currentIndex = _modalShowingEnhanced
+            ? _modalEnhancementVersionIndex
+            : 0;
+        if (choice.VersionIndex == currentIndex)
+            return;
+
+        if (_modalShowingVideo)
+            StopAndHideModalVideo(clearSource: true);
+        _modalEnhancementVersionIndex = choice.VersionIndex;
+        _modalShowingEnhanced = choice.VersionIndex > 0;
+        OpenModal();
+        ShowModalInteractionFeedback(choice.Label);
     }
 
     private string? CurrentModalEnhancementVersionJobId()

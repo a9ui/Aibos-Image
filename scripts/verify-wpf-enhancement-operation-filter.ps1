@@ -97,6 +97,7 @@ try {
         'videoSurface',
         'videoQueueSucceeded',
         'videoRequestExact',
+        'videoBoardFailureFeedback',
         'videoStyleSaved',
         'videoStylePersistence',
         'videoStyleCustomOnEdit',

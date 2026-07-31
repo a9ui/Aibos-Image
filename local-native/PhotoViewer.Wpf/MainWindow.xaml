@@ -1367,6 +1367,8 @@
                 <RadioButton x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="待機中" Tag="queued" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsRunningFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="処理中" Tag="running" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="完成したもののみ" Tag="completed" Click="EnhancementJobsFilter_Click"/>
+                <RadioButton x:Name="EnhancementJobsVideoFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="動画化" Tag="video" Click="EnhancementJobsFilter_Click"
+                             AutomationProperties.Name="Show video generation jobs"/>
                 <RadioButton x:Name="EnhancementJobsFailedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="失敗" Tag="failed" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="キャンセル済み" Tag="canceled" Click="EnhancementJobsFilter_Click"/>
                 <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機中をすべて消す"
@@ -1459,6 +1461,9 @@
                                   <Style.Triggers>
                                     <DataTrigger Binding="{Binding Operation}" Value="photoreal">
                                       <Setter Property="Foreground" Value="#C4B5FD"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Operation}" Value="video">
+                                      <Setter Property="Foreground" Value="#F0ABFC"/>
                                     </DataTrigger>
                                   </Style.Triggers>
                                 </Style>
@@ -2130,7 +2135,14 @@
         </Button>
         <Button x:Name="ModalPhotorealButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="この画像をローカルAIで実写化" AutomationProperties.Name="AI実写化" AutomationProperties.HelpText="このボタンを押した時だけ、AI高画質化と共通のGPUキューへ実写化ジョブを追加します。" MinWidth="72" Height="32" Padding="8,0" Click="StartModalPhotoreal_Click"><TextBlock x:Name="ModalPhotorealButtonLabel" Text="AI実写化" FontSize="9.5" FontWeight="SemiBold"/></Button>
         <Button x:Name="ModalEnhanceButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="AI高画質化" AutomationProperties.Name="Enhance selected image with local AI" AutomationProperties.HelpText="Starts the local AI companion only after this button is pressed." MinWidth="72" Height="32" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="AI高画質化" FontSize="9.5" FontWeight="SemiBold"/></Button>
-        <Button x:Name="ModalEnhancedToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Current display: Original. Toggle enhanced image output" Width="68" Height="32" Click="ToggleModalEnhanced_Click" IsEnabled="False">
+        <ComboBox x:Name="ModalEnhancementVersionComboBox" DockPanel.Dock="Right"
+                  Width="142" Height="32" Margin="0,0,4,0"
+                  Style="{StaticResource PhotorealSettingsComboBox}"
+                  DisplayMemberPath="Label" IsSynchronizedWithCurrentItem="False"
+                  SelectionChanged="ModalEnhancementVersion_SelectionChanged"
+                  AutomationProperties.Name="表示中: Original. AI処理版を選択"
+                  AutomationProperties.HelpText="Original、高画質化、実写化の全保存版から表示する画像を選びます。"/>
+        <Button x:Name="ModalEnhancedToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Current display: Original. Toggle enhanced image output" Width="68" Height="32" Click="ToggleModalEnhanced_Click" IsEnabled="False" Visibility="Collapsed">
           <TextBlock x:Name="ModalEnhancedToggleLabel" Text="Original" Foreground="{StaticResource TextSecondary}" FontSize="9.5" FontWeight="SemiBold"/>
         </Button>
         <Button x:Name="ModalFlipButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Flip horizontal (H)" AutomationProperties.Name="Flip image horizontally" Width="32" Height="32" Click="ToggleModalFlip_Click">
@@ -2284,9 +2296,11 @@
              Placement="Bottom" HorizontalOffset="-270" VerticalOffset="7"
              AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False"
              AutomationProperties.Name="Video generation board">
-        <Border Width="430" Padding="16" CornerRadius="7"
+        <Border x:Name="ModalVideoGenerationBoardBorder" Width="430" MaxHeight="680" Padding="16" CornerRadius="7"
                 Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
-          <StackPanel>
+          <ScrollViewer x:Name="ModalVideoGenerationScrollViewer"
+                        VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,6,0">
             <DockPanel LastChildFill="True" Margin="0,0,0,12">
               <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
                       Width="28" Height="28" Click="CloseVideoGenerationBoard_Click"
@@ -2448,7 +2462,8 @@
                     Click="QueueVideoGeneration_Click"
                     AutomationProperties.Name="Add video generation job"
                     AutomationProperties.HelpText="Explicitly adds one video job to the same durable GPU queue used by image enhancements."/>
-          </StackPanel>
+            </StackPanel>
+          </ScrollViewer>
         </Border>
       </Popup>
 
