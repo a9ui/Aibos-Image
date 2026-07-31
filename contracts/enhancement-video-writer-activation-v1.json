@@ -8,9 +8,27 @@
     "h25Commit": "1bd9673c6f92ba448b99552ed5bb230294bbafad",
     "rules": [
       "WPF enables mutations only for the exact current Wan2.2 video snapshot and output identity",
+      "delivery absence remains the legacy 16 fps and 97 frame shape",
+      "a present delivery is mutable only when its RIFE backend, model, 30 fps timing, pixel format, and audio fields are exact",
+      "a malformed present delivery remains reader-only and is never treated as legacy absence",
       "unknown, incomplete, future, or tampered video rows remain reader-only",
       "Jobs output playback is paused and deletion is routed through the H25 API"
     ]
+  },
+  "deliveryExtension": {
+    "issue": "a9ui/tools-h000025-photoviewer#356",
+    "protocolChange": "additive within aibos.enhancement-video/v1",
+    "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+    "model": "4.25",
+    "targetFps": 30,
+    "durationFrameCounts": {
+      "4": 120,
+      "6": 180
+    },
+    "pixelFormat": "yuv420p",
+    "audio": false,
+    "h25CandidateCommit": "f377d04f392f882351bbc00bc9d053cbeab78cc3",
+    "commitRecordingRule": "Record the exact H25 delivery-writer candidate after it exists; codeReady.h25Commit remains the historical Wan writer activation revision."
   },
   "liveRuntime": {
     "wpfMutationClientEnabled": false,
@@ -23,6 +41,8 @@
     "durationSeconds": 6,
     "playbackFps": 16,
     "frameCount": 97,
+    "width": 832,
+    "height": 480,
     "maximumPixelArea": 409600,
     "elapsedMilliseconds": 146691,
     "peakVramMiB": 11645,
@@ -30,13 +50,61 @@
     "codec": "h264",
     "pixelFormat": "yuv420p",
     "mediaFoundationPlayback": true,
-    "mediaFoundationInCi": false
+    "mediaFoundationInCi": false,
+    "delivery": {
+      "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+      "model": "4.25",
+      "targetFps": 30,
+      "frameCount": 180,
+      "durationSeconds": 6,
+      "width": 832,
+      "height": 480,
+      "elapsedMilliseconds": 11768,
+      "totalElapsedMilliseconds": 158459,
+      "pixelFormat": "yuv420p",
+      "audio": false
+    }
+  },
+  "portraitTimingUpperEvidence": {
+    "gpu": "RTX 4070 SUPER 12GB",
+    "qualityAdjudication": "rejected for visible replicated-edge padding; timing retained only as the conservative ETA upper bound",
+    "durationSeconds": 6,
+    "nativePlaybackFps": 16,
+    "nativeFrameCount": 97,
+    "deliveryPlaybackFps": 30,
+    "deliveryFrameCount": 180,
+    "width": 480,
+    "height": 832,
+    "wanElapsedMilliseconds": 202942,
+    "deliveryElapsedMilliseconds": 15318,
+    "totalElapsedMilliseconds": 218810
+  },
+  "refinedPortraitCandidateEvidence": {
+    "gpu": "RTX 4070 SUPER 12GB",
+    "qualityAdjudication": "adopted for anime M1 smoke",
+    "durationSeconds": 6,
+    "nativePlaybackFps": 16,
+    "nativeFrameCount": 97,
+    "deliveryPlaybackFps": 30,
+    "deliveryFrameCount": 180,
+    "width": 480,
+    "height": 800,
+    "wanElapsedMilliseconds": 158825,
+    "deliveryElapsedMilliseconds": 18070,
+    "totalElapsedMilliseconds": 177458,
+    "peakVramMiB": 11765,
+    "totalVramMiB": 12282,
+    "outputSha256": "dbbda82c172c577f251ada0178d78499505ffa400854365358b29e1dede7a7cc",
+    "visualRemainders": [
+      "minor right-finger shape drift",
+      "minor fine-line flicker"
+    ]
   },
   "cutover": {
     "requiresControlledRestart": true,
     "keepSingleWorker": true,
     "keepInferenceSerial": true,
     "forceHighVram": false,
-    "rollback": "Disable video writer/enqueue flags while retaining the video-capable readers and managed outputs."
+    "rollback": "Disable video writer/enqueue flags while retaining delivery-capable video readers and managed outputs."
   }
 }

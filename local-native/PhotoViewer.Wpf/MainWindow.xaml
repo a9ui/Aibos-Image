@@ -1599,11 +1599,11 @@
                   </ComboBox>
                 </StackPanel>
                 <StackPanel Grid.Column="2">
-                  <TextBlock Text="FPS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <TextBlock x:Name="AppVideoGenerationFpsLabel" Text="生成FPS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
                   <ComboBox x:Name="AppVideoFpsComboBox"
                             Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="1"
                             SelectionChanged="VideoGenerationSetting_SelectionChanged"
-                            AutomationProperties.Name="Default video playback FPS">
+                            AutomationProperties.Name="Default video generation FPS">
                     <ComboBoxItem Content="12 fps" Tag="12"/>
                     <ComboBoxItem Content="16 fps（推奨）" Tag="16"/>
                   </ComboBox>
@@ -1620,12 +1620,18 @@
                   </ComboBox>
                 </StackPanel>
               </Grid>
+              <TextBlock x:Name="AppVideoDeliveryText"
+                         Text="最終出力: 30 fps · RIFE 4.25 · H.264 / yuv420p · 音声なし"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,8,0,0"
+                         AutomationProperties.Name="Final video delivery"
+                         AutomationProperties.HelpText="Wan generation is finished locally at 30 frames per second with RIFE 4.25, H.264 yuv420p, and no audio."/>
               <TextBlock x:Name="AppVideoGenerationEstimateText"
-                         Text="生成目安: 約2分27秒（RTX 4070 SUPER実測基準・キュー待ちを除く）"
+                         Text="完了目安: 約2分38秒〜3分39秒（Wan生成＋RIFE 4.25仕上げ・RTX 4070 SUPER横長/縦長実測範囲・キュー待ちを除く）"
                          Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,8,0,0"
                          AutomationProperties.Name="Estimated default video generation time"
-                         AutomationProperties.HelpText="Estimate for Wan generation only; excludes queue wait and future post-processing."
+                         AutomationProperties.HelpText="Estimated range includes measured landscape and portrait Wan generation plus RIFE 4.25 delivery time; excludes queue wait."
                          AutomationProperties.LiveSetting="Polite"/>
               <DockPanel Margin="0,11,0,4">
                 <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
@@ -2225,11 +2231,11 @@
                 </ComboBox>
               </StackPanel>
               <StackPanel Grid.Column="2">
-                <TextBlock Text="FPS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                <TextBlock x:Name="ModalVideoGenerationFpsLabel" Text="生成FPS" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
                 <ComboBox x:Name="ModalVideoFpsComboBox"
                           Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="1"
                           SelectionChanged="VideoGenerationSetting_SelectionChanged"
-                          AutomationProperties.Name="Video playback FPS">
+                          AutomationProperties.Name="Video generation FPS">
                   <ComboBoxItem Content="12 fps" Tag="12"/>
                   <ComboBoxItem Content="16 fps（推奨）" Tag="16"/>
                 </ComboBox>
@@ -2246,12 +2252,18 @@
                 </ComboBox>
               </StackPanel>
             </Grid>
+            <TextBlock x:Name="ModalVideoDeliveryText"
+                       Text="最終出力: 30 fps · RIFE 4.25 · H.264 / yuv420p · 音声なし"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,8,0,0"
+                       AutomationProperties.Name="Final video delivery"
+                       AutomationProperties.HelpText="Wan generation is finished locally at 30 frames per second with RIFE 4.25, H.264 yuv420p, and no audio."/>
             <TextBlock x:Name="ModalVideoGenerationEstimateText"
-                       Text="生成目安: 約2分27秒（RTX 4070 SUPER実測基準・キュー待ちを除く）"
+                       Text="完了目安: 約2分38秒〜3分39秒（Wan生成＋RIFE 4.25仕上げ・RTX 4070 SUPER横長/縦長実測範囲・キュー待ちを除く）"
                        Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,8,0,0"
                        AutomationProperties.Name="Estimated video generation time"
-                       AutomationProperties.HelpText="Estimate for Wan generation only; excludes queue wait and future post-processing."
+                       AutomationProperties.HelpText="Estimated range includes measured landscape and portrait Wan generation plus RIFE 4.25 delivery time; excludes queue wait."
                        AutomationProperties.LiveSetting="Polite"/>
             <TextBlock Text="元画像のアスペクト比を保ち、32px単位で自動調整します。1 worker・GPU推論の並列化なし。"
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,0"/>
@@ -2402,7 +2414,7 @@
             </Button>
             <ComboBox x:Name="ModalVideoVersionComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}" DisplayMemberPath="Label"
-                      Width="168" Height="32" Margin="0,0,4,0" Visibility="Collapsed"
+                      Width="216" Height="32" Margin="0,0,4,0" Visibility="Collapsed"
                       SelectionChanged="ModalVideoVersion_SelectionChanged"
                       AutomationProperties.Name="Generated video version"/>
             <TextBlock x:Name="ModalShortcutHintText" Text="   ← → navigate   ·   Esc close" Foreground="{StaticResource TextTertiary}" FontSize="11" VerticalAlignment="Center" Margin="6,0,4,0"/>

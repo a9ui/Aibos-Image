@@ -466,29 +466,70 @@ is `contracts/enhancement-video-v1.json`.
 
 - A video job keeps `mediaKind: "video"` and a media-specific `video` snapshot
   alongside the existing version 1 job envelope. The snapshot records the
-  requested duration, playback FPS, and user prompt; the effective frame
-  count, width, height, positive prompt, and negative prompt; the enqueue-time
-  seed; model/preset identities; codec; and bit depth. Retry reuses the whole
-  persisted snapshot and seed. Compatible unknown fields are preserved.
-- Normal v1 uses Wan2.2 TI2V 5B FP16, nominal 6 seconds, 16 fps, 97 frames,
+  requested duration, Wan generation FPS, and user prompt; the native
+  effective frame count, width, height, positive prompt, and negative prompt;
+  the enqueue-time seed; model/preset identities; codec; and bit depth. Retry
+  reuses the whole persisted snapshot and seed. Compatible unknown fields are
+  preserved.
+- `video.delivery` is an optional additive v1 field. A genuinely missing field
+  is the legacy shape: managed-video playback metadata continues to use
+  `requested.playbackFps` and `effective.frameCount` (normally 16 fps and 97
+  frames). A present field is supported only when it is an object with the
+  exact current delivery identity and values: backend
+  `vs-rife-5.7.0-rife-4.25-v1`, model `4.25`, target 30 fps, duration 4 or 6
+  seconds, respectively 120 or 180 frames, `yuv420p`, and no audio. Missing,
+  null, mistyped, duplicate, extra, or inconsistent delivery members make the
+  row protected. Presence is never coerced to legacy absence. A protected row
+  is not canceled, retried, reordered, opened, or deleted through a managed
+  video mutation path.
+- Normal v1 Wan generation uses Wan2.2 TI2V 5B FP16, nominal 6 seconds, 16
+  generation fps, 97 native frames,
   an aspect-preserving 32-pixel-aligned bucket at or below 409,600 pixels,
   20 steps, CFG 5, `uni_pc` with `simple`, shift 8, denoise 1, an int32 seed
   fixed at enqueue, and 8-bit H.264 in MP4. A blank prompt means the built-in
   conservative anime idle-motion instruction. A custom prompt uses the
   preservation preamble plus the user's instruction and is not contradicted by
   blank-only idle or locked-camera wording.
+- The current delivery stage uses RIFE 4.25 to publish exactly 30 fps and
+  duration-times-30 frames: 120 frames for 4 seconds or 180 for 6 seconds.
+  Final H.264 output is `yuv420p` and contains no audio. Managed-video labels
+  and playback metadata use those delivery values when the field is valid;
+  legacy rows continue to show their native values. WPF labels the selectable
+  12/16 fps value as generation FPS and separately identifies the final 30 fps
+  RIFE 4.25 output.
+- WPF completion estimates include both Wan generation and RIFE delivery.
+  The measured RTX 4070 SUPER 12GB landscape baseline at 832x480 is
+  146.691 seconds plus 11.768 seconds. The measured portrait baseline at
+  480x832 is 202.942 seconds plus 15.318 seconds, with 218.810 seconds observed
+  end to end. That first portrait output was rejected for visible replicated
+  edge padding, but its valid timing remains the conservative ETA upper bound.
+  The refined 480x800 portrait output was adopted for the anime M1 smoke at
+  158.825 seconds plus 18.070 seconds, 177.458 seconds end to end, and
+  11,765 / 12,282 MiB sampled peak VRAM. WPF scales Wan by native frame count
+  and maximum pixel budget, scales delivery by duration and the same maximum
+  pixel budget, and presents the landscape-to-portrait result as a range
+  because orientation, content, and cold-run effects remain material.
+  Defaults display about 2:38 to 3:39; the 4-second, 12-generation-fps,
+  307,200-pixel setting displays about 1:01 to 1:25. Queue wait is excluded.
 - The prepared input is a separate contain-resized, edge-padded PNG at the
-  exact effective bucket. The source is never cropped, rewritten, or used as
-  a temporary output.
+  exact effective bucket. After the ordinary over-budget convergence, bucket
+  refinement compares the current bucket with each valid width-minus-32 and
+  height-minus-32 neighbor. Its score is `relativeAspectError + 0.25 *
+  unusedAreaRatio`; it moves to the lowest strictly improving neighbor and
+  repeats until neither neighbor improves the score. The standard 16:9, 3:2,
+  4:3, and 1:1 buckets remain 832x480, 768x512, 736x544, and 640x640. The
+  975x1614 bird input refines to 480x800, reducing edge-copy padding. The
+  source is never cropped, rewritten, or used as a temporary output.
 - Final video outputs use the fixed flat `Videos/` folder below the same
   configured Enhancement output parent. The filename includes job, source,
   and preset identities. A core ComfyUI staging file is allowed only as an
   exact adapter-owned transient and must be removed after success, cancel, or
   failure; the final residue audit is zero.
-- Video generation shares the existing durable ordered queue, worker, and
-  exclusive GPU lease with upscale and photoreal jobs. There is no second
-  worker, parallel inference, forced high-VRAM mode, or automatic fallback
-  model.
+- Wan generation and RIFE delivery remain one video job and share the existing
+  durable ordered queue, worker, and exclusive GPU lease with upscale and
+  photoreal jobs. Cancel applies to the active stage and leaves no separate
+  delivery job. There is no second worker, parallel inference, forced
+  high-VRAM mode, or automatic fallback model.
 - Reader rollout precedes writer rollout. Aibos first recognizes `video` as
   reader-only media and protects unknown operations. H25 must then pass the
   exact canonical fixture and retain the same fail-closed rule. Only after
@@ -505,9 +546,9 @@ is `contracts/enhancement-video-v1.json`.
   runtime flags remain false because the running PhotoViewer API, ComfyUI, and
   Aibos WPF were deliberately not restarted. This state permits merge and
   candidate verification; it does not claim production cutover.
-- A 14B/HQ preset, 24 fps, and an approximately 704p default remain deferred
-  until measured evidence on the supported 12GB GPU establishes memory,
-  latency, playback, and anime temporal-quality bounds.
+- A 14B/HQ preset, 24 fps native generation, and an approximately 704p default
+  remain deferred until measured evidence on the supported 12GB GPU
+  establishes memory, latency, playback, and anime temporal-quality bounds.
 
 ## Change rule
 

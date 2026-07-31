@@ -17,9 +17,13 @@ public partial class MainWindow
     private const int DefaultVideoPlaybackFps = 16;
     private const int DefaultVideoMaximumPixelArea = 409_600;
     private const int MaxVideoPromptLength = 2_000;
-    private const double VideoEstimateBaselineSeconds = 146.691;
-    private const int VideoEstimateBaselineFrameCount = 97;
-    private const int VideoEstimateBaselinePixelArea = 409_600;
+    private const double VideoWanLandscapeEstimateBaselineSeconds = 146.691;
+    private const double VideoWanPortraitEstimateBaselineSeconds = 202.942;
+    private const int VideoWanEstimateBaselineFrameCount = 97;
+    private const double VideoDeliveryLandscapeEstimateBaselineSeconds = 11.768;
+    private const double VideoDeliveryPortraitEstimateBaselineSeconds = 15.318;
+    private const int VideoDeliveryEstimateBaselineDurationSeconds = 6;
+    private const int VideoEstimateBaselineMaximumPixelArea = 409_600;
 
     private static readonly int[] SupportedVideoDurationSeconds = [4, 6];
     private static readonly int[] SupportedVideoPlaybackFps = [12, 16];
@@ -49,30 +53,58 @@ public partial class MainWindow
             _videoMaximumPixelArea,
             _videoPrompt.Trim());
 
-    private static (int FrameCount, int EstimatedSeconds)
+    private static (
+        int FrameCount,
+        int EstimatedMinimumSeconds,
+        int EstimatedMaximumSeconds)
         EstimateVideoGeneration(int durationSeconds, int playbackFps, int maximumPixelArea)
     {
         int frameCount = 4 * (durationSeconds * playbackFps / 4) + 1;
-        double seconds = VideoEstimateBaselineSeconds
-            * frameCount
-            / VideoEstimateBaselineFrameCount
-            * maximumPixelArea
-            / VideoEstimateBaselinePixelArea;
+        double ScaleWan(double baselineSeconds)
+            => baselineSeconds
+                * frameCount
+                / VideoWanEstimateBaselineFrameCount
+                * maximumPixelArea
+                / VideoEstimateBaselineMaximumPixelArea;
+        double ScaleDelivery(double baselineSeconds)
+            => baselineSeconds
+                * durationSeconds
+                / VideoDeliveryEstimateBaselineDurationSeconds
+                * maximumPixelArea
+                / VideoEstimateBaselineMaximumPixelArea;
+        double minimumSeconds =
+            ScaleWan(VideoWanLandscapeEstimateBaselineSeconds)
+            + ScaleDelivery(
+                VideoDeliveryLandscapeEstimateBaselineSeconds);
+        double maximumSeconds =
+            ScaleWan(VideoWanPortraitEstimateBaselineSeconds)
+            + ScaleDelivery(
+                VideoDeliveryPortraitEstimateBaselineSeconds);
         return (
             frameCount,
-            (int)Math.Round(seconds, MidpointRounding.AwayFromZero));
+            (int)Math.Round(
+                minimumSeconds,
+                MidpointRounding.AwayFromZero),
+            (int)Math.Ceiling(maximumSeconds));
     }
 
     private string VideoGenerationEstimateText()
     {
-        (_, int estimatedSeconds) = EstimateVideoGeneration(
+        (
+            _,
+            int estimatedMinimumSeconds,
+            int estimatedMaximumSeconds) = EstimateVideoGeneration(
             _videoDurationSeconds,
             _videoPlaybackFps,
             _videoMaximumPixelArea);
-        string duration = estimatedSeconds >= 60
-            ? $"{estimatedSeconds / 60}分{estimatedSeconds % 60:D2}秒"
-            : $"{estimatedSeconds}秒";
-        return $"生成目安: 約{duration}（RTX 4070 SUPER実測基準・キュー待ちを除く）";
+        static string FormatDuration(int seconds)
+            => seconds >= 60
+                ? $"{seconds / 60}分{seconds % 60:D2}秒"
+                : $"{seconds}秒";
+        return "完了目安: 約"
+            + $"{FormatDuration(estimatedMinimumSeconds)}〜"
+            + $"{FormatDuration(estimatedMaximumSeconds)}"
+            + "（Wan生成＋RIFE 4.25仕上げ・RTX 4070 SUPER横長/縦長実測範囲・キュー待ちを除く）";
     }
 
     private void OpenModalVideoGeneration_Click(object sender, RoutedEventArgs e)
@@ -180,7 +212,7 @@ public partial class MainWindow
     {
         RestoreVideoGenerationSettings(null, null, null, null);
         SetVideoGenerationSettingsStatus(
-            "6秒・16fps・最大409,600px・Normal既定プロンプトに戻しました。");
+            "6秒・生成16fps・最終30fps・最大409,600px・Normal既定プロンプトに戻しました。");
         if (!_initializing)
             SaveState();
     }
@@ -370,7 +402,11 @@ public partial class MainWindow
             _videoMaximumPixelArea,
             _videoPrompt);
 
-    public (int FrameCount, int EstimatedSeconds) VideoGenerationEstimateForSmoke
+    public (
+        int FrameCount,
+        int EstimatedMinimumSeconds,
+        int EstimatedMaximumSeconds)
+        VideoGenerationEstimateForSmoke
         => EstimateVideoGeneration(
             _videoDurationSeconds,
             _videoPlaybackFps,
@@ -401,6 +437,28 @@ public partial class MainWindow
             && ModalVideoPresetText.Text.Contains(
                 "Wan2.2 TI2V 5B",
                 StringComparison.Ordinal)
+            && string.Equals(
+                AppVideoGenerationFpsLabel.Text,
+                "生成FPS",
+                StringComparison.Ordinal)
+            && string.Equals(
+                ModalVideoGenerationFpsLabel.Text,
+                "生成FPS",
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(AppVideoFpsComboBox),
+                "Default video generation FPS",
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(ModalVideoFpsComboBox),
+                "Video generation FPS",
+                StringComparison.Ordinal)
+            && AppVideoDeliveryText.Text.Contains(
+                "最終出力: 30 fps · RIFE 4.25",
+                StringComparison.Ordinal)
+            && ModalVideoDeliveryText.Text.Contains(
+                "最終出力: 30 fps · RIFE 4.25",
+                StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText is not null
             && AppVideoGenerationEstimateText is not null
             && string.Equals(
@@ -408,7 +466,10 @@ public partial class MainWindow
                 AppVideoGenerationEstimateText.Text,
                 StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText.Text.Contains(
-                "RTX 4070 SUPER実測基準",
+                "RTX 4070 SUPER横長/縦長実測範囲",
+                StringComparison.Ordinal)
+            && ModalVideoGenerationEstimateText.Text.Contains(
+                "Wan生成＋RIFE 4.25仕上げ",
                 StringComparison.Ordinal)
             && AppVideoSettingsHeading is not null
             && SettingsVideoNav is not null;

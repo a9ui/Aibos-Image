@@ -31,6 +31,14 @@
       "codec",
       "bitDepth"
     ],
+    "optionalAdditiveFields": [
+      "delivery"
+    ],
+    "deliveryCompatibility": {
+      "missing": "legacy v1 output uses requested.playbackFps and effective.frameCount as final playback metadata",
+      "present": "must be the exact deliveryV1 shape and values for the requested duration",
+      "malformedPresent": "reader-only protected row; never cancel, retry, reorder, open, or delete through a managed-video mutation path"
+    },
     "unknownFields": "preserve when a compatible writer rewrites the row",
     "retry": "reuse the complete persisted snapshot and seed"
   },
@@ -57,8 +65,28 @@
     "codec": "h264",
     "container": "mp4",
     "bitDepth": 8,
+    "timingMeaning": "playbackFps and frameCount describe Wan native generation; a legacy snapshot without delivery also uses them as final playback metadata",
     "blankPrompt": "built-in conservative anime idle motion with identity, line-art, composition, first-frame, and locked-camera preservation",
     "customPrompt": "preservation preamble plus the user's instruction; blank-only idle and locked-camera clauses must not contradict an explicit custom motion request"
+  },
+  "deliveryV1": {
+    "field": "video.delivery",
+    "additiveWithinProtocol": true,
+    "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+    "model": "4.25",
+    "targetFps": 30,
+    "durationSeconds": [
+      4,
+      6
+    ],
+    "frameCountByDuration": {
+      "4": 120,
+      "6": 180
+    },
+    "pixelFormat": "yuv420p",
+    "audio": false,
+    "finalPlaybackMetadata": "valid delivery values replace native playbackFps and effective.frameCount in managed-video labels and playback metadata",
+    "invalidPresentValue": "fail closed; presence is never treated as legacy absence"
   },
   "normalization": {
     "frameCount": "4 * floor(durationSeconds * playbackFps / 4) + 1",
@@ -67,15 +95,91 @@
       "w0 = sqrt(A * r) and h0 = sqrt(A / r)",
       "round both dimensions to the nearest multiple of 32",
       "while width * height exceeds A, reduce by 32 the dimension that produces the smaller source-aspect error",
+      "after the over-budget loop, compare the current bucket with each valid adjacent candidate formed by reducing width or height by 32",
+      "score each candidate as relativeAspectError + 0.25 * unusedAreaRatio, where relativeAspectError = abs((candidateWidth / candidateHeight) / r - 1) and unusedAreaRatio = (A - candidateWidth * candidateHeight) / A",
+      "move to the lowest-score adjacent candidate only when its score strictly improves the current score, and repeat until neither adjacent candidate improves it",
       "prepare a separate contain-resized, edge-padded PNG at the exact bucket; never crop or rewrite the source"
     ],
     "examples": {
       "16:9": "832x480",
       "3:2": "768x512",
       "4:3": "736x544",
-      "1:1": "640x640"
+      "1:1": "640x640",
+      "bird-975x1614": "480x800"
+    },
+    "refinementFixture": {
+      "sourceWidth": 975,
+      "sourceHeight": 1614,
+      "maximumPixelArea": 409600,
+      "expectedWidth": 480,
+      "expectedHeight": 800
     }
   },
+  "mutationSafetyVectors": [
+    {
+      "id": "legacy-delivery-absent-6s",
+      "requestedDurationSeconds": 6,
+      "nativePlaybackFps": 16,
+      "nativeFrameCount": 97,
+      "delivery": "absent",
+      "expectedMutationSafe": true,
+      "expectedPlaybackFps": 16,
+      "expectedPlaybackFrameCount": 97
+    },
+    {
+      "id": "current-delivery-4s",
+      "requestedDurationSeconds": 4,
+      "nativePlaybackFps": 12,
+      "nativeFrameCount": 49,
+      "delivery": {
+        "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+        "model": "4.25",
+        "targetFps": 30,
+        "frameCount": 120,
+        "durationSeconds": 4,
+        "pixelFormat": "yuv420p",
+        "audio": false
+      },
+      "expectedMutationSafe": true,
+      "expectedPlaybackFps": 30,
+      "expectedPlaybackFrameCount": 120
+    },
+    {
+      "id": "current-delivery-6s",
+      "requestedDurationSeconds": 6,
+      "nativePlaybackFps": 16,
+      "nativeFrameCount": 97,
+      "delivery": {
+        "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+        "model": "4.25",
+        "targetFps": 30,
+        "frameCount": 180,
+        "durationSeconds": 6,
+        "pixelFormat": "yuv420p",
+        "audio": false
+      },
+      "expectedMutationSafe": true,
+      "expectedPlaybackFps": 30,
+      "expectedPlaybackFrameCount": 180
+    },
+    {
+      "id": "malformed-present-delivery",
+      "requestedDurationSeconds": 6,
+      "nativePlaybackFps": 16,
+      "nativeFrameCount": 97,
+      "delivery": {
+        "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+        "model": "4.25",
+        "targetFps": 30,
+        "frameCount": 179,
+        "durationSeconds": 6,
+        "pixelFormat": "yuv420p",
+        "audio": false
+      },
+      "expectedMutationSafe": false,
+      "expectedPlaybackMetadata": "protected"
+    }
+  ],
   "managedOutput": {
     "folder": "Videos",
     "flat": true,
@@ -153,6 +257,81 @@
         }
       },
       {
+        "id": "explicit-video-delivery",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "succeeded",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "outputPath": "${OUTPUT_ROOT}/Videos/video-delivery.mp4",
+        "presetId": "wan22-ti2v-5b-normal-v1",
+        "video": {
+          "presetId": "wan22-ti2v-5b-normal-v1",
+          "backendId": "wan22-ti2v-5b-core-v1",
+          "requested": {
+            "durationSeconds": 6,
+            "playbackFps": 16,
+            "prompt": ""
+          },
+          "effective": {
+            "frameCount": 97,
+            "width": 832,
+            "height": 480,
+            "positivePrompt": "fixture-positive",
+            "negativePrompt": "fixture-negative"
+          },
+          "delivery": {
+            "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+            "model": "4.25",
+            "targetFps": 30,
+            "frameCount": 180,
+            "durationSeconds": 6,
+            "pixelFormat": "yuv420p",
+            "audio": false
+          },
+          "seed": 123456790,
+          "codec": "h264",
+          "bitDepth": 8
+        }
+      },
+      {
+        "id": "malformed-video-delivery",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "failed",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "presetId": "wan22-ti2v-5b-normal-v1",
+        "video": {
+          "presetId": "wan22-ti2v-5b-normal-v1",
+          "backendId": "wan22-ti2v-5b-core-v1",
+          "requested": {
+            "durationSeconds": 6,
+            "playbackFps": 16,
+            "prompt": ""
+          },
+          "effective": {
+            "frameCount": 97,
+            "width": 832,
+            "height": 480,
+            "positivePrompt": "fixture-positive",
+            "negativePrompt": "fixture-negative"
+          },
+          "delivery": {
+            "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+            "model": "4.25",
+            "targetFps": 30,
+            "frameCount": 179,
+            "durationSeconds": 6,
+            "pixelFormat": "yuv420p",
+            "audio": false
+          },
+          "seed": 123456791,
+          "codec": "h264",
+          "bitDepth": 8
+        }
+      },
+      {
         "id": "future-operation",
         "operation": "future-motion-v2",
         "status": "queued",
@@ -175,8 +354,23 @@
       "explicit-upscale": "upscale",
       "explicit-photoreal": "photoreal",
       "explicit-video": "video",
+      "explicit-video-delivery": "video",
+      "malformed-video-delivery": "video",
       "future-operation": "unsupported",
       "null-operation": "unsupported"
+    },
+    "expectedPlaybackMetadata": {
+      "explicit-video": {
+        "fps": 16,
+        "frameCount": 97,
+        "source": "native-legacy"
+      },
+      "explicit-video-delivery": {
+        "fps": 30,
+        "frameCount": 180,
+        "source": "delivery"
+      },
+      "malformed-video-delivery": "protected"
     },
     "expectedImageVersionIds": [
       "legacy-missing-operation",
@@ -185,8 +379,13 @@
     ],
     "expectedReaderOnlyIds": [
       "explicit-video",
+      "explicit-video-delivery",
+      "malformed-video-delivery",
       "future-operation",
       "null-operation"
+    ],
+    "expectedMalformedDeliveryIds": [
+      "malformed-video-delivery"
     ],
     "expectedMutationRequests": 0
   }
