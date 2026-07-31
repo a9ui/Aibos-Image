@@ -13,6 +13,7 @@ $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csp
 $queueContractPath = Join-Path $repoRoot "contracts\enhancement-queue-order-v1.json"
 $healthContractPath = Join-Path $repoRoot "contracts\enhancement-health-v1.json"
 $videoContractPath = Join-Path $repoRoot "contracts\enhancement-video-v1.json"
+$videoActivationPath = Join-Path $repoRoot "contracts\enhancement-video-writer-activation-v1.json"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-enhancement-jobs-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -116,6 +117,37 @@ try {
     if ($videoContractChecks -contains $false) {
         throw "Enhancement video contract fields are invalid."
     }
+    if (-not (Test-Path -LiteralPath $videoActivationPath -PathType Leaf)) {
+        throw "Enhancement video writer activation record was not found: $videoActivationPath"
+    }
+    $videoActivation = Get-Content -LiteralPath $videoActivationPath -Raw | ConvertFrom-Json
+    $videoActivationChecks = @(
+        ($videoActivation.schemaVersion -eq 1)
+        ($videoActivation.recordId -eq "PV-ENHANCE-VIDEO-WRITER-ACTIVATION-001")
+        ($videoActivation.protocolContract -eq "PV-ENHANCE-VIDEO-001")
+        ($videoActivation.codeReady.wpfMutationClient -eq $true)
+        ($videoActivation.codeReady.h25Wan22Writer -eq $true)
+        ($videoActivation.codeReady.h25Commit -eq
+            "1bd9673c6f92ba448b99552ed5bb230294bbafad")
+        ($videoActivation.liveRuntime.wpfMutationClientEnabled -eq $false)
+        ($videoActivation.liveRuntime.h25WriterEnabled -eq $false)
+        ($videoActivation.liveRuntime.productionProcessesRestarted -eq $false)
+        ($videoActivation.candidateEvidence.durationSeconds -eq 6)
+        ($videoActivation.candidateEvidence.playbackFps -eq 16)
+        ($videoActivation.candidateEvidence.frameCount -eq 97)
+        ($videoActivation.candidateEvidence.maximumPixelArea -eq 409600)
+        ($videoActivation.candidateEvidence.codec -eq "h264")
+        ($videoActivation.candidateEvidence.pixelFormat -eq "yuv420p")
+        ($videoActivation.candidateEvidence.mediaFoundationPlayback -eq $true)
+        ($videoActivation.candidateEvidence.mediaFoundationInCi -eq $false)
+        ($videoActivation.cutover.requiresControlledRestart -eq $true)
+        ($videoActivation.cutover.keepSingleWorker -eq $true)
+        ($videoActivation.cutover.keepInferenceSerial -eq $true)
+        ($videoActivation.cutover.forceHighVram -eq $false)
+    )
+    if ($videoActivationChecks -contains $false) {
+        throw "Enhancement video writer activation fields are invalid."
+    }
 
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
@@ -168,10 +200,18 @@ try {
         'sourceOpenedInViewer',
         'queueInventoryOrdered',
         'operationLabelsVisible',
-        'videoReaderSafe',
+        'videoActionsEnabled',
+        'readerOnlyVideoSafe',
+        'videoCancelPendingSafe',
+        'videoCancelSettled',
+        'videoOutputOpened',
+        'videoOutputOpenedPaused',
+        'videoDeleteIssued',
+        'videoOutputDeleted',
+        'videoSiblingPreserved',
         'unknownOperationSafe',
         'legacyMissingOperation',
-        'readerOnlyNoMutation',
+        'unsupportedNoMutation',
         'imageVersionsExcludeVideo',
         'stableJobViews',
         'failedCancelIssued',

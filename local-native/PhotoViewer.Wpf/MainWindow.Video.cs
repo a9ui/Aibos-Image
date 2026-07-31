@@ -26,6 +26,8 @@ public partial class MainWindow
     private bool _modalVideoAutoplayPending;
     private bool _suppressModalVideoVersionSelection;
     private bool _modalVideoTransportStubForSmoke;
+    private TaskCompletionSource<bool>? _modalVideoMediaOpenCompletion;
+    private string? _modalVideoMediaFailureForSmoke;
 
     private sealed record ManagedVideoOutput(
         string OutputPath,
@@ -347,6 +349,10 @@ public partial class MainWindow
         _modalShowingVideo = true;
         _modalVideoPlaying = autoplay;
         _modalVideoAutoplayPending = autoplay;
+        _modalVideoMediaFailureForSmoke = null;
+        _modalVideoMediaOpenCompletion =
+            new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
         ModalVideo.Visibility = Visibility.Visible;
         ModalBitmap.Visibility = Visibility.Collapsed;
         ModalArtBase.Visibility = Visibility.Collapsed;
@@ -363,11 +369,17 @@ public partial class MainWindow
                 else
                     ModalVideo.Pause();
             }
-            catch
+            catch (Exception ex)
             {
+                _modalVideoMediaFailureForSmoke = ex.Message;
+                _modalVideoMediaOpenCompletion.TrySetResult(false);
                 StopAndHideModalVideo(clearSource: true);
                 return false;
             }
+        }
+        else
+        {
+            _modalVideoMediaOpenCompletion.TrySetResult(true);
         }
 
         RefreshModalVideoVersionChoices();
@@ -505,6 +517,7 @@ public partial class MainWindow
         if (_modalVideoAutoplayPending)
             ModalVideo.Play();
         _modalVideoPlaying = _modalVideoAutoplayPending;
+        _modalVideoMediaOpenCompletion?.TrySetResult(true);
         UpdateModalVideoPlaybackPresentation();
     }
 
@@ -527,6 +540,9 @@ public partial class MainWindow
         if (!_modalShowingVideo)
             return;
 
+        _modalVideoMediaFailureForSmoke =
+            e.ErrorException?.Message ?? "Media Foundation rejected the video.";
+        _modalVideoMediaOpenCompletion?.TrySetResult(false);
         StopAndHideModalVideo(clearSource: true);
         SetStatusToast("動画を再生できません。元画像を表示します。");
     }
@@ -556,9 +572,73 @@ public partial class MainWindow
         _modalVideoVersionIndex >= 0 && _modalVideoVersionIndex < _modalVideoVersions.Count
             ? _modalVideoVersions[_modalVideoVersionIndex].Output.OutputPath
             : null;
+    public string? ModalVideoMediaFailureForSmoke =>
+        _modalVideoMediaFailureForSmoke;
+    public bool ModalVideoHasNaturalDurationForSmoke =>
+        _modalVideoTransportStubForSmoke
+        || (ModalVideo.NaturalDuration.HasTimeSpan
+            && ModalVideo.NaturalDuration.TimeSpan > TimeSpan.Zero);
 
     public void EnableModalVideoTransportStubForSmoke()
         => _modalVideoTransportStubForSmoke = true;
+
+    public async Task<bool> WaitForModalVideoMediaOpenedForSmokeAsync(
+        int timeoutMilliseconds = 10_000)
+    {
+        TaskCompletionSource<bool>? completion =
+            _modalVideoMediaOpenCompletion;
+        if (completion is null)
+            return false;
+
+        try
+        {
+            return await completion.Task.WaitAsync(
+                TimeSpan.FromMilliseconds(
+                    Math.Max(1, timeoutMilliseconds)));
+        }
+        catch (TimeoutException)
+        {
+            _modalVideoMediaFailureForSmoke =
+                "Timed out waiting for MediaOpened.";
+            return false;
+        }
+    }
+
+    public async Task<bool> WaitForModalVideoPlaybackProgressForSmokeAsync(
+        int timeoutMilliseconds = 5_000)
+    {
+        if (_modalVideoTransportStubForSmoke)
+            return true;
+
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(
+            Math.Max(1, timeoutMilliseconds));
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (!_modalShowingVideo || !_modalVideoPlaying)
+                return false;
+            if (ModalVideo.Position > TimeSpan.Zero)
+                return true;
+            await Task.Delay(50);
+        }
+        _modalVideoMediaFailureForSmoke =
+            "Timed out waiting for video playback progress.";
+        return false;
+    }
+
+    public async Task<bool> WaitForModalVideoPauseSettledForSmokeAsync()
+    {
+        if (_modalVideoTransportStubForSmoke)
+            return !_modalVideoPlaying;
+        if (!_modalShowingVideo || _modalVideoPlaying)
+            return false;
+
+        TimeSpan before = ModalVideo.Position;
+        await Task.Delay(300);
+        TimeSpan after = ModalVideo.Position;
+        return _modalShowingVideo
+            && !_modalVideoPlaying
+            && Math.Abs((after - before).TotalMilliseconds) <= 100;
+    }
 
     public bool ToggleModalVideoPlaybackForSmoke()
         => ToggleModalVideoPlayback();

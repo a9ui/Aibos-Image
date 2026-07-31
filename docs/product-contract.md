@@ -499,6 +499,12 @@ is `contracts/enhancement-video-v1.json`.
   it does not retry, cancel, reorder, open, or delete that row until the exact
   H25 writer and managed-video ownership contract are active. Passive reads
   remain read-only and never start the companion or ComfyUI.
+- Source readiness and live rollout are separate. The canonical activation
+  record is `contracts/enhancement-video-writer-activation-v1.json`: the exact
+  H25 writer and guarded WPF mutation client are code-ready, while both live
+  runtime flags remain false because the running PhotoViewer API, ComfyUI, and
+  Aibos WPF were deliberately not restarted. This state permits merge and
+  candidate verification; it does not claim production cutover.
 - A 14B/HQ preset, 24 fps, and an approximately 704p default remain deferred
   until measured evidence on the supported 12GB GPU establishes memory,
   latency, playback, and anime temporal-quality bounds.

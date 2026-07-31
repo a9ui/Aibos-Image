@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "recordId": "PV-ENHANCE-VIDEO-WRITER-ACTIVATION-001",
+  "protocolContract": "PV-ENHANCE-VIDEO-001",
+  "codeReady": {
+    "wpfMutationClient": true,
+    "h25Wan22Writer": true,
+    "h25Commit": "1bd9673c6f92ba448b99552ed5bb230294bbafad",
+    "rules": [
+      "WPF enables mutations only for the exact current Wan2.2 video snapshot and output identity",
+      "unknown, incomplete, future, or tampered video rows remain reader-only",
+      "Jobs output playback is paused and deletion is routed through the H25 API"
+    ]
+  },
+  "liveRuntime": {
+    "wpfMutationClientEnabled": false,
+    "h25WriterEnabled": false,
+    "productionProcessesRestarted": false,
+    "reason": "The running PhotoViewer API, ComfyUI, and Aibos WPF were not stopped or restarted during review and acceptance."
+  },
+  "candidateEvidence": {
+    "gpu": "RTX 4070 SUPER 12GB",
+    "durationSeconds": 6,
+    "playbackFps": 16,
+    "frameCount": 97,
+    "maximumPixelArea": 409600,
+    "elapsedMilliseconds": 146691,
+    "peakVramMiB": 11645,
+    "totalVramMiB": 12282,
+    "codec": "h264",
+    "pixelFormat": "yuv420p",
+    "mediaFoundationPlayback": true,
+    "mediaFoundationInCi": false
+  },
+  "cutover": {
+    "requiresControlledRestart": true,
+    "keepSingleWorker": true,
+    "keepInferenceSerial": true,
+    "forceHighVram": false,
+    "rollback": "Disable video writer/enqueue flags while retaining the video-capable readers and managed outputs."
+  }
+}

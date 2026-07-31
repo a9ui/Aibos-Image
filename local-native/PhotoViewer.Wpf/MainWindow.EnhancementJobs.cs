@@ -2,6 +2,9 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -18,6 +21,19 @@ public partial class MainWindow
     private const int EnhancementJobsThumbnailLimit = 48;
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private const string UnsupportedEnhancementOperation = "unsupported";
+    private const string VideoPreservationPreamble =
+        "Animate the supplied image as the exact first frame. "
+        + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
+        + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency.";
+    private const string VideoBlankPromptMotion =
+        "Use subtle natural idle motion only: gentle breathing, an occasional blink, and restrained secondary motion in hair and clothing. "
+        + "Keep the camera locked and preserve the original framing.";
+    private const string VideoNegativePrompt =
+        "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark";
+    private static readonly JsonSerializerOptions VideoStableJsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
     private readonly List<EnhancementWorkspaceJobView> _enhancementWorkspaceJobs = [];
     private readonly Dictionary<string, BitmapSource> _enhancementWorkspaceThumbnailCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _enhancementWorkspaceHighlightedJobIds = new(StringComparer.Ordinal);
@@ -57,6 +73,342 @@ public partial class MainWindow
         };
     }
 
+    private static bool IsVideoMutationSafe(JsonElement job)
+    {
+        if ((job.TryGetProperty(
+                    "cancelRequested",
+                    out JsonElement cancelRequestedElement)
+                && cancelRequestedElement.ValueKind is not (
+                    JsonValueKind.True
+                    or JsonValueKind.False
+                    or JsonValueKind.Null))
+            || !TryGetExactStringProperty(job, "mediaKind", "video")
+            || !TryGetExactStringProperty(
+                job,
+                "presetId",
+                "wan22-ti2v-5b-normal-v1")
+            || !TryGetExactStringProperty(
+                job,
+                "adapterId",
+                "wan22-ti2v-5b-core-v1")
+            || !TryGetStringProperty(job, "sourceSha256", out string? sourceSha256)
+            || !IsLowerHex(sourceSha256, 64)
+            || !TryGetStringProperty(job, "presetHash", out string? presetHash)
+            || !IsLowerHex(presetHash, 12)
+            || !job.TryGetProperty("video", out JsonElement video)
+            || video.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(
+                video,
+                "presetId",
+                "backendId",
+                "modelName",
+                "requested",
+                "effective",
+                "seed",
+                "codec",
+                "container",
+                "bitDepth")
+            || !TryGetExactStringProperty(
+                video,
+                "presetId",
+                "wan22-ti2v-5b-normal-v1")
+            || !TryGetExactStringProperty(
+                video,
+                "backendId",
+                "wan22-ti2v-5b-core-v1")
+            || !TryGetExactStringProperty(
+                video,
+                "modelName",
+                "wan2.2_ti2v_5B_fp16.safetensors")
+            || !TryGetExactStringProperty(video, "codec", "h264")
+            || !TryGetExactStringProperty(video, "container", "mp4")
+            || !video.TryGetProperty("bitDepth", out JsonElement bitDepthElement)
+            || !bitDepthElement.TryGetInt32(out int bitDepth)
+            || bitDepth != 8
+            || !video.TryGetProperty("seed", out JsonElement seedElement)
+            || !seedElement.TryGetInt32(out int seed)
+            || seed < 0
+            || !video.TryGetProperty("requested", out JsonElement requested)
+            || requested.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(
+                requested,
+                "durationSeconds",
+                "playbackFps",
+                "maximumPixelArea",
+                "prompt")
+            || !video.TryGetProperty("effective", out JsonElement effective)
+            || effective.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(
+                effective,
+                "frameCount",
+                "width",
+                "height",
+                "positivePrompt",
+                "negativePrompt",
+                "steps",
+                "cfg",
+                "sampler",
+                "scheduler",
+                "shift",
+                "denoise")
+            || !requested.TryGetProperty(
+                "durationSeconds",
+                out JsonElement durationElement)
+            || !durationElement.TryGetInt32(out int durationSeconds)
+            || durationSeconds is not (4 or 6)
+            || !requested.TryGetProperty(
+                "playbackFps",
+                out JsonElement playbackFpsElement)
+            || !playbackFpsElement.TryGetInt32(out int playbackFps)
+            || playbackFps is not (12 or 16)
+            || !requested.TryGetProperty(
+                "maximumPixelArea",
+                out JsonElement maximumPixelAreaElement)
+            || !maximumPixelAreaElement.TryGetInt32(out int maximumPixelArea)
+            || maximumPixelArea is not (230400 or 307200 or 409600)
+            || !TryGetStringPropertyAllowEmpty(
+                requested,
+                "prompt",
+                out string? prompt)
+            || prompt!.Length > 2_000
+            || !effective.TryGetProperty(
+                "frameCount",
+                out JsonElement frameCountElement)
+            || !frameCountElement.TryGetInt32(out int frameCount)
+            || frameCount != checked(
+                4 * (durationSeconds * playbackFps / 4) + 1)
+            || !effective.TryGetProperty("width", out JsonElement widthElement)
+            || !widthElement.TryGetInt32(out int width)
+            || !effective.TryGetProperty("height", out JsonElement heightElement)
+            || !heightElement.TryGetInt32(out int height)
+            || width < 32
+            || height < 32
+            || width % 32 != 0
+            || height % 32 != 0
+            || checked((long)width * height) > maximumPixelArea
+            || !TryGetStringProperty(
+                effective,
+                "positivePrompt",
+                out string? positivePrompt)
+            || !TryGetStringPropertyAllowEmpty(
+                effective,
+                "negativePrompt",
+                out string? negativePrompt)
+            || !string.Equals(
+                positivePrompt,
+                BuildVideoPositivePrompt(prompt),
+                StringComparison.Ordinal)
+            || !string.Equals(
+                negativePrompt,
+                VideoNegativePrompt,
+                StringComparison.Ordinal)
+            || !HasExactInt32(effective, "steps", 20)
+            || !HasExactInt32(effective, "cfg", 5)
+            || !TryGetExactStringProperty(effective, "sampler", "uni_pc")
+            || !TryGetExactStringProperty(effective, "scheduler", "simple")
+            || !HasExactInt32(effective, "shift", 8)
+            || !HasExactInt32(effective, "denoise", 1))
+        {
+            return false;
+        }
+
+        if (!string.Equals(
+                presetHash,
+                HashStableJson(video)[..12],
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!job.TryGetProperty(
+                "outputPath",
+                out JsonElement outputPathElement)
+            || outputPathElement.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+        if (outputPathElement.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(outputPathElement.GetString())
+            || !TryGetStringProperty(job, "id", out string? jobId)
+            || !TryGetStringProperty(
+                job,
+                "sourcePath",
+                out string? sourcePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            string expectedFileName = BuildVideoOutputFileName(
+                jobId!,
+                sourcePath!,
+                sourceSha256!,
+                presetHash!);
+            return string.Equals(
+                Path.GetFileName(outputPathElement.GetString()),
+                expectedFileName,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasExactProperties(
+        JsonElement element,
+        params string[] expectedNames)
+    {
+        string[] actualNames = element
+            .EnumerateObject()
+            .Select(static property => property.Name)
+            .ToArray();
+        return actualNames.Length == expectedNames.Length
+            && actualNames
+                .ToHashSet(StringComparer.Ordinal)
+                .SetEquals(expectedNames);
+    }
+
+    private static string BuildVideoOutputFileName(
+        string jobId,
+        string sourcePath,
+        string sourceSha256,
+        string presetHash)
+    {
+        string safeJobId = SanitizeVideoOutputNamePart(
+            jobId,
+            maximumLength: 48,
+            fallback: "");
+        if (safeJobId.Length == 0)
+            throw new ArgumentException("Video job id is empty.", nameof(jobId));
+        string safeSourceName = SanitizeVideoOutputNamePart(
+            Path.GetFileNameWithoutExtension(sourcePath),
+            maximumLength: 64,
+            fallback: "image");
+        return $"{safeJobId}__{safeSourceName}__{sourceSha256[..16]}__wan22-ti2v-5b-normal-v1__{presetHash}.mp4";
+    }
+
+    private static string SanitizeVideoOutputNamePart(
+        string value,
+        int maximumLength,
+        string fallback)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (char character in value)
+        {
+            bool invalid = character < ' '
+                || character is '<' or '>' or ':' or '"' or '/'
+                    or '\\' or '|' or '?' or '*';
+            builder.Append(invalid ? '_' : character);
+        }
+        string sanitized = builder.ToString();
+        if (sanitized.Length > maximumLength)
+            sanitized = sanitized[..maximumLength];
+        return sanitized.Length == 0 ? fallback : sanitized;
+    }
+
+    private static string BuildVideoPositivePrompt(string prompt)
+    {
+        string requestedPrompt = prompt.Trim();
+        return requestedPrompt.Length == 0
+            ? $"{VideoPreservationPreamble} {VideoBlankPromptMotion}"
+            : $"{VideoPreservationPreamble} Follow this motion direction: {requestedPrompt}";
+    }
+
+    private static bool HasExactInt32(
+        JsonElement element,
+        string propertyName,
+        int expected)
+        => element.TryGetProperty(propertyName, out JsonElement property)
+            && property.TryGetInt32(out int value)
+            && value == expected;
+
+    private static bool IsLowerHex(string? value, int length)
+        => value is not null
+            && value.Length == length
+            && value.All(static character =>
+                character is >= '0' and <= '9'
+                    or >= 'a' and <= 'f');
+
+    private static string HashStableJson(JsonElement element)
+    {
+        var builder = new StringBuilder();
+        AppendStableJson(builder, element);
+        return Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())))
+            .ToLowerInvariant();
+    }
+
+    private static void AppendStableJson(
+        StringBuilder builder,
+        JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                builder.Append('{');
+                bool firstProperty = true;
+                foreach (JsonProperty property in element.EnumerateObject()
+                             .OrderBy(
+                                 static property => property.Name,
+                                 StringComparer.Ordinal))
+                {
+                    if (!firstProperty)
+                        builder.Append(',');
+                    firstProperty = false;
+                    builder.Append(
+                        JsonSerializer.Serialize(
+                            property.Name,
+                            VideoStableJsonOptions));
+                    builder.Append(':');
+                    AppendStableJson(builder, property.Value);
+                }
+                builder.Append('}');
+                break;
+            case JsonValueKind.Array:
+                builder.Append('[');
+                bool firstItem = true;
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    if (!firstItem)
+                        builder.Append(',');
+                    firstItem = false;
+                    AppendStableJson(builder, item);
+                }
+                builder.Append(']');
+                break;
+            case JsonValueKind.String:
+                builder.Append(
+                    JsonSerializer.Serialize(
+                        element.GetString(),
+                        VideoStableJsonOptions));
+                break;
+            case JsonValueKind.Number:
+                if (element.TryGetInt64(out long integer))
+                    builder.Append(integer.ToString(CultureInfo.InvariantCulture));
+                else
+                    builder.Append(
+                        element.GetDouble().ToString(
+                            "R",
+                            CultureInfo.InvariantCulture));
+                break;
+            case JsonValueKind.True:
+                builder.Append("true");
+                break;
+            case JsonValueKind.False:
+                builder.Append("false");
+                break;
+            case JsonValueKind.Null:
+                builder.Append("null");
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "Unsupported JSON value in video snapshot.");
+        }
+    }
+
     private static bool IsImageEnhancementOperation(string? operation)
         => operation is "upscale" or "photoreal";
 
@@ -66,7 +418,7 @@ public partial class MainWindow
             .Where(static job => job.Status == "queued")
             .ToArray();
         return queued.Length > 0
-            && queued.All(static job => job.IsReaderMutationSafe);
+            && queued.All(static job => job.IsSupportedMutationOperation);
     }
 
     private void InitializeEnhancementJobsWorkspace()
@@ -496,7 +848,7 @@ public partial class MainWindow
             .ThenBy(static candidate => candidate.ApiOrdinal)
             .ToArray();
         bool queueMutationScopeSafe =
-            queued.All(static candidate => candidate.IsReaderMutationSafe);
+            queued.All(static candidate => candidate.IsSupportedMutationOperation);
         foreach (EnhancementWorkspaceJobView job in queued)
         {
             job.QueuePosition = position++;
@@ -558,6 +910,11 @@ public partial class MainWindow
             && progressElement.TryGetInt32(out int parsedProgress)
             ? Math.Clamp(parsedProgress, 0, 100)
             : 0;
+        bool cancelRequested =
+            element.TryGetProperty(
+                "cancelRequested",
+                out JsonElement cancelRequestedElement)
+            && cancelRequestedElement.ValueKind == JsonValueKind.True;
         int? queueOrder = element.TryGetProperty("queueOrder", out JsonElement queueOrderElement)
             && queueOrderElement.ValueKind == JsonValueKind.Number
             && queueOrderElement.TryGetInt32(out int parsedQueueOrder)
@@ -580,14 +937,17 @@ public partial class MainWindow
         if (updatedAt == default)
             updatedAt = createdAt == default ? DateTimeOffset.MinValue : createdAt;
 
+        string operation = ReadEnhancementOperation(element);
         return new EnhancementWorkspaceJobView(
             id!,
             sourceId ?? "",
             sourcePath ?? "",
             presetId ?? "Default preset",
             adapterId ?? "local companion",
-            ReadEnhancementOperation(element),
+            operation,
+            operation == "video" && IsVideoMutationSafe(element),
             status,
+            cancelRequested,
             progress,
             outputPath,
             errorMessage,
@@ -934,8 +1294,22 @@ public partial class MainWindow
         if (!job.CanUseOutput)
         {
             EnhancementJobsStatusText.Text =
-                "Open output unavailable: this media is reader-only. The source image was not changed.";
+                "Open output unavailable: this operation or state is not eligible. The source image was not changed.";
             return false;
+        }
+        if (job.IsVideoOperation)
+        {
+            if (!TryResolveManagedVideoWorkspaceOutput(
+                    job,
+                    out ManagedVideoVersion video,
+                    out string videoReason))
+            {
+                EnhancementJobsStatusText.Text =
+                    $"Open output unavailable: {videoReason}. The source image was not changed.";
+                return false;
+            }
+
+            return TryOpenEnhancementVideoJobInViewer(job, video);
         }
         if (!TryResolveManagedEnhancementWorkspaceOutput(job, out ManagedEnhancedOutput output, out string reason))
         {
@@ -1020,6 +1394,34 @@ public partial class MainWindow
                 StringComparison.OrdinalIgnoreCase);
         if (!opened)
             SetStatusToast("The managed output could not be selected in the Aibos viewer.");
+        return opened;
+    }
+
+    private bool TryOpenEnhancementVideoJobInViewer(
+        EnhancementWorkspaceJobView job,
+        ManagedVideoVersion preferredVideo)
+    {
+        if (!TryOpenEnhancementJobInViewer(job, preferredOutput: null))
+            return false;
+
+        int versionIndex = _modalVideoVersions.FindIndex(candidate =>
+            string.Equals(candidate.JobId, job.Id, StringComparison.Ordinal)
+            && string.Equals(
+                candidate.Output.OutputPath,
+                preferredVideo.Output.OutputPath,
+                StringComparison.OrdinalIgnoreCase));
+        if (versionIndex < 0)
+        {
+            _modalVideoVersions.Add(preferredVideo);
+            versionIndex = _modalVideoVersions.Count - 1;
+        }
+
+        StopAndHideModalVideo(clearSource: true);
+        bool opened = ShowModalVideoVersion(
+            versionIndex,
+            autoplay: false);
+        if (!opened)
+            SetStatusToast("The managed video could not be selected in the Aibos viewer.");
         return opened;
     }
 
@@ -1130,16 +1532,27 @@ public partial class MainWindow
             return;
         }
 
-        if (!TryResolveManagedEnhancementWorkspaceOutput(job, out _, out string reason))
+        bool validOutput;
+        string reason;
+        if (job.IsVideoOperation)
+        {
+            validOutput = TryResolveManagedVideoWorkspaceOutput(job, out _, out reason);
+        }
+        else
+        {
+            validOutput = TryResolveManagedEnhancementWorkspaceOutput(job, out _, out reason);
+        }
+        if (!validOutput)
         {
             EnhancementJobsStatusText.Text = $"Delete output unavailable: {reason}. The source image was not changed.";
             return;
         }
 
+        string mediaName = job.IsVideoOperation ? "video" : "enhanced";
         bool confirmed = _confirmEnhancedOutputDeleteForSmoke?.Invoke() ?? MessageBox.Show(
                 this,
-                "Delete only this enhanced output? The original source image will be kept.",
-                "Delete enhanced output",
+                $"Delete only this managed {mediaName} output? The original source image will be kept.",
+                $"Delete {mediaName} output",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,
                 MessageBoxResult.No) == MessageBoxResult.Yes;
@@ -1163,7 +1576,8 @@ public partial class MainWindow
             }
 
             ReloadEnhancedOutputsForVisibleCatalog();
-            EnhancementJobsStatusText.Text = "Enhanced output deleted. The original source image was kept.";
+            EnhancementJobsStatusText.Text =
+                $"{(job.IsVideoOperation ? "Video" : "Enhanced")} output deleted. The original source image was kept.";
             await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
         }
         finally
@@ -1201,6 +1615,64 @@ public partial class MainWindow
 
         reason = "";
         return true;
+    }
+
+    private bool TryResolveManagedVideoWorkspaceOutput(
+        EnhancementWorkspaceJobView job,
+        out ManagedVideoVersion managedVideo,
+        out string reason)
+    {
+        managedVideo = null!;
+        reason = "the video is missing, stale, malformed, or outside managed storage";
+        if (!job.IsVideoOperation
+            || job.Status != "succeeded"
+            || string.IsNullOrWhiteSpace(job.OutputPath)
+            || job.SourceSize is null
+            || job.SourceMtimeMs is null
+            || !TryResolveEnhancementWorkspaceSource(job, out string canonicalSource)
+            || !ReloadEnhancedOutputsForVisibleCatalog())
+        {
+            return false;
+        }
+
+        try
+        {
+            string canonicalJobOutput =
+                _resolveFinalPath(Path.GetFullPath(job.OutputPath));
+            ManagedVideoVersion? candidate = GetManagedVideoVersionsForPath(canonicalSource)
+                .FirstOrDefault(version =>
+                    string.Equals(version.JobId, job.Id, StringComparison.Ordinal)
+                    && string.Equals(
+                        version.Output.OutputPath,
+                        canonicalJobOutput,
+                        StringComparison.OrdinalIgnoreCase));
+            if (candidate is null
+                || candidate.Output.SourceSize != job.SourceSize.Value
+                || Math.Abs(candidate.Output.SourceMtimeMs - job.SourceMtimeMs.Value) > 1
+                || !string.Equals(
+                    candidate.PresetId,
+                    job.PresetId,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    candidate.BackendId,
+                    job.AdapterId,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            managedVideo = candidate;
+            reason = "";
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or NotSupportedException
+                or ArgumentException)
+        {
+            return false;
+        }
     }
 
     private bool ReloadEnhancedOutputsForVisibleCatalog()
@@ -1399,7 +1871,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         string presetId,
         string adapterId,
         string operation,
+        bool videoMutationSafe,
         string status,
+        bool cancelRequested,
         int progress,
         string? outputPath,
         string? errorMessage,
@@ -1416,7 +1890,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         PresetId = presetId;
         AdapterId = adapterId;
         Operation = operation;
+        VideoMutationSafe = videoMutationSafe;
         Status = status;
+        CancelRequested = cancelRequested;
         Progress = progress;
         OutputPath = outputPath;
         ErrorMessage = errorMessage;
@@ -1434,7 +1910,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string PresetId { get; }
     public string AdapterId { get; }
     public string Operation { get; }
+    public bool VideoMutationSafe { get; }
     public string Status { get; private set; }
+    public bool CancelRequested { get; private set; }
     public int Progress { get; private set; }
     public string? OutputPath { get; private set; }
     public string? ErrorMessage { get; private set; }
@@ -1449,19 +1927,21 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool IsActive => Status is "queued" or "running";
     public bool IsImageOperation => Operation is "upscale" or "photoreal";
     public bool IsVideoOperation => Operation == "video";
-    public bool IsReaderMutationSafe => IsImageOperation;
+    public bool IsSupportedMutationOperation =>
+        IsImageOperation || (IsVideoOperation && VideoMutationSafe);
     public bool QueueMutationScopeSafe { get; set; } = true;
     public bool CanCancel =>
         !_isBusy
-        && IsReaderMutationSafe
+        && !CancelRequested
+        && IsSupportedMutationOperation
         && Status is "queued" or "running" or "failed";
     public bool CanRetry =>
         !_isBusy
-        && IsReaderMutationSafe
+        && IsSupportedMutationOperation
         && Status is "failed" or "canceled";
     public bool CanReorder =>
         !_isBusy
-        && IsReaderMutationSafe
+        && IsSupportedMutationOperation
         && QueueMutationScopeSafe
         && Status == "queued";
     public bool CanMoveUp => CanReorder && QueuePosition is > 1;
@@ -1473,14 +1953,14 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         !_isBusy && Status == "succeeded" && Operation == "photoreal";
     public bool CanUseOutput =>
         !_isBusy
-        && IsImageOperation
+        && IsSupportedMutationOperation
         && Status == "succeeded"
         && !string.IsNullOrWhiteSpace(OutputPath);
     public string CancelLabel => Status switch
     {
         "queued" => "待機を削除",
         "running" when Operation == "photoreal" => "実写化を中止",
-        "running" when Operation == "video" => "動画化はreader-only",
+        "running" when Operation == "video" => "動画化を中止",
         "running" when !IsImageOperation => "未対応操作",
         "running" => "高画質化を中止",
         _ => "キャンセル済みにする",
@@ -1494,20 +1974,28 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         "video" => "VIDEO  動画化",
         _ => "UNSUPPORTED  未対応",
     };
-    public string StatusLabel => Status switch
-    {
-        "queued" => $"待ち順 {QueuePosition ?? 0}  ·  Queued {Progress}%",
-        "running" => $"実行中  ·  Running {Progress}%",
-        "succeeded" => "Completed",
-        "failed" => "Failed",
-        "canceled" => "Canceled",
-        "deleted" => "Output deleted",
-        _ => Status,
-    };
+    public string StatusLabel => CancelRequested && Status == "running"
+        ? $"中止処理中  ·  Running {Progress}%"
+        : Status switch
+        {
+            "queued" => $"待ち順 {QueuePosition ?? 0}  ·  Queued {Progress}%",
+            "running" => $"実行中  ·  Running {Progress}%",
+            "succeeded" => "Completed",
+            "failed" => "Failed",
+            "canceled" => "Canceled",
+            "deleted" => "Output deleted",
+            _ => Status,
+        };
     public string DetailText => !string.IsNullOrWhiteSpace(ErrorMessage)
         ? ErrorMessage
+        : CancelRequested && Status == "running"
+            ? "Cancel requested. Waiting for the exact GPU prompt to settle before the next job starts."
         : IsVideoOperation
-            ? "Managed video metadata is readable. Jobs mutations stay disabled until the exact H25 writer contract is active."
+            ? !VideoMutationSafe
+                ? "This video row is incomplete or incompatible and remains protected from mutations."
+                : Status == "succeeded"
+                    ? "Managed video output is separate from the original source image."
+                    : "Video generation uses the same durable queue and GPU worker as image Enhancement."
             : !IsImageOperation
                 ? "This operation is unsupported and protected from image actions."
                 : Status == "succeeded"
@@ -1526,6 +2014,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             && string.Equals(PresetId, candidate.PresetId, StringComparison.Ordinal)
             && string.Equals(AdapterId, candidate.AdapterId, StringComparison.Ordinal)
             && string.Equals(Operation, candidate.Operation, StringComparison.Ordinal)
+            && VideoMutationSafe == candidate.VideoMutationSafe
             && CreatedAt == candidate.CreatedAt
             && SourceSize == candidate.SourceSize
             && SourceMtimeMs == candidate.SourceMtimeMs;
@@ -1533,6 +2022,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public void RefreshFrom(EnhancementWorkspaceJobView candidate)
     {
         bool statusChanged = !string.Equals(Status, candidate.Status, StringComparison.Ordinal);
+        bool cancelRequestedChanged = CancelRequested != candidate.CancelRequested;
         bool progressChanged = Progress != candidate.Progress;
         bool outputChanged = !string.Equals(OutputPath, candidate.OutputPath, StringComparison.OrdinalIgnoreCase);
         bool errorChanged = !string.Equals(ErrorMessage, candidate.ErrorMessage, StringComparison.Ordinal);
@@ -1544,6 +2034,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             QueueMutationScopeSafe != candidate.QueueMutationScopeSafe;
 
         Status = candidate.Status;
+        CancelRequested = candidate.CancelRequested;
         Progress = candidate.Progress;
         OutputPath = candidate.OutputPath;
         ErrorMessage = candidate.ErrorMessage;
@@ -1557,6 +2048,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         if (progressChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
         if (statusChanged
+            || cancelRequestedChanged
             || progressChanged
             || queueChanged
             || queueCountChanged
@@ -1576,11 +2068,17 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         }
         if (statusChanged || outputChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUseOutput)));
-        if (statusChanged || outputChanged || errorChanged)
+        if (statusChanged
+            || cancelRequestedChanged
+            || outputChanged
+            || errorChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
         if (updatedChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TimestampText)));
-        if (statusChanged || progressChanged || queueChanged)
+        if (statusChanged
+            || cancelRequestedChanged
+            || progressChanged
+            || queueChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
     }
 
