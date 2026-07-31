@@ -186,7 +186,7 @@ try {
         ($videoActivation.deliveryExtension.pixelFormat -eq "yuv420p")
         ($videoActivation.deliveryExtension.audio -eq $false)
         ([string]$videoActivation.deliveryExtension.h25CandidateCommit -ceq
-            'f377d04f392f882351bbc00bc9d053cbeab78cc3')
+            'e10cc052572da8e5b6e0cb9da06b928a44deb3e7')
         ($videoActivation.liveRuntime.wpfMutationClientEnabled -eq $false)
         ($videoActivation.liveRuntime.h25WriterEnabled -eq $false)
         ($videoActivation.liveRuntime.productionProcessesRestarted -eq $false)

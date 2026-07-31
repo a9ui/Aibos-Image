@@ -27,7 +27,7 @@
     },
     "pixelFormat": "yuv420p",
     "audio": false,
-    "h25CandidateCommit": "f377d04f392f882351bbc00bc9d053cbeab78cc3",
+    "h25CandidateCommit": "e10cc052572da8e5b6e0cb9da06b928a44deb3e7",
     "commitRecordingRule": "Record the exact H25 delivery-writer candidate after it exists; codeReady.h25Commit remains the historical Wan writer activation revision."
   },
   "liveRuntime": {
