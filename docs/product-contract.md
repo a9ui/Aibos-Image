@@ -462,7 +462,12 @@ or stores.
 `video` is a distinct managed-media operation. It is not an AI-upscaled or
 photoreal image version, and an MP4 must never enter an image decode, image
 version cycle, or image-output deletion path. The canonical additive fixture
-is `contracts/enhancement-video-v1.json`.
+is `contracts/enhancement-video-v1.json`. Video requests may additionally
+name `sourceProducerJobId`. When present, it is a durable reference to one
+succeeded photoreal job; WPF never sends that job's output path. The companion
+revalidates producer ownership and the managed still image, while the video
+row keeps the Original catalog identity in `sourceId` and pins the actual
+input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
 
 - A video job keeps `mediaKind: "video"` and a media-specific `video` snapshot
   alongside the existing version 1 job envelope. The snapshot records the

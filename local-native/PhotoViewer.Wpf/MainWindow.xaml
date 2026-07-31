@@ -690,7 +690,10 @@
             <ContextMenu x:Name="CardsContextMenu" AutomationProperties.Name="Image grid actions">
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
-              <MenuItem Header="動画化..." Click="GalleryContextVideo_Click" AutomationProperties.Name="Open video generation board"/>
+              <MenuItem Header="動画化" AutomationProperties.Name="Choose video generation source">
+                <MenuItem Header="Originalから..." Tag="original" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from Original"/>
+                <MenuItem Header="最新の実写版から..." Tag="photoreal" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from latest photoreal version"/>
+              </MenuItem>
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.GroupStyle>
@@ -729,7 +732,10 @@
             <ContextMenu x:Name="RowsContextMenu" AutomationProperties.Name="Image list actions">
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
-              <MenuItem Header="動画化..." Click="GalleryContextVideo_Click" AutomationProperties.Name="Open video generation board"/>
+              <MenuItem Header="動画化" AutomationProperties.Name="Choose video generation source">
+                <MenuItem Header="Originalから..." Tag="original" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from Original"/>
+                <MenuItem Header="最新の実写版から..." Tag="photoreal" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from latest photoreal version"/>
+              </MenuItem>
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -1573,13 +1579,23 @@
           <TextBlock x:Name="AppVideoSettingsHeading" Text="動画化"
                      Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold"
                      Margin="0,0,0,6" AutomationProperties.Name="Video generation settings section"/>
-          <TextBlock Text="Wan2.2 TI2V 5B Normalを使う動画ジョブの初期値です。変更は次に明示的に追加するジョブから使われ、待機中・処理中のジョブは変わりません。"
+          <TextBlock Text="動画ジョブのモデルと初期値です。変更は次に明示的に追加するジョブから使われ、待機中・処理中のジョブは変わりません。"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
                   BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,10">
             <StackPanel>
-              <TextBlock Text="Model · Wan2.2 TI2V 5B FP16 / Normal"
-                         Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,9"/>
+              <TextBlock Text="Model" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+              <ComboBox x:Name="AppVideoModelComboBox"
+                        Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                        SelectionChanged="VideoGenerationModel_SelectionChanged"
+                        AutomationProperties.Name="Default video generation model">
+                <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用／標準" Tag="wan22-ti2v-5b"/>
+                <ComboBoxItem Content="HunyuanVideo 1.5 — 実写・人物向け／実験" Tag="hunyuan-video-1.5-i2v-step-distilled-experimental"/>
+              </ComboBox>
+              <TextBlock x:Name="AppVideoModelDescriptionText"
+                         Text="RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,5,0,9"/>
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="*"/>
@@ -2177,7 +2193,7 @@
              Placement="Bottom" HorizontalOffset="-270" VerticalOffset="7"
              AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False"
              AutomationProperties.Name="Video generation board">
-        <Border Width="390" Padding="16" CornerRadius="7"
+        <Border Width="430" Padding="16" CornerRadius="7"
                 Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
           <StackPanel>
             <DockPanel LastChildFill="True" Margin="0,0,0,12">
@@ -2195,6 +2211,23 @@
             </DockPanel>
             <TextBlock Text="選んだ画像を最初のフレームとして使います。空欄なら、構図とキャラクターを保つ穏やかなNormalモーションを使います。"
                        Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+            <TextBlock x:Name="ModalVideoSourceText"
+                       Text="入力: 拡大画面を開いた時点の画像"
+                       Foreground="{StaticResource TextPrimary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,0,0,8"
+                       AutomationProperties.Name="Video generation source version"/>
+            <TextBlock Text="Model" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalVideoModelComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                      SelectionChanged="VideoGenerationModel_SelectionChanged"
+                      AutomationProperties.Name="Video generation model">
+              <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用／標準" Tag="wan22-ti2v-5b"/>
+              <ComboBoxItem Content="HunyuanVideo 1.5 — 実写・人物向け／実験" Tag="hunyuan-video-1.5-i2v-step-distilled-experimental"/>
+            </ComboBox>
+            <TextBlock x:Name="ModalVideoModelDescriptionText"
+                       Text="RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,5,0,10"/>
             <DockPanel Margin="0,0,0,4">
               <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
                       Content="Reset" Height="24" Padding="8,2"
@@ -2295,7 +2328,7 @@
             <MenuItem Header="Favorite +1" Click="ModalFavoriteIncrease_Click" AutomationProperties.Name="Increase favorite level"/>
             <MenuItem Header="Favorite -1" Click="ModalFavoriteDecrease_Click" AutomationProperties.Name="Decrease favorite level"/>
             <Separator/>
-            <MenuItem Header="動画化..." Click="ModalContextVideo_Click" AutomationProperties.Name="Open video generation board"/>
+            <MenuItem Header="表示中の画像を動画化..." Click="ModalContextVideo_Click" AutomationProperties.Name="Open video generation board for displayed image"/>
             <MenuItem x:Name="ModalContextEnhancedToggle" Header="Show Enhanced / Original" Click="ToggleModalEnhanced_Click" AutomationProperties.Name="Toggle enhanced image output"/>
             <MenuItem Header="{DynamicResource UiOpenExternally}" Click="OpenSelectedExternally_Click" AutomationProperties.Name="Open displayed image externally"/>
             <MenuItem Header="{DynamicResource UiShowSourceFolder}" Click="ShowSelectedInFolder_Click" AutomationProperties.Name="Show source in folder"/>

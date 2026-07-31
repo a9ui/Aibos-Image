@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -17046,7 +17047,7 @@ public partial class App : Application
             upscaleOutput,
             photorealSource,
             photorealOutput,
-            invalidSource,
+            photorealSource,
             videoOutput,
             olderVideoOutput,
             invalidSource,
@@ -17099,11 +17100,14 @@ public partial class App : Application
                 int afterClearCount = win.FilteredCountForSmoke;
                 win.SetVideoOnlyFilterForSmoke(true);
                 int videoFilteredCount = win.FilteredCountForSmoke;
-                bool videoVisible = win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
+                bool videoVisible = win.SelectFileNameForSmoke(
+                    Path.GetFileName(photorealSource));
                 bool selectedVideoBadge =
-                    win.VideoGeneratedForFileForSmoke(Path.GetFileName(invalidSource));
+                    win.VideoGeneratedForFileForSmoke(
+                        Path.GetFileName(photorealSource));
                 string? selectedVideoOutput =
-                    win.VideoOutputPathForFileForSmoke(Path.GetFileName(invalidSource));
+                    win.VideoOutputPathForFileForSmoke(
+                        Path.GetFileName(photorealSource));
                 bool videoOutputMatches = string.Equals(
                     selectedVideoOutput,
                     videoOutput,
@@ -17161,7 +17165,8 @@ public partial class App : Application
 
                 win.SetVideoOnlyFilterForSmoke(false);
                 bool ordinaryVideoSourceSelected =
-                    win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
+                    win.SelectFileNameForSmoke(
+                        Path.GetFileName(photorealSource));
                 bool ordinaryModalOpened = win.OpenModalForSmoke();
                 bool ordinaryModalStayedImage = !win.ModalShowingVideoForSmoke
                     && !win.ModalVideoPlayingForSmoke;
@@ -17182,7 +17187,13 @@ public partial class App : Application
                 bool videoDefaults = win.VideoGenerationSettingsForSmoke
                         is (6, 16, 409600, "")
                     && win.VideoGenerationEstimateForSmoke
-                        is (97, 158, 219);
+                        is (97, 158, 219)
+                    && win.VideoModelIdForSmoke == "wan22-ti2v-5b";
+                win.SelectVideoModelForSmoke(
+                    "hunyuan-video-1.5-i2v-step-distilled-experimental");
+                bool experimentalVideoModelBlocked =
+                    !win.VideoModelRunnableForSmoke;
+                win.SelectVideoModelForSmoke("wan22-ti2v-5b");
                 win.ConfigureVideoGenerationForSmoke(
                     4,
                     12,
@@ -17193,12 +17204,12 @@ public partial class App : Application
                 {
                     if (request.Method == HttpMethod.Get)
                     {
+                        using JsonDocument jobsDocument =
+                            JsonDocument.Parse(File.ReadAllText(jobsPath));
                         return new HttpResponseMessage(HttpStatusCode.OK)
                         {
-                            Content = new StringContent(
-                                "{\"jobs\":[],\"counts\":{\"queued\":0,\"running\":0,\"succeeded\":0,\"failed\":0,\"canceled\":0}}",
-                                Encoding.UTF8,
-                                "application/json"),
+                            Content = JsonContent.Create(
+                                jobsDocument.RootElement.Clone()),
                         };
                     }
 
@@ -17214,9 +17225,15 @@ public partial class App : Application
                     };
                 });
                 bool videoBoardSourceSelected =
-                    win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
+                    win.SelectFileNameForSmoke(
+                        Path.GetFileName(photorealSource));
                 bool videoBoardModalOpened = win.OpenModalForSmoke();
                 bool videoBoardOpened = win.OpenVideoGenerationBoardForSmoke();
+                bool videoBoardPhotorealSource =
+                    win.VideoSourceForSmoke is
+                    {
+                        ProducerJobId: "photoreal-ok",
+                    };
                 bool videoSurface = win.VideoGenerationSurfaceForSmoke
                     && win.VideoGenerationEstimateForSmoke
                         is (49, 61, 85);
@@ -17228,7 +17245,37 @@ public partial class App : Application
                     using JsonDocument videoRequestDocument =
                         JsonDocument.Parse(videoRequestJson);
                     JsonElement videoRequest = videoRequestDocument.RootElement;
-                    videoRequestExact = videoRequest.TryGetProperty(
+                    string[] videoRequestRootKeys = videoRequest
+                        .EnumerateObject()
+                        .Select(static property => property.Name)
+                        .OrderBy(static name => name, StringComparer.Ordinal)
+                        .ToArray();
+                    videoRequestExact = videoRequestRootKeys.SequenceEqual(
+                            [
+                                "adapterId",
+                                "mediaKind",
+                                "operation",
+                                "presetId",
+                                "sourceId",
+                                "sourceProducerJobId",
+                                "video",
+                            ],
+                            StringComparer.Ordinal)
+                        && !videoRequest.TryGetProperty(
+                            "sourcePath",
+                            out _)
+                        && videoRequest.TryGetProperty(
+                            "sourceId",
+                            out JsonElement videoSourceId)
+                        && string.Equals(
+                            videoSourceId.GetString(),
+                            photorealSource,
+                            StringComparison.OrdinalIgnoreCase)
+                        && videoRequest.TryGetProperty(
+                            "sourceProducerJobId",
+                            out JsonElement sourceProducerJobId)
+                        && sourceProducerJobId.GetString() == "photoreal-ok"
+                        && videoRequest.TryGetProperty(
                             "operation",
                             out JsonElement videoOperation)
                         && videoOperation.GetString() == "video"
@@ -17263,9 +17310,11 @@ public partial class App : Application
                 second.SetVideoOnlyFilterForSmoke(true);
                 int reloadVideoFilteredCount = second.FilteredCountForSmoke;
                 bool reloadVideoVisible =
-                    second.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
+                    second.SelectFileNameForSmoke(
+                        Path.GetFileName(photorealSource));
                 bool reloadVideoSettings = second.VideoGenerationSettingsForSmoke
-                    is (4, 12, 307200, "pan left slowly");
+                        is (4, 12, 307200, "pan left slowly")
+                    && second.VideoModelIdForSmoke == "wan22-ti2v-5b";
                 second.OpenAppSettingsForSmoke();
                 bool outputRootSettingsSurface = second.AppEnhancementOutputRootSurfaceForSmoke;
                 string alternateOutputRoot = Path.Combine(smokeRoot, "alternate-managed-outputs");
@@ -17342,9 +17391,11 @@ public partial class App : Application
                     && ordinaryNeighborNavigated
                     && ordinaryNeighborStayedImage
                     && videoDefaults
+                    && experimentalVideoModelBlocked
                     && videoBoardSourceSelected
                     && videoBoardModalOpened
                     && videoBoardOpened
+                    && videoBoardPhotorealSource
                     && videoSurface
                     && videoQueueSucceeded
                     && videoRequestExact
@@ -17780,7 +17831,8 @@ public partial class App : Application
                     string delivery = "legacy",
                     int durationSeconds = 6,
                     int playbackFps = 16,
-                    int nativeFrameCount = 97)
+                    int nativeFrameCount = 97,
+                    object? sourceProducerJobId = null)
                 {
                     var video = new Dictionary<string, object?>(
                         StringComparer.Ordinal)
@@ -17839,7 +17891,7 @@ public partial class App : Application
                         };
                     }
 
-                    return new Dictionary<string, object?>(
+                    var job = new Dictionary<string, object?>(
                         StringComparer.OrdinalIgnoreCase)
                     {
                         ["id"] = id,
@@ -17867,6 +17919,9 @@ public partial class App : Application
                             "2026-07-23T00:00:01.000Z",
                         ["video"] = video,
                     };
+                    if (sourceProducerJobId is not null)
+                        job["sourceProducerJobId"] = sourceProducerJobId;
+                    return job;
                 }
 
                 object LegacyJob(
@@ -17969,6 +18024,12 @@ public partial class App : Application
                             error: "Malformed delivery metadata",
                             presetHash: "0b6b30d0ae9d",
                             delivery: "malformed"),
+                        VideoJob(
+                            "video-malformed-provenance-job",
+                            "failed",
+                            100,
+                            error: "Malformed source provenance",
+                            sourceProducerJobId: 42),
                         Job(
                             "future-reader-job",
                             "failed",
@@ -18315,6 +18376,10 @@ public partial class App : Application
                     window.EnhancementJobViewIdentityForSmoke(
                         "video-reader-only-job")
                         as EnhancementWorkspaceJobView;
+                var malformedProvenanceVideoView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "video-malformed-provenance-job")
+                        as EnhancementWorkspaceJobView;
                 var futureReaderView =
                     window.EnhancementJobViewIdentityForSmoke("future-reader-job")
                         as EnhancementWorkspaceJobView;
@@ -18398,6 +18463,24 @@ public partial class App : Application
                         "video-reader-only-job",
                         "up")
                     && File.Exists(videoMalformedDeliveryOutputPath);
+                bool malformedProvenanceVideoSafe =
+                    malformedProvenanceVideoView is
+                    {
+                        Operation: "video",
+                        IsVideoOperation: true,
+                        VideoMutationSafe: false,
+                        CanCancel: false,
+                        CanRetry: false,
+                        CanReorder: false,
+                        CanUseOutput: false,
+                    }
+                    && !await window.CancelEnhancementJobForSmokeAsync(
+                        "video-malformed-provenance-job")
+                    && !await window.RetryEnhancementJobForSmokeAsync(
+                        "video-malformed-provenance-job")
+                    && !await window.MoveEnhancementJobForSmokeAsync(
+                        "video-malformed-provenance-job",
+                        "up");
                 bool unknownOperationSafe = futureReaderView is
                     {
                         Operation: "unsupported",
@@ -18594,7 +18677,7 @@ public partial class App : Application
                         && body.GetProperty("maxDimension").GetInt32() == 1024;
                 }
                 ok = initial.Visible
-                    && initial.Total == 15
+                    && initial.Total == 16
                     && initial.Active == 4
                     && initial.Polling
                     && passiveOpen
@@ -18609,7 +18692,7 @@ public partial class App : Application
                     && running.Filtered == 1
                     && queued.Filtered == 3
                     && queueInventoryOrdered
-                    && failed.Filtered == 6
+                    && failed.Filtered == 7
                     && completed.Filtered == 3
                     && canceled.Filtered == 2
                     && operationLabelsVisible
@@ -18617,35 +18700,36 @@ public partial class App : Application
                     && legacyVideoMutationSafe
                     && deliveryVideoMutationSafe
                     && readerOnlyVideoSafe
+                    && malformedProvenanceVideoSafe
                     && unknownOperationSafe
                     && legacyMissingOperation
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
                     && moveNextIssued
                     && cancelIssued
-                    && afterCancel.Total == 15
+                    && afterCancel.Total == 16
                     && afterCancel.Active == 4
                     && afterCancel.Polling
                     && videoCancelPendingSafe
                     && videoCancelSettled
                     && afterVideoCancelSettled.Active == 3
                     && failedCancelIssued
-                    && afterFailedCancel.Total == 15
+                    && afterFailedCancel.Total == 16
                     && afterFailedCancel.Active == 3
                     && afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
                     && canceledAfterActions.Filtered == 4
                     && retryIssued
-                    && afterRetry.Total == 16
+                    && afterRetry.Total == 17
                     && afterRetry.Active == 4
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 4", StringComparison.Ordinal))
                     && canceledRetryIssued
-                    && afterCanceledRetry.Total == 17
+                    && afterCanceledRetry.Total == 18
                     && afterCanceledRetry.Active == 5
                     && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
                     && rerunIssued
                     && rerunSettingsContract
-                    && afterRerun.Total == 18
+                    && afterRerun.Total == 19
                     && afterRerun.Active == 6
                     && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
                     && clearQueuedIssued
@@ -18735,6 +18819,7 @@ public partial class App : Application
                     legacyVideoMutationSafe,
                     deliveryVideoMutationSafe,
                     readerOnlyVideoSafe,
+                    malformedProvenanceVideoSafe,
                     unknownOperationSafe,
                     legacyMissingOperation,
                     unsupportedNoMutation,
@@ -25286,6 +25371,7 @@ public partial class App : Application
             string outputPath,
             int seed,
             bool includeDelivery,
+            bool usePhotorealSource,
             string createdAt)
         {
             var video = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -25324,12 +25410,18 @@ public partial class App : Application
                 };
             }
 
-            return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            var job = new Dictionary<string, object?>(
+                StringComparer.OrdinalIgnoreCase)
             {
                 ["id"] = id,
                 ["sourceId"] = videoSourcePath,
-                ["sourcePath"] = videoSourcePath,
-                ["sourceSignature"] = SourceSignature(videoSourcePath),
+                ["sourcePath"] = usePhotorealSource
+                    ? photorealOutputPath
+                    : videoSourcePath,
+                ["sourceSignature"] = SourceSignature(
+                    usePhotorealSource
+                        ? photorealOutputPath
+                        : videoSourcePath),
                 ["presetId"] = "wan22-ti2v-5b-normal-v1",
                 ["adapterId"] = "wan22-ti2v-5b-core-v1",
                 ["operation"] = "video",
@@ -25341,6 +25433,9 @@ public partial class App : Application
                 ["updatedAt"] = createdAt,
                 ["video"] = video,
             };
+            if (usePhotorealSource)
+                job["sourceProducerJobId"] = "photoreal-ok";
+            return job;
         }
 
         var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -25356,12 +25451,14 @@ public partial class App : Application
                     olderVideoOutputPath,
                     123456788,
                     includeDelivery: false,
+                    usePhotorealSource: false,
                     createdAt: "2026-07-30T00:00:00.000Z"),
                 SucceededVideo(
                     "video-newest",
                     videoOutputPath,
                     123456789,
                     includeDelivery: true,
+                    usePhotorealSource: true,
                     createdAt: "2026-07-30T00:00:01.000Z"),
                 Succeeded("stale-output", invalidSourcePath, missingOutputPath, "upscale"),
                 new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)

@@ -11,6 +11,10 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
+    private const string WanVideoModelId = "wan22-ti2v-5b";
+    private const string HunyuanVideoModelId =
+        "hunyuan-video-1.5-i2v-step-distilled-experimental";
+    private const string DefaultVideoModelId = WanVideoModelId;
     private const string DefaultVideoPresetId = "wan22-ti2v-5b-normal-v1";
     private const string DefaultVideoBackendId = "wan22-ti2v-5b-core-v1";
     private const int DefaultVideoDurationSeconds = 6;
@@ -32,9 +36,17 @@ public partial class MainWindow
     private int _videoDurationSeconds = DefaultVideoDurationSeconds;
     private int _videoPlaybackFps = DefaultVideoPlaybackFps;
     private int _videoMaximumPixelArea = DefaultVideoMaximumPixelArea;
+    private string _videoModelId = DefaultVideoModelId;
     private string _videoPrompt = "";
     private bool _syncingVideoGenerationSettings;
     private bool _videoGenerationRequestPending;
+    private VideoSourceChoice? _videoSourceChoice;
+
+    private sealed record VideoSourceChoice(
+        string SourceIdentity,
+        string DisplayPath,
+        string? ProducerJobId,
+        string Label);
 
     private sealed record VideoGenerationRequestSettings(
         string PresetId,
@@ -52,6 +64,137 @@ public partial class MainWindow
             _videoPlaybackFps,
             _videoMaximumPixelArea,
             _videoPrompt.Trim());
+
+    private static bool IsVideoModelRunnable(string modelId)
+        => string.Equals(modelId, WanVideoModelId, StringComparison.Ordinal);
+
+    private static string VideoModelLabel(string modelId)
+        => string.Equals(modelId, HunyuanVideoModelId, StringComparison.Ordinal)
+            ? "HunyuanVideo 1.5 — 実写・人物向け／実験"
+            : "Wan2.2 TI2V 5B — アニメ・汎用／標準";
+
+    private static string VideoModelDescription(string modelId)
+        => string.Equals(modelId, HunyuanVideoModelId, StringComparison.Ordinal)
+            ? "実写・人物の顔や手を重視する候補。12GBの隔離ランタイム実測前なので、現在は選択内容の確認だけできます。"
+            : "RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。";
+
+    private static string SelectedVideoModelId(ComboBox comboBox)
+    {
+        string? selected = (comboBox.SelectedItem as ComboBoxItem)
+            ?.Tag
+            ?.ToString();
+        return selected is WanVideoModelId or HunyuanVideoModelId
+            ? selected
+            : DefaultVideoModelId;
+    }
+
+    private static void SelectVideoModelId(
+        ComboBox comboBox,
+        string modelId)
+    {
+        ComboBoxItem? item = comboBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(candidate => string.Equals(
+                candidate.Tag?.ToString(),
+                modelId,
+                StringComparison.Ordinal));
+        comboBox.SelectedItem = item
+            ?? comboBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
+    }
+
+    private bool TryCaptureVideoSource(
+        Tile tile,
+        string? requestedSource,
+        out VideoSourceChoice source,
+        out string error)
+    {
+        source = null!;
+        error = "";
+        if (!TryResolveEnhancementSourceIdentity(
+                tile.Path,
+                out string sourceIdentity)
+            || !File.Exists(sourceIdentity))
+        {
+            error = "元画像が見つからないため動画化できません。";
+            return false;
+        }
+
+        ManagedEnhancementVersion? photorealVersion = null;
+        if (requestedSource is null
+            && TryGetCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion current)
+            && string.Equals(
+                current.Operation,
+                "photoreal",
+                StringComparison.Ordinal))
+        {
+            photorealVersion = current;
+        }
+        else if (string.Equals(
+            requestedSource,
+            "photoreal",
+            StringComparison.Ordinal))
+        {
+            foreach (ManagedEnhancementVersion candidate
+                     in GetManagedEnhancementVersionsForPath(tile.Path))
+            {
+                if (!string.Equals(
+                        candidate.Operation,
+                        "photoreal",
+                        StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(candidate.JobId)
+                    || !TryCreateManagedEnhancedOutput(
+                        tile,
+                        candidate.Output.OutputPath,
+                        candidate.Output.SourceSize,
+                        candidate.Output.SourceMtimeMs,
+                        out ManagedEnhancedOutput currentOutput))
+                {
+                    continue;
+                }
+
+                photorealVersion = candidate with
+                {
+                    Output = currentOutput,
+                };
+                break;
+            }
+            if (photorealVersion is null)
+            {
+                error = "この画像には利用できる実写化バージョンがありません。";
+                return false;
+            }
+        }
+
+        if (photorealVersion is not null)
+        {
+            if (string.IsNullOrWhiteSpace(photorealVersion.JobId)
+                || !File.Exists(photorealVersion.Output.OutputPath))
+            {
+                error = "実写化バージョンのJobまたは出力が見つかりません。";
+                return false;
+            }
+
+            source = new VideoSourceChoice(
+                sourceIdentity,
+                photorealVersion.Output.OutputPath,
+                photorealVersion.JobId,
+                $"実写版 · {Path.GetFileName(photorealVersion.Output.OutputPath)}");
+            return true;
+        }
+
+        string label = requestedSource is null
+            && _modalShowingEnhanced
+                ? "Original（高画質化表示は入力対象外）"
+                : "Original";
+        source = new VideoSourceChoice(
+            sourceIdentity,
+            sourceIdentity,
+            null,
+            label);
+        return true;
+    }
 
     private static (
         int FrameCount,
@@ -90,6 +233,11 @@ public partial class MainWindow
 
     private string VideoGenerationEstimateText()
     {
+        if (!IsVideoModelRunnable(_videoModelId))
+        {
+            return "完了目安: 未計測（12GB環境の隔離評価を通過するまで実行しません）";
+        }
+
         (
             _,
             int estimatedMinimumSeconds,
@@ -118,25 +266,39 @@ public partial class MainWindow
         OpenModal();
         if (Modal.Visibility != Visibility.Visible)
             return;
+        string requestedSource = (sender as MenuItem)?.Tag?.ToString()
+            ?? "original";
         _ = Dispatcher.BeginInvoke(
-            new Action(OpenVideoGenerationBoard),
+            new Action(() => OpenVideoGenerationBoard(requestedSource)),
             DispatcherPriority.Input);
     }
 
     private void ModalContextVideo_Click(object sender, RoutedEventArgs e)
         => OpenVideoGenerationBoard();
 
-    private void OpenVideoGenerationBoard()
+    private void OpenVideoGenerationBoard(string? requestedSource = null)
     {
         if (ModalVideoGenerationPopup is null
-            || SelectedTile() is not Tile { IsRealFile: true })
+            || SelectedTile() is not Tile { IsRealFile: true } tile)
         {
             return;
         }
+        if (!TryCaptureVideoSource(
+                tile,
+                requestedSource,
+                out VideoSourceChoice source,
+                out string sourceError))
+        {
+            SetTransientStatusToast(sourceError);
+            return;
+        }
 
+        _videoSourceChoice = source;
         SyncVideoGenerationSettingsControls();
         VideoGenerationStatusText.Text =
-            "実行すると既存のAI Jobsキューへ追加します。画像閲覧だけでは開始しません。";
+            IsVideoModelRunnable(_videoModelId)
+                ? "実行すると既存のAI Jobsキューへ追加します。画像閲覧だけでは開始しません。"
+                : "この実験モデルは12GB実測前のため、現在は実行できません。Wanを選ぶと実行できます。";
         ModalVideoGenerationPopup.IsOpen = true;
         _ = Dispatcher.BeginInvoke(
             new Action(() => ModalVideoPromptTextBox.Focus()),
@@ -188,6 +350,28 @@ public partial class MainWindow
             SaveState();
     }
 
+    private void VideoGenerationModel_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_syncingVideoGenerationSettings
+            || AppVideoModelComboBox is null
+            || ModalVideoModelComboBox is null)
+            return;
+
+        ComboBox source = ReferenceEquals(sender, AppVideoModelComboBox)
+            ? AppVideoModelComboBox
+            : ModalVideoModelComboBox;
+        _videoModelId = SelectedVideoModelId(source);
+        SyncVideoGenerationSettingsControls();
+        SetVideoGenerationSettingsStatus(
+            IsVideoModelRunnable(_videoModelId)
+                ? "Wan2.2を使用します。保存済みです。"
+                : "HunyuanVideo 1.5は実写・人物向けの実験候補です。12GB実測前のため実行は無効です。");
+        if (!_initializing)
+            SaveState();
+    }
+
     private void VideoGenerationPrompt_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_syncingVideoGenerationSettings)
@@ -210,7 +394,7 @@ public partial class MainWindow
 
     private void ResetVideoGenerationSettings_Click(object sender, RoutedEventArgs e)
     {
-        RestoreVideoGenerationSettings(null, null, null, null);
+        RestoreVideoGenerationSettings(null, null, null, null, null);
         SetVideoGenerationSettingsStatus(
             "6秒・生成16fps・最終30fps・最大409,600px・Normal既定プロンプトに戻しました。");
         if (!_initializing)
@@ -229,7 +413,8 @@ public partial class MainWindow
         int? durationSeconds,
         int? playbackFps,
         int? maximumPixelArea,
-        string? prompt)
+        string? prompt,
+        string? modelId = null)
     {
         _videoDurationSeconds = durationSeconds is int duration
             && SupportedVideoDurationSeconds.Contains(duration)
@@ -243,6 +428,9 @@ public partial class MainWindow
             && SupportedVideoMaximumPixelAreas.Contains(area)
                 ? area
                 : DefaultVideoMaximumPixelArea;
+        _videoModelId = modelId is WanVideoModelId or HunyuanVideoModelId
+            ? modelId
+            : DefaultVideoModelId;
         string restoredPrompt = prompt ?? "";
         _videoPrompt = restoredPrompt.Length <= MaxVideoPromptLength
             ? restoredPrompt
@@ -266,6 +454,7 @@ public partial class MainWindow
             SelectIntegerTag(ModalVideoDurationComboBox, _videoDurationSeconds);
             SelectIntegerTag(ModalVideoFpsComboBox, _videoPlaybackFps);
             SelectIntegerTag(ModalVideoResolutionComboBox, _videoMaximumPixelArea);
+            SelectVideoModelId(ModalVideoModelComboBox, _videoModelId);
             ModalVideoPromptTextBox.Text = _videoPrompt;
             if (AppVideoDurationComboBox is not null)
                 SelectIntegerTag(AppVideoDurationComboBox, _videoDurationSeconds);
@@ -273,8 +462,17 @@ public partial class MainWindow
                 SelectIntegerTag(AppVideoFpsComboBox, _videoPlaybackFps);
             if (AppVideoResolutionComboBox is not null)
                 SelectIntegerTag(AppVideoResolutionComboBox, _videoMaximumPixelArea);
+            if (AppVideoModelComboBox is not null)
+                SelectVideoModelId(AppVideoModelComboBox, _videoModelId);
             if (AppVideoPromptTextBox is not null)
                 AppVideoPromptTextBox.Text = _videoPrompt;
+            string modelDescription = VideoModelDescription(_videoModelId);
+            ModalVideoPresetText.Text = VideoModelLabel(_videoModelId);
+            ModalVideoModelDescriptionText.Text = modelDescription;
+            AppVideoModelDescriptionText.Text = modelDescription;
+            ModalVideoSourceText.Text = _videoSourceChoice is null
+                ? "入力: 拡大画面を開いた時点の画像"
+                : $"入力: {_videoSourceChoice.Label}";
             string estimateText = VideoGenerationEstimateText();
             if (ModalVideoGenerationEstimateText is not null)
                 ModalVideoGenerationEstimateText.Text = estimateText;
@@ -300,11 +498,20 @@ public partial class MainWindow
         // canonicalizes the selected source and verifies that it still exists
         // before sending any request.
         bool hasSource = SelectedTile() is { IsRealFile: true };
+        bool capturedSourceReady = _videoSourceChoice is VideoSourceChoice source
+            && File.Exists(source.SourceIdentity)
+            && File.Exists(source.DisplayPath);
+        bool modelReady = IsVideoModelRunnable(_videoModelId);
         ModalVideoGenerateButton.IsEnabled = hasSource && !_videoGenerationRequestPending;
-        QueueVideoGenerationButton.IsEnabled = hasSource && !_videoGenerationRequestPending;
+        QueueVideoGenerationButton.IsEnabled =
+            capturedSourceReady
+            && modelReady
+            && !_videoGenerationRequestPending;
         QueueVideoGenerationButton.Content = _videoGenerationRequestPending
             ? "追加中..."
-            : "動画化を実行";
+            : modelReady
+                ? "動画化を実行"
+                : "実験モデルは準備中";
         AutomationProperties.SetName(
             QueueVideoGenerationButton,
             _videoGenerationRequestPending
@@ -318,9 +525,10 @@ public partial class MainWindow
     private async Task<bool> QueueVideoGenerationAsync()
     {
         if (_videoGenerationRequestPending
-            || SelectedTile() is not Tile { IsRealFile: true } tile
-            || !TryResolveEnhancementSourceIdentity(tile.Path, out string sourceIdentity)
-            || !File.Exists(sourceIdentity))
+            || _videoSourceChoice is not VideoSourceChoice source
+            || !File.Exists(source.SourceIdentity)
+            || !File.Exists(source.DisplayPath)
+            || !IsVideoModelRunnable(_videoModelId))
         {
             return false;
         }
@@ -333,34 +541,39 @@ public partial class MainWindow
         try
         {
             EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionReadyForExplicitActionAsync(sourceIdentity);
+                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
+                    source.SourceIdentity);
             if (!readiness.Ok)
             {
                 SetVideoGenerationSettingsStatus(readiness.Error);
                 return false;
             }
 
+            var requestBody = new Dictionary<string, object?>
+            {
+                ["sourceId"] = source.SourceIdentity,
+                ["operation"] = "video",
+                ["mediaKind"] = "video",
+                ["presetId"] = settings.PresetId,
+                ["adapterId"] = settings.BackendId,
+                ["video"] = new
+                {
+                    requested = new
+                    {
+                        durationSeconds = settings.DurationSeconds,
+                        playbackFps = settings.PlaybackFps,
+                        maximumPixelArea = settings.MaximumPixelArea,
+                        prompt = settings.Prompt,
+                    },
+                },
+            };
+            if (!string.IsNullOrWhiteSpace(source.ProducerJobId))
+                requestBody["sourceProducerJobId"] = source.ProducerJobId;
+
             EnhancementApiResponse response = await SendEnhancementApiAsync(
                 HttpMethod.Post,
                 "api/enhance/jobs",
-                new
-                {
-                    sourceId = sourceIdentity,
-                    operation = "video",
-                    mediaKind = "video",
-                    presetId = settings.PresetId,
-                    adapterId = settings.BackendId,
-                    video = new
-                    {
-                        requested = new
-                        {
-                            durationSeconds = settings.DurationSeconds,
-                            playbackFps = settings.PlaybackFps,
-                            maximumPixelArea = settings.MaximumPixelArea,
-                            prompt = settings.Prompt,
-                        },
-                    },
-                });
+                requestBody);
             if (!response.Ok
                 || response.Payload is not JsonElement payload
                 || !payload.TryGetProperty("job", out JsonElement job)
@@ -377,7 +590,7 @@ public partial class MainWindow
             SetVideoGenerationSettingsStatus(
                 $"動画ジョブを共有GPUキューへ追加しました{suffix}。");
             SetTransientStatusToast(
-                $"{tile.FileName}: 動画化をJobsキューへ追加しました。");
+                $"{Path.GetFileName(source.SourceIdentity)}: {source.Label}から動画化をJobsキューへ追加しました。");
             ModalVideoGenerationPopup.IsOpen = false;
             return true;
         }
@@ -388,9 +601,10 @@ public partial class MainWindow
         }
     }
 
-    public bool OpenVideoGenerationBoardForSmoke()
+    public bool OpenVideoGenerationBoardForSmoke(
+        string? requestedSource = null)
     {
-        OpenVideoGenerationBoard();
+        OpenVideoGenerationBoard(requestedSource);
         return ModalVideoGenerationPopup.IsOpen;
     }
 
@@ -423,12 +637,32 @@ public partial class MainWindow
             maximumPixelArea,
             prompt);
 
+    public void SelectVideoModelForSmoke(string modelId)
+    {
+        _videoModelId = modelId;
+        SyncVideoGenerationSettingsControls();
+    }
+
+    public string VideoModelIdForSmoke => _videoModelId;
+    public bool VideoModelRunnableForSmoke =>
+        IsVideoModelRunnable(_videoModelId);
+
+    public (string Label, string? ProducerJobId)? VideoSourceForSmoke
+        => _videoSourceChoice is null
+            ? null
+            : (_videoSourceChoice.Label, _videoSourceChoice.ProducerJobId);
+
     public Task<bool> QueueVideoGenerationForSmokeAsync()
         => QueueVideoGenerationAsync();
 
     public bool VideoGenerationSurfaceForSmoke
         => ModalVideoGenerateButton is not null
             && ModalVideoGenerationPopup is not null
+            && ModalVideoModelComboBox.Items.Count == 2
+            && AppVideoModelComboBox.Items.Count == 2
+            && ModalVideoModelDescriptionText.Text.Contains(
+                "12GB",
+                StringComparison.Ordinal)
             && ModalVideoPromptTextBox.MaxLength == MaxVideoPromptLength
             && string.Equals(
                 AutomationProperties.GetName(QueueVideoGenerationButton),

@@ -3760,6 +3760,10 @@ public partial class MainWindow : Window
             EnhancementSourceIdentityComparer);
         var nextCatalogVideoVersionsByPath = new Dictionary<string, List<ManagedVideoVersion>>(
             StringComparer.OrdinalIgnoreCase);
+        var pendingVideoJobs = new List<JsonElement>();
+        var photorealVideoSources =
+            new Dictionary<string, ManagedPhotorealVideoSource>(
+                StringComparer.Ordinal);
         int nextJobsRead = 0;
         int nextCandidateCount = 0;
         int nextVideoCandidateCount = 0;
@@ -3778,6 +3782,18 @@ public partial class MainWindow : Window
                 throw new InvalidDataException("jobs array missing");
             }
 
+            var seenJobIds = new HashSet<string>(StringComparer.Ordinal);
+            var ambiguousJobIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (JsonElement job in jobsElement.EnumerateArray())
+            {
+                if (job.ValueKind == JsonValueKind.Object
+                    && TryGetStringProperty(job, "id", out string? jobId)
+                    && !seenJobIds.Add(jobId!))
+                {
+                    ambiguousJobIds.Add(jobId!);
+                }
+            }
+
             // The Browser store appends jobs. Reverse it so version 1 is always
             // the newest succeeded output, matching the Browser GET order.
             foreach (var job in jobsElement.EnumerateArray().Reverse())
@@ -3791,33 +3807,7 @@ public partial class MainWindow : Window
                 string operation = ReadEnhancementOperation(job);
                 if (operation == "video")
                 {
-                    if (!TryBuildManagedVideoVersion(
-                            job,
-                            out string resolvedVideoSource,
-                            out ManagedVideoVersion videoVersion,
-                            out IReadOnlyList<string> videoCatalogAliases))
-                    {
-                        continue;
-                    }
-
-                    if (!nextVideoVersions.TryGetValue(
-                            resolvedVideoSource,
-                            out List<ManagedVideoVersion>? videoVersions))
-                    {
-                        videoVersions = [];
-                        nextVideoVersions[resolvedVideoSource] = videoVersions;
-                        nextVideoCandidateCount++;
-                    }
-                    foreach (string alias in videoCatalogAliases)
-                        nextCatalogVideoVersionsByPath.TryAdd(alias, videoVersions);
-                    if (!videoVersions.Any(candidate =>
-                            string.Equals(
-                                candidate.Output.OutputPath,
-                                videoVersion.Output.OutputPath,
-                                StringComparison.OrdinalIgnoreCase)))
-                    {
-                        videoVersions.Add(videoVersion);
-                    }
+                    pendingVideoJobs.Add(job);
                     continue;
                 }
                 if (!IsImageEnhancementOperation(operation))
@@ -3836,6 +3826,17 @@ public partial class MainWindow : Window
                     jobId ?? "",
                     operation,
                     output);
+                if (operation == "photoreal"
+                    && !string.IsNullOrWhiteSpace(jobId)
+                    && !ambiguousJobIds.Contains(jobId))
+                {
+                    photorealVideoSources.TryAdd(
+                        jobId,
+                        new ManagedPhotorealVideoSource(
+                            resolvedSource,
+                            output.OutputPath,
+                            catalogAliases));
+                }
                 if (!nextVersions.TryGetValue(resolvedSource, out List<ManagedEnhancementVersion>? versions))
                 {
                     versions = [];
@@ -3857,6 +3858,41 @@ public partial class MainWindow : Window
                             StringComparison.OrdinalIgnoreCase)))
                 {
                     versions.Add(version);
+                }
+            }
+
+            // Video rows can be newer than their photoreal producer and are
+            // encountered first in the reversed store. Resolve them only
+            // after all succeeded image producers have been validated.
+            foreach (JsonElement job in pendingVideoJobs)
+            {
+                if (!TryBuildManagedVideoVersion(
+                        job,
+                        photorealVideoSources,
+                        out string resolvedVideoSource,
+                        out ManagedVideoVersion videoVersion,
+                        out IReadOnlyList<string> videoCatalogAliases))
+                {
+                    continue;
+                }
+
+                if (!nextVideoVersions.TryGetValue(
+                        resolvedVideoSource,
+                        out List<ManagedVideoVersion>? videoVersions))
+                {
+                    videoVersions = [];
+                    nextVideoVersions[resolvedVideoSource] = videoVersions;
+                    nextVideoCandidateCount++;
+                }
+                foreach (string alias in videoCatalogAliases)
+                    nextCatalogVideoVersionsByPath.TryAdd(alias, videoVersions);
+                if (!videoVersions.Any(candidate =>
+                        string.Equals(
+                            candidate.Output.OutputPath,
+                            videoVersion.Output.OutputPath,
+                            StringComparison.OrdinalIgnoreCase)))
+                {
+                    videoVersions.Add(videoVersion);
                 }
             }
 
@@ -7043,6 +7079,29 @@ public partial class MainWindow : Window
         list.SelectedItems.Clear();
         item.IsSelected = true;
         item.Focus();
+        if (list.ContextMenu is ContextMenu contextMenu)
+        {
+            MenuItem? videoMenu = contextMenu.Items
+                .OfType<MenuItem>()
+                .FirstOrDefault(candidate => string.Equals(
+                    candidate.Header?.ToString(),
+                    "動画化",
+                    StringComparison.Ordinal));
+            MenuItem? photorealVideo = videoMenu?.Items
+                .OfType<MenuItem>()
+                .FirstOrDefault(candidate => string.Equals(
+                    candidate.Tag?.ToString(),
+                    "photoreal",
+                    StringComparison.Ordinal));
+            if (photorealVideo is not null)
+            {
+                photorealVideo.IsEnabled = TryCaptureVideoSource(
+                    (Tile)item.DataContext,
+                    "photoreal",
+                    out _,
+                    out _);
+            }
+        }
     }
 
     private async void GalleryContextUpscale_Click(object sender, RoutedEventArgs e)
@@ -18089,7 +18148,8 @@ public partial class MainWindow : Window
             state.VideoDurationSeconds,
             state.VideoPlaybackFps,
             state.VideoMaximumPixelArea,
-            state.VideoPrompt);
+            state.VideoPrompt,
+            state.VideoModelId);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -18233,6 +18293,7 @@ public partial class MainWindow : Window
                 VideoPlaybackFps = _videoPlaybackFps,
                 VideoMaximumPixelArea = _videoMaximumPixelArea,
                 VideoPrompt = _videoPrompt,
+                VideoModelId = _videoModelId,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -22549,11 +22610,30 @@ public partial class MainWindow : Window
                 string.Equals(item.Header?.ToString(), "AI実写化", StringComparison.Ordinal)
                 && string.Equals(AutomationProperties.GetName(item), "AI実写化", StringComparison.Ordinal))
             && menu.Items.OfType<MenuItem>().Any(item =>
-                string.Equals(item.Header?.ToString(), "動画化...", StringComparison.Ordinal)
+                string.Equals(item.Header?.ToString(), "動画化", StringComparison.Ordinal)
                 && string.Equals(
                     AutomationProperties.GetName(item),
-                    "Open video generation board",
-                    StringComparison.Ordinal)));
+                    "Choose video generation source",
+                    StringComparison.Ordinal)
+                && item.Items.OfType<MenuItem>().Count() == 2
+                && item.Items.OfType<MenuItem>().Any(child =>
+                    string.Equals(
+                        child.Header?.ToString(),
+                        "Originalから...",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        child.Tag?.ToString(),
+                        "original",
+                        StringComparison.Ordinal))
+                && item.Items.OfType<MenuItem>().Any(child =>
+                    string.Equals(
+                        child.Header?.ToString(),
+                        "最新の実写版から...",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        child.Tag?.ToString(),
+                        "photoreal",
+                        StringComparison.Ordinal))));
     public bool ModalEdgeChromeContractForSmoke
         => ModalPreviousZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalCenterZoneColumn.Width.GridUnitType == GridUnitType.Star
@@ -23652,6 +23732,7 @@ public sealed class ViewerState
     public int? VideoPlaybackFps { get; set; }
     public int? VideoMaximumPixelArea { get; set; }
     public string? VideoPrompt { get; set; }
+    public string? VideoModelId { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.

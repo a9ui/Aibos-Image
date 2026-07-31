@@ -110,6 +110,21 @@ try {
         ($videoContract.deliveryV1.frameCountByDuration.'6' -eq 180)
         ($videoContract.deliveryV1.pixelFormat -eq "yuv420p")
         ($videoContract.deliveryV1.audio -eq $false)
+        ($videoContract.sourceSelectionV1.requestField -eq
+            "sourceProducerJobId")
+        ($videoContract.sourceSelectionV1.absent -eq
+            "use sourceId as the indexed Original source")
+        ($videoContract.sourceSelectionV1.present -eq
+            "the server resolves the id to one succeeded photoreal job; clients never provide its managed output path")
+        ($videoContract.sourceSelectionV1.producerRequirements.Count -eq 5)
+        ($videoContract.sourceSelectionV1.persistedIdentity.Contains(
+            "sourceId remains the Original catalog identity"))
+        ($videoContract.sourceSelectionV1.retry.Contains(
+            "preserve sourceProducerJobId"))
+        ($videoContract.sourceSelectionV1.deletion.Contains(
+            "queued or running video job"))
+        ($videoContract.sourceSelectionV1.wpf.Contains(
+            "currently displayed photoreal version"))
         ($videoContract.mutationSafetyVectors[0].id -eq
             "legacy-delivery-absent-6s")
         ($videoContract.mutationSafetyVectors[0].expectedMutationSafe -eq
@@ -287,6 +302,7 @@ try {
         'legacyVideoMutationSafe',
         'deliveryVideoMutationSafe',
         'readerOnlyVideoSafe',
+        'malformedProvenanceVideoSafe',
         'videoCancelPendingSafe',
         'videoCancelSettled',
         'videoOutputOpened',
