@@ -1620,6 +1620,13 @@
                   </ComboBox>
                 </StackPanel>
               </Grid>
+              <TextBlock x:Name="AppVideoGenerationEstimateText"
+                         Text="生成目安: 約2分27秒（RTX 4070 SUPER実測基準・キュー待ちを除く）"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,8,0,0"
+                         AutomationProperties.Name="Estimated default video generation time"
+                         AutomationProperties.HelpText="Estimate for Wan generation only; excludes queue wait and future post-processing."
+                         AutomationProperties.LiveSetting="Polite"/>
               <DockPanel Margin="0,11,0,4">
                 <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
                         Content="Reset" Height="25" Padding="8,2"
@@ -2239,6 +2246,13 @@
                 </ComboBox>
               </StackPanel>
             </Grid>
+            <TextBlock x:Name="ModalVideoGenerationEstimateText"
+                       Text="生成目安: 約2分27秒（RTX 4070 SUPER実測基準・キュー待ちを除く）"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,8,0,0"
+                       AutomationProperties.Name="Estimated video generation time"
+                       AutomationProperties.HelpText="Estimate for Wan generation only; excludes queue wait and future post-processing."
+                       AutomationProperties.LiveSetting="Polite"/>
             <TextBlock Text="元画像のアスペクト比を保ち、32px単位で自動調整します。1 worker・GPU推論の並列化なし。"
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,10,0,0"/>
             <TextBlock x:Name="VideoGenerationStatusText"

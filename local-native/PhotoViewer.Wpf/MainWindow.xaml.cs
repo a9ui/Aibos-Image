@@ -284,6 +284,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<Tile, long> _deferredFavoriteNotificationOwners =
         new(ReferenceEqualityComparer.Instance);
     private long _lastDeferredFavoriteNotificationFlushGenerationForSmoke;
+    private Task _latestDeferredFavoritePresentationTask = Task.CompletedTask;
     private bool _favoriteWriterAdopted;
     private bool _seenWriterAdopted;
     private DispatcherTimer? _favoriteWriterPumpTimer;
@@ -9921,12 +9922,13 @@ public partial class MainWindow : Window
             ScheduleSearchStateSave();
             if (projection is not null)
             {
-                _ = CompleteDeferredFavoritePresentationAsync(
-                    deferredTile,
-                    status,
-                    projection,
-                    deferredMutationPath!,
-                    deferredMutationGeneration);
+                _latestDeferredFavoritePresentationTask =
+                    CompleteDeferredFavoritePresentationAsync(
+                        deferredTile,
+                        status,
+                        projection,
+                        deferredMutationPath!,
+                        deferredMutationGeneration);
             }
             else
             {
@@ -20581,6 +20583,8 @@ public partial class MainWindow : Window
                 false,
                 false,
                 "favorite mutation did not schedule a catalog projection"));
+    public Task PendingDeferredFavoritePresentationForSmoke()
+        => _latestDeferredFavoritePresentationTask;
     public async Task<bool> AdjustGalleryFavoritePointerForSmokeAsync(string fileName, int delta)
     {
         Tile? tile = SelectedTile() is { } selected

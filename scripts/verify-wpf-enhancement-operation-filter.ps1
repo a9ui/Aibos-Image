@@ -23,10 +23,12 @@ $buildRoot = Join-Path $runRoot 'build'
 $fixtureRoot = Join-Path $runRoot 'images'
 $resultPath = Join-Path $runRoot 'result.json'
 $resolvedVideoFixture = ''
+$videoFixtureHashBefore = ''
 if (-not [string]::IsNullOrWhiteSpace($VideoFixturePath)) {
     $resolvedVideoFixture = [IO.Path]::GetFullPath($VideoFixturePath)
     Assert-True (Test-Path -LiteralPath $resolvedVideoFixture -PathType Leaf) "Video fixture was not found: $resolvedVideoFixture"
     Assert-True ([string]::Equals([IO.Path]::GetExtension($resolvedVideoFixture), '.mp4', [StringComparison]::OrdinalIgnoreCase)) 'Video fixture must be an MP4 file.'
+    $videoFixtureHashBefore = (Get-FileHash -LiteralPath $resolvedVideoFixture -Algorithm SHA256).Hash
 }
 
 try {
@@ -115,6 +117,9 @@ try {
         Assert-True ($result.realVideoFixtureUsed -eq $true) 'Real MP4 smoke did not report the supplied fixture.'
         Assert-True ($result.videoTransport -eq 'media-foundation') 'Real MP4 smoke did not use Media Foundation.'
         Assert-True ([string]::IsNullOrWhiteSpace($result.videoMediaFailure)) "Media Foundation failure: $($result.videoMediaFailure)"
+        Assert-True (Test-Path -LiteralPath $resolvedVideoFixture -PathType Leaf) 'Real MP4 smoke deleted the supplied fixture.'
+        $videoFixtureHashAfter = (Get-FileHash -LiteralPath $resolvedVideoFixture -Algorithm SHA256).Hash
+        Assert-True ([string]::Equals($videoFixtureHashBefore, $videoFixtureHashAfter, [StringComparison]::Ordinal)) 'Real MP4 smoke modified the supplied fixture.'
     }
     $result | ConvertTo-Json -Depth 5
 }

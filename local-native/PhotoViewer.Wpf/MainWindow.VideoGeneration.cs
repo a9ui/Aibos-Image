@@ -17,6 +17,9 @@ public partial class MainWindow
     private const int DefaultVideoPlaybackFps = 16;
     private const int DefaultVideoMaximumPixelArea = 409_600;
     private const int MaxVideoPromptLength = 2_000;
+    private const double VideoEstimateBaselineSeconds = 146.691;
+    private const int VideoEstimateBaselineFrameCount = 97;
+    private const int VideoEstimateBaselinePixelArea = 409_600;
 
     private static readonly int[] SupportedVideoDurationSeconds = [4, 6];
     private static readonly int[] SupportedVideoPlaybackFps = [12, 16];
@@ -45,6 +48,32 @@ public partial class MainWindow
             _videoPlaybackFps,
             _videoMaximumPixelArea,
             _videoPrompt.Trim());
+
+    private static (int FrameCount, int EstimatedSeconds)
+        EstimateVideoGeneration(int durationSeconds, int playbackFps, int maximumPixelArea)
+    {
+        int frameCount = 4 * (durationSeconds * playbackFps / 4) + 1;
+        double seconds = VideoEstimateBaselineSeconds
+            * frameCount
+            / VideoEstimateBaselineFrameCount
+            * maximumPixelArea
+            / VideoEstimateBaselinePixelArea;
+        return (
+            frameCount,
+            (int)Math.Round(seconds, MidpointRounding.AwayFromZero));
+    }
+
+    private string VideoGenerationEstimateText()
+    {
+        (_, int estimatedSeconds) = EstimateVideoGeneration(
+            _videoDurationSeconds,
+            _videoPlaybackFps,
+            _videoMaximumPixelArea);
+        string duration = estimatedSeconds >= 60
+            ? $"{estimatedSeconds / 60}分{estimatedSeconds % 60:D2}秒"
+            : $"{estimatedSeconds}秒";
+        return $"生成目安: 約{duration}（RTX 4070 SUPER実測基準・キュー待ちを除く）";
+    }
 
     private void OpenModalVideoGeneration_Click(object sender, RoutedEventArgs e)
         => OpenVideoGenerationBoard();
@@ -214,6 +243,11 @@ public partial class MainWindow
                 SelectIntegerTag(AppVideoResolutionComboBox, _videoMaximumPixelArea);
             if (AppVideoPromptTextBox is not null)
                 AppVideoPromptTextBox.Text = _videoPrompt;
+            string estimateText = VideoGenerationEstimateText();
+            if (ModalVideoGenerationEstimateText is not null)
+                ModalVideoGenerationEstimateText.Text = estimateText;
+            if (AppVideoGenerationEstimateText is not null)
+                AppVideoGenerationEstimateText.Text = estimateText;
         }
         finally
         {
@@ -336,6 +370,12 @@ public partial class MainWindow
             _videoMaximumPixelArea,
             _videoPrompt);
 
+    public (int FrameCount, int EstimatedSeconds) VideoGenerationEstimateForSmoke
+        => EstimateVideoGeneration(
+            _videoDurationSeconds,
+            _videoPlaybackFps,
+            _videoMaximumPixelArea);
+
     public void ConfigureVideoGenerationForSmoke(
         int durationSeconds,
         int playbackFps,
@@ -360,6 +400,15 @@ public partial class MainWindow
                 StringComparison.Ordinal)
             && ModalVideoPresetText.Text.Contains(
                 "Wan2.2 TI2V 5B",
+                StringComparison.Ordinal)
+            && ModalVideoGenerationEstimateText is not null
+            && AppVideoGenerationEstimateText is not null
+            && string.Equals(
+                ModalVideoGenerationEstimateText.Text,
+                AppVideoGenerationEstimateText.Text,
+                StringComparison.Ordinal)
+            && ModalVideoGenerationEstimateText.Text.Contains(
+                "RTX 4070 SUPER実測基準",
                 StringComparison.Ordinal)
             && AppVideoSettingsHeading is not null
             && SettingsVideoNav is not null;

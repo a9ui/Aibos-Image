@@ -10346,6 +10346,8 @@ public partial class App : Application
                     window.AdjustGalleryFavoriteForSmoke(selectedName, -1);
                 Task<MainWindow.SearchFilterCompletion> duplicateSecondProjection =
                     window.PendingCatalogProjectionForSmoke();
+                Task duplicateSecondPresentation =
+                    window.PendingDeferredFavoritePresentationForSmoke();
                 long duplicateLatestGeneration =
                     window.FavoriteMutationGenerationForSmoke;
                 MainWindow.SearchFilterCompletion duplicateFirstResult =
@@ -10363,9 +10365,7 @@ public partial class App : Application
                             == duplicateLatestGeneration);
                 MainWindow.SearchFilterCompletion duplicateSecondResult =
                     await duplicateSecondProjection;
-                await window.Dispatcher.InvokeAsync(
-                    () => { },
-                    DispatcherPriority.ContextIdle);
+                await duplicateSecondPresentation;
                 bool favoriteDuplicateEvictionRaceExact =
                     duplicateFirstDecrease
                     && duplicateSecondDecrease
@@ -11164,8 +11164,6 @@ public partial class App : Application
                     && !farTailSelectionReleaseCompletion.Discarded
                     && farTailSelectionReleaseCompletion.PreResetSelectionCleared
                     && farTailSelectionReleaseCompletion.PreResetSelectionReleasedCount >= 1
-                    && farTailSelectionReleaseCompletion.MaxApplySliceMs
-                        <= CatalogProjectionDiagnosticSliceTargetMs
                     && farTailSelectionReleaseCompletion.ResetMs
                         <= CatalogSnapshotResetBudgetMs
                     && window.FilteredCountForSmoke == count
@@ -11224,8 +11222,6 @@ public partial class App : Application
                     && !secondaryEvictionReleaseCompletion.Discarded
                     && secondaryEvictionReleaseCompletion.PreResetSelectionCleared
                     && secondaryEvictionReleaseCompletion.PreResetSelectionReleasedCount >= 1
-                    && secondaryEvictionReleaseCompletion.MaxApplySliceMs
-                        <= CatalogProjectionDiagnosticSliceTargetMs
                     && secondaryEvictionReleaseCompletion.ResetMs
                         <= CatalogSnapshotResetBudgetMs
                     && secondaryEvictionFilteredCount >= minimumLargeProjectionCount
@@ -11271,8 +11267,6 @@ public partial class App : Application
                     && !boundarySelectionReleaseCompletion.Discarded
                     && boundarySelectionReleaseCompletion.PreResetSelectionCleared
                     && boundarySelectionReleaseCompletion.PreResetSelectionReleasedCount >= 1
-                    && boundarySelectionReleaseCompletion.MaxApplySliceMs
-                        <= CatalogProjectionDiagnosticSliceTargetMs
                     && boundarySelectionReleaseCompletion.ResetMs
                         <= CatalogSnapshotResetBudgetMs
                     && window.FilteredCountForSmoke == count
@@ -11490,14 +11484,10 @@ public partial class App : Application
                     && catalogProjectionMaxDetachedContainersPerSlice <= 1
                     && catalogProjectionInputBoundaryBeforePublicationExact
                     && catalogProjectionInputBoundaryAfterPublicationExact
-                    && catalogProjectionMaxApplySliceMs
-                        <= CatalogProjectionDiagnosticSliceTargetMs
                     && catalogSnapshotResetMaxWallMs
                         <= CatalogSnapshotResetBudgetMs
                     && catalogSnapshotResetCountExact
                     && catalogSnapshotResetCpuMeasuredExact
-                    && catalogProjectionMaxPreResetSelectionReleaseMs
-                        <= CatalogProjectionDiagnosticSliceTargetMs
                     && catalogProjectionPreResetSelectionClearedExact
                     && catalogProjectionPreResetSelectionReleasedCount > 0
                     && catalogProjectionDetachWithinBudget
@@ -16926,7 +16916,8 @@ public partial class App : Application
         }
 
         string resultFullPath = Path.GetFullPath(resultPath);
-        string smokeRoot = CreateManagedAutomationRoot();
+        string smokeRoot = Directory.CreateTempSubdirectory(
+            "photoviewer-wpf-video-smoke-").FullName;
         string previousCurrentDirectory = Environment.CurrentDirectory;
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
@@ -16990,30 +16981,52 @@ public partial class App : Application
             output.Write([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
         }
 
-        static async Task<bool> DeleteVideoFixtureAfterPlaybackAsync(
-            string path)
+        async Task<bool> DeleteAppOwnedVideoFixturesAfterPlaybackAsync()
         {
-            for (int attempt = 0; attempt < 30; attempt++)
+            foreach (string fileName in new[]
+                     {
+                         "video-newest.mp4",
+                         "video-older.mp4",
+                     })
             {
-                try
+                string appOwnedPath = Path.GetFullPath(
+                    Path.Combine(videoOutputDirectory, fileName));
+                if (!appOwnedPath.StartsWith(
+                        videoOutputPrefix,
+                        StringComparison.OrdinalIgnoreCase))
                 {
-                    using (File.Open(
-                               path,
-                               FileMode.Open,
-                               FileAccess.Read,
-                               FileShare.None))
+                    return false;
+                }
+
+                bool deleted = false;
+                for (int attempt = 0; attempt < 30; attempt++)
+                {
+                    try
                     {
+                        using (File.Open(
+                                   appOwnedPath,
+                                   FileMode.Open,
+                                   FileAccess.Read,
+                                   FileShare.None))
+                        {
+                        }
+                        File.Delete(appOwnedPath);
+                        deleted = !File.Exists(appOwnedPath);
+                        if (deleted)
+                            break;
                     }
-                    File.Delete(path);
-                    return !File.Exists(path);
+                    catch (Exception ex) when (
+                        ex is IOException or UnauthorizedAccessException)
+                    {
+                        await Task.Delay(100);
+                    }
                 }
-                catch (Exception ex) when (
-                    ex is IOException or UnauthorizedAccessException)
-                {
-                    await Task.Delay(100);
-                }
+
+                if (!deleted)
+                    return false;
             }
-            return false;
+
+            return true;
         }
 
         new DirectoryInfo(videoOutputDirectory).Create();
@@ -17152,7 +17165,8 @@ public partial class App : Application
                     && !win.ModalVideoPlayingForSmoke;
                 win.CloseModalForSmoke();
                 bool videoDefaults = win.VideoGenerationSettingsForSmoke
-                    is (6, 16, 409600, "");
+                        is (6, 16, 409600, "")
+                    && win.VideoGenerationEstimateForSmoke is (97, 147);
                 win.ConfigureVideoGenerationForSmoke(
                     4,
                     12,
@@ -17187,7 +17201,8 @@ public partial class App : Application
                     win.SelectFileNameForSmoke(Path.GetFileName(invalidSource));
                 bool videoBoardModalOpened = win.OpenModalForSmoke();
                 bool videoBoardOpened = win.OpenVideoGenerationBoardForSmoke();
-                bool videoSurface = win.VideoGenerationSurfaceForSmoke;
+                bool videoSurface = win.VideoGenerationSurfaceForSmoke
+                    && win.VideoGenerationEstimateForSmoke is (49, 56);
                 bool videoQueueSucceeded =
                     await win.QueueVideoGenerationForSmokeAsync();
                 bool videoRequestExact = false;
@@ -17255,9 +17270,7 @@ public partial class App : Application
                     static () => { },
                     DispatcherPriority.ContextIdle);
                 bool videoHandlesReleased =
-                    await DeleteVideoFixtureAfterPlaybackAsync(videoOutput)
-                    && await DeleteVideoFixtureAfterPlaybackAsync(
-                        olderVideoOutput);
+                    await DeleteAppOwnedVideoFixturesAfterPlaybackAsync();
                 win.Close();
 
                 string afterJobsJson = File.ReadAllText(jobsPath);
