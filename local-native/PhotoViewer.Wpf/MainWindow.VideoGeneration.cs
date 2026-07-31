@@ -462,27 +462,33 @@ public partial class MainWindow
 
     private void OpenVideoGenerationBoard(string? requestedSource = null)
     {
-        if (ModalVideoGenerationPopup is null
-            || SelectedTile() is not Tile { IsRealFile: true } tile)
-        {
+        if (ModalVideoGenerationPopup is null)
             return;
-        }
-        if (!TryCaptureVideoSource(
-                tile,
-                requestedSource,
-                out VideoSourceChoice source,
-                out string sourceError))
-        {
-            SetTransientStatusToast(sourceError);
-            return;
-        }
 
-        _videoSourceChoice = source;
-        SyncVideoGenerationSettingsControls();
-        VideoGenerationStatusText.Text =
-            IsVideoModelRunnable(_videoModelId)
+        _videoSourceChoice = null;
+        string status;
+        if (SelectedTile() is not Tile { IsRealFile: true } tile)
+        {
+            status = "入力画像を選び直してください。設定は確認できますが、入力が確定するまで実行できません。";
+        }
+        else if (!TryCaptureVideoSource(
+                     tile,
+                     requestedSource,
+                     out VideoSourceChoice source,
+                     out string sourceError))
+        {
+            status = $"入力を確定できません: {sourceError} 設定は確認できますが、実行は無効です。";
+            SetTransientStatusToast(sourceError);
+        }
+        else
+        {
+            _videoSourceChoice = source;
+            status = IsVideoModelRunnable(_videoModelId)
                 ? "実行すると既存のAI Jobsキューへ追加します。画像閲覧だけでは開始しません。"
                 : "この実験モデルは12GB実測前のため、現在は実行できません。Wanを選ぶと実行できます。";
+        }
+        SyncVideoGenerationSettingsControls();
+        VideoGenerationStatusText.Text = status;
         ModalVideoGenerationPopup.IsOpen = true;
         _ = Dispatcher.BeginInvoke(
             new Action(() => ModalVideoPromptTextBox.Focus()),
@@ -1266,10 +1272,19 @@ public partial class MainWindow
     public Task<bool> QueueVideoGenerationForSmokeAsync()
         => QueueVideoGenerationAsync();
 
+    public bool VideoGenerationQueueEnabledForSmoke
+        => QueueVideoGenerationButton.IsEnabled;
+
+    public string VideoGenerationStatusForSmoke
+        => VideoGenerationStatusText.Text;
+
     public bool VideoGenerationSurfaceForSmoke
         => ModalVideoGenerateButton is not null
             && ModalVideoGenerationPopup is not null
             && VideoStyleSurfaceForSmoke
+            && ModalVideoGenerationBoardBorder.MaxHeight <= 680
+            && ModalVideoGenerationScrollViewer.VerticalScrollBarVisibility
+                == ScrollBarVisibility.Auto
             && ModalVideoModelComboBox.Items.Count == 2
             && AppVideoModelComboBox.Items.Count == 2
             && ModalVideoQualityComboBox.Items.Count == 2

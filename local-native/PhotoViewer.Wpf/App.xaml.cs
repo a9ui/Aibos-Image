@@ -17351,6 +17351,13 @@ public partial class App : Application
                         && requestedVideo.GetProperty("maximumPixelArea").GetInt32() == 307200
                         && requestedVideo.GetProperty("prompt").GetString() == "pan left slowly";
                 }
+                bool videoBoardFailureFeedback =
+                    win.OpenVideoGenerationBoardForSmoke(
+                        "photoreal-job:missing-video-source")
+                    && !win.VideoGenerationQueueEnabledForSmoke
+                    && win.VideoGenerationStatusForSmoke.Contains(
+                        "入力を確定できません",
+                        StringComparison.Ordinal);
                 win.CloseModalForSmoke();
 
                 var second = HiddenWindow();
@@ -17469,6 +17476,7 @@ public partial class App : Application
                     && videoSurface
                     && videoQueueSucceeded
                     && videoRequestExact
+                    && videoBoardFailureFeedback
                     && videoStyleSaved
                     && videoStylePersistence
                     && videoStyleCustomOnEdit
@@ -17562,6 +17570,7 @@ public partial class App : Application
                     VideoSurface = videoSurface,
                     VideoQueueSucceeded = videoQueueSucceeded,
                     VideoRequestExact = videoRequestExact,
+                    VideoBoardFailureFeedback = videoBoardFailureFeedback,
                     VideoStyleSaved = videoStyleSaved,
                     VideoStylePersistence = videoStylePersistence,
                     VideoStyleCustomOnEdit = videoStyleCustomOnEdit,
@@ -18441,6 +18450,8 @@ public partial class App : Application
                 EnhancementJobsWorkspaceSmokeSnapshot completed = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("canceled");
                 EnhancementJobsWorkspaceSmokeSnapshot canceled = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("video");
+                EnhancementJobsWorkspaceSmokeSnapshot videoOnly = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("all");
 
                 var videoReaderView =
@@ -18753,7 +18764,10 @@ public partial class App : Application
                     && initial.VisibleOperationLabels.Contains("VIDEO  動画化", StringComparer.Ordinal)
                     && initial.VisibleOperationLabels.Contains("UNSUPPORTED  未対応", StringComparer.Ordinal)
                     && completed.VisibleOperationLabels.Contains("REAL  実写化", StringComparer.Ordinal)
-                    && completed.VisibleOperationLabels.Contains("VIDEO  動画化", StringComparer.Ordinal);
+                    && completed.VisibleOperationLabels.Contains("VIDEO  動画化", StringComparer.Ordinal)
+                    && videoOnly.Filtered > 0
+                    && videoOnly.VisibleOperationLabels.All(static label =>
+                        string.Equals(label, "VIDEO  動画化", StringComparison.Ordinal));
                 bool rerunSettingsContract = false;
                 if (!string.IsNullOrWhiteSpace(rerunBody))
                 {
@@ -29357,6 +29371,7 @@ public partial class App : Application
         public bool VideoSurface { get; init; }
         public bool VideoQueueSucceeded { get; init; }
         public bool VideoRequestExact { get; init; }
+        public bool VideoBoardFailureFeedback { get; init; }
         public bool VideoStyleSaved { get; init; }
         public bool VideoStylePersistence { get; init; }
         public bool VideoStyleCustomOnEdit { get; init; }

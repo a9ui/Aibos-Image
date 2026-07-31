@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -564,7 +565,7 @@ public partial class MainWindow
         StopGalleryAutoScroll();
         SearchHistoryPopup.IsOpen = false;
         _enhancementWorkspaceFocusBeforeDialog = focusToRestore ?? Keyboard.FocusedElement;
-        _enhancementWorkspaceFilter = initialFilter is "queued" or "running" or "failed" or "canceled" or "completed"
+        _enhancementWorkspaceFilter = initialFilter is "queued" or "running" or "failed" or "canceled" or "completed" or "video"
             ? initialFilter
             : "all";
         EnhancementJobsAllFilter.IsChecked = _enhancementWorkspaceFilter == "all";
@@ -573,6 +574,7 @@ public partial class MainWindow
         EnhancementJobsFailedFilter.IsChecked = _enhancementWorkspaceFilter == "failed";
         EnhancementJobsCanceledFilter.IsChecked = _enhancementWorkspaceFilter == "canceled";
         EnhancementJobsCompletedFilter.IsChecked = _enhancementWorkspaceFilter == "completed";
+        EnhancementJobsVideoFilter.IsChecked = _enhancementWorkspaceFilter == "video";
         _enhancementWorkspaceHighlightedJobIds.Clear();
         if (highlightedJobIds is not null)
         {
@@ -1104,6 +1106,7 @@ public partial class MainWindow
                 "failed" => job.Status == "failed",
                 "canceled" => job.Status == "canceled",
                 "completed" => job.Status is "succeeded" or "deleted",
+                "video" => job.IsVideoOperation,
                 _ => true,
             })
             .ToArray();
@@ -2006,7 +2009,11 @@ public partial class MainWindow
 
     public bool EnhancementJobsHeaderChromeContractForSmoke
         => WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsCloseButton)
-            && WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsRefreshButton);
+            && WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsRefreshButton)
+            && string.Equals(
+                AutomationProperties.GetName(EnhancementJobsVideoFilter),
+                "Show video generation jobs",
+                StringComparison.Ordinal);
 
     public bool ActivateEnhancementJobsCloseForSmoke()
     {

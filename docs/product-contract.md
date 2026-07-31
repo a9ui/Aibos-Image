@@ -358,8 +358,10 @@ or stores.
   `comfyui-flux2-photoreal`; older `a1111-photoreal` jobs remain readable as
   managed historical versions.
 - Each valid succeeded output remains an independently selectable version.
-  In the modal, `Ctrl+Up` and `Ctrl+Down` cycle Original and every available
-  AI高画質化/AI実写化 version with wraparound. Delete removes only the selected
+  In the modal, one visible dropdown lists Original and every available
+  AI高画質化/AI実写化 version; repeated versions are numbered per operation and
+  the newest of each operation is identified. `Ctrl+Up` and `Ctrl+Down` retain
+  wraparound cycling of the same inventory. Delete removes only the selected
   managed version and never the source or sibling versions.
 - Both operations use the same companion `/api/enhance/jobs` endpoint, durable
   ordered queue, and single worker. New jobs append in FIFO order by default.
@@ -402,9 +404,9 @@ or stores.
   API. Opening it performs a passive jobs read only. It polls once per second
   only while the workspace is visible and at least one job is queued or
   running, and stops polling when hidden or when all jobs are terminal.
-  - Jobs may be filtered as All, Queued, Running, Completed, Failed, or
-    Canceled. Canceled records remain durable and visible for audit, Retry, and
-    queue safety.
+  - Jobs may be filtered as All, Queued, Running, Completed, Video, Failed, or
+    Canceled. The Video filter includes every video status. Canceled records
+    remain durable and visible for audit, Retry, and queue safety.
   Running work is shown first and never reordered. Queued work is inventoried
   in persisted `queueOrder` order with an explicit waiting position. A missing,
   null, invalid, or duplicate order in a legacy reader payload falls back
@@ -475,6 +477,10 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   are omitted. Upscaled versions are deliberately not video input choices.
   The modal action instead uses the currently displayed photoreal version when
   one is selected, otherwise Original.
+- The explicit video button always opens its bounded, scrollable settings
+  board. If the selected input version is missing, stale, or ambiguous, the
+  board explains the concrete input error and disables enqueue rather than
+  appearing unresponsive. Opening the board alone remains passive.
 - A video job keeps `mediaKind: "video"` and a media-specific `video` snapshot
   alongside the existing version 1 job envelope. The snapshot records the
   requested duration, Wan generation FPS, and user prompt; the native
