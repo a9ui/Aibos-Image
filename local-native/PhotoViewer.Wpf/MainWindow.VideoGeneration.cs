@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -22,10 +23,10 @@ public partial class MainWindow
     private const int DefaultVideoMaximumPixelArea = 409_600;
     private const int MaxVideoPromptLength = 2_000;
     private const double VideoWanLandscapeEstimateBaselineSeconds = 146.691;
-    private const double VideoWanPortraitEstimateBaselineSeconds = 202.942;
+    private const double VideoWanPortraitEstimateBaselineSeconds = 274.801;
     private const int VideoWanEstimateBaselineFrameCount = 97;
     private const double VideoDeliveryLandscapeEstimateBaselineSeconds = 11.768;
-    private const double VideoDeliveryPortraitEstimateBaselineSeconds = 15.318;
+    private const double VideoDeliveryPortraitEstimateBaselineSeconds = 17.560;
     private const int VideoDeliveryEstimateBaselineDurationSeconds = 6;
     private const int VideoEstimateBaselineMaximumPixelArea = 409_600;
 
@@ -255,6 +256,33 @@ public partial class MainWindow
             + "（Wan生成＋RIFE 4.25仕上げ・RTX 4070 SUPER横長/縦長実測範囲・キュー待ちを除く）";
     }
 
+    private string VideoGenerationDeliveryText()
+    {
+        int generationFrameCount =
+            4 * (_videoDurationSeconds * _videoPlaybackFps / 4) + 1;
+        int deliveryFrameCount = _videoDurationSeconds * 30;
+        string duration = _videoDurationSeconds.ToString(
+            "F3",
+            CultureInfo.InvariantCulture);
+        return $"生成: {_videoPlaybackFps} fps・{generationFrameCount}f"
+            + $" → 最終出力: 30 fps・{deliveryFrameCount}f・{duration}秒"
+            + " · RIFE 4.25 · H.264 / yuv420p · 音声なし";
+    }
+
+    private string VideoPixelBudgetHintText(bool includeDefaultPrompt)
+    {
+        string promptHint = includeDefaultPrompt
+            ? "空欄はNormalの既定モーション。"
+            : "";
+        string maximumPixelArea = _videoMaximumPixelArea.ToString(
+            "N0",
+            CultureInfo.InvariantCulture);
+        return promptHint
+            + $"選択した画素数上限: {maximumPixelArea}px。"
+            + "元画像比率を保ち、32px単位で上限内に自動調整します。"
+            + "1 worker・GPU推論の並列化なし。";
+    }
+
     private void OpenModalVideoGeneration_Click(object sender, RoutedEventArgs e)
         => OpenVideoGenerationBoard();
 
@@ -396,7 +424,7 @@ public partial class MainWindow
     {
         RestoreVideoGenerationSettings(null, null, null, null, null);
         SetVideoGenerationSettingsStatus(
-            "6秒・生成16fps・最終30fps・最大409,600px・Normal既定プロンプトに戻しました。");
+            "6秒・生成16fps・最終30fps・画素数上限409,600px・Normal既定プロンプトに戻しました。");
         if (!_initializing)
             SaveState();
     }
@@ -478,6 +506,17 @@ public partial class MainWindow
                 ModalVideoGenerationEstimateText.Text = estimateText;
             if (AppVideoGenerationEstimateText is not null)
                 AppVideoGenerationEstimateText.Text = estimateText;
+            string deliveryText = VideoGenerationDeliveryText();
+            if (ModalVideoDeliveryText is not null)
+                ModalVideoDeliveryText.Text = deliveryText;
+            if (AppVideoDeliveryText is not null)
+                AppVideoDeliveryText.Text = deliveryText;
+            if (ModalVideoResolutionHintText is not null)
+                ModalVideoResolutionHintText.Text =
+                    VideoPixelBudgetHintText(false);
+            if (AppVideoResolutionHintText is not null)
+                AppVideoResolutionHintText.Text =
+                    VideoPixelBudgetHintText(true);
         }
         finally
         {
@@ -687,17 +726,42 @@ public partial class MainWindow
                 AutomationProperties.GetName(ModalVideoFpsComboBox),
                 "Video generation FPS",
                 StringComparison.Ordinal)
+            && string.Equals(
+                AppVideoPixelBudgetLabel.Text,
+                "画素数上限",
+                StringComparison.Ordinal)
+            && string.Equals(
+                ModalVideoPixelBudgetLabel.Text,
+                "画素数上限",
+                StringComparison.Ordinal)
+            && string.Equals(
+                AppVideoDeliveryText.Text,
+                ModalVideoDeliveryText.Text,
+                StringComparison.Ordinal)
             && AppVideoDeliveryText.Text.Contains(
-                "最終出力: 30 fps · RIFE 4.25",
+                $"生成: {_videoPlaybackFps} fps・"
+                    + $"{4 * (_videoDurationSeconds * _videoPlaybackFps / 4) + 1}f",
                 StringComparison.Ordinal)
             && ModalVideoDeliveryText.Text.Contains(
-                "最終出力: 30 fps · RIFE 4.25",
+                $"最終出力: 30 fps・{_videoDurationSeconds * 30}f・"
+                    + $"{_videoDurationSeconds}.000秒 · RIFE 4.25",
+                StringComparison.Ordinal)
+            && AppVideoResolutionHintText.Text.Contains(
+                $"{_videoMaximumPixelArea.ToString(
+                    "N0",
+                    CultureInfo.InvariantCulture)}px",
+                StringComparison.Ordinal)
+            && ModalVideoResolutionHintText.Text.Contains(
+                "上限内に自動調整",
                 StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText is not null
             && AppVideoGenerationEstimateText is not null
             && string.Equals(
                 ModalVideoGenerationEstimateText.Text,
                 AppVideoGenerationEstimateText.Text,
+                StringComparison.Ordinal)
+            && ModalVideoGenerationEstimateText.Text.Contains(
+                "完了目安: 約1分01秒〜1分53秒",
                 StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText.Text.Contains(
                 "RTX 4070 SUPER横長/縦長実測範囲",

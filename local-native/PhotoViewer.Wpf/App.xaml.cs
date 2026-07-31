@@ -17187,7 +17187,7 @@ public partial class App : Application
                 bool videoDefaults = win.VideoGenerationSettingsForSmoke
                         is (6, 16, 409600, "")
                     && win.VideoGenerationEstimateForSmoke
-                        is (97, 158, 219)
+                        is (97, 158, 293)
                     && win.VideoModelIdForSmoke == "wan22-ti2v-5b";
                 win.SelectVideoModelForSmoke(
                     "hunyuan-video-1.5-i2v-step-distilled-experimental");
@@ -17236,7 +17236,7 @@ public partial class App : Application
                     };
                 bool videoSurface = win.VideoGenerationSurfaceForSmoke
                     && win.VideoGenerationEstimateForSmoke
-                        is (49, 61, 85);
+                        is (49, 61, 113);
                 bool videoQueueSucceeded =
                     await win.QueueVideoGenerationForSmokeAsync();
                 bool videoRequestExact = false;
