@@ -57,7 +57,7 @@
     "persistedIdentity": "video sourceId remains the Original catalog identity; sourcePath, sourceSignature, and sourceSha256 identify the actual Original or photoreal input; sourceProducerJobId records photoreal provenance",
     "retry": "preserve sourceProducerJobId and revalidate the producer plus pinned source identity",
     "deletion": "do not delete a photoreal output while a queued or running video job depends on its producer id",
-    "wpf": "the modal captures the currently displayed photoreal version; gallery context actions explicitly choose Original or latest photoreal"
+    "wpf": "the modal captures the currently displayed photoreal version; gallery context actions explicitly choose Original or one exact valid photoreal producer version"
   },
   "qualitySelectionV1": {
     "requestField": "presetId",

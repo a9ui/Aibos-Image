@@ -237,6 +237,29 @@ try {
         ($videoActivation.deliveryExtension.audio -eq $false)
         ([string]$videoActivation.deliveryExtension.h25CandidateCommit -ceq
             'e10cc052572da8e5b6e0cb9da06b928a44deb3e7')
+        ($videoActivation.qualityExtension.protocolChange -eq
+            "additive within aibos.enhancement-video/v1")
+        ($videoActivation.qualityExtension.normalPresetId -eq
+            "wan22-ti2v-5b-normal-v1")
+        ($videoActivation.qualityExtension.highPresetId -eq
+            "wan22-ti2v-5b-high-v1")
+        ($videoActivation.qualityExtension.normalSteps -eq 20)
+        ($videoActivation.qualityExtension.highSteps -eq 40)
+        ($videoActivation.qualityExtension.model -eq
+            "wan2.2_ti2v_5B_fp16.safetensors")
+        ($videoActivation.qualityExtension.sameNativeFrameCount -eq $true)
+        ($videoActivation.qualityExtension.sameMaximumPixelArea -eq $true)
+        ($videoActivation.qualityExtension.sameDeliveryProfile -eq
+            "deliveryV1")
+        ($videoActivation.qualityExtension.keepSingleWorker -eq $true)
+        ($videoActivation.qualityExtension.keepInferenceSerial -eq $true)
+        ([string]$videoActivation.qualityExtension.h25CandidateCommit -ceq
+            '15496ced189586daf384501cbec30fc732429a6c')
+        ([string]$videoActivation.qualityExtension.aibosReaderUiCandidateCommit -ceq
+            'c3c32a5da5da4921f0d8d9b7e16ccde6d250593c')
+        ([string]$videoActivation.qualityExtension.canonicalContractSha256 -ceq
+            'd604d5926b23afaa84aff75dd78a3a3705cbe7fc0e4d3870c85c97b6d80c634d')
+        ($videoActivation.qualityExtension.highRuntimeMeasured -eq $false)
         ($videoActivation.liveRuntime.wpfMutationClientEnabled -eq $false)
         ($videoActivation.liveRuntime.h25WriterEnabled -eq $false)
         ($videoActivation.liveRuntime.productionProcessesRestarted -eq $false)
