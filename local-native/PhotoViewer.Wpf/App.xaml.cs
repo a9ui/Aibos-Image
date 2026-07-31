@@ -16027,6 +16027,8 @@ public partial class App : Application
                 BitmapDecodePlan? overBoundaryGifPlan = PhotoViewer.Wpf.MainWindow.BuildBitmapDecodePlanForSmoke(".gif", 360, 10_001, 1_000);
                 BitmapDecodePlan? maximalBmpPlan = PhotoViewer.Wpf.MainWindow.BuildBitmapDecodePlanForSmoke(".bmp", 360, int.MaxValue, int.MaxValue);
                 BitmapDecodePlan? oversizedPngPlan = PhotoViewer.Wpf.MainWindow.BuildBitmapDecodePlanForSmoke(".png", 360, 10_000, 10_000);
+                BitmapDecodePlan? managedWebpPlan = PhotoViewer.Wpf.MainWindow.BuildBitmapDecodePlanForSmoke(".webp", 1_400, 4_960, 7_392, explicitManagedOutput: true);
+                BitmapDecodePlan? overManagedWebpPlan = PhotoViewer.Wpf.MainWindow.BuildBitmapDecodePlanForSmoke(".webp", 1_400, 10_001, 10_000, explicitManagedOutput: true);
                 BitmapDecodePlan? invalidDimensionsPlan = PhotoViewer.Wpf.MainWindow.BuildBitmapDecodePlanForSmoke(".tiff", 360, 0, 10_000);
                 ImageDimensions? oversizedBmpDimensions = PhotoViewer.Wpf.MainWindow.ReadBitmapDimensionsForSmoke(oversizedBmpHeaderPath);
                 BitmapDecodePlan? oversizedBmpFilePlan = PhotoViewer.Wpf.MainWindow.BuildBitmapDecodePlanFromFileForSmoke(oversizedBmpHeaderPath, 360);
@@ -16038,6 +16040,8 @@ public partial class App : Application
                     && overBoundaryGifPlan is null
                     && maximalBmpPlan is null
                     && oversizedPngPlan is not null
+                    && managedWebpPlan is not null
+                    && overManagedWebpPlan is not null
                     && invalidDimensionsPlan is null
                     && oversizedBmpHeaderRejectedBeforeDecode;
 
@@ -17277,6 +17281,15 @@ public partial class App : Application
                         ],
                         StringComparer.Ordinal);
                 bool videoBoardModalOpened = win.OpenModalForSmoke();
+                bool videoBoardDefaultsToOriginal =
+                    win.OpenVideoGenerationBoardForSmoke()
+                    && win.VideoSourceForSmoke is
+                    {
+                        ProducerJobId: null,
+                    } originalVideoSource
+                    && originalVideoSource.Label.Contains(
+                        "Original",
+                        StringComparison.Ordinal);
                 bool videoBoardOpened = win.OpenVideoGenerationBoardForSmoke(
                     "photoreal-job:photoreal-ok");
                 bool videoBoardPhotorealSource =
@@ -17471,6 +17484,7 @@ public partial class App : Application
                     && videoBoardSourceSelected
                     && galleryVideoSourceVersions
                     && videoBoardModalOpened
+                    && videoBoardDefaultsToOriginal
                     && videoBoardOpened
                     && videoBoardPhotorealSource
                     && videoSurface
@@ -17566,6 +17580,8 @@ public partial class App : Application
                     VideoDefaults = videoDefaults,
                     GalleryVideoSourceVersions =
                         galleryVideoSourceVersions,
+                    VideoBoardDefaultsToOriginal =
+                        videoBoardDefaultsToOriginal,
                     VideoBoardOpened = videoBoardOpened,
                     VideoSurface = videoSurface,
                     VideoQueueSucceeded = videoQueueSucceeded,
@@ -29367,6 +29383,7 @@ public partial class App : Application
         public string? VideoMediaFailure { get; init; }
         public bool VideoDefaults { get; init; }
         public bool GalleryVideoSourceVersions { get; init; }
+        public bool VideoBoardDefaultsToOriginal { get; init; }
         public bool VideoBoardOpened { get; init; }
         public bool VideoSurface { get; init; }
         public bool VideoQueueSucceeded { get; init; }

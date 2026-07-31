@@ -1297,6 +1297,18 @@ public partial class MainWindow
             await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry", "Retry queued as a new job.");
     }
 
+    private async void DismissEnhancementJob_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: EnhancementWorkspaceJobView job } && job.CanDismiss)
+        {
+            await RunEnhancementWorkspaceMutationAsync(
+                job,
+                HttpMethod.Delete,
+                $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}",
+                "Job removed from history. Source and output files were not changed.");
+        }
+    }
+
     private async void MoveEnhancementJobInQueue_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button
@@ -1995,6 +2007,16 @@ public partial class MainWindow
         return true;
     }
 
+    public async Task<bool> DismissEnhancementJobForSmokeAsync(string id)
+    {
+        EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+        if (job is null || !job.CanDismiss)
+            return false;
+        DismissEnhancementJob_Click(new Button { Tag = job }, new RoutedEventArgs());
+        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+        return true;
+    }
+
     public bool OpenEnhancementJobOutputForSmoke(string id)
     {
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
@@ -2135,6 +2157,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         !_isBusy
         && IsSupportedMutationOperation
         && Status is "failed" or "canceled";
+    public bool CanDismiss =>
+        !_isBusy
+        && Status is "failed" or "canceled" or "deleted";
     public bool CanReorder =>
         !_isBusy
         && IsSupportedMutationOperation
