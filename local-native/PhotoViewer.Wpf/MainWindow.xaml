@@ -1581,6 +1581,85 @@
                      Margin="0,0,0,6" AutomationProperties.Name="Video generation settings section"/>
           <TextBlock Text="動画ジョブのモデルと初期値です。変更は次に明示的に追加するジョブから使われ、待機中・処理中のジョブは変わりません。"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <TextBlock Text="Style" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
+                  BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
+            <StackPanel>
+              <ListBox x:Name="AppVideoStyleListBox"
+                       MinHeight="42" MaxHeight="112"
+                       Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                       Foreground="{StaticResource TextPrimary}"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto"
+                       IsSynchronizedWithCurrentItem="False"
+                       SelectionChanged="VideoStyle_SelectionChanged"
+                       AutomationProperties.Name="Saved video generation styles"
+                       AutomationProperties.HelpText="Choose a saved video generation style or the current unsaved settings.">
+                <ListBox.ItemContainerStyle>
+                  <Style TargetType="{x:Type ListBoxItem}">
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                    <Setter Property="Background" Value="{StaticResource BgPrimary}"/>
+                    <Setter Property="Padding" Value="8,5"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Template">
+                      <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                          <Border x:Name="StyleItemSurface"
+                                  Background="{TemplateBinding Background}"
+                                  BorderBrush="Transparent" BorderThickness="1"
+                                  Padding="{TemplateBinding Padding}">
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+                          </Border>
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                              <Setter TargetName="StyleItemSurface" Property="Background" Value="{StaticResource AccentFillHover}"/>
+                              <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                              <Setter TargetName="StyleItemSurface" Property="Background" Value="{StaticResource AccentFill}"/>
+                              <Setter TargetName="StyleItemSurface" Property="BorderBrush" Value="{StaticResource AccentLight}"/>
+                              <Setter Property="Foreground" Value="{StaticResource SelectionText}"/>
+                            </Trigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Setter.Value>
+                    </Setter>
+                  </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"/>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <Grid Margin="0,7,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="AppVideoStyleNameTextBox" Grid.Column="0"
+                         MaxLength="40" Padding="7,5" Margin="0,0,6,0"
+                         Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                         BorderBrush="{StaticResource BorderStrong}"
+                         AutomationProperties.Name="Video generation style name"/>
+                <Button x:Name="SaveAppVideoStyleButton" Grid.Column="1"
+                        Style="{StaticResource GhostButton}" Content="保存" Click="SaveVideoStyle_Click"
+                        MinWidth="64" Margin="0,0,6,0"
+                        AutomationProperties.Name="Save current video generation settings as a style"/>
+                <Button x:Name="DeleteAppVideoStyleButton" Grid.Column="2"
+                        Style="{StaticResource GhostButton}" Content="削除" Click="DeleteVideoStyle_Click"
+                        MinWidth="64"
+                        AutomationProperties.Name="Delete selected video generation style"/>
+              </Grid>
+              <TextBlock x:Name="AppVideoStyleSummaryText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,6,0,0"/>
+              <TextBlock x:Name="AppVideoStyleStatusText"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,3,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </Border>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
                   BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,10">
             <StackPanel>
@@ -2228,6 +2307,41 @@
                        Foreground="{StaticResource TextPrimary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,0,0,8"
                        AutomationProperties.Name="Video generation source version"/>
+            <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalVideoStyleComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}"
+                      DisplayMemberPath="Label"
+                      IsSynchronizedWithCurrentItem="False"
+                      SelectionChanged="VideoStyle_SelectionChanged"
+                      AutomationProperties.Name="Video generation style"
+                      AutomationProperties.HelpText="Apply a saved prompt, model, quality, duration, generation FPS, and pixel budget style."/>
+            <Grid Margin="0,6,0,10">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBox x:Name="ModalVideoStyleNameTextBox" Grid.Column="0"
+                       MaxLength="40" Padding="7,4" Margin="0,0,5,0"
+                       Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}"
+                       AutomationProperties.Name="Video generation style name"/>
+              <Button x:Name="SaveModalVideoStyleButton" Grid.Column="1"
+                      Style="{StaticResource GhostButton}" Content="保存" Click="SaveVideoStyle_Click"
+                      MinWidth="54" Height="27" Padding="7,2" Margin="0,0,5,0"
+                      Foreground="{StaticResource TextPrimary}"
+                      AutomationProperties.Name="Save current video generation settings as a style"/>
+              <Button x:Name="DeleteModalVideoStyleButton" Grid.Column="2"
+                      Style="{StaticResource GhostButton}" Content="削除" Click="DeleteVideoStyle_Click"
+                      MinWidth="54" Height="27" Padding="7,2"
+                      Foreground="{StaticResource TextPrimary}"
+                      AutomationProperties.Name="Delete selected video generation style"/>
+            </Grid>
+            <TextBlock x:Name="ModalVideoStyleStatusText"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10"
+                       TextWrapping="Wrap" Margin="0,-5,0,8"
+                       AutomationProperties.LiveSetting="Polite"/>
             <TextBlock Text="Model" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalVideoModelComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"

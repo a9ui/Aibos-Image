@@ -509,6 +509,16 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   queue, and exclusive GPU lease. A known preset paired with the wrong
   `effective.steps` value is protected as reader-only instead of being
   coerced.
+- A named video Style is WPF-local and snapshots the prompt, model, quality
+  preset, duration, generation FPS, and maximum pixel budget. Up to 32 Styles
+  with names of at most 40 characters are persisted in WPF `state.json`.
+  Selecting one from the video board or application settings applies all six
+  values; a later manual edit returns to the unsaved Custom selection without
+  modifying the stored Style. Saving the same name replaces that Style, and
+  deleting one leaves the current request values unchanged. Jobs still
+  snapshot the effective values only when explicitly enqueued. Restoring a
+  Style that names the 12GB-unverified Hunyuan candidate does not bypass its
+  disabled execution state.
 - The current delivery stage uses RIFE 4.25 to publish exactly 30 fps and
   duration-times-30 frames: 120 frames for 4 seconds or 180 for 6 seconds.
   Final H.264 output is `yuv420p` and contains no audio. Managed-video labels

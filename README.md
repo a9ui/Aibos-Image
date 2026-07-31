@@ -59,10 +59,12 @@ include:
 
 Renderer-local presentation state, including WPF window geometry, panel sizes,
 keyboard bindings, current selection, preview layout, and named AI
-photorealization Styles stays local. A Style snapshots the current prompt,
-strength, structure retention, quality steps, and work resolution so it can be
-reapplied from the preview or application settings. In particular, the existing
-WPF `state.json` is not shared wholesale.
+photorealization and video-generation Styles stay local. A photoreal Style
+snapshots the current prompt, strength, structure retention, quality steps, and
+work resolution. A video Style snapshots its prompt, model, quality, duration,
+generation FPS, and pixel budget. Both can be reapplied from the preview or
+application settings. In particular, the existing WPF `state.json` is not
+shared wholesale.
 
 Normal application startup remains reader-only: it never creates a locator,
 shared root, durable-data directory, or store. Its only operational write is an

@@ -18088,6 +18088,7 @@ public partial class MainWindow : Window
             RestoreModalPhotorealSettings(null, null, null, null, null);
             RestorePhotorealStyles(null, null);
             RestoreVideoGenerationSettings(null, null, null, null);
+            RestoreVideoStyles(null, null);
             _keyBindings = KeyBindingSettings.CreateDefaults();
             _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
             ApplyKeyBindingTooltips();
@@ -18141,6 +18142,7 @@ public partial class MainWindow : Window
             state.VideoPrompt,
             state.VideoModelId,
             state.VideoQualityId);
+        RestoreVideoStyles(state.VideoStyles, state.SelectedVideoStyleName);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -18286,6 +18288,8 @@ public partial class MainWindow : Window
                 VideoPrompt = _videoPrompt,
                 VideoModelId = _videoModelId,
                 VideoQualityId = _videoQualityId,
+                VideoStyles = SnapshotVideoStyles(),
+                SelectedVideoStyleName = _selectedVideoStyleName,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -23725,6 +23729,8 @@ public sealed class ViewerState
     public string? VideoPrompt { get; set; }
     public string? VideoModelId { get; set; }
     public string? VideoQualityId { get; set; }
+    public List<VideoStyleState>? VideoStyles { get; set; }
+    public string? SelectedVideoStyleName { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.
@@ -23752,6 +23758,17 @@ public sealed class PhotorealStyleState
     public double? CfgScale { get; set; }
     public int Steps { get; set; }
     public int MaxDimension { get; set; }
+    public string Prompt { get; set; } = "";
+}
+
+public sealed class VideoStyleState
+{
+    public string Name { get; set; } = "";
+    public string ModelId { get; set; } = "";
+    public string QualityId { get; set; } = "";
+    public int DurationSeconds { get; set; }
+    public int PlaybackFps { get; set; }
+    public int MaximumPixelArea { get; set; }
     public string Prompt { get; set; } = "";
 }
 

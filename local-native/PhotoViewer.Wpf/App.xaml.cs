@@ -17205,6 +17205,42 @@ public partial class App : Application
                     307200,
                     "pan left slowly",
                     "wan22-ti2v-5b-high-v1");
+                const string videoStyleName = "Slow cinematic pan";
+                bool videoStyleSaved = win.SaveVideoStyleForSmoke(videoStyleName);
+                win.FlushStateForSmoke();
+                string videoStatePath = Path.Combine(
+                    smokeRoot,
+                    ".cache",
+                    "state.json");
+                ViewerState? persistedVideoStyleState = JsonSerializer.Deserialize<ViewerState>(
+                    File.ReadAllText(videoStatePath));
+                VideoStyleState? persistedVideoStyle =
+                    persistedVideoStyleState?.VideoStyles?.SingleOrDefault();
+                bool videoStylePersistence = persistedVideoStyle is not null
+                    && persistedVideoStyle.Name == videoStyleName
+                    && persistedVideoStyle.ModelId == "wan22-ti2v-5b"
+                    && persistedVideoStyle.QualityId == "wan22-ti2v-5b-high-v1"
+                    && persistedVideoStyle.DurationSeconds == 4
+                    && persistedVideoStyle.PlaybackFps == 12
+                    && persistedVideoStyle.MaximumPixelArea == 307200
+                    && persistedVideoStyle.Prompt == "pan left slowly"
+                    && persistedVideoStyleState?.SelectedVideoStyleName
+                        == videoStyleName;
+                win.ConfigureVideoGenerationForSmoke(
+                    6,
+                    16,
+                    409600,
+                    "temporary custom motion",
+                    "wan22-ti2v-5b-normal-v1");
+                bool videoStyleCustomOnEdit =
+                    win.SelectedVideoStyleNameForSmoke is null;
+                bool videoStyleSelected =
+                    win.SelectVideoStyleForSmoke(videoStyleName);
+                bool videoStyleApplied = win.VideoGenerationSettingsForSmoke
+                        is (4, 12, 307200, "pan left slowly")
+                    && win.VideoModelIdForSmoke == "wan22-ti2v-5b"
+                    && win.VideoQualityIdForSmoke
+                        == "wan22-ti2v-5b-high-v1";
                 string videoRequestJson = "";
                 win.ConfigureModalEnhancementForSmoke(async (request, token) =>
                 {
@@ -17335,6 +17371,19 @@ public partial class App : Application
                     && second.VideoQualityIdForSmoke
                         == "wan22-ti2v-5b-high-v1"
                     && second.VideoQualityStepsForSmoke == 40;
+                bool videoStyleReloaded = second.VideoStyleNamesForSmoke.Contains(
+                        videoStyleName,
+                        StringComparer.OrdinalIgnoreCase)
+                    && string.Equals(
+                        second.SelectedVideoStyleNameForSmoke,
+                        videoStyleName,
+                        StringComparison.OrdinalIgnoreCase);
+                var videoSettingsBeforeStyleDelete =
+                    second.VideoGenerationSettingsForSmoke;
+                bool videoStyleDeleted =
+                    second.DeleteSelectedVideoStyleForSmoke()
+                    && second.VideoGenerationSettingsForSmoke
+                        == videoSettingsBeforeStyleDelete;
                 second.OpenAppSettingsForSmoke();
                 bool outputRootSettingsSurface = second.AppEnhancementOutputRootSurfaceForSmoke;
                 string alternateOutputRoot = Path.Combine(smokeRoot, "alternate-managed-outputs");
@@ -17420,6 +17469,13 @@ public partial class App : Application
                     && videoSurface
                     && videoQueueSucceeded
                     && videoRequestExact
+                    && videoStyleSaved
+                    && videoStylePersistence
+                    && videoStyleCustomOnEdit
+                    && videoStyleSelected
+                    && videoStyleApplied
+                    && videoStyleReloaded
+                    && videoStyleDeleted
                     && reloadFilteredCount == 1
                     && reloadPhotorealVisible
                     && reloadVideoFilteredCount == 1
@@ -17506,6 +17562,13 @@ public partial class App : Application
                     VideoSurface = videoSurface,
                     VideoQueueSucceeded = videoQueueSucceeded,
                     VideoRequestExact = videoRequestExact,
+                    VideoStyleSaved = videoStyleSaved,
+                    VideoStylePersistence = videoStylePersistence,
+                    VideoStyleCustomOnEdit = videoStyleCustomOnEdit,
+                    VideoStyleSelected = videoStyleSelected,
+                    VideoStyleApplied = videoStyleApplied,
+                    VideoStyleReloaded = videoStyleReloaded,
+                    VideoStyleDeleted = videoStyleDeleted,
                     ReloadFilteredCount = reloadFilteredCount,
                     ReloadPhotorealVisible = reloadPhotorealVisible,
                     ReloadVideoFilteredCount = reloadVideoFilteredCount,
@@ -29294,6 +29357,13 @@ public partial class App : Application
         public bool VideoSurface { get; init; }
         public bool VideoQueueSucceeded { get; init; }
         public bool VideoRequestExact { get; init; }
+        public bool VideoStyleSaved { get; init; }
+        public bool VideoStylePersistence { get; init; }
+        public bool VideoStyleCustomOnEdit { get; init; }
+        public bool VideoStyleSelected { get; init; }
+        public bool VideoStyleApplied { get; init; }
+        public bool VideoStyleReloaded { get; init; }
+        public bool VideoStyleDeleted { get; init; }
         public int ReloadFilteredCount { get; init; }
         public bool ReloadPhotorealVisible { get; init; }
         public int ReloadVideoFilteredCount { get; init; }

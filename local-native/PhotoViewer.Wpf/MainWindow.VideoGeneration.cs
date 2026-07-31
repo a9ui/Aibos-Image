@@ -28,6 +28,8 @@ public partial class MainWindow
     private const int DefaultVideoPlaybackFps = 16;
     private const int DefaultVideoMaximumPixelArea = 409_600;
     private const int MaxVideoPromptLength = 2_000;
+    private const int MaxVideoStyleCount = 32;
+    private const int MaxVideoStyleNameLength = 40;
     private const double VideoWanLandscapeEstimateBaselineSeconds = 146.691;
     private const double VideoWanPortraitEstimateBaselineSeconds = 274.801;
     private const int VideoWanEstimateBaselineFrameCount = 97;
@@ -46,6 +48,8 @@ public partial class MainWindow
     private string _videoModelId = DefaultVideoModelId;
     private string _videoQualityId = DefaultVideoPresetId;
     private string _videoPrompt = "";
+    private readonly List<VideoStyleState> _videoStyles = [];
+    private string? _selectedVideoStyleName;
     private bool _syncingVideoGenerationSettings;
     private bool _videoGenerationRequestPending;
     private VideoSourceChoice? _videoSourceChoice;
@@ -55,6 +59,8 @@ public partial class MainWindow
         string DisplayPath,
         string? ProducerJobId,
         string Label);
+
+    private sealed record VideoStyleChoice(string Label, string? StyleName);
 
     private sealed record VideoGenerationRequestSettings(
         string PresetId,
@@ -522,6 +528,7 @@ public partial class MainWindow
             resolutionSource,
             DefaultVideoMaximumPixelArea,
             SupportedVideoMaximumPixelAreas);
+        MarkVideoStyleAsCustom();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus("保存済み。次に追加する動画ジョブから使われます。");
         if (!_initializing)
@@ -541,6 +548,7 @@ public partial class MainWindow
             ? AppVideoModelComboBox
             : ModalVideoModelComboBox;
         _videoModelId = SelectedVideoModelId(source);
+        MarkVideoStyleAsCustom();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             IsVideoModelRunnable(_videoModelId)
@@ -565,6 +573,7 @@ public partial class MainWindow
             ? AppVideoQualityComboBox
             : ModalVideoQualityComboBox;
         _videoQualityId = SelectedVideoQualityId(source);
+        MarkVideoStyleAsCustom();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             $"{VideoQualityLabel(_videoQualityId)}を次の動画ジョブに使います。");
@@ -583,6 +592,7 @@ public partial class MainWindow
         _videoPrompt = source.Text.Length <= MaxVideoPromptLength
             ? source.Text
             : source.Text[..MaxVideoPromptLength];
+        MarkVideoStyleAsCustom();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
             string.IsNullOrWhiteSpace(_videoPrompt)
@@ -594,6 +604,7 @@ public partial class MainWindow
 
     private void ResetVideoGenerationSettings_Click(object sender, RoutedEventArgs e)
     {
+        _selectedVideoStyleName = null;
         RestoreVideoGenerationSettings(
             null,
             null,
@@ -601,6 +612,7 @@ public partial class MainWindow
             null,
             null,
             null);
+        RefreshVideoStyleControls(updateNameFields: true);
         SetVideoGenerationSettingsStatus(
             "6秒・生成16fps・最終30fps・画素数上限409,600px・標準20 step・Normal既定プロンプトに戻しました。");
         if (!_initializing)
@@ -614,6 +626,289 @@ public partial class MainWindow
         if (AppVideoSettingsStatusText is not null)
             AppVideoSettingsStatusText.Text = message;
     }
+
+    private void VideoStyle_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingVideoGenerationSettings)
+            return;
+
+        VideoStyleChoice? choice = sender switch
+        {
+            ComboBox comboBox => comboBox.SelectedItem as VideoStyleChoice,
+            ListBox listBox => listBox.SelectedItem as VideoStyleChoice,
+            _ => null,
+        };
+        if (choice is null)
+            return;
+
+        if (choice.StyleName is null)
+        {
+            _selectedVideoStyleName = null;
+            RefreshVideoStyleControls(updateNameFields: false);
+            SetVideoStyleStatus("現在の設定を使用します。Styleにはまだ保存されていません。");
+            if (!_initializing)
+                SaveState();
+            return;
+        }
+
+        VideoStyleState? style = FindVideoStyle(choice.StyleName);
+        if (style is null)
+            return;
+
+        _selectedVideoStyleName = style.Name;
+        RestoreVideoGenerationSettings(
+            style.DurationSeconds,
+            style.PlaybackFps,
+            style.MaximumPixelArea,
+            style.Prompt,
+            style.ModelId,
+            style.QualityId);
+        RefreshVideoStyleControls(updateNameFields: true);
+        SetVideoStyleStatus($"「{style.Name}」を反映しました。次に追加する動画ジョブから使われます。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void SaveVideoStyle_Click(object sender, RoutedEventArgs e)
+    {
+        TextBox nameTextBox = ReferenceEquals(sender, SaveModalVideoStyleButton)
+            ? ModalVideoStyleNameTextBox
+            : AppVideoStyleNameTextBox;
+        string name = nameTextBox.Text.Trim();
+        if (!IsValidVideoStyleName(name))
+        {
+            SetVideoStyleStatus($"Style名は1～{MaxVideoStyleNameLength}文字で入力してください。制御文字は使えません。");
+            return;
+        }
+
+        VideoStyleState style = CreateCurrentVideoStyle(name);
+        int existingIndex = _videoStyles.FindIndex(candidate =>
+            string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existingIndex >= 0)
+        {
+            _videoStyles[existingIndex] = style;
+        }
+        else
+        {
+            if (_videoStyles.Count >= MaxVideoStyleCount)
+            {
+                SetVideoStyleStatus($"Styleは最大{MaxVideoStyleCount}件です。不要なStyleを削除してください。");
+                return;
+            }
+            _videoStyles.Add(style);
+        }
+
+        _videoStyles.Sort(static (left, right) =>
+            StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name));
+        _selectedVideoStyleName = style.Name;
+        RefreshVideoStyleControls(updateNameFields: true);
+        SetVideoStyleStatus(
+            existingIndex >= 0
+                ? $"「{style.Name}」を現在の設定で上書きしました。"
+                : $"「{style.Name}」を保存しました。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void DeleteVideoStyle_Click(object sender, RoutedEventArgs e)
+    {
+        VideoStyleState? style = FindVideoStyle(_selectedVideoStyleName);
+        if (style is null)
+        {
+            SetVideoStyleStatus("削除する保存済みStyleを選んでください。");
+            return;
+        }
+
+        _videoStyles.Remove(style);
+        _selectedVideoStyleName = null;
+        RefreshVideoStyleControls(updateNameFields: true);
+        SetVideoStyleStatus($"「{style.Name}」を削除しました。現在の設定値はそのまま残ります。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void RestoreVideoStyles(
+        IEnumerable<VideoStyleState>? styles,
+        string? selectedStyleName)
+    {
+        _videoStyles.Clear();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (VideoStyleState? candidate in styles ?? [])
+        {
+            VideoStyleState? normalized = NormalizeVideoStyle(candidate);
+            if (normalized is null || !names.Add(normalized.Name))
+                continue;
+
+            _videoStyles.Add(normalized);
+            if (_videoStyles.Count >= MaxVideoStyleCount)
+                break;
+        }
+        _videoStyles.Sort(static (left, right) =>
+            StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name));
+
+        VideoStyleState? selected = FindVideoStyle(selectedStyleName);
+        _selectedVideoStyleName = selected is not null && VideoStyleMatchesCurrent(selected)
+            ? selected.Name
+            : null;
+        RefreshVideoStyleControls(updateNameFields: true);
+    }
+
+    private static VideoStyleState? NormalizeVideoStyle(VideoStyleState? candidate)
+    {
+        if (candidate is null)
+            return null;
+
+        string name = candidate.Name?.Trim() ?? "";
+        if (!IsValidVideoStyleName(name)
+            || candidate.ModelId is not (WanVideoModelId or HunyuanVideoModelId)
+            || !IsVideoQualitySupported(candidate.QualityId ?? "")
+            || !SupportedVideoDurationSeconds.Contains(candidate.DurationSeconds)
+            || !SupportedVideoPlaybackFps.Contains(candidate.PlaybackFps)
+            || !SupportedVideoMaximumPixelAreas.Contains(candidate.MaximumPixelArea))
+        {
+            return null;
+        }
+
+        string prompt = candidate.Prompt ?? "";
+        if (prompt.Length > MaxVideoPromptLength)
+            prompt = prompt[..MaxVideoPromptLength];
+        return new VideoStyleState
+        {
+            Name = name,
+            ModelId = candidate.ModelId,
+            QualityId = candidate.QualityId!,
+            DurationSeconds = candidate.DurationSeconds,
+            PlaybackFps = candidate.PlaybackFps,
+            MaximumPixelArea = candidate.MaximumPixelArea,
+            Prompt = prompt,
+        };
+    }
+
+    private static bool IsValidVideoStyleName(string name)
+        => name.Length is >= 1 and <= MaxVideoStyleNameLength
+            && !name.Any(char.IsControl);
+
+    private VideoStyleState CreateCurrentVideoStyle(string name)
+        => new()
+        {
+            Name = name,
+            ModelId = _videoModelId,
+            QualityId = _videoQualityId,
+            DurationSeconds = _videoDurationSeconds,
+            PlaybackFps = _videoPlaybackFps,
+            MaximumPixelArea = _videoMaximumPixelArea,
+            Prompt = _videoPrompt,
+        };
+
+    private VideoStyleState? FindVideoStyle(string? name)
+        => string.IsNullOrWhiteSpace(name)
+            ? null
+            : _videoStyles.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    private bool VideoStyleMatchesCurrent(VideoStyleState style)
+        => string.Equals(style.ModelId, _videoModelId, StringComparison.Ordinal)
+            && string.Equals(style.QualityId, _videoQualityId, StringComparison.Ordinal)
+            && style.DurationSeconds == _videoDurationSeconds
+            && style.PlaybackFps == _videoPlaybackFps
+            && style.MaximumPixelArea == _videoMaximumPixelArea
+            && string.Equals(style.Prompt, _videoPrompt, StringComparison.Ordinal);
+
+    private void MarkVideoStyleAsCustom()
+    {
+        if (_syncingVideoGenerationSettings)
+            return;
+
+        bool selectionChanged = _selectedVideoStyleName is not null;
+        _selectedVideoStyleName = null;
+        if (selectionChanged)
+        {
+            RefreshVideoStyleControls(updateNameFields: false);
+            SetVideoStyleStatus("設定を変更しました。保存済みStyleは上書きされていません。");
+        }
+        else
+        {
+            RefreshVideoStyleSummary();
+        }
+    }
+
+    private void RefreshVideoStyleControls(bool updateNameFields)
+    {
+        if (ModalVideoStyleComboBox is null
+            || AppVideoStyleListBox is null
+            || ModalVideoStyleNameTextBox is null
+            || AppVideoStyleNameTextBox is null
+            || DeleteModalVideoStyleButton is null
+            || DeleteAppVideoStyleButton is null)
+        {
+            return;
+        }
+
+        var choices = new List<VideoStyleChoice>
+        {
+            new("カスタム（現在の設定）", null),
+        };
+        choices.AddRange(_videoStyles.Select(static style =>
+            new VideoStyleChoice(style.Name, style.Name)));
+        VideoStyleChoice selectedChoice = choices.FirstOrDefault(choice =>
+                string.Equals(choice.StyleName, _selectedVideoStyleName, StringComparison.OrdinalIgnoreCase))
+            ?? choices[0];
+
+        bool wasSyncing = _syncingVideoGenerationSettings;
+        _syncingVideoGenerationSettings = true;
+        try
+        {
+            ModalVideoStyleComboBox.ItemsSource = choices;
+            AppVideoStyleListBox.ItemsSource = choices;
+            ModalVideoStyleComboBox.SelectedItem = selectedChoice;
+            AppVideoStyleListBox.SelectedItem = selectedChoice;
+            bool canDelete = selectedChoice.StyleName is not null;
+            DeleteModalVideoStyleButton.IsEnabled = canDelete;
+            DeleteAppVideoStyleButton.IsEnabled = canDelete;
+            if (updateNameFields)
+            {
+                string name = selectedChoice.StyleName ?? "";
+                ModalVideoStyleNameTextBox.Text = name;
+                AppVideoStyleNameTextBox.Text = name;
+            }
+            RefreshVideoStyleSummary();
+        }
+        finally
+        {
+            _syncingVideoGenerationSettings = wasSyncing;
+        }
+    }
+
+    private void RefreshVideoStyleSummary()
+    {
+        if (AppVideoStyleSummaryText is null)
+            return;
+
+        AppVideoStyleSummaryText.Text =
+            $"現在: {VideoModelLabel(_videoModelId)} / {VideoQualityLabel(_videoQualityId)} / {_videoDurationSeconds}秒 / 生成{_videoPlaybackFps}fps / {_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}px";
+    }
+
+    private void SetVideoStyleStatus(string message)
+    {
+        if (ModalVideoStyleStatusText is not null)
+            ModalVideoStyleStatusText.Text = message;
+        if (AppVideoStyleStatusText is not null)
+            AppVideoStyleStatusText.Text = message;
+    }
+
+    private List<VideoStyleState>? SnapshotVideoStyles()
+        => _videoStyles.Count == 0
+            ? null
+            : _videoStyles.Select(static style => new VideoStyleState
+            {
+                Name = style.Name,
+                ModelId = style.ModelId,
+                QualityId = style.QualityId,
+                DurationSeconds = style.DurationSeconds,
+                PlaybackFps = style.PlaybackFps,
+                MaximumPixelArea = style.MaximumPixelArea,
+                Prompt = style.Prompt,
+            }).ToList();
 
     private void RestoreVideoGenerationSettings(
         int? durationSeconds,
@@ -870,13 +1165,16 @@ public partial class MainWindow
         int maximumPixelArea,
         string prompt,
         string? qualityId = null)
-        => RestoreVideoGenerationSettings(
+    {
+        RestoreVideoGenerationSettings(
             durationSeconds,
             playbackFps,
             maximumPixelArea,
             prompt,
             _videoModelId,
             qualityId ?? _videoQualityId);
+        MarkVideoStyleAsCustom();
+    }
 
     public void SelectVideoModelForSmoke(string modelId)
     {
@@ -899,6 +1197,49 @@ public partial class MainWindow
     public string VideoQualityIdForSmoke => _videoQualityId;
     public int VideoQualityStepsForSmoke =>
         VideoQualitySteps(_videoQualityId);
+
+    public bool VideoStyleSurfaceForSmoke
+        => ModalVideoStyleComboBox is not null
+            && AppVideoStyleListBox is not null
+            && ModalVideoStyleNameTextBox.MaxLength == MaxVideoStyleNameLength
+            && AppVideoStyleNameTextBox.MaxLength == MaxVideoStyleNameLength
+            && AutomationProperties.GetName(ModalVideoStyleComboBox)
+                == "Video generation style"
+            && AutomationProperties.GetName(AppVideoStyleListBox)
+                == "Saved video generation styles";
+
+    public IReadOnlyList<string> VideoStyleNamesForSmoke
+        => _videoStyles.Select(static style => style.Name).ToList();
+
+    public string? SelectedVideoStyleNameForSmoke
+        => _selectedVideoStyleName;
+
+    public bool SaveVideoStyleForSmoke(string name)
+    {
+        AppVideoStyleNameTextBox.Text = name;
+        SaveVideoStyle_Click(SaveAppVideoStyleButton, new RoutedEventArgs());
+        return FindVideoStyle(name) is not null;
+    }
+
+    public bool SelectVideoStyleForSmoke(string name)
+    {
+        VideoStyleChoice? choice = ModalVideoStyleComboBox.Items
+            .OfType<VideoStyleChoice>()
+            .FirstOrDefault(candidate =>
+                string.Equals(candidate.StyleName, name, StringComparison.OrdinalIgnoreCase));
+        if (choice is null)
+            return false;
+
+        ModalVideoStyleComboBox.SelectedItem = choice;
+        return string.Equals(_selectedVideoStyleName, name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool DeleteSelectedVideoStyleForSmoke()
+    {
+        string? selectedName = _selectedVideoStyleName;
+        DeleteVideoStyle_Click(DeleteAppVideoStyleButton, new RoutedEventArgs());
+        return selectedName is not null && FindVideoStyle(selectedName) is null;
+    }
 
     public (string Label, string? ProducerJobId)? VideoSourceForSmoke
         => _videoSourceChoice is null
@@ -928,6 +1269,7 @@ public partial class MainWindow
     public bool VideoGenerationSurfaceForSmoke
         => ModalVideoGenerateButton is not null
             && ModalVideoGenerationPopup is not null
+            && VideoStyleSurfaceForSmoke
             && ModalVideoModelComboBox.Items.Count == 2
             && AppVideoModelComboBox.Items.Count == 2
             && ModalVideoQualityComboBox.Items.Count == 2
