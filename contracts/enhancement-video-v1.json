@@ -27,6 +27,7 @@
       "effective.height",
       "effective.positivePrompt",
       "effective.negativePrompt",
+      "effective.steps",
       "seed",
       "codec",
       "bitDepth"
@@ -58,6 +59,18 @@
     "deletion": "do not delete a photoreal output while a queued or running video job depends on its producer id",
     "wpf": "the modal captures the currently displayed photoreal version; gallery context actions explicitly choose Original or latest photoreal"
   },
+  "qualitySelectionV1": {
+    "requestField": "presetId",
+    "defaultPresetId": "wan22-ti2v-5b-normal-v1",
+    "supportedPresetIds": [
+      "wan22-ti2v-5b-normal-v1",
+      "wan22-ti2v-5b-high-v1"
+    ],
+    "normal": "20 Wan steps; remains the default and preserves every existing omitted-preset and queued-job identity",
+    "high": "40 Wan steps; explicit opt-in with the same model, native frame count, pixel budget, RIFE delivery, one-worker queue, and GPU lease",
+    "invalidPair": "a known preset with the wrong effective.steps value is reader-only protected",
+    "timing": "scale only the measured Wan generation component by steps / 20; RIFE delivery time is unchanged until direct measurements replace the estimate"
+  },
   "normalV1": {
     "presetId": "wan22-ti2v-5b-normal-v1",
     "backendId": "wan22-ti2v-5b-core-v1",
@@ -84,6 +97,17 @@
     "timingMeaning": "playbackFps and frameCount describe Wan native generation; a legacy snapshot without delivery also uses them as final playback metadata",
     "blankPrompt": "built-in conservative anime idle motion with identity, line-art, composition, first-frame, and locked-camera preservation",
     "customPrompt": "preservation preamble plus the user's instruction; blank-only idle and locked-camera clauses must not contradict an explicit custom motion request"
+  },
+  "highV1": {
+    "presetId": "wan22-ti2v-5b-high-v1",
+    "backendId": "wan22-ti2v-5b-core-v1",
+    "model": "wan2.2_ti2v_5B_fp16.safetensors",
+    "inherits": "normalV1 except for presetId and steps",
+    "steps": 40,
+    "maximumPixelArea": 409600,
+    "singleWorker": true,
+    "parallelInference": false,
+    "deliveryProfile": "deliveryV1"
   },
   "deliveryV1": {
     "field": "video.delivery",
@@ -162,6 +186,8 @@
     },
     {
       "id": "current-delivery-6s",
+      "presetId": "wan22-ti2v-5b-normal-v1",
+      "steps": 20,
       "requestedDurationSeconds": 6,
       "nativePlaybackFps": 16,
       "nativeFrameCount": 97,
@@ -177,6 +203,45 @@
       "expectedMutationSafe": true,
       "expectedPlaybackFps": 30,
       "expectedPlaybackFrameCount": 180
+    },
+    {
+      "id": "current-delivery-high-6s",
+      "presetId": "wan22-ti2v-5b-high-v1",
+      "steps": 40,
+      "requestedDurationSeconds": 6,
+      "nativePlaybackFps": 16,
+      "nativeFrameCount": 97,
+      "delivery": {
+        "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+        "model": "4.25",
+        "targetFps": 30,
+        "frameCount": 180,
+        "durationSeconds": 6,
+        "pixelFormat": "yuv420p",
+        "audio": false
+      },
+      "expectedMutationSafe": true,
+      "expectedPlaybackFps": 30,
+      "expectedPlaybackFrameCount": 180
+    },
+    {
+      "id": "high-preset-with-normal-steps",
+      "presetId": "wan22-ti2v-5b-high-v1",
+      "steps": 20,
+      "requestedDurationSeconds": 6,
+      "nativePlaybackFps": 16,
+      "nativeFrameCount": 97,
+      "delivery": {
+        "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+        "model": "4.25",
+        "targetFps": 30,
+        "frameCount": 180,
+        "durationSeconds": 6,
+        "pixelFormat": "yuv420p",
+        "audio": false
+      },
+      "expectedMutationSafe": false,
+      "expectedPlaybackMetadata": "protected"
     },
     {
       "id": "malformed-present-delivery",
@@ -262,7 +327,8 @@
             "width": 832,
             "height": 480,
             "positivePrompt": "fixture-positive",
-            "negativePrompt": "fixture-negative"
+            "negativePrompt": "fixture-negative",
+            "steps": 20
           },
           "seed": 123456789,
           "codec": "h264",
@@ -294,7 +360,8 @@
             "width": 832,
             "height": 480,
             "positivePrompt": "fixture-positive",
-            "negativePrompt": "fixture-negative"
+            "negativePrompt": "fixture-negative",
+            "steps": 20
           },
           "delivery": {
             "backendId": "vs-rife-5.7.0-rife-4.25-v1",
@@ -331,7 +398,8 @@
             "width": 832,
             "height": 480,
             "positivePrompt": "fixture-positive",
-            "negativePrompt": "fixture-negative"
+            "negativePrompt": "fixture-negative",
+            "steps": 20
           },
           "delivery": {
             "backendId": "vs-rife-5.7.0-rife-4.25-v1",
@@ -343,6 +411,45 @@
             "audio": false
           },
           "seed": 123456791,
+          "codec": "h264",
+          "bitDepth": 8
+        }
+      },
+      {
+        "id": "explicit-video-high-delivery",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "succeeded",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "outputPath": "${OUTPUT_ROOT}/Videos/video-high-delivery.mp4",
+        "presetId": "wan22-ti2v-5b-high-v1",
+        "video": {
+          "presetId": "wan22-ti2v-5b-high-v1",
+          "backendId": "wan22-ti2v-5b-core-v1",
+          "requested": {
+            "durationSeconds": 6,
+            "playbackFps": 16,
+            "prompt": ""
+          },
+          "effective": {
+            "frameCount": 97,
+            "width": 832,
+            "height": 480,
+            "positivePrompt": "fixture-positive",
+            "negativePrompt": "fixture-negative",
+            "steps": 40
+          },
+          "delivery": {
+            "backendId": "vs-rife-5.7.0-rife-4.25-v1",
+            "model": "4.25",
+            "targetFps": 30,
+            "frameCount": 180,
+            "durationSeconds": 6,
+            "pixelFormat": "yuv420p",
+            "audio": false
+          },
+          "seed": 123456792,
           "codec": "h264",
           "bitDepth": 8
         }
@@ -372,6 +479,7 @@
       "explicit-video": "video",
       "explicit-video-delivery": "video",
       "malformed-video-delivery": "video",
+      "explicit-video-high-delivery": "video",
       "future-operation": "unsupported",
       "null-operation": "unsupported"
     },
@@ -382,6 +490,11 @@
         "source": "native-legacy"
       },
       "explicit-video-delivery": {
+        "fps": 30,
+        "frameCount": 180,
+        "source": "delivery"
+      },
+      "explicit-video-high-delivery": {
         "fps": 30,
         "frameCount": 180,
         "source": "delivery"
@@ -397,6 +510,7 @@
       "explicit-video",
       "explicit-video-delivery",
       "malformed-video-delivery",
+      "explicit-video-high-delivery",
       "future-operation",
       "null-operation"
     ],

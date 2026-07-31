@@ -469,10 +469,17 @@ revalidates producer ownership and the managed still image, while the video
 row keeps the Original catalog identity in `sourceId` and pins the actual
 input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
 
+- The gallery context menu offers Original plus every valid, unambiguous
+  photoreal version for the selected catalog image. Each photoreal choice is
+  bound to its exact producer job id; stale outputs and duplicate producer ids
+  are omitted. Upscaled versions are deliberately not video input choices.
+  The modal action instead uses the currently displayed photoreal version when
+  one is selected, otherwise Original.
 - A video job keeps `mediaKind: "video"` and a media-specific `video` snapshot
   alongside the existing version 1 job envelope. The snapshot records the
   requested duration, Wan generation FPS, and user prompt; the native
-  effective frame count, width, height, positive prompt, and negative prompt;
+  effective frame count, width, height, positive prompt, negative prompt, and
+  quality-bound step count;
   the enqueue-time seed; model/preset identities; codec; and bit depth. Retry
   reuses the whole persisted snapshot and seed. Compatible unknown fields are
   preserved.
@@ -495,6 +502,13 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   conservative anime idle-motion instruction. A custom prompt uses the
   preservation preamble plus the user's instruction and is not contradicted by
   blank-only idle or locked-camera wording.
+- Quality is an exact preset choice, not a free-form step field. Normal remains
+  `wan22-ti2v-5b-normal-v1` at 20 steps and is the persisted default. High is
+  the explicit `wan22-ti2v-5b-high-v1` preset at 40 steps. High keeps the same
+  FP16 model, pixel budget, native frame count, RIFE delivery, one-worker
+  queue, and exclusive GPU lease. A known preset paired with the wrong
+  `effective.steps` value is protected as reader-only instead of being
+  coerced.
 - The current delivery stage uses RIFE 4.25 to publish exactly 30 fps and
   duration-times-30 frames: 120 frames for 4 seconds or 180 for 6 seconds.
   Final H.264 output is `yuv420p` and contains no audio. Managed-video labels
@@ -518,8 +532,11 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   scales delivery by duration and the same maximum pixel budget, and presents
   the landscape-to-portrait result as a range because orientation, content,
   motion, and cold-run effects remain material. Defaults display about 2:38
-  to 4:53; the 4-second, 12-generation-fps, 307,200-pixel setting displays
-  about 1:01 to 1:53. Queue wait is excluded.
+  to 4:53 for Normal and about 5:05 to 9:28 for High. The 4-second,
+  12-generation-fps, 307,200-pixel setting displays about 1:01 to 1:53 for
+  Normal and about 1:57 to 3:38 for High. Only the measured Wan component is
+  scaled by `steps / 20`; RIFE delivery time is unchanged. Queue wait is
+  excluded.
 - The prepared input is a separate contain-resized, edge-padded PNG at the
   exact effective bucket. After the ordinary over-budget convergence, bucket
   refinement compares the current bucket with each valid width-minus-32 and
@@ -555,9 +572,10 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   runtime flags remain false because the running PhotoViewer API, ComfyUI, and
   Aibos WPF were deliberately not restarted. This state permits merge and
   candidate verification; it does not claim production cutover.
-- A 14B/HQ preset, 24 fps native generation, and an approximately 704p default
-  remain deferred until measured evidence on the supported 12GB GPU
-  establishes memory, latency, playback, and anime temporal-quality bounds.
+- A 14B or alternate-model HQ profile, 24 fps native generation, and an
+  approximately 704p default remain deferred until measured evidence on the
+  supported 12GB GPU establishes memory, latency, playback, and anime
+  temporal-quality bounds.
 
 ## Change rule
 

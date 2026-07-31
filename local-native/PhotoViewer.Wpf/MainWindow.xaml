@@ -1589,11 +1589,22 @@
                         Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
                         SelectionChanged="VideoGenerationModel_SelectionChanged"
                         AutomationProperties.Name="Default video generation model">
-                <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用／標準" Tag="wan22-ti2v-5b"/>
+                <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用" Tag="wan22-ti2v-5b"/>
                 <ComboBoxItem Content="HunyuanVideo 1.5 — 実写・人物向け／実験" Tag="hunyuan-video-1.5-i2v-step-distilled-experimental"/>
               </ComboBox>
               <TextBlock x:Name="AppVideoModelDescriptionText"
                          Text="RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,5,0,9"/>
+              <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+              <ComboBox x:Name="AppVideoQualityComboBox"
+                        Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                        SelectionChanged="VideoGenerationQuality_SelectionChanged"
+                        AutomationProperties.Name="Default video generation quality">
+                <ComboBoxItem Content="標準 · 20 step（推奨）" Tag="wan22-ti2v-5b-normal-v1"/>
+                <ComboBoxItem Content="高品質 · 40 step（約2倍）" Tag="wan22-ti2v-5b-high-v1"/>
+              </ComboBox>
+              <TextBlock Text="高品質は同じ解像度と30fps仕上げでWan生成だけを40 stepにします。VRAM負荷を増やす解像度変更や並列推論は行いません。"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,5,0,9"/>
               <Grid>
@@ -2222,11 +2233,22 @@
                       Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
                       SelectionChanged="VideoGenerationModel_SelectionChanged"
                       AutomationProperties.Name="Video generation model">
-              <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用／標準" Tag="wan22-ti2v-5b"/>
+              <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用" Tag="wan22-ti2v-5b"/>
               <ComboBoxItem Content="HunyuanVideo 1.5 — 実写・人物向け／実験" Tag="hunyuan-video-1.5-i2v-step-distilled-experimental"/>
             </ComboBox>
             <TextBlock x:Name="ModalVideoModelDescriptionText"
                        Text="RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,5,0,10"/>
+            <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalVideoQualityComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                      SelectionChanged="VideoGenerationQuality_SelectionChanged"
+                      AutomationProperties.Name="Video generation quality">
+              <ComboBoxItem Content="標準 · 20 step（推奨）" Tag="wan22-ti2v-5b-normal-v1"/>
+              <ComboBoxItem Content="高品質 · 40 step（約2倍）" Tag="wan22-ti2v-5b-high-v1"/>
+            </ComboBox>
+            <TextBlock Text="高品質はWan生成だけを40 stepにします。解像度・RIFE 30fps仕上げ・単一GPUキューは標準と同じです。"
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,5,0,10"/>
             <DockPanel Margin="0,0,0,4">

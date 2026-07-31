@@ -92,6 +92,7 @@ try {
         'ordinaryNeighborStayedImage',
         'videoHandlesReleased',
         'videoDefaults',
+        'galleryVideoSourceVersions',
         'videoBoardOpened',
         'videoSurface',
         'videoQueueSucceeded',
