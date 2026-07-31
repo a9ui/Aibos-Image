@@ -440,7 +440,7 @@ public partial class MainWindow
     }
 
     private void OpenModalVideoGeneration_Click(object sender, RoutedEventArgs e)
-        => OpenVideoGenerationBoard();
+        => OpenVideoGenerationBoard("original");
 
     private void GalleryContextVideo_Click(object sender, RoutedEventArgs e)
     {
@@ -458,9 +458,9 @@ public partial class MainWindow
     }
 
     private void ModalContextVideo_Click(object sender, RoutedEventArgs e)
-        => OpenVideoGenerationBoard();
+        => OpenVideoGenerationBoard("original");
 
-    private void OpenVideoGenerationBoard(string? requestedSource = null)
+    private void OpenVideoGenerationBoard(string? requestedSource = "original")
     {
         if (ModalVideoGenerationPopup is null)
             return;
@@ -1140,7 +1140,7 @@ public partial class MainWindow
     }
 
     public bool OpenVideoGenerationBoardForSmoke(
-        string? requestedSource = null)
+        string? requestedSource = "original")
     {
         OpenVideoGenerationBoard(requestedSource);
         return ModalVideoGenerationPopup.IsOpen;

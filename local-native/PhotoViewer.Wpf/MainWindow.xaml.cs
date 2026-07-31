@@ -6087,11 +6087,17 @@ public partial class MainWindow : Window
     private Tile? ResolvePvuSeenImportTile(string rawKey)
         => ResolvePvuFavoriteImportTile(rawKey);
 
-    private static BitmapSource? LoadBitmap(string path, int decodePixelWidth)
+    private static BitmapSource? LoadBitmap(
+        string path,
+        int decodePixelWidth,
+        bool explicitManagedOutput = false)
     {
         try
         {
-            BitmapDecodePlan? decodePlan = BuildBitmapDecodePlan(path, decodePixelWidth);
+            BitmapDecodePlan? decodePlan = BuildBitmapDecodePlan(
+                path,
+                decodePixelWidth,
+                explicitManagedOutput);
             if (decodePlan is null)
                 return null;
 
@@ -6118,13 +6124,14 @@ public partial class MainWindow : Window
     private static async Task<BitmapSource?> LoadBitmapWithRetryAsync(
         string path,
         int decodePixelWidth,
-        CancellationToken token)
+        CancellationToken token,
+        bool explicitManagedOutput = false)
     {
         for (int attempt = 0; attempt < MaxThumbnailDecodeAttempts; attempt++)
         {
             token.ThrowIfCancellationRequested();
             BitmapSource? bitmap = await Task.Run(
-                () => LoadBitmap(path, decodePixelWidth),
+                () => LoadBitmap(path, decodePixelWidth, explicitManagedOutput),
                 token);
             if (bitmap is not null)
                 return bitmap;
@@ -6143,7 +6150,10 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private static BitmapDecodePlan? BuildBitmapDecodePlan(string path, int requestedPixelWidth)
+    private static BitmapDecodePlan? BuildBitmapDecodePlan(
+        string path,
+        int requestedPixelWidth,
+        bool explicitManagedOutput = false)
     {
         if (requestedPixelWidth <= 0 || !TryReadBitmapSize(path, out int sourceWidth, out int sourceHeight))
             return null;
@@ -6152,15 +6162,22 @@ public partial class MainWindow : Window
             Path.GetExtension(path),
             requestedPixelWidth,
             sourceWidth,
-            sourceHeight);
+            sourceHeight,
+            explicitManagedOutput);
     }
 
     internal static BitmapDecodePlan? BuildBitmapDecodePlanForSmoke(
         string extension,
         int requestedPixelWidth,
         int sourceWidth,
-        int sourceHeight)
-        => BuildBitmapDecodePlanForDimensions(extension, requestedPixelWidth, sourceWidth, sourceHeight);
+        int sourceHeight,
+        bool explicitManagedOutput = false)
+        => BuildBitmapDecodePlanForDimensions(
+            extension,
+            requestedPixelWidth,
+            sourceWidth,
+            sourceHeight,
+            explicitManagedOutput);
 
     internal static BitmapDecodePlan? BuildBitmapDecodePlanFromFileForSmoke(string path, int requestedPixelWidth)
         => BuildBitmapDecodePlan(path, requestedPixelWidth);
@@ -6174,16 +6191,16 @@ public partial class MainWindow : Window
         string extension,
         int requestedPixelWidth,
         int sourceWidth,
-        int sourceHeight)
+        int sourceHeight,
+        bool explicitManagedOutput = false)
     {
         if (requestedPixelWidth <= 0 || sourceWidth <= 0 || sourceHeight <= 0)
             return null;
 
-        // WPF documents native sized decode for JPEG and PNG only. Other
-        // codecs can allocate the original image before scaling, so reject a
-        // source that exceeds the explicit original-size decode budget.
-        // Unknown extensions fail closed through this branch too.
-        if (!NativeSizedDecodeExtensions.Contains(extension))
+        // Explicitly selected AI outputs are trusted managed files. Always
+        // produce a viewport-bounded decode plan for them instead of rejecting
+        // a valid high-resolution WebP because of its source pixel count.
+        if (!explicitManagedOutput && !NativeSizedDecodeExtensions.Contains(extension))
         {
             long sourcePixels = checked((long)sourceWidth * sourceHeight);
             if (sourcePixels > MaxOriginalSizeDecodePixelCount)
@@ -13927,7 +13944,12 @@ public partial class MainWindow : Window
         }
 
         if (t.IsRealFile && File.Exists(displayPath))
-            _ = LoadModalBitmapAsync(displayPath, t.Path, cts.Token, decodeCompletion);
+            _ = LoadModalBitmapAsync(
+                displayPath,
+                t.Path,
+                displayedAsset.Enhanced,
+                cts.Token,
+                decodeCompletion);
         else
             decodeCompletion.TrySetResult(immediate is not null);
 
@@ -14055,14 +14077,23 @@ public partial class MainWindow : Window
             ModalSourceLabel.Text = _modalShowingEnhanced ? $"{currentDisplay} output" : "Original";
     }
 
-    private async Task LoadModalBitmapAsync(string displayPath, string selectedPath, CancellationToken token, TaskCompletionSource<bool> completion)
+    private async Task LoadModalBitmapAsync(
+        string displayPath,
+        string selectedPath,
+        bool explicitManagedOutput,
+        CancellationToken token,
+        TaskCompletionSource<bool> completion)
     {
         BitmapSource? bitmap;
         try
         {
             if (_modalDecodeDelayForSmokeMs > 0)
                 await Task.Delay(_modalDecodeDelayForSmokeMs, token);
-            bitmap = await LoadBitmapWithRetryAsync(displayPath, 1400, token);
+            bitmap = await LoadBitmapWithRetryAsync(
+                displayPath,
+                1400,
+                token,
+                explicitManagedOutput);
         }
         catch (OperationCanceledException)
         {
