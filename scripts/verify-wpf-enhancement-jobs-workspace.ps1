@@ -100,6 +100,20 @@ try {
         ($videoContract.normalV1.shift -eq 8)
         ($videoContract.normalV1.seedRange.maximum -eq 2147483647)
         ($videoContract.normalV1.seedRange.fixedAtEnqueue -eq $true)
+        ($videoContract.qualitySelectionV1.requestField -eq "presetId")
+        ($videoContract.qualitySelectionV1.defaultPresetId -eq
+            "wan22-ti2v-5b-normal-v1")
+        (($videoContract.qualitySelectionV1.supportedPresetIds -join ",") -eq
+            "wan22-ti2v-5b-normal-v1,wan22-ti2v-5b-high-v1")
+        ($videoContract.highV1.presetId -eq "wan22-ti2v-5b-high-v1")
+        ($videoContract.highV1.backendId -eq "wan22-ti2v-5b-core-v1")
+        ($videoContract.highV1.model -eq
+            "wan2.2_ti2v_5B_fp16.safetensors")
+        ($videoContract.highV1.steps -eq 40)
+        ($videoContract.highV1.maximumPixelArea -eq 409600)
+        ($videoContract.highV1.singleWorker -eq $true)
+        ($videoContract.highV1.parallelInference -eq $false)
+        ($videoContract.highV1.deliveryProfile -eq "deliveryV1")
         ($videoContract.deliveryV1.field -eq "video.delivery")
         ($videoContract.deliveryV1.additiveWithinProtocol -eq $true)
         ($videoContract.deliveryV1.backendId -eq
@@ -136,10 +150,28 @@ try {
         ($videoContract.mutationSafetyVectors[1].expectedMutationSafe -eq
             $true)
         ($videoContract.mutationSafetyVectors[2].delivery.frameCount -eq 180)
+        ($videoContract.mutationSafetyVectors[2].presetId -eq
+            "wan22-ti2v-5b-normal-v1")
+        ($videoContract.mutationSafetyVectors[2].steps -eq 20)
         ($videoContract.mutationSafetyVectors[2].expectedMutationSafe -eq
             $true)
-        ($videoContract.mutationSafetyVectors[3].delivery.frameCount -eq 179)
+        ($videoContract.mutationSafetyVectors[3].id -eq
+            "current-delivery-high-6s")
+        ($videoContract.mutationSafetyVectors[3].presetId -eq
+            "wan22-ti2v-5b-high-v1")
+        ($videoContract.mutationSafetyVectors[3].steps -eq 40)
+        ($videoContract.mutationSafetyVectors[3].delivery.frameCount -eq 180)
         ($videoContract.mutationSafetyVectors[3].expectedMutationSafe -eq
+            $true)
+        ($videoContract.mutationSafetyVectors[4].id -eq
+            "high-preset-with-normal-steps")
+        ($videoContract.mutationSafetyVectors[4].presetId -eq
+            "wan22-ti2v-5b-high-v1")
+        ($videoContract.mutationSafetyVectors[4].steps -eq 20)
+        ($videoContract.mutationSafetyVectors[4].expectedMutationSafe -eq
+            $false)
+        ($videoContract.mutationSafetyVectors[5].delivery.frameCount -eq 179)
+        ($videoContract.mutationSafetyVectors[5].expectedMutationSafe -eq
             $false)
         (($videoContract.normalization.resolution -join " ").Contains(
             "relativeAspectError + 0.25 * unusedAreaRatio"))
@@ -160,17 +192,20 @@ try {
         ($videoContract.readerFixture.expectedOperations.'explicit-video' -eq "video")
         ($videoContract.readerFixture.expectedOperations.'explicit-video-delivery' -eq "video")
         ($videoContract.readerFixture.expectedOperations.'malformed-video-delivery' -eq "video")
+        ($videoContract.readerFixture.expectedOperations.'explicit-video-high-delivery' -eq "video")
         ($videoContract.readerFixture.expectedOperations.'future-operation' -eq "unsupported")
         ($videoContract.readerFixture.expectedOperations.'null-operation' -eq "unsupported")
         ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video'.fps -eq 16)
         ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video'.frameCount -eq 97)
         ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video-delivery'.fps -eq 30)
         ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video-delivery'.frameCount -eq 180)
+        ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video-high-delivery'.fps -eq 30)
+        ($videoContract.readerFixture.expectedPlaybackMetadata.'explicit-video-high-delivery'.frameCount -eq 180)
         ($videoContract.readerFixture.expectedPlaybackMetadata.'malformed-video-delivery' -eq "protected")
         (($videoContract.readerFixture.expectedImageVersionIds -join ",") -eq
             "legacy-missing-operation,explicit-upscale,explicit-photoreal")
         (($videoContract.readerFixture.expectedReaderOnlyIds -join ",") -eq
-            "explicit-video,explicit-video-delivery,malformed-video-delivery,future-operation,null-operation")
+            "explicit-video,explicit-video-delivery,malformed-video-delivery,explicit-video-high-delivery,future-operation,null-operation")
         (($videoContract.readerFixture.expectedMalformedDeliveryIds -join ",") -eq
             "malformed-video-delivery")
         ($videoContract.readerFixture.expectedMutationRequests -eq 0)
@@ -202,6 +237,29 @@ try {
         ($videoActivation.deliveryExtension.audio -eq $false)
         ([string]$videoActivation.deliveryExtension.h25CandidateCommit -ceq
             'e10cc052572da8e5b6e0cb9da06b928a44deb3e7')
+        ($videoActivation.qualityExtension.protocolChange -eq
+            "additive within aibos.enhancement-video/v1")
+        ($videoActivation.qualityExtension.normalPresetId -eq
+            "wan22-ti2v-5b-normal-v1")
+        ($videoActivation.qualityExtension.highPresetId -eq
+            "wan22-ti2v-5b-high-v1")
+        ($videoActivation.qualityExtension.normalSteps -eq 20)
+        ($videoActivation.qualityExtension.highSteps -eq 40)
+        ($videoActivation.qualityExtension.model -eq
+            "wan2.2_ti2v_5B_fp16.safetensors")
+        ($videoActivation.qualityExtension.sameNativeFrameCount -eq $true)
+        ($videoActivation.qualityExtension.sameMaximumPixelArea -eq $true)
+        ($videoActivation.qualityExtension.sameDeliveryProfile -eq
+            "deliveryV1")
+        ($videoActivation.qualityExtension.keepSingleWorker -eq $true)
+        ($videoActivation.qualityExtension.keepInferenceSerial -eq $true)
+        ([string]$videoActivation.qualityExtension.h25CandidateCommit -ceq
+            '15496ced189586daf384501cbec30fc732429a6c')
+        ([string]$videoActivation.qualityExtension.aibosReaderUiCandidateCommit -ceq
+            'c3c32a5da5da4921f0d8d9b7e16ccde6d250593c')
+        ([string]$videoActivation.qualityExtension.canonicalContractSha256 -ceq
+            'd604d5926b23afaa84aff75dd78a3a3705cbe7fc0e4d3870c85c97b6d80c634d')
+        ($videoActivation.qualityExtension.highRuntimeMeasured -eq $false)
         ($videoActivation.liveRuntime.wpfMutationClientEnabled -eq $false)
         ($videoActivation.liveRuntime.h25WriterEnabled -eq $false)
         ($videoActivation.liveRuntime.productionProcessesRestarted -eq $false)

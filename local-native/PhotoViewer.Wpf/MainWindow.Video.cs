@@ -70,7 +70,8 @@ public partial class MainWindow
         resolvedSource = "";
         version = null!;
         catalogAliases = [];
-        if (!TryGetStringProperty(job, "id", out string? jobId)
+        if (!IsVideoMutationSafe(job)
+            || !TryGetStringProperty(job, "id", out string? jobId)
             || !TryGetStringProperty(job, "sourcePath", out string? sourcePath)
             || !TryGetStringProperty(job, "sourceId", out string? sourceId)
             || !TryGetStringProperty(job, "outputPath", out string? outputPath)
@@ -635,6 +636,8 @@ public partial class MainWindow
             ?.VideoOutputPath;
 
     public int VideoCandidateCountForSmoke => _videoCandidateCount;
+    public int ManagedVideoVersionCountForSmoke =>
+        _videoVersions.Values.Sum(static versions => versions.Count);
     public int VideoVersionCountForSmoke => _modalVideoVersions.Count;
     public int ModalVideoVersionIndexForSmoke => _modalVideoVersionIndex;
     public bool ModalShowingVideoForSmoke => _modalShowingVideo;

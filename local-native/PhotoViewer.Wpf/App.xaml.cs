@@ -16954,10 +16954,12 @@ public partial class App : Application
             throw new InvalidOperationException(
                 "Video smoke output escaped its app-owned TEMP root.");
         }
-        string videoOutput = Path.GetFullPath(
-            Path.Combine(videoOutputDirectory, "video-newest.mp4"));
-        string olderVideoOutput = Path.GetFullPath(
-            Path.Combine(videoOutputDirectory, "video-older.mp4"));
+        string videoOutput = Path.GetFullPath(Path.Combine(
+            videoOutputDirectory,
+            $"video-newest__{Path.GetFileNameWithoutExtension(photorealOutput)}__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__f102bafe68e9.mp4"));
+        string olderVideoOutput = Path.GetFullPath(Path.Combine(
+            videoOutputDirectory,
+            $"video-older__{Path.GetFileNameWithoutExtension(photorealSource)}__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__22467069a81f.mp4"));
         string videoOutputPrefix =
             Path.TrimEndingDirectorySeparator(videoOutputDirectory)
             + Path.DirectorySeparatorChar;
@@ -16986,8 +16988,8 @@ public partial class App : Application
         {
             foreach (string fileName in new[]
                      {
-                         "video-newest.mp4",
-                         "video-older.mp4",
+                         Path.GetFileName(videoOutput),
+                         Path.GetFileName(olderVideoOutput),
                      })
             {
                 string appOwnedPath = Path.GetFullPath(
@@ -17188,7 +17190,10 @@ public partial class App : Application
                         is (6, 16, 409600, "")
                     && win.VideoGenerationEstimateForSmoke
                         is (97, 158, 293)
-                    && win.VideoModelIdForSmoke == "wan22-ti2v-5b";
+                    && win.VideoModelIdForSmoke == "wan22-ti2v-5b"
+                    && win.VideoQualityIdForSmoke
+                        == "wan22-ti2v-5b-normal-v1"
+                    && win.VideoQualityStepsForSmoke == 20;
                 win.SelectVideoModelForSmoke(
                     "hunyuan-video-1.5-i2v-step-distilled-experimental");
                 bool experimentalVideoModelBlocked =
@@ -17198,7 +17203,8 @@ public partial class App : Application
                     4,
                     12,
                     307200,
-                    "pan left slowly");
+                    "pan left slowly",
+                    "wan22-ti2v-5b-high-v1");
                 string videoRequestJson = "";
                 win.ConfigureModalEnhancementForSmoke(async (request, token) =>
                 {
@@ -17227,8 +17233,16 @@ public partial class App : Application
                 bool videoBoardSourceSelected =
                     win.SelectFileNameForSmoke(
                         Path.GetFileName(photorealSource));
+                bool galleryVideoSourceVersions =
+                    win.GalleryVideoSourceRequestsForSmoke.SequenceEqual(
+                        [
+                            "original",
+                            "photoreal-job:photoreal-ok",
+                        ],
+                        StringComparer.Ordinal);
                 bool videoBoardModalOpened = win.OpenModalForSmoke();
-                bool videoBoardOpened = win.OpenVideoGenerationBoardForSmoke();
+                bool videoBoardOpened = win.OpenVideoGenerationBoardForSmoke(
+                    "photoreal-job:photoreal-ok");
                 bool videoBoardPhotorealSource =
                     win.VideoSourceForSmoke is
                     {
@@ -17236,7 +17250,10 @@ public partial class App : Application
                     };
                 bool videoSurface = win.VideoGenerationSurfaceForSmoke
                     && win.VideoGenerationEstimateForSmoke
-                        is (49, 61, 113);
+                        is (49, 117, 218)
+                    && win.VideoQualityIdForSmoke
+                        == "wan22-ti2v-5b-high-v1"
+                    && win.VideoQualityStepsForSmoke == 40;
                 bool videoQueueSucceeded =
                     await win.QueueVideoGenerationForSmokeAsync();
                 bool videoRequestExact = false;
@@ -17286,7 +17303,7 @@ public partial class App : Application
                         && videoRequest.TryGetProperty(
                             "presetId",
                             out JsonElement videoPresetId)
-                        && videoPresetId.GetString() == "wan22-ti2v-5b-normal-v1"
+                        && videoPresetId.GetString() == "wan22-ti2v-5b-high-v1"
                         && videoRequest.TryGetProperty(
                             "adapterId",
                             out JsonElement videoAdapterId)
@@ -17314,7 +17331,10 @@ public partial class App : Application
                         Path.GetFileName(photorealSource));
                 bool reloadVideoSettings = second.VideoGenerationSettingsForSmoke
                         is (4, 12, 307200, "pan left slowly")
-                    && second.VideoModelIdForSmoke == "wan22-ti2v-5b";
+                    && second.VideoModelIdForSmoke == "wan22-ti2v-5b"
+                    && second.VideoQualityIdForSmoke
+                        == "wan22-ti2v-5b-high-v1"
+                    && second.VideoQualityStepsForSmoke == 40;
                 second.OpenAppSettingsForSmoke();
                 bool outputRootSettingsSurface = second.AppEnhancementOutputRootSurfaceForSmoke;
                 string alternateOutputRoot = Path.Combine(smokeRoot, "alternate-managed-outputs");
@@ -17393,6 +17413,7 @@ public partial class App : Application
                     && videoDefaults
                     && experimentalVideoModelBlocked
                     && videoBoardSourceSelected
+                    && galleryVideoSourceVersions
                     && videoBoardModalOpened
                     && videoBoardOpened
                     && videoBoardPhotorealSource
@@ -17479,6 +17500,8 @@ public partial class App : Application
                     VideoHandlesReleased = videoHandlesReleased,
                     VideoMediaFailure = videoMediaFailure,
                     VideoDefaults = videoDefaults,
+                    GalleryVideoSourceVersions =
+                        galleryVideoSourceVersions,
                     VideoBoardOpened = videoBoardOpened,
                     VideoSurface = videoSurface,
                     VideoQueueSucceeded = videoQueueSucceeded,
@@ -17692,13 +17715,13 @@ public partial class App : Application
             "outputs",
             "Videos",
             "video-sibling-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__22467069a81f.mp4");
-        string videoMalformedDeliveryOutputPath = Path.Combine(
+        string videoQualityMismatchOutputPath = Path.Combine(
             smokeRoot,
             "stores",
             "enhance",
             "outputs",
             "Videos",
-            "video-reader-only-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__0b6b30d0ae9d.mp4");
+            "video-reader-only-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-high-v1__0b6b30d0ae9d.mp4");
         string statePath = Path.Combine(smokeRoot, "stores", "state.json");
         string favoritesPath = Path.Combine(smokeRoot, "stores", "favorites.json");
         string seenPath = Path.Combine(smokeRoot, "stores", "seen.json");
@@ -17758,7 +17781,7 @@ public partial class App : Application
                     overwrite: true);
                 File.Copy(
                     videoOutputPath,
-                    videoMalformedDeliveryOutputPath,
+                    videoQualityMismatchOutputPath,
                     overwrite: true);
                 File.WriteAllText(statePath, "{\"version\":2}");
                 File.WriteAllText(favoritesPath, "{}");
@@ -17832,12 +17855,14 @@ public partial class App : Application
                     int durationSeconds = 6,
                     int playbackFps = 16,
                     int nativeFrameCount = 97,
+                    string presetId = "wan22-ti2v-5b-normal-v1",
+                    int steps = 20,
                     object? sourceProducerJobId = null)
                 {
                     var video = new Dictionary<string, object?>(
                         StringComparer.Ordinal)
                     {
-                        ["presetId"] = "wan22-ti2v-5b-normal-v1",
+                        ["presetId"] = presetId,
                         ["backendId"] = "wan22-ti2v-5b-core-v1",
                         ["modelName"] =
                             "wan2.2_ti2v_5B_fp16.safetensors",
@@ -17862,7 +17887,7 @@ public partial class App : Application
                                 + "Keep the camera locked and preserve the original framing.",
                             negativePrompt =
                                 "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark",
-                            steps = 20,
+                            steps,
                             cfg = 5,
                             sampler = "uni_pc",
                             scheduler = "simple",
@@ -17903,7 +17928,7 @@ public partial class App : Application
                             mtimeMs = sourceMtimeMs,
                         },
                         ["sourceSha256"] = new string('a', 64),
-                        ["presetId"] = "wan22-ti2v-5b-normal-v1",
+                        ["presetId"] = presetId,
                         ["presetHash"] = presetHash,
                         ["adapterId"] = "wan22-ti2v-5b-core-v1",
                         ["operation"] = "video",
@@ -17958,11 +17983,13 @@ public partial class App : Application
                             0,
                             createdAt: "2026-07-23T00:00:03.500Z",
                             queueOrder: 2,
-                            presetHash: "603e9622ace8",
+                            presetHash: "25464cb5d9ce",
                             delivery: "current",
                             durationSeconds: 4,
                             playbackFps: 12,
-                            nativeFrameCount: 49),
+                            nativeFrameCount: 49,
+                            presetId: "wan22-ti2v-5b-high-v1",
+                            steps: 40),
                         Job("failed-cancel-job", failedCanceled ? "canceled" : "failed", 18, error: "GPU backend stopped"),
                         VideoJob(
                             "failed-retry-job",
@@ -18018,12 +18045,13 @@ public partial class App : Application
                             createdAt: "2026-07-23T00:00:02.000Z"),
                         VideoJob(
                             "video-reader-only-job",
-                            "failed",
+                            "succeeded",
                             100,
-                            output: videoMalformedDeliveryOutputPath,
-                            error: "Malformed delivery metadata",
+                            output: videoQualityMismatchOutputPath,
                             presetHash: "0b6b30d0ae9d",
-                            delivery: "malformed"),
+                            delivery: "current",
+                            presetId: "wan22-ti2v-5b-high-v1",
+                            steps: 20),
                         VideoJob(
                             "video-malformed-provenance-job",
                             "failed",
@@ -18462,7 +18490,8 @@ public partial class App : Application
                     && !await window.MoveEnhancementJobForSmokeAsync(
                         "video-reader-only-job",
                         "up")
-                    && File.Exists(videoMalformedDeliveryOutputPath);
+                    && File.Exists(videoQualityMismatchOutputPath)
+                    && window.ManagedVideoVersionCountForSmoke == 2;
                 bool malformedProvenanceVideoSafe =
                     malformedProvenanceVideoView is
                     {
@@ -18692,8 +18721,8 @@ public partial class App : Application
                     && running.Filtered == 1
                     && queued.Filtered == 3
                     && queueInventoryOrdered
-                    && failed.Filtered == 7
-                    && completed.Filtered == 3
+                    && failed.Filtered == 6
+                    && completed.Filtered == 4
                     && canceled.Filtered == 2
                     && operationLabelsVisible
                     && videoActionsEnabled
@@ -25378,22 +25407,37 @@ public partial class App : Application
             {
                 ["presetId"] = "wan22-ti2v-5b-normal-v1",
                 ["backendId"] = "wan22-ti2v-5b-core-v1",
+                ["modelName"] = "wan2.2_ti2v_5B_fp16.safetensors",
                 ["requested"] = new Dictionary<string, object?>
                 {
                     ["durationSeconds"] = 6,
                     ["playbackFps"] = 16,
+                    ["maximumPixelArea"] = 409600,
                     ["prompt"] = "",
                 },
                 ["effective"] = new Dictionary<string, object?>
                 {
                     ["frameCount"] = 97,
-                    ["width"] = 832,
-                    ["height"] = 480,
-                    ["positivePrompt"] = "fixture-positive",
-                    ["negativePrompt"] = "fixture-negative",
+                    ["width"] = 736,
+                    ["height"] = 544,
+                    ["positivePrompt"] =
+                        "Animate the supplied image as the exact first frame. "
+                        + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
+                        + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
+                        + "Use subtle natural idle motion only: gentle breathing, an occasional blink, and restrained secondary motion in hair and clothing. "
+                        + "Keep the camera locked and preserve the original framing.",
+                    ["negativePrompt"] =
+                        "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark",
+                    ["steps"] = 20,
+                    ["cfg"] = 5,
+                    ["sampler"] = "uni_pc",
+                    ["scheduler"] = "simple",
+                    ["shift"] = 8,
+                    ["denoise"] = 1,
                 },
                 ["seed"] = seed,
                 ["codec"] = "h264",
+                ["container"] = "mp4",
                 ["bitDepth"] = 8,
             };
             if (includeDelivery)
@@ -25422,7 +25466,11 @@ public partial class App : Application
                     usePhotorealSource
                         ? photorealOutputPath
                         : videoSourcePath),
+                ["sourceSha256"] = new string('a', 64),
                 ["presetId"] = "wan22-ti2v-5b-normal-v1",
+                ["presetHash"] = includeDelivery
+                    ? "f102bafe68e9"
+                    : "22467069a81f",
                 ["adapterId"] = "wan22-ti2v-5b-core-v1",
                 ["operation"] = "video",
                 ["mediaKind"] = "video",
@@ -25449,7 +25497,7 @@ public partial class App : Application
                 SucceededVideo(
                     "video-older",
                     olderVideoOutputPath,
-                    123456788,
+                    123456789,
                     includeDelivery: false,
                     usePhotorealSource: false,
                     createdAt: "2026-07-30T00:00:00.000Z"),
@@ -29241,6 +29289,7 @@ public partial class App : Application
         public bool VideoHandlesReleased { get; init; }
         public string? VideoMediaFailure { get; init; }
         public bool VideoDefaults { get; init; }
+        public bool GalleryVideoSourceVersions { get; init; }
         public bool VideoBoardOpened { get; init; }
         public bool VideoSurface { get; init; }
         public bool VideoQueueSucceeded { get; init; }

@@ -86,10 +86,13 @@ public partial class MainWindow
                     or JsonValueKind.False
                     or JsonValueKind.Null))
             || !TryGetExactStringProperty(job, "mediaKind", "video")
-            || !TryGetExactStringProperty(
+            || !TryGetStringProperty(
                 job,
                 "presetId",
-                "wan22-ti2v-5b-normal-v1")
+                out string? jobPresetId)
+            || !TryGetVideoPresetSteps(
+                jobPresetId,
+                out int expectedSteps)
             || !TryGetExactStringProperty(
                 job,
                 "adapterId",
@@ -101,10 +104,14 @@ public partial class MainWindow
             || !job.TryGetProperty("video", out JsonElement video)
             || video.ValueKind != JsonValueKind.Object
             || !HasExactVideoSnapshotProperties(video)
-            || !TryGetExactStringProperty(
+            || !TryGetStringProperty(
                 video,
                 "presetId",
-                "wan22-ti2v-5b-normal-v1")
+                out string? videoPresetId)
+            || !string.Equals(
+                videoPresetId,
+                jobPresetId,
+                StringComparison.Ordinal)
             || !TryGetExactStringProperty(
                 video,
                 "backendId",
@@ -195,7 +202,7 @@ public partial class MainWindow
                 negativePrompt,
                 VideoNegativePrompt,
                 StringComparison.Ordinal)
-            || !HasExactInt32(effective, "steps", 20)
+            || !HasExactInt32(effective, "steps", expectedSteps)
             || !HasExactInt32(effective, "cfg", 5)
             || !TryGetExactStringProperty(effective, "sampler", "uni_pc")
             || !TryGetExactStringProperty(effective, "scheduler", "simple")
@@ -240,6 +247,7 @@ public partial class MainWindow
                 jobId!,
                 sourcePath!,
                 sourceSha256!,
+                jobPresetId!,
                 presetHash!);
             return string.Equals(
                 Path.GetFileName(outputPathElement.GetString()),
@@ -250,6 +258,24 @@ public partial class MainWindow
             ex is ArgumentException or NotSupportedException)
         {
             return false;
+        }
+    }
+
+    private static bool TryGetVideoPresetSteps(
+        string? presetId,
+        out int steps)
+    {
+        switch (presetId)
+        {
+            case NormalVideoPresetId:
+                steps = NormalVideoSteps;
+                return true;
+            case HighVideoPresetId:
+                steps = HighVideoSteps;
+                return true;
+            default:
+                steps = 0;
+                return false;
         }
     }
 
@@ -368,6 +394,7 @@ public partial class MainWindow
         string jobId,
         string sourcePath,
         string sourceSha256,
+        string presetId,
         string presetHash)
     {
         string safeJobId = SanitizeVideoOutputNamePart(
@@ -380,7 +407,7 @@ public partial class MainWindow
             Path.GetFileNameWithoutExtension(sourcePath),
             maximumLength: 64,
             fallback: "image");
-        return $"{safeJobId}__{safeSourceName}__{sourceSha256[..16]}__wan22-ti2v-5b-normal-v1__{presetHash}.mp4";
+        return $"{safeJobId}__{safeSourceName}__{sourceSha256[..16]}__{presetId}__{presetHash}.mp4";
     }
 
     private static string SanitizeVideoOutputNamePart(
@@ -2133,7 +2160,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             ? "実写版"
             : "Original";
     public string PresetSummary => IsVideoOperation
-        ? $"{(PresetId == "wan22-ti2v-5b-normal-v1" ? "Wan2.2 TI2V 5B · アニメ・汎用／標準" : PresetId)}  ·  {SourceVersionLabel}"
+        ? $"{(PresetId switch
+        {
+            "wan22-ti2v-5b-normal-v1" => "Wan2.2 TI2V 5B · 標準 · 20 step",
+            "wan22-ti2v-5b-high-v1" => "Wan2.2 TI2V 5B · 高品質 · 40 step",
+            _ => PresetId,
+        })}  ·  {SourceVersionLabel}"
         : $"{PresetId}  ·  {AdapterId}";
     public string OperationLabel => Operation switch
     {

@@ -7087,20 +7087,10 @@ public partial class MainWindow : Window
                     candidate.Header?.ToString(),
                     "動画化",
                     StringComparison.Ordinal));
-            MenuItem? photorealVideo = videoMenu?.Items
-                .OfType<MenuItem>()
-                .FirstOrDefault(candidate => string.Equals(
-                    candidate.Tag?.ToString(),
-                    "photoreal",
-                    StringComparison.Ordinal));
-            if (photorealVideo is not null)
-            {
-                photorealVideo.IsEnabled = TryCaptureVideoSource(
-                    (Tile)item.DataContext,
-                    "photoreal",
-                    out _,
-                    out _);
-            }
+            if (videoMenu is not null)
+                PopulateGalleryVideoSourceMenu(
+                    videoMenu,
+                    (Tile)item.DataContext);
         }
     }
 
@@ -18149,7 +18139,8 @@ public partial class MainWindow : Window
             state.VideoPlaybackFps,
             state.VideoMaximumPixelArea,
             state.VideoPrompt,
-            state.VideoModelId);
+            state.VideoModelId,
+            state.VideoQualityId);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -18294,6 +18285,7 @@ public partial class MainWindow : Window
                 VideoMaximumPixelArea = _videoMaximumPixelArea,
                 VideoPrompt = _videoPrompt,
                 VideoModelId = _videoModelId,
+                VideoQualityId = _videoQualityId,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -22615,7 +22607,7 @@ public partial class MainWindow : Window
                     AutomationProperties.GetName(item),
                     "Choose video generation source",
                     StringComparison.Ordinal)
-                && item.Items.OfType<MenuItem>().Count() == 2
+                && item.Items.OfType<MenuItem>().Count() >= 2
                 && item.Items.OfType<MenuItem>().Any(child =>
                     string.Equals(
                         child.Header?.ToString(),
@@ -22627,13 +22619,12 @@ public partial class MainWindow : Window
                         StringComparison.Ordinal))
                 && item.Items.OfType<MenuItem>().Any(child =>
                     string.Equals(
-                        child.Header?.ToString(),
-                        "最新の実写版から...",
-                        StringComparison.Ordinal)
-                    && string.Equals(
                         child.Tag?.ToString(),
                         "photoreal",
-                        StringComparison.Ordinal))));
+                        StringComparison.Ordinal)
+                    || child.Tag?.ToString()?.StartsWith(
+                        PhotorealVideoSourceRequestPrefix,
+                        StringComparison.Ordinal) == true)));
     public bool ModalEdgeChromeContractForSmoke
         => ModalPreviousZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalCenterZoneColumn.Width.GridUnitType == GridUnitType.Star
@@ -23733,6 +23724,7 @@ public sealed class ViewerState
     public int? VideoMaximumPixelArea { get; set; }
     public string? VideoPrompt { get; set; }
     public string? VideoModelId { get; set; }
+    public string? VideoQualityId { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.
