@@ -252,6 +252,7 @@ public partial class App
                     && companionLaunch.CreateNoWindow
                     && !companionLaunch.RedirectStandardOutput
                     && !companionLaunch.RedirectStandardError
+                    && !companionLaunch.HasExplicitWorkingDirectory
                     && !companionLaunch.HasExternalOwnerPid
                     && companionLaunch.NoOpen == "1"
                     && companionLaunch.ComfyAutostart == "0";

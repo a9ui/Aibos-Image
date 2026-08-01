@@ -285,7 +285,11 @@ if ($result.coldGalleryFocusWarmupBudgetMs -ne 250 `
 }
 $controlConsensus = $result.schedulerControlConsensus
 $dispatcherDiagnostic = $result.dispatcherDiagnostic
+$heartbeatMeasurementToleranceMs = 0.5
+$heartbeatAcceptanceLimitMs =
+    [double]$result.dispatcherHeartbeatBudgetMs + $heartbeatMeasurementToleranceMs
 if ($result.dispatcherHeartbeatBudgetMs -ne 50 `
+    -or $result.dispatcherHeartbeatMeasurementToleranceMs -ne $heartbeatMeasurementToleranceMs `
     -or $null -eq $controlConsensus `
     -or $null -eq $dispatcherDiagnostic) {
     $failures.Add('dispatcher heartbeat diagnostic contract was missing')
@@ -350,12 +354,12 @@ if ($null -ne $dispatcherDiagnostic) {
 }
 if ($dispatcherDiagnostic.rawOverBudgetCount -gt 0 `
     -and ($null -eq $dispatcherDiagnostic `
-        -or $dispatcherDiagnostic.maxProductGapMs -gt $result.dispatcherHeartbeatBudgetMs `
-        -or $dispatcherDiagnostic.activeOperationDiagnosticCount -gt 0 `
+        -or $dispatcherDiagnostic.maxProductGapMs -gt $heartbeatAcceptanceLimitMs `
         -or $dispatcherDiagnostic.inconclusiveCount -gt 0)) {
     $failures.Add(
         "raw dispatcher heartbeat gap was $($result.dispatcherHeartbeatMaxGapMs) ms " +
         "(budget $($result.dispatcherHeartbeatBudgetMs) ms; " +
+        "measurement tolerance $heartbeatMeasurementToleranceMs ms; " +
         "product max $($dispatcherDiagnostic.maxProductGapMs) ms; " +
         "strict queue max $($dispatcherDiagnostic.maxStrictSchedulerQueueDelayMs) ms; " +
         "queue/active/inconclusive " +

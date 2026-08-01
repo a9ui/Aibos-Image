@@ -118,8 +118,8 @@ public partial class MainWindow
             return false;
         }
 
-        string? root = ResolveEnhancementCompanionRoot();
-        if (root is null)
+        ValidatedEnhancementCompanionRoot? companionRoot = ResolveEnhancementCompanionRoot();
+        if (companionRoot is null)
         {
             error = "Aibos could not find the H25 Browser companion beside this portable build. Open the H25 copy of Aibos or set AIBOS_H25_COMPANION_ROOT.";
             return false;
@@ -133,7 +133,7 @@ public partial class MainWindow
                 error = "Automatic local AI startup requires an http://127.0.0.1 loopback endpoint.";
                 return false;
             }
-            string? nodeExecutable = ResolveNodeExecutablePath();
+            ValidatedNodeExecutable? nodeExecutable = ResolveNodeExecutablePath();
             if (nodeExecutable is null)
             {
                 error = "Aibos could not find an installed Node.js executable for the local AI companion.";
@@ -141,7 +141,7 @@ public partial class MainWindow
             }
             ProcessStartInfo startInfo = CreateEnhancementCompanionStartInfo(
                 nodeExecutable,
-                root,
+                companionRoot,
                 endpoint);
 
             var process = new Process
@@ -168,8 +168,8 @@ public partial class MainWindow
     }
 
     private static ProcessStartInfo CreateEnhancementCompanionStartInfo(
-        string nodeExecutable,
-        string root,
+        ValidatedNodeExecutable nodeExecutable,
+        ValidatedEnhancementCompanionRoot companionRoot,
         Uri endpoint)
     {
         var startInfo = new ProcessStartInfo
@@ -177,17 +177,13 @@ public partial class MainWindow
             // ResolveNodeExecutablePath only accepts canonical node.exe files
             // below the Windows Program Files roots.
             // codeql[cs/command-line-injection]
-            FileName = nodeExecutable,
-            // root is a canonical H25 root whose package/project identity and
-            // contained production launcher were validated before this call.
-            // codeql[cs/command-line-injection]
-            WorkingDirectory = root,
+            FileName = nodeExecutable.Path, // lgtm[cs/command-line-injection]
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = false,
             RedirectStandardError = false,
         };
-        startInfo.ArgumentList.Add(Path.Combine(root, "scripts", "prod_launcher.js"));
+        startInfo.ArgumentList.Add(companionRoot.LauncherPath);
         startInfo.ArgumentList.Add("--port");
         startInfo.ArgumentList.Add(endpoint.Port.ToString(
             System.Globalization.CultureInfo.InvariantCulture));
@@ -195,22 +191,25 @@ public partial class MainWindow
         startInfo.Environment["PVU_COMFY_AUTOSTART"] = "0";
         // Do not set PVU_OWNER_PID. The companion owns the durable FIFO worker
         // after an explicit AI action and must outlive the WPF viewer process.
+        startInfo.Environment.Remove("PVU_OWNER_PID");
         return startInfo;
     }
 
-    private static string? ResolveEnhancementCompanionRoot()
+    private static ValidatedEnhancementCompanionRoot? ResolveEnhancementCompanionRoot()
         => ResolveEnhancementCompanionRoot(
             Environment.GetEnvironmentVariable("AIBOS_H25_COMPANION_ROOT"),
             AppContext.BaseDirectory);
 
-    private static string? ResolveEnhancementCompanionRoot(
+    private static ValidatedEnhancementCompanionRoot? ResolveEnhancementCompanionRoot(
         string? configuredRoot,
         string appBaseDirectory)
     {
         // An explicitly configured root is authoritative and must itself be
         // the H25 project root. Never walk its parents or silently fall back.
         if (!string.IsNullOrWhiteSpace(configuredRoot))
-            return TryValidateEnhancementCompanionRoot(configuredRoot, out string configured)
+            return TryValidateEnhancementCompanionRoot(
+                configuredRoot,
+                out ValidatedEnhancementCompanionRoot? configured)
                 ? configured
                 : null;
 
@@ -228,7 +227,9 @@ public partial class MainWindow
         // is controlled by the launched app, unlike Environment.CurrentDirectory.
         for (int depth = 0; depth < 12 && current is not null; depth++)
         {
-            if (TryValidateEnhancementCompanionRoot(current, out string validated))
+            if (TryValidateEnhancementCompanionRoot(
+                    current,
+                    out ValidatedEnhancementCompanionRoot? validated))
                 return validated;
             current = Directory.GetParent(current)?.FullName;
         }
@@ -237,9 +238,9 @@ public partial class MainWindow
 
     private static bool TryValidateEnhancementCompanionRoot(
         string candidateRoot,
-        out string validatedRoot)
+        out ValidatedEnhancementCompanionRoot? validatedRoot)
     {
-        validatedRoot = "";
+        validatedRoot = null;
         try
         {
             string lexicalRoot = Path.GetFullPath(candidateRoot);
@@ -284,7 +285,7 @@ public partial class MainWindow
             if (!projectId || !projectName)
                 return false;
 
-            validatedRoot = canonicalRoot;
+            validatedRoot = new(canonicalRoot, ResolveFinalPathCore(launcherPath));
             return true;
         }
         catch (Exception ex) when (ex is
@@ -298,33 +299,81 @@ public partial class MainWindow
         }
     }
 
-    private static string? ResolveNodeExecutablePath()
+    private static ValidatedNodeExecutable? ResolveNodeExecutablePath()
     {
-        var candidates = new List<string>();
+        var candidates = new List<(string ProgramFilesRoot, string CandidatePath)>();
         string? programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         if (!string.IsNullOrWhiteSpace(programFiles))
-            candidates.Add(Path.Combine(programFiles, "nodejs", "node.exe"));
+            candidates.Add((programFiles, Path.Combine(programFiles, "nodejs", "node.exe")));
         string? programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
         if (!string.IsNullOrWhiteSpace(programFilesX86))
-            candidates.Add(Path.Combine(programFilesX86, "nodejs", "node.exe"));
+            candidates.Add((programFilesX86, Path.Combine(programFilesX86, "nodejs", "node.exe")));
 
-        foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach ((string programFilesRoot, string candidatePath) in candidates)
         {
-            try
-            {
-                string fullPath = Path.GetFullPath(candidate);
-                if (File.Exists(fullPath))
-                    return ResolveFinalPathCore(fullPath);
-            }
-            catch (Exception ex) when (ex is
-                ArgumentException or
-                NotSupportedException or
-                UnauthorizedAccessException or
-                IOException)
-            {
-            }
+            if (TryValidateNodeExecutablePath(
+                    programFilesRoot,
+                    candidatePath,
+                    out ValidatedNodeExecutable? validated))
+                return validated;
         }
         return null;
+    }
+
+    private static bool TryValidateNodeExecutablePath(
+        string programFilesRoot,
+        string candidatePath,
+        out ValidatedNodeExecutable? validatedExecutable)
+    {
+        validatedExecutable = null;
+        try
+        {
+            string lexicalProgramFilesRoot = Path.GetFullPath(programFilesRoot);
+            if (!Directory.Exists(lexicalProgramFilesRoot))
+                return false;
+
+            string expectedCandidate = Path.GetFullPath(
+                Path.Combine(lexicalProgramFilesRoot, "nodejs", "node.exe"));
+            if (!string.Equals(
+                    Path.GetFullPath(candidatePath),
+                    expectedCandidate,
+                    StringComparison.OrdinalIgnoreCase)
+                || !File.Exists(expectedCandidate))
+            {
+                return false;
+            }
+
+            string canonicalProgramFilesRoot = ResolveFinalPathCore(lexicalProgramFilesRoot);
+            string canonicalNodeDirectory = ResolveFinalPathCore(
+                Path.Combine(lexicalProgramFilesRoot, "nodejs"));
+            string canonicalCandidate = ResolveFinalPathCore(expectedCandidate);
+            if (!Directory.Exists(canonicalProgramFilesRoot)
+                || !Directory.Exists(canonicalNodeDirectory)
+                || !File.Exists(canonicalCandidate)
+                || !IsPathInside(canonicalNodeDirectory, canonicalProgramFilesRoot)
+                || !string.Equals(
+                    Path.GetDirectoryName(canonicalCandidate),
+                    canonicalNodeDirectory,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    Path.GetFileName(canonicalCandidate),
+                    "node.exe",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            validatedExecutable = new(canonicalCandidate);
+            return true;
+        }
+        catch (Exception ex) when (ex is
+            ArgumentException or
+            NotSupportedException or
+            UnauthorizedAccessException or
+            IOException)
+        {
+            return false;
+        }
     }
 
     private void StopOwnedEnhancementCompanion()
@@ -369,22 +418,36 @@ public partial class MainWindow
 
     public int EnhancementCompanionLaunchAttemptCountForSmoke => _enhancementCompanionLaunchAttemptCount;
     public string? EnhancementCompanionLaunchErrorForSmoke => _enhancementCompanionLaunchError;
-    public static string? ResolveEnhancementCompanionRootForSmoke() => ResolveEnhancementCompanionRoot();
+    public static string? ResolveEnhancementCompanionRootForSmoke()
+        => ResolveEnhancementCompanionRoot()?.RootPath;
     public static string? ResolveEnhancementCompanionRootForSmoke(
         string? configuredRoot,
         string appBaseDirectory)
-        => ResolveEnhancementCompanionRoot(configuredRoot, appBaseDirectory);
-    public static string? ResolveNodeExecutablePathForSmoke() => ResolveNodeExecutablePath();
+        => ResolveEnhancementCompanionRoot(configuredRoot, appBaseDirectory)?.RootPath;
+    public static string? ResolveNodeExecutablePathForSmoke() => ResolveNodeExecutablePath()?.Path;
+    public static bool ValidateNodeExecutableCandidateForSmoke(
+        string programFilesRoot,
+        string candidatePath)
+        => TryValidateNodeExecutablePath(programFilesRoot, candidatePath, out _);
     public static EnhancementCompanionLaunchContractSmokeSnapshot
         EnhancementCompanionLaunchContractForSmoke()
-        => new(
-            UseShellExecute: false,
-            CreateNoWindow: true,
-            RedirectStandardOutput: false,
-            RedirectStandardError: false,
-            HasExternalOwnerPid: false,
-            NoOpen: "1",
-            ComfyAutostart: "0");
+    {
+        ProcessStartInfo startInfo = CreateEnhancementCompanionStartInfo(
+            new ValidatedNodeExecutable(@"C:\Program Files\nodejs\node.exe"),
+            new ValidatedEnhancementCompanionRoot(
+                @"C:\fixture\H000025_PhotoViewer",
+                @"C:\fixture\H000025_PhotoViewer\scripts\prod_launcher.js"),
+            new Uri("http://127.0.0.1:3000"));
+        return new(
+            startInfo.UseShellExecute,
+            startInfo.CreateNoWindow,
+            startInfo.RedirectStandardOutput,
+            startInfo.RedirectStandardError,
+            !string.IsNullOrEmpty(startInfo.WorkingDirectory),
+            startInfo.Environment.ContainsKey("PVU_OWNER_PID"),
+            startInfo.Environment["PVU_NO_OPEN"],
+            startInfo.Environment["PVU_COMFY_AUTOSTART"]);
+    }
     public void ConfigureEnhancementCompanionAutoStartForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
         Func<Uri, (bool Started, string Error)> starter)
@@ -401,11 +464,18 @@ public partial class MainWindow
     }
 }
 
+internal sealed record ValidatedEnhancementCompanionRoot(
+    string RootPath,
+    string LauncherPath);
+
+internal sealed record ValidatedNodeExecutable(string Path);
+
 public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
     bool UseShellExecute,
     bool CreateNoWindow,
     bool RedirectStandardOutput,
     bool RedirectStandardError,
+    bool HasExplicitWorkingDirectory,
     bool HasExternalOwnerPid,
     string? NoOpen,
     string? ComfyAutostart);
