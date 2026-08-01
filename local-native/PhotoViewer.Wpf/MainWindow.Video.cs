@@ -23,6 +23,7 @@ public partial class MainWindow
     private int _videoCandidateCount;
     private bool _modalShowingVideo;
     private bool _modalVideoPlaying;
+    private bool _modalVideoLoopEnabled = true;
     private bool _modalVideoAutoplayPending;
     private bool _suppressModalVideoVersionSelection;
     private bool _modalVideoTransportStubForSmoke;
@@ -391,18 +392,16 @@ public partial class MainWindow
         }
 
         bool available = _modalVideoVersions.Count > 0;
-        ModalVideoVersionComboBox.Visibility = available
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        // The top display-version selector is the single user-facing media
+        // inventory. Keep this legacy control populated for compatibility and
+        // smoke inspection, but never expose a second video-only dropdown.
+        ModalVideoVersionComboBox.Visibility = Visibility.Collapsed;
         ModalVideoPlaybackButton.Visibility = available
             ? Visibility.Visible
             : Visibility.Collapsed;
         ModalVideoPlaybackButton.IsEnabled = available;
         UpdateModalVideoPlaybackPresentation();
     }
-
-    private bool ShouldAutoplayModalVideo()
-        => VideoOnlyFilter?.IsChecked == true && _modalVideoVersions.Count > 0;
 
     private bool ShowModalVideoVersion(int index, bool autoplay)
     {
@@ -456,6 +455,15 @@ public partial class MainWindow
 
         RefreshModalVideoVersionChoices();
         ModalVideoVersionComboBox.SelectedIndex = index;
+        if (SelectedTile() is Tile selected)
+        {
+            RememberModalDisplayPreference(
+                selected,
+                ModalDisplayVersionKind.Video,
+                version.JobId);
+            UpdateModalEnhancedControls(
+                TryGetModalEnhancedOutput(selected, out _));
+        }
         ModalSourceLabel.Text = $"Video V{index + 1}";
         ModalFileSizeText.Text = FormatFileSizeMb(new FileInfo(version.Output.OutputPath).Length);
         return true;
@@ -553,7 +561,7 @@ public partial class MainWindow
             : "動画再生";
         string shortcut = BindingText(ViewerKeyAction.ToggleVideoPlayback);
         ModalVideoPlaybackButton.ToolTip =
-            $"動画を再生 / 一時停止 ({shortcut})";
+            $"動画を再生 / 一時停止 ({shortcut})。再生終了後は自動ループします。";
         AutomationProperties.SetName(
             ModalVideoPlaybackButton,
             _modalShowingVideo && _modalVideoPlaying
@@ -598,10 +606,30 @@ public partial class MainWindow
         if (!_modalShowingVideo)
             return;
 
-        ModalVideo.Position = TimeSpan.Zero;
-        ModalVideo.Pause();
-        _modalVideoPlaying = false;
-        _modalVideoAutoplayPending = false;
+        try
+        {
+            if (!_modalVideoTransportStubForSmoke)
+                ModalVideo.Position = TimeSpan.Zero;
+            if (_modalVideoLoopEnabled)
+            {
+                if (!_modalVideoTransportStubForSmoke)
+                    ModalVideo.Play();
+                _modalVideoPlaying = true;
+                _modalVideoAutoplayPending = true;
+            }
+            else
+            {
+                if (!_modalVideoTransportStubForSmoke)
+                    ModalVideo.Pause();
+                _modalVideoPlaying = false;
+                _modalVideoAutoplayPending = false;
+            }
+        }
+        catch
+        {
+            StopAndHideModalVideo(clearSource: true);
+            return;
+        }
         UpdateModalVideoPlaybackPresentation();
     }
 
@@ -642,6 +670,7 @@ public partial class MainWindow
     public int ModalVideoVersionIndexForSmoke => _modalVideoVersionIndex;
     public bool ModalShowingVideoForSmoke => _modalShowingVideo;
     public bool ModalVideoPlayingForSmoke => _modalVideoPlaying;
+    public bool ModalVideoLoopEnabledForSmoke => _modalVideoLoopEnabled;
     public string? ModalVideoPathForSmoke =>
         _modalVideoVersionIndex >= 0 && _modalVideoVersionIndex < _modalVideoVersions.Count
             ? _modalVideoVersions[_modalVideoVersionIndex].Output.OutputPath
@@ -727,6 +756,16 @@ public partial class MainWindow
 
     public bool ToggleModalVideoPlaybackForSmoke()
         => ToggleModalVideoPlayback();
+
+    public bool TriggerModalVideoEndedForSmoke()
+    {
+        if (!_modalShowingVideo)
+            return false;
+        ModalVideo_MediaEnded(ModalVideo, new RoutedEventArgs());
+        return _modalShowingVideo
+            && _modalVideoLoopEnabled
+            && _modalVideoPlaying;
+    }
 
     public bool SelectModalVideoVersionForSmoke(int index)
     {

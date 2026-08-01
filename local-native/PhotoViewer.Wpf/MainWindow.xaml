@@ -1427,7 +1427,7 @@
                         <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Button Width="68" Height="68" Padding="0" BorderThickness="0" Background="Transparent"
                                 Tag="{Binding}" Click="OpenEnhancementSourceInViewer_Click"
-                                ToolTip="元画像をAibosのビューワーで開く"
+                                ToolTip="{Binding ThumbnailToolTip}"
                                 AutomationProperties.Name="{Binding SourceName, StringFormat=Open {0} in the Aibos viewer}">
                           <Border CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1">
                             <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
@@ -1485,7 +1485,7 @@
                               <Button Style="{StaticResource DangerButton}" Content="Remove" Tag="{Binding}" Click="DismissEnhancementJob_Click" Height="28" MinWidth="72" Margin="6,0,0,0" Visibility="{Binding CanDismiss, Converter={StaticResource BoolToVis}}"
                                       ToolTip="Remove this terminal job from history. Source and output files are not changed." AutomationProperties.Name="Remove terminal job from history"/>
                               <Button Style="{StaticResource GhostButton}" Content="Open output" Tag="{Binding}" Click="OpenEnhancementOutput_Click" Height="28" MinWidth="88" Margin="6,0,0,0"
-                                      ToolTip="Open this exact managed version in the Aibos viewer" Visibility="{Binding CanUseOutput, Converter={StaticResource BoolToVis}}"/>
+                                      ToolTip="{Binding OpenOutputToolTip}" Visibility="{Binding CanUseOutput, Converter={StaticResource BoolToVis}}"/>
                               <Button Style="{StaticResource DangerButton}" Content="Delete output" Tag="{Binding}" Click="DeleteEnhancementOutput_Click" Height="28" MinWidth="94" Margin="6,0,0,0" Visibility="{Binding CanUseOutput, Converter={StaticResource BoolToVis}}"/>
                             </WrapPanel>
                           </DockPanel>
@@ -2021,7 +2021,7 @@
           PreviewMouseDown="Modal_PreviewMouseDown" PreviewMouseUp="Modal_PreviewMouseUp"
           PreviewMouseMove="Modal_PreviewMouseMove" MouseLeave="Modal_MouseLeave"
           AutomationProperties.Name="Image preview dialog"
-          AutomationProperties.HelpText="Preview the selected image. Use Left and Right to navigate, Escape to close, and Tab to move through preview controls.">
+          AutomationProperties.HelpText="Preview the selected image or managed video. Click a video to play or pause, swipe up for full screen, use Left and Right to navigate, Escape to exit full screen or close, and Tab to move through preview controls.">
       <Grid.Resources>
         <DataTemplate x:Key="ModalFilmstripItemTemplate">
           <Grid Width="92" Height="64" ToolTip="{Binding FileName}" AutomationProperties.Name="{Binding FileName}">
@@ -2138,12 +2138,12 @@
         <Button x:Name="ModalPhotorealButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="この画像をローカルAIで実写化" AutomationProperties.Name="AI実写化" AutomationProperties.HelpText="このボタンを押した時だけ、AI高画質化と共通のGPUキューへ実写化ジョブを追加します。" MinWidth="72" Height="32" Padding="8,0" Click="StartModalPhotoreal_Click"><TextBlock x:Name="ModalPhotorealButtonLabel" Text="AI実写化" FontSize="9.5" FontWeight="SemiBold"/></Button>
         <Button x:Name="ModalEnhanceButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="AI高画質化" AutomationProperties.Name="Enhance selected image with local AI" AutomationProperties.HelpText="Starts the local AI companion only after this button is pressed." MinWidth="72" Height="32" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="AI高画質化" FontSize="9.5" FontWeight="SemiBold"/></Button>
         <ComboBox x:Name="ModalEnhancementVersionComboBox" DockPanel.Dock="Right"
-                  Width="142" Height="32" Margin="0,0,4,0"
+                  Width="210" Height="32" Margin="0,0,4,0"
                   Style="{StaticResource PhotorealSettingsComboBox}"
                   DisplayMemberPath="Label" IsSynchronizedWithCurrentItem="False"
                   SelectionChanged="ModalEnhancementVersion_SelectionChanged"
-                  AutomationProperties.Name="表示中: Original. AI処理版を選択"
-                  AutomationProperties.HelpText="Original、高画質化、実写化の全保存版から表示する画像を選びます。"/>
+                  AutomationProperties.Name="表示中: Original. 表示版を選択"
+                  AutomationProperties.HelpText="Original、高画質化、実写化、動画化の全保存版から表示するメディアを選びます。"/>
         <Button x:Name="ModalEnhancedToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Current display: Original. Toggle enhanced image output" Width="68" Height="32" Click="ToggleModalEnhanced_Click" IsEnabled="False" Visibility="Collapsed">
           <TextBlock x:Name="ModalEnhancedToggleLabel" Text="Original" Foreground="{StaticResource TextSecondary}" FontSize="9.5" FontWeight="SemiBold"/>
         </Button>

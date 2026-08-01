@@ -17075,6 +17075,29 @@ public partial class App : Application
             try
             {
                 await win.LoadFolderAsync(fullFolder);
+                win.ConfigureModalEnhancementForSmoke((request, _) =>
+                {
+                    if (request.Method == HttpMethod.Get)
+                    {
+                        using JsonDocument jobsDocument =
+                            JsonDocument.Parse(File.ReadAllText(jobsPath));
+                        return Task.FromResult(new HttpResponseMessage(
+                            HttpStatusCode.OK)
+                        {
+                            Content = JsonContent.Create(
+                                jobsDocument.RootElement.Clone()),
+                        });
+                    }
+
+                    return Task.FromResult(new HttpResponseMessage(
+                        HttpStatusCode.NotFound)
+                    {
+                        Content = new StringContent(
+                            "{\"error\":\"unexpected pre-board smoke route\"}",
+                            Encoding.UTF8,
+                            "application/json"),
+                    });
+                });
                 string resolvedJobsPath = win.EnhancementJobsPathForSmoke;
                 int allCount = win.FilteredCountForSmoke;
                 bool selectedUpscale = win.SelectFileNameForSmoke(Path.GetFileName(upscaleSource));
@@ -17133,6 +17156,20 @@ public partial class App : Application
                     && win.ModalVideoVersionIndexForSmoke == 0;
                 string[] videoVersionLabels =
                     win.ModalVideoVersionLabelsForSmoke;
+                string[] modalDisplayVersionLabels =
+                    win.ModalDisplayVersionLabelsForSmoke;
+                bool unifiedDisplayInventory =
+                    modalDisplayVersionLabels.Length == 4
+                    && modalDisplayVersionLabels[0] == "Original"
+                    && !modalDisplayVersionLabels[1].Contains(
+                        "fps",
+                        StringComparison.OrdinalIgnoreCase)
+                    && modalDisplayVersionLabels
+                        .Skip(2)
+                        .All(label => label.Contains(
+                            "fps",
+                            StringComparison.OrdinalIgnoreCase))
+                    && win.ModalDisplayVersionKindForSmoke == "Video";
                 (int PlaybackFps, int FrameCount)[] videoPlaybackMetadata =
                     win.ModalVideoVersionPlaybackMetadataForSmoke;
                 bool videoDeliveryMetadata =
@@ -17146,13 +17183,20 @@ public partial class App : Application
                     && videoVersionLabels[1].Contains(
                         "16fps · 97f",
                         StringComparison.Ordinal);
-                bool videoPaused = videoPlaybackProgress
-                    && win.ToggleModalVideoPlaybackForSmoke()
+                bool videoLoopDefault = videoPlaybackProgress
+                    && win.ModalVideoLoopEnabledForSmoke
+                    && win.TriggerModalVideoEndedForSmoke();
+                bool videoClickPaused = videoLoopDefault
+                    && win.ActivateModalImagePrimaryClickForSmoke()
                     && win.ModalShowingVideoForSmoke
                     && !win.ModalVideoPlayingForSmoke;
-                bool videoPauseSettled = videoPaused
+                bool videoPauseSettled = videoClickPaused
                     && await win
                         .WaitForModalVideoPauseSettledForSmokeAsync();
+                bool videoClickResumed = videoPauseSettled
+                    && win.ActivateModalImagePrimaryClickForSmoke()
+                    && win.ModalShowingVideoForSmoke
+                    && win.ModalVideoPlayingForSmoke;
                 bool olderVideoSelectionStarted =
                     win.SelectModalVideoVersionForSmoke(1);
                 bool olderVideoMediaOpened = olderVideoSelectionStarted
@@ -17174,21 +17218,34 @@ public partial class App : Application
                     win.SelectFileNameForSmoke(
                         Path.GetFileName(photorealSource));
                 bool ordinaryModalOpened = win.OpenModalForSmoke();
-                bool ordinaryModalStayedImage = !win.ModalShowingVideoForSmoke
-                    && !win.ModalVideoPlayingForSmoke;
-                bool manualVideoStartRequested =
-                    win.ToggleModalVideoPlaybackForSmoke();
-                bool manualVideoMediaOpened = manualVideoStartRequested
+                bool lastVideoRestoredMediaOpened = ordinaryModalOpened
                     && await win.WaitForModalVideoMediaOpenedForSmokeAsync();
-                bool manualVideoPlaybackProgress = manualVideoMediaOpened
+                bool lastVideoRestoredPlaybackProgress =
+                    lastVideoRestoredMediaOpened
                     && win.ModalVideoHasNaturalDurationForSmoke
                     && await win.WaitForModalVideoPlaybackProgressForSmokeAsync();
-                bool manualVideoStarted = manualVideoPlaybackProgress
+                bool lastVideoRestored = lastVideoRestoredPlaybackProgress
                     && win.ModalShowingVideoForSmoke
-                    && win.ModalVideoPlayingForSmoke;
+                    && win.ModalVideoPlayingForSmoke
+                    && string.Equals(
+                        win.ModalVideoPathForSmoke,
+                        olderVideoOutput,
+                        StringComparison.OrdinalIgnoreCase);
                 bool ordinaryNeighborNavigated = win.NavigateModalForSmoke(1);
-                bool ordinaryNeighborStayedImage = !win.ModalShowingVideoForSmoke
+                bool ordinaryNeighborFallbackImage =
+                    ordinaryNeighborNavigated
+                    && !win.ModalShowingVideoForSmoke
                     && !win.ModalVideoPlayingForSmoke;
+                bool returnedToVideoSource = win.NavigateModalForSmoke(-1);
+                bool returnedVideoMediaOpened = returnedToVideoSource
+                    && await win.WaitForModalVideoMediaOpenedForSmokeAsync();
+                bool lastVideoRestoredAfterReturn = returnedVideoMediaOpened
+                    && win.ModalShowingVideoForSmoke
+                    && win.ModalVideoPlayingForSmoke
+                    && string.Equals(
+                        win.ModalVideoPathForSmoke,
+                        olderVideoOutput,
+                        StringComparison.OrdinalIgnoreCase);
                 win.CloseModalForSmoke();
                 bool videoDefaults = win.VideoGenerationSettingsForSmoke
                         is (6, 16, 409600, "")
@@ -17273,8 +17330,10 @@ public partial class App : Application
                 bool videoBoardSourceSelected =
                     win.SelectFileNameForSmoke(
                         Path.GetFileName(photorealSource));
+                string[] galleryVideoSourceRequests =
+                    win.GalleryVideoSourceRequestsForSmoke;
                 bool galleryVideoSourceVersions =
-                    win.GalleryVideoSourceRequestsForSmoke.SequenceEqual(
+                    galleryVideoSourceRequests.SequenceEqual(
                         [
                             "original",
                             "photoreal-job:photoreal-ok",
@@ -17465,20 +17524,24 @@ public partial class App : Application
                     && videoPlaybackProgress
                     && videoAutoplay
                     && videoVersionInventory
+                    && unifiedDisplayInventory
                     && videoDeliveryMetadata
-                    && videoPaused
+                    && videoLoopDefault
+                    && videoClickPaused
                     && videoPauseSettled
+                    && videoClickResumed
                     && olderVideoMediaOpened
                     && olderVideoPlaybackProgress
                     && olderVideoSelected
                     && ordinaryVideoSourceSelected
                     && ordinaryModalOpened
-                    && ordinaryModalStayedImage
-                    && manualVideoMediaOpened
-                    && manualVideoPlaybackProgress
-                    && manualVideoStarted
+                    && lastVideoRestoredMediaOpened
+                    && lastVideoRestoredPlaybackProgress
+                    && lastVideoRestored
                     && ordinaryNeighborNavigated
-                    && ordinaryNeighborStayedImage
+                    && ordinaryNeighborFallbackImage
+                    && returnedToVideoSource
+                    && lastVideoRestoredAfterReturn
                     && videoDefaults
                     && experimentalVideoModelBlocked
                     && videoBoardSourceSelected
@@ -17561,25 +17624,35 @@ public partial class App : Application
                     VideoPlaybackProgress = videoPlaybackProgress,
                     VideoAutoplay = videoAutoplay,
                     VideoVersionInventory = videoVersionInventory,
+                    ModalDisplayVersionLabels = modalDisplayVersionLabels,
+                    UnifiedDisplayInventory = unifiedDisplayInventory,
                     VideoDeliveryMetadata = videoDeliveryMetadata,
-                    VideoPaused = videoPaused,
+                    VideoLoopDefault = videoLoopDefault,
+                    VideoClickPaused = videoClickPaused,
                     VideoPauseSettled = videoPauseSettled,
+                    VideoClickResumed = videoClickResumed,
                     OlderVideoMediaOpened = olderVideoMediaOpened,
                     OlderVideoPlaybackProgress =
                         olderVideoPlaybackProgress,
                     OlderVideoSelected = olderVideoSelected,
-                    OrdinaryModalStayedImage = ordinaryModalStayedImage,
-                    ManualVideoMediaOpened = manualVideoMediaOpened,
-                    ManualVideoPlaybackProgress =
-                        manualVideoPlaybackProgress,
-                    ManualVideoStarted = manualVideoStarted,
+                    LastVideoRestoredMediaOpened =
+                        lastVideoRestoredMediaOpened,
+                    LastVideoRestoredPlaybackProgress =
+                        lastVideoRestoredPlaybackProgress,
+                    LastVideoRestored = lastVideoRestored,
                     OrdinaryNeighborNavigated = ordinaryNeighborNavigated,
-                    OrdinaryNeighborStayedImage = ordinaryNeighborStayedImage,
+                    OrdinaryNeighborFallbackImage =
+                        ordinaryNeighborFallbackImage,
+                    ReturnedToVideoSource = returnedToVideoSource,
+                    LastVideoRestoredAfterReturn =
+                        lastVideoRestoredAfterReturn,
                     VideoHandlesReleased = videoHandlesReleased,
                     VideoMediaFailure = videoMediaFailure,
                     VideoDefaults = videoDefaults,
                     GalleryVideoSourceVersions =
                         galleryVideoSourceVersions,
+                    GalleryVideoSourceRequests =
+                        galleryVideoSourceRequests,
                     VideoBoardDefaultsToOriginal =
                         videoBoardDefaultsToOriginal,
                     VideoBoardOpened = videoBoardOpened,
@@ -18687,13 +18760,26 @@ public partial class App : Application
                 window.CloseModalForSmoke();
                 await window.WaitForEnhancementJobsReturnForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterOutputClose = window.EnhancementJobsWorkspaceForSmoke();
+                ExplorerRevealSmokeSnapshot videoOutputReveal =
+                    window.RevealEnhancementJobOutputForSmoke(
+                        "video-reader-job");
+                bool videoOutputRevealed = videoOutputReveal.Launched
+                    && string.Equals(
+                        videoOutputReveal.FileName,
+                        "explorer.exe",
+                        StringComparison.OrdinalIgnoreCase)
+                    && videoOutputReveal.UseShellExecute
+                    && videoOutputReveal.AutomationReady
+                    && videoOutputReveal.Arguments.SequenceEqual(
+                        [$"/select,{Path.GetFullPath(videoOutputPath)}"]);
                 window.EnableModalVideoTransportStubForSmoke();
-                bool videoOutputOpened =
-                    window.OpenEnhancementJobOutputForSmoke("video-reader-job");
+                bool videoThumbnailOpened =
+                    window.OpenEnhancementJobSourceInViewerForSmoke(
+                        "video-reader-job");
                 openedVideoOutput = window.ModalVideoPathForSmoke;
-                bool videoOutputOpenedPaused =
+                bool videoThumbnailAutoplay =
                     window.ModalShowingVideoForSmoke
-                    && !window.ModalVideoPlayingForSmoke;
+                    && window.ModalVideoPlayingForSmoke;
                 EnhancementJobsWorkspaceSmokeSnapshot whileVideoViewerOpen =
                     window.EnhancementJobsWorkspaceForSmoke();
                 window.CloseModalForSmoke();
@@ -18860,8 +18946,9 @@ public partial class App : Application
                     && sourceHiddenFromVisibleGallery
                     && outputOpened
                     && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
-                    && videoOutputOpened
-                    && videoOutputOpenedPaused
+                    && videoOutputRevealed
+                    && videoThumbnailOpened
+                    && videoThumbnailAutoplay
                     && string.Equals(
                         openedVideoOutput,
                         videoOutputPath,
@@ -18948,8 +19035,10 @@ public partial class App : Application
                     imageVersionsExcludeVideo,
                     stableJobViews,
                     openedOutput,
-                    videoOutputOpened,
-                    videoOutputOpenedPaused,
+                    videoOutputRevealed,
+                    videoOutputReveal,
+                    videoThumbnailOpened,
+                    videoThumbnailAutoplay,
                     openedVideoOutput,
                     videoDeleteIssued,
                     videoSiblingPreserved,
@@ -20472,6 +20561,11 @@ public partial class App : Application
                     && win.InvokePreviewKeyForSmoke(Key.F11)
                     && !win.ModalFullScreenForSmoke
                     && win.ModalVisibleForSmoke;
+                bool fullScreenSwipeUpRoute = win.ModalSwipeForSmoke(0, -200)
+                    && win.ModalFullScreenContractForSmoke
+                    && win.InvokePreviewKeyForSmoke(Key.Escape)
+                    && !win.ModalFullScreenForSmoke
+                    && win.ModalVisibleForSmoke;
 
                 string browserSharedOutputPath = Path.Combine(
                     Path.GetDirectoryName(jobsPath)!,
@@ -20887,34 +20981,78 @@ public partial class App : Application
                 bool selectedEnhanced = win.SelectFileNameForSmoke(firstName);
                 bool reopenedEnhanced = win.OpenModalForSmoke();
                 bool enhancedAvailable = win.ModalEnhancedToggleAvailableForSmoke;
-                bool defaultEnhanced = win.ModalShowingEnhancedForSmoke
-                    && string.Equals(win.ModalDisplayPathForSmoke, enhancedOutputPath, StringComparison.OrdinalIgnoreCase);
+                bool defaultOriginal = !win.ModalShowingEnhancedForSmoke
+                    && string.Equals(
+                        win.ModalDisplayPathForSmoke,
+                        firstPath,
+                        StringComparison.OrdinalIgnoreCase);
                 win.SetModalChromeVisibleForSmoke(false);
                 bool hiddenBeforeEnhancedToggle = !win.ModalManualChromeVisibleForSmoke
                     && !win.ModalChromeVisibleForSmoke;
-                bool toggledOriginal = win.ToggleModalEnhancedForSmoke();
-                bool hiddenAfterOriginal = !win.ModalManualChromeVisibleForSmoke
-                    && !win.ModalChromeVisibleForSmoke
-                    && !win.ModalShowingEnhancedForSmoke
-                    && string.Equals(win.ModalDisplayPathForSmoke, firstPath, StringComparison.OrdinalIgnoreCase);
                 bool toggledEnhanced = win.ToggleModalEnhancedForSmoke();
                 bool hiddenAfterEnhanced = !win.ModalManualChromeVisibleForSmoke
                     && !win.ModalChromeVisibleForSmoke
                     && win.ModalShowingEnhancedForSmoke
                     && string.Equals(win.ModalDisplayPathForSmoke, enhancedOutputPath, StringComparison.OrdinalIgnoreCase);
+                bool toggledOriginal = win.ToggleModalEnhancedForSmoke();
+                bool hiddenAfterOriginal = !win.ModalManualChromeVisibleForSmoke
+                    && !win.ModalChromeVisibleForSmoke
+                    && !win.ModalShowingEnhancedForSmoke
+                    && string.Equals(win.ModalDisplayPathForSmoke, firstPath, StringComparison.OrdinalIgnoreCase);
+                bool restoredEnhancedSelection = win.ToggleModalEnhancedForSmoke()
+                    && win.ModalShowingEnhancedForSmoke
+                    && string.Equals(
+                        win.ModalDisplayPathForSmoke,
+                        enhancedOutputPath,
+                        StringComparison.OrdinalIgnoreCase);
                 bool hiddenEnhancedPersistence = selectedEnhanced && reopenedEnhanced && enhancedAvailable
-                    && defaultEnhanced && hiddenBeforeEnhancedToggle
+                    && defaultOriginal && hiddenBeforeEnhancedToggle
+                    && toggledEnhanced && hiddenAfterEnhanced
                     && toggledOriginal && hiddenAfterOriginal
-                    && toggledEnhanced && hiddenAfterEnhanced;
+                    && restoredEnhancedSelection;
 
                 string? beforeHiddenNavigation = win.SelectedFileNameForSmoke;
                 bool movedWhileHidden = win.ModalEdgeNavigateForSmoke(1);
                 string? afterHiddenNavigation = win.SelectedFileNameForSmoke;
+                string? neighborDisplayPath = win.ModalDisplayPathForSmoke;
+                string neighborDisplayKind =
+                    win.ModalDisplayVersionKindForSmoke;
+                bool neighborRestoredOriginal = movedWhileHidden
+                    && !win.ModalShowingEnhancedForSmoke
+                    && !win.ModalShowingVideoForSmoke
+                    && string.Equals(
+                        neighborDisplayPath,
+                        secondPath,
+                        StringComparison.OrdinalIgnoreCase);
+                bool returnedToFirstSource = win.ModalEdgeNavigateForSmoke(-1);
+                string? returnedDisplayPath = win.ModalDisplayPathForSmoke;
+                string returnedDisplayKind =
+                    win.ModalDisplayVersionKindForSmoke;
+                bool returnedToLastDisplay = returnedToFirstSource
+                    && string.Equals(
+                        win.SelectedFileNameForSmoke,
+                        firstName,
+                        StringComparison.OrdinalIgnoreCase)
+                    && win.ModalShowingEnhancedForSmoke
+                    && string.Equals(
+                        returnedDisplayPath,
+                        enhancedOutputPath,
+                        StringComparison.OrdinalIgnoreCase);
+                bool restoredNeighborForDelete =
+                    win.ModalEdgeNavigateForSmoke(1)
+                    && string.Equals(
+                        win.SelectedFileNameForSmoke,
+                        secondName,
+                        StringComparison.OrdinalIgnoreCase);
+                bool lastDisplayPreferenceRestored = neighborRestoredOriginal
+                    && returnedToLastDisplay
+                    && restoredNeighborForDelete;
                 bool hiddenNavigationPersistence = movedWhileHidden
                     && string.Equals(beforeHiddenNavigation, firstName, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(afterHiddenNavigation, secondName, StringComparison.OrdinalIgnoreCase)
                     && !win.ModalManualChromeVisibleForSmoke
-                    && !win.ModalChromeVisibleForSmoke;
+                    && !win.ModalChromeVisibleForSmoke
+                    && lastDisplayPreferenceRestored;
 
                 win.SetConfirmBeforeDeleteForSmoke(false);
                 win.SetRecycleBinDeleteBackendForSmoke(_ => new RecycleBinDeleteResult(true, ""));
@@ -20941,7 +21079,8 @@ public partial class App : Application
                     && actualPixelsControl && favoriteLevelReadout && adaptiveToolbar
                     && positionCounter && fullCanvasInteraction && nativeMaximizeWorkArea
                     && overlayDoesNotReduceImageArea
-                    && fullScreenContract && fullScreenRestoredWindow && fullScreenButtonRoute
+                    && fullScreenContract && fullScreenRestoredWindow
+                    && fullScreenButtonRoute && fullScreenSwipeUpRoute
                     && browserSharedEnhancedReloaded && enhancedToolbarClarity
                     && enhancementLastKnownGood
                     && enhancementLargeCatalogRefreshBounded
@@ -20982,6 +21121,7 @@ public partial class App : Application
                     FullScreenContract = fullScreenContract,
                     FullScreenRestoredWindow = fullScreenRestoredWindow,
                     FullScreenButtonRoute = fullScreenButtonRoute,
+                    FullScreenSwipeUpRoute = fullScreenSwipeUpRoute,
                     BrowserSharedEnhancedReloaded = browserSharedEnhancedReloaded,
                     EnhancedToolbarClarity = enhancedToolbarClarity,
                     EnhancementLastKnownGood = enhancementLastKnownGood,
@@ -21053,6 +21193,15 @@ public partial class App : Application
                     ToggledOriginal = toggledOriginal,
                     HiddenAfterOriginal = hiddenAfterOriginal,
                     HiddenNavigationPersistence = hiddenNavigationPersistence,
+                    LastDisplayPreferenceRestored =
+                        lastDisplayPreferenceRestored,
+                    NeighborRestoredOriginal = neighborRestoredOriginal,
+                    NeighborDisplayPath = neighborDisplayPath,
+                    NeighborDisplayKind = neighborDisplayKind,
+                    ReturnedToLastDisplay = returnedToLastDisplay,
+                    ReturnedDisplayPath = returnedDisplayPath,
+                    ReturnedDisplayKind = returnedDisplayKind,
+                    RestoredNeighborForDelete = restoredNeighborForDelete,
                     BeforeHiddenNavigation = beforeHiddenNavigation,
                     AfterHiddenNavigation = afterHiddenNavigation,
                     MovedWhileHidden = movedWhileHidden,
@@ -26983,6 +27132,7 @@ public partial class App : Application
         public bool FullScreenContract { get; init; }
         public bool FullScreenRestoredWindow { get; init; }
         public bool FullScreenButtonRoute { get; init; }
+        public bool FullScreenSwipeUpRoute { get; init; }
         public bool BrowserSharedEnhancedReloaded { get; init; }
         public bool EnhancedToolbarClarity { get; init; }
         public bool EnhancementLastKnownGood { get; init; }
@@ -27054,6 +27204,14 @@ public partial class App : Application
         public bool ToggledOriginal { get; init; }
         public bool HiddenAfterOriginal { get; init; }
         public bool HiddenNavigationPersistence { get; init; }
+        public bool LastDisplayPreferenceRestored { get; init; }
+        public bool NeighborRestoredOriginal { get; init; }
+        public string? NeighborDisplayPath { get; init; }
+        public string? NeighborDisplayKind { get; init; }
+        public bool ReturnedToLastDisplay { get; init; }
+        public string? ReturnedDisplayPath { get; init; }
+        public string? ReturnedDisplayKind { get; init; }
+        public bool RestoredNeighborForDelete { get; init; }
         public string? BeforeHiddenNavigation { get; init; }
         public string? AfterHiddenNavigation { get; init; }
         public bool MovedWhileHidden { get; init; }
@@ -29367,22 +29525,28 @@ public partial class App : Application
         public bool VideoPlaybackProgress { get; init; }
         public bool VideoAutoplay { get; init; }
         public bool VideoVersionInventory { get; init; }
+        public string[] ModalDisplayVersionLabels { get; init; } = [];
+        public bool UnifiedDisplayInventory { get; init; }
         public bool VideoDeliveryMetadata { get; init; }
-        public bool VideoPaused { get; init; }
+        public bool VideoLoopDefault { get; init; }
+        public bool VideoClickPaused { get; init; }
         public bool VideoPauseSettled { get; init; }
+        public bool VideoClickResumed { get; init; }
         public bool OlderVideoMediaOpened { get; init; }
         public bool OlderVideoPlaybackProgress { get; init; }
         public bool OlderVideoSelected { get; init; }
-        public bool OrdinaryModalStayedImage { get; init; }
-        public bool ManualVideoMediaOpened { get; init; }
-        public bool ManualVideoPlaybackProgress { get; init; }
-        public bool ManualVideoStarted { get; init; }
+        public bool LastVideoRestoredMediaOpened { get; init; }
+        public bool LastVideoRestoredPlaybackProgress { get; init; }
+        public bool LastVideoRestored { get; init; }
         public bool OrdinaryNeighborNavigated { get; init; }
-        public bool OrdinaryNeighborStayedImage { get; init; }
+        public bool OrdinaryNeighborFallbackImage { get; init; }
+        public bool ReturnedToVideoSource { get; init; }
+        public bool LastVideoRestoredAfterReturn { get; init; }
         public bool VideoHandlesReleased { get; init; }
         public string? VideoMediaFailure { get; init; }
         public bool VideoDefaults { get; init; }
         public bool GalleryVideoSourceVersions { get; init; }
+        public string[] GalleryVideoSourceRequests { get; init; } = [];
         public bool VideoBoardDefaultsToOriginal { get; init; }
         public bool VideoBoardOpened { get; init; }
         public bool VideoSurface { get; init; }

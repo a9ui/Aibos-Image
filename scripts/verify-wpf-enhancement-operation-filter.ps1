@@ -63,7 +63,10 @@ try {
     $childExitCode = $LASTEXITCODE
     Assert-True (Test-Path -LiteralPath $resultPath -PathType Leaf) 'Enhancement operation filter smoke did not produce JSON.'
     $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-    Assert-True ($childExitCode -eq 0) "Enhancement operation filter smoke exited with $childExitCode."
+    if ($childExitCode -ne 0) {
+        $result | ConvertTo-Json -Depth 5 | Write-Host
+        throw "Enhancement operation filter smoke exited with $childExitCode."
+    }
     foreach ($propertyName in @(
         'ok',
         'selectedUpscaleBadge',
@@ -78,18 +81,22 @@ try {
         'videoPlaybackProgress',
         'videoAutoplay',
         'videoVersionInventory',
+        'unifiedDisplayInventory',
         'videoDeliveryMetadata',
-        'videoPaused',
+        'videoLoopDefault',
+        'videoClickPaused',
         'videoPauseSettled',
+        'videoClickResumed',
         'olderVideoMediaOpened',
         'olderVideoPlaybackProgress',
         'olderVideoSelected',
-        'ordinaryModalStayedImage',
-        'manualVideoMediaOpened',
-        'manualVideoPlaybackProgress',
-        'manualVideoStarted',
+        'lastVideoRestoredMediaOpened',
+        'lastVideoRestoredPlaybackProgress',
+        'lastVideoRestored',
         'ordinaryNeighborNavigated',
-        'ordinaryNeighborStayedImage',
+        'ordinaryNeighborFallbackImage',
+        'returnedToVideoSource',
+        'lastVideoRestoredAfterReturn',
         'videoHandlesReleased',
         'videoDefaults',
         'galleryVideoSourceVersions',
