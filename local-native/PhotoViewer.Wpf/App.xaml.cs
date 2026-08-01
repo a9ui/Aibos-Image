@@ -4564,6 +4564,7 @@ public partial class App : Application
                         && window.SetKeyBindingDraftForSmoke("favoriteLevel3", Key.L, ModifierKeys.Control)
                         && window.SetKeyBindingDraftForSmoke("nextImage", Key.N, ModifierKeys.None)
                         && window.SetKeyBindingDraftForSmoke("closeModal", Key.Q, ModifierKeys.None)
+                        && window.SetKeyBindingDraftForSmoke("recycleSelected", Key.X, ModifierKeys.None)
                         && window.SetKeyBindingDraftForSmoke("reopenLastClosedPreviewTab", Key.R, ModifierKeys.Control | ModifierKeys.Shift)
                         && window.SetKeyBindingDraftForSmoke("movePreviewTabLeft", Key.J, ModifierKeys.Alt | ModifierKeys.Shift)
                         && window.SetKeyBindingDraftForSmoke("movePreviewTabRight", Key.K, ModifierKeys.Alt | ModifierKeys.Shift);
@@ -4578,6 +4579,7 @@ public partial class App : Application
                         sharedBindingsSaved = sharedKeys.GetProperty("toggleFavorite").GetString() == "g"
                             && sharedKeys.GetProperty("nextImage").GetString() == "n"
                             && sharedKeys.GetProperty("closeModal").GetString() == "q"
+                            && sharedKeys.GetProperty("deleteImage").GetString() == "x"
                             && sharedKeys.GetProperty("enhanceImage").GetString() == "a"
                             && sharedKeys.GetProperty("futureBrowserAction").GetString() == "x"
                             && sharedRoot.GetProperty("futureSetting").GetProperty("mode").GetString() == "preserve";
@@ -4823,6 +4825,7 @@ public partial class App : Application
                         && window.KeyBindingTextForSmoke("favoriteLevel3", draft: false) == "Ctrl+L"
                         && window.KeyBindingTextForSmoke("nextImage", draft: false) == "N"
                         && window.KeyBindingTextForSmoke("closeModal", draft: false) == "Q"
+                        && window.KeyBindingTextForSmoke("recycleSelected", draft: false) == "X"
                         && window.KeyBindingTextForSmoke("reopenLastClosedPreviewTab", draft: false) == "Ctrl+Shift+R"
                         && window.KeyBindingTextForSmoke("movePreviewTabLeft", draft: false) == "Alt+Shift+J";
                     bool persistedHintsReloaded = persistedBindingsReloaded && window.KeyBindingHintsMatchForSmoke;
@@ -4844,7 +4847,7 @@ public partial class App : Application
                     bool settingsEscapeRescue = window.InvokePreviewKeyForSmoke(Key.Escape, ModifierKeys.None)
                         && !window.AppSettingsVisibleForSmoke;
                     bool deleteSelected = window.SelectFileNameForSmoke(thirdName) && window.FocusCardsListForSmoke();
-                    bool deleteOpened = window.InvokePreviewKeyForSmoke(Key.Delete, ModifierKeys.None)
+                    bool deleteOpened = window.InvokePreviewKeyForSmoke(Key.X, ModifierKeys.None)
                         && window.DeleteConfirmationVisibleForSmoke;
                     double deleteWheelWidthBefore = window.CardWidthForSmoke;
                     bool deleteWheelSuppressed = !window.InvokePreviewMouseWheelForSmoke(120, ModifierKeys.Control)
@@ -4858,6 +4861,7 @@ public partial class App : Application
                     bool resetDraft = window.KeyBindingTextForSmoke("favoriteIncrease", draft: true) == "F"
                         && window.KeyBindingTextForSmoke("nextImage", draft: true) == "Right"
                         && window.KeyBindingTextForSmoke("closeModal", draft: true) == "Escape"
+                        && window.KeyBindingTextForSmoke("recycleSelected", draft: true) == "Delete"
                         && window.KeyBindingTextForSmoke("reopenLastClosedPreviewTab", draft: true) == "Ctrl+Shift+T"
                         && window.KeyBindingTextForSmoke("movePreviewTabLeft", draft: true) == "Alt+Shift+Left";
                     bool resetSaved = resetDraft && window.SaveKeyBindingsForSmoke();
@@ -17146,6 +17150,20 @@ public partial class App : Application
                 bool videoModalOpened = win.OpenModalForSmoke();
                 bool videoMediaOpened = videoModalOpened
                     && await win.WaitForModalVideoMediaOpenedForSmokeAsync();
+                bool videoStartsAtZero = videoMediaOpened
+                    && win.ModalVideoSeekVisibleForSmoke
+                    && win.ModalVideoSeekValueForSmoke <= 0.25;
+                double videoSeekTarget =
+                    win.ModalVideoSeekMaximumForSmoke / 2;
+                bool videoSeekSurface = videoStartsAtZero
+                    && videoSeekTarget > 0
+                    && win.SeekModalVideoForSmoke(videoSeekTarget)
+                    && Math.Abs(
+                        win.ModalVideoSeekValueForSmoke
+                        - videoSeekTarget) < 0.05
+                    && win.ModalVideoSeekTimeForSmoke.Contains(" / ", StringComparison.Ordinal)
+                    && win.SeekModalVideoForSmoke(0)
+                    && win.ModalVideoSeekValueForSmoke <= 0.01;
                 bool videoNaturalDuration = videoMediaOpened
                     && win.ModalVideoHasNaturalDurationForSmoke;
                 bool videoPlaybackProgress = videoNaturalDuration
@@ -17303,6 +17321,7 @@ public partial class App : Application
                     && win.VideoQualityIdForSmoke
                         == "wan22-ti2v-5b-high-v1";
                 string videoRequestJson = "";
+                int enhancementMutationRequestCount = 0;
                 win.ConfigureModalEnhancementForSmoke(async (request, token) =>
                 {
                     if (request.Method == HttpMethod.Get)
@@ -17316,6 +17335,7 @@ public partial class App : Application
                         };
                     }
 
+                    enhancementMutationRequestCount++;
                     videoRequestJson = request.Content is null
                         ? ""
                         : await request.Content.ReadAsStringAsync(token);
@@ -17338,8 +17358,20 @@ public partial class App : Application
                             "original",
                             "photoreal-job:photoreal-ok",
                         ],
-                        StringComparer.Ordinal);
+                        StringComparer.Ordinal)
+                    && win.SelectedPhotorealVideoSourceGlobalJobIdRejectedForSmoke(
+                        "photoreal-ok");
                 bool videoBoardModalOpened = win.OpenModalForSmoke();
+                bool displayedPhotorealSelected =
+                    win.SelectModalEnhancementJobVersionForSmoke(
+                        "photoreal-ok");
+                bool displayedPhotorealVideoSource =
+                    displayedPhotorealSelected
+                    && win.OpenDisplayedModalVideoGenerationBoardForSmoke()
+                    && win.VideoSourceForSmoke is
+                    {
+                        ProducerJobId: "photoreal-ok",
+                    };
                 bool videoBoardDefaultsToOriginal =
                     win.OpenVideoGenerationBoardForSmoke()
                     && win.VideoSourceForSmoke is
@@ -17356,6 +17388,14 @@ public partial class App : Application
                     {
                         ProducerJobId: "photoreal-ok",
                     };
+                const string japaneseVideoPrompt =
+                    "手を伸ばしながら、ゆっくりカメラへ近づく";
+                win.ConfigureVideoGenerationForSmoke(
+                    4,
+                    12,
+                    307200,
+                    japaneseVideoPrompt,
+                    "wan22-ti2v-5b-high-v1");
                 bool videoSurface = win.VideoGenerationSurfaceForSmoke
                     && win.VideoGenerationEstimateForSmoke
                         is (49, 117, 218)
@@ -17421,8 +17461,16 @@ public partial class App : Application
                         && requestedVideo.GetProperty("durationSeconds").GetInt32() == 4
                         && requestedVideo.GetProperty("playbackFps").GetInt32() == 12
                         && requestedVideo.GetProperty("maximumPixelArea").GetInt32() == 307200
-                        && requestedVideo.GetProperty("prompt").GetString() == "pan left slowly";
+                        && requestedVideo.GetProperty("prompt").GetString()
+                            == japaneseVideoPrompt;
                 }
+                win.ConfigureVideoGenerationForSmoke(
+                    4,
+                    12,
+                    307200,
+                    "pan left slowly",
+                    "wan22-ti2v-5b-high-v1");
+                _ = win.SelectVideoStyleForSmoke(videoStyleName);
                 bool videoBoardFailureFeedback =
                     win.OpenVideoGenerationBoardForSmoke(
                         "photoreal-job:missing-video-source")
@@ -17430,6 +17478,147 @@ public partial class App : Application
                     && win.VideoGenerationStatusForSmoke.Contains(
                         "入力を確定できません",
                         StringComparison.Ordinal);
+                win.CloseModalForSmoke();
+
+                bool deleteValidationModalSelected =
+                    win.SelectFileNameForSmoke(
+                        Path.GetFileName(photorealSource))
+                    && win.OpenModalForSmoke();
+                bool deleteValidationImageSelected =
+                    deleteValidationModalSelected
+                    && win.SelectModalEnhancementJobVersionForSmoke(
+                        "photoreal-ok");
+                bool imageDeleteVerifiedBeforeTamper =
+                    deleteValidationImageSelected
+                    && win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                bool imageDuplicateJobRejected =
+                    imageDeleteVerifiedBeforeTamper
+                    && win.DisplayedManagedImageDuplicateJobRejectedForSmoke();
+                bool imageGlobalJobIdRejected =
+                    imageDeleteVerifiedBeforeTamper
+                    && win.DisplayedManagedImageGlobalJobIdRejectedForSmoke();
+                byte[] originalSourceBytes = File.ReadAllBytes(photorealSource);
+                DateTime originalSourceMtime = File.GetLastWriteTimeUtc(
+                    photorealSource);
+                bool imageDeleteBlockedAfterSourceTamper;
+                try
+                {
+                    File.WriteAllBytes(
+                        photorealSource,
+                        originalSourceBytes.Concat([byte.MinValue]).ToArray());
+                    imageDeleteBlockedAfterSourceTamper =
+                        !win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                }
+                finally
+                {
+                    File.WriteAllBytes(photorealSource, originalSourceBytes);
+                    File.SetLastWriteTimeUtc(
+                        photorealSource,
+                        originalSourceMtime);
+                }
+                bool imageDeleteVerifiedAfterRestore =
+                    win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                int requestsBeforeImageDeleteRace =
+                    enhancementMutationRequestCount;
+                win.ConfigureManagedOutputDeleteConfirmationForSmoke(() =>
+                {
+                    File.WriteAllBytes(
+                        photorealSource,
+                        originalSourceBytes.Concat([byte.MinValue]).ToArray());
+                    return true;
+                });
+                bool imageDeleteRaceBlocked;
+                try
+                {
+                    imageDeleteRaceBlocked =
+                        !await win.DeleteDisplayedModalMediaForSmokeAsync()
+                        && enhancementMutationRequestCount
+                            == requestsBeforeImageDeleteRace;
+                }
+                finally
+                {
+                    File.WriteAllBytes(photorealSource, originalSourceBytes);
+                    File.SetLastWriteTimeUtc(
+                        photorealSource,
+                        originalSourceMtime);
+                    win.ConfigureManagedOutputDeleteConfirmationForSmoke(
+                        () => true);
+                }
+                bool imageDeleteOwnershipGuard =
+                    imageDeleteVerifiedBeforeTamper
+                    && imageDuplicateJobRejected
+                    && imageGlobalJobIdRejected
+                    && imageDeleteBlockedAfterSourceTamper
+                    && imageDeleteVerifiedAfterRestore
+                    && imageDeleteRaceBlocked
+                    && win.DisplayedManagedImageDeleteVerifiedForSmoke;
+
+                bool deleteValidationVideoSelected =
+                    win.SelectModalVideoVersionForSmoke(0);
+                bool videoDeleteVerifiedBeforeTamper =
+                    deleteValidationVideoSelected
+                    && win.DisplayedManagedVideoDeleteVerifiedForSmoke;
+                bool videoDuplicateJobRejected =
+                    videoDeleteVerifiedBeforeTamper
+                    && win.DisplayedManagedVideoDuplicateJobRejectedForSmoke();
+                bool videoGlobalJobIdRejected =
+                    videoDeleteVerifiedBeforeTamper
+                    && win.DisplayedManagedVideoGlobalJobIdRejectedForSmoke();
+                byte[] photorealInputBytes = File.ReadAllBytes(photorealOutput);
+                DateTime photorealInputMtime = File.GetLastWriteTimeUtc(
+                    photorealOutput);
+                bool videoDeleteBlockedAfterInputTamper;
+                try
+                {
+                    File.WriteAllBytes(
+                        photorealOutput,
+                        photorealInputBytes.Concat([byte.MinValue]).ToArray());
+                    videoDeleteBlockedAfterInputTamper =
+                        !win.DisplayedManagedVideoDeleteVerifiedForSmoke;
+                }
+                finally
+                {
+                    File.WriteAllBytes(photorealOutput, photorealInputBytes);
+                    File.SetLastWriteTimeUtc(
+                        photorealOutput,
+                        photorealInputMtime);
+                }
+                bool videoDeleteVerifiedAfterRestore =
+                    win.DisplayedManagedVideoDeleteVerifiedForSmoke;
+                int requestsBeforeVideoDeleteRace =
+                    enhancementMutationRequestCount;
+                win.ConfigureManagedOutputDeleteConfirmationForSmoke(() =>
+                {
+                    File.WriteAllBytes(
+                        photorealOutput,
+                        photorealInputBytes.Concat([byte.MinValue]).ToArray());
+                    return true;
+                });
+                bool videoDeleteRaceBlocked;
+                try
+                {
+                    videoDeleteRaceBlocked =
+                        !await win.DeleteDisplayedModalMediaForSmokeAsync()
+                        && enhancementMutationRequestCount
+                            == requestsBeforeVideoDeleteRace;
+                }
+                finally
+                {
+                    File.WriteAllBytes(photorealOutput, photorealInputBytes);
+                    File.SetLastWriteTimeUtc(
+                        photorealOutput,
+                        photorealInputMtime);
+                    win.ConfigureManagedOutputDeleteConfirmationForSmoke(
+                        () => true);
+                }
+                bool videoDeleteOwnershipGuard =
+                    videoDeleteVerifiedBeforeTamper
+                    && videoDuplicateJobRejected
+                    && videoGlobalJobIdRejected
+                    && videoDeleteBlockedAfterInputTamper
+                    && videoDeleteVerifiedAfterRestore
+                    && videoDeleteRaceBlocked
+                    && win.DisplayedManagedVideoDeleteVerifiedForSmoke;
                 win.CloseModalForSmoke();
 
                 var second = HiddenWindow();
@@ -17520,6 +17709,8 @@ public partial class App : Application
                     && videoOutputMatches
                     && videoModalOpened
                     && videoMediaOpened
+                    && videoStartsAtZero
+                    && videoSeekSurface
                     && videoNaturalDuration
                     && videoPlaybackProgress
                     && videoAutoplay
@@ -17547,6 +17738,7 @@ public partial class App : Application
                     && videoBoardSourceSelected
                     && galleryVideoSourceVersions
                     && videoBoardModalOpened
+                    && displayedPhotorealVideoSource
                     && videoBoardDefaultsToOriginal
                     && videoBoardOpened
                     && videoBoardPhotorealSource
@@ -17554,6 +17746,8 @@ public partial class App : Application
                     && videoQueueSucceeded
                     && videoRequestExact
                     && videoBoardFailureFeedback
+                    && imageDeleteOwnershipGuard
+                    && videoDeleteOwnershipGuard
                     && videoStyleSaved
                     && videoStylePersistence
                     && videoStyleCustomOnEdit
@@ -17620,6 +17814,8 @@ public partial class App : Application
                         : "media-foundation",
                     VideoModalOpened = videoModalOpened,
                     VideoMediaOpened = videoMediaOpened,
+                    VideoStartsAtZero = videoStartsAtZero,
+                    VideoSeekSurface = videoSeekSurface,
                     VideoNaturalDuration = videoNaturalDuration,
                     VideoPlaybackProgress = videoPlaybackProgress,
                     VideoAutoplay = videoAutoplay,
@@ -17656,10 +17852,14 @@ public partial class App : Application
                     VideoBoardDefaultsToOriginal =
                         videoBoardDefaultsToOriginal,
                     VideoBoardOpened = videoBoardOpened,
+                    DisplayedPhotorealVideoSource =
+                        displayedPhotorealVideoSource,
                     VideoSurface = videoSurface,
                     VideoQueueSucceeded = videoQueueSucceeded,
                     VideoRequestExact = videoRequestExact,
                     VideoBoardFailureFeedback = videoBoardFailureFeedback,
+                    ImageDeleteOwnershipGuard = imageDeleteOwnershipGuard,
+                    VideoDeleteOwnershipGuard = videoDeleteOwnershipGuard,
                     VideoStyleSaved = videoStyleSaved,
                     VideoStylePersistence = videoStylePersistence,
                     VideoStyleCustomOnEdit = videoStyleCustomOnEdit,
@@ -17967,6 +18167,7 @@ public partial class App : Application
                 bool allQueuedCanceled = false;
                 bool outputDeleted = false;
                 bool videoOutputDeleted = false;
+                bool reverseJobsForReturn = false;
                 string healthMode = "available";
                 string? openedOutput = null;
                 string? openedVideoOutput = null;
@@ -18254,6 +18455,8 @@ public partial class App : Application
                             operation: "photoreal",
                             createdAt: "2026-07-23T00:00:06.000Z",
                             queueOrder: 5));
+                    if (reverseJobsForReturn)
+                        jobs.Reverse();
                     return jobs.ToArray();
                 }
 
@@ -18754,12 +18957,33 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 await window.SetSearchInputForSmokeAsync("__jobs_source_hidden_from_gallery__");
                 bool sourceHiddenFromVisibleGallery = window.FilteredCountForSmoke == 0;
+                double jobsAnchorBeforeViewer =
+                    window.PositionEnhancementJobForSmoke(
+                        "done-job",
+                        requestedViewportTop: 120);
+                double jobsViewportBeforeViewer =
+                    window.EnhancementJobsVerticalOffsetForSmoke;
+                bool jobsThumbMinimumVisible =
+                    window.EnhancementJobsVerticalThumbSlotHeightForSmoke >= 44;
                 bool outputOpened = window.OpenEnhancementJobOutputForSmoke("done-job");
+                reverseJobsForReturn = true;
                 openedOutput = window.ModalDisplayPathForSmoke;
                 EnhancementJobsWorkspaceSmokeSnapshot whileOutputViewerOpen = window.EnhancementJobsWorkspaceForSmoke();
                 window.CloseModalForSmoke();
                 await window.WaitForEnhancementJobsReturnForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterOutputClose = window.EnhancementJobsWorkspaceForSmoke();
+                double jobsAnchorAfterViewer =
+                    window.EnhancementJobViewportTopForSmoke("done-job");
+                bool jobsViewportRestoredAfterViewerClose =
+                    jobsViewportBeforeViewer > 0
+                    && double.IsFinite(jobsAnchorBeforeViewer)
+                    && double.IsFinite(jobsAnchorAfterViewer)
+                    && Math.Abs(jobsAnchorAfterViewer - jobsAnchorBeforeViewer) < 2
+                    && string.Equals(
+                        window.SelectedEnhancementJobIdForSmoke,
+                        "done-job",
+                        StringComparison.Ordinal);
+                reverseJobsForReturn = false;
                 ExplorerRevealSmokeSnapshot videoOutputReveal =
                     window.RevealEnhancementJobOutputForSmoke(
                         "video-reader-job");
@@ -18966,6 +19190,8 @@ public partial class App : Application
                     && afterDelete.VisibleIds.Contains("done-job", StringComparer.Ordinal)
                     && sourceOpenedInViewer
                     && jobsRestoredAfterViewerClose
+                    && jobsViewportRestoredAfterViewerClose
+                    && jobsThumbMinimumVisible
                     && jobsHeaderChromeContract
                     && closeButtonClosedWorkspace
                     && routesOk
@@ -19011,6 +19237,8 @@ public partial class App : Application
                     afterClearQueued,
                     whileOutputViewerOpen,
                     afterOutputClose,
+                    jobsViewportRestoredAfterViewerClose,
+                    jobsThumbMinimumVisible,
                     whileVideoViewerOpen,
                     afterVideoClose,
                     afterVideoDelete,
@@ -19418,7 +19646,7 @@ public partial class App : Application
                 mode = "succeeded";
                 refreshedSucceeded = await win.RefreshModalEnhancementForSmokeAsync();
                 outputAvailable = win.ModalEnhancedToggleAvailableForSmoke
-                    && win.ModalEnhancedDeleteVisibleForSmoke
+                    && win.ModalEnhancedDeleteAvailableForSmoke
                     && string.Equals(win.ModalEnhancementStatusForSmoke, "succeeded", StringComparison.Ordinal);
                 bool defaultEnhanced = win.ModalShowingEnhancedForSmoke
                     && string.Equals(win.ModalDisplayPathForSmoke, outputPath, StringComparison.OrdinalIgnoreCase);
@@ -20543,11 +20771,17 @@ public partial class App : Application
                 bool overlayDoesNotReduceImageArea = win.ModalOverlayDoesNotReduceImageAreaForSmoke();
                 Rect windowedBoundsBeforeFullScreen = win.WindowBoundsForSmoke;
                 bool fullScreenEnteredByF11 = win.InvokePreviewKeyForSmoke(Key.F11);
-                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
+                bool fullScreenEnteredSettled =
+                    await win.WaitForModalFullScreenTransitionForSmokeAsync(enabled: true);
                 bool fullScreenContract = fullScreenEnteredByF11
+                    && fullScreenEnteredSettled
                     && win.ModalFullScreenContractForSmoke
                     && win.ModalVisibleForSmoke;
-                bool fullScreenExitedByEscape = win.InvokePreviewKeyForSmoke(Key.Escape)
+                bool fullScreenExitAction = win.InvokePreviewKeyForSmoke(Key.Escape);
+                bool fullScreenExitSettled =
+                    await win.WaitForModalFullScreenTransitionForSmokeAsync(enabled: false);
+                bool fullScreenExitedByEscape = fullScreenExitAction
+                    && fullScreenExitSettled
                     && !win.ModalFullScreenForSmoke
                     && win.ModalVisibleForSmoke;
                 Rect windowedBoundsAfterFullScreen = win.WindowBoundsForSmoke;
@@ -20556,16 +20790,104 @@ public partial class App : Application
                     && Math.Abs(windowedBoundsAfterFullScreen.Top - windowedBoundsBeforeFullScreen.Top) < 1
                     && Math.Abs(windowedBoundsAfterFullScreen.Width - windowedBoundsBeforeFullScreen.Width) < 1
                     && Math.Abs(windowedBoundsAfterFullScreen.Height - windowedBoundsBeforeFullScreen.Height) < 1;
-                bool fullScreenButtonRoute = win.ToggleModalFullScreenForSmoke()
-                    && win.ModalFullScreenContractForSmoke
-                    && win.InvokePreviewKeyForSmoke(Key.F11)
+                bool fullScreenButtonEnterAction = win.ToggleModalFullScreenForSmoke();
+                bool fullScreenButtonEnterSettled =
+                    await win.WaitForModalFullScreenTransitionForSmokeAsync(enabled: true);
+                bool fullScreenButtonExitAction = win.InvokePreviewKeyForSmoke(Key.F11);
+                bool fullScreenButtonExitSettled =
+                    await win.WaitForModalFullScreenTransitionForSmokeAsync(enabled: false);
+                bool fullScreenButtonRoute = fullScreenButtonEnterAction
+                    && fullScreenButtonEnterSettled
+                    && fullScreenButtonExitAction
+                    && fullScreenButtonExitSettled
                     && !win.ModalFullScreenForSmoke
                     && win.ModalVisibleForSmoke;
-                bool fullScreenSwipeUpRoute = win.ModalSwipeForSmoke(0, -200)
-                    && win.ModalFullScreenContractForSmoke
+                bool fullScreenSwipeEnterAction = win.ModalSwipeForSmoke(0, -200);
+                bool fullScreenSwipeEnterSettled =
+                    await win.WaitForModalFullScreenTransitionForSmokeAsync(enabled: true);
+                bool fullScreenSwipeExitAction = win.InvokePreviewKeyForSmoke(Key.Escape);
+                bool fullScreenSwipeExitSettled =
+                    await win.WaitForModalFullScreenTransitionForSmokeAsync(enabled: false);
+                bool fullScreenSwipeUpRoute = fullScreenSwipeEnterAction
+                    && fullScreenSwipeEnterSettled
+                    && fullScreenSwipeExitAction
+                    && fullScreenSwipeExitSettled
+                    && !win.ModalFullScreenForSmoke
+                    && win.ModalVisibleForSmoke;
+                bool fullScreenBeforeCloseEnterAction = win.ToggleModalFullScreenForSmoke();
+                bool fullScreenBeforeCloseEnterSettled =
+                    await win.WaitForModalFullScreenTransitionForSmokeAsync(enabled: true);
+                bool fullScreenEnteredBeforeModalClose = fullScreenBeforeCloseEnterAction
+                    && fullScreenBeforeCloseEnterSettled
+                    && win.ModalFullScreenContractForSmoke;
+                win.CloseModalForSmoke();
+                bool fullScreenRetainedWhileModalHidden =
+                    fullScreenEnteredBeforeModalClose
+                    && win.ModalFullScreenForSmoke
+                    && !win.ModalVisibleForSmoke;
+                bool fullScreenHiddenExitAction = win.InvokePreviewKeyForSmoke(Key.F11);
+                bool fullScreenHiddenExitSettled =
+                    await win.WaitForModalFullScreenTransitionForSmokeAsync(enabled: false);
+                bool reopenedAfterFullScreenExit = win.OpenModalForSmoke();
+                bool fullScreenPreservedAfterModalClose =
+                    fullScreenRetainedWhileModalHidden
+                    && fullScreenHiddenExitAction
+                    && fullScreenHiddenExitSettled
+                    && !win.ModalFullScreenForSmoke
+                    && reopenedAfterFullScreenExit;
+                bool settingsBackdropDismissedOnly =
+                    win.ModalSettingsBackdropDismissContractForSmoke();
+                string? settingsKeyboardPath = win.SelectedFileNameForSmoke;
+                bool photorealSettingsOpened =
+                    win.OpenModalPhotorealSettingsForSmoke();
+                await win.Dispatcher.InvokeAsync(
+                    static () => { },
+                    DispatcherPriority.Input);
+                bool photorealSettingsKeyboardCaptured =
+                    photorealSettingsOpened
+                    && win.ModalSettingsBoardHasKeyboardFocusForSmoke
+                    && !win.InvokePreviewKeyForSmoke(Key.Right)
+                    && !win.InvokePreviewKeyForSmoke(Key.Delete)
+                    && !win.InvokePreviewKeyForSmoke(Key.F11)
+                    && win.ModalPhotorealSettingsVisibleForSmoke
+                    && win.ModalVisibleForSmoke
+                    && !win.ModalFullScreenForSmoke
+                    && !win.DeleteConfirmationVisibleForSmoke
+                    && string.Equals(
+                        win.SelectedFileNameForSmoke,
+                        settingsKeyboardPath,
+                        StringComparison.OrdinalIgnoreCase)
                     && win.InvokePreviewKeyForSmoke(Key.Escape)
+                    && !win.ModalPhotorealSettingsVisibleForSmoke;
+                bool videoSettingsOpened =
+                    win.OpenVideoGenerationBoardForSmoke("original");
+                await win.Dispatcher.InvokeAsync(
+                    static () => { },
+                    DispatcherPriority.Input);
+                bool videoSettingsKeyboardCaptured =
+                    videoSettingsOpened
+                    && win.ModalSettingsBoardHasKeyboardFocusForSmoke
+                    && !win.InvokePreviewKeyForSmoke(Key.Right)
+                    && !win.InvokePreviewKeyForSmoke(Key.Delete)
+                    && !win.InvokePreviewKeyForSmoke(Key.F11)
+                    && win.ModalVideoGenerationBoardVisibleForSmoke
+                    && win.ModalVisibleForSmoke
                     && !win.ModalFullScreenForSmoke
-                    && win.ModalVisibleForSmoke;
+                    && !win.DeleteConfirmationVisibleForSmoke
+                    && string.Equals(
+                        win.SelectedFileNameForSmoke,
+                        settingsKeyboardPath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && win.InvokePreviewKeyForSmoke(Key.Escape)
+                    && !win.ModalVideoGenerationBoardVisibleForSmoke;
+                settingsBackdropDismissedOnly = settingsBackdropDismissedOnly
+                    && photorealSettingsKeyboardCaptured
+                    && videoSettingsKeyboardCaptured;
+                string settingsBackdropDiagnostic =
+                    win.ModalSettingsBackdropDiagnosticForSmoke
+                    + $";photoKeyboard={photorealSettingsKeyboardCaptured}"
+                    + $";videoKeyboard={videoSettingsKeyboardCaptured}"
+                    + $";focus={win.ModalSettingsBoardHasKeyboardFocusForSmoke}";
 
                 string browserSharedOutputPath = Path.Combine(
                     Path.GetDirectoryName(jobsPath)!,
@@ -21081,6 +21403,8 @@ public partial class App : Application
                     && overlayDoesNotReduceImageArea
                     && fullScreenContract && fullScreenRestoredWindow
                     && fullScreenButtonRoute && fullScreenSwipeUpRoute
+                    && fullScreenPreservedAfterModalClose
+                    && settingsBackdropDismissedOnly
                     && browserSharedEnhancedReloaded && enhancedToolbarClarity
                     && enhancementLastKnownGood
                     && enhancementLargeCatalogRefreshBounded
@@ -21122,6 +21446,11 @@ public partial class App : Application
                     FullScreenRestoredWindow = fullScreenRestoredWindow,
                     FullScreenButtonRoute = fullScreenButtonRoute,
                     FullScreenSwipeUpRoute = fullScreenSwipeUpRoute,
+                    FullScreenPreservedAfterModalClose =
+                        fullScreenPreservedAfterModalClose,
+                    SettingsBackdropDismissedOnly =
+                        settingsBackdropDismissedOnly,
+                    SettingsBackdropDiagnostic = settingsBackdropDiagnostic,
                     BrowserSharedEnhancedReloaded = browserSharedEnhancedReloaded,
                     EnhancedToolbarClarity = enhancedToolbarClarity,
                     EnhancementLastKnownGood = enhancementLastKnownGood,
@@ -27133,6 +27462,9 @@ public partial class App : Application
         public bool FullScreenRestoredWindow { get; init; }
         public bool FullScreenButtonRoute { get; init; }
         public bool FullScreenSwipeUpRoute { get; init; }
+        public bool FullScreenPreservedAfterModalClose { get; init; }
+        public bool SettingsBackdropDismissedOnly { get; init; }
+        public string SettingsBackdropDiagnostic { get; init; } = "";
         public bool BrowserSharedEnhancedReloaded { get; init; }
         public bool EnhancedToolbarClarity { get; init; }
         public bool EnhancementLastKnownGood { get; init; }
@@ -29521,6 +29853,8 @@ public partial class App : Application
         public string? VideoTransport { get; init; }
         public bool VideoModalOpened { get; init; }
         public bool VideoMediaOpened { get; init; }
+        public bool VideoStartsAtZero { get; init; }
+        public bool VideoSeekSurface { get; init; }
         public bool VideoNaturalDuration { get; init; }
         public bool VideoPlaybackProgress { get; init; }
         public bool VideoAutoplay { get; init; }
@@ -29549,10 +29883,13 @@ public partial class App : Application
         public string[] GalleryVideoSourceRequests { get; init; } = [];
         public bool VideoBoardDefaultsToOriginal { get; init; }
         public bool VideoBoardOpened { get; init; }
+        public bool DisplayedPhotorealVideoSource { get; init; }
         public bool VideoSurface { get; init; }
         public bool VideoQueueSucceeded { get; init; }
         public bool VideoRequestExact { get; init; }
         public bool VideoBoardFailureFeedback { get; init; }
+        public bool ImageDeleteOwnershipGuard { get; init; }
+        public bool VideoDeleteOwnershipGuard { get; init; }
         public bool VideoStyleSaved { get; init; }
         public bool VideoStylePersistence { get; init; }
         public bool VideoStyleCustomOnEdit { get; init; }

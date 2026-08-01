@@ -185,14 +185,19 @@ public partial class MainWindow
 
         ManagedEnhancementVersion? photorealVersion = null;
         if (requestedSource is null
-            && TryGetCurrentModalEnhancementVersion(
-                tile,
-                out ManagedEnhancementVersion current)
-            && string.Equals(
-                current.Operation,
-                "photoreal",
-                StringComparison.Ordinal))
+            && CurrentModalEnhancementVersionIsPhotoreal())
         {
+            if (!TryGetDeletableCurrentModalEnhancementVersion(
+                    tile,
+                    out ManagedEnhancementVersion current)
+                || !string.Equals(
+                    current.Operation,
+                    "photoreal",
+                    StringComparison.Ordinal))
+            {
+                error = "表示中の実写版が古いか、Jobを一意に特定できません。実写版を選び直してください。";
+                return false;
+            }
             photorealVersion = current;
         }
         else if (requestedPhotorealJobId is not null
@@ -209,7 +214,7 @@ public partial class MainWindow
                         candidate.Operation,
                         "photoreal",
                         StringComparison.Ordinal)
-                    || string.IsNullOrWhiteSpace(candidate.JobId)
+                    || !IsGloballyUniqueManagedJobId(candidate.JobId)
                     || (requestedPhotorealJobId is not null
                         && !string.Equals(
                             candidate.JobId,
@@ -275,6 +280,37 @@ public partial class MainWindow
             sourceIdentity,
             null,
             label);
+        return true;
+    }
+
+    private bool TryRevalidateCapturedVideoSource(
+        out VideoSourceChoice source,
+        out string error)
+    {
+        source = null!;
+        error = "動画化の入力を選び直してください。";
+        if (_videoSourceChoice is not VideoSourceChoice captured
+            || SelectedTile() is not Tile { IsRealFile: true } tile)
+        {
+            return false;
+        }
+
+        string requestedSource = captured.ProducerJobId is null
+            ? "original"
+            : PhotorealVideoSourceRequestPrefix + captured.ProducerJobId;
+        if (!TryCaptureVideoSource(
+                tile,
+                requestedSource,
+                out VideoSourceChoice current,
+                out error)
+            || !Equals(current, captured))
+        {
+            if (string.IsNullOrWhiteSpace(error))
+                error = "動画化の入力が設定中に変わりました。選び直してください。";
+            return false;
+        }
+
+        source = current;
         return true;
     }
 
@@ -440,7 +476,7 @@ public partial class MainWindow
     }
 
     private void OpenModalVideoGeneration_Click(object sender, RoutedEventArgs e)
-        => OpenVideoGenerationBoard("original");
+        => OpenVideoGenerationBoard(requestedSource: null);
 
     private void GalleryContextVideo_Click(object sender, RoutedEventArgs e)
     {
@@ -458,7 +494,7 @@ public partial class MainWindow
     }
 
     private void ModalContextVideo_Click(object sender, RoutedEventArgs e)
-        => OpenVideoGenerationBoard("original");
+        => OpenVideoGenerationBoard(requestedSource: null);
 
     private void OpenVideoGenerationBoard(string? requestedSource = "original")
     {
@@ -489,16 +525,38 @@ public partial class MainWindow
         }
         SyncVideoGenerationSettingsControls();
         VideoGenerationStatusText.Text = status;
-        ModalVideoGenerationPopup.IsOpen = true;
+        if (ModalPhotorealSettingsPopup is not null)
+            ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
+        ModalVideoGenerationPopup.Visibility = Visibility.Visible;
         _ = Dispatcher.BeginInvoke(
-            new Action(() => ModalVideoPromptTextBox.Focus()),
+            new Action(() =>
+            {
+                if (ModalVideoGenerationPopup.Visibility == Visibility.Visible)
+                    Keyboard.Focus(ModalVideoPromptTextBox);
+            }),
             DispatcherPriority.Input);
     }
 
     private void CloseVideoGenerationBoard_Click(object sender, RoutedEventArgs e)
+        => CloseModalVideoGenerationBoard();
+
+    private void CloseModalVideoGenerationBoard()
     {
         if (ModalVideoGenerationPopup is not null)
-            ModalVideoGenerationPopup.IsOpen = false;
+            ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+        ModalVideoGenerateButton?.Focus();
+    }
+
+    private void ModalVideoGenerationBackdrop_MouseLeftButtonDown(
+        object sender,
+        System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (ModalVideoGenerationPopup.Visibility == Visibility.Visible
+            && ReferenceEquals(e.OriginalSource, ModalVideoGenerationPopup))
+        {
+            CloseModalVideoGenerationBoard();
+            e.Handled = true;
+        }
     }
 
     private void VideoGenerationSetting_SelectionChanged(
@@ -599,13 +657,34 @@ public partial class MainWindow
             ? source.Text
             : source.Text[..MaxVideoPromptLength];
         MarkVideoStyleAsCustom();
-        SyncVideoGenerationSettingsControls();
+        SyncVideoPromptPeer(source);
+        UpdateVideoGenerationActionControls();
         SetVideoGenerationSettingsStatus(
             string.IsNullOrWhiteSpace(_videoPrompt)
                 ? "空欄はNormalの既定モーションを使います。保存済みです。"
                 : "保存済み。入力した動きが次の動画ジョブに使われます。");
         if (!_initializing)
             SaveState();
+    }
+
+    private void SyncVideoPromptPeer(TextBox source)
+    {
+        TextBox? peer = ReferenceEquals(source, AppVideoPromptTextBox)
+            ? ModalVideoPromptTextBox
+            : AppVideoPromptTextBox;
+        if (peer is null || string.Equals(peer.Text, _videoPrompt, StringComparison.Ordinal))
+            return;
+
+        bool wasSyncing = _syncingVideoGenerationSettings;
+        _syncingVideoGenerationSettings = true;
+        try
+        {
+            peer.Text = _videoPrompt;
+        }
+        finally
+        {
+            _syncingVideoGenerationSettings = wasSyncing;
+        }
     }
 
     private void ResetVideoGenerationSettings_Click(object sender, RoutedEventArgs e)
@@ -1036,9 +1115,7 @@ public partial class MainWindow
         // canonicalizes the selected source and verifies that it still exists
         // before sending any request.
         bool hasSource = SelectedTile() is { IsRealFile: true };
-        bool capturedSourceReady = _videoSourceChoice is VideoSourceChoice source
-            && File.Exists(source.SourceIdentity)
-            && File.Exists(source.DisplayPath);
+        bool capturedSourceReady = TryRevalidateCapturedVideoSource(out _, out _);
         bool modelReady = IsVideoModelRunnable(_videoModelId);
         ModalVideoGenerateButton.IsEnabled = hasSource && !_videoGenerationRequestPending;
         QueueVideoGenerationButton.IsEnabled =
@@ -1062,14 +1139,19 @@ public partial class MainWindow
 
     private async Task<bool> QueueVideoGenerationAsync()
     {
-        if (_videoGenerationRequestPending
-            || _videoSourceChoice is not VideoSourceChoice source
-            || !File.Exists(source.SourceIdentity)
-            || !File.Exists(source.DisplayPath)
-            || !IsVideoModelRunnable(_videoModelId))
+        if (_videoGenerationRequestPending)
+            return false;
+
+        if (!TryRevalidateCapturedVideoSource(
+                out VideoSourceChoice source,
+                out string sourceError))
         {
+            if (!string.IsNullOrWhiteSpace(sourceError))
+                SetVideoGenerationSettingsStatus(sourceError);
             return false;
         }
+        if (!IsVideoModelRunnable(_videoModelId))
+            return false;
 
         VideoGenerationRequestSettings settings =
             CurrentVideoGenerationRequestSettings();
@@ -1086,6 +1168,20 @@ public partial class MainWindow
                 SetVideoGenerationSettingsStatus(readiness.Error);
                 return false;
             }
+
+            if (!TryRevalidateCapturedVideoSource(
+                    out VideoSourceChoice revalidatedSource,
+                    out sourceError)
+                || !Equals(revalidatedSource, source))
+            {
+                _videoSourceChoice = null;
+                SetVideoGenerationSettingsStatus(
+                    string.IsNullOrWhiteSpace(sourceError)
+                        ? "動画化の入力が準備確認中に変わりました。選び直してください。"
+                        : sourceError);
+                return false;
+            }
+            source = revalidatedSource;
 
             var requestBody = new Dictionary<string, object?>
             {
@@ -1129,7 +1225,7 @@ public partial class MainWindow
                 $"動画ジョブを共有GPUキューへ追加しました{suffix}。");
             SetTransientStatusToast(
                 $"{Path.GetFileName(source.SourceIdentity)}: {source.Label}から動画化をJobsキューへ追加しました。");
-            ModalVideoGenerationPopup.IsOpen = false;
+            ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
             return true;
         }
         finally
@@ -1143,7 +1239,13 @@ public partial class MainWindow
         string? requestedSource = "original")
     {
         OpenVideoGenerationBoard(requestedSource);
-        return ModalVideoGenerationPopup.IsOpen;
+        return ModalVideoGenerationPopup.Visibility == Visibility.Visible;
+    }
+
+    public bool OpenDisplayedModalVideoGenerationBoardForSmoke()
+    {
+        OpenModalVideoGeneration_Click(this, new RoutedEventArgs());
+        return ModalVideoGenerationPopup.Visibility == Visibility.Visible;
     }
 
     public (int DurationSeconds, int PlaybackFps, int MaximumPixelArea, string Prompt)
@@ -1269,11 +1371,46 @@ public partial class MainWindow
         }
     }
 
+    public bool SelectedPhotorealVideoSourceGlobalJobIdRejectedForSmoke(
+        string jobId)
+    {
+        if (SelectedTile() is not Tile { IsRealFile: true } tile
+            || !_ambiguousEnhancementJobIds.Add(jobId))
+        {
+            return false;
+        }
+
+        try
+        {
+            var menu = new MenuItem();
+            PopulateGalleryVideoSourceMenu(menu, tile);
+            string[] requests = menu.Items
+                .OfType<MenuItem>()
+                .Select(static item => item.Tag?.ToString())
+                .Where(static tag => !string.IsNullOrWhiteSpace(tag))
+                .Select(static tag => tag!)
+                .ToArray();
+            return requests.SequenceEqual(["original"], StringComparer.Ordinal)
+                && !TryCaptureVideoSource(
+                    tile,
+                    PhotorealVideoSourceRequestPrefix + jobId,
+                    out _,
+                    out _);
+        }
+        finally
+        {
+            _ambiguousEnhancementJobIds.Remove(jobId);
+        }
+    }
+
     public Task<bool> QueueVideoGenerationForSmokeAsync()
         => QueueVideoGenerationAsync();
 
     public bool VideoGenerationQueueEnabledForSmoke
         => QueueVideoGenerationButton.IsEnabled;
+
+    public bool ModalVideoGenerationBoardVisibleForSmoke
+        => ModalVideoGenerationPopup.Visibility == Visibility.Visible;
 
     public string VideoGenerationStatusForSmoke
         => VideoGenerationStatusText.Text;
@@ -1281,6 +1418,7 @@ public partial class MainWindow
     public bool VideoGenerationSurfaceForSmoke
         => ModalVideoGenerateButton is not null
             && ModalVideoGenerationPopup is not null
+            && ModalVideoGenerationPopup is Grid
             && VideoStyleSurfaceForSmoke
             && ModalVideoGenerationBoardBorder.MaxHeight <= 680
             && ModalVideoGenerationScrollViewer.VerticalScrollBarVisibility

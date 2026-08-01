@@ -1,5 +1,7 @@
 param(
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$DotnetPath = 'dotnet',
+    [string]$TargetFrameworkOverride = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +26,12 @@ $reloadResultPath = Join-Path $runRoot 'reload.json'
 try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
+        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    }
+    else {
+        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+    }
     if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
     $exe = Join-Path $buildRoot 'PhotoViewer.Wpf.exe'

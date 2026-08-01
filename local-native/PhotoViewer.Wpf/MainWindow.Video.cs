@@ -1,9 +1,12 @@
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace PhotoViewer.Wpf;
 
@@ -27,6 +30,11 @@ public partial class MainWindow
     private bool _modalVideoAutoplayPending;
     private bool _suppressModalVideoVersionSelection;
     private bool _modalVideoTransportStubForSmoke;
+    private bool _suppressModalVideoSeek;
+    private bool _modalVideoSeekDragging;
+    private double _modalVideoDurationSeconds;
+    private long _modalVideoPlaybackGeneration;
+    private DispatcherTimer? _modalVideoTimelineTimer;
     private TaskCompletionSource<bool>? _modalVideoMediaOpenCompletion;
     private string? _modalVideoMediaFailureForSmoke;
 
@@ -412,14 +420,19 @@ public partial class MainWindow
             return false;
         }
 
-        ManagedVideoVersion version = _modalVideoVersions[index];
-        if (!File.Exists(version.Output.OutputPath))
+        if (SelectedTile() is not Tile tile
+            || !TryValidateManagedVideoVersion(
+                tile,
+                _modalVideoVersions[index],
+                out ManagedVideoVersion version))
             return false;
 
         _modalVideoVersionIndex = index;
         _modalShowingVideo = true;
+        _modalShowingEnhanced = false;
         _modalVideoPlaying = autoplay;
         _modalVideoAutoplayPending = autoplay;
+        _modalVideoPlaybackGeneration++;
         _modalVideoMediaFailureForSmoke = null;
         _modalVideoMediaOpenCompletion =
             new TaskCompletionSource<bool>(
@@ -428,28 +441,35 @@ public partial class MainWindow
         ModalBitmap.Visibility = Visibility.Collapsed;
         ModalArtBase.Visibility = Visibility.Collapsed;
         ModalArtGlow.Visibility = Visibility.Collapsed;
+        ResetModalVideoTimeline(version.DurationSeconds, show: true);
+        EnsureModalVideoTimelineTimer();
+        _modalVideoTimelineTimer?.Start();
 
         if (!_modalVideoTransportStubForSmoke)
         {
             try
             {
                 ModalVideo.Stop();
+                ModalVideo.Source = null;
                 ModalVideo.Source = new Uri(version.Output.OutputPath, UriKind.Absolute);
-                if (autoplay)
-                    ModalVideo.Play();
-                else
-                    ModalVideo.Pause();
+                // Manual MediaElement transport does not open a newly assigned
+                // source until a transport state is requested. Pause kicks the
+                // open without advancing frames; MediaOpened then rewinds and
+                // dispatches the requested autoplay from exactly zero.
+                ModalVideo.Pause();
+                ModalVideo.Position = TimeSpan.Zero;
             }
             catch (Exception ex)
             {
                 _modalVideoMediaFailureForSmoke = ex.Message;
                 _modalVideoMediaOpenCompletion.TrySetResult(false);
-                StopAndHideModalVideo(clearSource: true);
+                RestoreModalOriginalAfterVideoFailure();
                 return false;
             }
         }
         else
         {
+            _modalVideoPlaying = autoplay;
             _modalVideoMediaOpenCompletion.TrySetResult(true);
         }
 
@@ -471,6 +491,8 @@ public partial class MainWindow
 
     private void StopAndHideModalVideo(bool clearSource)
     {
+        _modalVideoPlaybackGeneration++;
+        _modalVideoTimelineTimer?.Stop();
         if (ModalVideo is not null && !_modalVideoTransportStubForSmoke)
         {
             try
@@ -489,6 +511,7 @@ public partial class MainWindow
         _modalVideoAutoplayPending = false;
         if (ModalVideo is not null)
             ModalVideo.Visibility = Visibility.Collapsed;
+        ResetModalVideoTimeline(0, show: false);
         RestoreModalImageVisibility();
         if (Modal?.Visibility == Visibility.Visible)
         {
@@ -503,6 +526,24 @@ public partial class MainWindow
             }
         }
         UpdateModalVideoPlaybackPresentation();
+    }
+
+    private void RestoreModalOriginalAfterVideoFailure()
+    {
+        StopAndHideModalVideo(clearSource: true);
+        if (Modal.Visibility != Visibility.Visible
+            || SelectedTile() is not Tile tile)
+        {
+            return;
+        }
+
+        _modalEnhancementVersionIndex = 0;
+        _modalShowingEnhanced = false;
+        RememberModalDisplayPreference(
+            tile,
+            ModalDisplayVersionKind.Original,
+            null);
+        OpenModal();
     }
 
     private void RestoreModalImageVisibility()
@@ -543,7 +584,7 @@ public partial class MainWindow
         }
         catch
         {
-            StopAndHideModalVideo(clearSource: true);
+            RestoreModalOriginalAfterVideoFailure();
             return false;
         }
 
@@ -567,6 +608,307 @@ public partial class MainWindow
             _modalShowingVideo && _modalVideoPlaying
                 ? "Pause generated video"
                 : "Play generated video");
+        UpdateModalDisplayedDeletePresentation();
+    }
+
+    private bool TryGetDisplayedModalVideoVersion(
+        Tile tile,
+        out ManagedVideoVersion version)
+    {
+        version = null!;
+        if (!_modalShowingVideo
+            || !string.Equals(
+                _modalSourceTilePath,
+                tile.Path,
+                StringComparison.OrdinalIgnoreCase)
+            || _modalVideoVersionIndex < 0
+            || _modalVideoVersionIndex >= _modalVideoVersions.Count)
+        {
+            return false;
+        }
+
+        return TryValidateManagedVideoVersion(
+            tile,
+            _modalVideoVersions[_modalVideoVersionIndex],
+            out version);
+    }
+
+    private bool TryValidateManagedVideoVersion(
+        Tile tile,
+        ManagedVideoVersion candidate,
+        out ManagedVideoVersion version)
+    {
+        version = null!;
+        if (!IsGloballyUniqueManagedJobId(candidate.JobId))
+            return false;
+
+        ManagedVideoVersion? uniqueVideo = null;
+        foreach (ManagedVideoVersion current
+                 in GetManagedVideoVersionsForPath(tile.Path))
+        {
+            if (!string.Equals(
+                    current.JobId,
+                    candidate.JobId,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (uniqueVideo is not null)
+                return false;
+            uniqueVideo = current;
+        }
+        if (uniqueVideo is null || !Equals(uniqueVideo, candidate))
+            return false;
+
+        try
+        {
+            string currentInputPath;
+            if (candidate.SourceProducerJobId is null)
+            {
+                if (!TryResolveEnhancementSourceIdentity(
+                        tile.Path,
+                        out currentInputPath))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (!IsGloballyUniqueManagedJobId(candidate.SourceProducerJobId))
+                    return false;
+
+                ManagedEnhancementVersion? uniqueProducer = null;
+                foreach (ManagedEnhancementVersion producer
+                         in GetManagedEnhancementVersionsForPath(tile.Path))
+                {
+                    if (!string.Equals(
+                            producer.JobId,
+                            candidate.SourceProducerJobId,
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (uniqueProducer is not null
+                        || !string.Equals(
+                            producer.Operation,
+                            "photoreal",
+                            StringComparison.Ordinal)
+                        || !TryCreateManagedEnhancedOutput(
+                            tile,
+                            producer.Output.OutputPath,
+                            producer.Output.SourceSize,
+                            producer.Output.SourceMtimeMs,
+                            out ManagedEnhancedOutput currentProducerOutput))
+                    {
+                        return false;
+                    }
+
+                    uniqueProducer = producer with
+                    {
+                        Output = currentProducerOutput,
+                    };
+                }
+
+                if (uniqueProducer is null)
+                    return false;
+                currentInputPath = uniqueProducer.Output.OutputPath;
+            }
+
+            var currentInput = new FileInfo(currentInputPath);
+            double currentInputMtimeMs = new DateTimeOffset(
+                currentInput.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+            if (!currentInput.Exists
+                || currentInput.Length != candidate.Output.SourceSize
+                || Math.Abs(
+                    currentInputMtimeMs
+                        - candidate.Output.SourceMtimeMs) > 1)
+            {
+                return false;
+            }
+
+            string lexicalOutput = Path.GetFullPath(
+                candidate.Output.OutputPath);
+            string canonicalOutput = _resolveFinalPath(
+                lexicalOutput);
+            string lexicalRoot = Path.GetFullPath(Path.Combine(
+                ResolvedManagedEnhancementOutputsRoot,
+                ManagedVideoFolderName));
+            string canonicalRoot = _resolveFinalPath(lexicalRoot);
+            if (!string.Equals(
+                    Path.GetDirectoryName(lexicalOutput),
+                    lexicalRoot,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    Path.GetDirectoryName(canonicalOutput),
+                    canonicalRoot,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    Path.GetExtension(canonicalOutput),
+                    ManagedVideoExtension,
+                    StringComparison.OrdinalIgnoreCase)
+                || !File.Exists(canonicalOutput)
+                || new FileInfo(canonicalOutput).Length <= 0)
+            {
+                return false;
+            }
+
+            version = candidate;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool DisplayedManagedVideoDeleteVerifiedForSmoke
+        => SelectedTile() is Tile tile
+            && TryGetDisplayedModalVideoVersion(tile, out _);
+
+    public bool DisplayedManagedVideoDuplicateJobRejectedForSmoke()
+    {
+        if (SelectedTile() is not Tile tile
+            || !TryGetDisplayedModalVideoVersion(
+                tile,
+                out ManagedVideoVersion displayed)
+            || GetManagedVideoVersionsForPath(tile.Path)
+                is not List<ManagedVideoVersion> versions)
+        {
+            return false;
+        }
+
+        versions.Add(displayed);
+        try
+        {
+            return !TryGetDisplayedModalVideoVersion(tile, out _);
+        }
+        finally
+        {
+            versions.RemoveAt(versions.Count - 1);
+        }
+    }
+
+    public bool DisplayedManagedVideoGlobalJobIdRejectedForSmoke()
+    {
+        if (SelectedTile() is not Tile tile
+            || !TryGetDisplayedModalVideoVersion(
+                tile,
+                out ManagedVideoVersion displayed)
+            || !_ambiguousEnhancementJobIds.Add(displayed.JobId))
+        {
+            return false;
+        }
+
+        try
+        {
+            return !TryGetDisplayedModalVideoVersion(tile, out _);
+        }
+        finally
+        {
+            _ambiguousEnhancementJobIds.Remove(displayed.JobId);
+        }
+    }
+
+    private async Task<bool> DeleteDisplayedModalVideoOutputAsync()
+    {
+        if (_modalEnhancementRequestPending
+            || SelectedTile() is not Tile tile
+            || !TryGetDisplayedModalVideoVersion(
+                tile,
+                out ManagedVideoVersion version))
+        {
+            SetStatusToast("Delete blocked: the displayed managed video could not be verified.");
+            return false;
+        }
+
+        long requestGeneration = _modalEnhancementGeneration;
+        string sourcePath = tile.Path;
+        string requestJobId = version.JobId;
+        int previousIndex = _modalVideoVersionIndex;
+        bool confirmed = _confirmEnhancedOutputDeleteForSmoke?.Invoke() ?? MessageBox.Show(
+                this,
+                "Delete only the displayed video output? The original image and other AI versions will be kept.",
+                "Delete video output version",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No) == MessageBoxResult.Yes;
+        if (!confirmed)
+            return false;
+
+        if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration)
+            || !TryGetDisplayedModalVideoVersion(
+                tile,
+                out ManagedVideoVersion revalidated)
+            || !Equals(revalidated, version))
+        {
+            SetStatusToast("Delete blocked: the displayed video changed while confirmation was open.");
+            return false;
+        }
+
+        _modalEnhancementRequestPending = true;
+        StopAndHideModalVideo(clearSource: true);
+        UpdateModalEnhancementActionControls();
+        try
+        {
+            EnhancementApiResponse response = await SendEnhancementApiAsync(
+                HttpMethod.Delete,
+                $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId)}/output");
+            if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
+                return false;
+            if (!response.Ok)
+            {
+                SetStatusToast(response.Error);
+                if (Modal.Visibility == Visibility.Visible)
+                    ShowModalVideoVersion(previousIndex, autoplay: false);
+                return false;
+            }
+
+            RemoveManagedVideoVersion(tile, requestJobId);
+            OpenModal();
+            BeginModalEnhancementRefresh(tile.Path);
+            ShowModalInteractionFeedback(
+                "Video output version deleted; original and other versions kept");
+            return true;
+        }
+        finally
+        {
+            _modalEnhancementRequestPending = false;
+            UpdateModalEnhancementActionControls();
+        }
+    }
+
+    private void RemoveManagedVideoVersion(Tile tile, string jobId)
+    {
+        _modalVideoVersions.RemoveAll(version =>
+            string.Equals(version.JobId, jobId, StringComparison.Ordinal));
+        foreach (string key in _videoVersions.Keys.ToArray())
+        {
+            _videoVersions[key].RemoveAll(version =>
+                string.Equals(version.JobId, jobId, StringComparison.Ordinal));
+            if (_videoVersions[key].Count == 0)
+                _videoVersions.Remove(key);
+        }
+        foreach (string key in _catalogVideoVersionsByPath.Keys.ToArray())
+        {
+            _catalogVideoVersionsByPath[key].RemoveAll(version =>
+                string.Equals(version.JobId, jobId, StringComparison.Ordinal));
+            if (_catalogVideoVersionsByPath[key].Count == 0)
+                _catalogVideoVersionsByPath.Remove(key);
+        }
+
+        _modalVideoVersionIndex = 0;
+        _modalShowingVideo = false;
+        _modalEnhancementVersionIndex = 0;
+        _modalShowingEnhanced = false;
+        RememberModalDisplayPreference(
+            tile,
+            ModalDisplayVersionKind.Original,
+            null);
+        foreach (Tile catalogTile in _allTiles)
+            ApplyTileVideoAvailability(catalogTile);
+        RefreshModalVideoVersionChoices();
     }
 
     private void ModalVideoPlayback_Click(object sender, RoutedEventArgs e)
@@ -594,11 +936,52 @@ public partial class MainWindow
         if (!_modalShowingVideo)
             return;
 
-        if (_modalVideoAutoplayPending)
-            ModalVideo.Play();
-        _modalVideoPlaying = _modalVideoAutoplayPending;
+        long playbackGeneration = _modalVideoPlaybackGeneration;
+        try
+        {
+            ModalVideo.Pause();
+            ModalVideo.Position = TimeSpan.Zero;
+        }
+        catch
+        {
+            RestoreModalOriginalAfterVideoFailure();
+            return;
+        }
+        if (ModalVideo.NaturalDuration.HasTimeSpan
+            && ModalVideo.NaturalDuration.TimeSpan > TimeSpan.Zero)
+        {
+            _modalVideoDurationSeconds = ModalVideo.NaturalDuration.TimeSpan.TotalSeconds;
+        }
+        UpdateModalVideoTimeline(TimeSpan.Zero);
         _modalVideoMediaOpenCompletion?.TrySetResult(true);
         UpdateModalVideoPlaybackPresentation();
+        if (!_modalVideoAutoplayPending)
+            return;
+
+        _ = Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                if (!_modalShowingVideo
+                    || !_modalVideoAutoplayPending
+                    || playbackGeneration != _modalVideoPlaybackGeneration)
+                {
+                    return;
+                }
+
+                try
+                {
+                    ModalVideo.Position = TimeSpan.Zero;
+                    ModalVideo.Play();
+                    _modalVideoPlaying = true;
+                    UpdateModalVideoTimeline(TimeSpan.Zero);
+                    UpdateModalVideoPlaybackPresentation();
+                }
+                catch
+                {
+                    RestoreModalOriginalAfterVideoFailure();
+                }
+            }),
+            DispatcherPriority.Render);
     }
 
     private void ModalVideo_MediaEnded(object sender, RoutedEventArgs e)
@@ -610,6 +993,7 @@ public partial class MainWindow
         {
             if (!_modalVideoTransportStubForSmoke)
                 ModalVideo.Position = TimeSpan.Zero;
+            UpdateModalVideoTimeline(TimeSpan.Zero);
             if (_modalVideoLoopEnabled)
             {
                 if (!_modalVideoTransportStubForSmoke)
@@ -627,10 +1011,143 @@ public partial class MainWindow
         }
         catch
         {
-            StopAndHideModalVideo(clearSource: true);
+            RestoreModalOriginalAfterVideoFailure();
             return;
         }
         UpdateModalVideoPlaybackPresentation();
+    }
+
+    private void EnsureModalVideoTimelineTimer()
+    {
+        if (_modalVideoTimelineTimer is not null)
+            return;
+
+        _modalVideoTimelineTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(200),
+        };
+        _modalVideoTimelineTimer.Tick += (_, _) =>
+        {
+            if (!_modalShowingVideo || _modalVideoTransportStubForSmoke)
+                return;
+
+            try
+            {
+                if (ModalVideo.NaturalDuration.HasTimeSpan
+                    && ModalVideo.NaturalDuration.TimeSpan > TimeSpan.Zero)
+                {
+                    _modalVideoDurationSeconds = ModalVideo.NaturalDuration.TimeSpan.TotalSeconds;
+                }
+                if (!_modalVideoSeekDragging)
+                    UpdateModalVideoTimeline(ModalVideo.Position);
+            }
+            catch
+            {
+            }
+        };
+    }
+
+    private void ResetModalVideoTimeline(double durationSeconds, bool show)
+    {
+        _modalVideoDurationSeconds = double.IsFinite(durationSeconds)
+            ? Math.Max(0, durationSeconds)
+            : 0;
+        if (ModalVideoSeekPanel is null
+            || ModalVideoSeekSlider is null
+            || ModalVideoSeekTimeText is null)
+        {
+            return;
+        }
+
+        ModalVideoSeekPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        _suppressModalVideoSeek = true;
+        try
+        {
+            ModalVideoSeekSlider.Maximum = Math.Max(0.001, _modalVideoDurationSeconds);
+            ModalVideoSeekSlider.Value = 0;
+        }
+        finally
+        {
+            _suppressModalVideoSeek = false;
+        }
+        ModalVideoSeekTimeText.Text = $"0:00 / {FormatModalVideoTime(_modalVideoDurationSeconds)}";
+    }
+
+    private void UpdateModalVideoTimeline(TimeSpan position)
+    {
+        if (ModalVideoSeekSlider is null || ModalVideoSeekTimeText is null)
+            return;
+
+        double totalSeconds = Math.Max(0, _modalVideoDurationSeconds);
+        double currentSeconds = Math.Clamp(
+            double.IsFinite(position.TotalSeconds) ? position.TotalSeconds : 0,
+            0,
+            totalSeconds);
+        _suppressModalVideoSeek = true;
+        try
+        {
+            ModalVideoSeekSlider.Maximum = Math.Max(0.001, totalSeconds);
+            ModalVideoSeekSlider.Value = Math.Min(
+                ModalVideoSeekSlider.Maximum,
+                currentSeconds);
+        }
+        finally
+        {
+            _suppressModalVideoSeek = false;
+        }
+        ModalVideoSeekTimeText.Text =
+            $"{FormatModalVideoTime(currentSeconds)} / {FormatModalVideoTime(totalSeconds)}";
+    }
+
+    private static string FormatModalVideoTime(double seconds)
+    {
+        int totalSeconds = (int)Math.Max(0, Math.Floor(seconds));
+        return totalSeconds >= 3600
+            ? TimeSpan.FromSeconds(totalSeconds).ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture)
+            : TimeSpan.FromSeconds(totalSeconds).ToString(@"m\:ss", CultureInfo.InvariantCulture);
+    }
+
+    private void ModalVideoSeekSlider_PreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+        => _modalVideoSeekDragging = true;
+
+    private void ModalVideoSeekSlider_PreviewMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        _modalVideoSeekDragging = false;
+        SeekModalVideoToSeconds(ModalVideoSeekSlider.Value);
+    }
+
+    private void ModalVideoSeekSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressModalVideoSeek || !_modalShowingVideo)
+            return;
+        SeekModalVideoToSeconds(e.NewValue);
+    }
+
+    private bool SeekModalVideoToSeconds(double seconds)
+    {
+        if (!_modalShowingVideo || !double.IsFinite(seconds))
+            return false;
+
+        double clamped = Math.Clamp(seconds, 0, Math.Max(0, _modalVideoDurationSeconds));
+        if (!_modalVideoTransportStubForSmoke)
+        {
+            try
+            {
+                ModalVideo.Position = TimeSpan.FromSeconds(clamped);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        UpdateModalVideoTimeline(TimeSpan.FromSeconds(clamped));
+        return true;
     }
 
     private void ModalVideo_MediaFailed(
@@ -643,7 +1160,7 @@ public partial class MainWindow
         _modalVideoMediaFailureForSmoke =
             e.ErrorException?.Message ?? "Media Foundation rejected the video.";
         _modalVideoMediaOpenCompletion?.TrySetResult(false);
-        StopAndHideModalVideo(clearSource: true);
+        RestoreModalOriginalAfterVideoFailure();
         SetStatusToast("動画を再生できません。元画像を表示します。");
     }
 
@@ -671,6 +1188,11 @@ public partial class MainWindow
     public bool ModalShowingVideoForSmoke => _modalShowingVideo;
     public bool ModalVideoPlayingForSmoke => _modalVideoPlaying;
     public bool ModalVideoLoopEnabledForSmoke => _modalVideoLoopEnabled;
+    public bool ModalVideoSeekVisibleForSmoke =>
+        ModalVideoSeekPanel.Visibility == Visibility.Visible;
+    public double ModalVideoSeekValueForSmoke => ModalVideoSeekSlider.Value;
+    public double ModalVideoSeekMaximumForSmoke => ModalVideoSeekSlider.Maximum;
+    public string ModalVideoSeekTimeForSmoke => ModalVideoSeekTimeText.Text;
     public string? ModalVideoPathForSmoke =>
         _modalVideoVersionIndex >= 0 && _modalVideoVersionIndex < _modalVideoVersions.Count
             ? _modalVideoVersions[_modalVideoVersionIndex].Output.OutputPath
@@ -719,7 +1241,7 @@ public partial class MainWindow
     }
 
     public async Task<bool> WaitForModalVideoPlaybackProgressForSmokeAsync(
-        int timeoutMilliseconds = 5_000)
+        int timeoutMilliseconds = 10_000)
     {
         if (_modalVideoTransportStubForSmoke)
             return true;
@@ -757,6 +1279,9 @@ public partial class MainWindow
     public bool ToggleModalVideoPlaybackForSmoke()
         => ToggleModalVideoPlayback();
 
+    public bool SeekModalVideoForSmoke(double seconds)
+        => SeekModalVideoToSeconds(seconds);
+
     public bool TriggerModalVideoEndedForSmoke()
     {
         if (!_modalShowingVideo)
@@ -772,6 +1297,7 @@ public partial class MainWindow
         if (index < 0 || index >= _modalVideoVersions.Count)
             return false;
         _modalVideoVersionIndex = index;
-        return !_modalShowingVideo || ShowModalVideoVersion(index, autoplay: true);
+        return Modal.Visibility == Visibility.Visible
+            && ShowModalVideoVersion(index, autoplay: true);
     }
 }

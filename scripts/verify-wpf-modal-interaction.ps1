@@ -96,6 +96,8 @@ try {
         'fullScreenRestoredWindow',
         'fullScreenButtonRoute',
         'fullScreenSwipeUpRoute',
+        'fullScreenPreservedAfterModalClose',
+        'settingsBackdropDismissedOnly',
         'browserSharedEnhancedReloaded',
         'enhancedToolbarClarity',
         'enhancementLastKnownGood',

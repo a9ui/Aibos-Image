@@ -58,6 +58,9 @@ public partial class MainWindow
     private readonly List<string> _enhancementJobsPreviousSelectionPaths = [];
     private string? _enhancementJobsPreviousPrimaryPath;
     private bool _enhancementJobsModalSelectionCaptured;
+    private double _enhancementJobsReturnVerticalOffset;
+    private string? _enhancementJobsReturnJobId;
+    private double _enhancementJobsReturnAnchorViewportTop = double.NaN;
 
     private static string ReadEnhancementOperation(JsonElement job)
     {
@@ -558,7 +561,8 @@ public partial class MainWindow
     private async Task OpenEnhancementJobsWorkspaceAsync(
         string initialFilter,
         IReadOnlyCollection<string>? highlightedJobIds = null,
-        IInputElement? focusToRestore = null)
+        IInputElement? focusToRestore = null,
+        bool restoreReturnViewport = false)
     {
         if (EnhancementJobsDialog.Visibility == Visibility.Visible)
             return;
@@ -591,10 +595,13 @@ public partial class MainWindow
         _enhancementWorkspaceHealthEndpointSupported = null;
         ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
         EnhancementJobsEmptyText.Visibility = Visibility.Collapsed;
-        EnhancementJobsList.ItemsSource = null;
+        if (!restoreReturnViewport)
+            EnhancementJobsList.ItemsSource = null;
         long generation = ++_enhancementWorkspaceGeneration;
         _ = Dispatcher.BeginInvoke(EnhancementJobsRefreshButton.Focus, DispatcherPriority.Input);
         await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
+        if (restoreReturnViewport)
+            await RestoreEnhancementJobsReturnViewportAsync();
     }
 
     private void CloseEnhancementJobs_Click(object sender, RoutedEventArgs e)
@@ -1581,7 +1588,8 @@ public partial class MainWindow
 
     private bool TryOpenEnhancementJobInViewer(
         EnhancementWorkspaceJobView job,
-        ManagedEnhancedOutput? preferredOutput)
+        ManagedEnhancedOutput? preferredOutput,
+        ManagedVideoVersion? preferredVideo = null)
     {
         if (!TryResolveEnhancementWorkspaceCatalogSource(
                 job,
@@ -1607,7 +1615,15 @@ public partial class MainWindow
             };
         }
 
+        CaptureEnhancementJobsReturnViewport(job.Id);
         PrepareEnhancementJobsModalTile(tile, canonicalSource);
+        if (preferredVideo is not null)
+        {
+            RememberModalDisplayPreference(
+                tile,
+                ModalDisplayVersionKind.Video,
+                preferredVideo.JobId);
+        }
         _returnToEnhancementJobsAfterModalClose = true;
         CloseEnhancementJobsWorkspace(restoreFocus: false);
         SelectTile(tile);
@@ -1653,8 +1669,22 @@ public partial class MainWindow
         EnhancementWorkspaceJobView job,
         ManagedVideoVersion preferredVideo)
     {
-        if (!TryOpenEnhancementJobInViewer(job, preferredOutput: null))
+        if (!TryOpenEnhancementJobInViewer(
+                job,
+                preferredOutput: null,
+                preferredVideo))
             return false;
+
+        if (_modalShowingVideo
+            && _modalVideoVersionIndex >= 0
+            && _modalVideoVersionIndex < _modalVideoVersions.Count
+            && string.Equals(
+                _modalVideoVersions[_modalVideoVersionIndex].JobId,
+                preferredVideo.JobId,
+                StringComparison.Ordinal))
+        {
+            return true;
+        }
 
         int versionIndex = _modalVideoVersions.FindIndex(candidate =>
             string.Equals(candidate.JobId, job.Id, StringComparison.Ordinal)
@@ -1769,9 +1799,112 @@ public partial class MainWindow
             new Action(async () =>
             {
                 if (IsLoaded && IsVisible && EnhancementJobsDialog.Visibility != Visibility.Visible)
-                    await OpenEnhancementJobsWorkspaceAsync(filter, focusToRestore: OpenEnhancementJobsButton);
+                    await OpenEnhancementJobsWorkspaceAsync(
+                        filter,
+                        focusToRestore: OpenEnhancementJobsButton,
+                        restoreReturnViewport: true);
             }),
             DispatcherPriority.Background);
+    }
+
+    private void CaptureEnhancementJobsReturnViewport(string jobId)
+    {
+        _enhancementJobsReturnJobId = jobId;
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(EnhancementJobsList);
+        _enhancementJobsReturnVerticalOffset = viewer?.VerticalOffset ?? 0;
+        _enhancementJobsReturnAnchorViewportTop = double.NaN;
+        EnhancementWorkspaceJobView? item =
+            (EnhancementJobsList.ItemsSource as IEnumerable<EnhancementWorkspaceJobView>)?
+                .FirstOrDefault(job => string.Equals(
+                    job.Id,
+                    jobId,
+                    StringComparison.Ordinal));
+        if (viewer is not null
+            && item is not null
+            && TryGetEnhancementJobViewportTop(item, viewer, out double top))
+        {
+            _enhancementJobsReturnAnchorViewportTop = top;
+        }
+    }
+
+    private async Task RestoreEnhancementJobsReturnViewportAsync()
+    {
+        double requestedOffset = Math.Max(0, _enhancementJobsReturnVerticalOffset);
+        string? requestedJobId = _enhancementJobsReturnJobId;
+        double requestedAnchorTop = _enhancementJobsReturnAnchorViewportTop;
+        _enhancementJobsReturnVerticalOffset = 0;
+        _enhancementJobsReturnJobId = null;
+        _enhancementJobsReturnAnchorViewportTop = double.NaN;
+
+        EnhancementWorkspaceJobView? restoredItem = null;
+
+        void RestoreViewport()
+        {
+            EnhancementJobsList.UpdateLayout();
+            ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(EnhancementJobsList);
+            if (viewer is null)
+                return;
+
+            if (restoredItem is not null && double.IsFinite(requestedAnchorTop))
+            {
+                EnhancementJobsList.ScrollIntoView(restoredItem);
+                EnhancementJobsList.UpdateLayout();
+                if (TryGetEnhancementJobViewportTop(
+                        restoredItem,
+                        viewer,
+                        out double currentTop))
+                {
+                    viewer.ScrollToVerticalOffset(Math.Clamp(
+                        viewer.VerticalOffset + currentTop - requestedAnchorTop,
+                        0,
+                        viewer.ScrollableHeight));
+                    return;
+                }
+            }
+
+            viewer.ScrollToVerticalOffset(Math.Min(requestedOffset, viewer.ScrollableHeight));
+        }
+
+        await Dispatcher.InvokeAsync(() =>
+        {
+            EnhancementJobsList.UpdateLayout();
+            if (!string.IsNullOrWhiteSpace(requestedJobId))
+            {
+                restoredItem =
+                    (EnhancementJobsList.ItemsSource as IEnumerable<EnhancementWorkspaceJobView>)?
+                        .FirstOrDefault(job => string.Equals(
+                            job.Id,
+                            requestedJobId,
+                            StringComparison.Ordinal));
+                EnhancementJobsList.SelectedItem = restoredItem;
+            }
+            RestoreViewport();
+        }, DispatcherPriority.Loaded);
+
+        await Dispatcher.InvokeAsync(RestoreViewport, DispatcherPriority.Render);
+    }
+
+    private bool TryGetEnhancementJobViewportTop(
+        EnhancementWorkspaceJobView item,
+        ScrollViewer viewer,
+        out double top)
+    {
+        top = double.NaN;
+        if (EnhancementJobsList.ItemContainerGenerator.ContainerFromItem(item)
+                is not FrameworkElement container)
+        {
+            return false;
+        }
+
+        try
+        {
+            top = container.TranslatePoint(new Point(0, 0), viewer).Y;
+            return double.IsFinite(top);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private async void DeleteEnhancementOutput_Click(object sender, RoutedEventArgs e)
@@ -1966,6 +2099,89 @@ public partial class MainWindow
         => _allTiles.Where(static tile => tile.IsRealFile).Select(static tile => tile.Path).ToList();
 
     public void CloseEnhancementJobsForSmoke() => CloseEnhancementJobsWorkspace(restoreFocus: false);
+
+    public double EnhancementJobsVerticalOffsetForSmoke
+        => FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.VerticalOffset ?? 0;
+
+    public double EnhancementJobViewportTopForSmoke(string jobId)
+    {
+        EnhancementJobsList.UpdateLayout();
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(EnhancementJobsList);
+        EnhancementWorkspaceJobView? item =
+            (EnhancementJobsList.ItemsSource as IEnumerable<EnhancementWorkspaceJobView>)?
+                .FirstOrDefault(job => string.Equals(
+                    job.Id,
+                    jobId,
+                    StringComparison.Ordinal));
+        return viewer is not null
+            && item is not null
+            && TryGetEnhancementJobViewportTop(item, viewer, out double top)
+                ? top
+                : double.NaN;
+    }
+
+    public double PositionEnhancementJobForSmoke(
+        string jobId,
+        double requestedViewportTop)
+    {
+        EnhancementWorkspaceJobView? item =
+            (EnhancementJobsList.ItemsSource as IEnumerable<EnhancementWorkspaceJobView>)?
+                .FirstOrDefault(job => string.Equals(
+                    job.Id,
+                    jobId,
+                    StringComparison.Ordinal));
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(EnhancementJobsList);
+        if (item is null || viewer is null)
+            return double.NaN;
+
+        EnhancementJobsList.ScrollIntoView(item);
+        EnhancementJobsList.UpdateLayout();
+        if (!TryGetEnhancementJobViewportTop(item, viewer, out double currentTop))
+            return double.NaN;
+
+        viewer.ScrollToVerticalOffset(Math.Clamp(
+            viewer.VerticalOffset + currentTop - requestedViewportTop,
+            0,
+            viewer.ScrollableHeight));
+        EnhancementJobsList.UpdateLayout();
+        return TryGetEnhancementJobViewportTop(item, viewer, out double positionedTop)
+            ? positionedTop
+            : double.NaN;
+    }
+
+    public string? SelectedEnhancementJobIdForSmoke
+        => (EnhancementJobsList.SelectedItem as EnhancementWorkspaceJobView)?.Id;
+
+    public double ScrollEnhancementJobsForSmoke(double offset)
+    {
+        EnhancementJobsList.UpdateLayout();
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(EnhancementJobsList);
+        if (viewer is null)
+            return 0;
+        viewer.ScrollToVerticalOffset(Math.Clamp(offset, 0, viewer.ScrollableHeight));
+        EnhancementJobsList.UpdateLayout();
+        return viewer.VerticalOffset;
+    }
+
+    public double EnhancementJobsVerticalThumbSlotHeightForSmoke
+    {
+        get
+        {
+            EnhancementJobsList.UpdateLayout();
+            System.Windows.Controls.Primitives.ScrollBar? bar =
+                FindVisualDescendants<System.Windows.Controls.Primitives.ScrollBar>(EnhancementJobsList)
+                .FirstOrDefault(static candidate =>
+                    candidate.Orientation == Orientation.Vertical
+                    && candidate.IsVisible);
+            System.Windows.Controls.Primitives.Track? track = bar is null
+                ? null
+                : FindVisualDescendant<System.Windows.Controls.Primitives.Track>(bar);
+            return track?.Thumb is null
+                ? 0
+                : System.Windows.Controls.Primitives.LayoutInformation
+                    .GetLayoutSlot(track.Thumb).Height;
+        }
+    }
 
     public void SelectEnhancementJobsFilterForSmoke(string filter)
     {
