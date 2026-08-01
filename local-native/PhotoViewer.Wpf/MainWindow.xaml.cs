@@ -4028,9 +4028,35 @@ public partial class MainWindow : Window
             ApplyEnhancedOutputsToVisibleCatalog();
             if (Modal.Visibility == Visibility.Visible && SelectedTile() is Tile selected)
             {
+                string? activeVideoJobId = _modalShowingVideo
+                    && _modalVideoVersionIndex >= 0
+                    && _modalVideoVersionIndex < _modalVideoVersions.Count
+                        ? _modalVideoVersions[_modalVideoVersionIndex].JobId
+                        : null;
                 InitializeModalEnhancementVersions(selected);
                 InitializeModalVideoVersions(selected);
+                bool restoreVideo = RestoreModalDisplayPreference(selected);
                 UpdateModalEnhancedControls(TryGetModalEnhancedOutput(selected, out _));
+                string? restoredVideoJobId = restoreVideo
+                    && _modalVideoVersionIndex >= 0
+                    && _modalVideoVersionIndex < _modalVideoVersions.Count
+                        ? _modalVideoVersions[_modalVideoVersionIndex].JobId
+                        : null;
+                if (restoreVideo
+                    && (!string.Equals(
+                            activeVideoJobId,
+                            restoredVideoJobId,
+                            StringComparison.Ordinal)
+                        || !_modalShowingVideo))
+                {
+                    ShowModalVideoVersion(
+                        _modalVideoVersionIndex,
+                        autoplay: true);
+                }
+                else if (!restoreVideo && _modalShowingVideo)
+                {
+                    StopAndHideModalVideo(clearSource: true);
+                }
             }
         }
         catch (OperationCanceledException)
@@ -13871,6 +13897,7 @@ public partial class MainWindow : Window
         StopGalleryAutoScroll();
         bool opening = Modal.Visibility != Visibility.Visible;
         bool sourceChanged = !string.Equals(_modalSourceTilePath, t.Path, StringComparison.OrdinalIgnoreCase);
+        bool restoreVideoOnOpen = false;
         if (opening)
             _modalFocusBeforeOverlay = Keyboard.FocusedElement;
         if (!string.Equals(_modalTransformPath, t.Path, StringComparison.OrdinalIgnoreCase))
@@ -13879,10 +13906,12 @@ public partial class MainWindow : Window
         {
             StopAndHideModalVideo(clearSource: true);
             _modalSourceTilePath = t.Path;
-            // Each navigation target is resolved independently. A currently valid,
-            // owned succeeded output is the preferred asset for a newly selected image.
+            // Each navigation target is resolved independently. Restore the
+            // last explicitly displayed media kind without weakening managed
+            // image/video ownership validation.
             InitializeModalEnhancementVersions(t);
             InitializeModalVideoVersions(t);
+            restoreVideoOnOpen = RestoreModalDisplayPreference(t);
         }
         var watch = Stopwatch.StartNew();
         _modalCts?.Cancel();
@@ -13892,7 +13921,7 @@ public partial class MainWindow : Window
         var decodeCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _modalDecodeCompletion = decodeCompletion;
 
-        bool requestedEnhanced = _modalShowingEnhanced || (sourceChanged && t.Enhanced);
+        bool requestedEnhanced = _modalShowingEnhanced;
         bool canShowEnhanced = TryGetModalEnhancedOutput(t, out _);
         if (!TryResolveDisplayedAsset(t, requestedEnhanced, out DisplayedAssetResolution displayedAsset, out string resolutionFailure))
         {
@@ -13924,7 +13953,7 @@ public partial class MainWindow : Window
         Modal.UpdateLayout();
         UpdateModalFit();
         ScheduleModalFitUpdate();
-        if (sourceChanged && ShouldAutoplayModalVideo())
+        if (sourceChanged && restoreVideoOnOpen)
             ShowModalVideoVersion(_modalVideoVersionIndex, autoplay: true);
         if (opening)
         {
@@ -14074,7 +14103,11 @@ public partial class MainWindow : Window
                 $"Current display: {currentDisplay}. Toggle with E or cycle versions with Ctrl+Up and Ctrl+Down");
         }
         if (ModalSourceLabel is not null)
-            ModalSourceLabel.Text = _modalShowingEnhanced ? $"{currentDisplay} output" : "Original";
+            ModalSourceLabel.Text = _modalShowingVideo
+                ? currentDisplay
+                : _modalShowingEnhanced
+                    ? $"{currentDisplay} output"
+                    : "Original";
     }
 
     private async Task LoadModalBitmapAsync(
@@ -14904,11 +14937,20 @@ public partial class MainWindow : Window
         {
             _modalEnhancementVersionIndex = 0;
             _modalShowingEnhanced = false;
+            RememberModalDisplayPreference(
+                tile,
+                ModalDisplayVersionKind.Original,
+                null);
         }
         else
         {
             _modalEnhancementVersionIndex = 1;
             _modalShowingEnhanced = true;
+            ManagedEnhancementVersion version = _modalEnhancementVersions[0];
+            RememberModalDisplayPreference(
+                tile,
+                ModalDisplayKindForOperation(version.Operation),
+                version.JobId);
         }
         OpenModal();
         return true;
@@ -15260,9 +15302,17 @@ public partial class MainWindow : Window
         {
             Vector delta = end - start.Value;
             if (!TryNavigateModalSwipe(delta) && !moved)
-                ToggleModalChromeFromImage();
+                ActivateModalImagePrimaryClick();
         }
         e.Handled = true;
+    }
+
+    private void ActivateModalImagePrimaryClick()
+    {
+        if (_modalShowingVideo)
+            ToggleModalVideoPlayback();
+        else
+            ToggleModalChromeFromImage();
     }
 
     private void ModalImage_LostMouseCapture(object sender, MouseEventArgs e) => EndModalPointerGesture();
@@ -15301,6 +15351,16 @@ public partial class MainWindow : Window
 
         double absoluteX = Math.Abs(delta.X);
         double absoluteY = Math.Abs(delta.Y);
+        if (delta.Y < 0 && absoluteY > absoluteX)
+        {
+            double fullScreenThreshold = Math.Clamp(
+                ModalImage.ActualHeight * 0.16,
+                72,
+                180);
+            if (absoluteY < fullScreenThreshold)
+                return false;
+            return SetModalFullScreen(true);
+        }
         if (delta.Y > 0 && absoluteY > absoluteX)
         {
             double closeThreshold = Math.Clamp(ModalImage.ActualHeight * 0.16, 72, 180);
@@ -22893,6 +22953,12 @@ public partial class MainWindow : Window
     }
     public bool ModalEdgeNavigateForSmoke(int delta) => NavigateModal(delta);
     public bool ModalSwipeForSmoke(double horizontalDelta, double verticalDelta = 0) => TryNavigateModalSwipe(new Vector(horizontalDelta, verticalDelta));
+    public bool ActivateModalImagePrimaryClickForSmoke()
+    {
+        bool before = _modalVideoPlaying;
+        ActivateModalImagePrimaryClick();
+        return _modalShowingVideo && before != _modalVideoPlaying;
+    }
     public bool ToggleModalMetadataForSmoke()
     {
         bool beforeChrome = ModalChromeVisibleForSmoke;
@@ -22930,20 +22996,29 @@ public partial class MainWindow : Window
     public string ModalEnhancementMessageForSmoke => ModalEnhancementStatusText.Text;
     public bool ModalEnhancementCancelVisibleForSmoke => ModalEnhanceCancelButton.Visibility == Visibility.Visible;
     public bool ModalEnhancedDeleteVisibleForSmoke => ModalEnhancedDeleteButton.Visibility == Visibility.Visible;
+    public string[] ModalDisplayVersionLabelsForSmoke =>
+        ModalEnhancementVersionComboBox.Items
+            .OfType<ModalDisplayVersionChoice>()
+            .Select(static choice => choice.Label)
+            .ToArray();
+    public string ModalDisplayVersionKindForSmoke =>
+        ModalEnhancementVersionComboBox.SelectedItem
+            is ModalDisplayVersionChoice choice
+                ? choice.Kind.ToString()
+                : "Unavailable";
     public bool ModalEnhancedToolbarClarityContractForSmoke
         => string.Equals(
                 ModalEnhancedToggleLabel.Text,
-                _modalShowingEnhanced ? "Enhanced" : "Original",
+                CurrentModalEnhancementVersionLabel(),
                 StringComparison.Ordinal)
             && ModalEnhancementVersionComboBox.Visibility == Visibility.Visible
             && ModalEnhancementVersionComboBox.Items.Count
-                == _modalEnhancementVersions.Count + 1
+                == _modalEnhancementVersions.Count + _modalVideoVersions.Count + 1
             && ModalEnhancementVersionComboBox.SelectedItem
-                is ModalEnhancementVersionChoice selectedChoice
-            && selectedChoice.VersionIndex
-                == (_modalShowingEnhanced ? _modalEnhancementVersionIndex : 0)
+                is ModalDisplayVersionChoice selectedChoice
+            && IsCurrentModalDisplayChoice(selectedChoice)
             && AutomationProperties.GetName(ModalEnhancementVersionComboBox).Contains(
-                "AI処理版を選択",
+                "動画化",
                 StringComparison.Ordinal)
             && ModalEnhancedToggleButton.Width >= 64
             && ModalEnhancedDeleteButton.Width <= 36
@@ -22952,7 +23027,7 @@ public partial class MainWindow : Window
                 "keep the original",
                 StringComparison.OrdinalIgnoreCase) == true
             && AutomationProperties.GetName(ModalEnhancedToggleButton).Contains(
-                _modalShowingEnhanced ? "Enhanced" : "Original",
+                CurrentModalEnhancementVersionLabel(),
                 StringComparison.Ordinal);
 
     public void ConfigureModalEnhancementForSmoke(

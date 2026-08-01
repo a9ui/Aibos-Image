@@ -38,9 +38,26 @@ public partial class MainWindow
     private readonly List<PhotorealStyleState> _photorealStyles = [];
     private string? _selectedPhotorealStyleName;
     private bool _syncingModalEnhancementVersionSelection;
+    private readonly Dictionary<string, ModalDisplayPreference>
+        _modalDisplayPreferencesByPath = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed record PhotorealStyleChoice(string Label, string? StyleName);
-    private sealed record ModalEnhancementVersionChoice(int VersionIndex, string Label);
+    private enum ModalDisplayVersionKind
+    {
+        Original,
+        Upscale,
+        Photoreal,
+        Video,
+    }
+
+    private sealed record ModalDisplayPreference(
+        ModalDisplayVersionKind Kind,
+        string? JobId);
+
+    private sealed record ModalDisplayVersionChoice(
+        ModalDisplayVersionKind Kind,
+        int VersionIndex,
+        string Label);
 
     private sealed record ModalPhotorealRequestSettings(
         double Strength,
@@ -85,8 +102,8 @@ public partial class MainWindow
                 new ManagedEnhancementVersion("", "upscale", currentFallback));
         }
 
-        _modalEnhancementVersionIndex = _modalEnhancementVersions.Count > 0 ? 1 : 0;
-        _modalShowingEnhanced = _modalEnhancementVersionIndex > 0;
+        _modalEnhancementVersionIndex = 0;
+        _modalShowingEnhanced = false;
     }
 
     private void ClearModalEnhancementVersions()
@@ -286,6 +303,10 @@ public partial class MainWindow
             new ManagedEnhancementVersion(job.Id, job.Operation, output));
         _modalEnhancementVersionIndex = 1;
         _modalShowingEnhanced = true;
+        RememberModalDisplayPreference(
+            tile,
+            ModalDisplayKindForOperation(job.Operation),
+            job.Id);
         ApplyTileEnhancementAvailability(tile, _modalEnhancementVersions);
 
         if (TryResolveEnhancementSourceIdentity(tile.Path, out string sourceIdentity))
@@ -308,6 +329,10 @@ public partial class MainWindow
             string.Equals(candidate.JobId, jobId, StringComparison.Ordinal));
         _modalEnhancementVersionIndex = 0;
         _modalShowingEnhanced = false;
+        RememberModalDisplayPreference(
+            tile,
+            ModalDisplayVersionKind.Original,
+            null);
         if (!TryResolveEnhancementSourceIdentity(tile.Path, out string sourceIdentity))
             return;
 
@@ -340,31 +365,123 @@ public partial class MainWindow
         }
     }
 
-    private bool CycleModalEnhancementVersion(int delta)
+    private static ModalDisplayVersionKind ModalDisplayKindForOperation(
+        string operation)
+        => string.Equals(operation, "photoreal", StringComparison.Ordinal)
+            ? ModalDisplayVersionKind.Photoreal
+            : ModalDisplayVersionKind.Upscale;
+
+    private void RememberModalDisplayPreference(
+        Tile tile,
+        ModalDisplayVersionKind kind,
+        string? jobId)
     {
-        if (Modal.Visibility != Visibility.Visible
-            || SelectedTile() is not Tile tile
-            || _modalEnhancementVersions.Count == 0)
+        _modalDisplayPreferencesByPath[tile.Path] =
+            new ModalDisplayPreference(kind, jobId);
+    }
+
+    private bool RestoreModalDisplayPreference(Tile tile)
+    {
+        ModalDisplayPreference preference;
+        bool forceVideoOnly =
+            VideoOnlyFilter?.IsChecked == true && _modalVideoVersions.Count > 0;
+        if (forceVideoOnly)
         {
-            return false;
+            _modalDisplayPreferencesByPath.TryGetValue(
+                tile.Path,
+                out ModalDisplayPreference? remembered);
+            preference = new ModalDisplayPreference(
+                ModalDisplayVersionKind.Video,
+                remembered?.Kind == ModalDisplayVersionKind.Video
+                    ? remembered.JobId
+                    : null);
+        }
+        else if (!_modalDisplayPreferencesByPath.TryGetValue(
+                     tile.Path,
+                     out preference!))
+        {
+            preference = new ModalDisplayPreference(
+                ModalDisplayVersionKind.Original,
+                null);
         }
 
-        int total = _modalEnhancementVersions.Count + 1;
-        int current = _modalShowingEnhanced
-            ? Math.Clamp(_modalEnhancementVersionIndex, 1, total - 1)
-            : 0;
-        int next = (current + delta) % total;
+        _modalShowingEnhanced = false;
+        _modalEnhancementVersionIndex = 0;
+        if (preference.Kind == ModalDisplayVersionKind.Video)
+        {
+            int videoIndex = string.IsNullOrWhiteSpace(preference.JobId)
+                ? -1
+                : _modalVideoVersions.FindIndex(version => string.Equals(
+                    version.JobId,
+                    preference.JobId,
+                    StringComparison.Ordinal));
+            if (videoIndex < 0 && forceVideoOnly)
+                videoIndex = 0;
+            if (videoIndex >= 0)
+            {
+                _modalVideoVersionIndex = videoIndex;
+                return true;
+            }
+        }
+        else if (preference.Kind is
+                 ModalDisplayVersionKind.Upscale or
+                 ModalDisplayVersionKind.Photoreal)
+        {
+            int imageIndex = string.IsNullOrWhiteSpace(preference.JobId)
+                ? -1
+                : _modalEnhancementVersions.FindIndex(version =>
+                    string.Equals(
+                        version.JobId,
+                        preference.JobId,
+                        StringComparison.Ordinal)
+                    && ModalDisplayKindForOperation(version.Operation)
+                        == preference.Kind);
+            if (imageIndex >= 0)
+            {
+                _modalEnhancementVersionIndex = imageIndex + 1;
+                _modalShowingEnhanced = true;
+            }
+        }
+
+        if (preference.Kind != ModalDisplayVersionKind.Original
+            && !_modalShowingEnhanced)
+        {
+            RememberModalDisplayPreference(
+                tile,
+                ModalDisplayVersionKind.Original,
+                null);
+        }
+
+        return false;
+    }
+
+    private bool CycleModalEnhancementVersion(int delta)
+    {
+        if (Modal.Visibility != Visibility.Visible)
+            return false;
+
+        IReadOnlyList<ModalDisplayVersionChoice> choices =
+            BuildModalDisplayVersionChoices();
+        if (choices.Count < 2)
+            return false;
+
+        int current = choices.ToList().FindIndex(IsCurrentModalDisplayChoice);
+        if (current < 0)
+            current = 0;
+        int next = (current + delta) % choices.Count;
         if (next < 0)
-            next += total;
-        _modalEnhancementVersionIndex = next;
-        _modalShowingEnhanced = next > 0;
-        OpenModal();
-        ShowModalInteractionFeedback(CurrentModalEnhancementVersionLabel());
-        return true;
+            next += choices.Count;
+        return ApplyModalDisplayVersionChoice(choices[next], showFeedback: true);
     }
 
     private string CurrentModalEnhancementVersionLabel()
     {
+        if (_modalShowingVideo
+            && _modalVideoVersionIndex >= 0
+            && _modalVideoVersionIndex < _modalVideoVersions.Count)
+        {
+            return ModalVideoVersionChoiceLabel(_modalVideoVersionIndex);
+        }
         if (!_modalShowingEnhanced
             || _modalEnhancementVersionIndex < 1
             || _modalEnhancementVersionIndex > _modalEnhancementVersions.Count)
@@ -410,36 +527,81 @@ public partial class MainWindow
         return $"{operation} {operationIndex}/{operationTotal}{latest}";
     }
 
+    private string ModalVideoVersionChoiceLabel(int versionIndex)
+    {
+        if (versionIndex < 0 || versionIndex >= _modalVideoVersions.Count)
+            return "動画";
+
+        ManagedVideoVersion version = _modalVideoVersions[versionIndex];
+        string latest = versionIndex == 0 ? "（最新）" : "";
+        return $"動画 {versionIndex + 1}/{_modalVideoVersions.Count}{latest} ・ "
+            + $"{version.DurationSeconds:0.#}秒 {version.PlaybackFps}fps";
+    }
+
+    private IReadOnlyList<ModalDisplayVersionChoice>
+        BuildModalDisplayVersionChoices()
+    {
+        var choices = new List<ModalDisplayVersionChoice>
+        {
+            new(ModalDisplayVersionKind.Original, 0, "Original"),
+        };
+        choices.AddRange(Enumerable.Range(1, _modalEnhancementVersions.Count)
+            .Select(index => new ModalDisplayVersionChoice(
+                ModalDisplayKindForOperation(
+                    _modalEnhancementVersions[index - 1].Operation),
+                index,
+                ModalEnhancementVersionChoiceLabel(index))));
+        choices.AddRange(Enumerable.Range(0, _modalVideoVersions.Count)
+            .Select(index => new ModalDisplayVersionChoice(
+                ModalDisplayVersionKind.Video,
+                index,
+                ModalVideoVersionChoiceLabel(index))));
+        return choices;
+    }
+
+    private bool IsCurrentModalDisplayChoice(ModalDisplayVersionChoice choice)
+        => choice.Kind switch
+        {
+            ModalDisplayVersionKind.Original =>
+                !_modalShowingVideo && !_modalShowingEnhanced,
+            ModalDisplayVersionKind.Video =>
+                _modalShowingVideo
+                && choice.VersionIndex == _modalVideoVersionIndex,
+            ModalDisplayVersionKind.Upscale or
+            ModalDisplayVersionKind.Photoreal =>
+                !_modalShowingVideo
+                && _modalShowingEnhanced
+                && choice.VersionIndex == _modalEnhancementVersionIndex
+                && choice.VersionIndex >= 1
+                && choice.VersionIndex <= _modalEnhancementVersions.Count
+                && ModalDisplayKindForOperation(
+                    _modalEnhancementVersions[choice.VersionIndex - 1].Operation)
+                    == choice.Kind,
+            _ => false,
+        };
+
     private void RefreshModalEnhancementVersionSelector(bool canShowEnhanced)
     {
         if (ModalEnhancementVersionComboBox is null)
             return;
 
-        var choices = new List<ModalEnhancementVersionChoice>
-        {
-            new(0, "Original"),
-        };
-        choices.AddRange(Enumerable.Range(1, _modalEnhancementVersions.Count)
-            .Select(index => new ModalEnhancementVersionChoice(
-                index,
-                ModalEnhancementVersionChoiceLabel(index))));
-        int selectedIndex = _modalShowingEnhanced
-            ? Math.Clamp(_modalEnhancementVersionIndex, 1, _modalEnhancementVersions.Count)
-            : 0;
+        IReadOnlyList<ModalDisplayVersionChoice> choices =
+            BuildModalDisplayVersionChoices();
+        ModalDisplayVersionChoice selectedChoice =
+            choices.FirstOrDefault(IsCurrentModalDisplayChoice) ?? choices[0];
 
         _syncingModalEnhancementVersionSelection = true;
         try
         {
             ModalEnhancementVersionComboBox.ItemsSource = choices;
-            ModalEnhancementVersionComboBox.SelectedItem = choices.First(choice =>
-                choice.VersionIndex == selectedIndex);
-            ModalEnhancementVersionComboBox.IsEnabled = canShowEnhanced;
-            ModalEnhancementVersionComboBox.ToolTip = canShowEnhanced
-                ? "Original、高画質化、実写化の全保存版を選択"
-                : "AI処理済み画像はありません";
+            ModalEnhancementVersionComboBox.SelectedItem = selectedChoice;
+            ModalEnhancementVersionComboBox.IsEnabled = choices.Count > 1;
+            ModalEnhancementVersionComboBox.ToolTip = choices.Count > 1
+                ? "Original、高画質化、実写化、動画化の全保存版を選択"
+                : "AI処理済み画像・動画はありません";
             AutomationProperties.SetName(
                 ModalEnhancementVersionComboBox,
-                $"表示中: {choices.First(choice => choice.VersionIndex == selectedIndex).Label}. AI処理版を選択");
+                $"表示中: {selectedChoice.Label}. Original、高画質化、実写化、動画化から選択");
         }
         finally
         {
@@ -454,27 +616,89 @@ public partial class MainWindow
         if (_syncingModalEnhancementVersionSelection
             || sender is not ComboBox
             {
-                SelectedItem: ModalEnhancementVersionChoice choice,
+                SelectedItem: ModalDisplayVersionChoice choice,
             }
-            || Modal.Visibility != Visibility.Visible
-            || choice.VersionIndex < 0
-            || choice.VersionIndex > _modalEnhancementVersions.Count)
+            || Modal.Visibility != Visibility.Visible)
         {
             return;
         }
 
-        int currentIndex = _modalShowingEnhanced
-            ? _modalEnhancementVersionIndex
-            : 0;
-        if (choice.VersionIndex == currentIndex)
+        if (IsCurrentModalDisplayChoice(choice))
             return;
 
-        if (_modalShowingVideo)
-            StopAndHideModalVideo(clearSource: true);
-        _modalEnhancementVersionIndex = choice.VersionIndex;
-        _modalShowingEnhanced = choice.VersionIndex > 0;
-        OpenModal();
-        ShowModalInteractionFeedback(choice.Label);
+        ApplyModalDisplayVersionChoice(choice, showFeedback: true);
+    }
+
+    private bool ApplyModalDisplayVersionChoice(
+        ModalDisplayVersionChoice choice,
+        bool showFeedback)
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || SelectedTile() is not Tile tile)
+        {
+            return false;
+        }
+
+        bool applied;
+        if (choice.Kind == ModalDisplayVersionKind.Video)
+        {
+            if (choice.VersionIndex < 0
+                || choice.VersionIndex >= _modalVideoVersions.Count)
+            {
+                return false;
+            }
+            _modalShowingEnhanced = false;
+            _modalEnhancementVersionIndex = 0;
+            applied = ShowModalVideoVersion(
+                choice.VersionIndex,
+                autoplay: true);
+            if (applied)
+            {
+                RememberModalDisplayPreference(
+                    tile,
+                    ModalDisplayVersionKind.Video,
+                    _modalVideoVersions[choice.VersionIndex].JobId);
+            }
+        }
+        else
+        {
+            if (_modalShowingVideo)
+                StopAndHideModalVideo(clearSource: true);
+
+            if (choice.Kind == ModalDisplayVersionKind.Original)
+            {
+                _modalEnhancementVersionIndex = 0;
+                _modalShowingEnhanced = false;
+                RememberModalDisplayPreference(
+                    tile,
+                    ModalDisplayVersionKind.Original,
+                    null);
+            }
+            else
+            {
+                if (choice.VersionIndex < 1
+                    || choice.VersionIndex > _modalEnhancementVersions.Count)
+                {
+                    return false;
+                }
+                ManagedEnhancementVersion version =
+                    _modalEnhancementVersions[choice.VersionIndex - 1];
+                if (ModalDisplayKindForOperation(version.Operation) != choice.Kind)
+                    return false;
+                _modalEnhancementVersionIndex = choice.VersionIndex;
+                _modalShowingEnhanced = true;
+                RememberModalDisplayPreference(
+                    tile,
+                    choice.Kind,
+                    version.JobId);
+            }
+            OpenModal();
+            applied = true;
+        }
+
+        if (applied && showFeedback)
+            ShowModalInteractionFeedback(choice.Label);
+        return applied;
     }
 
     private string? CurrentModalEnhancementVersionJobId()

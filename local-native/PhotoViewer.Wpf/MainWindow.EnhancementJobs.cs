@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -1504,7 +1505,7 @@ public partial class MainWindow
                 return false;
             }
 
-            return TryOpenEnhancementVideoJobInViewer(job, video);
+            return TryRevealEnhancementVideoOutputInExplorer(video);
         }
         if (!TryResolveManagedEnhancementWorkspaceOutput(job, out ManagedEnhancedOutput output, out string reason))
         {
@@ -1522,7 +1523,61 @@ public partial class MainWindow
     }
 
     private bool TryOpenEnhancementSourceInViewer(EnhancementWorkspaceJobView job)
-        => TryOpenEnhancementJobInViewer(job, preferredOutput: null);
+    {
+        if (job.IsVideoOperation && job.CanUseOutput)
+        {
+            if (!TryResolveManagedVideoWorkspaceOutput(
+                    job,
+                    out ManagedVideoVersion video,
+                    out string reason))
+            {
+                EnhancementJobsStatusText.Text =
+                    $"動画を開けません: {reason}. 元画像は変更されていません。";
+                return false;
+            }
+            return TryOpenEnhancementVideoJobInViewer(job, video);
+        }
+
+        return TryOpenEnhancementJobInViewer(job, preferredOutput: null);
+    }
+
+    private bool TryRevealEnhancementVideoOutputInExplorer(
+        ManagedVideoVersion video)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo("explorer.exe")
+            {
+                UseShellExecute = true,
+            };
+            startInfo.ArgumentList.Add($"/select,{video.Output.OutputPath}");
+            if (!_explorerLauncher(startInfo))
+            {
+                EnhancementJobsStatusText.Text =
+                    "動画の保存先をExplorerで開けませんでした。もう一度試してください。";
+                return false;
+            }
+
+            EnhancementJobsStatusText.Text =
+                "Explorerで完成動画の保存先を開きました。";
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is Win32Exception
+                or IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or ArgumentException
+                or NotSupportedException
+                or System.Security.SecurityException)
+        {
+            Trace.TraceWarning(
+                $"Enhancement video reveal failed: {ex.GetType().Name}");
+            EnhancementJobsStatusText.Text =
+                "動画の保存先をExplorerで開けませんでした。もう一度試してください。";
+            return false;
+        }
+    }
 
     private bool TryOpenEnhancementJobInViewer(
         EnhancementWorkspaceJobView job,
@@ -1616,7 +1671,7 @@ public partial class MainWindow
         StopAndHideModalVideo(clearSource: true);
         bool opened = ShowModalVideoVersion(
             versionIndex,
-            autoplay: false);
+            autoplay: true);
         if (!opened)
             SetStatusToast("The managed video could not be selected in the Aibos viewer.");
         return opened;
@@ -2023,6 +2078,39 @@ public partial class MainWindow
         return job is not null && TryOpenEnhancementWorkspaceOutput(job);
     }
 
+    public ExplorerRevealSmokeSnapshot RevealEnhancementJobOutputForSmoke(
+        string id)
+    {
+        ProcessStartInfo? captured = null;
+        Func<ProcessStartInfo, bool> previous = _explorerLauncher;
+        _explorerLauncher = startInfo =>
+        {
+            captured = startInfo;
+            return true;
+        };
+        try
+        {
+            EnhancementWorkspaceJobView? job =
+                _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+            bool opened = job is not null
+                && TryOpenEnhancementWorkspaceOutput(job);
+            return new ExplorerRevealSmokeSnapshot(
+                opened && captured is not null,
+                captured?.FileName ?? "",
+                captured?.ArgumentList.ToList() ?? [],
+                captured?.Arguments ?? "",
+                captured?.UseShellExecute ?? false,
+                job is { IsVideoOperation: true, CanUseOutput: true },
+                false,
+                EnhancementJobsStatusText.Text,
+                "jobs-output");
+        }
+        finally
+        {
+            _explorerLauncher = previous;
+        }
+    }
+
     public bool OpenEnhancementJobSourceInViewerForSmoke(string id)
     {
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
@@ -2177,6 +2265,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && IsSupportedMutationOperation
         && Status == "succeeded"
         && !string.IsNullOrWhiteSpace(OutputPath);
+    public string ThumbnailToolTip => IsVideoOperation && CanUseOutput
+        ? "完成動画をAibosの拡大ビューで再生"
+        : "元画像をAibosのビューワーで開く";
+    public string OpenOutputToolTip => IsVideoOperation
+        ? "Explorerで完成動画の保存先を開く"
+        : "このAI処理版をAibosの拡大ビューで開く";
     public string CancelLabel => Status switch
     {
         "queued" => "待機を削除",
@@ -2303,7 +2397,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRerunWithCurrentSettings)));
         }
         if (statusChanged || outputChanged)
+        {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUseOutput)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ThumbnailToolTip)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(OpenOutputToolTip)));
+        }
         if (statusChanged
             || cancelRequestedChanged
             || outputChanged

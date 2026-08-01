@@ -462,9 +462,11 @@ or stores.
 ### `PV-ENHANCE-VIDEO-001` — Reader-first managed video operation
 
 `video` is a distinct managed-media operation. It is not an AI-upscaled or
-photoreal image version, and an MP4 must never enter an image decode, image
-version cycle, or image-output deletion path. The canonical additive fixture
-is `contracts/enhancement-video-v1.json`. Video requests may additionally
+photoreal image version, and an MP4 must never enter an image decode or
+image-output deletion path. The modal may expose image and video versions in
+one typed display selector, but selecting a video must route only to managed
+media playback. The canonical additive fixture is
+`contracts/enhancement-video-v1.json`. Video requests may additionally
 name `sourceProducerJobId`. When present, it is a durable reference to one
 succeeded photoreal job; WPF never sends that job's output path. The companion
 revalidates producer ownership and the managed still image, while the video
@@ -481,6 +483,21 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   board. If the selected input version is missing, stale, or ambiguous, the
   board explains the concrete input error and disables enqueue rather than
   appearing unresponsive. Opening the board alone remains passive.
+- The modal's single display-version dropdown lists Original, every valid
+  upscale and photoreal image version, and every valid managed video version.
+  The last selected media kind and exact job version are retained per source
+  for later modal navigation in the WPF session. A source with no retained
+  selection, or whose retained version is no longer valid, falls back to
+  Original without weakening any ownership check.
+- Selecting a video starts playback in the modal. A short primary click on the
+  video toggles play and pause, completed playback loops from the beginning by
+  default, and an upward primary-button swipe enters full screen. Escape exits
+  full screen before it closes the modal. These gestures never enqueue or
+  mutate a job.
+- For a succeeded video row in Jobs, selecting the thumbnail opens that exact
+  managed video in the modal and starts playback. `Open output` instead opens
+  Explorer at the validated MP4 and selects it. Image-job thumbnail and output
+  behavior remains unchanged.
 - A video job keeps `mediaKind: "video"` and a media-specific `video` snapshot
   alongside the existing version 1 job envelope. The snapshot records the
   requested duration, Wan generation FPS, and user prompt; the native
