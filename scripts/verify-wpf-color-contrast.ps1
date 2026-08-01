@@ -197,13 +197,13 @@ if ($disabledOpacityValues.Count -eq 0 -or
 }
 
 $photorealStart = $mainWindowXaml.IndexOf(
-    '<Popup x:Name="ModalPhotorealSettingsPopup"',
+    '<Grid x:Name="ModalPhotorealSettingsPopup"',
     [StringComparison]::Ordinal)
 $photorealEnd = $mainWindowXaml.IndexOf(
     '<!-- image area -->',
     [StringComparison]::Ordinal)
 if ($photorealStart -lt 0 -or $photorealEnd -le $photorealStart) {
-    throw 'Could not locate the photoreal settings popup.'
+    throw 'Could not locate the photoreal settings overlay.'
 }
 $photorealXaml = $mainWindowXaml.Substring(
     $photorealStart,

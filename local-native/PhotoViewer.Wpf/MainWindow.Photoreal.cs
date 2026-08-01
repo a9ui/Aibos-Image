@@ -5,6 +5,8 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace PhotoViewer.Wpf;
 
@@ -143,6 +145,112 @@ public partial class MainWindow
 
         version = candidate with { Output = current };
         return true;
+    }
+
+    private bool TryGetDeletableCurrentModalEnhancementVersion(
+        Tile tile,
+        out ManagedEnhancementVersion version)
+    {
+        version = null!;
+        if (!TryGetCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion displayed)
+            || !IsGloballyUniqueManagedJobId(displayed.JobId))
+        {
+            return false;
+        }
+
+        ManagedEnhancementVersion? unique = null;
+        foreach (ManagedEnhancementVersion candidate
+                 in GetManagedEnhancementVersionsForPath(tile.Path))
+        {
+            if (!string.Equals(
+                    candidate.JobId,
+                    displayed.JobId,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (unique is not null
+                || !TryCreateManagedEnhancedOutput(
+                    tile,
+                    candidate.Output.OutputPath,
+                    candidate.Output.SourceSize,
+                    candidate.Output.SourceMtimeMs,
+                    out ManagedEnhancedOutput current))
+            {
+                return false;
+            }
+
+            unique = candidate with { Output = current };
+        }
+
+        if (unique is null
+            || !string.Equals(
+                unique.Operation,
+                displayed.Operation,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                unique.Output.OutputPath,
+                displayed.Output.OutputPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        version = unique;
+        return true;
+    }
+
+    public bool DisplayedManagedImageDeleteVerifiedForSmoke
+        => SelectedTile() is Tile tile
+            && TryGetDeletableCurrentModalEnhancementVersion(tile, out _);
+
+    public bool DisplayedManagedImageDuplicateJobRejectedForSmoke()
+    {
+        if (SelectedTile() is not Tile tile
+            || !TryGetDeletableCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion displayed)
+            || GetManagedEnhancementVersionsForPath(tile.Path)
+                is not List<ManagedEnhancementVersion> versions)
+        {
+            return false;
+        }
+
+        versions.Add(displayed);
+        try
+        {
+            return !TryGetDeletableCurrentModalEnhancementVersion(
+                tile,
+                out _);
+        }
+        finally
+        {
+            versions.RemoveAt(versions.Count - 1);
+        }
+    }
+
+    public bool DisplayedManagedImageGlobalJobIdRejectedForSmoke()
+    {
+        if (SelectedTile() is not Tile tile
+            || !TryGetDeletableCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion displayed)
+            || !_ambiguousEnhancementJobIds.Add(displayed.JobId))
+        {
+            return false;
+        }
+
+        try
+        {
+            return !TryGetDeletableCurrentModalEnhancementVersion(tile, out _);
+        }
+        finally
+        {
+            _ambiguousEnhancementJobIds.Remove(displayed.JobId);
+        }
     }
 
     private bool TryGetPreferredModalEnhancementVersion(
@@ -626,7 +734,13 @@ public partial class MainWindow
         if (IsCurrentModalDisplayChoice(choice))
             return;
 
-        ApplyModalDisplayVersionChoice(choice, showFeedback: true);
+        if (!ApplyModalDisplayVersionChoice(choice, showFeedback: true))
+        {
+            SetStatusToast(
+                "表示バージョンが古いか一意に特定できません。現在の表示を維持しました。");
+            RefreshModalEnhancementVersionSelector(
+                canShowEnhanced: _modalEnhancementVersions.Count > 0);
+        }
     }
 
     private bool ApplyModalDisplayVersionChoice(
@@ -647,8 +761,6 @@ public partial class MainWindow
             {
                 return false;
             }
-            _modalShowingEnhanced = false;
-            _modalEnhancementVersionIndex = 0;
             applied = ShowModalVideoVersion(
                 choice.VersionIndex,
                 autoplay: true);
@@ -701,6 +813,23 @@ public partial class MainWindow
         return applied;
     }
 
+    public bool SelectModalEnhancementJobVersionForSmoke(string jobId)
+    {
+        int index = _modalEnhancementVersions.FindIndex(version =>
+            string.Equals(version.JobId, jobId, StringComparison.Ordinal));
+        if (index < 0)
+            return false;
+
+        int versionIndex = index + 1;
+        ManagedEnhancementVersion version = _modalEnhancementVersions[index];
+        return ApplyModalDisplayVersionChoice(
+            new ModalDisplayVersionChoice(
+                ModalDisplayKindForOperation(version.Operation),
+                versionIndex,
+                ModalEnhancementVersionChoiceLabel(versionIndex)),
+            showFeedback: false);
+    }
+
     private string? CurrentModalEnhancementVersionJobId()
         => _modalShowingEnhanced
             && _modalEnhancementVersionIndex >= 1
@@ -732,8 +861,131 @@ public partial class MainWindow
             return;
 
         SyncModalPhotorealSettingsControls();
-        ModalPhotorealSettingsPopup.IsOpen = !ModalPhotorealSettingsPopup.IsOpen;
+        bool opening = ModalPhotorealSettingsPopup.Visibility != Visibility.Visible;
+        if (opening && ModalVideoGenerationPopup is not null)
+            ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+        ModalPhotorealSettingsPopup.Visibility = opening
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (opening)
+        {
+            _ = Dispatcher.BeginInvoke(
+                new Action(() =>
+                {
+                    if (ModalPhotorealSettingsPopup.Visibility == Visibility.Visible)
+                        Keyboard.Focus(ModalPhotorealPromptTextBox);
+                }),
+                DispatcherPriority.Input);
+        }
     }
+
+    private void ModalPhotorealSettingsBackdrop_MouseLeftButtonDown(
+        object sender,
+        System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (ModalPhotorealSettingsPopup.Visibility == Visibility.Visible
+            && ReferenceEquals(e.OriginalSource, ModalPhotorealSettingsPopup))
+        {
+            CloseModalPhotorealSettingsBoard();
+            e.Handled = true;
+        }
+    }
+
+    private void CloseModalPhotorealSettingsBoard()
+    {
+        ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
+        ModalPhotorealSettingsButton?.Focus();
+    }
+
+    public bool ModalSettingsBackdropDismissContractForSmoke()
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || SelectedTile() is not Tile selected)
+            return false;
+
+        string selectedPath = selected.Path;
+        WindowState state = WindowState;
+        bool fullScreen = _modalFullScreen;
+        Modal.UpdateLayout();
+
+        bool RaiseBackdropClick(Grid overlay)
+        {
+            var args = new MouseButtonEventArgs(
+                Mouse.PrimaryDevice,
+                Environment.TickCount,
+                MouseButton.Left)
+            {
+                RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+                Source = overlay,
+            };
+            overlay.RaiseEvent(args);
+            return args.Handled;
+        }
+
+        ModalPhotorealSettingsPopup.Visibility = Visibility.Visible;
+        Minimize_Click(this, new RoutedEventArgs());
+        bool photorealCaptionGuard =
+            ModalPhotorealSettingsPopup.Visibility == Visibility.Collapsed
+            && WindowState == state;
+        ModalPhotorealSettingsPopup.Visibility = Visibility.Visible;
+        bool photorealHandled = RaiseBackdropClick(
+            ModalPhotorealSettingsPopup);
+        bool photorealDismissedOnly =
+            photorealHandled
+            && photorealCaptionGuard
+            && ModalPhotorealSettingsPopup.Visibility == Visibility.Collapsed
+            && Modal.Visibility == Visibility.Visible;
+
+        ModalVideoGenerationPopup.Visibility = Visibility.Visible;
+        bool fakeMaximized = _fakeMaximized;
+        Rect bounds = new(Left, Top, Width, Height);
+        Maximize_Click(this, new RoutedEventArgs());
+        bool videoCaptionGuard =
+            ModalVideoGenerationPopup.Visibility == Visibility.Collapsed
+            && _fakeMaximized == fakeMaximized
+            && new Rect(Left, Top, Width, Height) == bounds;
+        ModalVideoGenerationPopup.Visibility = Visibility.Visible;
+        bool videoHandled = RaiseBackdropClick(
+            ModalVideoGenerationPopup);
+        bool videoDismissedOnly =
+            videoHandled
+            && videoCaptionGuard
+            && ModalVideoGenerationPopup.Visibility == Visibility.Collapsed
+            && Modal.Visibility == Visibility.Visible;
+        ModalSettingsBackdropDiagnosticForSmoke =
+            $"photoHandled={photorealHandled};photoCaption={photorealCaptionGuard};"
+            + $"photoDismissed={photorealDismissedOnly};videoHandled={videoHandled};"
+            + $"videoCaption={videoCaptionGuard};videoDismissed={videoDismissedOnly}";
+        return photorealDismissedOnly
+            && videoDismissedOnly
+            && SelectedTile() is Tile current
+            && string.Equals(
+                current.Path,
+                selectedPath,
+                StringComparison.OrdinalIgnoreCase)
+            && WindowState == state
+            && _modalFullScreen == fullScreen
+            && ModalPhotorealSettingsPopup is Grid
+            && ModalVideoGenerationPopup is Grid;
+    }
+
+    public string ModalSettingsBackdropDiagnosticForSmoke { get; private set; } = "";
+
+    public bool OpenModalPhotorealSettingsForSmoke()
+    {
+        if (ModalPhotorealSettingsPopup.Visibility != Visibility.Visible)
+            ToggleModalPhotorealSettings_Click(this, new RoutedEventArgs());
+        return ModalPhotorealSettingsPopup.Visibility == Visibility.Visible;
+    }
+
+    public bool ModalSettingsBoardHasKeyboardFocusForSmoke
+        => (ModalPhotorealSettingsPopup.Visibility == Visibility.Visible
+                && ModalPhotorealSettingsPopup.IsKeyboardFocusWithin)
+            || (ModalVideoGenerationPopup.Visibility == Visibility.Visible
+                && ModalVideoGenerationPopup.IsKeyboardFocusWithin);
+
+    public bool ModalPhotorealSettingsVisibleForSmoke
+        => ModalPhotorealSettingsPopup.Visibility == Visibility.Visible;
 
     private void ModalPhotorealSetting_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {

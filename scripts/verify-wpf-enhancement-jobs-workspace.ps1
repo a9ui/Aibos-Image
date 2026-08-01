@@ -380,6 +380,8 @@ try {
         'rerunSettingsContract',
         'clearQueuedIssued',
         'jobsRestoredAfterViewerClose',
+        'jobsViewportRestoredAfterViewerClose',
+        'jobsThumbMinimumVisible',
         'sourceUnchanged',
         'storesUnchanged',
         'outputDeleted'

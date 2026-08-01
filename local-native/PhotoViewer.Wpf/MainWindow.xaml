@@ -1037,6 +1037,10 @@
     <Grid x:Name="Landing" Grid.RowSpan="3" Visibility="Collapsed" Background="{StaticResource BgPrimary}" AllowDrop="True"
           DragEnter="FolderDropTarget_DragEnter" DragOver="FolderDropTarget_DragOver" DragLeave="FolderDropTarget_DragLeave" Drop="FolderDropTarget_Drop"
           AutomationProperties.Name="Folder selection landing drop target" AutomationProperties.HelpText="Drop existing folders from Explorer to add them to the folder set. Files are never copied or moved.">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="52"/>
+        <RowDefinition Height="*"/>
+      </Grid.RowDefinitions>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,10,0,0"
                   Height="32" Panel.ZIndex="20" IsHitTestVisible="False">
         <Image Source="Brand/Generated/Aibos.Mark.24.png" Width="24" Height="24" Margin="2"
@@ -1072,7 +1076,9 @@
         </Button>
       </StackPanel>
 
-      <StackPanel Width="560" VerticalAlignment="Center" HorizontalAlignment="Center">
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                    VerticalContentAlignment="Center" HorizontalContentAlignment="Center">
+      <StackPanel Width="560" Margin="0,10,0,16">
         <Image Source="Brand/Generated/Aibos.Mark.64.png" Width="64" Height="64" Margin="0,0,0,10"
                Stretch="Uniform" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality"
                AutomationProperties.Name="Aibos Gallery Fold mark"/>
@@ -1195,7 +1201,8 @@
           <Button x:Name="CancelScanButton" Style="{StaticResource GhostButton}" Content="{DynamicResource UiCancelScan}" Click="CancelScan_Click" Visibility="Collapsed" IsEnabled="False" HorizontalAlignment="Center" MinWidth="112" Margin="0,10,0,0" AutomationProperties.Name="Cancel scan" AutomationProperties.HelpText="Cancel only the active scan and keep the ordered folder draft."/>
         </StackPanel>
       </StackPanel>
-      <Border x:Name="LandingFolderDropOverlay" Visibility="Collapsed" IsHitTestVisible="False" Margin="28" CornerRadius="6"
+      </ScrollViewer>
+      <Border x:Name="LandingFolderDropOverlay" Grid.RowSpan="2" Visibility="Collapsed" IsHitTestVisible="False" Margin="28" CornerRadius="6"
               Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource AccentLight}" BorderThickness="2">
         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
           <TextBlock Text="{DynamicResource UiDropFoldersTitle}" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center"/>
@@ -2104,26 +2111,23 @@
                 Click="OpenShortcuts_Click" ToolTip="{DynamicResource UiShortcutsToolTip}" AutomationProperties.Name="Open keyboard shortcuts">
           <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE765;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
         </Button>
-        <Button x:Name="ModalDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" Click="DeleteSelected_Click" ToolTip="Move source to Recycle Bin (Delete)" AutomationProperties.Name="Move selected image to Recycle Bin" Width="32" Height="32" Margin="0,0,4,0">
+        <Button x:Name="ModalDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" Click="DeleteDisplayedModalMedia_Click" ToolTip="Move source to Recycle Bin (Delete)" AutomationProperties.Name="Delete displayed media" Width="32" Height="32" Margin="0,0,4,0">
           <Path Data="M3,6 h18 M8,6 V4 a2,2 0 0 1 2,-2 h4 a2,2 0 0 1 2,2 v2 M19,6 l-1,14 a2,2 0 0 1 -2,2 H8 a2,2 0 0 1 -2,-2 L5,6" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="14" Height="14"/>
         </Button>
         <Button x:Name="ModalMetadataSidebarToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="ToggleModalMetadataSidebar_Click" ToolTip="Show metadata sidebar" AutomationProperties.Name="Toggle metadata sidebar" Width="32" Height="32">
           <TextBlock x:Name="ModalMetadataSidebarToggleLabel" Text="&lt;" Foreground="{StaticResource TextSecondary}" FontSize="15" FontWeight="SemiBold"/>
         </Button>
         <Button x:Name="ModalFilmstripToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="ToggleModalFilmstrip_Click" ToolTip="Hide image filmstrip (T)" AutomationProperties.Name="Hide image filmstrip" Width="32" Height="32">
-          <TextBlock x:Name="ModalFilmstripToggleLabel" FontFamily="Segoe MDL2 Assets" Text="&#xE714;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
+          <Path x:Name="ModalFilmstripToggleLabel"
+                Data="M3,4 H21 V20 H3 Z M3,8 H21 M3,16 H21 M9,8 V16 M15,8 V16 M7,4 V8 M12,4 V8 M17,4 V8 M7,16 V20 M12,16 V20 M17,16 V20"
+                Stroke="{StaticResource TextSecondary}" StrokeThickness="1.5"
+                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                Fill="Transparent" Stretch="Uniform" Width="18" Height="18"/>
         </Button>
         <Button x:Name="ModalOpenExternalButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Open externally" AutomationProperties.Name="Open selected image externally" Width="32" Height="32" Click="OpenSelectedExternally_Click">
           <Path Data="M18,13 v6 a2,2 0 0 1 -2,2 H5 a2,2 0 0 1 -2,-2 V8 a2,2 0 0 1 2,-2 h6 M15,3 h6 v6 M10,14 L21,3" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="15" Height="15"/>
         </Button>
         <Button x:Name="ModalRevealButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Show selected source in folder" AutomationProperties.Name="Show selected source in folder" Width="32" Height="32" Click="ShowSelectedInFolder_Click"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Foreground="{StaticResource TextSecondary}" FontSize="15"/></Button>
-        <Button x:Name="ModalEnhancedDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" ToolTip="Delete only the enhanced output; keep the original" AutomationProperties.Name="Delete selected enhanced output" Width="32" Height="32" Click="DeleteModalEnhancedOutput_Click" Visibility="Collapsed">
-          <Path x:Name="ModalEnhancedDeleteGlyph"
-                Data="M3,4 H14 V17 H3 Z M5,13 L8,10 L10,12 L12,10 L14,12 M17,5 L22,10 M22,5 L17,10"
-                Stroke="{StaticResource TextSecondary}" StrokeThickness="1.6"
-                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                Fill="Transparent" Stretch="Uniform" Width="16" Height="16"/>
-        </Button>
         <Button x:Name="ModalEnhanceCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Cancel the running enhancement job" AutomationProperties.Name="Cancel image enhancement" MinWidth="92" Height="32" Padding="8,0" Click="CancelModalEnhancement_Click" Visibility="Collapsed"><TextBlock x:Name="ModalEnhanceCancelButtonLabel" Text="処理を中止" FontSize="10"/></Button>
         <Button x:Name="ModalVideoGenerateButton" DockPanel.Dock="Right"
                 Style="{StaticResource GhostButton}" ToolTip="この画像から動画を生成"
@@ -2183,13 +2187,16 @@
           <TextBlock x:Name="ModalEnhancementStatusText" Grid.Column="3" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" TextTrimming="CharacterEllipsis" MaxWidth="240"/>
         </Grid>
       </DockPanel>
-      <Popup x:Name="ModalPhotorealSettingsPopup"
-             PlacementTarget="{Binding ElementName=ModalPhotorealSettingsButton}"
-             Placement="Bottom" HorizontalOffset="-250" VerticalOffset="7"
-             AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False"
-             AutomationProperties.Name="AI photorealization settings">
-        <Border Width="300" Padding="14" CornerRadius="6"
-                Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+      <Grid x:Name="ModalPhotorealSettingsPopup" Grid.RowSpan="3" Grid.ColumnSpan="2"
+            Visibility="Collapsed" Panel.ZIndex="90" Background="Transparent"
+            WindowChrome.IsHitTestVisibleInChrome="True"
+            MouseLeftButtonDown="ModalPhotorealSettingsBackdrop_MouseLeftButtonDown"
+            AutomationProperties.Name="AI photorealization settings overlay">
+        <Border Width="300" MaxHeight="680" Padding="14" CornerRadius="6"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+                Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <StackPanel>
             <DockPanel LastChildFill="True" Margin="0,0,0,12">
               <TextBlock DockPanel.Dock="Right" Text="GPU queue shared with AI高画質化" Foreground="{StaticResource TextSecondary}" FontSize="10" VerticalAlignment="Center"/>
@@ -2290,16 +2297,19 @@
             </Grid>
             <TextBlock Text="設定を閉じても値は保存されます。元画像は変更しません。" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,12,0,0"/>
           </StackPanel>
+          </ScrollViewer>
         </Border>
-      </Popup>
+      </Grid>
 
-      <Popup x:Name="ModalVideoGenerationPopup"
-             PlacementTarget="{Binding ElementName=ModalVideoGenerateButton}"
-             Placement="Bottom" HorizontalOffset="-270" VerticalOffset="7"
-             AllowsTransparency="True" PopupAnimation="Fade" StaysOpen="False"
-             AutomationProperties.Name="Video generation board">
+      <Grid x:Name="ModalVideoGenerationPopup" Grid.RowSpan="3" Grid.ColumnSpan="2"
+            Visibility="Collapsed" Panel.ZIndex="90" Background="Transparent"
+            WindowChrome.IsHitTestVisibleInChrome="True"
+            MouseLeftButtonDown="ModalVideoGenerationBackdrop_MouseLeftButtonDown"
+            AutomationProperties.Name="Video generation board overlay">
         <Border x:Name="ModalVideoGenerationBoardBorder" Width="430" MaxHeight="680" Padding="16" CornerRadius="7"
-                Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+                Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
           <ScrollViewer x:Name="ModalVideoGenerationScrollViewer"
                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="0,0,6,0">
@@ -2467,7 +2477,7 @@
             </StackPanel>
           </ScrollViewer>
         </Border>
-      </Popup>
+      </Grid>
 
       <!-- image area -->
       <Grid x:Name="ModalImageArea" Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Margin="0"
@@ -2492,7 +2502,7 @@
             <MenuItem x:Name="ModalContextFullScreen" Header="Enter full screen (F11)" Click="ToggleModalFullScreen_Click" AutomationProperties.Name="Toggle full screen"/>
             <MenuItem Header="{DynamicResource UiShortcuts}" Click="OpenShortcuts_Click" AutomationProperties.Name="Open keyboard shortcuts"/>
             <Separator/>
-            <MenuItem Header="{DynamicResource UiMoveToRecycleBin}" Click="DeleteSelected_Click" AutomationProperties.Name="Move source to Recycle Bin with confirmation"/>
+            <MenuItem x:Name="ModalContextDeleteDisplayed" Header="Delete displayed media" Click="DeleteDisplayedModalMedia_Click" AutomationProperties.Name="Delete displayed media"/>
           </ContextMenu>
         </Grid.ContextMenu>
         <Grid.ColumnDefinitions>
@@ -2600,6 +2610,26 @@
                     AutomationProperties.HelpText="Plays only an already-completed managed video and never starts generation.">
               <TextBlock x:Name="ModalVideoPlaybackButtonLabel" Text="動画再生" FontSize="9.5" FontWeight="SemiBold"/>
             </Button>
+            <Grid x:Name="ModalVideoSeekPanel" Width="286" Height="32" Margin="2,0,4,0"
+                  Visibility="Collapsed" VerticalAlignment="Center"
+                  AutomationProperties.Name="Generated video timeline">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="78"/>
+              </Grid.ColumnDefinitions>
+              <Slider x:Name="ModalVideoSeekSlider" Grid.Column="0"
+                      Minimum="0" Maximum="1" Value="0" SmallChange="0.1" LargeChange="1"
+                      IsMoveToPointEnabled="True" VerticalAlignment="Center" Margin="0,0,8,0"
+                      ValueChanged="ModalVideoSeekSlider_ValueChanged"
+                      PreviewMouseLeftButtonDown="ModalVideoSeekSlider_PreviewMouseLeftButtonDown"
+                      PreviewMouseLeftButtonUp="ModalVideoSeekSlider_PreviewMouseLeftButtonUp"
+                      AutomationProperties.Name="Video playback position"
+                      AutomationProperties.HelpText="Drag or click to seek within the displayed generated video."/>
+              <TextBlock x:Name="ModalVideoSeekTimeText" Grid.Column="1" Text="0:00 / 0:00"
+                         Foreground="{StaticResource TextSecondary}" FontFamily="{StaticResource MonoFont}"
+                         FontSize="10.5" VerticalAlignment="Center" TextAlignment="Center"
+                         AutomationProperties.Name="Video playback time"/>
+            </Grid>
             <ComboBox x:Name="ModalVideoVersionComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}" DisplayMemberPath="Label"
                       Width="216" Height="32" Margin="0,0,4,0" Visibility="Collapsed"

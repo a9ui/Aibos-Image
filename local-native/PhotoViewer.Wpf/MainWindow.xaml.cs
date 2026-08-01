@@ -210,6 +210,8 @@ public partial class MainWindow : Window
         new(EnhancementSourceIdentityComparer);
     private readonly Dictionary<string, List<ManagedEnhancementVersion>> _catalogEnhancementVersionsByPath =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _ambiguousEnhancementJobIds =
+        new(StringComparer.Ordinal);
     private readonly List<string> _restoredPreviewTabPaths = [];
     private readonly SemaphoreSlim _thumbnailDecodeGate = new(MaxThumbnailDecodeWorkers, MaxThumbnailDecodeWorkers);
     private readonly ConcurrentDictionary<string, byte> _thumbnailLoadsInFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -839,7 +841,8 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        ConstrainWindowToCurrentWorkArea();
+        if (!NormalizeNativeMaximizeToWorkArea())
+            ConstrainWindowToCurrentWorkArea();
     }
 
     private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -1501,6 +1504,7 @@ public partial class MainWindow : Window
         Dictionary<string, List<ManagedEnhancementVersion>> CatalogVersionsByPath,
         Dictionary<string, List<ManagedVideoVersion>> VideoVersions,
         Dictionary<string, List<ManagedVideoVersion>> CatalogVideoVersionsByPath,
+        HashSet<string> AmbiguousJobIds,
         int JobsRead,
         int CandidateCount,
         int VideoCandidateCount,
@@ -3738,6 +3742,7 @@ public partial class MainWindow : Window
                     new Dictionary<string, List<ManagedEnhancementVersion>>(StringComparer.OrdinalIgnoreCase),
                     new Dictionary<string, List<ManagedVideoVersion>>(EnhancementSourceIdentityComparer),
                     new Dictionary<string, List<ManagedVideoVersion>>(StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(StringComparer.Ordinal),
                     0,
                     0,
                     0,
@@ -3904,6 +3909,7 @@ public partial class MainWindow : Window
                     nextCatalogVersionsByPath,
                     nextVideoVersions,
                     nextCatalogVideoVersionsByPath,
+                    ambiguousJobIds,
                     nextJobsRead,
                     nextCandidateCount,
                     nextVideoCandidateCount,
@@ -3937,6 +3943,8 @@ public partial class MainWindow : Window
         _catalogVideoVersionsByPath.Clear();
         foreach ((string alias, List<ManagedVideoVersion> versions) in snapshot.CatalogVideoVersionsByPath)
             _catalogVideoVersionsByPath[alias] = versions;
+        _ambiguousEnhancementJobIds.Clear();
+        _ambiguousEnhancementJobIds.UnionWith(snapshot.AmbiguousJobIds);
         _enhancementJobsRead = snapshot.JobsRead;
         _enhancedCandidateCount = snapshot.CandidateCount;
         _videoCandidateCount = snapshot.VideoCandidateCount;
@@ -4274,6 +4282,33 @@ public partial class MainWindow : Window
         }
 
         return Array.Empty<ManagedEnhancementVersion>();
+    }
+
+    private bool IsGloballyUniqueManagedJobId(string jobId)
+    {
+        if (string.IsNullOrWhiteSpace(jobId)
+            || _ambiguousEnhancementJobIds.Contains(jobId))
+        {
+            return false;
+        }
+
+        int occurrences = 0;
+        foreach (List<ManagedEnhancementVersion> versions in _enhancementVersions.Values)
+        {
+            occurrences += versions.Count(version =>
+                string.Equals(version.JobId, jobId, StringComparison.Ordinal));
+            if (occurrences > 1)
+                return false;
+        }
+        foreach (List<ManagedVideoVersion> versions in _videoVersions.Values)
+        {
+            occurrences += versions.Count(version =>
+                string.Equals(version.JobId, jobId, StringComparison.Ordinal));
+            if (occurrences > 1)
+                return false;
+        }
+
+        return occurrences == 1;
     }
 
     private IReadOnlyList<ManagedEnhancementVersion> GetCatalogManagedEnhancementVersionsForPath(string path)
@@ -14108,6 +14143,7 @@ public partial class MainWindow : Window
                 : _modalShowingEnhanced
                     ? $"{currentDisplay} output"
                     : "Original";
+        UpdateModalDisplayedDeletePresentation();
     }
 
     private async Task LoadModalBitmapAsync(
@@ -14203,6 +14239,7 @@ public partial class MainWindow : Window
 
     private void Modal_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
+        UpdateModalDisplayedDeletePresentation();
         bool enhancedAvailable = SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
         ModalContextEnhancedToggle.IsEnabled = enhancedAvailable;
         string outputLabel = _modalEnhancementOperation == "photoreal" ? "Photoreal" : "Enhanced";
@@ -14557,11 +14594,6 @@ public partial class MainWindow : Window
         bool canceling = active && _modalEnhancementCancelRequested;
         bool retryable = _modalEnhancementJobStatus is "failed" or "canceled";
         bool currentIsPhotoreal = _modalEnhancementOperation == "photoreal";
-        bool hasDeletableOutput = _modalEnhancementJobStatus == "succeeded"
-            && _modalShowingEnhanced
-            && !string.IsNullOrWhiteSpace(CurrentModalEnhancementVersionJobId())
-            && SelectedTile() is Tile selected
-            && TryGetModalEnhancedOutput(selected, out _);
 
         ModalEnhanceButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
         ModalPhotorealButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
@@ -14585,11 +14617,7 @@ public partial class MainWindow : Window
         ModalEnhanceCancelButton.ToolTip = canceling
             ? "Waiting for the local AI process to stop"
             : "Cancel the running enhancement job";
-        ModalEnhancedDeleteButton.Visibility = hasDeletableOutput ? Visibility.Visible : Visibility.Collapsed;
-        ModalEnhancedDeleteButton.IsEnabled = hasDeletableOutput && !_modalEnhancementRequestPending;
-        ModalEnhancedDeleteButton.ToolTip = CurrentModalEnhancementVersionIsPhotoreal()
-            ? "Delete only the photoreal output; keep the original"
-            : "Delete only the enhanced output; keep the original";
+        UpdateModalDisplayedDeletePresentation();
 
         string operationLabel = currentIsPhotoreal ? "実写化" : "高画質化";
         string status = _modalEnhancementRequestPending ? $"{operationLabel}: starting..."
@@ -14780,15 +14808,69 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void DeleteModalEnhancedOutput_Click(object sender, RoutedEventArgs e)
+    private async void DeleteDisplayedModalMedia_Click(object sender, RoutedEventArgs e)
+        => await DeleteDisplayedModalMediaAsync();
+
+    private bool RequestDeleteDisplayedModalMedia()
+    {
+        if (Modal.Visibility != Visibility.Visible)
+            return RequestDeleteSelected();
+
+        if (_modalShowingVideo)
+        {
+            if (SelectedTile() is not Tile videoTile
+                || !TryGetDisplayedModalVideoVersion(videoTile, out _))
+            {
+                SetStatusToast("Delete blocked: the displayed managed video could not be verified.");
+                return false;
+            }
+
+            _ = DeleteDisplayedModalVideoOutputAsync();
+            return true;
+        }
+
+        if (_modalShowingEnhanced)
+        {
+            if (SelectedTile() is not Tile enhancedTile
+                || !TryGetDeletableCurrentModalEnhancementVersion(
+                    enhancedTile,
+                    out _))
+            {
+                SetStatusToast("Delete blocked: the displayed managed AI image could not be verified.");
+                return false;
+            }
+
+            _ = DeleteDisplayedModalEnhancedOutputAsync();
+            return true;
+        }
+
+        return RequestDeleteSelected(forceConfirmation: true);
+    }
+
+    private async Task<bool> DeleteDisplayedModalMediaAsync()
+    {
+        if (_modalShowingVideo)
+            return await DeleteDisplayedModalVideoOutputAsync();
+        if (_modalShowingEnhanced)
+            return await DeleteDisplayedModalEnhancedOutputAsync();
+        return RequestDeleteSelected(forceConfirmation: true);
+    }
+
+    private async Task<bool> DeleteDisplayedModalEnhancedOutputAsync()
     {
         if (_modalEnhancementRequestPending
             || SelectedTile() is not Tile tile
-            || string.IsNullOrWhiteSpace(CurrentModalEnhancementVersionJobId()))
+            || !TryGetDeletableCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion version))
         {
-            return;
+            SetStatusToast("Delete blocked: the displayed managed AI image could not be verified.");
+            return false;
         }
 
+        long requestGeneration = _modalEnhancementGeneration;
+        string sourcePath = tile.Path;
+        string requestJobId = version.JobId;
         bool confirmed = _confirmEnhancedOutputDeleteForSmoke?.Invoke() ?? MessageBox.Show(
                 this,
                 $"Delete only {CurrentModalEnhancementVersionLabel()}? The original image and other AI versions will be kept.",
@@ -14797,11 +14879,18 @@ public partial class MainWindow : Window
                 MessageBoxImage.Warning,
                 MessageBoxResult.No) == MessageBoxResult.Yes;
         if (!confirmed)
-            return;
+            return false;
 
-        long requestGeneration = _modalEnhancementGeneration;
-        string sourcePath = tile.Path;
-        string requestJobId = CurrentModalEnhancementVersionJobId()!;
+        if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration)
+            || !TryGetDeletableCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion revalidated)
+            || !Equals(revalidated, version))
+        {
+            SetStatusToast("Delete blocked: the displayed AI output changed while confirmation was open.");
+            return false;
+        }
+
         _modalEnhancementRequestPending = true;
         UpdateModalEnhancementActionControls();
         try
@@ -14810,12 +14899,12 @@ public partial class MainWindow : Window
                 HttpMethod.Delete,
                 $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId)}/output");
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
-                return;
+                return false;
             if (!response.Ok)
             {
                 _modalEnhancementError = response.Error;
                 SetStatusToast(response.Error);
-                return;
+                return false;
             }
 
             RemoveModalEnhancementVersion(tile, requestJobId);
@@ -14828,11 +14917,61 @@ public partial class MainWindow : Window
             OpenModal();
             BeginModalEnhancementRefresh(tile.Path);
             ShowModalInteractionFeedback("AI output version deleted; original and other versions kept");
+            return true;
         }
         finally
         {
             _modalEnhancementRequestPending = false;
             UpdateModalEnhancementActionControls();
+        }
+    }
+
+    private void UpdateModalDisplayedDeletePresentation()
+    {
+        if (ModalDeleteButton is null)
+            return;
+
+        string shortcut = BindingText(ViewerKeyAction.RecycleCurrentImage);
+        bool enabled;
+        string toolTip;
+        string automationName;
+        string contextHeader;
+        if (_modalShowingVideo)
+        {
+            enabled = SelectedTile() is Tile videoTile
+                && TryGetDisplayedModalVideoVersion(videoTile, out _);
+            toolTip = $"Delete only the displayed video output; keep the original and other AI versions ({shortcut})";
+            automationName = "Delete displayed managed video output";
+            contextHeader = "Delete displayed video output";
+        }
+        else if (_modalShowingEnhanced)
+        {
+            enabled = SelectedTile() is Tile enhancedTile
+                && TryGetDeletableCurrentModalEnhancementVersion(
+                    enhancedTile,
+                    out _);
+            toolTip = CurrentModalEnhancementVersionIsPhotoreal()
+                ? $"Delete only the displayed photoreal output; keep the original and other AI versions ({shortcut})"
+                : $"Delete only the displayed enhanced output; keep the original and other AI versions ({shortcut})";
+            automationName = "Delete displayed managed AI image output";
+            contextHeader = "Delete displayed AI image output";
+        }
+        else
+        {
+            enabled = SelectedTile() is Tile source && TryValidateDelete(source, out _);
+            toolTip = $"Move the displayed original source to Recycle Bin after confirmation ({shortcut})";
+            automationName = "Move displayed original source to Recycle Bin";
+            contextHeader = "Move displayed original to Recycle Bin";
+        }
+
+        ModalDeleteButton.IsEnabled = enabled && !_modalEnhancementRequestPending;
+        ModalDeleteButton.ToolTip = toolTip;
+        AutomationProperties.SetName(ModalDeleteButton, automationName);
+        if (ModalContextDeleteDisplayed is not null)
+        {
+            ModalContextDeleteDisplayed.IsEnabled = enabled && !_modalEnhancementRequestPending;
+            ModalContextDeleteDisplayed.Header = contextHeader;
+            AutomationProperties.SetName(ModalContextDeleteDisplayed, automationName);
         }
     }
 
@@ -14882,17 +15021,15 @@ public partial class MainWindow : Window
         bool wasVisible = Modal.Visibility == Visibility.Visible;
         IInputElement? focusTarget = _modalFocusBeforeOverlay;
         _modalFocusBeforeOverlay = null;
-        if (_modalFullScreen)
-            SetModalFullScreen(false, showFeedback: false);
         CancelPendingModalSingleClick();
         EndModalPointerGesture();
         _modalCts?.Cancel();
         _modalEnhancementPollTimer.Stop();
         _modalEnhancementGeneration++;
         if (ModalPhotorealSettingsPopup is not null)
-            ModalPhotorealSettingsPopup.IsOpen = false;
+            ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
         if (ModalVideoGenerationPopup is not null)
-            ModalVideoGenerationPopup.IsOpen = false;
+            ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
         Modal.Visibility = Visibility.Collapsed;
         _modalShowingEnhanced = false;
         _modalSourceTilePath = null;
@@ -15729,6 +15866,8 @@ public partial class MainWindow : Window
         return IsDescendantOrSelf(target, ModalWindowCaptionControls)
             || IsDescendantOrSelf(target, ModalTopBarSurface)
             || IsDescendantOrSelf(target, ModalTopBar)
+            || IsDescendantOrSelf(target, ModalPhotorealSettingsPopup)
+            || IsDescendantOrSelf(target, ModalVideoGenerationPopup)
             || IsDescendantOrSelf(target, ModalMetadataSidebar)
             || IsDescendantOrSelf(target, ModalFooter)
             || IsDescendantOrSelf(target, ModalFilmstripOverlay)
@@ -16557,11 +16696,11 @@ public partial class MainWindow : Window
         ModalFavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
         FavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
         BulkFavoriteIncreaseButton.ToolTip = UiLanguageResources.Format("UiBulkFavoriteIncreaseFormat", BindingText(ViewerKeyAction.FavoriteIncrease));
-        ModalDeleteButton.ToolTip = UiLanguageResources.Format("UiRecycleCurrentFormat", BindingText(ViewerKeyAction.RecycleCurrentImage));
         RestorePreviewTabButton.ToolTip = UiLanguageResources.Format("UiReopenClosedFormat", BindingText(ViewerKeyAction.ReopenLastClosedPreviewTab));
         ModalFlipButton.ToolTip = UiLanguageResources.Format("UiFlipHorizontalFormat", BindingText(ViewerKeyAction.FlipHorizontal));
         ModalEnhancedToggleButton.ToolTip = UiLanguageResources.Format("UiToggleEnhancedFormat", BindingText(ViewerKeyAction.ToggleEnhancedPreview));
         UpdateModalVideoPlaybackPresentation();
+        UpdateModalDisplayedDeletePresentation();
         ModalEnhanceButton.ToolTip = UiLanguageResources.Format("UiEnhanceCurrentFormat", BindingText(ViewerKeyAction.EnhanceCurrentImage));
         ModalZoomOutButton.ToolTip = UiLanguageResources.Format("UiZoomOutFormat", BindingText(ViewerKeyAction.ModalZoomOut));
         ModalZoomResetButton.ToolTip = UiLanguageResources.Format("UiResetFitFormat", BindingText(ViewerKeyAction.ModalZoomReset));
@@ -17389,7 +17528,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private bool RequestDeleteSelected()
+    private bool RequestDeleteSelected(bool forceConfirmation = false)
     {
         if (SelectedTile() is not Tile tile)
         {
@@ -17405,7 +17544,7 @@ public partial class MainWindow : Window
 
         int favoriteLevel = FavoriteLevelForDelete(tile);
         bool favoriteProtected = favoriteLevel > 0;
-        if (_confirmBeforeDelete || favoriteProtected)
+        if (forceConfirmation || _confirmBeforeDelete || favoriteProtected)
         {
             _pendingDeleteTile = tile;
             _pendingBulkDeleteSnapshot = null;
@@ -18741,9 +18880,16 @@ public partial class MainWindow : Window
             return true;
         }
 
-        if (ModalVideoGenerationPopup?.IsOpen == true)
+        if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible)
         {
-            ModalVideoGenerationPopup.IsOpen = false;
+            ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
+            ModalPhotorealSettingsButton?.Focus();
+            return true;
+        }
+
+        if (ModalVideoGenerationPopup?.Visibility == Visibility.Visible)
+        {
+            CloseModalVideoGenerationBoard();
             return true;
         }
 
@@ -18764,12 +18910,41 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (ModalVideoGenerationPopup?.IsOpen == true
+        if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
             && key == Key.Escape
             && modifiers == ModifierKeys.None)
         {
-            ModalVideoGenerationPopup.IsOpen = false;
+            ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
+            ModalPhotorealSettingsButton?.Focus();
             e.Handled = true;
+            return;
+        }
+        if (ModalVideoGenerationPopup?.Visibility == Visibility.Visible
+            && key == Key.Escape
+            && modifiers == ModifierKeys.None)
+        {
+            CloseModalVideoGenerationBoard();
+            e.Handled = true;
+            return;
+        }
+        if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
+            || ModalVideoGenerationPopup?.Visibility == Visibility.Visible)
+        {
+            if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
+                && !ModalPhotorealSettingsPopup.IsKeyboardFocusWithin)
+            {
+                Keyboard.Focus(ModalPhotorealPromptTextBox);
+            }
+            else if (ModalVideoGenerationPopup?.Visibility == Visibility.Visible
+                && !ModalVideoGenerationPopup.IsKeyboardFocusWithin)
+            {
+                Keyboard.Focus(ModalVideoPromptTextBox);
+            }
+
+            // The settings board is the topmost keyboard surface. Keep normal
+            // editing/Tab behavior inside it, but do not route any viewer-wide
+            // shortcut to the image or video underneath.
+            base.OnPreviewKeyDown(e);
             return;
         }
         if (DeleteConfirmationDialog.Visibility == Visibility.Visible
@@ -18821,6 +18996,12 @@ public partial class MainWindow : Window
         if (modalVisible && key == Key.F11 && modifiers == ModifierKeys.None)
         {
             SetModalFullScreen(!_modalFullScreen);
+            e.Handled = true;
+            return;
+        }
+        if (!modalVisible && _modalFullScreen && key == Key.F11 && modifiers == ModifierKeys.None)
+        {
+            SetModalFullScreen(false);
             e.Handled = true;
             return;
         }
@@ -18969,7 +19150,9 @@ public partial class MainWindow : Window
         if (MatchesBinding(ViewerKeyAction.FavoriteLevel5, key, modifiers))
             return SetFavoriteLevelForSelection(5);
         if (MatchesBinding(ViewerKeyAction.RecycleCurrentImage, key, modifiers))
-            return RequestDeleteSelected();
+            return Modal.Visibility == Visibility.Visible
+                ? RequestDeleteDisplayedModalMedia()
+                : RequestDeleteSelected();
         if (MatchesBinding(ViewerKeyAction.AddToAlbum, key, modifiers))
             return ShowAlbumLibrary();
         if (MatchesBinding(ViewerKeyAction.ReopenLastClosedPreviewTab, key, modifiers))
@@ -19175,7 +19358,27 @@ public partial class MainWindow : Window
     }
 
     // ─────────── Window chrome buttons ───────────
-    private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private bool DismissModalSettingsBoardForWindowChrome()
+    {
+        if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible)
+        {
+            CloseModalPhotorealSettingsBoard();
+            return true;
+        }
+        if (ModalVideoGenerationPopup?.Visibility == Visibility.Visible)
+        {
+            CloseModalVideoGenerationBoard();
+            return true;
+        }
+        return false;
+    }
+
+    private void Minimize_Click(object sender, RoutedEventArgs e)
+    {
+        if (DismissModalSettingsBoardForWindowChrome())
+            return;
+        WindowState = WindowState.Minimized;
+    }
 
     private bool SetModalFullScreen(bool enabled, bool showFeedback = true)
     {
@@ -19272,6 +19475,9 @@ public partial class MainWindow : Window
 
     private void Maximize_Click(object sender, RoutedEventArgs e)
     {
+        if (DismissModalSettingsBoardForWindowChrome())
+            return;
+
         // Fake-maximize to the working area so the taskbar is never covered and
         // borderless content is not clipped by the maximized non-client frame.
         Rect workArea = ResolveSafeCurrentMonitorWorkArea();
@@ -19306,50 +19512,62 @@ public partial class MainWindow : Window
         if (_normalizingNativeMaximize)
             return;
 
-        if (!_modalFullScreen && WindowState == WindowState.Maximized)
+        NormalizeNativeMaximizeToWorkArea();
+
+        UpdateWindowMaximizePresentation();
+    }
+
+    private bool NormalizeNativeMaximizeToWorkArea()
+    {
+        if (_normalizingNativeMaximize
+            || _modalFullScreen
+            || WindowState != WindowState.Maximized)
         {
-            Rect workArea = ResolveSafeCurrentMonitorWorkArea();
-            Rect nativeRestoreBounds = RestoreBounds;
-            bool restoreRequested = _fakeMaximized;
-            _normalizingNativeMaximize = true;
-            try
+            return false;
+        }
+
+        Rect workArea = ResolveSafeCurrentMonitorWorkArea();
+        Rect nativeRestoreBounds = RestoreBounds;
+        bool restoreRequested = _fakeMaximized;
+        _normalizingNativeMaximize = true;
+        try
+        {
+            WindowState = WindowState.Normal;
+            ApplyEffectiveWindowMinimums(workArea);
+            if (restoreRequested)
             {
-                WindowState = WindowState.Normal;
-                ApplyEffectiveWindowMinimums(workArea);
-                if (restoreRequested)
-                {
-                    Rect restored = NormalizeRestoreBounds(
-                        _restoreBounds,
-                        workArea,
-                        DesignWindowMinWidth,
-                        DesignWindowMinHeight);
-                    Left = restored.Left;
-                    Top = restored.Top;
-                    Width = restored.Width;
-                    Height = restored.Height;
-                    _fakeMaximized = false;
-                }
-                else
-                {
-                    _restoreBounds = NormalizeRestoreBounds(
-                        nativeRestoreBounds,
-                        workArea,
-                        DesignWindowMinWidth,
-                        DesignWindowMinHeight);
-                    Left = workArea.Left;
-                    Top = workArea.Top;
-                    Width = workArea.Width;
-                    Height = workArea.Height;
-                    _fakeMaximized = true;
-                }
+                Rect restored = NormalizeRestoreBounds(
+                    _restoreBounds,
+                    workArea,
+                    DesignWindowMinWidth,
+                    DesignWindowMinHeight);
+                Left = restored.Left;
+                Top = restored.Top;
+                Width = restored.Width;
+                Height = restored.Height;
+                _fakeMaximized = false;
             }
-            finally
+            else
             {
-                _normalizingNativeMaximize = false;
+                _restoreBounds = NormalizeRestoreBounds(
+                    nativeRestoreBounds,
+                    workArea,
+                    DesignWindowMinWidth,
+                    DesignWindowMinHeight);
+                Left = workArea.Left;
+                Top = workArea.Top;
+                Width = workArea.Width;
+                Height = workArea.Height;
+                _fakeMaximized = true;
             }
+        }
+        finally
+        {
+            _normalizingNativeMaximize = false;
         }
 
         UpdateWindowMaximizePresentation();
+        return true;
     }
 
     private void UpdateWindowMaximizePresentation()
@@ -19545,7 +19763,12 @@ public partial class MainWindow : Window
         public int Bottom;
     }
 
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+    private void Close_Click(object sender, RoutedEventArgs e)
+    {
+        if (DismissModalSettingsBoardForWindowChrome())
+            return;
+        Close();
+    }
 
     public Rect WindowBoundsForSmoke => new(Left, Top, Width, Height);
     public Size EffectiveWindowMinimumForSmoke => new(MinWidth, MinHeight);
@@ -22501,6 +22724,36 @@ public partial class MainWindow : Window
     }
     public bool ModalFullScreenForSmoke => _modalFullScreen;
     public bool ToggleModalFullScreenForSmoke() => SetModalFullScreen(!_modalFullScreen);
+    public async Task<bool> WaitForModalFullScreenTransitionForSmokeAsync(
+        bool enabled,
+        int timeoutMilliseconds = 2_000)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(
+            Math.Max(1, timeoutMilliseconds));
+        do
+        {
+            await Dispatcher.InvokeAsync(
+                () =>
+                {
+                    UpdateLayout();
+                    UpdateModalFit();
+                },
+                DispatcherPriority.Render);
+
+            bool settled = enabled
+                ? ModalFullScreenContractForSmoke
+                : !_modalFullScreen
+                    && WindowState != WindowState.Maximized
+                    && ModalWindowCaptionControls.Visibility == Visibility.Visible;
+            if (settled)
+                return true;
+
+            await Task.Delay(10);
+        }
+        while (DateTimeOffset.UtcNow < deadline);
+
+        return false;
+    }
     public bool ModalFullScreenContractForSmoke
         => _modalFullScreen
             && WindowState == WindowState.Maximized
@@ -22995,7 +23248,9 @@ public partial class MainWindow : Window
     public string? ModalEnhancementErrorForSmoke => _modalEnhancementError;
     public string ModalEnhancementMessageForSmoke => ModalEnhancementStatusText.Text;
     public bool ModalEnhancementCancelVisibleForSmoke => ModalEnhanceCancelButton.Visibility == Visibility.Visible;
-    public bool ModalEnhancedDeleteVisibleForSmoke => ModalEnhancedDeleteButton.Visibility == Visibility.Visible;
+    public bool ModalEnhancedDeleteAvailableForSmoke
+        => _modalShowingEnhanced
+            && ModalDeleteButton.IsEnabled;
     public string[] ModalDisplayVersionLabelsForSmoke =>
         ModalEnhancementVersionComboBox.Items
             .OfType<ModalDisplayVersionChoice>()
@@ -23021,11 +23276,15 @@ public partial class MainWindow : Window
                 "動画化",
                 StringComparison.Ordinal)
             && ModalEnhancedToggleButton.Width >= 64
-            && ModalEnhancedDeleteButton.Width <= 36
-            && ModalEnhancedDeleteButton.Content is System.Windows.Shapes.Path
-            && ModalEnhancedDeleteButton.ToolTip?.ToString()?.Contains(
-                "keep the original",
-                StringComparison.OrdinalIgnoreCase) == true
+            && ModalDeleteButton.Width <= 36
+            && ModalDeleteButton.Content is System.Windows.Shapes.Path
+            && (_modalShowingVideo || _modalShowingEnhanced
+                ? ModalDeleteButton.ToolTip?.ToString()?.Contains(
+                    "keep the original",
+                    StringComparison.OrdinalIgnoreCase) == true
+                : ModalDeleteButton.ToolTip?.ToString()?.Contains(
+                    "Recycle Bin",
+                    StringComparison.OrdinalIgnoreCase) == true)
             && AutomationProperties.GetName(ModalEnhancedToggleButton).Contains(
                 CurrentModalEnhancementVersionLabel(),
                 StringComparison.Ordinal);
@@ -23062,6 +23321,13 @@ public partial class MainWindow : Window
         _confirmLargeEnhancementForSmoke = () => confirmLargeJob;
         _confirmEnhancedOutputDeleteForSmoke = () => confirmOutputDelete;
     }
+
+    public void ConfigureManagedOutputDeleteConfirmationForSmoke(
+        Func<bool>? confirmation)
+        => _confirmEnhancedOutputDeleteForSmoke = confirmation;
+
+    public Task<bool> DeleteDisplayedModalMediaForSmokeAsync()
+        => DeleteDisplayedModalMediaAsync();
 
     public async Task<bool> RefreshModalEnhancementForSmokeAsync()
     {
@@ -23110,8 +23376,7 @@ public partial class MainWindow : Window
 
     public async Task<bool> DeleteModalEnhancedOutputForSmokeAsync()
     {
-        DeleteModalEnhancedOutput_Click(this, new RoutedEventArgs());
-        await WaitForModalEnhancementRequestForSmokeAsync();
+        await DeleteDisplayedModalEnhancedOutputAsync();
         return SelectedTile() is Tile tile && !tile.Enhanced && !_modalShowingEnhanced;
     }
 
