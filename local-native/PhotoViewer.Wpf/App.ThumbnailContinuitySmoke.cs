@@ -166,6 +166,25 @@ public partial class App
                     && batchLoaded <= batchResidentLimit
                     && batchLoaded < batchApplies
                     && window.ThumbnailLoadsInFlightCountForSmoke == 0;
+                int syntheticProtectedCount = batchResidentLimit + 16;
+                window.SetNonResidentThumbnailProtectionForSmoke(syntheticProtectedCount);
+                int nonResidentProtectedPaths = window.ProtectedResidentThumbnailCountForSmoke;
+                int protectedLoadedThumbnails = window.ProtectedLoadedThumbnailCountForSmoke;
+                int effectiveResidentEntryLimit = window.EffectiveResidentThumbnailEntryLimitForSmoke;
+                int protectedReloadCandidates =
+                    window.ScheduleMissingThumbnailBatchWithCurrentProtectionForSmoke(batchNames);
+                bool protectedReloadIdle = await window.WaitForThumbnailViewportIdleForSmokeAsync();
+                int residentAfterProtectedReload = window.ResidentThumbnailCountForSmoke;
+                int loadedAfterProtectedReload = window.LoadedThumbnailCountForSmoke(batchNames);
+                bool nonResidentProtectionDoesNotReserveEntries =
+                    nonResidentProtectedPaths == syntheticProtectedCount
+                    && protectedLoadedThumbnails == 0
+                    && effectiveResidentEntryLimit == batchResidentLimit
+                    && protectedReloadCandidates > 0
+                    && protectedReloadIdle
+                    && residentAfterProtectedReload == batchResidentLimit
+                    && loadedAfterProtectedReload == batchResidentLimit;
+                window.ClearProtectedResidentThumbnailsForSmoke();
                 window.ConfigureThumbnailDecodeDelayForSmoke(0);
 
                 window.SeedLargeInteractionCatalogForSmoke(1_201);
@@ -223,6 +242,7 @@ public partial class App
                     && sourcesUnchanged
                     && burstLatestWins
                     && batchBounded
+                    && nonResidentProtectionDoesNotReserveEntries
                     && progressiveSliceObserved
                     && layoutGenerationAdvanced
                     && densityChangedColumns
@@ -260,6 +280,14 @@ public partial class App
                     batchResident,
                     batchResidentLimit,
                     batchProtected,
+                    nonResidentProtectionDoesNotReserveEntries,
+                    nonResidentProtectedPaths,
+                    protectedLoadedThumbnails,
+                    effectiveResidentEntryLimit,
+                    protectedReloadCandidates,
+                    protectedReloadIdle,
+                    residentAfterProtectedReload,
+                    loadedAfterProtectedReload,
                     progressiveSliceObserved,
                     progressivePlaceholders,
                     sparseSettled,

@@ -70,6 +70,7 @@ try {
         'sourcesUnchanged',
         'burstLatestWins',
         'batchBounded',
+        'nonResidentProtectionDoesNotReserveEntries',
         'progressiveSliceObserved',
         'sparseSettled',
         'denseSettled',

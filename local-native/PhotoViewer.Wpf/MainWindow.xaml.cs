@@ -2968,11 +2968,11 @@ public partial class MainWindow : Window
 
     private void TrimResidentThumbnails()
     {
-        long protectedBytes = ProtectedResidentThumbnailBytes();
+        (long protectedBytes, int protectedResidentCount) = ProtectedResidentThumbnailMetrics();
         long effectiveBudget = Math.Max(_residentThumbnailBudgetBytes, protectedBytes);
         int effectiveEntryLimit = Math.Max(
             MaxResidentThumbnailEntryCount,
-            _protectedResidentThumbnailPaths.Count);
+            protectedResidentCount);
         _maxProtectedResidentThumbnailBytes = Math.Max(_maxProtectedResidentThumbnailBytes, protectedBytes);
         _maxEffectiveResidentThumbnailBudgetBytes = Math.Max(
             _maxEffectiveResidentThumbnailBudgetBytes,
@@ -2994,15 +2994,19 @@ public partial class MainWindow : Window
         _maxResidentThumbnailBytes = Math.Max(_maxResidentThumbnailBytes, _residentThumbnailBytes);
     }
 
-    private long ProtectedResidentThumbnailBytes()
+    private (long Bytes, int Count) ProtectedResidentThumbnailMetrics()
     {
         long total = 0;
+        int count = 0;
         foreach (string path in _protectedResidentThumbnailPaths)
         {
             if (_residentThumbnailByteSizes.TryGetValue(path, out long bytes))
+            {
                 total = total > long.MaxValue - bytes ? long.MaxValue : total + bytes;
+                count++;
+            }
         }
-        return total;
+        return (total, count);
     }
 
     private void EvictResidentThumbnail(LinkedListNode<Tile> node)
@@ -21270,6 +21274,9 @@ public partial class MainWindow : Window
     public int MaxResidentThumbnailCountForSmoke => _maxResidentThumbnailCount;
     public int ResidentThumbnailLimitForSmoke => MaxResidentThumbnailEntryCount;
     public int ProtectedResidentThumbnailCountForSmoke => _protectedResidentThumbnailPaths.Count;
+    public int ProtectedLoadedThumbnailCountForSmoke => ProtectedResidentThumbnailMetrics().Count;
+    public int EffectiveResidentThumbnailEntryLimitForSmoke
+        => Math.Max(MaxResidentThumbnailEntryCount, ProtectedResidentThumbnailMetrics().Count);
     public long ResidentThumbnailBytesForSmoke => _residentThumbnailBytes;
     public long MaxResidentThumbnailBytesForSmoke => _maxResidentThumbnailBytes;
     public long ResidentThumbnailBudgetBytesForSmoke => _residentThumbnailBudgetBytes;
@@ -21345,6 +21352,43 @@ public partial class MainWindow : Window
             priorityCandidateCount: tiles.Count);
         return _thumbnailViewportScheduleCount - schedulesBefore;
     }
+    public void SetNonResidentThumbnailProtectionForSmoke(int count)
+    {
+        _protectedResidentThumbnailPaths.Clear();
+        for (int index = 0; index < Math.Max(0, count); index++)
+            _protectedResidentThumbnailPaths.Add($"smoke-nonresident-{index:D4}");
+        TrimResidentThumbnails();
+    }
+    public int ScheduleMissingThumbnailBatchWithCurrentProtectionForSmoke(
+        IReadOnlyList<string> fileNames)
+    {
+        ArgumentNullException.ThrowIfNull(fileNames);
+        CancelThumbnailViewportLoading();
+        var tiles = new List<Tile>(fileNames.Count);
+        foreach (string fileName in fileNames)
+        {
+            Tile tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Thumbnail smoke tile was not found: {fileName}");
+            if (tile.Thumbnail is not null)
+                continue;
+            _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
+            tiles.Add(tile);
+        }
+
+        if (tiles.Count > 0)
+        {
+            ScheduleThumbnailCandidates(
+                tiles,
+                $"smoke-protected-batch|{_loadGeneration}|{++_thumbnailViewportRevision}",
+                priorityCandidateCount: tiles.Count);
+        }
+        return tiles.Count;
+    }
+    public void ClearProtectedResidentThumbnailsForSmoke()
+        => ClearProtectedResidentThumbnails();
     public async Task<bool> WaitForThumbnailViewportIdleForSmokeAsync(
         int timeoutMilliseconds = 5_000)
     {
