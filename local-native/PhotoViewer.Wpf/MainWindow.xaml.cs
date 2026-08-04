@@ -64,7 +64,7 @@ public partial class MainWindow : Window
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
 
     private const int MinParallelThumbnailCount = 32;
-    private const int MaxThumbnailDecodeWorkers = 12;
+    private const int MaxThumbnailDecodeWorkers = 4;
     private const int InitialThumbnailPrefetchCount = 16;
     private const int MaxThumbnailDecodeAttempts = 4;
     private const int FirstThumbnailDecodeRetryDelayMilliseconds = 120;
@@ -233,9 +233,14 @@ public partial class MainWindow : Window
     private int _thumbnailViewportCancelCount;
     private int _thumbnailViewportDuplicateSuppressedCount;
     private int _thumbnailDecodeDelayForSmokeMilliseconds;
+    private int _thumbnailWicReadBlockForSmoke;
+    private int _thumbnailWicReadSmokeEnabled;
+    private readonly ManualResetEventSlim _thumbnailWicReadReleaseForSmoke = new(initialState: true);
     private readonly ConcurrentDictionary<string, int> _thumbnailDecodeStartsForSmoke =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, int> _thumbnailAppliesForSmoke =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _thumbnailWicReadStartsForSmoke =
         new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _thumbnailViewportCts;
     private string? _thumbnailViewportSignature;
@@ -1327,7 +1332,7 @@ public partial class MainWindow : Window
         bool ActivePreviewIncluded,
         GridZoomAnchor? ViewportAnchor,
         PreparedVirtualizingLayout? PreparedLayout,
-        GalleryAutomationProjectionIndex AutomationProjection,
+        GalleryAutomationProjectionIndex? AutomationProjection,
         int? ExactSingleRemovalIndex);
 
     private sealed record CatalogProjectionRequest(
@@ -2778,7 +2783,18 @@ public partial class MainWindow : Window
                         try
                         {
                             int decodeWidth = (int)Math.Clamp(tile.CardWidth * 1.4, 180, 520);
-                            thumbnail = await Task.Run(() => LoadThumbnailBitmap(tile, decodeWidth), token);
+                            bool recordWicReadForSmoke =
+                                Volatile.Read(ref _thumbnailWicReadSmokeEnabled) != 0;
+                            bool blockWicReadForSmoke =
+                                Volatile.Read(ref _thumbnailWicReadBlockForSmoke) != 0;
+                            thumbnail = await Task.Run(
+                                () => LoadThumbnailBitmap(
+                                    tile,
+                                    decodeWidth,
+                                    token,
+                                    recordWicReadForSmoke,
+                                    blockWicReadForSmoke),
+                                token);
                         }
                         finally
                         {
@@ -3084,15 +3100,41 @@ public partial class MainWindow : Window
         _visibleThumbnailEvictionCount = 0;
     }
 
-    private BitmapSource? LoadThumbnailBitmap(Tile tile, int decodePixelWidth)
+    private BitmapSource? LoadThumbnailBitmap(
+        Tile tile,
+        int decodePixelWidth,
+        CancellationToken token,
+        bool recordWicReadForSmoke,
+        bool blockWicReadForSmoke)
     {
+        int firstWicReadRecorded = 0;
+        Action? onFirstWicRead = !recordWicReadForSmoke
+            ? null
+            : () =>
+            {
+                if (Interlocked.Exchange(ref firstWicReadRecorded, 1) != 0)
+                    return;
+                _thumbnailWicReadStartsForSmoke.AddOrUpdate(
+                    tile.Path,
+                    1,
+                    static (_, count) => count + 1);
+                if (blockWicReadForSmoke)
+                    _thumbnailWicReadReleaseForSmoke.Wait();
+                token.ThrowIfCancellationRequested();
+            };
         try
         {
+            token.ThrowIfCancellationRequested();
             foreach (string cachePath in GetBrowserThumbnailCachePaths(tile))
             {
+                token.ThrowIfCancellationRequested();
                 if (!File.Exists(cachePath))
                     continue;
-                BitmapSource? cached = LoadBitmap(cachePath, decodePixelWidth);
+                BitmapSource? cached = LoadBitmap(
+                    cachePath,
+                    decodePixelWidth,
+                    cancellationToken: token,
+                    onFirstRead: onFirstWicRead);
                 if (cached is not null)
                 {
                     Interlocked.Increment(ref _thumbnailBrowserCacheHits);
@@ -3102,13 +3144,21 @@ public partial class MainWindow : Window
                 }
             }
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             // A missing/unsupported WebP codec or malformed cache entry must
             // fall back to the source without deleting the browser cache.
         }
 
-        return LoadBitmap(tile.Path, decodePixelWidth);
+        return LoadBitmap(
+            tile.Path,
+            decodePixelWidth,
+            cancellationToken: token,
+            onFirstRead: onFirstWicRead);
     }
 
     private static IReadOnlyList<string> GetBrowserThumbnailCachePaths(Tile tile)
@@ -6247,21 +6297,299 @@ public partial class MainWindow : Window
     private Tile? ResolvePvuSeenImportTile(string rawKey)
         => ResolvePvuFavoriteImportTile(rawKey);
 
+    private static Stream OpenBitmapReadStream(
+        string path,
+        CancellationToken cancellationToken,
+        Action? onFirstRead)
+    {
+        var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 4_096,
+            FileOptions.Asynchronous);
+        return cancellationToken.CanBeCanceled || onFirstRead is not null
+            ? new CancellationAwareReadStream(stream, cancellationToken, onFirstRead)
+            : stream;
+    }
+
+    private sealed class CancellationAwareReadStream : Stream
+    {
+        private Stream? _inner;
+        private readonly CancellationToken _cancellationToken;
+        private readonly Action? _onFirstRead;
+        private readonly CancellationTokenRegistration _cancellationRegistration;
+        private int _firstReadObserved;
+
+        internal CancellationAwareReadStream(
+            Stream inner,
+            CancellationToken cancellationToken,
+            Action? onFirstRead)
+        {
+            _inner = inner;
+            _cancellationToken = cancellationToken;
+            _onFirstRead = onFirstRead;
+            _cancellationRegistration = cancellationToken.CanBeCanceled
+                ? cancellationToken.Register(
+                    static state => ThreadPool.UnsafeQueueUserWorkItem(
+                        static target => target.DisposeInnerForCancellation(),
+                        (CancellationAwareReadStream)state!,
+                        preferLocal: false),
+                    this)
+                : default;
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => true;
+        public override bool CanWrite => false;
+        public override long Length => WithCancellation(static stream => stream.Length);
+        public override long Position
+        {
+            get => WithCancellation(static stream => stream.Position);
+            set => WithCancellation(stream => stream.Position = value);
+        }
+
+        public override void Flush()
+            => WithCancellation(static stream => stream.Flush());
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            ObserveFirstRead();
+            return WithCancellation(stream => stream
+                .ReadAsync(buffer.AsMemory(offset, count), _cancellationToken)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult());
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            byte[] rented = ArrayPool<byte>.Shared.Rent(Math.Max(1, buffer.Length));
+            try
+            {
+                int bytesRead = Read(rented, 0, buffer.Length);
+                rented.AsSpan(0, bytesRead).CopyTo(buffer);
+                return bytesRead;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+
+        public override int ReadByte()
+        {
+            byte[] buffer = new byte[1];
+            return Read(buffer, 0, 1) == 0 ? -1 : buffer[0];
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+            => WithCancellation(stream => stream.Seek(offset, origin));
+
+        public override void SetLength(long value)
+            => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _cancellationRegistration.Dispose();
+                Interlocked.Exchange(ref _inner, null)?.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        private void ObserveFirstRead()
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (Interlocked.Exchange(ref _firstReadObserved, 1) == 0)
+                _onFirstRead?.Invoke();
+            _cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        private void DisposeInnerForCancellation()
+        {
+            Stream? stream = Interlocked.Exchange(ref _inner, null);
+            if (stream is null)
+                return;
+            try
+            {
+                stream.Dispose();
+            }
+            catch
+            {
+                // The close runs on the thread pool and must not surface a
+                // failure outside cancellation. The worker normalizes the
+                // resulting read failure to OperationCanceledException.
+            }
+        }
+
+        private Stream GetInner()
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            return Volatile.Read(ref _inner)
+                ?? throw new ObjectDisposedException(nameof(CancellationAwareReadStream));
+        }
+
+        private T WithCancellation<T>(Func<Stream, T> action)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            Stream stream = GetInner();
+            try
+            {
+                T result = action(stream);
+                _cancellationToken.ThrowIfCancellationRequested();
+                return result;
+            }
+            catch (Exception ex) when (_cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(
+                    "Bitmap stream operation was canceled.",
+                    ex,
+                    _cancellationToken);
+            }
+        }
+
+        private void WithCancellation(Action<Stream> action)
+            => WithCancellation(
+                stream =>
+                {
+                    action(stream);
+                    return true;
+                });
+    }
+
+    private sealed class DisposeReleasedReadStream : Stream
+    {
+        private readonly TaskCompletionSource<bool> _readEntered = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _disposed = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _disposeCount;
+
+        internal Task ReadEntered => _readEntered.Task;
+        internal int DisposeCount => Volatile.Read(ref _disposeCount);
+
+        public override bool CanRead => true;
+        public override bool CanSeek => true;
+        public override bool CanWrite => false;
+        public override long Length => 1;
+        public override long Position { get; set; }
+        public override void Flush()
+        {
+        }
+        public override int Read(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            _readEntered.TrySetResult(true);
+            return new ValueTask<int>(WaitForDisposeAsync());
+        }
+        public override long Seek(long offset, SeekOrigin origin)
+            => Position;
+        public override void SetLength(long value)
+            => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && Interlocked.Increment(ref _disposeCount) == 1)
+                _disposed.TrySetResult(true);
+            base.Dispose(disposing);
+        }
+
+        private async Task<int> WaitForDisposeAsync()
+        {
+            await _disposed.Task;
+            throw new ObjectDisposedException(nameof(DisposeReleasedReadStream));
+        }
+    }
+
+    internal static async Task<CancellationAwareReadSmokeSnapshot>
+        RunCancellationAwareReadStreamForSmokeAsync()
+    {
+        using var cts = new CancellationTokenSource();
+        var inner = new DisposeReleasedReadStream();
+        var stream = new CancellationAwareReadStream(inner, cts.Token, onFirstRead: null);
+        Task<int> readTask = Task.Run(() => stream.Read(new byte[1], 0, 1));
+        bool readEntered = await Task.WhenAny(
+            inner.ReadEntered,
+            Task.Delay(TimeSpan.FromSeconds(2))) == inner.ReadEntered;
+        bool cancelReturned = false;
+        bool readCanceled = false;
+        bool readCompleted = false;
+        bool innerDisposedBeforeCleanup = false;
+        try
+        {
+            if (readEntered)
+            {
+                cts.Cancel();
+                cancelReturned = true;
+                readCompleted = await Task.WhenAny(
+                    readTask,
+                    Task.Delay(TimeSpan.FromSeconds(2))) == readTask;
+                if (readCompleted)
+                {
+                    try
+                    {
+                        _ = await readTask;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        readCanceled = true;
+                    }
+                }
+                innerDisposedBeforeCleanup = inner.DisposeCount > 0;
+            }
+        }
+        finally
+        {
+            stream.Dispose();
+            if (!readTask.IsCompleted)
+            {
+                _ = await Task.WhenAny(
+                    readTask,
+                    Task.Delay(TimeSpan.FromSeconds(2)));
+            }
+        }
+
+        return new CancellationAwareReadSmokeSnapshot(
+            readEntered,
+            cancelReturned,
+            readCompleted,
+            readCanceled,
+            innerDisposedBeforeCleanup);
+    }
+
     private static BitmapSource? LoadBitmap(
         string path,
         int decodePixelWidth,
-        bool explicitManagedOutput = false)
+        bool explicitManagedOutput = false,
+        CancellationToken cancellationToken = default,
+        Action? onFirstRead = null)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             BitmapDecodePlan? decodePlan = BuildBitmapDecodePlan(
                 path,
                 decodePixelWidth,
-                explicitManagedOutput);
+                explicitManagedOutput,
+                cancellationToken);
             if (decodePlan is null)
                 return null;
 
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using Stream stream = OpenBitmapReadStream(
+                path,
+                cancellationToken,
+                onFirstRead);
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
@@ -6272,8 +6600,16 @@ public partial class MainWindow : Window
                 image.DecodePixelHeight = decodePlan.Value.PixelHeight;
             image.StreamSource = stream;
             image.EndInit();
+            cancellationToken.ThrowIfCancellationRequested();
             image.Freeze();
             return image;
+        }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(
+                "Bitmap decode was canceled.",
+                ex,
+                cancellationToken);
         }
         catch
         {
@@ -6291,7 +6627,11 @@ public partial class MainWindow : Window
         {
             token.ThrowIfCancellationRequested();
             BitmapSource? bitmap = await Task.Run(
-                () => LoadBitmap(path, decodePixelWidth, explicitManagedOutput),
+                () => LoadBitmap(
+                    path,
+                    decodePixelWidth,
+                    explicitManagedOutput,
+                    token),
                 token);
             if (bitmap is not null)
                 return bitmap;
@@ -6313,10 +6653,19 @@ public partial class MainWindow : Window
     private static BitmapDecodePlan? BuildBitmapDecodePlan(
         string path,
         int requestedPixelWidth,
-        bool explicitManagedOutput = false)
+        bool explicitManagedOutput = false,
+        CancellationToken cancellationToken = default)
     {
-        if (requestedPixelWidth <= 0 || !TryReadBitmapSize(path, out int sourceWidth, out int sourceHeight))
+        cancellationToken.ThrowIfCancellationRequested();
+        if (requestedPixelWidth <= 0
+            || !TryReadBitmapSize(
+                path,
+                out int sourceWidth,
+                out int sourceHeight,
+                cancellationToken))
+        {
             return null;
+        }
 
         return BuildBitmapDecodePlanForDimensions(
             Path.GetExtension(path),
@@ -6407,18 +6756,34 @@ public partial class MainWindow : Window
         return new BitmapDecodePlan(Math.Max(1, (int)Math.Floor(targetWidth)), 0);
     }
 
-    private static bool TryReadBitmapSize(string path, out int width, out int height)
+    private static bool TryReadBitmapSize(
+        string path,
+        out int width,
+        out int height,
+        CancellationToken cancellationToken = default)
     {
         width = 0;
         height = 0;
         try
         {
-            using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            cancellationToken.ThrowIfCancellationRequested();
+            using Stream stream = OpenBitmapReadStream(
+                path,
+                cancellationToken,
+                onFirstRead: null);
             var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
             var frame = decoder.Frames[0];
             width = frame.PixelWidth;
             height = frame.PixelHeight;
+            cancellationToken.ThrowIfCancellationRequested();
             return width > 0 && height > 0;
+        }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(
+                "Bitmap dimension read was canceled.",
+                ex,
+                cancellationToken);
         }
         catch
         {
@@ -9116,7 +9481,10 @@ public partial class MainWindow : Window
                 {
                     if (previousPriority > ThreadPriority.Lowest)
                         currentThread.Priority = ThreadPriority.Lowest;
-                    return ComputeFilterResult(snapshot, cts.Token);
+                    return ComputeFilterResult(
+                        snapshot,
+                        cts.Token,
+                        prepareAutomationProjection: true);
                 }
                 finally
                 {
@@ -9183,7 +9551,6 @@ public partial class MainWindow : Window
         {
             if (captureWatch.IsRunning)
                 captureWatch.Stop();
-            result?.AutomationProjection.ReleaseCreator();
             long cleanupAllocatedBefore = collectAllocationDiagnostics
                 ? GC.GetAllocatedBytesForCurrentThread()
                 : 0;
@@ -10972,7 +11339,10 @@ public partial class MainWindow : Window
         FilterResult? result = null;
         try
         {
-            result = ComputeFilterResult(snapshot, CancellationToken.None);
+            result = ComputeFilterResult(
+                snapshot,
+                CancellationToken.None,
+                prepareAutomationProjection: false);
             ApplyFilterResult(result, selectFirst, selectionFallbackIndex);
         }
         finally
@@ -11122,6 +11492,7 @@ public partial class MainWindow : Window
 
     private static void ReturnFilterResult(FilterResult result)
     {
+        result.AutomationProjection?.ReleaseCreator();
         // Filter results are immutable, exactly-sized arrays. The visible
         // collection adopts them in O(1), and old snapshots remain valid for
         // any WPF enumerator that was already in flight.
@@ -11145,7 +11516,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private static FilterResult ComputeFilterResult(FilterSnapshot snapshot, CancellationToken cancellationToken)
+    private static FilterResult ComputeFilterResult(
+        FilterSnapshot snapshot,
+        CancellationToken cancellationToken,
+        bool prepareAutomationProjection)
     {
         bool unfiltered = !snapshot.AlbumActive
             && snapshot.QueryTokens.Length == 0
@@ -11396,11 +11770,12 @@ public partial class MainWindow : Window
                 exactSingleRemovalIndex = removedIndex;
         }
 
-        GalleryAutomationProjectionIndex automationProjection =
-            GalleryAutomationProjectionIndex.Create(
+        GalleryAutomationProjectionIndex? automationProjection = prepareAutomationProjection
+            ? GalleryAutomationProjectionIndex.Create(
                 filtered,
                 filteredCount,
-                cancellationToken);
+                cancellationToken)
+            : null;
 
         return new FilterResult(
             filtered,
@@ -11429,6 +11804,17 @@ public partial class MainWindow : Window
         {
             projection.ReleaseCreator();
         }
+    }
+
+    private void StageGalleryAutomationProjection(FilterResult filterResult)
+    {
+        GalleryAutomationProjectionIndex projection =
+            filterResult.AutomationProjection
+            ?? GalleryAutomationProjectionIndex.Create(
+                filterResult.Tiles,
+                filterResult.Count,
+                CancellationToken.None);
+        StageGalleryAutomationProjection(projection);
     }
 
     private static int CompareFilterTilesForSort(
@@ -11754,7 +12140,7 @@ public partial class MainWindow : Window
                     ? GC.GetAllocatedBytesForCurrentThread()
                     : 0;
                 if (projectionChanged)
-                    StageGalleryAutomationProjection(filterResult.AutomationProjection);
+                    StageGalleryAutomationProjection(filterResult);
                 if (publishSingleRemoval)
                 {
                     _tiles.ReplaceOneRemovedAfterValidation(
@@ -12039,7 +12425,7 @@ public partial class MainWindow : Window
                 ReleaseWpfSelectionBeforeCatalogPublication();
             }
             if (projectionChanged)
-                StageGalleryAutomationProjection(filterResult.AutomationProjection);
+                StageGalleryAutomationProjection(filterResult);
             if (projectionChanged)
                 _tiles.ReplaceAll(filtered, filteredCount);
         }
@@ -21287,10 +21673,20 @@ public partial class MainWindow : Window
     public int ActiveThumbnailDecodeWorkersForSmoke => Volatile.Read(ref _activeThumbnailDecodeWorkers);
     public int MaxActiveThumbnailDecodeWorkersForSmoke => Volatile.Read(ref _maxActiveThumbnailDecodeWorkers);
     public int ThumbnailDecodeWorkerLimitForSmoke => MaxThumbnailDecodeWorkers;
+    public int ThumbnailDecodeGateAvailableForSmoke => _thumbnailDecodeGate.CurrentCount;
     public int ThumbnailViewportScheduleCountForSmoke => _thumbnailViewportScheduleCount;
     public int ThumbnailViewportCancelCountForSmoke => _thumbnailViewportCancelCount;
     public int ThumbnailViewportDuplicateSuppressedCountForSmoke => _thumbnailViewportDuplicateSuppressedCount;
     public int ThumbnailLoadsInFlightCountForSmoke => _thumbnailLoadsInFlight.Count;
+    public int ThumbnailLoadsInFlightForSmoke(IReadOnlyList<string> fileNames)
+        => fileNames.Count(fileName =>
+        {
+            Tile? tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase));
+            return tile is not null && _thumbnailLoadsInFlight.ContainsKey(tile.Path);
+        });
     public void ConfigureThumbnailDecodeDelayForSmoke(int delayMilliseconds)
     {
         Volatile.Write(
@@ -21298,6 +21694,25 @@ public partial class MainWindow : Window
             Math.Max(0, delayMilliseconds));
         _thumbnailDecodeStartsForSmoke.Clear();
         _thumbnailAppliesForSmoke.Clear();
+    }
+    public void ConfigureThumbnailWicReadBarrierForSmoke(
+        bool blockFirstRead,
+        bool clearCounters = true)
+    {
+        if (clearCounters)
+            _thumbnailWicReadStartsForSmoke.Clear();
+        if (blockFirstRead)
+            _thumbnailWicReadReleaseForSmoke.Reset();
+        Volatile.Write(ref _thumbnailWicReadBlockForSmoke, blockFirstRead ? 1 : 0);
+        Volatile.Write(ref _thumbnailWicReadSmokeEnabled, 1);
+    }
+    public void ReleaseThumbnailWicReadBarrierForSmoke()
+        => _thumbnailWicReadReleaseForSmoke.Set();
+    public void DisableThumbnailWicReadSmoke()
+    {
+        Volatile.Write(ref _thumbnailWicReadSmokeEnabled, 0);
+        Volatile.Write(ref _thumbnailWicReadBlockForSmoke, 0);
+        _thumbnailWicReadReleaseForSmoke.Set();
     }
     public int BurstScheduleThumbnailViewportsForSmoke(IReadOnlyList<string> fileNames)
     {
@@ -21410,6 +21825,8 @@ public partial class MainWindow : Window
     }
     public int ThumbnailDecodeStartsForSmoke(IReadOnlyList<string> fileNames)
         => SumThumbnailSmokeCounts(fileNames, _thumbnailDecodeStartsForSmoke);
+    public int ThumbnailWicReadStartsForSmoke(IReadOnlyList<string> fileNames)
+        => SumThumbnailSmokeCounts(fileNames, _thumbnailWicReadStartsForSmoke);
     public int ThumbnailAppliesForSmoke(IReadOnlyList<string> fileNames)
         => SumThumbnailSmokeCounts(fileNames, _thumbnailAppliesForSmoke);
     public int LoadedThumbnailCountForSmoke(IReadOnlyList<string> fileNames)
@@ -21454,6 +21871,18 @@ public partial class MainWindow : Window
     public int GridItemsSourceCountForSmoke => CardsList.Items.Count;
     public int ProjectionResetNotificationCountForSmoke => _tiles.ResetNotificationCount;
     public int ProjectionRemoveNotificationCountForSmoke => _tiles.RemoveNotificationCount;
+    public SynchronousFilterOwnershipSmokeSnapshot RunSynchronousNoOpFilterForSmoke()
+    {
+        long createdBefore = GalleryAutomationProjectionIndex.CreatedCount;
+        long activeCreatorsBefore = GalleryAutomationProjectionIndex.ActiveCreatorCount;
+        int resetsBefore = _tiles.ResetNotificationCount;
+        ApplyFilters(selectFirst: false);
+        return new SynchronousFilterOwnershipSmokeSnapshot(
+            _tiles.Count,
+            GalleryAutomationProjectionIndex.CreatedCount - createdBefore,
+            GalleryAutomationProjectionIndex.ActiveCreatorCount - activeCreatorsBefore,
+            _tiles.ResetNotificationCount - resetsBefore);
+    }
     public bool GridUsesFullExtentVirtualizationForSmoke
         => ReferenceEquals(CardsList.ItemsSource, _tilesView)
             && FindVisualDescendant<VirtualizingWrapPanel>(CardsList) is not null;
@@ -24741,6 +25170,19 @@ public sealed record GalleryAutomationItemSmokeSnapshot(
     public static GalleryAutomationItemSmokeSnapshot Unavailable(int index)
         => new(index, "", "", false, false, false, false, false, false);
 }
+
+public sealed record SynchronousFilterOwnershipSmokeSnapshot(
+    int Count,
+    long AutomationProjectionCreateDelta,
+    long ActiveCreatorDelta,
+    int ProjectionResetDelta);
+
+public sealed record CancellationAwareReadSmokeSnapshot(
+    bool ReadEntered,
+    bool CancelReturned,
+    bool ReadCompleted,
+    bool ReadCanceled,
+    bool InnerDisposedBeforeCleanup);
 
 public sealed class GalleryAutomationPeerSmokeLease(
     VirtualizedGalleryListBoxItemAutomationPeer peer)
