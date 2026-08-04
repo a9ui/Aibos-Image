@@ -19,6 +19,10 @@ public partial class App
         string lockedPath = Path.Combine(folder, "locked-valid.png");
         string anchorPath = Path.Combine(folder, "anchor-valid.png");
         string corruptPath = Path.Combine(folder, "corrupt.png");
+        string[] batchPaths = Enumerable.Range(0, 272)
+            .Select(index => Path.Combine(folder, $"burst-{index:D2}.png"))
+            .ToArray();
+        string[] burstPaths = batchPaths.Take(64).ToArray();
         var previousEnvironment = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["PHOTOVIEWER_WPF_STATE_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH"),
@@ -61,6 +65,15 @@ public partial class App
                 WriteSmokePng(lockedPath, 64, 48, Color.FromRgb(76, 132, 214));
                 WriteSmokePng(anchorPath, 64, 48, Color.FromRgb(126, 190, 116));
                 File.WriteAllBytes(corruptPath, [0x89, 0x50, 0x4E, 0x47, 0x00, 0x01, 0x02, 0x03]);
+                foreach (string burstPath in batchPaths)
+                {
+                    File.Copy(anchorPath, burstPath);
+                    File.SetLastWriteTimeUtc(burstPath, DateTime.UtcNow.AddHours(-1));
+                }
+                DateTime continuityFixtureWriteTime = DateTime.UtcNow;
+                File.SetLastWriteTimeUtc(lockedPath, continuityFixtureWriteTime);
+                File.SetLastWriteTimeUtc(anchorPath, continuityFixtureWriteTime);
+                File.SetLastWriteTimeUtc(corruptPath, continuityFixtureWriteTime);
                 var sourceHashesBefore = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     [Path.GetFileName(lockedPath)] = HashFile(lockedPath),
@@ -108,6 +121,52 @@ public partial class App
                     && sourceHashesBefore.All(pair =>
                         sourceHashesAfterRecovery.TryGetValue(pair.Key, out string? hash)
                         && string.Equals(hash, pair.Value, StringComparison.Ordinal));
+
+                string[] burstNames = burstPaths.Select(Path.GetFileName).ToArray()!;
+                bool viewportIdleBeforeBurst =
+                    await window.WaitForThumbnailViewportIdleForSmokeAsync();
+                window.ConfigureThumbnailDecodeDelayForSmoke(250);
+                int viewportCancelsBeforeBurst = window.ThumbnailViewportCancelCountForSmoke;
+                int burstSchedules = window.BurstScheduleThumbnailViewportsForSmoke(burstNames);
+                bool viewportIdleAfterBurst =
+                    await window.WaitForThumbnailViewportIdleForSmokeAsync();
+                int burstCancels =
+                    window.ThumbnailViewportCancelCountForSmoke - viewportCancelsBeforeBurst;
+                int burstDecodeStarts = window.ThumbnailDecodeStartsForSmoke(burstNames);
+                int burstApplies = window.ThumbnailAppliesForSmoke(burstNames);
+                int burstLoaded = window.LoadedThumbnailCountForSmoke(burstNames);
+                int burstInFlight = window.ThumbnailLoadsInFlightCountForSmoke;
+                bool burstLatestWins = viewportIdleBeforeBurst
+                    && viewportIdleAfterBurst
+                    && burstSchedules == burstNames.Length
+                    && burstCancels == burstNames.Length - 1
+                    && burstDecodeStarts == 1
+                    && burstApplies == 1
+                    && burstLoaded == 1
+                    && burstInFlight == 0;
+
+                string[] batchNames = batchPaths.Select(Path.GetFileName).ToArray()!;
+                window.ConfigureThumbnailDecodeDelayForSmoke(5);
+                int batchSchedules = window.ScheduleThumbnailBatchForSmoke(batchNames);
+                bool batchIdle = await window.WaitForThumbnailViewportIdleForSmokeAsync();
+                int batchDecodeStarts = window.ThumbnailDecodeStartsForSmoke(batchNames);
+                int batchApplies = window.ThumbnailAppliesForSmoke(batchNames);
+                int batchLoaded = window.LoadedThumbnailCountForSmoke(batchNames);
+                int batchMaxWorkers = window.MaxActiveThumbnailDecodeWorkersForSmoke;
+                int batchResident = window.ResidentThumbnailCountForSmoke;
+                int batchResidentLimit = window.ResidentThumbnailLimitForSmoke;
+                int batchProtected = window.ProtectedResidentThumbnailCountForSmoke;
+                bool batchBounded = batchIdle
+                    && batchSchedules == 1
+                    && batchDecodeStarts == batchNames.Length
+                    && batchApplies == batchNames.Length
+                    && batchMaxWorkers is >= 2 and <= 4
+                    && batchProtected == 0
+                    && batchResident <= batchResidentLimit
+                    && batchLoaded <= batchResidentLimit
+                    && batchLoaded < batchApplies
+                    && window.ThumbnailLoadsInFlightCountForSmoke == 0;
+                window.ConfigureThumbnailDecodeDelayForSmoke(0);
 
                 window.SeedLargeInteractionCatalogForSmoke(1_201);
                 window.SetGridModeForSmoke();
@@ -162,6 +221,8 @@ public partial class App
                     && corruptAttempts == 4
                     && singleFolderLoad
                     && sourcesUnchanged
+                    && burstLatestWins
+                    && batchBounded
                     && progressiveSliceObserved
                     && layoutGenerationAdvanced
                     && densityChangedColumns
@@ -181,6 +242,24 @@ public partial class App
                     corruptAttempts,
                     singleFolderLoad,
                     sourcesUnchanged,
+                    burstLatestWins,
+                    viewportIdleBeforeBurst,
+                    viewportIdleAfterBurst,
+                    burstSchedules,
+                    burstCancels,
+                    burstDecodeStarts,
+                    burstApplies,
+                    burstLoaded,
+                    burstInFlight,
+                    batchBounded,
+                    batchSchedules,
+                    batchDecodeStarts,
+                    batchApplies,
+                    batchLoaded,
+                    batchMaxWorkers,
+                    batchResident,
+                    batchResidentLimit,
+                    batchProtected,
                     progressiveSliceObserved,
                     progressivePlaceholders,
                     sparseSettled,

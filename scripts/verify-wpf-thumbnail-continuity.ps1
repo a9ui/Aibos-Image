@@ -68,6 +68,8 @@ try {
         'corruptBecameTerminal',
         'singleFolderLoad',
         'sourcesUnchanged',
+        'burstLatestWins',
+        'batchBounded',
         'progressiveSliceObserved',
         'sparseSettled',
         'denseSettled',

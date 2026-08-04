@@ -70,10 +70,10 @@ public partial class MainWindow : Window
     private const int FirstThumbnailDecodeRetryDelayMilliseconds = 120;
     private const int SecondThumbnailDecodeRetryDelayMilliseconds = 300;
     private const int ThirdThumbnailDecodeRetryDelayMilliseconds = 750;
-    private const int LegacyResidentThumbnailCountHint = 128;
-    private const long MinResidentThumbnailBudgetBytes = 192L * 1024 * 1024;
-    private const long MaxResidentThumbnailBudgetBytes = 512L * 1024 * 1024;
-    private const long FallbackResidentThumbnailBudgetBytes = 256L * 1024 * 1024;
+    private const int MaxResidentThumbnailEntryCount = 256;
+    private const long MinResidentThumbnailBudgetBytes = 128L * 1024 * 1024;
+    private const long MaxResidentThumbnailBudgetBytes = 256L * 1024 * 1024;
+    private const long FallbackResidentThumbnailBudgetBytes = 192L * 1024 * 1024;
     private const int TransientStatusToastMilliseconds = 850;
     private const int MinParallelCatalogPreparationCount = 512;
     private const int MaxCatalogPreparationWorkers = 4;
@@ -232,6 +232,11 @@ public partial class MainWindow : Window
     private int _thumbnailViewportScheduleCount;
     private int _thumbnailViewportCancelCount;
     private int _thumbnailViewportDuplicateSuppressedCount;
+    private int _thumbnailDecodeDelayForSmokeMilliseconds;
+    private readonly ConcurrentDictionary<string, int> _thumbnailDecodeStartsForSmoke =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _thumbnailAppliesForSmoke =
+        new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _thumbnailViewportCts;
     private string? _thumbnailViewportSignature;
     private long _thumbnailViewportRevision;
@@ -464,6 +469,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _catalogProjectionCts;
     private readonly SemaphoreSlim _catalogProjectionApplyGate = new(1, 1);
     private long _catalogProjectionGeneration;
+    private long _unseenFilterReconcileGeneration;
     private CatalogProjectionRequest? _scheduledCatalogProjection;
     private long _lastAppliedCatalogProjectionGeneration;
     private long _catalogContentRevision;
@@ -897,6 +903,7 @@ public partial class MainWindow : Window
     {
         if (_tiles.Count == 0)
         {
+            CancelThumbnailViewportLoading();
             ClearProtectedResidentThumbnails();
             return;
         }
@@ -931,33 +938,41 @@ public partial class MainWindow : Window
                 candidates.Add(tile);
         }
 
-        if (candidates.Count == 0)
-            return;
-
         string signature = $"grid|{_loadGeneration}|{_thumbnailViewportRevision}|{firstVisible}|{lastVisible}";
-        ScheduleThumbnailCandidates(candidates, signature);
+        ScheduleThumbnailCandidates(
+            candidates,
+            signature,
+            Math.Min(ImmediateViewportThumbnailCount, candidates.Count));
     }
 
-    private void ScheduleThumbnailCandidates(IReadOnlyList<Tile> candidates, string signature)
+    private void ScheduleThumbnailCandidates(
+        IReadOnlyList<Tile> candidates,
+        string signature,
+        int priorityCandidateCount)
     {
-        if (candidates.Count == 0)
-            return;
-
-        if (_thumbnailViewportCts is not null
-            && string.Equals(_thumbnailViewportSignature, signature, StringComparison.Ordinal))
+        bool sameViewport = _thumbnailViewportCts is not null
+            && string.Equals(_thumbnailViewportSignature, signature, StringComparison.Ordinal);
+        if (sameViewport)
         {
             _thumbnailViewportDuplicateSuppressedCount++;
             return;
         }
 
         CancelThumbnailViewportLoading();
+        if (candidates.Count == 0)
+            return;
+
         CancellationTokenSource cts = _loadCts is { } loadCts
             ? CancellationTokenSource.CreateLinkedTokenSource(loadCts.Token)
             : new CancellationTokenSource();
         _thumbnailViewportCts = cts;
         _thumbnailViewportSignature = signature;
         _thumbnailViewportScheduleCount++;
-        _ = LoadThumbnailViewportAsync(candidates, _loadGeneration, cts);
+        _ = LoadThumbnailViewportAsync(
+            candidates,
+            Math.Clamp(priorityCandidateCount, 1, candidates.Count),
+            _loadGeneration,
+            cts);
     }
 
     private void RowsList_ScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -982,24 +997,25 @@ public partial class MainWindow : Window
         bool movingDown = currentOffset >= _lastListThumbnailVerticalOffset;
         _lastListThumbnailVerticalOffset = currentOffset;
         var candidates = new List<(Tile Tile, bool Visible, double Distance, double Top)>();
+        var visiblePaths = new List<(string Path, double Top)>();
         var protectedTiles = new List<Tile>();
         foreach (ListBoxItem item in FindVisualDescendants<ListBoxItem>(RowsList))
         {
             if (item.DataContext is not Tile { IsRealFile: true } tile)
                 continue;
             protectedTiles.Add(tile);
-            if (tile.Thumbnail is not null)
-            {
-                TouchResidentThumbnail(tile);
-                continue;
-            }
             try
             {
                 double top = item.TransformToAncestor(viewer).Transform(new Point(0, 0)).Y;
                 double bottom = top + item.ActualHeight;
                 bool visible = bottom >= 0 && top <= viewer.ViewportHeight;
                 double distance = Math.Abs(((top + bottom) / 2) - (viewer.ViewportHeight / 2));
-                candidates.Add((tile, visible, distance, top));
+                if (visible)
+                    visiblePaths.Add((tile.Path, top));
+                if (tile.Thumbnail is not null)
+                    TouchResidentThumbnail(tile);
+                else
+                    candidates.Add((tile, visible, distance, top));
             }
             catch (InvalidOperationException)
             {
@@ -1027,15 +1043,22 @@ public partial class MainWindow : Window
             .ToList();
         string visibleSignature = string.Join(
             '\u001f',
-            candidates.Where(static candidate => candidate.Visible)
+            visiblePaths
                 .OrderBy(static candidate => candidate.Top)
-                .Select(static candidate => candidate.Tile.Path));
+                .Select(static candidate => candidate.Path));
         string signature = $"list|{_loadGeneration}|{_thumbnailViewportRevision}|{visibleSignature}";
-        ScheduleThumbnailCandidates(orderedCandidates, signature);
+        int visibleCandidateCount = visibleCandidates
+            .DistinctBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase)
+            .Count();
+        ScheduleThumbnailCandidates(
+            orderedCandidates,
+            signature,
+            Math.Min(orderedCandidates.Count, visibleCandidateCount + 1));
     }
 
     private async Task LoadThumbnailViewportAsync(
         IReadOnlyList<Tile> candidates,
+        int priorityCandidateCount,
         long generation,
         CancellationTokenSource cts)
     {
@@ -1045,12 +1068,14 @@ public partial class MainWindow : Window
             List<Tile> ordered = candidates
                 .OrderByDescending(tile => ReferenceEquals(tile, selected))
                 .ToList();
-            int immediateCount = Math.Min(ImmediateViewportThumbnailCount, ordered.Count);
-            CancellationToken priorityToken = _loadCts?.Token ?? CancellationToken.None;
+            int immediateCount = Math.Clamp(
+                priorityCandidateCount,
+                ImmediateViewportThumbnailCount,
+                ordered.Count);
             await LoadThumbnailCandidatesAsync(
                 ordered.Take(immediateCount).ToArray(),
                 generation,
-                priorityToken,
+                cts.Token,
                 maxBatchConcurrency: 4);
             cts.Token.ThrowIfCancellationRequested();
 
@@ -1343,7 +1368,8 @@ public partial class MainWindow : Window
         double CatalogSnapshotResetThreadCpuMs = -1,
         int CatalogSnapshotResetCount = 0,
         int CatalogSnapshotResetNestedCount = 0,
-        bool PublishedSingleRemoval = false);
+        bool PublishedSingleRemoval = false,
+        bool Published = false);
 
     private sealed class CatalogLayoutCache
     {
@@ -2709,24 +2735,42 @@ public partial class MainWindow : Window
         int workers = Math.Max(1, Math.Min(batchWorkerLimit, requested));
         if (requested == 0)
             return new ThumbnailLoadMetrics(0, 0, 0, 0);
-        using var batchGate = new SemaphoreSlim(batchWorkerLimit, batchWorkerLimit);
+        int nextCandidateIndex = -1;
 
         try
         {
-            Task[] loads = candidates.Select(async tile =>
+            async Task LoadWorkerAsync()
             {
-                if (tile.Thumbnail is not null
-                    || !ShouldAttemptThumbnailDecode(tile.Path)
-                    || !_thumbnailLoadsInFlight.TryAdd(tile.Path, 0))
+                while (true)
                 {
-                    return;
-                }
-                Interlocked.Increment(ref scheduled);
-                try
-                {
-                    await batchGate.WaitAsync(token);
+                    token.ThrowIfCancellationRequested();
+                    int candidateIndex = Interlocked.Increment(ref nextCandidateIndex);
+                    if (candidateIndex >= requested)
+                        return;
+
+                    Tile tile = candidates[candidateIndex];
+                    if (tile.Thumbnail is not null
+                        || !ShouldAttemptThumbnailDecode(tile.Path)
+                        || !_thumbnailLoadsInFlight.TryAdd(tile.Path, 0))
+                    {
+                        continue;
+                    }
+
+                    Interlocked.Increment(ref scheduled);
+                    int smokeDelayMilliseconds = Volatile.Read(
+                        ref _thumbnailDecodeDelayForSmokeMilliseconds);
+                    bool recordForSmoke = smokeDelayMilliseconds > 0;
                     try
                     {
+                        if (recordForSmoke)
+                        {
+                            await Task.Delay(smokeDelayMilliseconds, token);
+                            _thumbnailDecodeStartsForSmoke.AddOrUpdate(
+                                tile.Path,
+                                1,
+                                static (_, count) => count + 1);
+                        }
+
                         await _thumbnailDecodeGate.WaitAsync(token);
                         int activeWorkers = Interlocked.Increment(ref _activeThumbnailDecodeWorkers);
                         UpdateMaximumCounter(ref _maxActiveThumbnailDecodeWorkers, activeWorkers);
@@ -2752,29 +2796,35 @@ public partial class MainWindow : Window
                         {
                             _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
                             StoreResidentThumbnail(tile, thumbnail);
+                            if (recordForSmoke)
+                            {
+                                _thumbnailAppliesForSmoke.AddOrUpdate(
+                                    tile.Path,
+                                    1,
+                                    static (_, count) => count + 1);
+                            }
                         }
+                        Interlocked.Increment(ref completed);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        RecordThumbnailDecodeFailure(tile.Path);
                         Interlocked.Increment(ref completed);
                     }
                     finally
                     {
-                        batchGate.Release();
+                        _thumbnailLoadsInFlight.TryRemove(tile.Path, out _);
                     }
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    RecordThumbnailDecodeFailure(tile.Path);
-                    Interlocked.Increment(ref completed);
-                }
-                finally
-                {
-                    _thumbnailLoadsInFlight.TryRemove(tile.Path, out _);
-                }
-            }).ToArray();
+            }
 
+            Task[] loads = Enumerable.Range(0, workers)
+                .Select(_ => LoadWorkerAsync())
+                .ToArray();
             await Task.WhenAll(loads);
         }
         catch (OperationCanceledException)
@@ -2920,11 +2970,15 @@ public partial class MainWindow : Window
     {
         long protectedBytes = ProtectedResidentThumbnailBytes();
         long effectiveBudget = Math.Max(_residentThumbnailBudgetBytes, protectedBytes);
+        int effectiveEntryLimit = Math.Max(
+            MaxResidentThumbnailEntryCount,
+            _protectedResidentThumbnailPaths.Count);
         _maxProtectedResidentThumbnailBytes = Math.Max(_maxProtectedResidentThumbnailBytes, protectedBytes);
         _maxEffectiveResidentThumbnailBudgetBytes = Math.Max(
             _maxEffectiveResidentThumbnailBudgetBytes,
             effectiveBudget);
-        while (_residentThumbnailBytes > effectiveBudget)
+        while (_residentThumbnailBytes > effectiveBudget
+            || _residentThumbnailLru.Count > effectiveEntryLimit)
         {
             LinkedListNode<Tile>? oldestUnprotected = _residentThumbnailLru.First;
             while (oldestUnprotected is not null
@@ -2980,7 +3034,7 @@ public partial class MainWindow : Window
     {
         long available = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
         long candidate = available > 0
-            ? available / 32
+            ? available / 64
             : FallbackResidentThumbnailBudgetBytes;
         return Math.Clamp(
             candidate,
@@ -4876,9 +4930,7 @@ public partial class MainWindow : Window
             if (applyUnseenFilter && UnseenOnlyFilter?.IsChecked == true)
             {
                 Tile? selected = SelectedTile();
-                ApplyFilters(selectFirst: false);
-                if (selected is not null && !_tiles.Contains(selected))
-                    SelectTile(null);
+                _ = ReconcileUnseenFilterProjectionAsync(selected);
             }
             else if (applyUnseenFilter)
             {
@@ -5170,10 +5222,10 @@ public partial class MainWindow : Window
             return null;
         }
 
+        bool reorderCatalog = _scheduledCatalogProjection?.ReorderCatalog == true;
         int selectedIndex = _primarySelectedIndex >= 0
             ? _primarySelectedIndex
             : Math.Max(CardsList.SelectedIndex, RowsList.SelectedIndex);
-        bool reorderCatalog = _scheduledCatalogProjection?.ReorderCatalog == true;
         // A later inclusion must supersede any in-flight exclusion snapshot.
         // Recompute from the full catalog so the old generation cannot remove
         // an image that has already become eligible again. Preserve an
@@ -5509,9 +5561,7 @@ public partial class MainWindow : Window
 
         if (UnseenOnlyFilter?.IsChecked == true)
         {
-            ApplyFilters(selectFirst: false);
-            if (!_tiles.Contains(tile))
-                SelectTile(null);
+            _ = ReconcileUnseenFilterProjectionAsync(tile);
         }
         else
         {
@@ -5519,6 +5569,51 @@ public partial class MainWindow : Window
         }
 
         return true;
+    }
+
+    private async Task ReconcileUnseenFilterProjectionAsync(Tile? selected)
+    {
+        long reconcileGeneration = ++_unseenFilterReconcileGeneration;
+        while (reconcileGeneration == _unseenFilterReconcileGeneration
+            && UnseenOnlyFilter?.IsChecked == true
+            && _tiles.Any(static tile => tile.IsRealFile && !tile.Unseen))
+        {
+            Task<SearchFilterCompletion>? pendingProjection =
+                _pendingSearchFilterCompletion?.Task;
+            SearchFilterCompletion completion;
+            if (pendingProjection is not null && !pendingProjection.IsCompleted)
+            {
+                // Let a newer user-driven query/filter publish first. Its
+                // snapshot may already include this seen-state change.
+                completion = await pendingProjection;
+            }
+            else
+            {
+                bool reorderCatalog = _scheduledCatalogProjection?.ReorderCatalog == true;
+                bool projectionIsStable = _scheduledCatalogProjection is null
+                    && _pendingSearchFilterCompletion is null
+                    && _catalogProjectionCts is null;
+                completion = await QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: reorderCatalog,
+                    selectFirst: false,
+                    restrictToCurrentProjection: projectionIsStable);
+            }
+
+            if (!string.IsNullOrWhiteSpace(completion.Error))
+                return;
+        }
+
+        if (reconcileGeneration == _unseenFilterReconcileGeneration
+            && selected is not null
+            && !_tiles.Contains(selected)
+            && string.Equals(
+                _primarySelectedPath,
+                selected.Path,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            SelectTile(null);
+        }
     }
 
     private bool QueueTileSeen(Tile tile)
@@ -5948,7 +6043,7 @@ public partial class MainWindow : Window
         if (imported > 0)
         {
             if (UnseenOnlyFilter?.IsChecked == true)
-                ApplyFilters(selectFirst: false);
+                _ = ReconcileUnseenFilterProjectionAsync(SelectedTile());
             else
                 UpdateHeaderStats();
         }
@@ -9057,7 +9152,8 @@ public partial class MainWindow : Window
                 _maxCatalogProjectionApplySliceMilliseconds = Math.Max(
                     _maxCatalogProjectionApplySliceMilliseconds,
                     maxApplySliceMs);
-                if (request.Generation == _catalogProjectionGeneration)
+                if (request.Generation == _catalogProjectionGeneration
+                    && applyMetrics.Published)
                 {
                     _lastAppliedCatalogProjectionGeneration = request.Generation;
                     outcome = SearchFilterCompletion.AppliedResult;
@@ -11480,8 +11576,16 @@ public partial class MainWindow : Window
         if (_galleryVirtualizingPanel is null)
             AttachGalleryVirtualizationPanel();
         VirtualizingWrapPanel? preparedPanel = _galleryVirtualizingPanel;
-        CancelThumbnailViewportLoading();
-        _thumbnailViewportRevision++;
+        bool releaseWpfSelectionBeforePublication =
+            ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult);
+        bool projectionChanged =
+            !_tiles.Matches(filterResult.Tiles, filterResult.Count)
+            || releaseWpfSelectionBeforePublication;
+        if (projectionChanged)
+        {
+            CancelThumbnailViewportLoading();
+            _thumbnailViewportRevision++;
+        }
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
         inputBoundaryBeforePublication = true;
@@ -11489,12 +11593,14 @@ public partial class MainWindow : Window
         var phase = new Stopwatch();
         int exactSingleRemovalIndex = filterResult.ExactSingleRemovalIndex ?? -1;
         bool publishSingleRemoval =
-            exactSingleRemovalIndex >= 0
+            projectionChanged
+            && exactSingleRemovalIndex >= 0
             && _tiles.CanReplaceOneRemoved(
                 filterResult.Tiles,
                 filterResult.Count,
                 exactSingleRemovalIndex);
-        if (!publishSingleRemoval
+        if (projectionChanged
+            && !publishSingleRemoval
             && snapshot.RestoreGalleryFocus
             && Keyboard.FocusedElement is DependencyObject focusedElement)
         {
@@ -11516,7 +11622,8 @@ public partial class MainWindow : Window
                     reconcileMs);
             }
         }
-        if (ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult))
+        if (projectionChanged
+            && releaseWpfSelectionBeforePublication)
         {
             (
                 preResetSelectionReleaseMs,
@@ -11527,7 +11634,8 @@ public partial class MainWindow : Window
             // generator detachment as two independently bounded UI slices.
             _ = await YieldForInputAsync(checkGeneration: false);
         }
-        bool resetPreparationStarted = !publishSingleRemoval
+        bool resetPreparationStarted = projectionChanged
+            && !publishSingleRemoval
             && preparedPanel?.BeginItemsResetPreparation() == true;
         try
         {
@@ -11641,7 +11749,8 @@ public partial class MainWindow : Window
                 long resetAllocatedBefore = collectResetAllocation
                     ? GC.GetAllocatedBytesForCurrentThread()
                     : 0;
-                StageGalleryAutomationProjection(filterResult.AutomationProjection);
+                if (projectionChanged)
+                    StageGalleryAutomationProjection(filterResult.AutomationProjection);
                 if (publishSingleRemoval)
                 {
                     _tiles.ReplaceOneRemovedAfterValidation(
@@ -11649,7 +11758,7 @@ public partial class MainWindow : Window
                         filterResult.Count,
                         exactSingleRemovalIndex);
                 }
-                else
+                else if (projectionChanged)
                 {
                     // The work above remains part of the app-owned
                     // cooperative slice. The synchronous WPF Reset is an
@@ -11740,7 +11849,7 @@ public partial class MainWindow : Window
             _primarySelectedTile = null;
             _primarySelectedIndex = -1;
         }
-        if (filterResult.PreparedLayout is null)
+        if (projectionChanged && filterResult.PreparedLayout is null)
             _galleryVirtualizingPanel?.InvalidateItemLayout();
         phase.Stop();
         statsMs = phase.ElapsedMilliseconds;
@@ -11849,7 +11958,8 @@ public partial class MainWindow : Window
             catalogSnapshotResetThreadCpuMs,
             catalogSnapshotResetCount,
             catalogSnapshotResetNestedCount,
-            publishSingleRemoval);
+            publishSingleRemoval,
+            Published: true);
     }
 
     private void ScheduleCatalogStatsUpdate(long generation)
@@ -11906,15 +12016,28 @@ public partial class MainWindow : Window
         }
 
         bool wasSyncingSelection = _syncingSelection;
+        bool releaseWpfSelectionBeforePublication =
+            ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult);
+        bool projectionChanged =
+            !_tiles.Matches(filtered, filteredCount)
+            || releaseWpfSelectionBeforePublication;
         _syncingSelection = true;
         try
         {
-            CancelThumbnailViewportLoading();
-            _thumbnailViewportRevision++;
-            if (ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult))
+            if (projectionChanged)
+            {
+                CancelThumbnailViewportLoading();
+                _thumbnailViewportRevision++;
+            }
+            if (projectionChanged
+                && releaseWpfSelectionBeforePublication)
+            {
                 ReleaseWpfSelectionBeforeCatalogPublication();
-            StageGalleryAutomationProjection(filterResult.AutomationProjection);
-            _tiles.ReplaceAll(filtered, filteredCount);
+            }
+            if (projectionChanged)
+                StageGalleryAutomationProjection(filterResult.AutomationProjection);
+            if (projectionChanged)
+                _tiles.ReplaceAll(filtered, filteredCount);
         }
         finally
         {
@@ -11938,7 +12061,8 @@ public partial class MainWindow : Window
         if (preferred is null && selectionFallbackIndex.HasValue && _tiles.Count > 0)
             preferred = _tiles[Math.Clamp(selectionFallbackIndex.Value, 0, _tiles.Count - 1)];
         preferred ??= selectFirst && _tiles.Count > 0 ? _tiles[0] : null;
-        _galleryVirtualizingPanel?.InvalidateItemLayout();
+        if (projectionChanged)
+            _galleryVirtualizingPanel?.InvalidateItemLayout();
         UpdateFolderStats();
 
         if (preferred is not null)
@@ -21144,7 +21268,7 @@ public partial class MainWindow : Window
     public int ThumbnailBrowserCacheHitsForSmoke => _thumbnailBrowserCacheHits;
     public int ResidentThumbnailCountForSmoke => _residentThumbnailLru.Count;
     public int MaxResidentThumbnailCountForSmoke => _maxResidentThumbnailCount;
-    public int ResidentThumbnailLimitForSmoke => LegacyResidentThumbnailCountHint;
+    public int ResidentThumbnailLimitForSmoke => MaxResidentThumbnailEntryCount;
     public int ProtectedResidentThumbnailCountForSmoke => _protectedResidentThumbnailPaths.Count;
     public long ResidentThumbnailBytesForSmoke => _residentThumbnailBytes;
     public long MaxResidentThumbnailBytesForSmoke => _maxResidentThumbnailBytes;
@@ -21159,6 +21283,111 @@ public partial class MainWindow : Window
     public int ThumbnailViewportScheduleCountForSmoke => _thumbnailViewportScheduleCount;
     public int ThumbnailViewportCancelCountForSmoke => _thumbnailViewportCancelCount;
     public int ThumbnailViewportDuplicateSuppressedCountForSmoke => _thumbnailViewportDuplicateSuppressedCount;
+    public int ThumbnailLoadsInFlightCountForSmoke => _thumbnailLoadsInFlight.Count;
+    public void ConfigureThumbnailDecodeDelayForSmoke(int delayMilliseconds)
+    {
+        Volatile.Write(
+            ref _thumbnailDecodeDelayForSmokeMilliseconds,
+            Math.Max(0, delayMilliseconds));
+        _thumbnailDecodeStartsForSmoke.Clear();
+        _thumbnailAppliesForSmoke.Clear();
+    }
+    public int BurstScheduleThumbnailViewportsForSmoke(IReadOnlyList<string> fileNames)
+    {
+        ArgumentNullException.ThrowIfNull(fileNames);
+        CancelThumbnailViewportLoading();
+        long burstRevision = ++_thumbnailViewportRevision;
+        int schedulesBefore = _thumbnailViewportScheduleCount;
+        for (int index = 0; index < fileNames.Count; index++)
+        {
+            Tile tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileNames[index],
+                StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Thumbnail smoke tile was not found: {fileNames[index]}");
+            tile.Thumbnail = null;
+            TouchResidentThumbnail(tile);
+            _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
+            _thumbnailDecodeStartsForSmoke.TryRemove(tile.Path, out _);
+            _thumbnailAppliesForSmoke.TryRemove(tile.Path, out _);
+            ScheduleThumbnailCandidates(
+                [tile],
+                $"smoke|{_loadGeneration}|{burstRevision}|{index}",
+                priorityCandidateCount: 1);
+        }
+        return _thumbnailViewportScheduleCount - schedulesBefore;
+    }
+    public int ScheduleThumbnailBatchForSmoke(IReadOnlyList<string> fileNames)
+    {
+        ArgumentNullException.ThrowIfNull(fileNames);
+        CancelThumbnailViewportLoading();
+        SelectTile(null);
+        ClearProtectedResidentThumbnails();
+        Interlocked.Exchange(ref _maxActiveThumbnailDecodeWorkers, 0);
+        var tiles = new List<Tile>(fileNames.Count);
+        foreach (string fileName in fileNames)
+        {
+            Tile tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Thumbnail smoke tile was not found: {fileName}");
+            tile.Thumbnail = null;
+            TouchResidentThumbnail(tile);
+            _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
+            tiles.Add(tile);
+        }
+
+        int schedulesBefore = _thumbnailViewportScheduleCount;
+        ScheduleThumbnailCandidates(
+            tiles,
+            $"smoke-batch|{_loadGeneration}|{++_thumbnailViewportRevision}",
+            priorityCandidateCount: tiles.Count);
+        return _thumbnailViewportScheduleCount - schedulesBefore;
+    }
+    public async Task<bool> WaitForThumbnailViewportIdleForSmokeAsync(
+        int timeoutMilliseconds = 5_000)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < timeoutMilliseconds)
+        {
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            if (_thumbnailViewportCts is null
+                && _thumbnailLoadsInFlight.IsEmpty
+                && Volatile.Read(ref _activeThumbnailDecodeWorkers) == 0)
+            {
+                return true;
+            }
+            await Task.Delay(10);
+        }
+        return _thumbnailViewportCts is null
+            && _thumbnailLoadsInFlight.IsEmpty
+            && Volatile.Read(ref _activeThumbnailDecodeWorkers) == 0;
+    }
+    public int ThumbnailDecodeStartsForSmoke(IReadOnlyList<string> fileNames)
+        => SumThumbnailSmokeCounts(fileNames, _thumbnailDecodeStartsForSmoke);
+    public int ThumbnailAppliesForSmoke(IReadOnlyList<string> fileNames)
+        => SumThumbnailSmokeCounts(fileNames, _thumbnailAppliesForSmoke);
+    public int LoadedThumbnailCountForSmoke(IReadOnlyList<string> fileNames)
+        => fileNames.Count(fileName => _allTiles.Any(tile =>
+            string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase)
+            && tile.Thumbnail is not null));
+    private int SumThumbnailSmokeCounts(
+        IReadOnlyList<string> fileNames,
+        ConcurrentDictionary<string, int> counts)
+    {
+        int total = 0;
+        foreach (string fileName in fileNames)
+        {
+            Tile? tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase));
+            if (tile is not null && counts.TryGetValue(tile.Path, out int count))
+                total += count;
+        }
+        return total;
+    }
     public int ThumbnailDecodeAttemptCountForSmoke(string fileName)
     {
         Tile? tile = _allTiles.FirstOrDefault(candidate =>
@@ -24807,6 +25036,25 @@ internal sealed class ResettableObservableCollection<T> :
         ReplaceOwned(count == items.Length ? items : items.AsSpan(0, count).ToArray());
     }
 
+    public bool Matches(T[] items, int count)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (count < 0 || count > items.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        if (_items.Length != count)
+            return false;
+        if (ReferenceEquals(_items, items))
+            return true;
+
+        EqualityComparer<T> comparer = EqualityComparer<T>.Default;
+        for (int index = 0; index < count; index++)
+        {
+            if (!comparer.Equals(_items[index], items[index]))
+                return false;
+        }
+        return true;
+    }
+
     public bool CanReplaceOneRemoved(T[] items, int count, int removedIndex)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -24968,7 +25216,23 @@ internal sealed class ResettableObservableCollection<T> :
 // ─────────── Tile view model ───────────
 public sealed class Tile : INotifyPropertyChanged
 {
-    private static readonly PropertyChangedEventArgs AllLayoutPropertiesChanged = new(string.Empty);
+    private static readonly PropertyChangedEventArgs CardWidthChanged = new(nameof(CardWidth));
+    private static readonly PropertyChangedEventArgs CardHeightChanged = new(nameof(CardHeight));
+    private static readonly PropertyChangedEventArgs CardThumbnailStretchChanged = new(nameof(CardThumbnailStretch));
+    private static readonly PropertyChangedEventArgs ShowCardDetailsChanged = new(nameof(ShowCardDetails));
+    private static readonly PropertyChangedEventArgs ShowCardStatusBadgeChanged = new(nameof(ShowCardStatusBadge));
+    private static readonly PropertyChangedEventArgs CardFavoriteButtonSizeChanged = new(nameof(CardFavoriteButtonSize));
+    private static readonly PropertyChangedEventArgs UseCompactCardTemplateChanged = new(nameof(UseCompactCardTemplate));
+    private static readonly PropertyChangedEventArgs CompactFavoriteControlHeightChanged = new(nameof(CompactFavoriteControlHeight));
+    private static readonly PropertyChangedEventArgs ListThumbnailWidthChanged = new(nameof(ListThumbnailWidth));
+    private static readonly PropertyChangedEventArgs ListThumbnailHeightChanged = new(nameof(ListThumbnailHeight));
+    private static readonly PropertyChangedEventArgs ListThumbnailSizeChanged = new(nameof(ListThumbnailSize));
+    private static readonly PropertyChangedEventArgs ShowFavoriteBadgeChanged = new(nameof(ShowFavoriteBadge));
+    private static readonly PropertyChangedEventArgs ShowEnhancedBadgeChanged = new(nameof(ShowEnhancedBadge));
+    private static readonly PropertyChangedEventArgs ShowUpscaleBadgeChanged = new(nameof(ShowUpscaleBadge));
+    private static readonly PropertyChangedEventArgs ShowPhotorealBadgeChanged = new(nameof(ShowPhotorealBadge));
+    private static readonly PropertyChangedEventArgs ShowVideoBadgeChanged = new(nameof(ShowVideoBadge));
+    private static readonly PropertyChangedEventArgs ShowUnseenDotOnCardChanged = new(nameof(ShowUnseenDotOnCard));
 
     public Brush? ArtBase { get; set; }
     public Brush? ArtGlow { get; set; }
@@ -25312,16 +25576,25 @@ public sealed class Tile : INotifyPropertyChanged
         double listThumbnailHeight,
         double listThumbnailSize)
     {
-        bool changed = Math.Abs(_cardWidth - cardWidth) >= 0.01
-            || Math.Abs(_cardHeight - cardHeight) >= 0.01
-            || _cardThumbnailStretch != cardThumbnailStretch
-            || _showCardDetails != showDetails
-            || _showCardStatusBadge != showStatusBadge
-            || Math.Abs(_listThumbnailWidth - listThumbnailWidth) >= 0.01
-            || Math.Abs(_listThumbnailHeight - listThumbnailHeight) >= 0.01
-            || Math.Abs(_listThumbnailSize - listThumbnailSize) >= 0.01;
-        if (!changed)
+        bool cardWidthChanged = Math.Abs(_cardWidth - cardWidth) >= 0.01;
+        bool cardHeightChanged = Math.Abs(_cardHeight - cardHeight) >= 0.01;
+        bool cardThumbnailStretchChanged = _cardThumbnailStretch != cardThumbnailStretch;
+        bool showDetailsChanged = _showCardDetails != showDetails;
+        bool showStatusBadgeChanged = _showCardStatusBadge != showStatusBadge;
+        bool listThumbnailWidthChanged = Math.Abs(_listThumbnailWidth - listThumbnailWidth) >= 0.01;
+        bool listThumbnailHeightChanged = Math.Abs(_listThumbnailHeight - listThumbnailHeight) >= 0.01;
+        bool listThumbnailSizeChanged = Math.Abs(_listThumbnailSize - listThumbnailSize) >= 0.01;
+        if (!cardWidthChanged
+            && !cardHeightChanged
+            && !cardThumbnailStretchChanged
+            && !showDetailsChanged
+            && !showStatusBadgeChanged
+            && !listThumbnailWidthChanged
+            && !listThumbnailHeightChanged
+            && !listThumbnailSizeChanged)
+        {
             return;
+        }
 
         _cardWidth = cardWidth;
         _cardHeight = cardHeight;
@@ -25332,11 +25605,44 @@ public sealed class Tile : INotifyPropertyChanged
         _listThumbnailHeight = listThumbnailHeight;
         _listThumbnailSize = listThumbnailSize;
 
-        // Only realized cards have WPF binding subscribers. Non-realized
-        // catalog entries therefore update without allocating event args, and
-        // realized cards refresh all layout bindings with one notification.
         PropertyChangedEventHandler? handler = PropertyChanged;
-        handler?.Invoke(this, AllLayoutPropertiesChanged);
+        if (handler is null)
+            return;
+
+        // Keep thumbnail bindings stable while zoom/layout values change.
+        // Empty-name notifications re-evaluate every binding, including the
+        // already loaded BitmapSource, and make recycled cards visibly flash.
+        if (cardWidthChanged)
+        {
+            handler(this, CardWidthChanged);
+            handler(this, CardFavoriteButtonSizeChanged);
+            handler(this, UseCompactCardTemplateChanged);
+        }
+        if (cardHeightChanged)
+        {
+            handler(this, CardHeightChanged);
+            handler(this, CompactFavoriteControlHeightChanged);
+        }
+        if (cardThumbnailStretchChanged)
+            handler(this, CardThumbnailStretchChanged);
+        if (showDetailsChanged)
+            handler(this, ShowCardDetailsChanged);
+        if (showStatusBadgeChanged)
+        {
+            handler(this, ShowCardStatusBadgeChanged);
+            handler(this, ShowFavoriteBadgeChanged);
+            handler(this, ShowEnhancedBadgeChanged);
+            handler(this, ShowUpscaleBadgeChanged);
+            handler(this, ShowPhotorealBadgeChanged);
+            handler(this, ShowVideoBadgeChanged);
+            handler(this, ShowUnseenDotOnCardChanged);
+        }
+        if (listThumbnailWidthChanged)
+            handler(this, ListThumbnailWidthChanged);
+        if (listThumbnailHeightChanged)
+            handler(this, ListThumbnailHeightChanged);
+        if (listThumbnailSizeChanged)
+            handler(this, ListThumbnailSizeChanged);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
