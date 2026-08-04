@@ -19,6 +19,10 @@ public partial class App
         string lockedPath = Path.Combine(folder, "locked-valid.png");
         string anchorPath = Path.Combine(folder, "anchor-valid.png");
         string corruptPath = Path.Combine(folder, "corrupt.png");
+        string[] batchPaths = Enumerable.Range(0, 272)
+            .Select(index => Path.Combine(folder, $"burst-{index:D2}.png"))
+            .ToArray();
+        string[] burstPaths = batchPaths.Take(64).ToArray();
         var previousEnvironment = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["PHOTOVIEWER_WPF_STATE_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH"),
@@ -61,6 +65,15 @@ public partial class App
                 WriteSmokePng(lockedPath, 64, 48, Color.FromRgb(76, 132, 214));
                 WriteSmokePng(anchorPath, 64, 48, Color.FromRgb(126, 190, 116));
                 File.WriteAllBytes(corruptPath, [0x89, 0x50, 0x4E, 0x47, 0x00, 0x01, 0x02, 0x03]);
+                foreach (string burstPath in batchPaths)
+                {
+                    File.Copy(anchorPath, burstPath);
+                    File.SetLastWriteTimeUtc(burstPath, DateTime.UtcNow.AddHours(-1));
+                }
+                DateTime continuityFixtureWriteTime = DateTime.UtcNow;
+                File.SetLastWriteTimeUtc(lockedPath, continuityFixtureWriteTime);
+                File.SetLastWriteTimeUtc(anchorPath, continuityFixtureWriteTime);
+                File.SetLastWriteTimeUtc(corruptPath, continuityFixtureWriteTime);
                 var sourceHashesBefore = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     [Path.GetFileName(lockedPath)] = HashFile(lockedPath),
@@ -108,6 +121,161 @@ public partial class App
                     && sourceHashesBefore.All(pair =>
                         sourceHashesAfterRecovery.TryGetValue(pair.Key, out string? hash)
                         && string.Equals(hash, pair.Value, StringComparison.Ordinal));
+
+                string[] burstNames = burstPaths.Select(Path.GetFileName).ToArray()!;
+                bool viewportIdleBeforeBurst =
+                    await window.WaitForThumbnailViewportIdleForSmokeAsync();
+                window.ConfigureThumbnailDecodeDelayForSmoke(250);
+                int viewportCancelsBeforeBurst = window.ThumbnailViewportCancelCountForSmoke;
+                int burstSchedules = window.BurstScheduleThumbnailViewportsForSmoke(burstNames);
+                bool viewportIdleAfterBurst =
+                    await window.WaitForThumbnailViewportIdleForSmokeAsync();
+                int burstCancels =
+                    window.ThumbnailViewportCancelCountForSmoke - viewportCancelsBeforeBurst;
+                int burstDecodeStarts = window.ThumbnailDecodeStartsForSmoke(burstNames);
+                int burstApplies = window.ThumbnailAppliesForSmoke(burstNames);
+                int burstLoaded = window.LoadedThumbnailCountForSmoke(burstNames);
+                int burstInFlight = window.ThumbnailLoadsInFlightCountForSmoke;
+                bool burstLatestWins = viewportIdleBeforeBurst
+                    && viewportIdleAfterBurst
+                    && burstSchedules == burstNames.Length
+                    && burstCancels == burstNames.Length - 1
+                    && burstDecodeStarts == 1
+                    && burstApplies == 1
+                    && burstLoaded == 1
+                    && burstInFlight == 0;
+
+                string[] batchNames = batchPaths.Select(Path.GetFileName).ToArray()!;
+                CancellationAwareReadSmokeSnapshot cancellationAwareRead =
+                    await global::PhotoViewer.Wpf.MainWindow
+                        .RunCancellationAwareReadStreamForSmokeAsync();
+                bool cancellationAwareReadInterrupted =
+                    cancellationAwareRead.ReadEntered
+                    && cancellationAwareRead.CancelReturned
+                    && cancellationAwareRead.ReadCompleted
+                    && cancellationAwareRead.ReadCanceled
+                    && cancellationAwareRead.InnerDisposedBeforeCleanup;
+                string[] wicGenerationA = batchNames.Skip(64).Take(4).ToArray();
+                string[] wicGenerationB = batchNames.Skip(68).Take(4).ToArray();
+                string[] wicGenerationC = batchNames.Skip(72).Take(4).ToArray();
+                string[] wicGenerationD = batchNames.Skip(76).Take(4).ToArray();
+                window.ConfigureThumbnailDecodeDelayForSmoke(0);
+                window.ConfigureThumbnailWicReadBarrierForSmoke(blockFirstRead: true);
+                int wicGenerationASchedules = window.ScheduleThumbnailBatchForSmoke(wicGenerationA);
+                bool wicGenerationAEntered = await WaitForThumbnailContinuityConditionAsync(
+                    () => window.ThumbnailWicReadStartsForSmoke(wicGenerationA) == wicGenerationA.Length
+                        && window.ActiveThumbnailDecodeWorkersForSmoke == wicGenerationA.Length,
+                    timeoutMilliseconds: 4_000);
+                window.ConfigureThumbnailWicReadBarrierForSmoke(
+                    blockFirstRead: false,
+                    clearCounters: false);
+                int wicGenerationBSchedules = window.ScheduleThumbnailBatchForSmoke(wicGenerationB);
+                bool wicGenerationBQueued = await WaitForThumbnailContinuityConditionAsync(
+                    () => window.ThumbnailLoadsInFlightForSmoke(wicGenerationB) == wicGenerationB.Length,
+                    timeoutMilliseconds: 2_000);
+                int wicGenerationCSchedules = window.ScheduleThumbnailBatchForSmoke(wicGenerationC);
+                bool wicGenerationCQueued = await WaitForThumbnailContinuityConditionAsync(
+                    () => window.ThumbnailLoadsInFlightForSmoke(wicGenerationB) == 0
+                        && window.ThumbnailLoadsInFlightForSmoke(wicGenerationC) == wicGenerationC.Length,
+                    timeoutMilliseconds: 2_000);
+                int wicGenerationDSchedules = window.ScheduleThumbnailBatchForSmoke(wicGenerationD);
+                bool wicGenerationDQueued = await WaitForThumbnailContinuityConditionAsync(
+                    () => window.ThumbnailLoadsInFlightForSmoke(wicGenerationC) == 0
+                        && window.ThumbnailLoadsInFlightForSmoke(wicGenerationD) == wicGenerationD.Length,
+                    timeoutMilliseconds: 2_000);
+                bool latestGenerationBlockedBehindActiveDecode =
+                    window.ThumbnailWicReadStartsForSmoke(wicGenerationD) == 0
+                    && window.ActiveThumbnailDecodeWorkersForSmoke == wicGenerationA.Length
+                    && window.ThumbnailDecodeGateAvailableForSmoke == 0
+                    && window.ThumbnailDecodeWorkerLimitForSmoke == 4;
+                window.ReleaseThumbnailWicReadBarrierForSmoke();
+                bool wicCancellationIdle = await window.WaitForThumbnailViewportIdleForSmokeAsync(
+                    timeoutMilliseconds: 8_000);
+                int wicGenerationAReadStarts = window.ThumbnailWicReadStartsForSmoke(wicGenerationA);
+                int wicGenerationBReadStarts = window.ThumbnailWicReadStartsForSmoke(wicGenerationB);
+                int wicGenerationCReadStarts = window.ThumbnailWicReadStartsForSmoke(wicGenerationC);
+                int wicGenerationDReadStarts = window.ThumbnailWicReadStartsForSmoke(wicGenerationD);
+                int staleWicLoaded = window.LoadedThumbnailCountForSmoke(
+                    [.. wicGenerationA, .. wicGenerationB, .. wicGenerationC]);
+                int currentWicLoaded = window.LoadedThumbnailCountForSmoke(wicGenerationD);
+                int staleWicFailures = wicGenerationA
+                    .Concat(wicGenerationB)
+                    .Concat(wicGenerationC)
+                    .Sum(window.ThumbnailDecodeAttemptCountForSmoke);
+                bool wicCancellationBounded = cancellationAwareReadInterrupted
+                    && wicGenerationAEntered
+                    && wicGenerationBQueued
+                    && wicGenerationCQueued
+                    && wicGenerationDQueued
+                    && latestGenerationBlockedBehindActiveDecode
+                    && wicGenerationASchedules == 1
+                    && wicGenerationBSchedules == 1
+                    && wicGenerationCSchedules == 1
+                    && wicGenerationDSchedules == 1
+                    && wicCancellationIdle
+                    && wicGenerationAReadStarts == wicGenerationA.Length
+                    && wicGenerationBReadStarts == 0
+                    && wicGenerationCReadStarts == 0
+                    && wicGenerationDReadStarts == wicGenerationD.Length
+                    && staleWicLoaded == 0
+                    && currentWicLoaded == wicGenerationD.Length
+                    && staleWicFailures == 0
+                    && window.MaxActiveThumbnailDecodeWorkersForSmoke <= 4
+                    && window.ActiveThumbnailDecodeWorkersForSmoke == 0
+                    && window.ThumbnailLoadsInFlightCountForSmoke == 0
+                    && window.ThumbnailDecodeGateAvailableForSmoke
+                        == window.ThumbnailDecodeWorkerLimitForSmoke;
+                window.DisableThumbnailWicReadSmoke();
+
+                window.ConfigureThumbnailDecodeDelayForSmoke(5);
+                int batchSchedules = window.ScheduleThumbnailBatchForSmoke(batchNames);
+                bool batchIdle = await window.WaitForThumbnailViewportIdleForSmokeAsync();
+                int batchDecodeStarts = window.ThumbnailDecodeStartsForSmoke(batchNames);
+                int batchApplies = window.ThumbnailAppliesForSmoke(batchNames);
+                int batchLoaded = window.LoadedThumbnailCountForSmoke(batchNames);
+                int batchMaxWorkers = window.MaxActiveThumbnailDecodeWorkersForSmoke;
+                int batchResident = window.ResidentThumbnailCountForSmoke;
+                int batchResidentLimit = window.ResidentThumbnailLimitForSmoke;
+                int batchProtected = window.ProtectedResidentThumbnailCountForSmoke;
+                bool batchBounded = batchIdle
+                    && batchSchedules == 1
+                    && batchDecodeStarts == batchNames.Length
+                    && batchApplies == batchNames.Length
+                    && batchMaxWorkers is >= 2 and <= 4
+                    && batchProtected == 0
+                    && batchResident <= batchResidentLimit
+                    && batchLoaded <= batchResidentLimit
+                    && batchLoaded < batchApplies
+                    && window.ThumbnailLoadsInFlightCountForSmoke == 0;
+                int syntheticProtectedCount = batchResidentLimit + 16;
+                window.SetNonResidentThumbnailProtectionForSmoke(syntheticProtectedCount);
+                int nonResidentProtectedPaths = window.ProtectedResidentThumbnailCountForSmoke;
+                int protectedLoadedThumbnails = window.ProtectedLoadedThumbnailCountForSmoke;
+                int effectiveResidentEntryLimit = window.EffectiveResidentThumbnailEntryLimitForSmoke;
+                int protectedReloadCandidates =
+                    window.ScheduleMissingThumbnailBatchWithCurrentProtectionForSmoke(batchNames);
+                bool protectedReloadIdle = await window.WaitForThumbnailViewportIdleForSmokeAsync();
+                int residentAfterProtectedReload = window.ResidentThumbnailCountForSmoke;
+                int loadedAfterProtectedReload = window.LoadedThumbnailCountForSmoke(batchNames);
+                bool nonResidentProtectionDoesNotReserveEntries =
+                    nonResidentProtectedPaths == syntheticProtectedCount
+                    && protectedLoadedThumbnails == 0
+                    && effectiveResidentEntryLimit == batchResidentLimit
+                    && protectedReloadCandidates > 0
+                    && protectedReloadIdle
+                    && residentAfterProtectedReload == batchResidentLimit
+                    && loadedAfterProtectedReload == batchResidentLimit;
+                window.ClearProtectedResidentThumbnailsForSmoke();
+                window.ConfigureThumbnailDecodeDelayForSmoke(0);
+
+                window.SeedLargeInteractionCatalogForSmoke(100_000);
+                SynchronousFilterOwnershipSmokeSnapshot synchronousFilterOwnership =
+                    window.RunSynchronousNoOpFilterForSmoke();
+                bool synchronousNoOpFilterAvoidsAutomationAllocation =
+                    synchronousFilterOwnership.Count == 100_000
+                    && synchronousFilterOwnership.AutomationProjectionCreateDelta == 0
+                    && synchronousFilterOwnership.ActiveCreatorDelta == 0
+                    && synchronousFilterOwnership.ProjectionResetDelta == 0;
 
                 window.SeedLargeInteractionCatalogForSmoke(1_201);
                 window.SetGridModeForSmoke();
@@ -162,6 +330,11 @@ public partial class App
                     && corruptAttempts == 4
                     && singleFolderLoad
                     && sourcesUnchanged
+                    && burstLatestWins
+                    && wicCancellationBounded
+                    && batchBounded
+                    && nonResidentProtectionDoesNotReserveEntries
+                    && synchronousNoOpFilterAvoidsAutomationAllocation
                     && progressiveSliceObserved
                     && layoutGenerationAdvanced
                     && densityChangedColumns
@@ -181,6 +354,53 @@ public partial class App
                     corruptAttempts,
                     singleFolderLoad,
                     sourcesUnchanged,
+                    burstLatestWins,
+                    viewportIdleBeforeBurst,
+                    viewportIdleAfterBurst,
+                    burstSchedules,
+                    burstCancels,
+                    burstDecodeStarts,
+                    burstApplies,
+                    burstLoaded,
+                    burstInFlight,
+                    wicCancellationBounded,
+                    cancellationAwareReadInterrupted,
+                    cancellationAwareRead,
+                    wicGenerationAEntered,
+                    wicGenerationBQueued,
+                    wicGenerationCQueued,
+                    wicGenerationDQueued,
+                    latestGenerationBlockedBehindActiveDecode,
+                    wicGenerationASchedules,
+                    wicGenerationBSchedules,
+                    wicGenerationCSchedules,
+                    wicGenerationDSchedules,
+                    wicGenerationAReadStarts,
+                    wicGenerationBReadStarts,
+                    wicGenerationCReadStarts,
+                    wicGenerationDReadStarts,
+                    staleWicLoaded,
+                    currentWicLoaded,
+                    staleWicFailures,
+                    batchBounded,
+                    batchSchedules,
+                    batchDecodeStarts,
+                    batchApplies,
+                    batchLoaded,
+                    batchMaxWorkers,
+                    batchResident,
+                    batchResidentLimit,
+                    batchProtected,
+                    nonResidentProtectionDoesNotReserveEntries,
+                    nonResidentProtectedPaths,
+                    protectedLoadedThumbnails,
+                    effectiveResidentEntryLimit,
+                    protectedReloadCandidates,
+                    protectedReloadIdle,
+                    residentAfterProtectedReload,
+                    loadedAfterProtectedReload,
+                    synchronousNoOpFilterAvoidsAutomationAllocation,
+                    synchronousFilterOwnership,
                     progressiveSliceObserved,
                     progressivePlaceholders,
                     sparseSettled,
