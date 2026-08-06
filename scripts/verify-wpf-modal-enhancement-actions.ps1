@@ -26,6 +26,7 @@ Assert-True $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCa
 
 $buildRoot = Join-Path $runRoot 'build'
 $resultPath = Join-Path $runRoot 'modal-enhancement-actions.json'
+$recoveryResultPath = Join-Path $runRoot 'recovered-enhancement-references.json'
 $sentinelRoot = Join-Path $runRoot 'caller-store-sentinels'
 $storeEnvironment = [ordered]@{
     PHOTOVIEWER_WPF_STATE_PATH = Join-Path $sentinelRoot 'state.json'
@@ -120,6 +121,9 @@ try {
         'alternateLexicalIdentity',
         'pollIdentityCanonical',
         'restartRecovery',
+        'legacyPhotorealRestartRecovery',
+        'legacyPhotorealModalRecovery',
+        'missingLegacyPhotorealRejected',
         'lexicalOutputRejected',
         'canonicalOutputRejected',
         'navigatedDuringResponse',
@@ -130,6 +134,8 @@ try {
         'companionAppBaseAncestor',
         'companionConfiguredAncestorRejected',
         'companionIdentityRejected',
+        'companionDedicatedLauncherSelected',
+        'companionLegacyRollbackLauncherSelected',
         'nodeExecutableResolved',
         'closeCompleted',
         'environmentRestored',
@@ -146,6 +152,35 @@ try {
         Assert-True ($null -ne $property) "Smoke JSON is missing required property: $propertyName"
         Assert-True ($property.Value -eq $true) "Smoke invariant failed: $propertyName"
     }
+
+    & $DotnetPath $dll --modal-photoreal-smoke $recoveryResultPath
+    $recoveryChildExitCode = $LASTEXITCODE
+    Assert-True (Test-Path -LiteralPath $recoveryResultPath -PathType Leaf) 'Recovered Enhancement reference smoke did not produce JSON.'
+    $recoveryResult = Get-Content -LiteralPath $recoveryResultPath -Raw | ConvertFrom-Json
+    if ($recoveryChildExitCode -ne 0) {
+        $failureEvidence = $recoveryResult | ConvertTo-Json -Depth 5 -Compress
+        throw "Recovered Enhancement reference smoke exited with $recoveryChildExitCode. Evidence: $failureEvidence"
+    }
+    $recoveryRequiredTrue = @(
+        'recoveredReferenceExact',
+        'recoveredReferenceValidEmptyJobs',
+        'recoveredReferenceMalformedJobsRejected',
+        'recoveredReferenceHashVector',
+        'recoveredReferenceHashMismatchRejected',
+        'recoveredReferenceAmbiguousRejected',
+        'recoveredReferenceKnownJobRejected',
+        'recoveredReferenceMutationBlocked',
+        'recoveredReferencePollingPreserved',
+        'recoveredReferenceReadOnly',
+        'recoveredReferenceCacheReuse',
+        'recoveredReferenceCacheInvalidation'
+    )
+    foreach ($propertyName in $recoveryRequiredTrue) {
+        $property = $recoveryResult.PSObject.Properties[$propertyName]
+        Assert-True ($null -ne $property) "Recovery smoke JSON is missing required property: $propertyName"
+        Assert-True ($property.Value -eq $true) "Recovery smoke invariant failed: $propertyName"
+    }
+    $recoveryAllPassed = $recoveryRequiredTrue.Count -eq 12
 
     $appStorePaths = @($result.storePaths.PSObject.Properties | ForEach-Object { [IO.Path]::GetFullPath([string]$_.Value) })
     Assert-True ($appStorePaths.Count -eq 8) 'Smoke must report every durable state file used by the enhancement path.'
@@ -189,7 +224,8 @@ try {
     $appTempStoresRemoved = @($appStorePaths | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0
     Assert-True $appTempStoresRemoved 'The modal enhancement smoke left its internal TEMP stores behind.'
 
-    $allPassed = $requiredTrue.Count -eq 40 `
+    $allPassed = $requiredTrue.Count -eq 45 `
+        -and $recoveryAllPassed `
         -and $callerStoresUnchanged `
         -and $metadataSentinelUnchanged `
         -and $stateWriteCaptured `
@@ -198,14 +234,18 @@ try {
 
     $summary = [pscustomobject]@{
         allPassed = $allPassed
-        message = 'Modal enhancement source identity, output ownership, actions, TEMP isolation, stale-response guard, and cleanup passed.'
+        message = 'Modal enhancement actions and read-only recovered output references passed with TEMP isolation.'
         childExitCode = $childExitCode
+        recoveryChildExitCode = $recoveryChildExitCode
         storesUnchanged = [bool]$result.sharedStoresByteIdentical
         callerStoresUnchanged = $callerStoresUnchanged
         callerMetadataCacheUnchanged = $metadataSentinelUnchanged
         sourceUntouched = [bool]$result.sourceUntouched
         canonicalSourceUntouched = [bool]$result.canonicalSourceUntouched
         restartRecovery = [bool]$result.restartRecovery
+        legacyPhotorealRestartRecovery = [bool]$result.legacyPhotorealRestartRecovery
+        legacyPhotorealModalRecovery = [bool]$result.legacyPhotorealModalRecovery
+        missingLegacyPhotorealRejected = [bool]$result.missingLegacyPhotorealRejected
         outputOwnership = [bool]$result.lexicalOutputRejected -and [bool]$result.canonicalOutputRejected
         staleResponseDiscarded = [bool]$result.staleResponseDiscarded
         navigationDuringResponse = [bool]$result.navigatedDuringResponse
@@ -215,6 +255,9 @@ try {
         stateWriteCapturedInTemp = $stateWriteCaptured
         appTempStoresRemoved = $appTempStoresRemoved
         residueFree = [bool]$result.residueFree
+        recoveredReferences = $recoveryAllPassed
+        recoveredReferencePerformance = $recoveryResult.recoveredReferencePerformance
+        recoveredReferenceDiagnostic = [string]$recoveryResult.recoveredReferenceDiagnostic
     }
     $summary | ConvertTo-Json -Depth 5
 }

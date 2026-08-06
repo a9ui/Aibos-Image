@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-I2I-001",
+  "protocol": "aibos.enhancement-i2i/v1",
+  "jobStoreVersion": 1,
+  "operationEnvelope": {
+    "acceptedValues": [
+      "upscale",
+      "photoreal",
+      "i2i",
+      "video"
+    ],
+    "legacyMissingOperation": "upscale",
+    "presentInvalidOrUnknownOperation": "reader-only unsupported row; never coerce, execute, retry, reorder, open, or delete as an image enhancement",
+    "storeVersionChange": false
+  },
+  "operation": "i2i",
+  "mediaKind": "image",
+  "adapterId": "comfyui-flux2-i2i",
+  "presetId": "flux2-i2i-hair-v1",
+  "outputFolder": "Edited",
+  "sourceSelectionV1": {
+    "requestField": "sourceProducerJobId",
+    "absent": "use sourceId as the indexed Original source",
+    "present": "resolve exactly one succeeded photoreal job for the same indexed Original; the client never supplies its managed output path",
+    "producerRequirements": [
+      "operation is exactly photoreal",
+      "status is succeeded and outputPath is present",
+      "producer sourceId, sourcePath, and sourceSignature match the indexed Original",
+      "output passes lexical and canonical managed-root ownership checks",
+      "output is an existing supported still image"
+    ],
+    "persistedIdentity": "sourceId, sourcePath, and sourceSignature remain the Original catalog identity; sourceProducerJobId records the optional photoreal input provenance",
+    "retry": "preserve sourceProducerJobId and revalidate the producer immediately before execution",
+    "deletion": "do not delete a photoreal output while a queued or running i2i job depends on its producer id",
+    "allowedSources": [
+      "original",
+      "succeeded-photoreal-producer"
+    ],
+    "disallowedSources": [
+      "upscale",
+      "i2i",
+      "video",
+      "raw-client-output-path"
+    ]
+  },
+  "requestV1": {
+    "fixedTarget": "hair-color",
+    "fields": {
+      "target": {
+        "type": "string",
+        "requiredValue": "hair-color"
+      },
+      "hairColor": {
+        "type": "string",
+        "maximumCharacters": 160,
+        "blankAllowed": false
+      },
+      "details": {
+        "type": "string",
+        "maximumCharacters": 240,
+        "blankMeaning": "no additional hair-color detail"
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647,
+        "missing": "choose once at enqueue and persist the resolved integer"
+      }
+    },
+    "minimumRequestedChanges": "one nonblank hairColor for target=hair-color",
+    "unsupportedTargets": [
+      "hairstyle",
+      "outfit"
+    ],
+    "normalization": "trim each string without rewriting its wording",
+    "sourceImagePathField": "forbidden"
+  },
+  "snapshotV1": {
+    "container": "preset.options",
+    "requiredFields": [
+      "i2iSchemaVersion",
+      "target",
+      "hairColor",
+      "details",
+      "preserveIdentity",
+      "prompt",
+      "negativePrompt",
+      "steps",
+      "cfgScale",
+      "maxDimension",
+      "seed",
+      "workflowRevision",
+      "maskRevision",
+      "loraEnabled"
+    ],
+    "fixedValues": {
+      "i2iSchemaVersion": 1,
+      "target": "hair-color",
+      "preserveIdentity": true,
+      "negativePrompt": "",
+      "steps": 8,
+      "cfgScale": 1,
+      "maxDimension": 1280,
+      "workflowRevision": "i2i-flux2-klein9b-sam31-v1",
+      "maskRevision": "sam31-hair-mediapipe-face-v1",
+      "loraEnabled": false
+    },
+    "unknownFields": "preserve when a compatible writer rewrites the row",
+    "retry": "reuse the complete persisted preset, prompt, seed, and source provenance"
+  },
+  "promptSemanticsV1": {
+    "constructionOwner": "companion",
+    "style": "positive description of the requested end state",
+    "requestedChanges": "describe the requested hair color and optional normalized hair-color details; do not inherit a private prompt from the source producer",
+    "sourceReference": "the exact selected Original or photoreal producer pixels are the image reference; source provenance is preserved separately from prompt text",
+    "identity": "retain the same recognizable person, face geometry and proportions, expression, gaze, age, skin appearance, and unrequested facial details",
+    "unchangedContext": "retain pose, body proportions, hands, camera, crop, background, lighting, visual medium, and every unrequested detail",
+    "negativeConditioning": "empty",
+    "manualMask": false,
+    "pixelIdenticalFaceGuarantee": "the deterministic composite restores the protected face core and every pixel outside the editable hair mask from the exact selected source before output encoding"
+  },
+  "executionV1": {
+    "modelFamily": "FLUX.2 Klein reference editing",
+    "installedModel": "flux-2-klein-9b-Q4_K_M.gguf",
+    "referenceConditioning": "ReferenceLatent",
+    "modelPasses": 1,
+    "internalStages": [
+      "resolve and revalidate the exact selected source",
+      "detect one primary face and person",
+      "derive a hair mask with SAM 3.1 text segmentation",
+      "derive the protected face core with MediaPipe face detection",
+      "run one FLUX.2 reference edit candidate",
+      "composite only the editable hair mask with bounded feathering onto the exact source",
+      "verify protected and out-of-mask pixels before publishing one output"
+    ],
+    "singleDurableQueue": true,
+    "singleWorker": true,
+    "parallelInference": false,
+    "samAndFluxSimultaneouslyResident": false,
+    "manualMaskRequired": false,
+    "automaticHairMaskRequired": true,
+    "automaticFaceDetectorRequired": true,
+    "failClosed": "no output is published when a single primary subject, hair mask, protected face core, exact source, or composite invariant cannot be established",
+    "comparisonLora": "off"
+  },
+  "capabilityV1": {
+    "healthPath": "capabilities.i2i",
+    "shape": {
+      "contractId": "PV-ENHANCE-I2I-001",
+      "operation": "i2i",
+      "readerReady": true,
+      "writerEnabled": false,
+      "backendConfigured": false,
+      "ready": false,
+      "supportedTargets": [
+        "hair-color"
+      ],
+      "backendId": "comfyui-flux2-i2i",
+      "workflowRevision": "i2i-flux2-klein9b-sam31-v1",
+      "maskRevision": "sam31-hair-mediapipe-face-v1",
+      "issueCode": "WORKFLOW_UNVERIFIED"
+    },
+    "enqueueGate": "POST operation=i2i requires readerReady, writerEnabled, backendConfigured, and ready to all be exactly true and target to be listed in supportedTargets",
+    "notReady": "validate the request and source envelope, then return 503 I2I_BACKEND_NOT_READY without writing a job or waking the queue",
+    "passiveRead": "health, Jobs readers, and version readers never load models or start the worker"
+  },
+  "readerRules": {
+    "missingCapability": "keep jobs readable but hide or disable new i2i enqueue actions",
+    "malformedSnapshot": "reader-only protected row; never execute, retry, reorder, open, or delete through a managed-image mutation path",
+    "unknownSnapshotFields": "ignore for display and preserve on compatible rewrite",
+    "passiveUi": "opening menus, boards, source selectors, Jobs, or versions never starts the companion or enqueues work"
+  },
+  "readerFirst": {
+    "canonicalAuthority": "a9ui/Aibos-Image",
+    "wpfWriterEnabled": false,
+    "h25WriterEnabled": false,
+    "requirements": [
+      "Aibos recognizes exact valid i2i rows as managed image versions and keeps malformed rows reader-only",
+      "H25 vendors this exact fixture revision and keeps its writer capability disabled until both readers pass",
+      "both exact readers pass before H25 may emit operation=i2i",
+      "rollback keeps i2i-capable readers after any i2i row is written"
+    ]
+  },
+  "displayV1": {
+    "productLabel": "AI編集",
+    "shortLabel": "EDIT",
+    "versionLabel": "AI編集 n/N",
+    "independentCount": true,
+    "independentFrom": [
+      "upscale",
+      "photoreal",
+      "video"
+    ]
+  },
+  "vectors": [
+    {
+      "id": "original-hair-color",
+      "sourceProducerJobId": "absent",
+      "request": {
+        "target": "hair-color",
+        "hairColor": "dark auburn",
+        "details": ""
+      },
+      "expectedAccepted": true,
+      "expectedSource": "original",
+      "expectedPreserveIdentity": true
+    },
+    {
+      "id": "photoreal-hair-color",
+      "sourceProducerJobId": "photoreal-job-1",
+      "request": {
+        "target": "hair-color",
+        "hairColor": "deep black",
+        "details": "retain the existing highlights"
+      },
+      "expectedAccepted": true,
+      "expectedSource": "succeeded-photoreal-producer",
+      "expectedPreserveIdentity": true
+    },
+    {
+      "id": "blank-request",
+      "sourceProducerJobId": "absent",
+      "request": {
+        "target": "hair-color",
+        "hairColor": " ",
+        "details": ""
+      },
+      "expectedAccepted": false,
+      "expectedCode": "I2I_EDIT_REQUIRED"
+    },
+    {
+      "id": "raw-output-path-rejected",
+      "sourceProducerJobId": "photoreal-job-1",
+      "sourceOutputPath": "synthetic-managed-path.png",
+      "request": {
+        "target": "hair-color",
+        "hairColor": "black"
+      },
+      "expectedAccepted": false,
+      "expectedCode": "I2I_SOURCE_PATH_FORBIDDEN"
+    },
+    {
+      "id": "non-photoreal-producer-rejected",
+      "sourceProducerJobId": "upscale-job-1",
+      "request": {
+        "target": "hair-color",
+        "hairColor": "platinum blonde"
+      },
+      "expectedAccepted": false,
+      "expectedCode": "SOURCE_PATH_INVALID"
+    },
+    {
+      "id": "future-target-rejected",
+      "sourceProducerJobId": "absent",
+      "request": {
+        "target": "hairstyle",
+        "hairColor": "black"
+      },
+      "expectedAccepted": false,
+      "expectedCode": "I2I_TARGET_UNSUPPORTED"
+    }
+  ]
+}

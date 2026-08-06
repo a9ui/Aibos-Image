@@ -1,5 +1,6 @@
 param(
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$DotnetPath = 'dotnet'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,7 @@ function Assert-True {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+$dll = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.dll"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('photoviewer-wpf-png-metadata-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -20,11 +21,11 @@ $resultPath = Join-Path $runRoot 'result.json'
 
 try {
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
-    & dotnet build $project -c $Configuration --nologo -v:minimal
+    & $DotnetPath build $project -c $Configuration --nologo -v:minimal
     if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
-    $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--png-metadata-smoke', ('"{0}"' -f $resultPath)) `
+    $process = Start-Process -FilePath $DotnetPath `
+        -ArgumentList @(('"{0}"' -f $dll), '--png-metadata-smoke', ('"{0}"' -f $resultPath)) `
         -WindowStyle Hidden -PassThru -Wait
     $details = if (Test-Path -LiteralPath $resultPath) { Get-Content -Raw -LiteralPath $resultPath } else { 'no result file' }
     Assert-True ($process.ExitCode -eq 0) "PNG metadata process exited $($process.ExitCode): $details"
@@ -34,15 +35,23 @@ try {
     Assert-True ($result.ok -eq $true) "PNG metadata smoke failed: $details"
     Assert-True ($result.duplicateFirstChunkOwned -eq $true) 'A later duplicate parameters chunk replaced the first chunk.'
     Assert-True ($result.emptyFirstChunkOwned -eq $true) 'A later parameters chunk replaced an empty first chunk.'
+    Assert-True ($result.unicodeITextRead -eq $true) 'Uncompressed Unicode iTXt parameters were not read consistently.'
+    Assert-True ($result.comfyGraphRead -eq $true) 'Legacy ComfyUI prompt graph metadata was not recovered consistently.'
+    Assert-True ($result.comfyLoraOffRead -eq $true) 'A LoRA-off ComfyUI graph did not remain explicitly LoRA-off.'
+    Assert-True ($result.parametersOverrideComfy -eq $true) 'A ComfyUI graph overrode the authoritative parameters chunk.'
 
     [pscustomobject]@{
         allPassed = $true
-        message = 'Catalog, Preview, and Modal honor the same first PNG parameters chunk, including empty-first duplicates.'
+        message = 'Catalog, Preview, Modal, and Copy agree for A1111 parameters and legacy ComfyUI prompt graphs.'
         processId = $process.Id
         duplicateCatalogPrompt = $result.duplicateCatalogPrompt
         emptyFirstCatalogPrompt = $result.emptyFirstCatalogPrompt
         duplicateFirstChunkOwned = $result.duplicateFirstChunkOwned
         emptyFirstChunkOwned = $result.emptyFirstChunkOwned
+        unicodeITextRead = $result.unicodeITextRead
+        comfyGraphRead = $result.comfyGraphRead
+        comfyLoraOffRead = $result.comfyLoraOffRead
+        parametersOverrideComfy = $result.parametersOverrideComfy
     } | ConvertTo-Json -Depth 5
 }
 finally {

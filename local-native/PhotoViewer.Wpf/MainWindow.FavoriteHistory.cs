@@ -197,9 +197,11 @@ public partial class MainWindow
         FavoriteHistoryList.Visibility = _favoriteHistory.Count == 0
             ? Visibility.Collapsed
             : Visibility.Visible;
-        FavoriteHistoryButton.Content = _favoriteHistory.Count == 0
-            ? "History"
-            : $"History {_favoriteHistory.Count}";
+        string historyDescription = _favoriteHistory.Count == 0
+            ? "No favorite changes in this session."
+            : $"{_favoriteHistory.Count} favorite changes in this session.";
+        FavoriteHistoryButton.ToolTip = $"Show favorite changes made in this session. {historyDescription}";
+        AutomationProperties.SetHelpText(FavoriteHistoryButton, historyDescription);
     }
 
     private bool TryHandleFavoriteUndoRedo(Key key, ModifierKeys modifiers)
@@ -222,6 +224,8 @@ public partial class MainWindow
         => string.Equals(AutomationProperties.GetName(FavoriteUndoButton), "Undo favorite change", StringComparison.Ordinal)
             && string.Equals(AutomationProperties.GetName(FavoriteRedoButton), "Redo favorite change", StringComparison.Ordinal)
             && string.Equals(AutomationProperties.GetName(FavoriteHistoryButton), "Show favorite change history", StringComparison.Ordinal)
+            && FavoriteHistoryButton.Content is System.Windows.Shapes.Path
+            && !string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(FavoriteHistoryButton))
             && FavoriteUndoButton.ToolTip?.ToString()?.Contains("Ctrl+Z", StringComparison.OrdinalIgnoreCase) == true
             && FavoriteRedoButton.ToolTip?.ToString()?.Contains("Ctrl+Y", StringComparison.OrdinalIgnoreCase) == true;
 }

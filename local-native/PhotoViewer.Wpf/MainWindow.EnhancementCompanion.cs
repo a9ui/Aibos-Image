@@ -9,6 +9,18 @@ public partial class MainWindow
 {
     private const int EnhancementCompanionReadyTimeoutMilliseconds = 120_000;
     private const int EnhancementCompanionProbeDelayMilliseconds = 450;
+    private const string EnhancementCompanionLauncherFileName =
+        "enhancement_companion.js";
+    private const string LegacyNextCompanionLauncherFileName =
+        "prod_launcher.js";
+    private const string PhotorealPromptControlsCapability = "photorealPromptControlsV2";
+    private const string AtomicImageEnqueueNextCapability = "atomicImageEnqueueNext";
+    private const string PhotorealSourceUpscaleCapability = "photorealSourceUpscale";
+    private const string RecoveredPhotorealSourceUpscaleCapability =
+        "recoveredPhotorealSourceUpscaleV1";
+    private const string PhotorealSeedControlCapability =
+        "photorealSeedControlV1";
+    private const string VideoSeedControlCapability = "videoSeedControlV1";
 
     private readonly SemaphoreSlim _enhancementCompanionLaunchGate = new(1, 1);
     private readonly CancellationTokenSource _enhancementCompanionLifetimeCts = new();
@@ -28,7 +40,11 @@ public partial class MainWindow
             HttpMethod.Get,
             readinessRoute,
             token: token);
-        if (IsReadyEnhancementCompanionResponse(response) || !_usingDefaultModalEnhancementSender)
+        // Any HTTP status proves that a loopback server already owns the
+        // endpoint. Only a transport failure may authorize a new process.
+        if (IsReadyEnhancementCompanionResponse(response)
+            || !_usingDefaultModalEnhancementSender
+            || response.StatusCode > 0)
             return response;
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
@@ -42,7 +58,8 @@ public partial class MainWindow
                 HttpMethod.Get,
                 readinessRoute,
                 token: linkedToken);
-            if (IsReadyEnhancementCompanionResponse(response))
+            if (IsReadyEnhancementCompanionResponse(response)
+                || response.StatusCode > 0)
                 return response;
 
             if (_ownedEnhancementCompanion is null || _ownedEnhancementCompanion.HasExited)
@@ -94,6 +111,140 @@ public partial class MainWindow
             _enhancementCompanionLaunchGate.Release();
         }
     }
+
+    private async Task<EnhancementApiResponse> EnsurePhotorealCompanionReadyForExplicitActionAsync(
+        string? sourceIdentity = null,
+        CancellationToken token = default)
+        => await EnsureImageEnhancementCompanionReadyForExplicitActionAsync(
+            "photoreal",
+            enqueueNext: false,
+            sourceIdentity: sourceIdentity,
+            token: token);
+
+    private async Task<EnhancementApiResponse> EnsureEnhancementCapabilityForExplicitActionAsync(
+        string capability,
+        string capabilityLabel,
+        string? sourceIdentity = null,
+        CancellationToken token = default)
+    {
+        EnhancementApiResponse readiness =
+            await EnsureEnhancementCompanionReadyForExplicitActionAsync(
+                sourceIdentity,
+                token);
+        if (!readiness.Ok)
+            return readiness;
+
+        EnhancementApiResponse health = await SendEnhancementApiAsync(
+            HttpMethod.Get,
+            "api/enhance/health",
+            token: token);
+        if (health.Ok
+            && health.Payload is JsonElement payload
+            && HasEnhancementCapability(payload, capability))
+        {
+            return readiness;
+        }
+
+        return new EnhancementApiResponse(
+            false,
+            426,
+            health.Payload,
+            $"The running H25 companion does not support {capabilityLabel}. Restart H25 first; no job was added.");
+    }
+
+    private async Task<EnhancementApiResponse> EnsureImageEnhancementCompanionReadyForExplicitActionAsync(
+        string operation,
+        bool enqueueNext,
+        string? sourceIdentity = null,
+        bool requiresPhotorealSourceUpscale = false,
+        bool requiresRecoveredPhotorealSourceUpscale = false,
+        bool requiresPhotorealSeedControl = false,
+        CancellationToken token = default)
+    {
+        EnhancementApiResponse readiness =
+            await EnsureEnhancementCompanionReadyForExplicitActionAsync(sourceIdentity, token);
+        if (!readiness.Ok)
+            return readiness;
+
+        bool needsPhotorealControls = string.Equals(
+            operation,
+            "photoreal",
+            StringComparison.Ordinal);
+        if (!needsPhotorealControls
+            && !enqueueNext
+            && !requiresPhotorealSourceUpscale
+            && !requiresRecoveredPhotorealSourceUpscale
+            && !requiresPhotorealSeedControl)
+            return readiness;
+
+        EnhancementApiResponse health = await SendEnhancementApiAsync(
+            HttpMethod.Get,
+            "api/enhance/health",
+            token: token);
+        bool photorealSupported = !needsPhotorealControls;
+        bool enqueueNextSupported = !enqueueNext;
+        bool photorealSourceUpscaleSupported =
+            !requiresPhotorealSourceUpscale;
+        bool recoveredPhotorealSourceUpscaleSupported =
+            !requiresRecoveredPhotorealSourceUpscale;
+        bool photorealSeedControlSupported = !requiresPhotorealSeedControl;
+        if (health.Ok && health.Payload is JsonElement payload)
+        {
+            photorealSupported = photorealSupported
+                || HasEnhancementCapability(payload, PhotorealPromptControlsCapability);
+            enqueueNextSupported = enqueueNextSupported
+                || HasEnhancementCapability(payload, AtomicImageEnqueueNextCapability);
+            photorealSourceUpscaleSupported = photorealSourceUpscaleSupported
+                || HasEnhancementCapability(
+                    payload,
+                    PhotorealSourceUpscaleCapability);
+            recoveredPhotorealSourceUpscaleSupported =
+                recoveredPhotorealSourceUpscaleSupported
+                || HasEnhancementCapability(
+                    payload,
+                    RecoveredPhotorealSourceUpscaleCapability);
+            photorealSeedControlSupported = photorealSeedControlSupported
+                || HasEnhancementCapability(
+                    payload,
+                    PhotorealSeedControlCapability);
+        }
+        if (photorealSupported
+            && enqueueNextSupported
+            && photorealSourceUpscaleSupported
+            && recoveredPhotorealSourceUpscaleSupported
+            && photorealSeedControlSupported)
+        {
+            return readiness;
+        }
+
+        var missingCapabilities = new List<string>(5);
+        if (!photorealSupported)
+            missingCapabilities.Add("this photoreal settings format");
+        if (!enqueueNextSupported)
+            missingCapabilities.Add("atomic enqueue-next");
+        if (!photorealSourceUpscaleSupported)
+            missingCapabilities.Add("photoreal-output upscaling");
+        if (!recoveredPhotorealSourceUpscaleSupported)
+            missingCapabilities.Add("Recovered photoreal-output upscaling");
+        if (!photorealSeedControlSupported)
+            missingCapabilities.Add("fixed photoreal seeds");
+        string missing = string.Join(", ", missingCapabilities);
+        return new EnhancementApiResponse(
+            false,
+            426,
+            health.Payload,
+            $"The running H25 companion does not support {missing}. Restart H25 first; no job was added.");
+    }
+
+    private static bool HasPhotorealPromptControlsCapability(JsonElement payload)
+        => HasEnhancementCapability(payload, PhotorealPromptControlsCapability);
+
+    private static bool HasEnhancementCapability(JsonElement payload, string capability)
+        => payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("capabilities", out JsonElement capabilities)
+            && capabilities.ValueKind == JsonValueKind.Object
+            && capabilities.TryGetProperty(capability, out JsonElement supported)
+            && supported.ValueKind == JsonValueKind.True;
 
     private static bool IsReadyEnhancementCompanionResponse(EnhancementApiResponse response)
         => response.Ok
@@ -198,17 +349,27 @@ public partial class MainWindow
     private static ValidatedEnhancementCompanionRoot? ResolveEnhancementCompanionRoot()
         => ResolveEnhancementCompanionRoot(
             Environment.GetEnvironmentVariable("AIBOS_H25_COMPANION_ROOT"),
-            AppContext.BaseDirectory);
+            AppContext.BaseDirectory,
+            UseLegacyNextCompanionLauncher());
+
+    private static bool UseLegacyNextCompanionLauncher()
+        => string.Equals(
+            Environment.GetEnvironmentVariable(
+                "AIBOS_H25_LEGACY_NEXT_COMPANION"),
+            "1",
+            StringComparison.Ordinal);
 
     private static ValidatedEnhancementCompanionRoot? ResolveEnhancementCompanionRoot(
         string? configuredRoot,
-        string appBaseDirectory)
+        string appBaseDirectory,
+        bool useLegacyNextLauncher)
     {
         // An explicitly configured root is authoritative and must itself be
         // the H25 project root. Never walk its parents or silently fall back.
         if (!string.IsNullOrWhiteSpace(configuredRoot))
             return TryValidateEnhancementCompanionRoot(
                 configuredRoot,
+                useLegacyNextLauncher,
                 out ValidatedEnhancementCompanionRoot? configured)
                 ? configured
                 : null;
@@ -229,6 +390,7 @@ public partial class MainWindow
         {
             if (TryValidateEnhancementCompanionRoot(
                     current,
+                    useLegacyNextLauncher,
                     out ValidatedEnhancementCompanionRoot? validated))
                 return validated;
             current = Directory.GetParent(current)?.FullName;
@@ -238,6 +400,7 @@ public partial class MainWindow
 
     private static bool TryValidateEnhancementCompanionRoot(
         string candidateRoot,
+        bool useLegacyNextLauncher,
         out ValidatedEnhancementCompanionRoot? validatedRoot)
     {
         validatedRoot = null;
@@ -253,7 +416,12 @@ public partial class MainWindow
 
             string packagePath = Path.Combine(canonicalRoot, "package.json");
             string projectPath = Path.Combine(canonicalRoot, "project.toml");
-            string launcherPath = Path.Combine(canonicalRoot, "scripts", "prod_launcher.js");
+            string launcherPath = Path.Combine(
+                canonicalRoot,
+                "scripts",
+                useLegacyNextLauncher
+                    ? LegacyNextCompanionLauncherFileName
+                    : EnhancementCompanionLauncherFileName);
             foreach (string requiredPath in new[] { packagePath, projectPath, launcherPath })
             {
                 if (!File.Exists(requiredPath))
@@ -423,20 +591,36 @@ public partial class MainWindow
     public static string? ResolveEnhancementCompanionRootForSmoke(
         string? configuredRoot,
         string appBaseDirectory)
-        => ResolveEnhancementCompanionRoot(configuredRoot, appBaseDirectory)?.RootPath;
+        => ResolveEnhancementCompanionRoot(
+            configuredRoot,
+            appBaseDirectory,
+            useLegacyNextLauncher: false)?.RootPath;
+    public static string? ResolveEnhancementCompanionLauncherForSmoke(
+        string? configuredRoot,
+        string appBaseDirectory,
+        bool useLegacyNextLauncher)
+        => ResolveEnhancementCompanionRoot(
+            configuredRoot,
+            appBaseDirectory,
+            useLegacyNextLauncher)?.LauncherPath;
     public static string? ResolveNodeExecutablePathForSmoke() => ResolveNodeExecutablePath()?.Path;
     public static bool ValidateNodeExecutableCandidateForSmoke(
         string programFilesRoot,
         string candidatePath)
         => TryValidateNodeExecutablePath(programFilesRoot, candidatePath, out _);
     public static EnhancementCompanionLaunchContractSmokeSnapshot
-        EnhancementCompanionLaunchContractForSmoke()
+        EnhancementCompanionLaunchContractForSmoke(
+            bool useLegacyNextLauncher = false)
     {
         ProcessStartInfo startInfo = CreateEnhancementCompanionStartInfo(
             new ValidatedNodeExecutable(@"C:\Program Files\nodejs\node.exe"),
             new ValidatedEnhancementCompanionRoot(
                 @"C:\fixture\H000025_PhotoViewer",
-                @"C:\fixture\H000025_PhotoViewer\scripts\prod_launcher.js"),
+                Path.Combine(
+                    @"C:\fixture\H000025_PhotoViewer\scripts",
+                    useLegacyNextLauncher
+                        ? LegacyNextCompanionLauncherFileName
+                        : EnhancementCompanionLauncherFileName)),
             new Uri("http://127.0.0.1:3000"));
         return new(
             startInfo.UseShellExecute,
@@ -446,7 +630,8 @@ public partial class MainWindow
             !string.IsNullOrEmpty(startInfo.WorkingDirectory),
             startInfo.Environment.ContainsKey("PVU_OWNER_PID"),
             startInfo.Environment["PVU_NO_OPEN"],
-            startInfo.Environment["PVU_COMFY_AUTOSTART"]);
+            startInfo.Environment["PVU_COMFY_AUTOSTART"],
+            Path.GetFileName(startInfo.ArgumentList[0]));
     }
     public void ConfigureEnhancementCompanionAutoStartForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
@@ -462,6 +647,18 @@ public partial class MainWindow
         EnhancementApiResponse response = await EnsureEnhancementCompanionReadyForExplicitActionAsync();
         return response.Ok;
     }
+    public async Task<bool> EnsurePhotorealCompanionForExplicitActionForSmokeAsync()
+    {
+        EnhancementApiResponse response = await EnsurePhotorealCompanionReadyForExplicitActionAsync();
+        return response.Ok;
+    }
+    public static bool HasPhotorealPromptControlsCapabilityForSmoke(JsonElement payload)
+        => HasPhotorealPromptControlsCapability(payload);
+    public static bool HasRecoveredPhotorealSourceUpscaleCapabilityForSmoke(
+        JsonElement payload)
+        => HasEnhancementCapability(
+            payload,
+            RecoveredPhotorealSourceUpscaleCapability);
 }
 
 internal sealed record ValidatedEnhancementCompanionRoot(
@@ -478,4 +675,5 @@ public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
     bool HasExplicitWorkingDirectory,
     bool HasExternalOwnerPid,
     string? NoOpen,
-    string? ComfyAutostart);
+    string? ComfyAutostart,
+    string LauncherFileName);

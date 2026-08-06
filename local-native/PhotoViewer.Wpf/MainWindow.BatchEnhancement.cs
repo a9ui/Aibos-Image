@@ -15,7 +15,6 @@ public partial class MainWindow
 {
     private const int BatchEnhancementMaxConcurrentRequests = 4;
     private const int BatchEnhancementLargeSelectionThreshold = 25;
-    private const string BatchEnhancementOutputFormat = "webp";
     private static readonly string[] RequiredNcnnModelFiles =
     [
         "realesr-animevideov3-x2.param",
@@ -66,7 +65,8 @@ public partial class MainWindow
             .Select(static tile => new BatchEnhancementSourceSnapshot(
                 tile.Path,
                 tile.FileName,
-                tile.IsRealFile))
+                tile.IsRealFile,
+                tile.Prompt))
             .ToArray();
         if (selected.Length == 0)
         {
@@ -94,7 +94,13 @@ public partial class MainWindow
         BatchEnhancementItemsList.ItemsSource = _batchEnhancementItems.ToArray();
         BatchEnhancementDialog.Visibility = Visibility.Visible;
         BatchEnhancementCompanionStatusText.Text = "Checking the local companion and selected sources...";
-        BatchEnhancementAdapterStatusText.Text = "Real-ESRGAN fast GPU · checking local installation";
+        string adapterId = _modalEnhancementAdapterId;
+        BatchEnhancementAdapterStatusText.Text = string.Equals(
+            adapterId,
+            "comfyui",
+            StringComparison.Ordinal)
+                ? "ComfyUI AI upscale · checking companion availability"
+                : "Real-ESRGAN fast GPU · checking local installation";
         BatchEnhancementStatusText.Text = "Review only. No enhancement jobs have been created.";
         RefreshBatchEnhancementSurface();
         long generation = ++_batchEnhancementGeneration;
@@ -103,7 +109,8 @@ public partial class MainWindow
         _batchEnhancementSynchronousOpenMilliseconds = openWatch.ElapsedMilliseconds;
 
         Task<List<BatchEnhancementItemView>> sourceCheck = Task.Run(() => BuildBatchEnhancementItems(selected));
-        Task<BatchEnhancementAdapterAvailability> adapterCheck = Task.Run(CheckBatchEnhancementAdapterAvailability);
+        Task<BatchEnhancementAdapterAvailability> adapterCheck = Task.Run(
+            () => CheckBatchEnhancementAdapterAvailability(adapterId));
         _batchEnhancementGetCount++;
         Task<EnhancementApiResponse> companionCheck = SendEnhancementApiAsync(HttpMethod.Get, "api/enhance/jobs");
         await Task.WhenAll(sourceCheck, adapterCheck, companionCheck);
@@ -180,13 +187,28 @@ public partial class MainWindow
                 continue;
             }
 
-            result.Add(BatchEnhancementItemView.Ready(source.DisplayName, source.Path, sourceIdentity));
+            string? prompt = ResolveOriginalPromptSnapshot(
+                source.Prompt,
+                sourceIdentity);
+            result.Add(BatchEnhancementItemView.Ready(
+                source.DisplayName,
+                source.Path,
+                sourceIdentity,
+                string.IsNullOrWhiteSpace(prompt) ? null : prompt));
         }
         return result;
     }
 
-    private static BatchEnhancementAdapterAvailability CheckBatchEnhancementAdapterAvailability()
+    private static BatchEnhancementAdapterAvailability CheckBatchEnhancementAdapterAvailability(
+        string adapterId)
     {
+        if (string.Equals(adapterId, "comfyui", StringComparison.Ordinal))
+        {
+            return new BatchEnhancementAdapterAvailability(
+                false,
+                "ComfyUI AI upscale · the companion will validate its workflow and models when submitting");
+        }
+
         try
         {
             string? customRoot = Environment.GetEnvironmentVariable("PVU_REALESRGAN_NCNN_ROOT");
@@ -397,7 +419,10 @@ public partial class MainWindow
                 EnhancementApiResponse response = await SendEnhancementApiAsync(
                     HttpMethod.Post,
                     "api/enhance/jobs",
-                    CreateBatchEnhancementRequestBody(item.SourceIdentity, confirmLarge));
+                    CreateBatchEnhancementRequestBody(
+                        item.SourceIdentity,
+                        item.Prompt,
+                        confirmLarge));
                 if (response.Ok
                     && response.Payload is JsonElement payload
                     && TryReadCreatedBatchEnhancementJob(payload, item.SourceIdentity, out string? jobId))
@@ -534,22 +559,21 @@ public partial class MainWindow
         _ = target?.Focus();
     }
 
-    private Dictionary<string, object> CreateBatchEnhancementRequestBody(
+    private Dictionary<string, object?> CreateBatchEnhancementRequestBody(
         string sourceIdentity,
+        string? prompt,
         bool confirmLarge)
-    {
-        var body = new Dictionary<string, object>(StringComparer.Ordinal)
-        {
-            ["sourceId"] = sourceIdentity,
-            ["presetId"] = _modalEnhancementPresetId,
-            ["adapterId"] = _modalEnhancementAdapterId,
-            ["scale"] = _modalEnhancementScale,
-            ["outputFormat"] = BatchEnhancementOutputFormat,
-        };
-        if (confirmLarge)
-            body["confirmLargeJob"] = true;
-        return body;
-    }
+        => CreateUpscaleRequestBody(
+            sourceIdentity,
+            new UpscaleRequestSource(null, null),
+            _modalEnhancementPresetId,
+            _modalEnhancementAdapterId,
+            _modalEnhancementScale,
+            prompt,
+            confirmLarge ? true : null,
+            outputFormat: _upscaleOutputFormat,
+            includeOperation: false,
+            includeNullOriginalPrompt: false);
 
     private void CancelBatchEnhancement_Click(object sender, RoutedEventArgs e)
     {
@@ -771,12 +795,14 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
         string displayName,
         string sourcePath,
         string sourceIdentity,
+        string? prompt,
         BatchEnhancementItemState state,
         string detailText)
     {
         DisplayName = string.IsNullOrWhiteSpace(displayName) ? Path.GetFileName(sourcePath) : displayName;
         SourcePath = sourcePath;
         SourceIdentity = sourceIdentity;
+        Prompt = string.IsNullOrWhiteSpace(prompt) ? null : prompt;
         _state = state;
         _detailText = detailText;
     }
@@ -784,6 +810,7 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
     public string DisplayName { get; }
     public string SourcePath { get; }
     public string SourceIdentity { get; }
+    public string? Prompt { get; }
     public BatchEnhancementItemState State => _state;
     public string StatusLabel => _state switch
     {
@@ -808,13 +835,17 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
     public string AccessibleName => $"{DisplayName}, {StatusLabel}, {DetailText}";
 
     public static BatchEnhancementItemView Checking(string displayName, string sourcePath)
-        => new(displayName, sourcePath, "", BatchEnhancementItemState.Checking, "Checking source eligibility.");
+        => new(displayName, sourcePath, "", null, BatchEnhancementItemState.Checking, "Checking source eligibility.");
 
-    public static BatchEnhancementItemView Ready(string displayName, string sourcePath, string sourceIdentity)
-        => new(displayName, sourcePath, sourceIdentity, BatchEnhancementItemState.Ready, "Ready to create one enhancement job.");
+    public static BatchEnhancementItemView Ready(
+        string displayName,
+        string sourcePath,
+        string sourceIdentity,
+        string? prompt)
+        => new(displayName, sourcePath, sourceIdentity, prompt, BatchEnhancementItemState.Ready, "Ready to create one enhancement job.");
 
     public static BatchEnhancementItemView Skipped(string displayName, string sourcePath, string reason)
-        => new(displayName, sourcePath, "", BatchEnhancementItemState.Skipped, reason);
+        => new(displayName, sourcePath, "", null, BatchEnhancementItemState.Skipped, reason);
 
     public void MarkSkipped(string reason) => SetState(BatchEnhancementItemState.Skipped, reason, null);
 
@@ -862,7 +893,8 @@ public enum BatchEnhancementItemState
 internal readonly record struct BatchEnhancementSourceSnapshot(
     string Path,
     string DisplayName,
-    bool IsRealFile);
+    bool IsRealFile,
+    string? Prompt);
 
 internal readonly record struct BatchEnhancementAdapterAvailability(
     bool Detected,

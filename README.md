@@ -54,17 +54,35 @@ include:
   `search-history.json`, and `recent-folders.json`;
 - `enhance/jobs.json`, plus managed outputs at the parent selected by
   `enhance/output-root.txt` (falling back to `enhance/outputs/**`). Image
-  outputs remain under `Upscaled/` and `Photorealized/`; the reader-first
-  managed-video contract reserves the sibling flat `Videos/` folder.
+  outputs remain under `Upscaled/`, `Photorealized/`, and `Edited/`; the
+  reader-first managed-video contract reserves the sibling flat `Videos/`
+  folder.
 
 Renderer-local presentation state, including WPF window geometry, panel sizes,
 keyboard bindings, current selection, preview layout, and named AI
 photorealization and video-generation Styles stay local. A photoreal Style
-snapshots the current prompt, strength, structure retention, quality steps, and
-work resolution. A video Style snapshots its prompt, model, quality, duration,
+snapshots LoRA enabled, the current Positive prompt, Positive fallback used
+when blank, Negative prompt, strength, CFG scale, quality steps, and work
+resolution. A
+video Style snapshots its prompt, model, quality, duration,
 generation FPS, and pixel budget. Both can be reapplied from the preview or
 application settings. In particular, the existing WPF `state.json` is not
 shared wholesale.
+
+Fresh photoreal settings use the base FLUX.2 model with the comparison LoRA
+OFF. The WPF-local PNG Prompt inheritance table can translate selected A1111
+source tags into editable Positive fragments at explicit enqueue time. A
+local ignored prompt policy supplies production defaults; the tracked example
+contains synthetic schema values only. Set `AIBOS_WPF_PROMPT_POLICY_PATH` or
+place `config/wpf-prompts.local.json` beside the application/current directory.
+Missing or invalid policy uses bounded public placeholders and an empty default
+inheritance table without changing persisted user edits. A
+photoreal output carries its effective generation settings in the PNG
+`parameters` chunk. Existing photoreal PNGs that predate that writer remain
+readable through their bounded ComfyUI `prompt` graph when no `parameters`
+chunk exists; `parameters` always wins when both are present. Video versions
+continue to use their existing immutable snapshot in `enhance/jobs.json`, so
+no per-output JSON sidecars are added.
 
 Normal application startup remains reader-only: it never creates a locator,
 shared root, durable-data directory, or store. Its only operational write is an

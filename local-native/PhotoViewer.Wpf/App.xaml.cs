@@ -188,6 +188,20 @@ public partial class App : Application
         UiLanguageResources.Apply(UiLanguageResources.English);
         InitializeAccessibilityPalette(e.Args.Contains("--force-high-contrast", StringComparer.OrdinalIgnoreCase));
 
+        int i2iReaderSmokeIdx = Array.IndexOf(e.Args, "--i2i-reader-smoke");
+        if (i2iReaderSmokeIdx >= 0 && i2iReaderSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureI2iReaderSmoke(e.Args[i2iReaderSmokeIdx + 1]);
+            return;
+        }
+
+        int i2iV2ReaderSmokeIdx = Array.IndexOf(e.Args, "--i2i-v2-reader-smoke");
+        if (i2iV2ReaderSmokeIdx >= 0 && i2iV2ReaderSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureI2iV2ReaderSmoke(e.Args[i2iV2ReaderSmokeIdx + 1]);
+            return;
+        }
+
         int highContrastSmokeIdx = Array.IndexOf(e.Args, "--high-contrast-smoke");
         if (highContrastSmokeIdx >= 0 && highContrastSmokeIdx + 1 < e.Args.Length)
         {
@@ -794,6 +808,16 @@ public partial class App : Application
         if (modalEnhancementActionsSmokeIdx >= 0 && modalEnhancementActionsSmokeIdx + 1 < e.Args.Length)
         {
             CaptureModalEnhancementActionsSmoke(e.Args[modalEnhancementActionsSmokeIdx + 1]);
+            return;
+        }
+
+        int catalogProjectionCoalescingSmokeIdx =
+            Array.IndexOf(e.Args, "--catalog-projection-coalescing-smoke");
+        if (catalogProjectionCoalescingSmokeIdx >= 0
+            && catalogProjectionCoalescingSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureCatalogProjectionCoalescingSmoke(
+                e.Args[catalogProjectionCoalescingSmokeIdx + 1]);
             return;
         }
 
@@ -2938,11 +2962,13 @@ public partial class App : Application
                 List<string> wideClippedButtons = wideProbe.SidebarClippedButtonNamesForSmoke;
                 bool wideChromeContained = wideProbe.VisibleWorkbenchChromeContainedForSmoke;
                 double wideDragRegionWidth = wideProbe.HeaderDragRegionWidthForSmoke;
+                bool wideDragRegions = wideProbe.WindowDragRegionsContractForSmoke;
                 bool wideSidebarLayout = wideAdaptiveOff
                     && wideSettingsPinned
                     && wideScrollContained
                     && wideButtonTextFits
                     && wideChromeContained
+                    && wideDragRegions
                     && wideDragRegionWidth >= 95;
                 wideProbe.SetUiLanguageForSmoke("en");
 
@@ -2958,6 +2984,7 @@ public partial class App : Application
                         new Rect(0, 0, compactStartupWorkArea.Width, compactStartupWorkArea.Height))
                     && window.AdaptiveWorkbenchForSmoke
                     && window.HeaderDragRegionWidthForSmoke >= 95
+                    && window.WindowDragRegionsContractForSmoke
                     && window.VisibleWorkbenchChromeContainedForSmoke;
 
                 // Keep the injected secondary work area inside the CI desktop's
@@ -3033,6 +3060,7 @@ public partial class App : Application
                     && window.AdaptiveWorkbenchForSmoke
                     && window.SearchMinimumWidthForSmoke <= 140
                     && window.HeaderDragRegionWidthForSmoke >= 95
+                    && window.WindowDragRegionsContractForSmoke
                     && window.VisibleWorkbenchChromeContainedForSmoke;
                 window.ToggleMaximizeForSmoke();
 
@@ -4439,6 +4467,7 @@ public partial class App : Application
                 {
                     bool defaultsLoaded = window.KeyBindingTextForSmoke("favoriteIncrease", draft: false) == "F"
                         && window.KeyBindingTextForSmoke("nextImage", draft: false) == "Right"
+                        && window.KeyBindingTextForSmoke("photorealizeCurrentImage", draft: false) == "R"
                         && window.KeyBindingTextForSmoke("reopenLastClosedPreviewTab", draft: false) == "Ctrl+Shift+T"
                         && window.KeyBindingTextForSmoke("movePreviewTabLeft", draft: false) == "Alt+Shift+Left";
                     bool persistedInvalidFallback = window.KeyBindingTextForSmoke("favoriteIncrease", draft: false) == "F"
@@ -4827,6 +4856,7 @@ public partial class App : Application
                     bool persistedBindingsReloaded = window.KeyBindingTextForSmoke("favoriteIncrease", draft: false) == "G"
                         && window.KeyBindingTextForSmoke("favoriteLevel3", draft: false) == "Ctrl+L"
                         && window.KeyBindingTextForSmoke("nextImage", draft: false) == "N"
+                        && window.KeyBindingTextForSmoke("photorealizeCurrentImage", draft: false) == "R"
                         && window.KeyBindingTextForSmoke("closeModal", draft: false) == "Q"
                         && window.KeyBindingTextForSmoke("recycleSelected", draft: false) == "X"
                         && window.KeyBindingTextForSmoke("reopenLastClosedPreviewTab", draft: false) == "Ctrl+Shift+R"
@@ -4863,6 +4893,7 @@ public partial class App : Application
                     window.ResetKeyBindingsForSmoke();
                     bool resetDraft = window.KeyBindingTextForSmoke("favoriteIncrease", draft: true) == "F"
                         && window.KeyBindingTextForSmoke("nextImage", draft: true) == "Right"
+                        && window.KeyBindingTextForSmoke("photorealizeCurrentImage", draft: true) == "R"
                         && window.KeyBindingTextForSmoke("closeModal", draft: true) == "Escape"
                         && window.KeyBindingTextForSmoke("recycleSelected", draft: true) == "Delete"
                         && window.KeyBindingTextForSmoke("reopenLastClosedPreviewTab", draft: true) == "Ctrl+Shift+T"
@@ -9335,6 +9366,32 @@ public partial class App : Application
                 bool changedCreatedOldest = first.SetSortByForSmoke("created-oldest");
                 List<string> createdOldestOrder = first.FilteredFileNamesForSmoke(3);
                 bool createdOldestGrouped = first.DateGroupingActiveForSmoke;
+                DateTimeOffset activityBase = new(
+                    2026,
+                    1,
+                    1,
+                    12,
+                    0,
+                    0,
+                    TimeSpan.Zero);
+                bool activityFixtures =
+                    first.SetSortActivityForSmoke(alphaName, "upscale", activityBase.AddDays(3))
+                    && first.SetSortActivityForSmoke(bravoName, "upscale", activityBase.AddDays(2))
+                    && first.SetSortActivityForSmoke(bravoName, "photoreal", activityBase.AddDays(4))
+                    && first.SetSortActivityForSmoke(charlieName, "photoreal", activityBase.AddDays(1))
+                    && first.SetSortActivityForSmoke(charlieName, "video", activityBase.AddDays(5))
+                    && first.SetSortActivityForSmoke(alphaName, "video", activityBase.AddDays(4))
+                    && first.SetSortActivityForSmoke(bravoName, "favorite", activityBase.AddDays(6))
+                    && first.SetSortActivityForSmoke(alphaName, "favorite", activityBase.AddDays(2));
+                bool changedUpscaleNewest = first.SetSortByForSmoke("upscale-completed-newest");
+                List<string> upscaleNewestOrder = first.FilteredFileNamesForSmoke(3);
+                bool changedPhotorealNewest = first.SetSortByForSmoke("photoreal-completed-newest");
+                List<string> photorealNewestOrder = first.FilteredFileNamesForSmoke(3);
+                bool changedVideoNewest = first.SetSortByForSmoke("video-completed-newest");
+                List<string> videoNewestOrder = first.FilteredFileNamesForSmoke(3);
+                bool changedFavoriteNewest = first.SetSortByForSmoke("favorite-changed-newest");
+                List<string> favoriteNewestOrder = first.FilteredFileNamesForSmoke(3);
+                bool activitySortsFlat = first.FlatGridActiveForSmoke;
                 bool changedRandom = first.SetSortByForSmoke("random");
                 bool randomFlat = first.FlatGridActiveForSmoke;
                 string randomSeedBefore = first.RandomSortSeedForSmoke;
@@ -9352,6 +9409,10 @@ public partial class App : Application
                 List<string> restoredOrder = second.FilteredFileNamesForSmoke(3);
                 string restoredRandomSeed = second.RandomSortSeedForSmoke;
                 bool restoredRandomFlat = second.FlatGridActiveForSmoke;
+                bool restoredFavoriteSortChanged = second.SetSortByForSmoke(
+                    "favorite-changed-newest");
+                List<string> restoredFavoriteOrder =
+                    second.FilteredFileNamesForSmoke(3);
                 second.Close();
 
                 List<string> expectedNewest = [bravoName, alphaName, charlieName];
@@ -9359,11 +9420,27 @@ public partial class App : Application
                 List<string> expectedName = [alphaName, bravoName, charlieName];
                 List<string> expectedCreatedNewest = [bravoName, alphaName, charlieName];
                 List<string> expectedCreatedOldest = [charlieName, alphaName, bravoName];
+                List<string> expectedUpscaleNewest = [alphaName, bravoName, charlieName];
+                List<string> expectedPhotorealNewest = [bravoName, charlieName, alphaName];
+                List<string> expectedVideoNewest = [charlieName, alphaName, bravoName];
+                List<string> expectedFavoriteNewest = [bravoName, alphaName, charlieName];
                 bool newestOk = SameNameOrder(newestOrder, expectedNewest);
                 bool oldestOk = SameNameOrder(oldestOrder, expectedOldest);
                 bool nameOk = SameNameOrder(nameOrder, expectedName);
                 bool createdNewestOk = SameNameOrder(createdNewestOrder, expectedCreatedNewest);
                 bool createdOldestOk = SameNameOrder(createdOldestOrder, expectedCreatedOldest);
+                bool activitySortsOk = activityFixtures
+                    && changedUpscaleNewest
+                    && changedPhotorealNewest
+                    && changedVideoNewest
+                    && changedFavoriteNewest
+                    && SameNameOrder(upscaleNewestOrder, expectedUpscaleNewest)
+                    && SameNameOrder(photorealNewestOrder, expectedPhotorealNewest)
+                    && SameNameOrder(videoNewestOrder, expectedVideoNewest)
+                    && SameNameOrder(favoriteNewestOrder, expectedFavoriteNewest)
+                    && restoredFavoriteSortChanged
+                    && SameNameOrder(restoredFavoriteOrder, expectedFavoriteNewest)
+                    && activitySortsFlat;
                 bool randomPersistence = changedRandom
                     && reshuffled
                     && !string.Equals(randomSeedBefore, randomSeedAfter, StringComparison.Ordinal)
@@ -9387,13 +9464,14 @@ public partial class App : Application
                     && createdOldestOk
                     && newestFlat && oldestFlat && nameFlat && randomFlat && restoredRandomFlat
                     && createdNewestGrouped && createdOldestGrouped
+                    && activitySortsOk
                     && randomPersistence;
 
                 result = new SortSmokeResult
                 {
                     Ok = ok,
                     Message = ok
-                        ? "modified, created, name, random/reshuffle sort, filter, selection, modal navigation, and persistence checks passed"
+                        ? "modified, created, operation activity, favorite activity, name, random/reshuffle sort, filter, selection, modal navigation, and persistence checks passed"
                         : "sort smoke did not meet order/filter/selection/modal/persistence expectations",
                     Folder = sortFolder,
                     ProjectRoot = smokeRoot,
@@ -9403,11 +9481,20 @@ public partial class App : Application
                     ExpectedName = expectedName,
                     ExpectedCreatedNewest = expectedCreatedNewest,
                     ExpectedCreatedOldest = expectedCreatedOldest,
+                    ExpectedUpscaleNewest = expectedUpscaleNewest,
+                    ExpectedPhotorealNewest = expectedPhotorealNewest,
+                    ExpectedVideoNewest = expectedVideoNewest,
+                    ExpectedFavoriteNewest = expectedFavoriteNewest,
                     NewestOrder = newestOrder,
                     OldestOrder = oldestOrder,
                     NameOrder = nameOrder,
                     CreatedNewestOrder = createdNewestOrder,
                     CreatedOldestOrder = createdOldestOrder,
+                    UpscaleNewestOrder = upscaleNewestOrder,
+                    PhotorealNewestOrder = photorealNewestOrder,
+                    VideoNewestOrder = videoNewestOrder,
+                    FavoriteNewestOrder = favoriteNewestOrder,
+                    RestoredFavoriteOrder = restoredFavoriteOrder,
                     RandomOrderBefore = randomOrderBefore,
                     RandomOrderAfter = randomOrderAfter,
                     RestoredOrder = restoredOrder,
@@ -9429,6 +9516,8 @@ public partial class App : Application
                     NameFlat = nameFlat,
                     CreatedNewestGrouped = createdNewestGrouped,
                     CreatedOldestGrouped = createdOldestGrouped,
+                    ActivitySortsOk = activitySortsOk,
+                    ActivitySortsFlat = activitySortsFlat,
                     RandomFlat = randomFlat,
                     RestoredRandomFlat = restoredRandomFlat,
                 };
@@ -17182,17 +17271,40 @@ public partial class App : Application
                 string[] modalDisplayVersionLabels =
                     win.ModalDisplayVersionLabelsForSmoke;
                 bool unifiedDisplayInventory =
-                    modalDisplayVersionLabels.Length == 4
-                    && modalDisplayVersionLabels[0] == "Original"
-                    && !modalDisplayVersionLabels[1].Contains(
-                        "fps",
-                        StringComparison.OrdinalIgnoreCase)
-                    && modalDisplayVersionLabels
-                        .Skip(2)
-                        .All(label => label.Contains(
-                            "fps",
-                            StringComparison.OrdinalIgnoreCase))
+                    modalDisplayVersionLabels.SequenceEqual(
+                        [
+                            "Original",
+                            "実写化 1/1",
+                            "動画化 1/2",
+                            "動画化 2/2",
+                        ],
+                        StringComparer.Ordinal)
                     && win.ModalDisplayVersionKindForSmoke == "Video";
+                ModalMetadataSmokeSnapshot videoMetadata =
+                    win.DisplayedModalMetadataForSmoke;
+                bool videoGenerationSettingsSnapshot =
+                    videoMetadata.MetadataCurrent
+                    && videoMetadata.Status.Contains(
+                        "動画化 Job",
+                        StringComparison.Ordinal)
+                    && videoMetadata.Settings.Contains(
+                        "Requested FPS: 16",
+                        StringComparison.Ordinal)
+                    && videoMetadata.Settings.Contains(
+                        "Playback FPS: 30",
+                        StringComparison.Ordinal)
+                    && videoMetadata.Settings.Contains(
+                        "Native frames: 97",
+                        StringComparison.Ordinal)
+                    && videoMetadata.Settings.Contains(
+                        "Output frames: 180",
+                        StringComparison.Ordinal)
+                    && videoMetadata.Settings.Contains(
+                        "Steps: 20",
+                        StringComparison.Ordinal)
+                    && videoMetadata.Settings.Contains(
+                        "Delivery: vs-rife-5.7.0-rife-4.25-v1",
+                        StringComparison.Ordinal);
                 (int PlaybackFps, int FrameCount)[] videoPlaybackMetadata =
                     win.ModalVideoVersionPlaybackMetadataForSmoke;
                 bool videoDeliveryMetadata =
@@ -17277,7 +17389,9 @@ public partial class App : Application
                     && win.VideoModelIdForSmoke == "wan22-ti2v-5b"
                     && win.VideoQualityIdForSmoke
                         == "wan22-ti2v-5b-normal-v1"
-                    && win.VideoQualityStepsForSmoke == 20;
+                    && win.VideoQualityStepsForSmoke == 20
+                    && win.VideoSeedForSmoke is (false, "0", true)
+                    && win.VideoSeedSurfaceForSmoke;
                 win.SelectVideoModelForSmoke(
                     "hunyuan-video-1.5-i2v-step-distilled-experimental");
                 bool experimentalVideoModelBlocked =
@@ -17309,7 +17423,9 @@ public partial class App : Application
                     && persistedVideoStyle.MaximumPixelArea == 307200
                     && persistedVideoStyle.Prompt == "pan left slowly"
                     && persistedVideoStyleState?.SelectedVideoStyleName
-                        == videoStyleName;
+                        == videoStyleName
+                    && persistedVideoStyleState.VideoSeedMode == "random"
+                    && persistedVideoStyleState.VideoSeedValue == 0;
                 win.ConfigureVideoGenerationForSmoke(
                     6,
                     16,
@@ -17327,10 +17443,28 @@ public partial class App : Application
                         == "wan22-ti2v-5b-high-v1";
                 string videoRequestJson = "";
                 int enhancementMutationRequestCount = 0;
+                bool videoSeedCapabilityAvailable = true;
                 win.ConfigureModalEnhancementForSmoke(async (request, token) =>
                 {
                     if (request.Method == HttpMethod.Get)
                     {
+                        string route = request.RequestUri?.AbsolutePath ?? "";
+                        if (route.EndsWith(
+                                "/api/enhance/health",
+                                StringComparison.Ordinal))
+                        {
+                            return new HttpResponseMessage(HttpStatusCode.OK)
+                            {
+                                Content = JsonContent.Create(new
+                                {
+                                    capabilities = new
+                                    {
+                                        videoSeedControlV1 =
+                                            videoSeedCapabilityAvailable,
+                                    },
+                                }),
+                            };
+                        }
                         using JsonDocument jobsDocument =
                             JsonDocument.Parse(File.ReadAllText(jobsPath));
                         return new HttpResponseMessage(HttpStatusCode.OK)
@@ -17431,6 +17565,7 @@ public partial class App : Application
                                 "video",
                             ],
                             StringComparer.Ordinal)
+                        && !videoRequest.TryGetProperty("seed", out _)
                         && !videoRequest.TryGetProperty(
                             "sourcePath",
                             out _)
@@ -17469,6 +17604,68 @@ public partial class App : Application
                         && requestedVideo.GetProperty("prompt").GetString()
                             == japaneseVideoPrompt;
                 }
+                const int fixedVideoSeed = int.MaxValue;
+                win.ConfigureVideoSeedForSmoke(
+                    fixedMode: true,
+                    value: fixedVideoSeed.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture));
+                win.FlushStateForSmoke();
+                ViewerState? persistedVideoSeedState =
+                    JsonSerializer.Deserialize<ViewerState>(File.ReadAllText(
+                        videoStatePath));
+                int postsBeforeFixedVideoSeed = enhancementMutationRequestCount;
+                bool fixedVideoSeedQueued =
+                    await win.QueueVideoGenerationForSmokeAsync();
+                bool fixedVideoSeedExact = false;
+                if (fixedVideoSeedQueued
+                    && enhancementMutationRequestCount
+                        == postsBeforeFixedVideoSeed + 1)
+                {
+                    using JsonDocument fixedVideoSeedDocument =
+                        JsonDocument.Parse(videoRequestJson);
+                    fixedVideoSeedExact = fixedVideoSeedDocument.RootElement
+                            .GetProperty("seed").GetInt32() == fixedVideoSeed
+                        && persistedVideoSeedState?.VideoSeedMode == "fixed"
+                        && persistedVideoSeedState.VideoSeedValue
+                            == fixedVideoSeed;
+                }
+
+                win.ConfigureVideoSeedForSmoke(
+                    fixedMode: true,
+                    value: "2147483648");
+                int postsBeforeInvalidVideoSeed = enhancementMutationRequestCount;
+                bool invalidVideoSeedBlocked =
+                    !await win.QueueVideoGenerationForSmokeAsync()
+                    && enhancementMutationRequestCount
+                        == postsBeforeInvalidVideoSeed
+                    && !win.VideoSeedForSmoke.Valid
+                    && !win.VideoGenerationQueueEnabledForSmoke
+                    && win.VideoGenerationStatusForSmoke.Contains(
+                        "0〜2147483647",
+                        StringComparison.Ordinal);
+
+                win.ConfigureVideoSeedForSmoke(
+                    fixedMode: true,
+                    value: "975310");
+                videoSeedCapabilityAvailable = false;
+                int postsBeforeMissingVideoSeedCapability =
+                    enhancementMutationRequestCount;
+                bool missingVideoSeedCapabilityBlocked =
+                    !await win.QueueVideoGenerationForSmokeAsync()
+                    && enhancementMutationRequestCount
+                        == postsBeforeMissingVideoSeedCapability
+                    && win.VideoGenerationStatusForSmoke.Contains(
+                        "fixed video seeds",
+                        StringComparison.Ordinal);
+                videoSeedCapabilityAvailable = true;
+                win.ConfigureVideoSeedForSmoke(
+                    fixedMode: false,
+                    value: "975310");
+                bool videoSeedContract = videoDefaults
+                    && videoRequestExact
+                    && fixedVideoSeedExact
+                    && invalidVideoSeedBlocked
+                    && missingVideoSeedCapabilityBlocked;
                 win.ConfigureVideoGenerationForSmoke(
                     4,
                     12,
@@ -17722,6 +17919,7 @@ public partial class App : Application
                     && videoVersionInventory
                     && unifiedDisplayInventory
                     && videoDeliveryMetadata
+                    && videoGenerationSettingsSnapshot
                     && videoLoopDefault
                     && videoClickPaused
                     && videoPauseSettled
@@ -17750,6 +17948,7 @@ public partial class App : Application
                     && videoSurface
                     && videoQueueSucceeded
                     && videoRequestExact
+                    && videoSeedContract
                     && videoBoardFailureFeedback
                     && imageDeleteOwnershipGuard
                     && videoDeleteOwnershipGuard
@@ -17828,6 +18027,8 @@ public partial class App : Application
                     ModalDisplayVersionLabels = modalDisplayVersionLabels,
                     UnifiedDisplayInventory = unifiedDisplayInventory,
                     VideoDeliveryMetadata = videoDeliveryMetadata,
+                    VideoGenerationSettingsSnapshot =
+                        videoGenerationSettingsSnapshot,
                     VideoLoopDefault = videoLoopDefault,
                     VideoClickPaused = videoClickPaused,
                     VideoPauseSettled = videoPauseSettled,
@@ -17862,6 +18063,7 @@ public partial class App : Application
                     VideoSurface = videoSurface,
                     VideoQueueSucceeded = videoQueueSucceeded,
                     VideoRequestExact = videoRequestExact,
+                    VideoSeedContract = videoSeedContract,
                     VideoBoardFailureFeedback = videoBoardFailureFeedback,
                     ImageDeleteOwnershipGuard = imageDeleteOwnershipGuard,
                     VideoDeleteOwnershipGuard = videoDeleteOwnershipGuard,
@@ -18137,6 +18339,10 @@ public partial class App : Application
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
                 Directory.CreateDirectory(metadataIndexDirectory);
                 WriteSmokePng(sourcePath, 96, 72, Color.FromRgb(78, 128, 214));
+                InsertPngTextFixture(
+                    sourcePath,
+                    "parameters",
+                    "workspace source tag\nNegative prompt: source negative\nSteps: 20, CFG scale: 5, Seed: 42");
                 WriteSmokePng(outputPath, 192, 144, Color.FromRgb(86, 180, 214));
                 File.WriteAllBytes(
                     videoOutputPath,
@@ -18174,9 +18380,17 @@ public partial class App : Application
                 bool videoOutputDeleted = false;
                 bool reverseJobsForReturn = false;
                 string healthMode = "available";
+                bool queuePaused = false;
+                var queueControlBodies = new List<string>();
                 string? openedOutput = null;
                 string? openedVideoOutput = null;
                 string rerunBody = "";
+                string randomRerunBody = "";
+                string fixedRerunBody = "";
+                var rerunBodies = new List<string>();
+                bool photorealSeedCapabilityAvailable = true;
+                string queuedPromptUpdateBody = "";
+                var queuedPromptUpdateBodies = new List<(string Route, string Body)>();
                 var sourceInfo = new FileInfo(sourcePath);
                 double sourceMtimeMs = new DateTimeOffset(sourceInfo.LastWriteTimeUtc).ToUnixTimeMilliseconds();
 
@@ -18188,14 +18402,17 @@ public partial class App : Application
                     string? error = null,
                     string? operation = "upscale",
                     string createdAt = "2026-07-23T00:00:00.000Z",
-                    int? queueOrder = null) => new
+                    int? queueOrder = null,
+                    string? adapter = null) => new
                 {
                     id,
                     sourceId = sourcePath,
                     sourcePath,
                     sourceSignature = new { size = sourceInfo.Length, mtimeMs = sourceMtimeMs },
                     presetId = "anime-sharp-x2",
-                    adapterId = "realesrgan-ncnn",
+                    adapterId = adapter ?? (operation == "photoreal"
+                        ? "comfyui-flux2-photoreal"
+                        : "realesrgan-ncnn"),
                     operation,
                     status,
                     progress,
@@ -18246,14 +18463,14 @@ public partial class App : Application
                             width = 736,
                             height = 544,
                             positivePrompt = effectivePositivePrompt
-                                ??
-                                "Animate the supplied image as the exact first frame. "
-                                + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
-                                + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
-                                + "Use subtle natural idle motion only: gentle breathing, an occasional blink, and restrained secondary motion in hair and clothing. "
-                                + "Keep the camera locked and preserve the original framing.",
-                            negativePrompt =
-                                "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark",
+                                ?? string.Join(
+                                    " ",
+                                    WpfLocalPromptPolicy.Current.Video!
+                                        .PreservationPreamble,
+                                    WpfLocalPromptPolicy.Current.Video!
+                                        .BlankPromptMotion),
+                            negativePrompt = WpfLocalPromptPolicy.Current.Video!
+                                .NegativePrompt,
                             steps,
                             cfg = 5,
                             sampler = "uni_pc",
@@ -18357,18 +18574,23 @@ public partial class App : Application
                             nativeFrameCount: 49,
                             presetId: "wan22-ti2v-5b-high-v1",
                             steps: 40),
-                        Job("failed-cancel-job", failedCanceled ? "canceled" : "failed", 18, error: "GPU backend stopped"),
+                        Job(
+                            "failed-cancel-job",
+                            failedCanceled ? "canceled" : "failed",
+                            18,
+                            error: "GPU backend stopped",
+                            operation: "photoreal"),
                         VideoJob(
                             "failed-retry-job",
                             "failed",
                             27,
                             error: "Model runtime stopped",
-                            requestedPrompt: "髪を揺らす",
-                            effectivePositivePrompt:
-                                "Animate the supplied image as the exact first frame. "
-                                + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
-                                + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
-                                + "Follow this motion direction: 髪を揺らす",
+                            requestedPrompt: "example motion",
+                            effectivePositivePrompt: string.Join(
+                                " ",
+                                WpfLocalPromptPolicy.Current.Video!
+                                    .PreservationPreamble,
+                                "Follow this motion direction: example motion"),
                             presetHash: "ef83960a4509"),
                         VideoJob(
                             "delivery-failed-job",
@@ -18387,15 +18609,22 @@ public partial class App : Application
                             "queue-first-job",
                             allQueuedCanceled ? "canceled" : "queued",
                             0,
+                            operation: "photoreal",
                             createdAt: "2026-07-23T00:00:02.000Z",
-                            queueOrder: queueLaterFirst ? 1 : 0),
+                            queueOrder: queueLaterFirst ? 1 : 0,
+                            adapter: "a1111-photoreal"),
                         Job(
                             "done-job",
                             outputDeleted ? "deleted" : "succeeded",
                             100,
                             outputDeleted ? null : outputPath,
                             operation: "photoreal"),
-                        Job("canceled-job", "canceled", 11, error: "Canceled by user"),
+                        Job(
+                            "canceled-job",
+                            "canceled",
+                            11,
+                            error: "Canceled by user",
+                            operation: "photoreal"),
                         LegacyJob("legacy-reader-job", "canceled", 7),
                         VideoJob(
                             "video-reader-job",
@@ -18450,6 +18679,7 @@ public partial class App : Application
                             "canceled-retry-job",
                             allQueuedCanceled ? "canceled" : "queued",
                             0,
+                            operation: "photoreal",
                             createdAt: "2026-07-23T00:00:05.000Z",
                             queueOrder: 4));
                     if (rerunCreated)
@@ -18485,6 +18715,26 @@ public partial class App : Application
                         if (counts.ContainsKey(status))
                             counts[status]++;
                     }
+
+                    var worker = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["pumpRunning"] = counts["running"] + counts["queued"] > 0,
+                        ["processWorkerInstanceId"] = "smoke-worker",
+                        ["consecutiveWorkerFailures"] = 0,
+                        ["lastWorkerError"] = null,
+                        ["lastWorkerErrorAt"] = null,
+                        ["lastLeaseContentionAt"] = null,
+                    };
+                    if (healthMode != "legacy-pause")
+                        worker["paused"] = queuePaused;
+                    var capabilities = new Dictionary<string, object?>(
+                        StringComparer.Ordinal);
+                    if (healthMode != "legacy-prompt-update")
+                        capabilities["queuedPhotorealPromptUpdate"] = true;
+                    capabilities["photorealPromptControlsV2"] = true;
+                    capabilities["atomicImageEnqueueNext"] = true;
+                    if (photorealSeedCapabilityAvailable)
+                        capabilities["photorealSeedControlV1"] = true;
 
                     return new
                     {
@@ -18528,15 +18778,8 @@ public partial class App : Application
                             lastProgressAt = (string?)null,
                             lastTerminalAt = (string?)null,
                         },
-                        worker = new
-                        {
-                            pumpRunning = counts["running"] + counts["queued"] > 0,
-                            processWorkerInstanceId = "smoke-worker",
-                            consecutiveWorkerFailures = 0,
-                            lastWorkerError = (string?)null,
-                            lastWorkerErrorAt = (string?)null,
-                            lastLeaseContentionAt = (string?)null,
-                        },
+                        worker,
+                        capabilities,
                         comfyUi = new
                         {
                             endpoint = "http://127.0.0.1:8190",
@@ -18573,6 +18816,16 @@ public partial class App : Application
                             ? JsonResponse(HttpStatusCode.OK, CurrentHealth())
                             : JsonResponse(HttpStatusCode.NotFound, new { error = "health route unavailable" }));
                     }
+                    if (request.Method == HttpMethod.Post && route.EndsWith("/api/enhance/queue", StringComparison.Ordinal))
+                    {
+                        string body = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "";
+                        queueControlBodies.Add(body);
+                        using JsonDocument pauseDocument = JsonDocument.Parse(body);
+                        queuePaused = pauseDocument.RootElement.GetProperty("paused").GetBoolean();
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.OK,
+                            new { paused = queuePaused, pumpRunning = !queuePaused }));
+                    }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/active-job/cancel", StringComparison.Ordinal))
                     {
                         activeCancelRequested = true;
@@ -18591,7 +18844,14 @@ public partial class App : Application
                     if (request.Method == HttpMethod.Post && route.EndsWith("/failed-cancel-job/cancel", StringComparison.Ordinal))
                     {
                         failedCanceled = true;
-                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { job = Job("failed-cancel-job", "canceled", 18) }));
+                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new
+                        {
+                            job = Job(
+                                "failed-cancel-job",
+                                "canceled",
+                                18,
+                                operation: "photoreal"),
+                        }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/failed-retry-job/retry", StringComparison.Ordinal))
                     {
@@ -18603,7 +18863,14 @@ public partial class App : Application
                     if (request.Method == HttpMethod.Post && route.EndsWith("/canceled-job/retry", StringComparison.Ordinal))
                     {
                         canceledRetryCreated = true;
-                        return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new { job = Job("canceled-retry-job", "queued", 0) }));
+                        return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new
+                        {
+                            job = Job(
+                                "canceled-retry-job",
+                                "queued",
+                                0,
+                                operation: "photoreal"),
+                        }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/queue-later-job/queue", StringComparison.Ordinal))
                     {
@@ -18621,6 +18888,29 @@ public partial class App : Application
                             queue = CurrentJobs(),
                         }));
                     }
+                    if (request.Method == HttpMethod.Post
+                        && route.EndsWith("/prompts", StringComparison.Ordinal))
+                    {
+                        string body = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "";
+                        queuedPromptUpdateBodies.Add((route, body));
+                        if (route.EndsWith("/rerun-job/prompts", StringComparison.Ordinal))
+                            queuedPromptUpdateBody = body;
+                        string[] segments = route.Split(
+                            '/',
+                            StringSplitOptions.RemoveEmptyEntries);
+                        string jobId = segments.Length >= 2
+                            ? segments[^2]
+                            : "unknown-job";
+                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new
+                        {
+                            job = Job(
+                                jobId,
+                                "queued",
+                                0,
+                                operation: "photoreal",
+                                queueOrder: 5),
+                        }));
+                    }
                     if (request.Method == HttpMethod.Delete && route.EndsWith("/api/enhance/jobs/queued", StringComparison.Ordinal))
                     {
                         allQueuedCanceled = true;
@@ -18634,6 +18924,7 @@ public partial class App : Application
                     if (request.Method == HttpMethod.Post && route.EndsWith("/api/enhance/jobs", StringComparison.Ordinal))
                     {
                         rerunBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "";
+                        rerunBodies.Add(rerunBody);
                         rerunCreated = true;
                         return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new
                         {
@@ -18673,11 +18964,14 @@ public partial class App : Application
                 }, confirmOutputDelete: true);
                 window.ConfigureModalPhotorealSettingsForSmoke(
                     0.45,
-                    0.75,
                     6,
                     1024,
                     "workspace rerun prompt",
-                    1.4);
+                    1.4,
+                    "workspace empty-state prompt",
+                    "workspace negative prompt",
+                    loraEnabled: false,
+                    negativePromptEnabled: true);
                 File.WriteAllText(
                     jobsPath,
                     JsonSerializer.Serialize(new
@@ -18702,10 +18996,33 @@ public partial class App : Application
                     && passiveOpenRequests.Contains("GET /api/enhance/jobs", StringComparer.Ordinal)
                     && passiveOpenRequests.Contains("GET /api/enhance/health", StringComparer.Ordinal);
                 bool healthVisible = initial.HealthState == "Working"
-                    && initial.HealthDetail == "1 running / 3 queued";
+                    && initial.HealthDetail == "1 running / 3 queued"
+                    && initial.QueuePaused == false
+                    && initial.QueuePauseLabel == "一時停止"
+                    && initial.QueuePauseEnabled
+                    && initial.QueuedPhotorealPromptUpdateSupported;
                 bool healthProvenance = initial.HealthRevision == "H25 69684954";
                 bool healthPassive = initial.HealthGetRequests >= 1 && passiveOpen;
                 object? viewBeforeRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
+                healthMode = "legacy-prompt-update";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot legacyPromptUpdateHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool legacyPromptUpdateCapabilitySafe =
+                    legacyPromptUpdateHealth.HealthState == "Working"
+                    && !legacyPromptUpdateHealth
+                        .QueuedPhotorealPromptUpdateSupported
+                    && legacyPromptUpdateHealth.QueuePaused == false
+                    && legacyPromptUpdateHealth.QueuePauseEnabled
+                    && legacyPromptUpdateHealth.Total == initial.Total;
+                healthMode = "legacy-pause";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot legacyPauseHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool legacyPauseCapabilitySafe = legacyPauseHealth.HealthState == "Working"
+                    && legacyPauseHealth.QueuePaused is null
+                    && !legacyPauseHealth.QueuePauseEnabled
+                    && legacyPauseHealth.Total == initial.Total;
                 healthMode = "missing";
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot legacyHealth =
@@ -18734,6 +19051,29 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool healthRecovered = recoveredHealth.HealthState == "Working"
                     && recoveredHealth.HealthRevision == "H25 69684954";
+                bool pauseIssued = await window.SetEnhancementQueuePausedForSmokeAsync(true);
+                EnhancementJobsWorkspaceSmokeSnapshot pausedQueue =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool pauseCurrentContinues = pauseIssued
+                    && pausedQueue.HealthState == "Paused"
+                    && pausedQueue.HealthDetail == "1 running now; 3 queued jobs will remain paused"
+                    && pausedQueue.QueuePaused == true
+                    && pausedQueue.QueuePauseLabel == "再開"
+                    && pausedQueue.QueuePauseEnabled
+                    && pausedQueue.Total == initial.Total
+                    && pausedQueue.Active == initial.Active;
+                bool resumeIssued = await window.SetEnhancementQueuePausedForSmokeAsync(false);
+                EnhancementJobsWorkspaceSmokeSnapshot resumedQueue =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool queuePauseContract = pauseCurrentContinues
+                    && resumeIssued
+                    && resumedQueue.HealthState == "Working"
+                    && resumedQueue.QueuePaused == false
+                    && resumedQueue.QueuePauseLabel == "一時停止"
+                    && resumedQueue.QueuePauseEnabled
+                    && queueControlBodies.SequenceEqual(
+                        ["{\"paused\":true}", "{\"paused\":false}"],
+                        StringComparer.Ordinal);
                 object? viewAfterRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
                 bool stableJobViews = viewBeforeRefresh is not null
                     && ReferenceEquals(viewBeforeRefresh, viewAfterRefresh);
@@ -18787,6 +19127,18 @@ public partial class App : Application
                         as EnhancementWorkspaceJobView;
                 var legacyReaderView =
                     window.EnhancementJobViewIdentityForSmoke("legacy-reader-job")
+                        as EnhancementWorkspaceJobView;
+                var legacyQueuedPhotorealView =
+                    window.EnhancementJobViewIdentityForSmoke("queue-first-job")
+                        as EnhancementWorkspaceJobView;
+                var failedPhotorealView =
+                    window.EnhancementJobViewIdentityForSmoke("failed-cancel-job")
+                        as EnhancementWorkspaceJobView;
+                var canceledPhotorealView =
+                    window.EnhancementJobViewIdentityForSmoke("canceled-job")
+                        as EnhancementWorkspaceJobView;
+                var completedPhotorealView =
+                    window.EnhancementJobViewIdentityForSmoke("done-job")
                         as EnhancementWorkspaceJobView;
                 int requestsBeforeUnsupportedActions = requests.Count;
                 bool legacyVideoMutationSafe = activeVideoView is
@@ -18903,6 +19255,50 @@ public partial class App : Application
                     && !await window.RetryEnhancementJobForSmokeAsync("null-operation-reader-job");
                 bool legacyMissingOperation =
                     legacyReaderView?.Operation == "upscale";
+                bool legacyPhotorealPromptUpdateSafe =
+                    legacyQueuedPhotorealView is
+                    {
+                        Operation: "photoreal",
+                        AdapterId: "a1111-photoreal",
+                        CanUpdatePhotorealPrompts: false,
+                    }
+                    && !await window.UpdateQueuedPhotorealPromptsForSmokeAsync(
+                        "queue-first-job");
+                bool photorealTerminalCurrentSettingsActions =
+                    failedPhotorealView is
+                    {
+                        Operation: "photoreal",
+                        Status: "failed",
+                        CanRetry: true,
+                        CanRerunWithCurrentSettings: true,
+                        CanRerunNextWithCurrentSettings: true,
+                    }
+                    && canceledPhotorealView is
+                    {
+                        Operation: "photoreal",
+                        Status: "canceled",
+                        CanRetry: true,
+                        CanRerunWithCurrentSettings: true,
+                        CanRerunNextWithCurrentSettings: true,
+                    }
+                    && completedPhotorealView is
+                    {
+                        Operation: "photoreal",
+                        Status: "succeeded",
+                        CanRetry: false,
+                        CanRerunWithCurrentSettings: true,
+                        CanRerunNextWithCurrentSettings: true,
+                    }
+                    && failedVideoView is
+                    {
+                        CanRerunWithCurrentSettings: false,
+                        CanRerunNextWithCurrentSettings: false,
+                    }
+                    && activeVideoView is
+                    {
+                        CanRerunWithCurrentSettings: false,
+                        CanRerunNextWithCurrentSettings: false,
+                    };
                 bool unsupportedNoMutation =
                     requests.Count == requestsBeforeUnsupportedActions;
                 bool imageVersionsExcludeVideo =
@@ -18953,9 +19349,68 @@ public partial class App : Application
                 EnhancementJobsWorkspaceSmokeSnapshot afterCanceledRetry =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool rerunIssued =
-                    await window.RerunPhotorealJobForSmokeAsync("done-job");
+                    await window.RerunPhotorealJobForSmokeAsync(
+                        "canceled-job",
+                        enqueueNext: true);
+                if (rerunBodies.Count > 0)
+                    randomRerunBody = rerunBodies[^1];
                 EnhancementJobsWorkspaceSmokeSnapshot afterRerun =
                     window.EnhancementJobsWorkspaceForSmoke();
+                bool queuedPromptUpdateIssued =
+                    await window.UpdateQueuedPhotorealPromptsForSmokeAsync(
+                        "rerun-job");
+                EnhancementJobsWorkspaceSmokeSnapshot afterQueuedPromptUpdate =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                int promptUpdateCountBeforeBulk = queuedPromptUpdateBodies.Count;
+                bool bulkPromptControlReady =
+                    window.UpdateAllQueuedPhotorealPromptsControlForSmoke;
+                int bulkPromptEligibleCount =
+                    await window.UpdateAllQueuedPhotorealPromptsForSmokeAsync();
+                (string Route, string Body)[] bulkPromptUpdates =
+                    queuedPromptUpdateBodies.Skip(promptUpdateCountBeforeBulk).ToArray();
+                EnhancementJobsWorkspaceSmokeSnapshot afterBulkPromptUpdate =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                window.ConfigurePhotorealSeedForSmoke(
+                    fixedMode: true,
+                    value: "2147483648");
+                int rerunsBeforeInvalidSeed = rerunBodies.Count;
+                bool invalidRerunSeedBlocked =
+                    await window.RerunPhotorealJobForSmokeAsync(
+                        "canceled-job",
+                        enqueueNext: true)
+                    && rerunBodies.Count == rerunsBeforeInvalidSeed
+                    && window.EnhancementJobsStatusForSmoke.Contains(
+                        "0〜2147483647",
+                        StringComparison.Ordinal);
+                window.ConfigurePhotorealSeedForSmoke(
+                    fixedMode: true,
+                    value: "975310");
+                photorealSeedCapabilityAvailable = false;
+                int rerunsBeforeMissingSeedCapability = rerunBodies.Count;
+                bool missingRerunSeedCapabilityBlocked =
+                    await window.RerunPhotorealJobForSmokeAsync(
+                        "canceled-job",
+                        enqueueNext: true)
+                    && rerunBodies.Count
+                        == rerunsBeforeMissingSeedCapability
+                    && window.EnhancementJobsStatusForSmoke.Contains(
+                        "fixed photoreal seeds",
+                        StringComparison.Ordinal);
+                photorealSeedCapabilityAvailable = true;
+                window.ConfigurePhotorealSeedForSmoke(
+                    fixedMode: true,
+                    value: int.MaxValue.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture));
+                int rerunsBeforeFixedSeed = rerunBodies.Count;
+                bool fixedRerunSeedIssued =
+                    await window.RerunPhotorealJobForSmokeAsync(
+                        "canceled-job",
+                        enqueueNext: true);
+                if (rerunBodies.Count == rerunsBeforeFixedSeed + 1)
+                    fixedRerunBody = rerunBodies[^1];
+                window.ConfigurePhotorealSeedForSmoke(
+                    fixedMode: false,
+                    value: "975310");
                 bool clearQueuedIssued =
                     await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterClearQueued =
@@ -19057,11 +19512,13 @@ public partial class App : Application
                     && !whileSourceViewerOpen.Polling
                     && afterSourceOpen.Visible;
                 bool routesOk = requests.Contains("POST /api/enhance/jobs/active-job/cancel", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/queue", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-cancel-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-retry-job/retry", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/canceled-job/retry", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/queue-later-job/queue", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/rerun-job/prompts", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/queued", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/video-reader-job/output", StringComparer.Ordinal);
@@ -19100,19 +19557,77 @@ public partial class App : Application
                     && videoOnly.VisibleOperationLabels.All(static label =>
                         string.Equals(label, "VIDEO  動画化", StringComparison.Ordinal));
                 bool rerunSettingsContract = false;
-                if (!string.IsNullOrWhiteSpace(rerunBody))
+                if (!string.IsNullOrWhiteSpace(randomRerunBody))
                 {
-                    using JsonDocument rerunDocument = JsonDocument.Parse(rerunBody);
+                    using JsonDocument rerunDocument =
+                        JsonDocument.Parse(randomRerunBody);
                     JsonElement body = rerunDocument.RootElement;
                     rerunSettingsContract =
                         body.GetProperty("operation").GetString() == "photoreal"
-                        && body.GetProperty("prompt").GetString() == "workspace rerun prompt"
+                        && !body.GetProperty("loraEnabled").GetBoolean()
+                        && body.GetProperty("prompt").GetString() ==
+                            "workspace rerun prompt";
+                    rerunSettingsContract = rerunSettingsContract
+                        && body.GetProperty("negativePrompt").GetString()
+                            == "workspace negative prompt"
                         && Math.Abs(body.GetProperty("strength").GetDouble() - 0.45) < 0.001
-                        && Math.Abs(body.GetProperty("structureStrength").GetDouble() - 0.75) < 0.001
+                        && !body.TryGetProperty("structureStrength", out _)
                         && Math.Abs(body.GetProperty("cfgScale").GetDouble() - 1.4) < 0.001
                         && body.GetProperty("steps").GetInt32() == 6
-                        && body.GetProperty("maxDimension").GetInt32() == 1024;
+                        && body.GetProperty("maxDimension").GetInt32() == 1024
+                        && !body.TryGetProperty("seed", out _)
+                        && body.GetProperty("queuePlacement").GetString() == "next";
                 }
+                bool rerunSeedContract = false;
+                if (!string.IsNullOrWhiteSpace(fixedRerunBody))
+                {
+                    using JsonDocument fixedSeedRerunDocument =
+                        JsonDocument.Parse(fixedRerunBody);
+                    JsonElement fixedSeedBody =
+                        fixedSeedRerunDocument.RootElement;
+                    rerunSeedContract = invalidRerunSeedBlocked
+                        && missingRerunSeedCapabilityBlocked
+                        && fixedRerunSeedIssued
+                        && fixedSeedBody.GetProperty("seed").GetInt32()
+                            == int.MaxValue
+                        && fixedSeedBody.GetProperty("queuePlacement")
+                            .GetString() == "next";
+                }
+                bool queuedPromptUpdateContract = false;
+                if (!string.IsNullOrWhiteSpace(queuedPromptUpdateBody))
+                {
+                    using JsonDocument updateDocument =
+                        JsonDocument.Parse(queuedPromptUpdateBody);
+                    JsonElement body = updateDocument.RootElement;
+                    queuedPromptUpdateContract =
+                        body.EnumerateObject().Count() == 2
+                        && body.GetProperty("prompt").GetString()
+                            == "workspace rerun prompt"
+                        && body.GetProperty("negativePrompt").GetString()
+                            == "workspace negative prompt";
+                }
+                bool bulkQueuedPromptUpdateContract =
+                    bulkPromptControlReady
+                    && bulkPromptEligibleCount == 2
+                    && bulkPromptUpdates.Length == 2
+                    && bulkPromptUpdates.Select(static update => update.Route)
+                        .OrderBy(static route => route, StringComparer.Ordinal)
+                        .SequenceEqual(
+                            [
+                                "/api/enhance/jobs/canceled-retry-job/prompts",
+                                "/api/enhance/jobs/rerun-job/prompts",
+                            ],
+                            StringComparer.Ordinal)
+                    && bulkPromptUpdates.All(static update =>
+                    {
+                        using JsonDocument document = JsonDocument.Parse(update.Body);
+                        JsonElement body = document.RootElement;
+                        return body.EnumerateObject().Count() == 2
+                            && body.GetProperty("prompt").GetString()
+                                == "workspace rerun prompt"
+                            && body.GetProperty("negativePrompt").GetString()
+                                == "workspace negative prompt";
+                    });
                 ok = initial.Visible
                     && initial.Total == 16
                     && initial.Active == 4
@@ -19121,10 +19636,13 @@ public partial class App : Application
                     && healthVisible
                     && healthProvenance
                     && healthPassive
+                    && legacyPromptUpdateCapabilitySafe
+                    && legacyPauseCapabilitySafe
                     && legacyHealthFallback
                     && futureHealthFallback
                     && unknownIssueSafe
                     && healthRecovered
+                    && queuePauseContract
                     && stableJobViews
                     && running.Filtered == 1
                     && queued.Filtered == 3
@@ -19140,6 +19658,8 @@ public partial class App : Application
                     && malformedProvenanceVideoSafe
                     && unknownOperationSafe
                     && legacyMissingOperation
+                    && legacyPhotorealPromptUpdateSafe
+                    && photorealTerminalCurrentSettingsActions
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
                     && moveNextIssued
@@ -19166,9 +19686,20 @@ public partial class App : Application
                     && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
                     && rerunIssued
                     && rerunSettingsContract
+                    && rerunSeedContract
                     && afterRerun.Total == 19
                     && afterRerun.Active == 6
                     && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
+                    && queuedPromptUpdateIssued
+                    && queuedPromptUpdateContract
+                    && afterQueuedPromptUpdate.Total == afterRerun.Total
+                    && afterQueuedPromptUpdate.Active == afterRerun.Active
+                    && afterQueuedPromptUpdate.VisibleIds.Contains(
+                        "rerun-job",
+                        StringComparer.Ordinal)
+                    && bulkQueuedPromptUpdateContract
+                    && afterBulkPromptUpdate.Total == afterQueuedPromptUpdate.Total
+                    && afterBulkPromptUpdate.Active == afterQueuedPromptUpdate.Active
                     && clearQueuedIssued
                     && afterClearQueued.Active == 0
                     && !afterClearQueued.Polling
@@ -19209,10 +19740,13 @@ public partial class App : Application
                     healthVisible,
                     healthProvenance,
                     healthPassive,
+                    legacyPromptUpdateCapabilitySafe,
+                    legacyPauseCapabilitySafe,
                     legacyHealthFallback,
                     futureHealthFallback,
                     unknownIssueSafe,
                     healthRecovered,
+                    queuePauseContract,
                     initial,
                     legacyHealth,
                     futureHealth,
@@ -19237,7 +19771,11 @@ public partial class App : Application
                     afterCanceledRetry,
                     rerunIssued,
                     rerunSettingsContract,
+                    rerunSeedContract,
                     afterRerun,
+                    queuedPromptUpdateIssued,
+                    queuedPromptUpdateContract,
+                    afterQueuedPromptUpdate,
                     clearQueuedIssued,
                     afterClearQueued,
                     whileOutputViewerOpen,
@@ -19264,6 +19802,8 @@ public partial class App : Application
                     malformedProvenanceVideoSafe,
                     unknownOperationSafe,
                     legacyMissingOperation,
+                    legacyPhotorealPromptUpdateSafe,
+                    photorealTerminalCurrentSettingsActions,
                     unsupportedNoMutation,
                     imageVersionsExcludeVideo,
                     stableJobViews,
@@ -19308,6 +19848,222 @@ public partial class App : Application
         }, DispatcherPriority.ContextIdle);
     }
 
+    private void CaptureCatalogProjectionCoalescingSmoke(string resultPath)
+    {
+        string resultFullPath = Path.GetFullPath(resultPath);
+        string smokeRoot = Directory.CreateTempSubdirectory(
+            "photoviewer-wpf-catalog-projection-coalescing-").FullName;
+        string folder = Path.Combine(smokeRoot, "images");
+        string storeRoot = Path.Combine(smokeRoot, "stores");
+        string favoriteName = "favorite.png";
+        string ordinaryName = "ordinary.png";
+        var environmentOverrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["PHOTOVIEWER_WPF_STATE_PATH"] = Path.Combine(storeRoot, "state.json"),
+            ["PHOTOVIEWER_WPF_SETTINGS_PATH"] = Path.Combine(storeRoot, "settings.json"),
+            ["PHOTOVIEWER_WPF_FAVORITES_PATH"] = Path.Combine(storeRoot, "favorites.json"),
+            ["PHOTOVIEWER_WPF_SEEN_PATH"] = Path.Combine(storeRoot, "seen.json"),
+            ["PHOTOVIEWER_WPF_RECENT_PATH"] = Path.Combine(storeRoot, "recent.json"),
+            ["PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH"] = Path.Combine(storeRoot, "search-history.json"),
+            ["PHOTOVIEWER_WPF_ALBUMS_PATH"] = Path.Combine(storeRoot, "albums.json"),
+            ["PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY"] = Path.Combine(storeRoot, "metadata-index"),
+            ["PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"] = Path.Combine(storeRoot, "enhance", "jobs.json"),
+            ["PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT"] = Path.Combine(storeRoot, "enhance", "outputs"),
+        };
+        Dictionary<string, string?> previousEnvironment = environmentOverrides.Keys.ToDictionary(
+            static name => name,
+            static name => Environment.GetEnvironmentVariable(name),
+            StringComparer.Ordinal);
+        foreach ((string name, string value) in environmentOverrides)
+            Environment.SetEnvironmentVariable(name, value);
+
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        Dispatcher.InvokeAsync(async () =>
+        {
+            MainWindow? win = null;
+            string failure = "";
+            int appliedCount = 0;
+            int discardedCount = 0;
+            long startPosts = 0;
+            long startCoalesced = 0;
+            long captures = 0;
+            long anchorPosts = 0;
+            long anchorCoalesced = 0;
+            long anchorExecuted = 0;
+            bool anchorPreserved = false;
+            bool finalProjectionExact = false;
+            bool finalGenerationExact = false;
+            try
+            {
+                string tempRoot = Path.GetFullPath(Path.GetTempPath())
+                    .TrimEnd(Path.DirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                string normalizedRoot = Path.GetFullPath(smokeRoot)
+                    .TrimEnd(Path.DirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                if (!normalizedRoot.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Catalog projection smoke storage must stay under TEMP.");
+                }
+
+                Directory.CreateDirectory(folder);
+                Directory.CreateDirectory(storeRoot);
+                Directory.CreateDirectory(environmentOverrides[
+                    "PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY"]);
+                Directory.CreateDirectory(environmentOverrides[
+                    "PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT"]);
+                Directory.CreateDirectory(Path.GetDirectoryName(environmentOverrides[
+                    "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"])!);
+                File.WriteAllText(
+                    environmentOverrides["PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"],
+                    "{\"version\":1,\"jobs\":[]}");
+                WriteSmokePng(
+                    Path.Combine(folder, favoriteName),
+                    32,
+                    24,
+                    Color.FromRgb(92, 132, 208));
+                WriteSmokePng(
+                    Path.Combine(folder, ordinaryName),
+                    32,
+                    24,
+                    Color.FromRgb(188, 104, 72));
+
+                win = HiddenWindow();
+                win.SuppressStatePersistence();
+                win.Show();
+                await win.LoadFolderAsync(folder).WaitAsync(TimeSpan.FromSeconds(15));
+                win.SetSortByForSmoke("name");
+                if (!win.SelectFileNameForSmoke(favoriteName)
+                    || !win.SetSelectedFavoriteLevelForSmoke(1))
+                {
+                    throw new InvalidOperationException(
+                        "Catalog projection smoke could not prepare its favorite fixture.");
+                }
+                await win.DrainSharedStoreWritersForSmokeAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10));
+
+                long startPostBefore = win.CatalogProjectionStartPostCountForSmoke;
+                long startCoalescedBefore = win.CatalogProjectionStartCoalescedCountForSmoke;
+                long captureBefore = win.CatalogProjectionCaptureCountForSmoke;
+                var requests = new Task<MainWindow.SearchFilterCompletion>[20];
+                for (int index = 0; index < requests.Length; index++)
+                {
+                    bool favoritesOnly = (index & 1) == 1;
+                    requests[index] = favoritesOnly
+                        ? win.SetFavoriteOnlyFilterForSmokeAsync(enabled: true)
+                        : win.ClearFavoriteFiltersForSmokeAsync();
+                }
+
+                MainWindow.SearchFilterCompletion[] outcomes = await Task.WhenAll(requests)
+                    .WaitAsync(TimeSpan.FromSeconds(15));
+                startPosts = win.CatalogProjectionStartPostCountForSmoke - startPostBefore;
+                startCoalesced = win.CatalogProjectionStartCoalescedCountForSmoke - startCoalescedBefore;
+                captures = win.CatalogProjectionCaptureCountForSmoke - captureBefore;
+                appliedCount = outcomes.Count(static outcome => outcome.Applied && !outcome.Discarded);
+                discardedCount = outcomes.Count(static outcome => outcome.Discarded);
+                finalProjectionExact = win.ShowFavoritesOnlyForSmoke
+                    && win.FilteredCountForSmoke == 1
+                    && win.FilteredFileNamesForSmoke(2).SequenceEqual(
+                        [favoriteName],
+                        StringComparer.OrdinalIgnoreCase);
+                finalGenerationExact = win.LastAppliedSearchFilterGenerationForSmoke
+                    == win.CatalogProjectionGenerationForSmoke;
+
+                await win.WaitForGridZoomAnchorForSmokeAsync();
+                string? expectedAnchor = win.CaptureGridViewportAnchorPathForSmoke();
+                long anchorPostBefore = win.GridAnchorRememberPostCountForSmoke;
+                long anchorCoalescedBefore = win.GridAnchorRememberCoalescedCountForSmoke;
+                long anchorExecutedBefore = win.GridAnchorRememberExecuteCountForSmoke;
+                for (int index = 0; index < 20; index++)
+                    win.ScheduleGridAnchorRememberForSmoke();
+                await win.Dispatcher.InvokeAsync(
+                    static () => { },
+                    DispatcherPriority.ContextIdle);
+                anchorPosts = win.GridAnchorRememberPostCountForSmoke - anchorPostBefore;
+                anchorCoalesced = win.GridAnchorRememberCoalescedCountForSmoke - anchorCoalescedBefore;
+                anchorExecuted = win.GridAnchorRememberExecuteCountForSmoke - anchorExecutedBefore;
+                anchorPreserved = expectedAnchor is not null
+                    && string.Equals(
+                        win.LastStableGridViewportAnchorPathForSmoke,
+                        expectedAnchor,
+                        StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                failure = ex.Message;
+            }
+            finally
+            {
+                if (win is not null)
+                {
+                    try
+                    {
+                        if (win.IsLoaded)
+                            await win.CloseAndWaitForSmokeAsync();
+                        else
+                            win.Close();
+                    }
+                    catch (Exception closeException)
+                    {
+                        if (string.IsNullOrWhiteSpace(failure))
+                            failure = $"window close failed: {closeException.Message}";
+                    }
+                }
+                foreach ((string name, string? value) in previousEnvironment)
+                    Environment.SetEnvironmentVariable(name, value);
+            }
+
+            bool ok = startPosts == 20
+                && startCoalesced == 19
+                && captures == 1
+                && appliedCount == 1
+                && discardedCount == 19
+                && finalProjectionExact
+                && finalGenerationExact
+                && anchorPosts == 1
+                && anchorCoalesced == 19
+                && anchorExecuted == 1
+                && anchorPreserved
+                && string.IsNullOrWhiteSpace(failure);
+            object result = new
+            {
+                ok,
+                message = ok
+                    ? "20-request projection and anchor bursts coalesced to the final UI work"
+                    : string.IsNullOrWhiteSpace(failure)
+                        ? "catalog projection coalescing contract failed"
+                        : failure,
+                startPosts,
+                startCoalesced,
+                captures,
+                appliedCount,
+                discardedCount,
+                finalProjectionExact,
+                finalGenerationExact,
+                anchorPosts,
+                anchorCoalesced,
+                anchorExecuted,
+                anchorPreserved,
+            };
+            Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
+            File.WriteAllText(
+                resultFullPath,
+                JsonSerializer.Serialize(
+                    result,
+                    new JsonSerializerOptions { WriteIndented = true }));
+            try
+            {
+                if (Directory.Exists(smokeRoot))
+                    Directory.Delete(smokeRoot, recursive: true);
+            }
+            catch
+            {
+            }
+            Shutdown(ok ? 0 : 1);
+        }, DispatcherPriority.ContextIdle);
+    }
+
     private void CaptureModalEnhancementActionsSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
@@ -19321,6 +20077,24 @@ public partial class App : Application
         string canonicalNavigationTargetPath = Path.Combine(canonicalSourceRoot, "navigation-target.png");
         string storeRoot = Path.Combine(smokeRoot, "stores");
         string outputPath = Path.Combine(storeRoot, "enhance", "outputs", "enhance-source.webp");
+        string legacyPhotorealOutputPath = Path.Combine(
+            storeRoot,
+            "enhance",
+            "outputs",
+            "Photoreal",
+            "legacy-photoreal.png");
+        string migratedPhotorealOutputPath = Path.Combine(
+            storeRoot,
+            "enhance",
+            "outputs",
+            "Photorealized",
+            Path.GetFileName(legacyPhotorealOutputPath));
+        string missingLegacyPhotorealOutputPath = Path.Combine(
+            storeRoot,
+            "enhance",
+            "outputs",
+            "Photoreal",
+            "missing-photoreal.png");
         string lexicalOutsideOutputPath = Path.Combine(smokeRoot, "outside-managed", "lexical-escape.webp");
         string canonicalEscapeOutputPath = Path.Combine(storeRoot, "enhance", "outputs", "junction-alias", "canonical-escape.webp");
         string canonicalEscapeTargetPath = Path.Combine(smokeRoot, "outside-managed", "canonical-escape.webp");
@@ -19384,17 +20158,35 @@ public partial class App : Application
             bool alternateLexicalIdentity = false;
             bool pollIdentityCanonical = false;
             bool restartRecovery = false;
+            bool legacyPhotorealRestartRecovery = false;
+            bool legacyPhotorealModalRecovery = false;
+            bool missingLegacyPhotorealRejected = false;
             bool lexicalOutputRejected = false;
             bool canonicalOutputRejected = false;
             bool canonicalSourceUntouched = false;
             bool navigatedDuringResponse = false;
             bool staleResponseDiscarded = false;
+            bool rapidNavigationGetCoalesced = false;
+            bool rapidNavigationGetFinalSource = false;
+            bool rapidNavigationDecodeCoalesced = false;
+            bool rapidNavigationMetadataCoalesced = false;
+            bool rapidNavigationFinalSelection = false;
+            bool rapidNavigationBaselineDecodeCompleted = false;
+            bool rapidNavigationFinalDecodeCompleted = false;
+            int rapidNavigationGetStarts = 0;
+            int rapidNavigationDecodeStarts = 0;
+            int rapidNavigationDecodeApplies = 0;
+            int rapidNavigationMetadataStarts = 0;
+            int rapidNavigationMetadataApplies = 0;
             bool passiveCompanionStartSuppressed = false;
+            bool serverErrorCompanionStartSuppressed = false;
             bool explicitCompanionAutoStart = false;
             bool companionConfiguredRootExact = false;
             bool companionAppBaseAncestor = false;
             bool companionConfiguredAncestorRejected = false;
             bool companionIdentityRejected = false;
+            bool companionDedicatedLauncherSelected = false;
+            bool companionLegacyRollbackLauncherSelected = false;
             bool nodeExecutableResolved = false;
             bool nodeProgramFilesCandidateAccepted = false;
             bool nodeOutsideCandidateRejected = false;
@@ -19447,6 +20239,7 @@ public partial class App : Application
                 Directory.CreateDirectory(folder);
                 Directory.CreateDirectory(Path.GetDirectoryName(canonicalSourcePath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                Directory.CreateDirectory(Path.GetDirectoryName(migratedPhotorealOutputPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(lexicalOutsideOutputPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(canonicalEscapeOutputPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
@@ -19460,6 +20253,7 @@ public partial class App : Application
                 WriteSmokePng(lexicalOutsideOutputPath, 40, 40, Color.FromRgb(212, 92, 68));
                 WriteSmokePng(canonicalEscapeOutputPath, 44, 44, Color.FromRgb(226, 158, 62));
                 File.Copy(canonicalEscapeOutputPath, canonicalEscapeTargetPath, overwrite: true);
+                WriteSmokePng(migratedPhotorealOutputPath, 48, 48, Color.FromRgb(82, 168, 126));
                 File.WriteAllText(statePath, "{\"version\":2}");
                 File.WriteAllText(favoritesPath, "{}");
                 File.WriteAllText(seenPath, JsonSerializer.Serialize(new Dictionary<string, bool>
@@ -19483,8 +20277,11 @@ public partial class App : Application
                     Path.Combine(companionFixtureRoot, "project.toml"),
                     "[project]\nid = \"H000025\"\nname = \"PhotoViewer\"\n");
                 File.WriteAllText(
-                    Path.Combine(companionFixtureRoot, "scripts", "prod_launcher.js"),
+                    Path.Combine(companionFixtureRoot, "scripts", "enhancement_companion.js"),
                     "// companion identity fixture");
+                File.WriteAllText(
+                    Path.Combine(companionFixtureRoot, "scripts", "prod_launcher.js"),
+                    "// legacy companion identity fixture");
                 Directory.CreateDirectory(Path.Combine(invalidCompanionRoot, "scripts"));
                 File.WriteAllText(
                     Path.Combine(invalidCompanionRoot, "package.json"),
@@ -19493,7 +20290,7 @@ public partial class App : Application
                     Path.Combine(invalidCompanionRoot, "project.toml"),
                     "[project]\nid = \"H000025\"\nname = \"PhotoViewer\"\n");
                 File.WriteAllText(
-                    Path.Combine(invalidCompanionRoot, "scripts", "prod_launcher.js"),
+                    Path.Combine(invalidCompanionRoot, "scripts", "enhancement_companion.js"),
                     "// invalid identity fixture");
                 Directory.CreateDirectory(Path.GetDirectoryName(fakeNodeExecutable)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(outsideNodeExecutable)!);
@@ -19521,6 +20318,26 @@ public partial class App : Application
                     PhotoViewer.Wpf.MainWindow.ResolveEnhancementCompanionRootForSmoke(
                         invalidCompanionRoot,
                         invalidCompanionRoot) is null;
+                companionDedicatedLauncherSelected = string.Equals(
+                    PhotoViewer.Wpf.MainWindow.ResolveEnhancementCompanionLauncherForSmoke(
+                        companionFixtureRoot,
+                        invalidCompanionRoot,
+                        useLegacyNextLauncher: false),
+                    ResolveFinalPathForSmoke(Path.Combine(
+                        companionFixtureRoot,
+                        "scripts",
+                        "enhancement_companion.js")),
+                    StringComparison.OrdinalIgnoreCase);
+                companionLegacyRollbackLauncherSelected = string.Equals(
+                    PhotoViewer.Wpf.MainWindow.ResolveEnhancementCompanionLauncherForSmoke(
+                        companionFixtureRoot,
+                        invalidCompanionRoot,
+                        useLegacyNextLauncher: true),
+                    ResolveFinalPathForSmoke(Path.Combine(
+                        companionFixtureRoot,
+                        "scripts",
+                        "prod_launcher.js")),
+                    StringComparison.OrdinalIgnoreCase);
                 string? nodeExecutable = PhotoViewer.Wpf.MainWindow.ResolveNodeExecutablePathForSmoke();
                 nodeExecutableResolved = !string.IsNullOrWhiteSpace(nodeExecutable)
                     && Path.IsPathFullyQualified(nodeExecutable)
@@ -19554,15 +20371,35 @@ public partial class App : Application
                 // observe the real project cache even if global automation setup changes.
                 win = HiddenWindow();
                 win.SuppressStatePersistence();
+                bool serverErrorStarterCalled = false;
+                int launchAttemptsBeforeServerError =
+                    win.EnhancementCompanionLaunchAttemptCountForSmoke;
+                win.ConfigureEnhancementCompanionAutoStartForSmoke(
+                    (_, _) => Task.FromResult(JsonResponse(
+                        HttpStatusCode.InternalServerError,
+                        new { error = "temporary server failure" })),
+                    _ =>
+                    {
+                        serverErrorStarterCalled = true;
+                        return (true, "");
+                    });
+                serverErrorCompanionStartSuppressed =
+                    !await win.EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
+                    && !serverErrorStarterCalled
+                    && win.EnhancementCompanionLaunchAttemptCountForSmoke
+                        == launchAttemptsBeforeServerError;
+
                 int readinessProbeCount = 0;
                 bool injectedStarterCalled = false;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
                     (request, _) =>
                     {
                         readinessProbeCount++;
-                        return Task.FromResult(readinessProbeCount >= 3
-                            ? JsonResponse(HttpStatusCode.OK, new { jobs = Array.Empty<object>() })
-                            : JsonResponse(HttpStatusCode.ServiceUnavailable, new { error = "not ready" }));
+                        if (readinessProbeCount < 3)
+                            throw new HttpRequestException("simulated unavailable companion");
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.OK,
+                            new { jobs = Array.Empty<object>() }));
                     },
                     endpoint =>
                     {
@@ -19609,6 +20446,8 @@ public partial class App : Application
                             "queued" => [Job("queued")],
                             "canceled" => [Job("canceled")],
                             "succeeded" => [Job("succeeded", 100, outputPath)],
+                            "legacy-photoreal" => [Job("succeeded", 100, legacyPhotorealOutputPath)],
+                            "missing-legacy-photoreal" => [Job("succeeded", 100, missingLegacyPhotorealOutputPath)],
                             "lexical-escape" => [Job("succeeded", 100, lexicalOutsideOutputPath)],
                             "canonical-escape" => [Job("succeeded", 100, canonicalEscapeOutputPath)],
                             _ => [],
@@ -19695,7 +20534,7 @@ public partial class App : Application
                             sourceSignature = new { size = canonicalSourceInfo.Length, mtimeMs = canonicalSourceMtimeMs },
                             status = "succeeded",
                             progress = 100,
-                            outputPath,
+                            outputPath = legacyPhotorealOutputPath,
                         },
                     },
                 }));
@@ -19707,7 +20546,11 @@ public partial class App : Application
                 bool recoverySelected = recoveryWin.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
                 restartRecovery = recoverySelected
                     && recoveryWin.SelectedEnhancedForSmoke
-                    && string.Equals(recoveryWin.SelectedEnhancedOutputPathForSmoke, outputPath, StringComparison.OrdinalIgnoreCase);
+                    && string.Equals(
+                        recoveryWin.SelectedEnhancedOutputPathForSmoke,
+                        migratedPhotorealOutputPath,
+                        StringComparison.OrdinalIgnoreCase);
+                legacyPhotorealRestartRecovery = restartRecovery;
                 recoveryWin.Close();
                 recoveryWin = null;
                 File.WriteAllText(jobsPath, jobsSeed);
@@ -19723,6 +20566,17 @@ public partial class App : Application
                 await win.RefreshModalEnhancementForSmokeAsync();
                 canonicalOutputRejected = !win.ModalEnhancedToggleAvailableForSmoke
                     && (win.ModalEnhancementErrorForSmoke?.Contains("outside managed storage", StringComparison.OrdinalIgnoreCase) ?? false);
+                mode = "legacy-photoreal";
+                await win.RefreshModalEnhancementForSmokeAsync();
+                legacyPhotorealModalRecovery = win.ModalEnhancedToggleAvailableForSmoke
+                    && string.Equals(
+                        win.ModalDisplayPathForSmoke,
+                        migratedPhotorealOutputPath,
+                        StringComparison.OrdinalIgnoreCase);
+                mode = "missing-legacy-photoreal";
+                await win.RefreshModalEnhancementForSmokeAsync();
+                missingLegacyPhotorealRejected = !win.ModalEnhancedToggleAvailableForSmoke
+                    && (win.ModalEnhancementErrorForSmoke?.Contains("missing", StringComparison.OrdinalIgnoreCase) ?? false);
                 mode = "empty";
                 await win.RefreshModalEnhancementForSmokeAsync();
                 pollIdentityCanonical = polledSourceIds.Any(sourceId =>
@@ -19761,15 +20615,88 @@ public partial class App : Application
                     && string.IsNullOrWhiteSpace(win.ModalEnhancementStatusForSmoke)
                     && !win.SelectedEnhancedForSmoke;
 
+                // Let the current target settle, then burst navigation faster
+                // than the modal debounce. Only the final target may start a
+                // jobs GET; selection still traverses every input synchronously.
+                await Task.Delay(160);
+                rapidNavigationBaselineDecodeCompleted =
+                    await win.WaitForModalFullDecodeForSmokeAsync();
+                int getStartsBeforeBurst = requests.Count(
+                    static route => route == "GET /api/enhance/jobs");
+                int polledSourcesBeforeBurst = polledSourceIds.Count;
+                int decodeStartsBeforeBurst = win.ModalDecodeStartCountForSmoke;
+                int decodeAppliesBeforeBurst = win.ModalDecodeApplyCountForSmoke;
+                int metadataStartsBeforeBurst = win.ModalMetadataReadStartCountForSmoke;
+                int metadataAppliesBeforeBurst = win.ModalMetadataApplyCountForSmoke;
+                string? rapidNavigationStartPath = win.SelectedPathForSmoke;
+                bool rapidNavigationAccepted = true;
+                for (int index = 0; index < 20; index++)
+                {
+                    string? previousPath = win.SelectedPathForSmoke;
+                    rapidNavigationAccepted &= win.NavigateModalForSmoke(1)
+                        && !string.Equals(
+                            win.SelectedPathForSmoke,
+                            previousPath,
+                            StringComparison.OrdinalIgnoreCase);
+                }
+                await Task.Delay(240);
+                rapidNavigationFinalDecodeCompleted =
+                    await win.WaitForModalFullDecodeForSmokeAsync();
+                rapidNavigationGetStarts = requests.Count(
+                    static route => route == "GET /api/enhance/jobs")
+                    - getStartsBeforeBurst;
+                rapidNavigationDecodeStarts = win.ModalDecodeStartCountForSmoke
+                    - decodeStartsBeforeBurst;
+                rapidNavigationDecodeApplies = win.ModalDecodeApplyCountForSmoke
+                    - decodeAppliesBeforeBurst;
+                rapidNavigationMetadataStarts = win.ModalMetadataReadStartCountForSmoke
+                    - metadataStartsBeforeBurst;
+                rapidNavigationMetadataApplies = win.ModalMetadataApplyCountForSmoke
+                    - metadataAppliesBeforeBurst;
+                rapidNavigationGetCoalesced = rapidNavigationGetStarts == 1;
+                rapidNavigationDecodeCoalesced = rapidNavigationBaselineDecodeCompleted
+                    && rapidNavigationFinalDecodeCompleted
+                    && rapidNavigationDecodeStarts == 1
+                    && rapidNavigationDecodeApplies == 1;
+                rapidNavigationMetadataCoalesced = rapidNavigationMetadataStarts is 0 or 1
+                    && rapidNavigationMetadataApplies == rapidNavigationMetadataStarts;
+                rapidNavigationFinalSelection = rapidNavigationAccepted
+                    && string.Equals(
+                        win.SelectedPathForSmoke,
+                        rapidNavigationStartPath,
+                        StringComparison.OrdinalIgnoreCase);
+                string? rapidFinalPath = win.SelectedPathForSmoke;
+                string? rapidExpectedSource = string.IsNullOrWhiteSpace(rapidFinalPath)
+                    ? null
+                    : ResolveSmokeIdentity(rapidFinalPath);
+                string[] rapidPolledSources = polledSourceIds
+                    .Skip(polledSourcesBeforeBurst)
+                    .ToArray();
+                rapidNavigationGetFinalSource = rapidPolledSources.Length == 1
+                    && string.Equals(
+                        rapidPolledSources[0],
+                        rapidExpectedSource,
+                        StringComparison.OrdinalIgnoreCase);
+
                 functionalOk = selected && opened && refreshedEmpty && started && queuedUi && canceled && canceledUi
                     && refreshedSucceeded && outputAvailable && toggledEnhanced && deletedOutput
                     && originalPreserved && outputRemoved && createContract && routesOk
                     && sourceIdentityCaseInsensitive && alternateLexicalIdentity && pollIdentityCanonical
-                    && restartRecovery && lexicalOutputRejected && canonicalOutputRejected
+                    && restartRecovery && legacyPhotorealRestartRecovery
+                    && legacyPhotorealModalRecovery && missingLegacyPhotorealRejected
+                    && lexicalOutputRejected && canonicalOutputRejected
                     && navigatedDuringResponse && staleResponseDiscarded
-                    && passiveCompanionStartSuppressed && explicitCompanionAutoStart
+                    && rapidNavigationGetCoalesced && rapidNavigationGetFinalSource
+                    && rapidNavigationDecodeCoalesced
+                    && rapidNavigationMetadataCoalesced
+                    && rapidNavigationFinalSelection
+                    && passiveCompanionStartSuppressed
+                    && serverErrorCompanionStartSuppressed
+                    && explicitCompanionAutoStart
                     && companionConfiguredRootExact && companionAppBaseAncestor
                     && companionConfiguredAncestorRejected && companionIdentityRejected
+                    && companionDedicatedLauncherSelected
+                    && companionLegacyRollbackLauncherSelected
                     && nodeExecutableResolved && nodeProgramFilesCandidateAccepted
                     && nodeOutsideCandidateRejected;
             }
@@ -19879,16 +20806,34 @@ public partial class App : Application
                 alternateLexicalIdentity,
                 pollIdentityCanonical,
                 restartRecovery,
+                legacyPhotorealRestartRecovery,
+                legacyPhotorealModalRecovery,
+                missingLegacyPhotorealRejected,
                 lexicalOutputRejected,
                 canonicalOutputRejected,
                 navigatedDuringResponse,
                 staleResponseDiscarded,
+                rapidNavigationGetCoalesced,
+                rapidNavigationGetFinalSource,
+                rapidNavigationDecodeCoalesced,
+                rapidNavigationMetadataCoalesced,
+                rapidNavigationFinalSelection,
+                rapidNavigationBaselineDecodeCompleted,
+                rapidNavigationFinalDecodeCompleted,
+                rapidNavigationGetStarts,
+                rapidNavigationDecodeStarts,
+                rapidNavigationDecodeApplies,
+                rapidNavigationMetadataStarts,
+                rapidNavigationMetadataApplies,
                 passiveCompanionStartSuppressed,
+                serverErrorCompanionStartSuppressed,
                 explicitCompanionAutoStart,
                 companionConfiguredRootExact,
                 companionAppBaseAncestor,
                 companionConfiguredAncestorRejected,
                 companionIdentityRejected,
+                companionDedicatedLauncherSelected,
+                companionLegacyRollbackLauncherSelected,
                 nodeExecutableResolved,
                 nodeProgramFilesCandidateAccepted,
                 nodeOutsideCandidateRejected,
@@ -20206,8 +21151,10 @@ public partial class App : Application
                 }
                 else
                 {
+                    interruptedJobFailed = await WaitForStatusAsync(
+                        "failed",
+                        TimeSpan.FromSeconds(45));
                     status = win.ModalEnhancementStatusForSmoke;
-                    interruptedJobFailed = status == "failed";
                     restartJobObserved = interruptedJobFailed
                         && !string.IsNullOrWhiteSpace(win.ModalEnhancementJobIdForSmoke);
                     jobId = win.ModalEnhancementJobIdForSmoke;
@@ -20863,6 +21810,27 @@ public partial class App : Application
                 bool settingsBackdropDismissedOnly =
                     win.ModalSettingsBackdropDismissContractForSmoke();
                 string? settingsKeyboardPath = win.SelectedFileNameForSmoke;
+                bool upscaleSettingsOpened =
+                    win.OpenModalUpscaleSettingsForSmoke();
+                await win.Dispatcher.InvokeAsync(
+                    static () => { },
+                    DispatcherPriority.Input);
+                bool upscaleSettingsKeyboardCaptured =
+                    upscaleSettingsOpened
+                    && win.ModalSettingsBoardHasKeyboardFocusForSmoke
+                    && !win.InvokePreviewKeyForSmoke(Key.Right)
+                    && !win.InvokePreviewKeyForSmoke(Key.Delete)
+                    && !win.InvokePreviewKeyForSmoke(Key.F11)
+                    && win.ModalUpscaleSettingsVisibleForSmoke
+                    && win.ModalVisibleForSmoke
+                    && !win.ModalFullScreenForSmoke
+                    && !win.DeleteConfirmationVisibleForSmoke
+                    && string.Equals(
+                        win.SelectedFileNameForSmoke,
+                        settingsKeyboardPath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && win.InvokePreviewKeyForSmoke(Key.Escape)
+                    && !win.ModalUpscaleSettingsVisibleForSmoke;
                 bool photorealSettingsOpened =
                     win.OpenModalPhotorealSettingsForSmoke();
                 await win.Dispatcher.InvokeAsync(
@@ -20906,10 +21874,12 @@ public partial class App : Application
                     && win.InvokePreviewKeyForSmoke(Key.Escape)
                     && !win.ModalVideoGenerationBoardVisibleForSmoke;
                 settingsBackdropDismissedOnly = settingsBackdropDismissedOnly
+                    && upscaleSettingsKeyboardCaptured
                     && photorealSettingsKeyboardCaptured
                     && videoSettingsKeyboardCaptured;
                 string settingsBackdropDiagnostic =
                     win.ModalSettingsBackdropDiagnosticForSmoke
+                    + $";upscaleKeyboard={upscaleSettingsKeyboardCaptured}"
                     + $";photoKeyboard={photorealSettingsKeyboardCaptured}"
                     + $";videoKeyboard={videoSettingsKeyboardCaptured}"
                     + $";focus={win.ModalSettingsBoardHasKeyboardFocusForSmoke}";
@@ -21009,23 +21979,9 @@ public partial class App : Application
                     && win.ModalWideToolbarContractForSmoke;
                 bool windowCaptionControls = win.ModalWindowCaptionControlsContractForSmoke
                     && win.ActivateModalMinimizeForSmoke()
-                    && win.ActivateModalMaximizeForSmoke();
-                Rect desktopWorkArea = SystemParameters.WorkArea;
-                double nativeMaximizeLeft = desktopWorkArea.Left + Math.Min(24, desktopWorkArea.Width / 4);
-                double nativeMaximizeTop = desktopWorkArea.Top + Math.Min(32, desktopWorkArea.Height / 4);
-                double nativeMaximizeWidth = Math.Min(
-                    1120,
-                    Math.Max(1, desktopWorkArea.Right - nativeMaximizeLeft - 24));
-                double nativeMaximizeHeight = Math.Min(
-                    700,
-                    Math.Max(1, desktopWorkArea.Bottom - nativeMaximizeTop - 32));
-                var nativeMaximizeSmokeWorkArea = new Rect(
-                    nativeMaximizeLeft,
-                    nativeMaximizeTop,
-                    nativeMaximizeWidth,
-                    nativeMaximizeHeight);
-                bool nativeMaximizeWorkArea = await win.NormalizeNativeMaximizeForSmokeAsync(
-                    nativeMaximizeSmokeWorkArea);
+                    && await win.ActivateModalMaximizeForSmokeAsync()
+                    && await win.ActivateCaptionDoubleClickForSmokeAsync();
+                bool nativeMaximizeWorkArea = await win.PreserveNativeMaximizeForSmokeAsync();
                 win.UpdateLayout();
                 // Opening and the caption-control smoke both queue actual-bounds
                 // refits at Loaded priority. Settle after both so clamped CI
@@ -24358,15 +25314,24 @@ public partial class App : Application
         string ignoredName = "ignored-text.png";
         string duplicateName = "duplicate-parameters.png";
         string emptyFirstName = "empty-first-parameters.png";
+        string unicodeName = "unicode-itxt-parameters.png";
+        string comfyName = "legacy-comfy-prompt.png";
+        string comfyLoraOffName = "legacy-comfy-prompt-lora-off.png";
+        string parametersOverrideName = "parameters-overrides-comfy.png";
         string validPath = Path.Combine(folder, validName);
         string missingPath = Path.Combine(folder, missingName);
         string ignoredPath = Path.Combine(folder, ignoredName);
         string duplicatePath = Path.Combine(folder, duplicateName);
         string emptyFirstPath = Path.Combine(folder, emptyFirstName);
+        string unicodePath = Path.Combine(folder, unicodeName);
+        string comfyPath = Path.Combine(folder, comfyName);
+        string comfyLoraOffPath = Path.Combine(folder, comfyLoraOffName);
+        string parametersOverridePath = Path.Combine(
+            folder,
+            parametersOverrideName);
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
-
         try
         {
             Directory.CreateDirectory(folder);
@@ -24391,6 +25356,38 @@ public partial class App : Application
                 emptyFirstPath,
                 "parameters",
                 "later prompt must stay ignored\nNegative prompt: later negative\nSteps: 77, Sampler: DPM++");
+            WriteSmokePng(
+                unicodePath,
+                128,
+                96,
+                Color.FromRgb(52, 73, 94));
+            InsertPngITextFixture(
+                unicodePath,
+                "parameters",
+                "日本語の実写化プロンプト\nNegative prompt: 赤いアイシャドウ\nSteps: 8, Sampler: Euler, CFG scale: 1.4, Seed: 5678");
+            WriteSmokePng(
+                comfyPath,
+                128,
+                96,
+                Color.FromRgb(26, 188, 156));
+            InsertPngTextFixture(
+                comfyPath,
+                "prompt",
+                BuildComfyPromptGraphFixture(loraEnabled: true));
+            WriteSmokePng(
+                comfyLoraOffPath,
+                128,
+                96,
+                Color.FromRgb(22, 160, 133));
+            InsertPngTextFixture(
+                comfyLoraOffPath,
+                "prompt",
+                BuildComfyPromptGraphFixture(loraEnabled: false));
+            File.Copy(comfyPath, parametersOverridePath, overwrite: true);
+            InsertPngTextFixture(
+                parametersOverridePath,
+                "parameters",
+                "parameters wins\nNegative prompt: parameters negative\nSteps: 9, Sampler: DPM++ 2M, CFG scale: 2.5, Seed: 999");
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", seenPath);
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", favoritesPath);
@@ -24437,6 +25434,118 @@ public partial class App : Application
                     && !emptyFirst.MetadataApplied
                     && string.Equals(emptyFirst.Prompt, emptyFirstPath, StringComparison.OrdinalIgnoreCase)
                     && !emptyFirst.SamplerVisible;
+                string? unicodeCatalogPrompt =
+                    win.PromptForFileNameForSmoke(unicodeName);
+                PngMetadataSmokeSnapshot unicode =
+                    await win.SelectPngMetadataForSmokeAsync(unicodeName);
+                bool unicodeITextRead = string.Equals(
+                        unicodeCatalogPrompt,
+                        "日本語の実写化プロンプト",
+                        StringComparison.Ordinal)
+                    && unicode.MetadataApplied
+                    && string.Equals(
+                        unicode.Prompt,
+                        "日本語の実写化プロンプト",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        unicode.NegativePrompt,
+                        "赤いアイシャドウ",
+                        StringComparison.Ordinal)
+                    && string.Equals(unicode.Sampler, "Euler", StringComparison.Ordinal);
+                win.CloseModalForSmoke();
+                string? comfyCatalogPrompt =
+                    win.PromptForFileNameForSmoke(comfyName);
+                PngMetadataSmokeSnapshot comfy =
+                    await win.SelectPngMetadataForSmokeAsync(comfyName);
+                MetadataCopySmokeSnapshot comfyCopy =
+                    win.CopyCurrentPreviewMetadataForSmoke();
+                win.OpenModalMetadataForSmoke();
+                ModalMetadataSmokeSnapshot comfyModal =
+                    await win.WaitForModalDisplayedMetadataForSmokeAsync();
+                win.CloseModalForSmoke();
+                bool comfyGraphRead = string.Equals(
+                        comfyCatalogPrompt,
+                        "legacy graph positive",
+                        StringComparison.Ordinal)
+                    && comfy.MetadataApplied
+                    && string.Equals(
+                        comfy.Prompt,
+                        "legacy graph positive",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        comfy.NegativePrompt,
+                        "legacy graph negative",
+                        StringComparison.Ordinal)
+                    && string.Equals(comfy.Sampler, "euler", StringComparison.Ordinal)
+                    && comfyCopy.Copied
+                    && comfyCopy.CopyText.Contains(
+                        "Metadata format: ComfyUI prompt graph",
+                        StringComparison.Ordinal)
+                    && comfyCopy.CopyText.Contains(
+                        "Model: flux-2-klein-9b-Q4_K_M.gguf",
+                        StringComparison.Ordinal)
+                    && comfyCopy.CopyText.Contains(
+                        "LoRA: flux2-klein-anything-to-real.safetensors",
+                        StringComparison.Ordinal)
+                    && comfyCopy.CopyText.Contains(
+                        "LoRA strength: 0.8",
+                        StringComparison.Ordinal)
+                    && comfyCopy.CopyText.Contains("Steps: 8", StringComparison.Ordinal)
+                    && comfyCopy.CopyText.Contains("CFG scale: 1.2", StringComparison.Ordinal)
+                    && comfyCopy.CopyText.Contains(
+                        "Seed: 259437030895261",
+                        StringComparison.Ordinal)
+                    && comfyCopy.CopyText.Contains(
+                        "Generation size: 688 x 1024",
+                        StringComparison.Ordinal)
+                    && comfyModal.MetadataCurrent
+                    && string.Equals(
+                        comfyModal.Prompt,
+                        "legacy graph positive",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        comfyModal.NegativePrompt,
+                        "legacy graph negative",
+                        StringComparison.Ordinal)
+                    && comfyModal.Settings.Contains(
+                        "LoRA strength: 0.8",
+                        StringComparison.Ordinal);
+
+                PngMetadataSmokeSnapshot comfyLoraOff =
+                    await win.SelectPngMetadataForSmokeAsync(comfyLoraOffName);
+                MetadataCopySmokeSnapshot comfyLoraOffCopy =
+                    win.CopyCurrentPreviewMetadataForSmoke();
+                bool comfyLoraOffRead = comfyLoraOff.MetadataApplied
+                    && comfyLoraOffCopy.Copied
+                    && comfyLoraOffCopy.CopyText.Contains(
+                        "LoRA: OFF",
+                        StringComparison.Ordinal)
+                    && !comfyLoraOffCopy.CopyText.Contains(
+                        "LoRA strength:",
+                        StringComparison.Ordinal);
+
+                string? parametersOverrideCatalogPrompt =
+                    win.PromptForFileNameForSmoke(parametersOverrideName);
+                PngMetadataSmokeSnapshot parametersOverride =
+                    await win.SelectPngMetadataForSmokeAsync(
+                        parametersOverrideName);
+                bool parametersOverrideComfy = string.Equals(
+                        parametersOverrideCatalogPrompt,
+                        "parameters wins",
+                        StringComparison.Ordinal)
+                    && parametersOverride.MetadataApplied
+                    && string.Equals(
+                        parametersOverride.Prompt,
+                        "parameters wins",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        parametersOverride.NegativePrompt,
+                        "parameters negative",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        parametersOverride.Sampler,
+                        "DPM++ 2M",
+                        StringComparison.Ordinal);
                 PngMetadataSmokeSnapshot missing = await win.SelectPngMetadataForSmokeAsync(missingName);
                 MetadataCopySmokeSnapshot missingCopy = win.CopyCurrentPreviewMetadataForSmoke();
                 MetadataCopySmokeSnapshot missingPromptCopy = win.CopyCurrentPreviewPromptForSmoke(negative: false);
@@ -24529,6 +25638,10 @@ public partial class App : Application
                     && doubleClickHiddenModal.CopyNegativeEnabled
                     && duplicateFirstChunkOwned
                     && emptyFirstChunkOwned
+                    && unicodeITextRead
+                    && comfyGraphRead
+                    && comfyLoraOffRead
+                    && parametersOverrideComfy
                     && missing.Selected
                     && !missing.MetadataApplied
                     && !missingCopy.Copied
@@ -24547,7 +25660,7 @@ public partial class App : Application
                 {
                     Ok = ok,
                     Message = ok
-                        ? "lazy PNG parameters metadata and catalog indexing share first-parameters-chunk ownership, including empty-first duplicates; Prompt/Negative/Settings surfaces remain synchronized and unrelated text stays on the safe fallback"
+                        ? "A1111 parameters and legacy ComfyUI prompt graphs produce synchronized Catalog, Preview, Modal, and Copy metadata while parameters retains priority"
                         : "PNG parameters metadata smoke did not meet expected lazy selection behavior",
                     SmokeRoot = smokeRoot,
                     Folder = folder,
@@ -24572,6 +25685,20 @@ public partial class App : Application
                     EmptyFirst = emptyFirst,
                     DuplicateFirstChunkOwned = duplicateFirstChunkOwned,
                     EmptyFirstChunkOwned = emptyFirstChunkOwned,
+                    UnicodePath = unicodePath,
+                    Unicode = unicode,
+                    UnicodeITextRead = unicodeITextRead,
+                    ComfyPath = comfyPath,
+                    Comfy = comfy,
+                    ComfyCopy = comfyCopy,
+                    ComfyModal = comfyModal,
+                    ComfyGraphRead = comfyGraphRead,
+                    ComfyLoraOffPath = comfyLoraOffPath,
+                    ComfyLoraOff = comfyLoraOff,
+                    ComfyLoraOffRead = comfyLoraOffRead,
+                    ParametersOverridePath = parametersOverridePath,
+                    ParametersOverride = parametersOverride,
+                    ParametersOverrideComfy = parametersOverrideComfy,
                     Missing = missing,
                     MissingCopy = missingCopy,
                     IgnoredTextSkipped = ignoredTextSkipped,
@@ -24619,7 +25746,7 @@ public partial class App : Application
             WritePngTextFixture(
                 taggedPath,
                 "parameters",
-                "studio portrait, soft light, Studio Portrait, ,   \nNegative prompt: lowres\nSteps: 12, Sampler: Euler",
+                "studio portrait, soft light, ((fresh_tag:1.2)), Studio Portrait, ,   \nNegative prompt: lowres\nSteps: 12, Sampler: Euler",
                 Color.FromRgb(52, 152, 219));
             WriteSmokePng(Path.Combine(folder, otherName), 64, 48, Color.FromRgb(46, 204, 113));
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
@@ -24650,6 +25777,8 @@ public partial class App : Application
                 bool sidebarVisible = win.ToggleModalMetadataSidebarForSmoke().SidebarVisible;
                 List<string> initialTags = win.ModalPromptTagsForSmoke;
                 bool initialAccessibilityReady = win.ModalPromptTagsAccessibilityReadyForSmoke;
+                bool promptMappingContextReady =
+                    win.ModalPromptMappingContextReadyForSmoke("fresh_tag:1.2");
                 long sourceLengthBefore = new FileInfo(taggedPath).Length;
                 DateTime sourceWriteBefore = File.GetLastWriteTimeUtc(taggedPath);
                 int enhancementJobsBefore = win.EnhancementJobsReadForSmoke;
@@ -24693,12 +25822,13 @@ public partial class App : Application
                     && opened && sidebarVisible && reopened
                     && appended.Applied && deduped.Applied
                     && refreshedMetadata.MetadataApplied
-                    && initialTags.SequenceEqual(["studio portrait", "soft light"], StringComparer.OrdinalIgnoreCase)
+                    && initialTags.SequenceEqual(["studio portrait", "soft light", "fresh_tag:1.2"], StringComparer.OrdinalIgnoreCase)
                     && string.Equals(appended.SearchQuery, "studio portrait, soft light", StringComparison.Ordinal)
                     && string.Equals(deduped.SearchQuery, appended.SearchQuery, StringComparison.Ordinal)
                     && !appended.ModalVisible && !deduped.ModalVisible
                     && appended.SearchFocused && deduped.SearchFocused
-                    && initialAccessibilityReady && appended.AccessibilityReady && deduped.AccessibilityReady
+                    && initialAccessibilityReady && promptMappingContextReady
+                    && appended.AccessibilityReady && deduped.AccessibilityReady
                     && activeSearchTerms.SequenceEqual(["studio portrait", "soft light"], StringComparer.Ordinal)
                     && activeSearchTermsAccessibilityReady
                     && removedWholeSearchTerm
@@ -24723,6 +25853,7 @@ public partial class App : Application
                     SidebarVisible = sidebarVisible,
                     InitialTags = initialTags,
                     InitialAccessibilityReady = initialAccessibilityReady,
+                    PromptMappingContextReady = promptMappingContextReady,
                     AlbumActivated = albumActivated,
                     ReturnedToCatalog = returnedToCatalog,
                     Appended = appended,
@@ -26016,14 +27147,12 @@ public partial class App : Application
                     ["frameCount"] = 97,
                     ["width"] = 736,
                     ["height"] = 544,
-                    ["positivePrompt"] =
-                        "Animate the supplied image as the exact first frame. "
-                        + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
-                        + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
-                        + "Use subtle natural idle motion only: gentle breathing, an occasional blink, and restrained secondary motion in hair and clothing. "
-                        + "Keep the camera locked and preserve the original framing.",
+                    ["positivePrompt"] = string.Join(
+                        " ",
+                        WpfLocalPromptPolicy.Current.Video!.PreservationPreamble,
+                        WpfLocalPromptPolicy.Current.Video!.BlankPromptMotion),
                     ["negativePrompt"] =
-                        "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark",
+                        WpfLocalPromptPolicy.Current.Video!.NegativePrompt,
                     ["steps"] = 20,
                     ["cfg"] = 5,
                     ["sampler"] = "uni_pc",
@@ -26693,6 +27822,138 @@ public partial class App : Application
         File.WriteAllBytes(path, combined);
     }
 
+    private static void InsertPngITextFixture(
+        string path,
+        string keyword,
+        string text)
+    {
+        byte[] png = File.ReadAllBytes(path);
+        int insertOffset = FindPngIdatOffset(png);
+        byte[] keywordBytes = Encoding.Latin1.GetBytes(keyword);
+        byte[] textBytes = Encoding.UTF8.GetBytes(text);
+        byte[] data = new byte[keywordBytes.Length + 5 + textBytes.Length];
+        Buffer.BlockCopy(keywordBytes, 0, data, 0, keywordBytes.Length);
+        int cursor = keywordBytes.Length;
+        data[cursor++] = 0;
+        data[cursor++] = 0;
+        data[cursor++] = 0;
+        data[cursor++] = 0;
+        data[cursor++] = 0;
+        Buffer.BlockCopy(textBytes, 0, data, cursor, textBytes.Length);
+        byte[] chunk = BuildPngTextChunk("iTXt", data);
+        byte[] combined = new byte[png.Length + chunk.Length];
+        Buffer.BlockCopy(png, 0, combined, 0, insertOffset);
+        Buffer.BlockCopy(chunk, 0, combined, insertOffset, chunk.Length);
+        Buffer.BlockCopy(
+            png,
+            insertOffset,
+            combined,
+            insertOffset + chunk.Length,
+            png.Length - insertOffset);
+        File.WriteAllBytes(path, combined);
+    }
+
+    private static string BuildComfyPromptGraphFixture(bool loraEnabled)
+    {
+        static object[] Link(string nodeId) => [nodeId, 0];
+
+        var graph = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["save-output"] = new
+            {
+                inputs = new { images = Link("decode") },
+                class_type = "SaveImage",
+            },
+            ["decode"] = new
+            {
+                inputs = new { samples = Link("sample") },
+                class_type = "VAEDecode",
+            },
+            ["sample"] = new
+            {
+                inputs = new
+                {
+                    noise = Link("noise"),
+                    guider = Link("guider"),
+                    sampler = Link("sampler-select"),
+                    sigmas = Link("scheduler"),
+                    latent_image = Link("latent"),
+                },
+                class_type = "SamplerCustomAdvanced",
+            },
+            ["noise"] = new
+            {
+                inputs = new { noise_seed = 259437030895261L },
+                class_type = "RandomNoise",
+            },
+            ["guider"] = new
+            {
+                inputs = new
+                {
+                    model = Link(loraEnabled ? "lora" : "model"),
+                    positive = Link("positive-reference"),
+                    negative = Link("negative-reference"),
+                    cfg = 1.2,
+                },
+                class_type = "CFGGuider",
+            },
+            ["positive-reference"] = new
+            {
+                inputs = new { conditioning = Link("positive") },
+                class_type = "ReferenceLatent",
+            },
+            ["negative-reference"] = new
+            {
+                inputs = new { conditioning = Link("negative") },
+                class_type = "ReferenceLatent",
+            },
+            ["positive"] = new
+            {
+                inputs = new { text = "legacy graph positive" },
+                class_type = "CLIPTextEncode",
+            },
+            ["negative"] = new
+            {
+                inputs = new { text = "legacy graph negative" },
+                class_type = "CLIPTextEncode",
+            },
+            ["model"] = new
+            {
+                inputs = new { unet_name = "flux-2-klein-9b-Q4_K_M.gguf" },
+                class_type = "UnetLoaderGGUF",
+            },
+            ["sampler-select"] = new
+            {
+                inputs = new { sampler_name = "euler" },
+                class_type = "KSamplerSelect",
+            },
+            ["scheduler"] = new
+            {
+                inputs = new { steps = 8, width = 688, height = 1024 },
+                class_type = "Flux2Scheduler",
+            },
+            ["latent"] = new
+            {
+                inputs = new { width = 688, height = 1024, batch_size = 1 },
+                class_type = "EmptyFlux2LatentImage",
+            },
+        };
+        if (loraEnabled)
+        {
+            graph["lora"] = new
+            {
+                inputs = new
+                {
+                    model = Link("model"),
+                    lora_name = "flux2-klein-anything-to-real.safetensors",
+                    strength_model = 0.8,
+                },
+                class_type = "LoraLoaderModelOnly",
+            };
+        }
+        return JsonSerializer.Serialize(graph);
+    }
+
     private static int FindPngIdatOffset(byte[] png)
     {
         const int signatureLength = 8;
@@ -26715,13 +27976,15 @@ public partial class App : Application
     }
 
     private static byte[] BuildPngTextChunk(byte[] data)
+        => BuildPngTextChunk("tEXt", data);
+
+    private static byte[] BuildPngTextChunk(string type, byte[] data)
     {
+        if (type.Length != 4 || type.Any(static character => character > 0x7f))
+            throw new ArgumentException("PNG chunk type must be four ASCII characters.", nameof(type));
         byte[] chunk = new byte[data.Length + 12];
         WritePngBigEndianInt32(chunk, 0, data.Length);
-        chunk[4] = (byte)'t';
-        chunk[5] = (byte)'E';
-        chunk[6] = (byte)'X';
-        chunk[7] = (byte)'t';
+        Encoding.ASCII.GetBytes(type, chunk.AsSpan(4, 4));
         Buffer.BlockCopy(data, 0, chunk, 8, data.Length);
         uint crc = ComputePngCrc(chunk.AsSpan(4, data.Length + 4));
         WritePngBigEndianInt32(chunk, data.Length + 8, unchecked((int)crc));
@@ -27240,6 +28503,7 @@ public partial class App : Application
         public string? IgnoredPath { get; init; }
         public string? DuplicatePath { get; init; }
         public string? EmptyFirstPath { get; init; }
+        public string? UnicodePath { get; init; }
         public PngMetadataSmokeSnapshot? Valid { get; init; }
         public MetadataCopySmokeSnapshot? ValidCopy { get; init; }
         public ModalMetadataSmokeSnapshot? InitialModal { get; init; }
@@ -27256,6 +28520,19 @@ public partial class App : Application
         public PngMetadataSmokeSnapshot? EmptyFirst { get; init; }
         public bool DuplicateFirstChunkOwned { get; init; }
         public bool EmptyFirstChunkOwned { get; init; }
+        public PngMetadataSmokeSnapshot? Unicode { get; init; }
+        public bool UnicodeITextRead { get; init; }
+        public string? ComfyPath { get; init; }
+        public PngMetadataSmokeSnapshot? Comfy { get; init; }
+        public MetadataCopySmokeSnapshot? ComfyCopy { get; init; }
+        public ModalMetadataSmokeSnapshot? ComfyModal { get; init; }
+        public bool ComfyGraphRead { get; init; }
+        public string? ComfyLoraOffPath { get; init; }
+        public PngMetadataSmokeSnapshot? ComfyLoraOff { get; init; }
+        public bool ComfyLoraOffRead { get; init; }
+        public string? ParametersOverridePath { get; init; }
+        public PngMetadataSmokeSnapshot? ParametersOverride { get; init; }
+        public bool ParametersOverrideComfy { get; init; }
         public PngMetadataSmokeSnapshot? Missing { get; init; }
         public MetadataCopySmokeSnapshot? MissingCopy { get; init; }
         public bool IgnoredTextSkipped { get; init; }
@@ -27278,6 +28555,7 @@ public partial class App : Application
         public bool SidebarVisible { get; init; }
         public List<string> InitialTags { get; init; } = [];
         public bool InitialAccessibilityReady { get; init; }
+        public bool PromptMappingContextReady { get; init; }
         public bool AlbumActivated { get; init; }
         public bool ReturnedToCatalog { get; init; }
         public PromptTagSearchSmokeSnapshot? Appended { get; init; }
@@ -28188,11 +29466,20 @@ public partial class App : Application
         public List<string> ExpectedName { get; init; } = [];
         public List<string> ExpectedCreatedNewest { get; init; } = [];
         public List<string> ExpectedCreatedOldest { get; init; } = [];
+        public List<string> ExpectedUpscaleNewest { get; init; } = [];
+        public List<string> ExpectedPhotorealNewest { get; init; } = [];
+        public List<string> ExpectedVideoNewest { get; init; } = [];
+        public List<string> ExpectedFavoriteNewest { get; init; } = [];
         public List<string> NewestOrder { get; init; } = [];
         public List<string> OldestOrder { get; init; } = [];
         public List<string> NameOrder { get; init; } = [];
         public List<string> CreatedNewestOrder { get; init; } = [];
         public List<string> CreatedOldestOrder { get; init; } = [];
+        public List<string> UpscaleNewestOrder { get; init; } = [];
+        public List<string> PhotorealNewestOrder { get; init; } = [];
+        public List<string> VideoNewestOrder { get; init; } = [];
+        public List<string> FavoriteNewestOrder { get; init; } = [];
+        public List<string> RestoredFavoriteOrder { get; init; } = [];
         public List<string> RandomOrderBefore { get; init; } = [];
         public List<string> RandomOrderAfter { get; init; } = [];
         public List<string> RestoredOrder { get; init; } = [];
@@ -28214,6 +29501,8 @@ public partial class App : Application
         public bool NameFlat { get; init; }
         public bool CreatedNewestGrouped { get; init; }
         public bool CreatedOldestGrouped { get; init; }
+        public bool ActivitySortsOk { get; init; }
+        public bool ActivitySortsFlat { get; init; }
         public bool RandomFlat { get; init; }
         public bool RestoredRandomFlat { get; init; }
     }
@@ -29888,6 +31177,7 @@ public partial class App : Application
         public string[] ModalDisplayVersionLabels { get; init; } = [];
         public bool UnifiedDisplayInventory { get; init; }
         public bool VideoDeliveryMetadata { get; init; }
+        public bool VideoGenerationSettingsSnapshot { get; init; }
         public bool VideoLoopDefault { get; init; }
         public bool VideoClickPaused { get; init; }
         public bool VideoPauseSettled { get; init; }
@@ -29913,6 +31203,7 @@ public partial class App : Application
         public bool VideoSurface { get; init; }
         public bool VideoQueueSucceeded { get; init; }
         public bool VideoRequestExact { get; init; }
+        public bool VideoSeedContract { get; init; }
         public bool VideoBoardFailureFeedback { get; init; }
         public bool ImageDeleteOwnershipGuard { get; init; }
         public bool VideoDeleteOwnershipGuard { get; init; }

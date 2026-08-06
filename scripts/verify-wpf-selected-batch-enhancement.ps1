@@ -74,6 +74,7 @@ try {
         'customAdapterPathDeferred',
         'boundedConcurrency',
         'doubleClickSuppressed',
+        'doubleClickPromptProvenance',
         'failedOnlyRetry',
         'ambiguousPostSafe',
         'oneCreatedJobPerAcceptedSource',

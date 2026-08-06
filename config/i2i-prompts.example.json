@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "policyRevision": "DUMMY_REPLACE_LOCALLY",
+  "templates": {
+    "outfit": "DUMMY_OUTFIT_TEMPLATE {{instruction}} {{details}}",
+    "expression": "DUMMY_EXPRESSION_TEMPLATE {{instruction}} {{details}}",
+    "background": "DUMMY_BACKGROUND_TEMPLATE {{instruction}} {{details}}",
+    "pose": "DUMMY_POSE_TEMPLATE {{instruction}} {{details}}"
+  }
+}
