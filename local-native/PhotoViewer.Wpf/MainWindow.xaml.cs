@@ -7129,6 +7129,9 @@ public partial class MainWindow : Window
         CancellationToken cancellationToken,
         Action? onFirstRead)
     {
+        // `path` is a canonical catalog image selected for a read-only decode.
+        // This helper never writes through the path or passes it to a shell.
+        // codeql[cs/path-injection]
         var stream = new FileStream(
             path,
             FileMode.Open,
