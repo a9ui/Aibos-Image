@@ -13,7 +13,9 @@ Before changing code, read:
 3. `docs/product-contract.md`;
 4. `contracts/parity-v1.json` when changing a registered shared-state meaning;
 5. `contracts/shared-root-locator-v1.json` when changing shared-root discovery;
-6. any more specific `AGENTS.md` closer to the files being changed.
+6. `contracts/enhancement-enqueue-inbox-v1.json` when changing explicit
+   Enhancement registration or delivery;
+7. any more specific `AGENTS.md` closer to the files being changed.
 
 `docs/product-contract.md` is normative for this WPF application and for the
 cross-repository durable-state boundary. Historical documents, screenshots,
@@ -45,8 +47,8 @@ tests, and the behavior of only one application do not override it.
   search, modal navigation, and state hydration must not enqueue jobs or start
   workers.
 - Ordinary WPF viewing must not require a Browser or Node.js runtime. The
-  optional H25 Browser Enhancement companion is loopback-only and must remain
-  bound to `127.0.0.1`.
+  optional dedicated H25 Enhancement API companion is loopback-only, must
+  remain bound to `127.0.0.1`, and must not load or open the Browser UI.
 - Treat file paths, process arguments, image metadata, loopback responses, and
   durable-state files as untrusted input. Preserve validation and resource
   bounds.

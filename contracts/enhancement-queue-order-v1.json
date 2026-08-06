@@ -11,6 +11,56 @@
     "defaultForNewJobs": "append after every currently queued job",
     "persistence": "stored atomically in enhance/jobs.json"
   },
+  "pauseControl": {
+    "field": "queuePaused",
+    "location": "top-level enhance/jobs.json",
+    "type": "boolean",
+    "missingValue": false,
+    "route": "POST /api/enhance/queue with an explicit paused boolean",
+    "pause": "persist true under the same shared lock used to claim jobs; do not cancel or alter the running job",
+    "claimWhilePaused": "return no job and leave every queued row unchanged",
+    "enqueueWhilePaused": "append normally and preserve FIFO order without starting the new job",
+    "resume": "persist false before waking the queue worker",
+    "restart": "preserve the persisted pause state across process and application restarts"
+  },
+  "queuedPhotorealPromptUpdate": {
+    "route": "POST /api/enhance/jobs/:id/prompts",
+    "body": {
+      "prompt": "string up to 2000 characters",
+      "negativePrompt": "string up to 2000 characters"
+    },
+    "appliesTo": "queued photoreal jobs using comfyui-flux2-photoreal only",
+    "updates": "preset.options.prompt, preset.options.negativePrompt, presetHash, and updatedAt",
+    "preserves": [
+      "job id",
+      "status",
+      "queueOrder",
+      "LoRA setting",
+      "numeric generation settings",
+      "source identity"
+    ],
+    "sharesClaimLock": true,
+    "afterClaim": "return conflict without changing the running job",
+    "wakesWorker": false
+  },
+  "atomicImageEnqueueNext": {
+    "route": "POST /api/enhance/jobs",
+    "field": "queuePlacement",
+    "values": [
+      "last",
+      "next"
+    ],
+    "defaultWhenMissing": "last",
+    "appliesTo": [
+      "upscale",
+      "photoreal"
+    ],
+    "videoRequest": "reject with HTTP 400 and leave the queue unchanged",
+    "next": "insert first among queued jobs under the same shared lock used to claim jobs",
+    "runningJob": "leave unchanged and never preempt it",
+    "normalization": "persist contiguous queueOrder values from zero after insertion",
+    "whilePaused": "allow insertion but do not claim it until the queue resumes"
+  },
   "readerOrdering": [
     "running job first without changing it",
     "queued jobs with a valid queueOrder by ascending queueOrder",
@@ -28,6 +78,9 @@
   "workerRules": {
     "claim": "claim the first queued job in reader ordering",
     "singleWorker": true,
+    "pauseAndClaimShareOneLock": true,
+    "currentJobFinishesWhenPaused": true,
+    "resumePreservesFifo": true,
     "runningJobIsNeverPreemptedByReorder": true,
     "pumpAfterRunningCancel": true,
     "pumpAfterStartupRecovery": true

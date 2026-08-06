@@ -530,6 +530,8 @@ internal sealed class GalleryAutomationProjectionIndex
     private const int MaxPooledDictionaries = 2;
     private static readonly ConcurrentBag<Dictionary<string, int>> DictionaryPool = [];
     private static int _pooledDictionaryCount;
+    private static long _createdCount;
+    private static long _activeCreatorCount;
 
     private Dictionary<string, int>? _firstIndexByName;
     private readonly WeakReference<Tile>? _first;
@@ -543,6 +545,8 @@ internal sealed class GalleryAutomationProjectionIndex
         Tile? first,
         Tile? last)
     {
+        Interlocked.Increment(ref _createdCount);
+        Interlocked.Increment(ref _activeCreatorCount);
         Count = count;
         _firstIndexByName = firstIndexByName;
         _first = first is null ? null : new WeakReference<Tile>(first);
@@ -550,6 +554,8 @@ internal sealed class GalleryAutomationProjectionIndex
     }
 
     internal int Count { get; }
+    internal static long CreatedCount => Volatile.Read(ref _createdCount);
+    internal static long ActiveCreatorCount => Volatile.Read(ref _activeCreatorCount);
 
     internal static GalleryAutomationProjectionIndex Create(
         IReadOnlyList<Tile> items,
@@ -621,7 +627,10 @@ internal sealed class GalleryAutomationProjectionIndex
     internal void ReleaseCreator()
     {
         if (Interlocked.Exchange(ref _creatorReleased, 1) == 0)
+        {
+            Interlocked.Decrement(ref _activeCreatorCount);
             Release();
+        }
     }
 
     internal bool Matches(ItemCollection items)

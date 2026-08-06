@@ -48,6 +48,8 @@ public partial class MainWindow
     private string _videoModelId = DefaultVideoModelId;
     private string _videoQualityId = DefaultVideoPresetId;
     private string _videoPrompt = "";
+    private bool _videoSeedFixed;
+    private string _videoSeedValueText = "0";
     private readonly List<VideoStyleState> _videoStyles = [];
     private string? _selectedVideoStyleName;
     private bool _syncingVideoGenerationSettings;
@@ -78,6 +80,23 @@ public partial class MainWindow
             _videoPlaybackFps,
             _videoMaximumPixelArea,
             _videoPrompt.Trim());
+
+    private bool TryResolveVideoSeed(out int? seed, out string error)
+    {
+        seed = null;
+        error = "";
+        if (!_videoSeedFixed)
+            return true;
+
+        if (TryParseFixedSeed(_videoSeedValueText, out int fixedSeed))
+        {
+            seed = fixedSeed;
+            return true;
+        }
+
+        error = "動画化のFixed Seedは0〜2147483647の整数で入力してください。ジョブは追加していません。";
+        return false;
+    }
 
     private static bool IsVideoModelRunnable(string modelId)
         => string.Equals(modelId, WanVideoModelId, StringComparison.Ordinal);
@@ -187,7 +206,7 @@ public partial class MainWindow
         if (requestedSource is null
             && CurrentModalEnhancementVersionIsPhotoreal())
         {
-            if (!TryGetDeletableCurrentModalEnhancementVersion(
+            if (!TryGetExactDurableCurrentModalEnhancementVersion(
                     tile,
                     out ManagedEnhancementVersion current)
                 || !string.Equals(
@@ -525,6 +544,8 @@ public partial class MainWindow
         }
         SyncVideoGenerationSettingsControls();
         VideoGenerationStatusText.Text = status;
+        if (ModalUpscaleSettingsPopup is not null)
+            ModalUpscaleSettingsPopup.Visibility = Visibility.Collapsed;
         if (ModalPhotorealSettingsPopup is not null)
             ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
         ModalVideoGenerationPopup.Visibility = Visibility.Visible;
@@ -544,7 +565,7 @@ public partial class MainWindow
     {
         if (ModalVideoGenerationPopup is not null)
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
-        ModalVideoGenerateButton?.Focus();
+        ModalOverflowButton?.Focus();
     }
 
     private void ModalVideoGenerationBackdrop_MouseLeftButtonDown(
@@ -645,6 +666,44 @@ public partial class MainWindow
             SaveState();
     }
 
+    private void VideoSeedMode_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_syncingVideoGenerationSettings || sender is not ComboBox source)
+            return;
+
+        _videoSeedFixed = SelectedSeedModeIsFixed(source);
+        SyncVideoSeedControls();
+        UpdateVideoGenerationActionControls();
+        SetVideoGenerationSettingsStatus(
+            _videoSeedFixed
+                ? TryParseFixedSeed(_videoSeedValueText, out _)
+                    ? "Fixed Seedを保存しました。次の動画化ジョブから使われます。"
+                    : "Fixed Seedは0〜2147483647の整数で入力してください。"
+                : "Random Seedを使います。ジョブ追加時に新しいSeedを決めます。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void VideoSeedValue_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_syncingVideoGenerationSettings || sender is not TextBox source)
+            return;
+
+        _videoSeedValueText = source.Text;
+        SyncVideoSeedControls();
+        UpdateVideoGenerationActionControls();
+        SetVideoGenerationSettingsStatus(
+            !_videoSeedFixed
+                ? "Random Seedを使います。Fixedへ切り替えるまで数値は送信しません。"
+                : TryParseFixedSeed(_videoSeedValueText, out _)
+                    ? "Fixed Seedを保存しました。次の動画化ジョブから使われます。"
+                    : "Fixed Seedは0〜2147483647の整数で入力してください。");
+        if (!_initializing)
+            SaveState();
+    }
+
     private void VideoGenerationPrompt_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_syncingVideoGenerationSettings)
@@ -697,6 +756,7 @@ public partial class MainWindow
             null,
             null,
             null);
+        RestoreVideoSeedSettings(null, null);
         RefreshVideoStyleControls(updateNameFields: true);
         SetVideoGenerationSettingsStatus(
             "6秒・生成16fps・最終30fps・画素数上限409,600px・標準20 step・Normal既定プロンプトに戻しました。");
@@ -1028,6 +1088,43 @@ public partial class MainWindow
         SyncVideoGenerationSettingsControls();
     }
 
+    private void RestoreVideoSeedSettings(string? mode, int? value)
+    {
+        _videoSeedFixed = string.Equals(
+            mode,
+            FixedSeedMode,
+            StringComparison.OrdinalIgnoreCase);
+        _videoSeedValueText = RestoreSeedValueText(_videoSeedFixed, value);
+        SyncVideoSeedControls();
+    }
+
+    private void SyncVideoSeedControls()
+    {
+        bool wasSyncing = _syncingVideoGenerationSettings;
+        _syncingVideoGenerationSettings = true;
+        try
+        {
+            if (ModalVideoSeedModeComboBox is not null)
+                SelectSeedMode(ModalVideoSeedModeComboBox, _videoSeedFixed);
+            if (AppVideoSeedModeComboBox is not null)
+                SelectSeedMode(AppVideoSeedModeComboBox, _videoSeedFixed);
+            if (ModalVideoSeedValueTextBox is not null)
+            {
+                ModalVideoSeedValueTextBox.Text = _videoSeedValueText;
+                ModalVideoSeedValueTextBox.IsEnabled = _videoSeedFixed;
+            }
+            if (AppVideoSeedValueTextBox is not null)
+            {
+                AppVideoSeedValueTextBox.Text = _videoSeedValueText;
+                AppVideoSeedValueTextBox.IsEnabled = _videoSeedFixed;
+            }
+        }
+        finally
+        {
+            _syncingVideoGenerationSettings = wasSyncing;
+        }
+    }
+
     private void SyncVideoGenerationSettingsControls()
     {
         if (ModalVideoDurationComboBox is null
@@ -1066,6 +1163,7 @@ public partial class MainWindow
             }
             if (AppVideoPromptTextBox is not null)
                 AppVideoPromptTextBox.Text = _videoPrompt;
+            SyncVideoSeedControls();
             string modelDescription = VideoModelDescription(_videoModelId);
             string qualityLabel = VideoQualityLabel(_videoQualityId);
             ModalVideoPresetText.Text =
@@ -1117,15 +1215,20 @@ public partial class MainWindow
         bool hasSource = SelectedTile() is { IsRealFile: true };
         bool capturedSourceReady = TryRevalidateCapturedVideoSource(out _, out _);
         bool modelReady = IsVideoModelRunnable(_videoModelId);
+        bool seedReady = !_videoSeedFixed
+            || TryParseFixedSeed(_videoSeedValueText, out _);
         ModalVideoGenerateButton.IsEnabled = hasSource && !_videoGenerationRequestPending;
         QueueVideoGenerationButton.IsEnabled =
             capturedSourceReady
             && modelReady
+            && seedReady
             && !_videoGenerationRequestPending;
         QueueVideoGenerationButton.Content = _videoGenerationRequestPending
             ? "追加中..."
             : modelReady
-                ? "動画化を実行"
+                ? seedReady
+                    ? "動画化を実行"
+                    : "Seedを確認"
                 : "実験モデルは準備中";
         AutomationProperties.SetName(
             QueueVideoGenerationButton,
@@ -1150,8 +1253,15 @@ public partial class MainWindow
                 SetVideoGenerationSettingsStatus(sourceError);
             return false;
         }
+        Tile? capturedSourceTile = SelectedTile();
         if (!IsVideoModelRunnable(_videoModelId))
             return false;
+        if (!TryResolveVideoSeed(out int? seed, out string seedError))
+        {
+            SetVideoGenerationSettingsStatus(seedError);
+            UpdateVideoGenerationActionControls();
+            return false;
+        }
 
         VideoGenerationRequestSettings settings =
             CurrentVideoGenerationRequestSettings();
@@ -1160,14 +1270,11 @@ public partial class MainWindow
         SetVideoGenerationSettingsStatus("ローカル動画生成の準備を確認しています...");
         try
         {
-            EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
-                    source.SourceIdentity);
-            if (!readiness.Ok)
-            {
-                SetVideoGenerationSettingsStatus(readiness.Error);
-                return false;
-            }
+            Func<JsonElement, string?>? healthValidator = seed.HasValue
+                ? CreateEnhancementCapabilityHealthValidator(
+                    VideoSeedControlCapability,
+                    "fixed video seeds")
+                : null;
 
             if (!TryRevalidateCapturedVideoSource(
                     out VideoSourceChoice revalidatedSource,
@@ -1203,11 +1310,23 @@ public partial class MainWindow
             };
             if (!string.IsNullOrWhiteSpace(source.ProducerJobId))
                 requestBody["sourceProducerJobId"] = source.ProducerJobId;
+            if (seed is int fixedSeed)
+                requestBody["seed"] = fixedSeed;
 
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Post,
-                "api/enhance/jobs",
-                requestBody);
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+                requestBody,
+                includeQueuePlacementInBody: false,
+                healthValidator: healthValidator,
+                recoverySourceIdentity: source.SourceIdentity);
+            if (response.SavedForDelivery)
+            {
+                SetVideoGenerationSettingsStatus(
+                    "動画化の予約を保存しました。Jobsへの登録を継続しています。");
+                SetTransientStatusToast(
+                    $"{Path.GetFileName(source.SourceIdentity)}: 動画化の予約を保存しました。登録を継続しています。");
+                ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+                return true;
+            }
             if (!response.Ok
                 || response.Payload is not JsonElement payload
                 || !payload.TryGetProperty("job", out JsonElement job)
@@ -1218,6 +1337,7 @@ public partial class MainWindow
             }
 
             TryGetStringProperty(job, "id", out string? jobId);
+            ApplyActiveEnhancementQueueJobToVisibleCatalog(job, capturedSourceTile);
             string suffix = string.IsNullOrWhiteSpace(jobId)
                 ? ""
                 : $" ({jobId})";
@@ -1226,6 +1346,7 @@ public partial class MainWindow
             SetTransientStatusToast(
                 $"{Path.GetFileName(source.SourceIdentity)}: {source.Label}から動画化をJobsキューへ追加しました。");
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+            QueueEnhancedStateRefreshIfChanged();
             return true;
         }
         finally
@@ -1256,6 +1377,24 @@ public partial class MainWindow
             _videoMaximumPixelArea,
             _videoPrompt);
 
+    public (bool Fixed, string Value, bool Valid) VideoSeedForSmoke
+        => (
+            _videoSeedFixed,
+            _videoSeedValueText,
+            !_videoSeedFixed || TryParseFixedSeed(_videoSeedValueText, out _));
+
+    public bool VideoSeedSurfaceForSmoke
+        => ModalVideoSeedModeComboBox is not null
+            && ModalVideoSeedValueTextBox is not null
+            && AppVideoSeedModeComboBox is not null
+            && AppVideoSeedValueTextBox is not null
+            && ModalVideoSeedValueTextBox.MaxLength == 10
+            && AppVideoSeedValueTextBox.MaxLength == 10
+            && AutomationProperties.GetName(ModalVideoSeedModeComboBox)
+                == "Video generation seed mode"
+            && AutomationProperties.GetName(AppVideoSeedModeComboBox)
+                == "Default video generation seed mode";
+
     public (
         int FrameCount,
         int EstimatedMinimumSeconds,
@@ -1282,6 +1421,16 @@ public partial class MainWindow
             _videoModelId,
             qualityId ?? _videoQualityId);
         MarkVideoStyleAsCustom();
+    }
+
+    public void ConfigureVideoSeedForSmoke(bool fixedMode, string value)
+    {
+        _videoSeedFixed = fixedMode;
+        _videoSeedValueText = value;
+        SyncVideoSeedControls();
+        UpdateVideoGenerationActionControls();
+        if (!_initializing)
+            SaveState();
     }
 
     public void SelectVideoModelForSmoke(string modelId)

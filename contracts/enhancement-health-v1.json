@@ -65,6 +65,11 @@
     "unknownFields": "ignore",
     "unknownStatus": "treat the health payload as unavailable",
     "unknownIssue": "preserve the needs-attention status and show a generic attention message",
+    "missingWorkerPaused": "keep health and jobs readable but disable pause and resume controls",
+    "missingQueuedPhotorealPromptUpdate": "keep health and jobs readable but hide the queued prompt-update action",
+    "missingPhotorealPromptControlsV2": "keep health and jobs readable but block new photoreal submissions so an older companion cannot silently ignore Negative, LoRA OFF, or the removal of legacy hidden prompt text",
+    "missingAtomicImageEnqueueNext": "keep health and jobs readable but hide or block enqueue-next actions so an older companion cannot silently append the job to the tail",
+    "pausedDisplay": "show Paused as an intentional state; if one job is running, explain that it may finish while no next job starts",
     "polling": "request health only while the Jobs workspace performs its existing passive refresh",
     "timeoutPolicy": "do not infer a stall from elapsed time alone until a measured threshold is adopted"
   },
@@ -113,11 +118,17 @@
       },
       "worker": {
         "pumpRunning": true,
+        "paused": false,
         "processWorkerInstanceId": "fixture-worker",
         "consecutiveWorkerFailures": 0,
         "lastWorkerError": null,
         "lastWorkerErrorAt": null,
         "lastLeaseContentionAt": null
+      },
+      "capabilities": {
+        "queuedPhotorealPromptUpdate": true,
+        "photorealPromptControlsV2": true,
+        "atomicImageEnqueueNext": true
       },
       "comfyUi": {
         "endpoint": "http://127.0.0.1:8190",

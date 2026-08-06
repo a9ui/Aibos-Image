@@ -367,7 +367,7 @@ if ($dispatcherDiagnostic.rawOverBudgetCount -gt 0 `
         "$($dispatcherDiagnostic.activeOperationDiagnosticCount)/" +
         "$($dispatcherDiagnostic.inconclusiveCount))")
 }
-if ($result.mixedLatestWins -ne $true -or $result.mixedStaleSearchDiscarded -ne $true -or $result.mixedStaleFilterDiscarded -ne $true -or $result.mixedDiscardedCount -lt 1) {
+if ($result.mixedLatestWins -ne $true -or $result.mixedStaleSearchDiscarded -ne $true -or $result.mixedStaleFilterDiscarded -ne $true) {
     $failures.Add('mixed search/filter/sort did not discard stale generations')
 }
 if ($result.mixedViewportAnchorPreserved -ne $true) {

@@ -70,6 +70,9 @@ try {
         'vitest.setup.ts', 'start_viewer.bat'
     )
     foreach ($path in $tracked) {
+        if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $path) -PathType Leaf)) {
+            continue
+        }
         if ($path -in $forbiddenExact -or
             $path -match '^(src|e2e|config|docs/performance)/' -or
             [IO.Path]::GetExtension($path).ToLowerInvariant() -in @('.js', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts')) {

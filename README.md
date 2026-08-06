@@ -31,18 +31,21 @@ rewrite source images. Source deletion is a separate explicit action and uses
 the operating system Recycle Bin.
 
 Ordinary viewing is fully local and does not require a Browser or Node.js
-runtime. Optional Enhancement begins only after an explicit user action and may
-call the separately installed H25 Browser application over loopback as a local
-companion. That companion must remain bound to `127.0.0.1`; LAN, tunnel,
-reverse-proxy, hosted, and Internet exposure are outside the product boundary.
-If the companion is not already running, pressing an AI Start/Retry action may
-start it without opening the Browser UI. Aibos never starts it during browsing,
-preview, search, navigation, or passive job inspection. Before the companion
-reports ready, Aibos may stop only that exact failed or canceled launch attempt.
-After readiness, the companion becomes an independent durable worker and keeps
-processing the shared FIFO queue when Aibos closes. Reopening Aibos reads the
-persisted queue, operation type, status, and latest saved progress from the
-companion.
+runtime. Optional Enhancement begins only after an explicit user action and
+uses the separately installed, API-only H25 Enhancement companion over
+loopback. That companion binds to `127.0.0.1`, opens no Browser window, and
+does not load the Browser Viewer, Albums, Search, thumbnails, or Favorites.
+These guarantees apply to the default Enhancement companion launcher. The
+explicit `AIBOS_H25_LEGACY_NEXT_COMPANION=1` rollback switch selects the
+unchanged legacy Next runtime instead; it is outside the API-only companion
+mode and is retained only for a controlled rollback.
+LAN, tunnel, reverse-proxy, hosted, and Internet exposure are outside the
+product boundary. If the companion is not already running, an explicit AI
+Start/Retry action may start it. Aibos never starts it during browsing,
+preview, search, navigation, or passive job inspection. After a queue
+reservation is durably saved, the companion can register and process it after
+Aibos closes or the companion restarts. Reopening Aibos reads the persisted
+queue, operation type, status, and latest saved progress from the companion.
 
 ## Cross-repository durable state
 
@@ -52,19 +55,40 @@ include:
 
 - `favorites.json`, `seen.json`, `settings.json`, `albums.json`,
   `search-history.json`, and `recent-folders.json`;
-- `enhance/jobs.json`, plus managed outputs at the parent selected by
+- `enhance/jobs.json`, the versioned explicit-enqueue inbox below
+  `enhance/enqueue-inbox/**`, plus managed outputs at the parent selected by
   `enhance/output-root.txt` (falling back to `enhance/outputs/**`). Image
-  outputs remain under `Upscaled/` and `Photorealized/`; the reader-first
-  managed-video contract reserves the sibling flat `Videos/` folder.
+  outputs remain under `Upscaled/`, `Photorealized/`, and `Edited/`; the
+  reader-first managed-video contract reserves the sibling flat `Videos/`
+  folder.
 
 Renderer-local presentation state, including WPF window geometry, panel sizes,
 keyboard bindings, current selection, preview layout, and named AI
 photorealization and video-generation Styles stay local. A photoreal Style
-snapshots the current prompt, strength, structure retention, quality steps, and
-work resolution. A video Style snapshots its prompt, model, quality, duration,
+snapshots LoRA enabled, the current Positive prompt, Positive fallback used
+when blank, Negative prompt, strength, CFG scale, quality steps, and work
+resolution. A
+video Style snapshots its prompt, model, quality, duration,
 generation FPS, and pixel budget. Both can be reapplied from the preview or
 application settings. In particular, the existing WPF `state.json` is not
 shared wholesale.
+
+Fresh photoreal settings use the base FLUX.2 model with the comparison LoRA
+OFF. The WPF-local PNG Prompt inheritance table can translate selected A1111
+source tags into editable Positive fragments at explicit enqueue time. A
+local ignored prompt policy supplies production defaults. The tracked WPF
+schema example at
+`local-native/PhotoViewer.Wpf/config/wpf-prompts.example.json` contains
+synthetic placeholder values only. Set `AIBOS_WPF_PROMPT_POLICY_PATH` or place
+`config/wpf-prompts.local.json` beside the application/current directory.
+Missing or invalid policy uses bounded public placeholders and an empty default
+inheritance table without changing persisted user edits. A
+photoreal output carries its effective generation settings in the PNG
+`parameters` chunk. Existing photoreal PNGs that predate that writer remain
+readable through their bounded ComfyUI `prompt` graph when no `parameters`
+chunk exists; `parameters` always wins when both are present. Video versions
+continue to use their existing immutable snapshot in `enhance/jobs.json`, so
+no per-output JSON sidecars are added.
 
 Normal application startup remains reader-only: it never creates a locator,
 shared root, durable-data directory, or store. Its only operational write is an

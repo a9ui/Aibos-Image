@@ -26,8 +26,15 @@ vectors. It is test input and evidence mapping, not a second specification.
 
 - Ordinary WPF viewing is local and remains usable without a Browser or Node.js
   runtime.
-- Enhancement may call the separately installed H25 Browser application as an
-  optional local companion, only after an explicit user action.
+- Enhancement may call the separately installed, API-only H25 Enhancement
+  companion, only after an explicit user action. The companion opens no Browser
+  window and does not load the Browser Viewer, Album, Search, thumbnail, or
+  Favorite surfaces.
+- The API-only guarantees above apply to the default Enhancement companion
+  launcher. The explicit `AIBOS_H25_LEGACY_NEXT_COMPANION=1` rollback switch
+  selects the unchanged legacy Next runtime instead. That switch is outside
+  normal companion mode and is retained only for a controlled rollback; while
+  it is enabled, the API-only and no-Viewer-loading guarantees do not apply.
 - An explicit AI Start or Retry may start that local companion when it is not
   already available. Passive browsing, preview, navigation, job inspection,
   and state hydration never start it. Before readiness, WPF may stop only the
@@ -36,8 +43,9 @@ vectors. It is test input and evidence mapping, not a second specification.
   because WPF closes.
 - The companion endpoint is loopback-only and must bind to `127.0.0.1`. LAN,
   tunnel, reverse-proxy, hosted, and Internet exposure are unsupported.
-- An unavailable companion must produce a bounded, actionable error and must
-  not affect ordinary viewing or mutate source/shared state.
+- An unavailable companion must not affect ordinary viewing or source images.
+  An explicit enqueue either publishes a bounded durable reservation or reports
+  that nothing was saved; it must never report success for a failed local save.
 
 ## Source images and destructive actions
 
@@ -65,8 +73,9 @@ The shared durable set is:
 - `albums.json`;
 - `search-history.json`;
 - `recent-folders.json`;
-- `enhance/jobs.json`, `enhance/output-root.txt`, and managed outputs below the
-  configured parent (with `enhance/outputs/**` retained as the fallback).
+- `enhance/jobs.json`, `enhance/output-root.txt`, the versioned explicit-enqueue
+  inbox below `enhance/enqueue-inbox/**`, and managed outputs below the configured
+  parent (with `enhance/outputs/**` retained as the fallback).
 
 The current shared `settings.json` allowlist includes
 `confirmBeforeDelete` and `thumbnailStatusBorders`. WPF adopts the shared
@@ -301,11 +310,32 @@ or stores.
   Filmstrip.
 - Album order is preserved when an Album is the active source.
 - Search and Album sources do not overwrite each other's owned collections.
+- The WPF gallery may sort newest-first by completed upscale, photoreal, or
+  video activity. It uses `completedAt` when present, otherwise `updatedAt`,
+  otherwise `createdAt`; legacy rows without `completedAt` are therefore an
+  explicit last-update approximation. Images without a usable timestamp sort
+  after timestamped images with filename and path as stable tie-breakers.
 - Presentation geometry and gestures not stated here remain WPF implementation
   details.
 
 ## Favorite safety
 
+- In the enlarged-image modal, Favorite targets the version actually displayed.
+  Original uses the canonical source path as its shared `favorites.json` key.
+  A validated managed Photoreal version uses that exact output path as a
+  separate key, so each Photoreal output and its Original keep independent
+  levels. Upscale, I2I, and Video displays retain the Original/source Favorite
+  meaning in this contract version.
+- Gallery Favorite badges, filters, and sorting retain Original/source
+  semantics even when the gallery thumbnail preference displays a managed
+  Photoreal image. Version-specific Favorite is exposed only in the modal.
+  Every supported writer must merge only its changed path keys into the latest
+  shared map; a normal write must preserve catalog-external managed-output keys.
+- Removing or temporarily losing a managed output does not delete its Favorite
+  entry. The entry is invisible while that exact path is unavailable and is
+  reused only if the same validated output path becomes available again. This
+  matches the existing retention of Favorite history when an Original leaves
+  the active catalog.
 - Gallery compact/card/list surfaces, the right-preview action row, and the
   bulk relative controls do not expose a Favorite decrement button. Gallery
   users may increment or choose an explicit level 0 through 5. Modal decrement
@@ -314,6 +344,13 @@ or stores.
   name, before/after levels, action type, and time. The right preview exposes
   History, Undo, and Redo. `Ctrl+Z` and `Ctrl+Y` apply the same Favorite-only
   undo/redo operations when an editable input or modal is not active.
+- WPF stores the latest successful Favorite interaction time per image in
+  renderer-local `state.json` for its `Fav touched` sort. Setting level 0 is an
+  interaction and remains in this local history. Older images with no recorded
+  time sort last. Only the newest 20,000 activity rows are retained so this
+  renderer-local presentation history cannot grow without bound. This field is
+  not added to shared `favorites.json` and does not change cross-repository
+  Favorite meaning.
 - Favorite undo/redo never attempts to cancel or reverse Enhancement jobs,
   source recycle operations, image files, Seen state, or Album state.
 
@@ -325,44 +362,140 @@ or stores.
 - Original and managed Enhanced outputs remain distinct; source images are not
   overwritten.
 - Enhancement operation envelope v1 is an additive extension of the existing
-  version 1 job store. `operation` is `upscale`, `photoreal`, or `video`; only
+  version 1 job store. `operation` is `upscale`, `photoreal`, `i2i`, or `video`; only
   a genuinely missing value on an older job means `upscale`. A present null,
   malformed, or unknown value is unsupported and fails closed. It must never
   be coerced to `upscale`, executed, retried, reordered, opened, or deleted as
   an image Enhancement.
 - The modal exposes separate explicit `AI高画質化` and `AI実写化` actions.
-  Photoreal prompt, strength, structure retention, CFG scale, quality steps,
-  and work resolution are WPF-local request defaults and do not mutate shared
-  Browser settings. All six values are exposed by the application settings
-  screen and kept synchronized with the modal popup. The prompt starts with
-  the built-in tested default, remains freely editable from both surfaces,
-  persists locally as one shared value, and has an explicit prompt Reset.
-  Application settings also provide one explicit Reset for all six values.
-- A named photoreal Style is WPF-local and snapshots the prompt, strength,
-  structure retention, CFG scale, quality steps, and work resolution. Up to 32
+  LoRA enabled, Positive prompt, Positive prompt used when the first field is blank,
+  Negative prompt, strength, CFG scale, quality steps, and work resolution are
+  WPF-local request defaults and do not mutate shared Browser settings. All
+  eight values are exposed by the application settings screen and kept
+  synchronized with the modal popup. The three prompt fields remain freely
+  editable from both surfaces, persist locally, and each has an explicit Reset.
+  Application settings also provide one explicit Reset for all eight values.
+  At enqueue time, a nonblank Positive prompt is sent verbatim after trimming;
+  otherwise the trimmed blank-field fallback is sent. The trimmed Negative
+  prompt is sent through the companion's real negative-conditioning input.
+  With the FLUX CFG guider, CFG 1.00 gives Negative zero guidance contribution;
+  the WPF labels this dependency and users can select a value above 1.00 when
+  they intend to use Negative guidance. No hidden Positive sentence is appended
+  from a composition setting.
+- WarmBloodAban Anything-to-Real is an optional comparison LoRA. Fresh/reset
+  settings default to LoRA OFF with a dormant 40% value; OFF means the companion
+  omits the LoRA node and does not require the LoRA asset. A legacy saved Style
+  or queued job that predates the boolean retains its historical ON meaning.
+- Application settings expose a separate searchable PNG Prompt inheritance
+  editor. Each row has Enabled, category, exact A1111 source tag, and editable
+  Positive output text, with Add/Delete/Reset. Clicking the Enabled checkbox
+  toggles it directly with one click rather than requiring the row to enter edit
+  mode first. Production prompt defaults and inheritance rows are supplied by
+  an ignored local policy selected with `AIBOS_WPF_PROMPT_POLICY_PATH`, or by
+  `config/wpf-prompts.local.json` beside the application/current directory.
+  The tracked example documents only the schema and synthetic values. Missing
+  or invalid local policy uses bounded public placeholders and an empty default
+  table; an explicitly empty persisted table stays empty. A higher local policy
+  revision appends only missing rows to older persisted state and preserves
+  custom rows and edits. Prompt values and their revision history are not part
+  of the public source contract.
+  Matching ignores case, treats `_` and an ASCII space as equivalent,
+  keeps hyphens distinct, ignores A1111 outer attention brackets, numeric
+  weights, and escaping, treats a top-level standalone `BREAK` token as a separator,
+  preserves PNG source order, and deduplicates output. A local row may use
+  bounded `matchTokens` and `excludeTokens` arrays for generic related-tag
+  matching without embedding those private values in source. A complete mapped
+  fragment is appended only when the resulting Positive remains within 2,000
+  characters. Overflow fragments are skipped at phrase boundaries rather than
+  truncating text or failing the explicit enqueue.
+  In the enlarged Original PNG view, each Positive prompt chip exposes a
+  right-click action that opens this editor at the matching row. A missing tag
+  is staged as an enabled `カスタム` row whose initial output is the same
+  normalized text; A1111 numeric weight and attention wrappers are removed.
+  Existing normalized tags are selected without duplication, and Cancel keeps
+  the table unchanged.
+  The editor's normal actions and primary save action use explicit contrasting
+  dark backgrounds, light text, and visible borders; text/background contrast
+  remains at least 4.5:1.
+- A named photoreal Style is WPF-local and snapshots LoRA enabled, the three raw
+  prompt fields, strength, CFG scale, quality steps, and work resolution. Up to 32
   Styles with names of at most 40 characters are persisted in WPF `state.json`.
   Selecting a Style from either the modal popup or application settings applies
-  all six values; later manual edits return to the unsaved Custom selection
+  all eight values; later manual edits return to the unsaved Custom selection
   without modifying the stored Style. Saving the same name replaces that Style,
   and deleting one leaves the current request values unchanged.
   Quality offers 4, 6, 8, and opt-in `非常に高い（12 step）`; the default remains
   the measured 8-step profile.
-  Editing is saved while typing. Each job snapshots the current prompt when it
-  is enqueued; already queued or running jobs are not rewritten.
-- The built-in photoreal prompt asks the edit model to preserve the source
-  identity, expression, mood, occlusions, pose, hand placement, lighting, and
-  Japanese/East Asian facial proportions while correcting malformed visible
-  hands to five natural fingers. The operation is one model pass: no ADetailer,
-  face restoration, hidden upscale, or second generative detail pass is run.
+  Editing is saved while typing. Each job snapshots the resolved Positive and
+  current Negative prompt when it is enqueued; ordinary settings edits do not
+  rewrite queued or running jobs. The explicit Jobs action described below is
+  the only queued-job prompt replacement path.
+- Photoreal defaults come from the same ignored local policy and remain freely
+  editable in WPF. Their concrete wording is not tracked. The operation is one
+  model pass: no face restoration, hidden upscale, or second generative detail
+  pass is run.
 - New photoreal requests use the companion adapter identifier
   `comfyui-flux2-photoreal`; older `a1111-photoreal` jobs remain readable as
   managed historical versions.
+- `PV-ENHANCE-I2I-001` defines explicit local image editing without a manual
+  mask. `i2i` is a distinct managed-image operation shown as `AI編集`; it is
+  never counted or labeled as photorealization or upscale. The request chooses
+  the indexed Original or one exact succeeded photoreal producer by durable
+  `sourceProducerJobId`; clients never submit a managed output path. The job
+  keeps the Original catalog identity. The first writer slice accepts only
+  `target=hair-color`; its immutable preset snapshot records the requested
+  hair color, optional bounded detail, effective prompt, numeric generation
+  settings, seed, workflow revision, and mask revision. Hairstyle and outfit
+  editing remain unsupported until a later measured protocol revision.
+- I2I v1 uses the existing local FLUX.2 reference-conditioning runtime with
+  the comparison LoRA OFF, one model pass, empty Negative conditioning, and
+  CFG 1.0. The companion derives a hair mask with SAM 3.1, protects the face
+  core detected with MediaPipe, runs one FLUX.2 reference-edit candidate, and
+  deterministically composites only the bounded feathered hair region onto the
+  exact selected source. Protected face-core pixels and every pixel outside
+  the editable mask come from that source. Missing or ambiguous source, subject,
+  hair mask, or face protection fails closed without publishing a full-frame
+  fallback. SAM and FLUX are loaded sequentially on the one existing GPU worker;
+  no manual mask, face-restoration pass, hidden upscale, second worker, or
+  parallel GPU queue is introduced.
+- I2I controls are explicit and transient: opening a menu, modal, source list,
+  or settings board remains passive. Only the enlarged-image modal opens the
+  bounded `AI編集` boards. The source is the exact version currently displayed,
+  using its valid photoreal producer when applicable. There is no gallery-list
+  enqueue action or source picker in the first slice.
+  I2I outputs and upscaled outputs are not v1 input choices. Retry copies the
+  complete saved preset and source provenance; Cancel, queue order, enqueue-next,
+  pause/resume, output open, and output delete retain the existing Jobs rules.
+  Enqueue is enabled only after the open edit board has observed
+  the schema-matched `capabilities.i2i` or `capabilities.i2iV2` object reporting
+  the exact contract, target, revisions, and all reader/writer/backend/ready
+  flags as ready. After that proof, a transiently
+  unavailable second health probe may still save the explicit create
+  reservation locally; a positive not-ready response rejects it before save.
+  Retry has no board-scoped proof and therefore requires an exact ready health
+  response on that action before its reservation is saved. A not-ready POST
+  returns 503 without adding a durable row or waking the queue.
+  The companion writer is default-off and requires the explicit local
+  `PVU_I2I_WRITER_ENABLED=1` process gate in addition to the verified mask
+  assets. Removing that gate disables new enqueue while retaining the reader
+  and existing managed outputs for rollback.
+  The canonical additive fixture is `contracts/enhancement-i2i-v1.json`.
 - Each valid succeeded output remains an independently selectable version.
   In the modal, one visible dropdown lists Original and every available
-  AI高画質化/AI実写化 version; repeated versions are numbered per operation and
-  the newest of each operation is identified. `Ctrl+Up` and `Ctrl+Down` retain
+  AI高画質化/AI実写化/AI編集/動画化 version. The inventory is grouped and numbered as
+  `Original`, `実写化 n/N`, `高画質化 n/N`, `AI編集 n/N`, and `動画化 n/N`
+  independently.
+  `Ctrl+Up` and `Ctrl+Down` retain
   wraparound cycling of the same inventory. Delete removes only the selected
   managed version and never the source or sibling versions.
+- Explicit `AI高画質化` uses the currently displayed managed photoreal version
+  when one is selected. WPF sends only its durable `sourceProducerJobId` and
+  the photo profile `photo-natural-x2` / `realesrgan-ncnn` / scale 2; it never
+  sends a managed output path. The companion revalidates that the producer is
+  a succeeded photoreal job for the same Original, runs the adapter against
+  that exact output, and keeps the Original `sourceId`, `sourcePath`, and
+  signature on the new upscale row so version grouping and Retry remain stable.
+  Original or already-upscaled selections retain the ordinary upscale profile.
 - Both operations use the same companion `/api/enhance/jobs` endpoint, durable
   ordered queue, and single worker. New jobs append in FIFO order by default.
   They must not create separate GPU queues or run GPU work in parallel. Retry
@@ -375,10 +508,15 @@ or stores.
   actions for the clicked real source image. Opening a context menu remains
   passive; only choosing either action may start the companion and enqueue
   work.
-- `PV-ENHANCE-OUTPUT-001` defines one configurable parent for both operations.
+- Those menus also expose `次に高画質化` and `次に実写化`. The companion must
+  advertise `atomicImageEnqueueNext`; the POST then carries
+  `queuePlacement: "next"` and inserts first among waiting jobs under the claim
+  lock without preempting the running job. Missing capability never silently
+  degrades to tail insertion.
+- `PV-ENHANCE-OUTPUT-001` defines one configurable parent for all operations.
   The parent is selected in the WPF AI実写化 settings section and stored as one
   absolute path in `enhance/output-root.txt`; the fixed flat operation folders
-  below it are `Upscaled/` and `Photorealized/`. WPF's dedicated environment
+  below it are `Upscaled/`, `Photorealized/`, `Edited/`, and `Videos/`. WPF's dedicated environment
   override and then `PVU_ENHANCE_OUTPUT_ROOT` take precedence and make this
   setting read-only. Without any override or configuration, the legacy
   `enhance/outputs` parent remains the fallback.
@@ -387,11 +525,15 @@ or stores.
   paths. A queued job resolves the current parent when it starts processing;
   a running job keeps its already recorded destination. Existing recorded
   absolute output paths remain readable.
-- The H25 Browser companion owns the current local Enhancement API and worker.
-  WPF owns its loopback client and must keep the API optional.
+- The dedicated H25 Enhancement companion owns the local Enhancement API,
+  durable inbox consumer, and worker. WPF owns its loopback client and the
+  explicit enqueue publisher; ordinary viewing must keep the API optional.
 - Modal and batch Start/Retry first reuse an already-ready loopback companion.
   If none is ready, that same explicit action may launch the separately
-  installed H25 companion with Browser opening and ComfyUI autostart disabled.
+  installed API-only H25 companion through the default launcher. It must not
+  start or load the Browser
+  Viewer, React, Albums, Search, thumbnails, or Favorites, and ComfyUI autostart
+  remains disabled.
   A successful ready companion continues the durable ordered queue after WPF
   closes. Reopening WPF passively reads the persisted queue, operation type,
   status, and latest saved integer progress. On companion startup, the worker
@@ -415,9 +557,14 @@ or stores.
   or become the next queued job. Reordering never interrupts the running job
   and survives a companion restart. The canonical additive reader fixture is
   `contracts/enhancement-queue-order-v1.json`.
+  The Jobs header exposes one durable Pause/Resume control when the companion
+  advertises `worker.paused`. Pause prevents new claims but lets the current
+  job finish; queued rows and their FIFO order survive WPF/companion restarts.
+  Resume preserves that order. An older companion without the capability keeps
+  the control disabled instead of pretending to pause.
   Stable job-view and thumbnail instances are updated in place so polling does
-  not make thumbnails flash. Each row visibly identifies `HQ`/高画質化 or
-  `REAL`/実写化.
+  not make thumbnails flash. Each row visibly identifies `HQ`/高画質化,
+  `REAL`/実写化, `EDIT`/AI編集, or `VIDEO`/動画化.
 - Choosing a job thumbnail closes the workspace and opens its validated source
   in the WPF viewer. Open output opens the exact validated managed version in
   that same viewer even when the source is currently hidden by gallery filters
@@ -429,16 +576,98 @@ or stores.
     requiring another enqueue or Retry. One explicit bulk action cancels queued
     rows only and does not change the running job.
   - Failed and Canceled rows expose Retry, which copies the original job
-    snapshot and operation into a newly appended queued job. A completed
-    photoreal row exposes `現在設定で再実写化`, which creates a new job from the
-    current WPF prompt, strength, structure retention, CFG scale, steps, and
-    work resolution rather than silently reusing the old snapshot.
+    snapshot and operation into a newly appended queued job. Succeeded, Failed,
+    and Canceled photoreal rows also expose `現在設定で再実写化` and
+    `現在設定で次に実写化`, which create a separate new job from the
+    current WPF resolved Positive prompt, Negative prompt, LoRA enabled,
+    strength, CFG scale, steps, and work resolution rather than silently
+    reusing the old snapshot. Thus Failed and Canceled photoreal rows retain
+    both the original-snapshot Retry and current-settings actions; none of these
+    actions mutates the source row. The latter requires the atomic enqueue-next
+    capability and requests `queuePlacement: "next"`.
+  - A waiting `comfyui-flux2-photoreal` row exposes `現在のPromptへ更新`.
+    This explicit action atomically replaces only its resolved Positive and
+    Negative prompts. It preserves job ID, queued status, waiting order, LoRA
+    enabled/strength, steps, CFG, work resolution, and source identity, and
+    does not wake the worker. The update shares the companion's claim lock;
+    once claimed/running it fails with conflict and changes nothing. Historical
+    `a1111-photoreal` rows never expose this action because that adapter does not
+    consume these saved prompt options. The action also requires the exact
+    `capabilities.queuedPhotorealPromptUpdate` health flag; an older companion
+    without it keeps Jobs readable but does not expose a button that would 404.
+    The Jobs header also exposes one bulk variant for all currently waiting,
+    eligible rows. It resolves the current WPF Positive and Negative separately
+    for each source PNG, then invokes the same per-row replacement contract.
+    It does not change LoRA, numeric settings, source identity, status, or queue
+    order; ineligible and concurrently claimed rows are skipped or reported
+    without rolling back successful updates to other rows.
   - Cancel never deletes the source, a managed output, or failure diagnostics.
     Cancel, Retry, re-run, Open output, and Delete output remain explicit user
     actions.
   WPF validates source identity, source signature, and managed-output ownership
-  before opening or deleting an output. The workspace does not change the
-  `enhance/jobs.json` schema and never starts a worker from ordinary browsing.
+  before opening or deleting an output. WPF never writes `enhance/jobs.json`
+  directly and never starts a worker from ordinary browsing.
+- `PV-ENHANCE-ENQUEUE-INBOX-001` defines durable registration of explicit
+  create and Retry actions. WPF performs one bounded health probe. An exact v1
+  capability publishes the request before any immediate POST nudge. A timeout,
+  transport error, retryable status, malformed/ambiguous health response, or
+  companion without the v1 capability also publishes first and sends no
+  ambiguous POST. Only the exact v1 capability permits an immediate nudge.
+  Feature-gated I2I create actions use this unknown-probe fallback only after
+  the open edit board has already observed the exact ready I2I capability.
+  I2I Retry requires an exact ready health response for the Retry action and
+  never publishes from an unknown capability state.
+  - A publish writes one bounded envelope to a same-directory temporary file,
+    flushes it through the storage stack, and moves it without overwrite into
+    `enhance/enqueue-inbox/v1/pending`. Passive viewing and health reads never
+    create this directory. A failed write or move is an explicit no-save error.
+  - The API-only companion claims envelopes through `processing`, dispatches
+    the fixed create or Retry route with the saved request ID as its idempotency
+    key, and deletes the envelope only after a matching durable receipt. A lost
+    response, timeout, 408, 425, 429, 5xx, job-store contention, restart, or
+    WPF exit retains the reservation and retries it in FIFO order. Definitive
+    4xx input failures move to `needs-action` without blocking later valid
+    items in the same batch.
+  - After a successful publish, one valid request converges to at most one Jobs
+    row even when the immediate response is lost or dispatch is repeated. The
+    guarantee begins when the durable move succeeds; disk-full, access-denied,
+    unsupported-state, or media failure must remain visible as a local save
+    failure rather than a false queued state.
+  - `enhance/jobs.json` remains version 1 and may contain the additive optional
+    root array `idempotencyReceipts`. A receipt contains only request ID,
+    SHA-256 request fingerprint, original job ID, and original creation time;
+    it never stores a source path, prompt, or request body. Terminal history
+    dismissal creates the receipt under the same lock and atomic replacement
+    before removing the visible row. A matching replay after dismissal returns
+    the original job ID without creating another row; a different fingerprint
+    for the same request ID conflicts.
+  - Receipts have no TTL or eviction and are bounded at 8192 entries. If a new
+    receipt is required at capacity, dismissal returns conflict and preserves
+    the visible row. Legacy version-1 stores without the array remain valid.
+    Unknown root and receipt fields round-trip unchanged; malformed, duplicate,
+    or conflicting receipt state fails closed without replacing the store.
+  - Rollout installs and starts the inbox-capable companion before installing
+    this WPF writer. Rollback restores the prior WPF and companion as a pair;
+    already-published envelopes remain intact for a later inbox-capable
+    companion and are never converted to an unsafe legacy POST.
+  - The versioned wire shape, bounds, fixed routes, hash, capability, and
+    synthetic vectors are canonical in
+    `contracts/enhancement-enqueue-inbox-v1.json`.
+- A completed photoreal PNG stores its effective Positive, Negative, numeric
+  settings, seed, model, and LoRA state in its own A1111-compatible
+  `parameters` text chunk. No per-image JSON sidecar is created. For existing
+  photoreal PNGs made before that writer, WPF may recover the connected final
+  Positive, Negative, steps, CFG, sampler, scheduler, seed, generation size,
+  model, and LoRA state from a bounded ComfyUI `prompt` graph only when no
+  `parameters` chunk exists. The first `parameters` chunk remains authoritative
+  even when empty or unsupported; a graph never overrides it. The modal
+  metadata sidebar and its Copy actions resolve only the currently displayed
+  version: Original reads the original PNG, photoreal reads that output PNG,
+  and missing metadata is shown as unavailable rather than replaced with
+  current defaults. A displayed video reads its exact stored `video` snapshot
+  from the existing `jobs.json`, including native/output FPS and frame counts,
+  model, steps, CFG, sampler, scheduler, shift, denoise, seed, codec, and RIFE
+  delivery. Missing legacy fields remain visibly unknown.
 - `PV-ENHANCE-HEALTH-001` defines the optional read-only
   `GET /api/enhance/health` companion contract. The Jobs workspace may request
   it alongside its existing passive jobs refresh and display `Healthy`,
@@ -452,12 +681,14 @@ or stores.
   WPF does not infer a stall from elapsed time alone until a measured threshold
   is adopted. The canonical reader fixture is
   `contracts/enhancement-health-v1.json`.
-- Removing the in-repository Browser backend is not merge-ready until a named
-  H25 commit passes an isolated TEMP compatibility test against the exact WPF
-  candidate. That test must prove request and response compatibility, one
-  absolute Enhancement root for `jobs.json` and `outputs/**`, WPF output
-  ownership checks, restart recovery, unchanged source bytes, and zero writes
-  to user-owned state or caches.
+- Replacing `next start` as WPF's launch target is not merge-ready until a named
+  H25 API-companion commit passes an isolated TEMP compatibility test against
+  the exact WPF candidate. That test must prove the existing URL contracts,
+  durable inbox recovery and idempotency, one absolute Enhancement root for
+  `jobs.json`, the inbox, and `outputs/**`, WPF output ownership checks,
+  unchanged source bytes, and zero writes to unrelated user-owned state or
+  caches. The independently maintained Browser product remains present and
+  unchanged; it is only excluded from the WPF companion launch path.
 
 ### `PV-ENHANCE-VIDEO-001` — Reader-first managed video operation
 

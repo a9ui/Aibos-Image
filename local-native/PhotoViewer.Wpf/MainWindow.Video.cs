@@ -47,26 +47,49 @@ public partial class MainWindow
         string JobId,
         string PresetId,
         string BackendId,
+        string ModelName,
         string? SourceProducerJobId,
         double DurationSeconds,
+        int RequestedPlaybackFps,
         int PlaybackFps,
+        int NativeFrameCount,
         int FrameCount,
+        int MaximumPixelArea,
         int Width,
         int Height,
         string RequestedPrompt,
         string PositivePrompt,
         string NegativePrompt,
+        int Steps,
+        int Cfg,
+        string Sampler,
+        string Scheduler,
+        int Shift,
+        int Denoise,
         int Seed,
         string Codec,
+        string Container,
         int BitDepth,
-        DateTimeOffset CreatedAt,
+        ManagedVideoDeliverySnapshot? Delivery,
+        DateTimeOffset? CompletedAtUtc,
         ManagedVideoOutput Output);
+
+    private sealed record ManagedVideoDeliverySnapshot(
+        string BackendId,
+        string Model,
+        int TargetFps,
+        int FrameCount,
+        int DurationSeconds,
+        string PixelFormat,
+        bool Audio);
 
     private sealed record ModalVideoVersionChoice(int Index, string Label);
     private sealed record ManagedPhotorealVideoSource(
         string ResolvedSource,
         string OutputPath,
-        IReadOnlyList<string> CatalogAliases);
+        IReadOnlyList<string> CatalogAliases,
+        long SourceSize,
+        double SourceMtimeMs);
 
     private bool TryBuildManagedVideoVersion(
         JsonElement job,
@@ -95,12 +118,15 @@ public partial class MainWindow
             || video.ValueKind != JsonValueKind.Object
             || !TryGetStringProperty(video, "presetId", out string? presetId)
             || !TryGetStringProperty(video, "backendId", out string? backendId)
+            || !TryGetStringProperty(video, "modelName", out string? modelName)
             || !video.TryGetProperty("requested", out JsonElement requested)
             || requested.ValueKind != JsonValueKind.Object
             || !requested.TryGetProperty("durationSeconds", out JsonElement durationElement)
             || !durationElement.TryGetDouble(out double durationSeconds)
             || !requested.TryGetProperty("playbackFps", out JsonElement fpsElement)
             || !fpsElement.TryGetInt32(out int playbackFps)
+            || !requested.TryGetProperty("maximumPixelArea", out JsonElement maximumPixelAreaElement)
+            || !maximumPixelAreaElement.TryGetInt32(out int maximumPixelArea)
             || !TryGetStringPropertyAllowEmpty(requested, "prompt", out string? requestedPrompt)
             || !video.TryGetProperty("effective", out JsonElement effective)
             || effective.ValueKind != JsonValueKind.Object
@@ -112,9 +138,20 @@ public partial class MainWindow
             || !heightElement.TryGetInt32(out int height)
             || !TryGetStringProperty(effective, "positivePrompt", out string? positivePrompt)
             || !TryGetStringPropertyAllowEmpty(effective, "negativePrompt", out string? negativePrompt)
+            || !effective.TryGetProperty("steps", out JsonElement stepsElement)
+            || !stepsElement.TryGetInt32(out int steps)
+            || !effective.TryGetProperty("cfg", out JsonElement cfgElement)
+            || !cfgElement.TryGetInt32(out int cfg)
+            || !TryGetStringProperty(effective, "sampler", out string? sampler)
+            || !TryGetStringProperty(effective, "scheduler", out string? scheduler)
+            || !effective.TryGetProperty("shift", out JsonElement shiftElement)
+            || !shiftElement.TryGetInt32(out int shift)
+            || !effective.TryGetProperty("denoise", out JsonElement denoiseElement)
+            || !denoiseElement.TryGetInt32(out int denoise)
             || !video.TryGetProperty("seed", out JsonElement seedElement)
             || !seedElement.TryGetInt32(out int seed)
             || !TryGetStringProperty(video, "codec", out string? codec)
+            || !TryGetStringProperty(video, "container", out string? container)
             || !video.TryGetProperty("bitDepth", out JsonElement bitDepthElement)
             || !bitDepthElement.TryGetInt32(out int bitDepth))
         {
@@ -132,8 +169,10 @@ public partial class MainWindow
             || width % ManagedVideoAlignment != 0
             || height % ManagedVideoAlignment != 0
             || checked((long)width * height) > ManagedVideoMaximumPixelArea
+            || checked((long)width * height) > maximumPixelArea
             || seed < 0
             || !string.Equals(codec, "h264", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(container, "mp4", StringComparison.OrdinalIgnoreCase)
             || bitDepth != 8)
         {
             return false;
@@ -148,7 +187,8 @@ public partial class MainWindow
 
         int outputPlaybackFps = playbackFps;
         int outputFrameCount = frameCount;
-        if (video.TryGetProperty("delivery", out _))
+        ManagedVideoDeliverySnapshot? deliverySnapshot = null;
+        if (video.TryGetProperty("delivery", out JsonElement delivery))
         {
             if (video.EnumerateObject().Count(static property =>
                     property.NameEquals("delivery")) != 1
@@ -165,6 +205,27 @@ public partial class MainWindow
 
             outputPlaybackFps = 30;
             outputFrameCount = checked(deliveryDurationSeconds * 30);
+            if (!TryGetStringProperty(delivery, "backendId", out string? deliveryBackendId)
+                || !TryGetStringProperty(delivery, "model", out string? deliveryModel)
+                || !delivery.TryGetProperty("targetFps", out JsonElement deliveryFpsElement)
+                || !deliveryFpsElement.TryGetInt32(out int deliveryFps)
+                || !delivery.TryGetProperty("frameCount", out JsonElement deliveryFramesElement)
+                || !deliveryFramesElement.TryGetInt32(out int deliveryFrames)
+                || !delivery.TryGetProperty("pixelFormat", out JsonElement deliveryPixelFormatElement)
+                || deliveryPixelFormatElement.ValueKind != JsonValueKind.String
+                || !delivery.TryGetProperty("audio", out JsonElement deliveryAudioElement)
+                || deliveryAudioElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                return false;
+            }
+            deliverySnapshot = new ManagedVideoDeliverySnapshot(
+                deliveryBackendId!,
+                deliveryModel!,
+                deliveryFps,
+                deliveryFrames,
+                deliveryDurationSeconds,
+                deliveryPixelFormatElement.GetString()!,
+                deliveryAudioElement.GetBoolean());
         }
 
         try
@@ -239,32 +300,38 @@ public partial class MainWindow
                 return false;
             }
 
-            DateTimeOffset createdAt = DateTimeOffset.MinValue;
-            if (TryGetStringProperty(job, "createdAt", out string? createdAtText))
-                DateTimeOffset.TryParse(
-                    createdAtText,
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.RoundtripKind,
-                    out createdAt);
+            DateTimeOffset? completedAtUtc = ReadEnhancementActivityAtUtc(job);
 
             resolvedSource = resolvedSourceId;
             version = new ManagedVideoVersion(
                 jobId!,
                 presetId!,
                 backendId!,
+                modelName!,
                 sourceProducerJobId,
                 durationSeconds,
+                playbackFps,
                 outputPlaybackFps,
+                frameCount,
                 outputFrameCount,
+                maximumPixelArea,
                 width,
                 height,
                 requestedPrompt!,
                 positivePrompt!,
                 negativePrompt!,
+                steps,
+                cfg,
+                sampler!,
+                scheduler!,
+                shift,
+                denoise,
                 seed,
                 codec!.ToLowerInvariant(),
+                container!.ToLowerInvariant(),
                 bitDepth,
-                createdAt,
+                deliverySnapshot,
+                completedAtUtc,
                 new ManagedVideoOutput(canonicalOutput, sourceSize, sourceMtimeMs));
             catalogAliases = producerAliases
                 .Concat(new[] { sourceId, resolvedSourceId })
@@ -344,10 +411,12 @@ public partial class MainWindow
     {
         IReadOnlyList<ManagedVideoVersion> versions =
             GetCatalogManagedVideoVersionsForPath(tile.Path);
+        tile.VideoVersionCount = versions.Count;
         tile.VideoGenerated = versions.Count > 0;
         tile.VideoOutputPath = versions.Count > 0
             ? versions[0].Output.OutputPath
             : null;
+        tile.VideoCompletedAtUtc = LatestVideoActivityUtc(versions);
     }
 
     private void InitializeModalVideoVersions(Tile tile)
@@ -408,6 +477,12 @@ public partial class MainWindow
             ? Visibility.Visible
             : Visibility.Collapsed;
         ModalVideoPlaybackButton.IsEnabled = available;
+        if (ModalFooter is not null)
+        {
+            ModalFooter.Visibility = available && ModalChromeEffectivelyVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
         UpdateModalVideoPlaybackPresentation();
     }
 
@@ -430,6 +505,7 @@ public partial class MainWindow
         _modalVideoVersionIndex = index;
         _modalShowingVideo = true;
         _modalShowingEnhanced = false;
+        CancelModalMetadataRefresh(clearCurrent: true);
         _modalVideoPlaying = autoplay;
         _modalVideoAutoplayPending = autoplay;
         _modalVideoPlaybackGeneration++;
@@ -481,11 +557,16 @@ public partial class MainWindow
                 selected,
                 ModalDisplayVersionKind.Video,
                 version.JobId);
+            UpdateModalDisplayedDimensionsInfo(
+                selected,
+                version.Width,
+                version.Height);
             UpdateModalEnhancedControls(
                 TryGetModalEnhancedOutput(selected, out _));
         }
         ModalSourceLabel.Text = $"Video V{index + 1}";
         ModalFileSizeText.Text = FormatFileSizeMb(new FileInfo(version.Output.OutputPath).Length);
+        SyncModalMetadataSidebar();
         return true;
     }
 
@@ -515,8 +596,16 @@ public partial class MainWindow
         RestoreModalImageVisibility();
         if (Modal?.Visibility == Visibility.Visible)
         {
-            bool canShowEnhanced = SelectedTile() is Tile selected
+            Tile? selected = SelectedTile();
+            bool canShowEnhanced = selected is not null
                 && TryGetModalEnhancedOutput(selected, out _);
+            if (selected is not null)
+            {
+                UpdateModalDisplayedDimensionsInfo(
+                    selected,
+                    _modalDisplayedImagePixelWidth,
+                    _modalDisplayedImagePixelHeight);
+            }
             UpdateModalEnhancedControls(canShowEnhanced);
             if (!string.IsNullOrWhiteSpace(_modalDisplayPath)
                 && File.Exists(_modalDisplayPath))
@@ -1060,6 +1149,14 @@ public partial class MainWindow
         }
 
         ModalVideoSeekPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (ModalFooter is not null)
+        {
+            bool hasFooterContent = show
+                || ModalVideoPlaybackButton?.Visibility == Visibility.Visible;
+            ModalFooter.Visibility = hasFooterContent && ModalChromeEffectivelyVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
         _suppressModalVideoSeek = true;
         try
         {
