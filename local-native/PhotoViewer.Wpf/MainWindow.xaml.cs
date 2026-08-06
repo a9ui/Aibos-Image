@@ -4161,12 +4161,17 @@ public partial class MainWindow : Window
 
         foreach ((string path, DateTimeOffset changedAtUtc) in committed)
             _favoriteChangedAtUtcByPath[path] = changedAtUtc;
-        TrimFavoriteActivity(_favoriteChangedAtUtcByPath);
+        var affectedPaths = new HashSet<string>(
+            committed.Keys,
+            StringComparer.OrdinalIgnoreCase);
+        TrimFavoriteActivity(_favoriteChangedAtUtcByPath, affectedPaths);
         foreach (Tile tile in _allTiles)
         {
+            if (!affectedPaths.Contains(tile.Path))
+                continue;
             tile.FavoriteChangedAtUtc =
                 _favoriteChangedAtUtcByPath.TryGetValue(
-                    NormalizeFavoritePath(tile.Path),
+                    tile.Path,
                     out DateTimeOffset changedAtUtc)
                     ? changedAtUtc
                     : null;
@@ -4183,7 +4188,8 @@ public partial class MainWindow : Window
     }
 
     private static void TrimFavoriteActivity(
-        Dictionary<string, DateTimeOffset> activity)
+        Dictionary<string, DateTimeOffset> activity,
+        ISet<string>? affectedPaths = null)
     {
         if (activity.Count <= MaxPersistedFavoriteActivityEntries)
             return;
@@ -4193,6 +4199,17 @@ public partial class MainWindow : Window
             .ThenBy(static item => item.Key, StringComparer.OrdinalIgnoreCase)
             .Take(MaxPersistedFavoriteActivityEntries)
             .ToArray();
+        if (affectedPaths is not null)
+        {
+            var retainedPaths = retained
+                .Select(static item => item.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (string path in activity.Keys)
+            {
+                if (!retainedPaths.Contains(path))
+                    affectedPaths.Add(path);
+            }
+        }
         activity.Clear();
         foreach ((string path, DateTimeOffset changedAtUtc) in retained)
             activity[path] = changedAtUtc;
