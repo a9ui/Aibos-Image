@@ -709,8 +709,6 @@
             <ContextMenu x:Name="CardsContextMenu" AutomationProperties.Name="Image grid actions">
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
-              <MenuItem Header="AI編集（髪色）…" Click="GalleryContextI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
-              <MenuItem Header="AI編集（服・表情・背景・ポーズ）…" Click="GalleryContextI2iEditV2_Click" AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
               <MenuItem Header="AI実写高画質化のみ" Click="GalleryContextPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
               <MenuItem Header="次に高画質化" Click="GalleryContextUpscaleNext_Click" AutomationProperties.Name="次に高画質化"/>
               <MenuItem Header="次に実写化" Click="GalleryContextPhotorealNext_Click" AutomationProperties.Name="次に実写化"/>
@@ -756,8 +754,6 @@
             <ContextMenu x:Name="RowsContextMenu" AutomationProperties.Name="Image list actions">
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
-              <MenuItem Header="AI編集（髪色）…" Click="GalleryContextI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
-              <MenuItem Header="AI編集（服・表情・背景・ポーズ）…" Click="GalleryContextI2iEditV2_Click" AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
               <MenuItem Header="AI実写高画質化のみ" Click="GalleryContextPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
               <MenuItem Header="次に高画質化" Click="GalleryContextUpscaleNext_Click" AutomationProperties.Name="次に高画質化"/>
               <MenuItem Header="次に実写化" Click="GalleryContextPhotorealNext_Click" AutomationProperties.Name="次に実写化"/>
@@ -1570,7 +1566,7 @@
     </Grid>
 
     <!-- Explicit I2I edit board. Opening this surface performs only a passive
-         capability GET; the companion may start only from the queue button. -->
+         capability GET; the companion may start only from the GO button. -->
     <Grid x:Name="I2iEditDialog" Grid.RowSpan="3" Panel.ZIndex="650"
           Visibility="Collapsed" Background="#A9000000"
           MouseLeftButtonDown="I2iEditBackdrop_MouseLeftButtonDown"
@@ -1681,18 +1677,18 @@
                     Content="閉じる" MinWidth="72" Height="32" Margin="8,0,0,0"
                     Click="CloseI2iEdit_Click"/>
             <Button x:Name="I2iQueueButton" DockPanel.Dock="Right"
-                    Style="{StaticResource PrimaryButton}" Content="キューへ追加"
+                    Style="{StaticResource PrimaryButton}" Content="GO"
                     MinWidth="108" Height="32" IsEnabled="False"
                     Click="QueueI2iEdit_Click"
-                    AutomationProperties.Name="AI編集ジョブをキューへ追加"
-                    AutomationProperties.HelpText="このボタンを押した時だけcompanionを起動し、ジョブを追加します。"/>
+                    AutomationProperties.Name="GO: AI編集ジョブをキューへ追加"
+                    AutomationProperties.HelpText="GOを押した時だけcompanionを起動し、ジョブを追加します。"/>
           </DockPanel>
         </Grid>
       </Border>
     </Grid>
 
     <!-- Multi-target I2I v2 board. The source is pinned when opened. Opening
-         performs a passive health GET only; queueing is the sole writer action. -->
+         performs a passive health GET only; GO is the sole writer action. -->
     <Grid x:Name="I2iV2EditDialog" Grid.RowSpan="3" Panel.ZIndex="655"
           Visibility="Collapsed" Background="#A9000000"
           MouseLeftButtonDown="I2iV2EditBackdrop_MouseLeftButtonDown"
@@ -1843,11 +1839,11 @@
                     Content="閉じる" MinWidth="72" Height="32" Margin="8,0,0,0"
                     Click="CloseI2iV2Edit_Click"/>
             <Button x:Name="I2iV2QueueButton" DockPanel.Dock="Right"
-                    Style="{StaticResource PrimaryButton}" Content="キューへ追加"
+                    Style="{StaticResource PrimaryButton}" Content="GO"
                     MinWidth="108" Height="32" IsEnabled="False"
                     Click="QueueI2iV2Edit_Click"
-                    AutomationProperties.Name="複数ターゲットAI編集ジョブをキューへ追加"
-                    AutomationProperties.HelpText="このボタンを押した時だけcompanionを起動し、ジョブを追加します。"/>
+                    AutomationProperties.Name="GO: 複数ターゲットAI編集ジョブをキューへ追加"
+                    AutomationProperties.HelpText="GOを押した時だけcompanionを起動し、ジョブを追加します。"/>
             <Button x:Name="I2iV2ResetButton" DockPanel.Dock="Right"
                     Style="{StaticResource GhostButton}" Content="入力をリセット"
                     MinWidth="96" Height="32" Click="ResetI2iV2Edit_Click"

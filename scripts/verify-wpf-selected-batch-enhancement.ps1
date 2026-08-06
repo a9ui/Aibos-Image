@@ -76,9 +76,9 @@ try {
         'doubleClickSuppressed',
         'doubleClickPromptProvenance',
         'failedOnlyRetry',
-        'ambiguousPostSafe',
+        'transientReceiptsSaved',
         'oneCreatedJobPerAcceptedSource',
-        'stopUnsentOnly',
+        'durableReservationsNotStoppable',
         'sourceUnchanged',
         'storesUnchanged',
         'managedOutputsEmpty'

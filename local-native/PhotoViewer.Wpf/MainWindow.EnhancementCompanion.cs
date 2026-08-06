@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
@@ -21,6 +22,7 @@ public partial class MainWindow
     private const string PhotorealSeedControlCapability =
         "photorealSeedControlV1";
     private const string VideoSeedControlCapability = "videoSeedControlV1";
+    private const int DurableEnqueueActionDeadlineMilliseconds = 2_000;
 
     private readonly SemaphoreSlim _enhancementCompanionLaunchGate = new(1, 1);
     private readonly CancellationTokenSource _enhancementCompanionLifetimeCts = new();
@@ -28,6 +30,14 @@ public partial class MainWindow
     private string? _enhancementCompanionLaunchError;
     private int _enhancementCompanionLaunchAttemptCount;
     private Func<Uri, (bool Started, string Error)>? _startEnhancementCompanionForSmoke;
+    private sealed record EnhancementEnqueueProbe(
+        EnhancementEnqueueBackendMode Mode,
+        JsonElement? HealthPayload,
+        long ActionDeadlineTick);
+    private sealed record DurableEnhancementBatchResponse(
+        EnhancementApiResponse[] Responses,
+        int NudgeCount,
+        int PublishedCount);
 
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionReadyForExplicitActionAsync(
         string? sourceIdentity = null,
@@ -245,6 +255,400 @@ public partial class MainWindow
             && capabilities.ValueKind == JsonValueKind.Object
             && capabilities.TryGetProperty(capability, out JsonElement supported)
             && supported.ValueKind == JsonValueKind.True;
+
+    private static Func<JsonElement, string?>? CreateImageEnhancementHealthValidator(
+        string operation,
+        bool enqueueNext,
+        bool requiresPhotorealSourceUpscale = false,
+        bool requiresRecoveredPhotorealSourceUpscale = false,
+        bool requiresPhotorealSeedControl = false)
+    {
+        bool needsPhotorealControls = string.Equals(
+            operation,
+            "photoreal",
+            StringComparison.Ordinal);
+        if (!needsPhotorealControls
+            && !enqueueNext
+            && !requiresPhotorealSourceUpscale
+            && !requiresRecoveredPhotorealSourceUpscale
+            && !requiresPhotorealSeedControl)
+        {
+            return null;
+        }
+
+        return payload =>
+        {
+            var missingCapabilities = new List<string>(5);
+            if (needsPhotorealControls
+                && !HasEnhancementCapability(payload, PhotorealPromptControlsCapability))
+            {
+                missingCapabilities.Add("this photoreal settings format");
+            }
+            if (enqueueNext
+                && !HasEnhancementCapability(payload, AtomicImageEnqueueNextCapability))
+            {
+                missingCapabilities.Add("atomic enqueue-next");
+            }
+            if (requiresPhotorealSourceUpscale
+                && !HasEnhancementCapability(payload, PhotorealSourceUpscaleCapability))
+            {
+                missingCapabilities.Add("photoreal-output upscaling");
+            }
+            if (requiresRecoveredPhotorealSourceUpscale
+                && !HasEnhancementCapability(
+                    payload,
+                    RecoveredPhotorealSourceUpscaleCapability))
+            {
+                missingCapabilities.Add("Recovered photoreal-output upscaling");
+            }
+            if (requiresPhotorealSeedControl
+                && !HasEnhancementCapability(payload, PhotorealSeedControlCapability))
+            {
+                missingCapabilities.Add("fixed photoreal seeds");
+            }
+            return missingCapabilities.Count == 0
+                ? null
+                : $"The running H25 companion does not support {string.Join(", ", missingCapabilities)}. Restart H25 first; no job was added.";
+        };
+    }
+
+    private static Func<JsonElement, string?> CreateEnhancementCapabilityHealthValidator(
+        string capability,
+        string capabilityLabel)
+        => payload => HasEnhancementCapability(payload, capability)
+            ? null
+            : $"The running H25 companion does not support {capabilityLabel}. Restart H25 first; no job was added.";
+
+    private async Task<EnhancementEnqueueProbe> ProbeEnhancementEnqueueBackendAsync(
+        CancellationToken token)
+    {
+        long deadline = Environment.TickCount64 + DurableEnqueueActionDeadlineMilliseconds;
+        EnhancementApiResponse health = await SendEnhancementApiAsync(
+            HttpMethod.Get,
+            "api/enhance/health",
+            token: token,
+            timeoutMilliseconds: DurableEnqueueActionDeadlineMilliseconds);
+        return new EnhancementEnqueueProbe(
+            EnhancementEnqueueProbePolicy.Classify(
+                health.Ok,
+                health.StatusCode,
+                health.Payload),
+            health.Payload,
+            deadline);
+    }
+
+    private static int RemainingEnhancementEnqueueActionMilliseconds(
+        EnhancementEnqueueProbe probe)
+        => (int)Math.Clamp(
+            probe.ActionDeadlineTick - Environment.TickCount64,
+            0,
+            DurableEnqueueActionDeadlineMilliseconds);
+
+    private static EnhancementApiResponse? ValidateEnhancementEnqueueProbe(
+        EnhancementEnqueueProbe probe,
+        Func<JsonElement, string?>? healthValidator,
+        bool requireExactHealthValidation)
+    {
+        if (healthValidator is null)
+            return null;
+        if (!EnhancementEnqueueProbePolicy.AllowsFeatureValidation(probe.Mode))
+        {
+            return requireExactHealthValidation
+                ? new EnhancementApiResponse(
+                    false,
+                    426,
+                    probe.HealthPayload,
+                    "The running H25 companion cannot prove support for this request. Restart H25 first; no job was added.")
+                : null;
+        }
+        if (probe.HealthPayload is not JsonElement healthPayload)
+        {
+            return new EnhancementApiResponse(
+                false,
+                426,
+                null,
+                "The running H25 companion cannot prove support for this request. Restart H25 first; no job was added.");
+        }
+
+        string? error = healthValidator(healthPayload);
+        return string.IsNullOrWhiteSpace(error)
+            ? null
+            : new EnhancementApiResponse(false, 426, healthPayload, error);
+    }
+
+    private async Task<EnhancementApiResponse> SendEnhancementEnqueueAsync(
+        object? body,
+        string queuePlacement = "last",
+        string? retryJobId = null,
+        bool includeQueuePlacementInBody = true,
+        CancellationToken token = default,
+        Func<JsonElement, string?>? healthValidator = null,
+        bool requireExactHealthValidation = false,
+        string? recoverySourceIdentity = null)
+    {
+        string route = retryJobId is null
+            ? "api/enhance/jobs"
+            : $"api/enhance/jobs/{Uri.EscapeDataString(retryJobId)}/retry";
+        EnhancementEnqueueProbe probe =
+            await ProbeEnhancementEnqueueBackendAsync(token);
+        EnhancementApiResponse? validationFailure =
+            ValidateEnhancementEnqueueProbe(
+                probe,
+                healthValidator,
+                requireExactHealthValidation);
+        if (validationFailure is not null)
+            return validationFailure;
+        EnhancementEnqueueInboxItem item;
+        try
+        {
+            item = EnhancementEnqueueInboxStore.CreateItem(
+                body,
+                queuePlacement,
+                batchIndex: 0,
+                kind: retryJobId is null ? "create" : "retry",
+                retryJobId: retryJobId,
+                includeQueuePlacementInBody: includeQueuePlacementInBody);
+            _ = EnhancementEnqueueInboxStore.Publish(
+                ResolvedEnhancementJobsPath,
+                [item]);
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or Win32Exception
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException
+                or JsonException)
+        {
+            return new EnhancementApiResponse(
+                false,
+                0,
+                null,
+                "The AI queue reservation could not be saved locally. Nothing was submitted; try again.");
+        }
+
+        if (!EnhancementEnqueueProbePolicy.AllowsImmediateNudge(probe.Mode))
+        {
+            KickEnhancementCompanionRecoveryAfterDurablePublish(
+                recoverySourceIdentity);
+            return SavedForDeliveryResponse(item);
+        }
+
+        int remaining = RemainingEnhancementEnqueueActionMilliseconds(probe);
+        if (remaining <= 0)
+        {
+            KickEnhancementCompanionRecoveryAfterDurablePublish(
+                recoverySourceIdentity);
+            return SavedForDeliveryResponse(item);
+        }
+        EnhancementApiResponse nudge = await SendEnhancementApiAsync(
+            HttpMethod.Post,
+            route,
+            token: token,
+            exactBodyJson: item.BodyJson,
+            idempotencyKey: item.RequestId,
+            timeoutMilliseconds: remaining);
+        EnhancementApiResponse normalized =
+            NormalizeDurableEnqueueResponse(nudge, item);
+        if (normalized.SavedForDelivery)
+        {
+            KickEnhancementCompanionRecoveryAfterDurablePublish(
+                recoverySourceIdentity);
+        }
+        return normalized;
+    }
+
+    private async Task<DurableEnhancementBatchResponse>
+        TrySendDurableEnhancementBatchAsync(
+            IReadOnlyList<object?> bodies,
+            string queuePlacement = "last",
+            CancellationToken token = default,
+            Action? onFirstPublish = null,
+            Func<bool>? shouldStopBeforeFirstPublish = null)
+    {
+        if (bodies.Count == 0)
+            return new DurableEnhancementBatchResponse([], 0, 0);
+        EnhancementEnqueueProbe probe =
+            await ProbeEnhancementEnqueueBackendAsync(token);
+        EnhancementApiResponse unsavedFailure = new(
+            false,
+            0,
+            null,
+            "The AI queue reservations could not be saved locally. Nothing was submitted; try again.");
+        EnhancementApiResponse stoppedResponse = new(
+            false,
+            499,
+            null,
+            "Batch submission was stopped before the reservation was saved.");
+        var responses = Enumerable.Repeat(unsavedFailure, bodies.Count).ToArray();
+        var publishedItems = new List<(int GlobalIndex, EnhancementEnqueueInboxItem Item)>(
+            bodies.Count);
+        bool firstPublishReported = false;
+        bool abortRemainingPublishes = false;
+
+        bool PublishRange(int start, int count)
+        {
+            if (!firstPublishReported
+                && shouldStopBeforeFirstPublish?.Invoke() == true)
+            {
+                for (int index = start; index < bodies.Count; index++)
+                    responses[index] = stoppedResponse;
+                abortRemainingPublishes = true;
+                return false;
+            }
+
+            try
+            {
+                EnhancementEnqueueInboxItem[] chunk = Enumerable.Range(0, count)
+                    .Select(localIndex => EnhancementEnqueueInboxStore.CreateItem(
+                        bodies[start + localIndex],
+                        queuePlacement,
+                        localIndex))
+                    .ToArray();
+                _ = EnhancementEnqueueInboxStore.Publish(
+                    ResolvedEnhancementJobsPath,
+                    chunk);
+                for (int localIndex = 0; localIndex < chunk.Length; localIndex++)
+                {
+                    int globalIndex = start + localIndex;
+                    responses[globalIndex] = SavedForDeliveryResponse(chunk[localIndex]);
+                    publishedItems.Add((globalIndex, chunk[localIndex]));
+                }
+                if (!firstPublishReported)
+                {
+                    firstPublishReported = true;
+                    onFirstPublish?.Invoke();
+                }
+                return true;
+            }
+            catch (EnhancementEnqueuePayloadTooLargeException) when (count > 1)
+            {
+                int firstCount = count / 2;
+                bool firstPublished = PublishRange(start, firstCount);
+                if (!firstPublished || abortRemainingPublishes)
+                    return false;
+                return PublishRange(start + firstCount, count - firstCount);
+            }
+            catch (EnhancementEnqueuePayloadTooLargeException ex)
+            {
+                responses[start] = new EnhancementApiResponse(
+                    false,
+                    413,
+                    null,
+                    ex.Message);
+                return true;
+            }
+            catch (Exception ex) when (
+                ex is IOException
+                    or Win32Exception
+                    or UnauthorizedAccessException
+                    or ArgumentException
+                    or NotSupportedException
+                    or JsonException)
+            {
+                abortRemainingPublishes = true;
+                return false;
+            }
+        }
+
+        for (int start = 0; start < bodies.Count; start += EnhancementEnqueueInboxStore.MaximumItemsPerEnvelope)
+        {
+            int count = EnhancementEnqueueProbePolicy.NextEnvelopeItemCount(
+                bodies.Count - start);
+            if (!PublishRange(start, count))
+                break;
+        }
+
+        if (!EnhancementEnqueueProbePolicy.AllowsImmediateNudge(probe.Mode)
+            && publishedItems.Count > 0)
+        {
+            KickEnhancementCompanionRecoveryAfterDurablePublish(null);
+        }
+
+        int nudgeCount = 0;
+        if (EnhancementEnqueueProbePolicy.AllowsImmediateNudge(probe.Mode))
+        {
+            foreach ((int globalIndex, EnhancementEnqueueInboxItem item) in publishedItems)
+            {
+                int remaining = RemainingEnhancementEnqueueActionMilliseconds(probe);
+                if (remaining <= 0 || token.IsCancellationRequested)
+                    break;
+
+                nudgeCount++;
+                EnhancementApiResponse nudge = await SendEnhancementApiAsync(
+                    HttpMethod.Post,
+                    "api/enhance/jobs",
+                    token: token,
+                    exactBodyJson: item.BodyJson,
+                    idempotencyKey: item.RequestId,
+                    timeoutMilliseconds: remaining);
+                responses[globalIndex] = NormalizeDurableEnqueueResponse(nudge, item);
+            }
+            if (publishedItems.Any(entry =>
+                    responses[entry.GlobalIndex].SavedForDelivery))
+            {
+                KickEnhancementCompanionRecoveryAfterDurablePublish(null);
+            }
+        }
+
+        return new DurableEnhancementBatchResponse(
+            responses,
+            nudgeCount,
+            publishedItems.Count);
+    }
+
+    private void KickEnhancementCompanionRecoveryAfterDurablePublish(
+        string? sourceIdentity)
+    {
+        if (!_usingDefaultModalEnhancementSender
+            || _enhancementCompanionLifetimeCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                _ = await EnsureEnhancementCompanionReadyForExplicitActionAsync(
+                    sourceIdentity,
+                    _enhancementCompanionLifetimeCts.Token);
+            }
+            catch
+            {
+                // The reservation is already durable. Recovery is best-effort.
+            }
+        });
+    }
+
+    private static EnhancementApiResponse NormalizeDurableEnqueueResponse(
+        EnhancementApiResponse response,
+        EnhancementEnqueueInboxItem item)
+    {
+        if (response.Ok
+            && EnhancementEnqueueProbePolicy.HasMatchingDurableReceipt(
+                response.Payload,
+                item.RequestId))
+        {
+            return response;
+        }
+        if (response.StatusCode is >= 400 and < 500
+            && response.StatusCode is not (408 or 425 or 429))
+        {
+            return response;
+        }
+        return SavedForDeliveryResponse(item);
+    }
+
+    private static EnhancementApiResponse SavedForDeliveryResponse(
+        EnhancementEnqueueInboxItem item)
+        => new(
+            true,
+            202,
+            null,
+            "",
+            SavedForDelivery: true,
+            DeliveryRequestId: item.RequestId);
 
     private static bool IsReadyEnhancementCompanionResponse(EnhancementApiResponse response)
         => response.Ok

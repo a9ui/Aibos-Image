@@ -58,7 +58,7 @@
   "promptPolicyV1": {
     "pathEnvironmentVariable": "AIBOS_I2I_PROMPT_POLICY_PATH",
     "defaultIgnoredPath": "config/i2i-prompts.local.json",
-    "trackedExample": "config/i2i-prompts.example.json contains deliberately invalid dummy placeholders only",
+    "trackedExample": "no backend policy example is tracked in this WPF repository; local-native/PhotoViewer.Wpf/config/wpf-prompts.example.json documents the separate WPF-local policy schema with synthetic placeholders only",
     "schemaVersion": 1,
     "requiredTargets": [
       "outfit",

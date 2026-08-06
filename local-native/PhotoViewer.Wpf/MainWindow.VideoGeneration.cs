@@ -1270,19 +1270,11 @@ public partial class MainWindow
         SetVideoGenerationSettingsStatus("ローカル動画生成の準備を確認しています...");
         try
         {
-            EnhancementApiResponse readiness =
-                seed.HasValue
-                    ? await EnsureEnhancementCapabilityForExplicitActionAsync(
-                        VideoSeedControlCapability,
-                        "fixed video seeds",
-                        source.SourceIdentity)
-                    : await EnsureEnhancementCompanionReadyForExplicitActionAsync(
-                        source.SourceIdentity);
-            if (!readiness.Ok)
-            {
-                SetVideoGenerationSettingsStatus(readiness.Error);
-                return false;
-            }
+            Func<JsonElement, string?>? healthValidator = seed.HasValue
+                ? CreateEnhancementCapabilityHealthValidator(
+                    VideoSeedControlCapability,
+                    "fixed video seeds")
+                : null;
 
             if (!TryRevalidateCapturedVideoSource(
                     out VideoSourceChoice revalidatedSource,
@@ -1321,10 +1313,20 @@ public partial class MainWindow
             if (seed is int fixedSeed)
                 requestBody["seed"] = fixedSeed;
 
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Post,
-                "api/enhance/jobs",
-                requestBody);
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+                requestBody,
+                includeQueuePlacementInBody: false,
+                healthValidator: healthValidator,
+                recoverySourceIdentity: source.SourceIdentity);
+            if (response.SavedForDelivery)
+            {
+                SetVideoGenerationSettingsStatus(
+                    "動画化の予約を保存しました。Jobsへの登録を継続しています。");
+                SetTransientStatusToast(
+                    $"{Path.GetFileName(source.SourceIdentity)}: 動画化の予約を保存しました。登録を継続しています。");
+                ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+                return true;
+            }
             if (!response.Ok
                 || response.Payload is not JsonElement payload
                 || !payload.TryGetProperty("job", out JsonElement job)

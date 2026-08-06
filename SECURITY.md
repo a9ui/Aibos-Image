@@ -10,11 +10,12 @@ visibility does not make it a public service.
 - Keep explicit source deletion on the Windows Recycle Bin path; do not add a
   permanent-delete fallback.
 
-Ordinary WPF viewing does not require a network service. The optional
-Enhancement companion is the independently maintained H25 Browser application
-and is contacted only over loopback after an explicit user action. It must
-remain bound to `127.0.0.1`; do not expose it through a LAN listener, reverse
-proxy, tunnel, hosted deployment, or the Internet.
+Ordinary WPF viewing does not require a network service. The optional,
+dedicated H25 Enhancement API companion is contacted only over loopback after
+an explicit user action. It opens no Browser window and does not load the
+Browser Viewer or its gallery data. It must remain bound to `127.0.0.1`; do not
+expose it through a LAN listener, reverse proxy, tunnel, hosted deployment, or
+the Internet.
 
 The WPF and Browser applications will share a versioned durable-state contract.
 Malformed or unsupported future state must fail non-destructively. Never reset,

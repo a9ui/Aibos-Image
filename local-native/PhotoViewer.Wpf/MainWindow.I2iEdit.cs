@@ -26,6 +26,7 @@ public partial class MainWindow
     private const int I2iDetailsMaximumCharacters = 240;
 
     private bool _i2iCapabilityReady;
+    private bool _i2iCapabilityUnknown;
     private bool _i2iCapabilityCheckPending;
     private bool _i2iRequestPending;
     private bool _syncingI2iSeedControls;
@@ -37,7 +38,6 @@ public partial class MainWindow
         string SourcePath,
         string? SourceProducerJobId,
         string Label,
-        bool ModalBound,
         long ModalGeneration);
 
     private static bool IsI2iMutationSafe(JsonElement job)
@@ -592,16 +592,28 @@ public partial class MainWindow
         return true;
     }
 
-    private bool TryResolveCurrentI2iEditSource(
-        bool modalBound,
+    private bool TryResolveCurrentModalI2iEditSource(
         out I2iEditSource source,
         out string error)
     {
         source = null!;
         error = "";
+        if (Modal.Visibility != Visibility.Visible)
+        {
+            error = "拡大表示の画像を確認できません。";
+            return false;
+        }
         if (SelectedTile() is not Tile { IsRealFile: true } tile)
         {
-            error = "AI編集できるOriginal画像を確認できません。";
+            error = "拡大表示中のOriginal画像を確認できません。";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(_modalSourceTilePath)
+            || !EnhancementSourceIdentityComparer.Equals(
+                _modalSourceTilePath,
+                tile.Path))
+        {
+            error = "拡大表示の画像が変わりました。表示を確認してから開き直してください。";
             return false;
         }
         if (!File.Exists(tile.Path)
@@ -614,41 +626,32 @@ public partial class MainWindow
 
         string? sourceProducerJobId = null;
         string sourceLabel = "Original";
-        if (modalBound)
+        if (_modalShowingVideo)
         {
-            if (Modal.Visibility != Visibility.Visible)
+            error = "動画はAI編集の入力にできません。Originalか実写化版を表示してください。";
+            return false;
+        }
+        if (_modalShowingEnhanced)
+        {
+            if (!CurrentModalEnhancementVersionIsPhotoreal()
+                || !TryGetExactDurableCurrentModalEnhancementVersion(
+                    tile,
+                    out ManagedEnhancementVersion photoreal)
+                || photoreal.Recovered
+                || string.IsNullOrWhiteSpace(photoreal.JobId))
             {
-                error = "拡大表示の画像を確認できません。";
+                error = "AI編集は表示中のOriginalか、正確に確認できる実写化版から開始できます。";
                 return false;
             }
-            if (_modalShowingVideo)
-            {
-                error = "動画はAI編集の入力にできません。Originalか実写化版を表示してください。";
-                return false;
-            }
-            if (_modalShowingEnhanced)
-            {
-                if (!CurrentModalEnhancementVersionIsPhotoreal()
-                    || !TryGetExactDurableCurrentModalEnhancementVersion(
-                        tile,
-                        out ManagedEnhancementVersion photoreal)
-                    || photoreal.Recovered
-                    || string.IsNullOrWhiteSpace(photoreal.JobId))
-                {
-                    error = "AI編集は表示中のOriginalか、正確に確認できる実写化版から開始できます。";
-                    return false;
-                }
-                sourceProducerJobId = photoreal.JobId;
-                sourceLabel = CurrentModalEnhancementVersionLabel();
-            }
+            sourceProducerJobId = photoreal.JobId;
+            sourceLabel = CurrentModalEnhancementVersionLabel();
         }
 
         source = new I2iEditSource(
             sourceIdentity,
             sourceProducerJobId,
             sourceLabel,
-            modalBound,
-            modalBound ? _modalEnhancementGeneration : -1);
+            _modalEnhancementGeneration);
         return true;
     }
 
@@ -670,14 +673,13 @@ public partial class MainWindow
             return false;
         }
 
-        if (!expected.ModalBound)
-        {
-            tile = selected;
-            return true;
-        }
         if (Modal.Visibility != Visibility.Visible
             || expected.ModalGeneration != _modalEnhancementGeneration
-            || _modalShowingVideo)
+            || _modalShowingVideo
+            || string.IsNullOrWhiteSpace(_modalSourceTilePath)
+            || !EnhancementSourceIdentityComparer.Equals(
+                _modalSourceTilePath,
+                selected.Path))
         {
             return false;
         }
@@ -703,20 +705,14 @@ public partial class MainWindow
         return true;
     }
 
-    private async void GalleryContextI2iEdit_Click(
-        object sender,
-        RoutedEventArgs e)
-        => await OpenI2iEditBoardAsync(modalBound: false);
-
     private async void OpenModalI2iEdit_Click(
         object sender,
         RoutedEventArgs e)
-        => await OpenI2iEditBoardAsync(modalBound: true);
+        => await OpenI2iEditBoardAsync();
 
-    private async Task<bool> OpenI2iEditBoardAsync(bool modalBound)
+    private async Task<bool> OpenI2iEditBoardAsync()
     {
-        if (!TryResolveCurrentI2iEditSource(
-                modalBound,
+        if (!TryResolveCurrentModalI2iEditSource(
                 out I2iEditSource source,
                 out string error))
         {
@@ -727,6 +723,7 @@ public partial class MainWindow
         _i2iFocusBeforeBoard = Keyboard.FocusedElement;
         _i2iEditSource = source;
         _i2iCapabilityReady = false;
+        _i2iCapabilityUnknown = false;
         _i2iCapabilityCheckPending = true;
         _i2iRequestPending = false;
         long generation = ++_i2iBoardGeneration;
@@ -754,7 +751,8 @@ public partial class MainWindow
     {
         EnhancementApiResponse response = await SendEnhancementApiAsync(
             HttpMethod.Get,
-            "api/enhance/health");
+            "api/enhance/health",
+            timeoutMilliseconds: DurableEnqueueActionDeadlineMilliseconds);
         if (generation != _i2iBoardGeneration
             || I2iEditDialog.Visibility != Visibility.Visible)
         {
@@ -762,6 +760,20 @@ public partial class MainWindow
         }
 
         _i2iCapabilityCheckPending = false;
+        EnhancementEnqueueBackendMode mode = EnhancementEnqueueProbePolicy.Classify(
+            response.Ok,
+            response.StatusCode,
+            response.Payload);
+        if (mode == EnhancementEnqueueBackendMode.Unknown)
+        {
+            _i2iCapabilityReady = false;
+            _i2iCapabilityUnknown = true;
+            UpdateI2iEditBoardPresentation(
+                "バックエンドのAI編集対応を確認できません。ジョブは追加されません。");
+            return;
+        }
+
+        _i2iCapabilityUnknown = false;
         if (!response.Ok
             || response.Payload is not JsonElement payload
             || !TryParseI2iCapability(
@@ -833,13 +845,15 @@ public partial class MainWindow
         string status = statusOverride
             ?? (_i2iCapabilityCheckPending
                 ? "バックエンドの準備状態を確認しています…"
-                : !_i2iCapabilityReady
-                    ? "AI編集バックエンドがreadyになるまでジョブは追加できません。"
-                    : !sourceValid
-                        ? sourceError
-                        : !fieldsValid
-                            ? "髪色は必須です。補足は240文字まで入力できます。"
-                            : "髪色だけを編集し、顔と髪以外の領域を自動保持します。");
+                : _i2iCapabilityUnknown
+                    ? "バックエンドのAI編集対応を確認できません。ジョブは追加されません。"
+                    : !_i2iCapabilityReady
+                        ? "AI編集バックエンドがreadyになるまでジョブは追加できません。"
+                        : !sourceValid
+                            ? sourceError
+                            : !fieldsValid
+                                ? "髪色は必須です。補足は240文字まで入力できます。"
+                                : "髪色だけを編集し、顔と髪以外の領域を自動保持します。");
         I2iEditStatusText.Text = status;
         I2iQueueButton.IsEnabled = _i2iCapabilityReady
             && !_i2iCapabilityCheckPending
@@ -871,6 +885,12 @@ public partial class MainWindow
             UpdateI2iEditBoardPresentation(sourceError);
             return false;
         }
+        if (!_i2iCapabilityReady || _i2iCapabilityCheckPending)
+        {
+            UpdateI2iEditBoardPresentation(
+                "バックエンドのAI編集対応を確認できません。ジョブは追加されません。");
+            return false;
+        }
 
         string hairColor = I2iHairColorTextBox.Text.Trim();
         string details = I2iDetailsTextBox.Text.Trim();
@@ -897,31 +917,19 @@ public partial class MainWindow
         UpdateI2iEditBoardPresentation("AI編集の追加準備をしています…");
         try
         {
-            EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
-                    source.SourcePath);
-            if (!readiness.Ok)
+            string? ValidateI2iHealth(JsonElement healthPayload)
             {
-                UpdateI2iEditBoardPresentation(readiness.Error);
-                return false;
-            }
-
-            EnhancementApiResponse health = await SendEnhancementApiAsync(
-                HttpMethod.Get,
-                "api/enhance/health");
-            string issueCode = "WORKFLOW_UNVERIFIED";
-            if (!health.Ok
-                || health.Payload is not JsonElement healthPayload
-                || !TryParseI2iCapability(
-                    healthPayload,
-                    out bool ready,
-                    out issueCode)
-                || !ready)
-            {
-                _i2iCapabilityReady = false;
-                UpdateI2iEditBoardPresentation(
-                    $"AI編集バックエンドはまだreadyではありません（{issueCode}）。ジョブは追加されませんでした。");
-                return false;
+                string issueCode = "WORKFLOW_UNVERIFIED";
+                bool supported = TryParseI2iCapability(
+                        healthPayload,
+                        out bool ready,
+                        out issueCode)
+                    && ready;
+                _i2iCapabilityReady = supported;
+                _i2iCapabilityUnknown = false;
+                return supported
+                    ? null
+                    : $"The running H25 companion is not ready for AI editing ({issueCode}). No job was added.";
             }
 
             if (!RevalidateI2iEditSource(source, out tile, out sourceError))
@@ -945,10 +953,18 @@ public partial class MainWindow
             if (seed.HasValue)
                 requestBody["seed"] = seed.Value;
 
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Post,
-                "api/enhance/jobs",
-                requestBody);
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+                requestBody,
+                healthValidator: ValidateI2iHealth,
+                recoverySourceIdentity: source.SourcePath);
+            if (response.SavedForDelivery)
+            {
+                _i2iRequestPending = false;
+                CloseI2iEditBoard(restoreFocus: false);
+                SetTransientStatusToast(
+                    $"{tile.FileName}: AI編集の予約を保存しました。Jobsへの登録を継続しています。");
+                return true;
+            }
             if (!response.Ok
                 || response.Payload is not JsonElement payload
                 || !payload.TryGetProperty("job", out JsonElement job)
@@ -964,8 +980,7 @@ public partial class MainWindow
             if (!string.IsNullOrWhiteSpace(source.SourceProducerJobId))
                 _activeI2iSourceProducerJobIds.Add(source.SourceProducerJobId);
             ApplyActiveEnhancementQueueJobToVisibleCatalog(job, tile);
-            if (source.ModalBound
-                && Modal.Visibility == Visibility.Visible
+            if (Modal.Visibility == Visibility.Visible
                 && ParseModalEnhancementJob(job) is ModalEnhancementJobSnapshot snapshot)
             {
                 ApplyModalEnhancementJob(tile, snapshot);
@@ -1034,6 +1049,7 @@ public partial class MainWindow
         _i2iFocusBeforeBoard = null;
         _i2iEditSource = null;
         _i2iCapabilityReady = false;
+        _i2iCapabilityUnknown = false;
         _i2iCapabilityCheckPending = false;
         _i2iBoardGeneration++;
         I2iEditDialog.Visibility = Visibility.Collapsed;
@@ -1047,8 +1063,7 @@ public partial class MainWindow
     {
         if (ModalI2iEditButton is null || ModalContextI2iEdit is null)
             return;
-        bool available = TryResolveCurrentI2iEditSource(
-            modalBound: true,
+        bool available = TryResolveCurrentModalI2iEditSource(
             out _,
             out string error);
         ModalI2iEditButton.IsEnabled = available && !_modalEnhancementRequestPending;
@@ -1083,11 +1098,8 @@ public partial class MainWindow
     public static string ReadEnhancementOperationForI2iSmoke(JsonElement job)
         => ReadEnhancementOperation(job);
 
-    public async Task<bool> OpenGalleryI2iEditBoardForSmokeAsync()
-        => await OpenI2iEditBoardAsync(modalBound: false);
-
     public async Task<bool> OpenModalI2iEditBoardForSmokeAsync()
-        => await OpenI2iEditBoardAsync(modalBound: true);
+        => await OpenI2iEditBoardAsync();
 
     public void ConfigureI2iEditForSmoke(
         string hairColor,

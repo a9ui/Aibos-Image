@@ -1850,22 +1850,11 @@ public partial class MainWindow
         long generation = _enhancementWorkspaceGeneration;
         try
         {
-            EnhancementApiResponse readiness =
-                await EnsureImageEnhancementCompanionReadyForExplicitActionAsync(
+            Func<JsonElement, string?>? healthValidator =
+                CreateImageEnhancementHealthValidator(
                     "photoreal",
                     enqueueNext,
-                    sourceIdentity,
                     requiresPhotorealSeedControl: photorealSeed.HasValue);
-            if (generation != _enhancementWorkspaceGeneration
-                || EnhancementJobsDialog.Visibility != Visibility.Visible)
-            {
-                return;
-            }
-            if (!readiness.Ok)
-            {
-                EnhancementJobsStatusText.Text = readiness.Error;
-                return;
-            }
 
             ModalPhotorealRequestSettings settings;
             try
@@ -1879,17 +1868,24 @@ public partial class MainWindow
                 EnhancementJobsStatusText.Text = ex.Message;
                 return;
             }
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Post,
-                "api/enhance/jobs",
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
                 CreatePhotorealRequestBody(
                     sourceIdentity,
                     settings,
                     photorealSeed,
-                    enqueueNext ? "next" : "last"));
+                    enqueueNext ? "next" : "last"),
+                enqueueNext ? "next" : "last",
+                healthValidator: healthValidator,
+                recoverySourceIdentity: sourceIdentity);
             if (generation != _enhancementWorkspaceGeneration
                 || EnhancementJobsDialog.Visibility != Visibility.Visible)
             {
+                return;
+            }
+            if (response.SavedForDelivery)
+            {
+                EnhancementJobsStatusText.Text =
+                    "再実写化の予約を保存しました。Jobsへの登録を継続しています。";
                 return;
             }
             if (!response.Ok)
@@ -1926,9 +1922,33 @@ public partial class MainWindow
         long generation = _enhancementWorkspaceGeneration;
         try
         {
-            EnhancementApiResponse response = await SendEnhancementApiAsync(method, route, body);
+            bool isRetryEnqueue = method == HttpMethod.Post
+                && body is null
+                && string.Equals(
+                    route,
+                    $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
+                    StringComparison.Ordinal);
+            Func<JsonElement, string?>? retryHealthValidator =
+                isRetryEnqueue
+                    ? CreateEnhancementRetryHealthValidator(job)
+                    : null;
+            EnhancementApiResponse response = isRetryEnqueue
+                ? await SendEnhancementEnqueueAsync(
+                    body: null,
+                    queuePlacement: "last",
+                    retryJobId: job.Id,
+                    healthValidator: retryHealthValidator,
+                    requireExactHealthValidation:
+                        retryHealthValidator is not null)
+                : await SendEnhancementApiAsync(method, route, body);
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
                 return;
+            if (response.SavedForDelivery)
+            {
+                EnhancementJobsStatusText.Text =
+                    "再試行の予約を保存しました。Jobsへの登録を継続しています。";
+                return;
+            }
             if (!response.Ok)
             {
                 EnhancementJobsStatusText.Text = response.Error;
@@ -1944,6 +1964,32 @@ public partial class MainWindow
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
         }
+    }
+
+    private Func<JsonElement, string?>? CreateEnhancementRetryHealthValidator(
+        EnhancementWorkspaceJobView job)
+    {
+        if (!string.Equals(job.Operation, "i2i", StringComparison.Ordinal))
+            return null;
+
+        if (job.I2iSchemaVersion == 2)
+        {
+            string target = job.I2iTarget ?? "";
+            return payload => TryParseI2iV2Capability(
+                    payload,
+                    out I2iV2CapabilityState capability)
+                && capability.IsReadyFor(target)
+                    ? null
+                    : "The running H25 companion is not ready for this AI edit Retry. No reservation was saved.";
+        }
+
+        return payload => TryParseI2iCapability(
+                payload,
+                out bool ready,
+                out _)
+            && ready
+                ? null
+                : "The running H25 companion is not ready for this AI edit Retry. No reservation was saved.";
     }
 
     private void OpenEnhancementOutput_Click(object sender, RoutedEventArgs e)
@@ -2072,6 +2118,7 @@ public partial class MainWindow
                 FileName = Path.GetFileName(canonicalSource),
                 IsRealFile = true,
                 ModifiedUtc = sourceInfo.LastWriteTimeUtc,
+                Fav = FavoriteLevelForPath(canonicalSource),
             };
         }
 
@@ -2946,6 +2993,9 @@ public partial class MainWindow
         supportedMutation = view.IsSupportedMutationOperation;
         return true;
     }
+
+    public static string ComputeVideoPresetHashForSmoke(JsonElement video)
+        => HashStableJson(video)[..12];
 }
 
 public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged

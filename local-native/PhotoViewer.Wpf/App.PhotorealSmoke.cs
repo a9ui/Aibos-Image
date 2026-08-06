@@ -52,6 +52,8 @@ public partial class App
             bool veryHighQualityContract = false;
             bool sharedQueueRoute = false;
             bool versionCycleContract = false;
+            bool versionSpecificFavoriteContract = false;
+            bool staleFavoriteSourceFallbackRejected = false;
             bool versionWheelCycleContract = false;
             bool thumbnailVersionPreferenceContract = false;
             bool thumbnailVariantCountContract = false;
@@ -667,7 +669,7 @@ public partial class App
                     if (request.Method == HttpMethod.Get)
                     {
                         if (route.EndsWith(
-                                "/api/enhance/jobs",
+                                "/api/enhance/health",
                                 StringComparison.Ordinal)
                             && galleryReadinessRelease is not null)
                         {
@@ -680,6 +682,12 @@ public partial class App
                             {
                                 capabilities = new
                                 {
+                                    durableEnqueueInboxV1 = new
+                                    {
+                                        ready = true,
+                                        protocolVersion = 1,
+                                        backendGeneration = "json-v1",
+                                    },
                                     photorealPromptControlsV2 = true,
                                     atomicImageEnqueueNext = true,
                                     photorealSourceUpscale = true,
@@ -717,11 +725,17 @@ public partial class App
                             createBody = bodyText;
                         }
                         var requestSourceInfo = new FileInfo(requestSource);
+                        string jobId = $"{requestOperation}-smoke-job-{createBodies.Count}";
+                        string requestId = request.Headers.TryGetValues(
+                                "Idempotency-Key",
+                                out IEnumerable<string>? requestIds)
+                            ? requestIds.Single()
+                            : "missing-request-id";
                         return JsonResponse(HttpStatusCode.Accepted, new
                         {
                             job = new
                             {
-                                id = $"{requestOperation}-smoke-job-{createBodies.Count}",
+                                id = jobId,
                                 operation = requestOperation,
                                 sourceId = requestSource,
                                 sourcePath = requestSource,
@@ -736,6 +750,11 @@ public partial class App
                                     .GetString(),
                                 status = "queued",
                                 progress = 0,
+                            },
+                            receipt = new
+                            {
+                                idempotencyKey = requestId,
+                                jobId,
                             },
                         });
                     }
@@ -1710,6 +1729,73 @@ public partial class App
                     !body.TryGetProperty("structureStrength", out _);
                 sharedQueueRoute = requests.Any(static request => request == "POST /api/enhance/jobs")
                     && requests.All(static request => !request.Contains("/photoreal/", StringComparison.Ordinal));
+                window.CloseModalForSmoke();
+                bool favoriteSourceSelected = window.SelectFileNameForSmoke(
+                    Path.GetFileName(sourcePath));
+                bool favoriteModalOpened = window.OpenModalForSmoke();
+                bool favoritePhotorealSelected =
+                    window.SelectModalEnhancementJobVersionForSmoke(
+                        "photoreal-version");
+                bool photorealFavoriteRaised = favoriteSourceSelected
+                    && favoriteModalOpened
+                    && favoritePhotorealSelected
+                    && window.ModalFavoriteLevelForSmoke == 0
+                    && window.SelectedFavoriteLevelForSmoke == 0
+                    && window.AdjustModalFavoriteForSmoke(1)
+                    && window.AdjustModalFavoriteForSmoke(1)
+                    && window.ModalFavoriteLevelForSmoke == 2
+                    && window.SelectedFavoriteLevelForSmoke == 0;
+                bool originalFavoriteAbsentAfterPhotoreal = false;
+                string favoritesPath =
+                    environment["PHOTOVIEWER_WPF_FAVORITES_PATH"];
+                if (File.Exists(favoritesPath))
+                {
+                    using JsonDocument favoritesAfterPhotoreal =
+                        JsonDocument.Parse(File.ReadAllText(favoritesPath));
+                    JsonElement favoriteRoot =
+                        favoritesAfterPhotoreal.RootElement;
+                    originalFavoriteAbsentAfterPhotoreal =
+                        favoriteRoot.TryGetProperty(
+                            photorealOutputPath,
+                            out JsonElement photorealFavorite)
+                        && photorealFavorite.GetInt32() == 2
+                        && !favoriteRoot.TryGetProperty(sourcePath, out _);
+                }
+                bool originalFavoriteRaised =
+                    window.SelectModalOriginalVersionForSmoke()
+                    && window.ModalFavoriteLevelForSmoke == 0
+                    && window.AdjustModalFavoriteForSmoke(1)
+                    && window.ModalFavoriteLevelForSmoke == 1
+                    && window.SelectedFavoriteLevelForSmoke == 1;
+                bool photorealFavoriteRestored =
+                    window.SelectModalEnhancementJobVersionForSmoke(
+                        "photoreal-version")
+                    && window.ModalFavoriteLevelForSmoke == 2
+                    && window.SelectedFavoriteLevelForSmoke == 1;
+                staleFavoriteSourceFallbackRejected =
+                    photorealFavoriteRestored
+                    && window.RejectStaleModalFavoriteSourceFallbackForSmoke();
+                bool favoriteKeysPersisted = false;
+                if (File.Exists(favoritesPath))
+                {
+                    using JsonDocument persistedFavorites =
+                        JsonDocument.Parse(File.ReadAllText(favoritesPath));
+                    JsonElement favoriteRoot = persistedFavorites.RootElement;
+                    favoriteKeysPersisted = favoriteRoot.TryGetProperty(
+                            sourcePath,
+                            out JsonElement originalFavorite)
+                        && originalFavorite.GetInt32() == 1
+                        && favoriteRoot.TryGetProperty(
+                            photorealOutputPath,
+                            out JsonElement photorealFavorite)
+                        && photorealFavorite.GetInt32() == 2;
+                }
+                versionSpecificFavoriteContract = photorealFavoriteRaised
+                    && originalFavoriteAbsentAfterPhotoreal
+                    && originalFavoriteRaised
+                    && photorealFavoriteRestored
+                    && staleFavoriteSourceFallbackRejected
+                    && favoriteKeysPersisted;
                 sourceUntouched = sourceHashBefore == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)));
                 Dictionary<string, string> recoveredFixtureHashesAfter =
                     FingerprintRecoveredSmokeFiles(recoveredFixtureFiles);
@@ -1729,6 +1815,7 @@ public partial class App
                     && started
                     && toolbarContract
                     && versionCycleContract
+                    && versionSpecificFavoriteContract
                     && versionWheelCycleContract
                     && thumbnailVersionPreferenceContract
                     && thumbnailVariantCountContract
@@ -1804,6 +1891,8 @@ public partial class App
                     started,
                     toolbarContract,
                     versionCycleContract,
+                    versionSpecificFavoriteContract,
+                    staleFavoriteSourceFallbackRejected,
                     versionWheelCycleContract,
                     thumbnailVersionPreferenceContract,
                     thumbnailVariantCountContract,

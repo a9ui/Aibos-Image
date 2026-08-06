@@ -120,6 +120,7 @@ public partial class MainWindow
     ];
 
     private bool _i2iV2CapabilityCheckPending;
+    private bool _i2iV2CapabilityUnknown;
     private bool _i2iV2RequestPending;
     private bool _syncingI2iV2Controls;
     private long _i2iV2BoardGeneration;
@@ -620,20 +621,14 @@ public partial class MainWindow
             .ToLowerInvariant()[..12];
     }
 
-    private async void GalleryContextI2iEditV2_Click(
-        object sender,
-        RoutedEventArgs e)
-        => await OpenI2iV2EditBoardAsync(modalBound: false);
-
     private async void OpenModalI2iEditV2_Click(
         object sender,
         RoutedEventArgs e)
-        => await OpenI2iV2EditBoardAsync(modalBound: true);
+        => await OpenI2iV2EditBoardAsync();
 
-    private async Task<bool> OpenI2iV2EditBoardAsync(bool modalBound)
+    private async Task<bool> OpenI2iV2EditBoardAsync()
     {
-        if (!TryResolveCurrentI2iEditSource(
-                modalBound,
+        if (!TryResolveCurrentModalI2iEditSource(
                 out I2iEditSource source,
                 out string error))
         {
@@ -644,6 +639,7 @@ public partial class MainWindow
         _i2iV2FocusBeforeBoard = Keyboard.FocusedElement;
         _i2iV2EditSource = source;
         _i2iV2Capability = null;
+        _i2iV2CapabilityUnknown = false;
         _i2iV2CapabilityCheckPending = true;
         _i2iV2RequestPending = false;
         long generation = ++_i2iV2BoardGeneration;
@@ -674,7 +670,8 @@ public partial class MainWindow
     {
         EnhancementApiResponse response = await SendEnhancementApiAsync(
             HttpMethod.Get,
-            "api/enhance/health");
+            "api/enhance/health",
+            timeoutMilliseconds: DurableEnqueueActionDeadlineMilliseconds);
         if (generation != _i2iV2BoardGeneration
             || I2iV2EditDialog.Visibility != Visibility.Visible)
         {
@@ -682,6 +679,20 @@ public partial class MainWindow
         }
 
         _i2iV2CapabilityCheckPending = false;
+        EnhancementEnqueueBackendMode mode = EnhancementEnqueueProbePolicy.Classify(
+            response.Ok,
+            response.StatusCode,
+            response.Payload);
+        if (mode == EnhancementEnqueueBackendMode.Unknown)
+        {
+            _i2iV2Capability = null;
+            _i2iV2CapabilityUnknown = true;
+            UpdateI2iV2BoardPresentation(
+                "バックエンドのAI編集対応を確認できません。ジョブは追加されません。");
+            return;
+        }
+
+        _i2iV2CapabilityUnknown = false;
         if (!response.Ok
             || response.Payload is not JsonElement payload
             || !TryParseI2iV2Capability(payload, out I2iV2CapabilityState capability))
@@ -816,6 +827,7 @@ public partial class MainWindow
         bool sourceValid = _i2iV2EditSource is not null
             && RevalidateI2iEditSource(_i2iV2EditSource, out _, out sourceError);
         bool targetReady = _i2iV2Capability?.IsReadyFor(target) == true;
+        bool targetQueueable = targetReady;
 
         I2iV2SeedStatusText.Text = seedValid ? "" : seedError;
         I2iV2SeedStatusText.Visibility = seedValid
@@ -827,17 +839,19 @@ public partial class MainWindow
         string status = statusOverride
             ?? (_i2iV2CapabilityCheckPending
                 ? "バックエンドの対応状態を確認しています…"
-                : !targetReady
-                    ? "選択したAI編集がreadyになるまでジョブは追加できません。"
-                    : !sourceValid
-                        ? sourceError
-                        : !fieldsValid
-                            ? "変更内容（プロンプト）は必須です。各入力は2000文字相当までです。"
-                            : target == "pose"
-                                ? "ポーズ変更は実験的です。顔と構図を保護しますが、体や手は再生成されます。"
-                                : "顔の同一性と元の構図を基本設定として自動保持します。");
+                : _i2iV2CapabilityUnknown
+                    ? "バックエンドのAI編集対応を確認できません。ジョブは追加されません。"
+                    : !targetReady
+                        ? "選択したAI編集がreadyになるまでジョブは追加できません。"
+                        : !sourceValid
+                            ? sourceError
+                            : !fieldsValid
+                                ? "変更内容（プロンプト）は必須です。各入力は2000文字相当までです。"
+                                : target == "pose"
+                                    ? "ポーズ変更は実験的です。顔と構図を保護しますが、体や手は再生成されます。"
+                                    : "顔の同一性と元の構図を基本設定として自動保持します。");
         I2iV2EditStatusText.Text = status;
-        I2iV2QueueButton.IsEnabled = targetReady
+        I2iV2QueueButton.IsEnabled = targetQueueable
             && !_i2iV2CapabilityCheckPending
             && !_i2iV2RequestPending
             && sourceValid
@@ -881,6 +895,15 @@ public partial class MainWindow
         }
 
         string target = SelectedI2iV2Target();
+        I2iV2CapabilityState? boardCapability = _i2iV2Capability;
+        if (_i2iV2CapabilityCheckPending
+            || boardCapability is null
+            || !boardCapability.IsReadyFor(target))
+        {
+            UpdateI2iV2BoardPresentation(
+                "バックエンドのAI編集対応を確認できません。ジョブは追加されません。");
+            return false;
+        }
         string instruction = I2iV2InstructionTextBox.Text.Trim();
         string details = I2iV2DetailsTextBox.Text.Trim();
         bool seedValid = TryResolveI2iV2Seed(
@@ -910,31 +933,23 @@ public partial class MainWindow
         UpdateI2iV2BoardPresentation("AI編集の追加準備をしています…");
         try
         {
-            EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
-                    source.SourcePath);
-            if (!readiness.Ok)
+            I2iV2CapabilityState? validatedCapability = null;
+            string? ValidateI2iV2Health(JsonElement healthPayload)
             {
-                UpdateI2iV2BoardPresentation(readiness.Error);
-                return false;
+                if (!TryParseI2iV2Capability(
+                        healthPayload,
+                        out I2iV2CapabilityState capability)
+                    || !capability.IsReadyFor(target))
+                {
+                    _i2iV2Capability = null;
+                    _i2iV2CapabilityUnknown = false;
+                    return "The running H25 companion is not ready for the selected AI edit. No job was added.";
+                }
+                validatedCapability = capability;
+                _i2iV2Capability = capability;
+                _i2iV2CapabilityUnknown = false;
+                return null;
             }
-
-            EnhancementApiResponse health = await SendEnhancementApiAsync(
-                HttpMethod.Get,
-                "api/enhance/health");
-            if (!health.Ok
-                || health.Payload is not JsonElement healthPayload
-                || !TryParseI2iV2Capability(
-                    healthPayload,
-                    out I2iV2CapabilityState capability)
-                || !capability.IsReadyFor(target))
-            {
-                _i2iV2Capability = null;
-                UpdateI2iV2BoardPresentation(
-                    "選択したAI編集のバックエンドはまだreadyではありません。ジョブは追加されませんでした。");
-                return false;
-            }
-            _i2iV2Capability = capability;
 
             if (!RevalidateI2iEditSource(source, out tile, out sourceError))
             {
@@ -947,7 +962,7 @@ public partial class MainWindow
                 ["sourceId"] = source.SourcePath,
                 ["operation"] = I2iV2Operation,
                 ["presetId"] = I2iV2PresetId,
-                ["adapterId"] = capability.AdapterId,
+                ["adapterId"] = I2iV2AdapterId,
                 ["target"] = target,
                 ["instruction"] = instruction,
             };
@@ -958,11 +973,20 @@ public partial class MainWindow
             if (seed.HasValue)
                 requestBody["seed"] = seed.Value;
 
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Post,
-                "api/enhance/jobs",
-                requestBody);
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+                requestBody,
+                healthValidator: ValidateI2iV2Health,
+                recoverySourceIdentity: source.SourcePath);
+            if (response.SavedForDelivery)
+            {
+                _i2iV2RequestPending = false;
+                CloseI2iV2EditBoard(restoreFocus: false);
+                SetTransientStatusToast(
+                    $"{tile.FileName}: {I2iV2TargetLabel(target)}のAI編集予約を保存しました。Jobsへの登録を継続しています。");
+                return true;
+            }
             if (!response.Ok
+                || validatedCapability is not I2iV2CapabilityState capability
                 || response.Payload is not JsonElement payload
                 || !TryGetUniqueI2iProperty(payload, "job", out JsonElement job)
                 || !IsI2iV2JobForExpectedSource(
@@ -984,8 +1008,7 @@ public partial class MainWindow
             if (!string.IsNullOrWhiteSpace(source.SourceProducerJobId))
                 _activeI2iSourceProducerJobIds.Add(source.SourceProducerJobId);
             ApplyActiveEnhancementQueueJobToVisibleCatalog(job, tile);
-            if (source.ModalBound
-                && Modal.Visibility == Visibility.Visible
+            if (Modal.Visibility == Visibility.Visible
                 && ParseModalEnhancementJob(job) is ModalEnhancementJobSnapshot snapshot)
             {
                 ApplyModalEnhancementJob(tile, snapshot);
@@ -1082,6 +1105,7 @@ public partial class MainWindow
         _i2iV2FocusBeforeBoard = null;
         _i2iV2EditSource = null;
         _i2iV2Capability = null;
+        _i2iV2CapabilityUnknown = false;
         _i2iV2CapabilityCheckPending = false;
         _i2iV2BoardGeneration++;
         I2iV2EditDialog.Visibility = Visibility.Collapsed;

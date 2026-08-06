@@ -26,8 +26,15 @@ vectors. It is test input and evidence mapping, not a second specification.
 
 - Ordinary WPF viewing is local and remains usable without a Browser or Node.js
   runtime.
-- Enhancement may call the separately installed H25 Browser application as an
-  optional local companion, only after an explicit user action.
+- Enhancement may call the separately installed, API-only H25 Enhancement
+  companion, only after an explicit user action. The companion opens no Browser
+  window and does not load the Browser Viewer, Album, Search, thumbnail, or
+  Favorite surfaces.
+- The API-only guarantees above apply to the default Enhancement companion
+  launcher. The explicit `AIBOS_H25_LEGACY_NEXT_COMPANION=1` rollback switch
+  selects the unchanged legacy Next runtime instead. That switch is outside
+  normal companion mode and is retained only for a controlled rollback; while
+  it is enabled, the API-only and no-Viewer-loading guarantees do not apply.
 - An explicit AI Start or Retry may start that local companion when it is not
   already available. Passive browsing, preview, navigation, job inspection,
   and state hydration never start it. Before readiness, WPF may stop only the
@@ -36,8 +43,9 @@ vectors. It is test input and evidence mapping, not a second specification.
   because WPF closes.
 - The companion endpoint is loopback-only and must bind to `127.0.0.1`. LAN,
   tunnel, reverse-proxy, hosted, and Internet exposure are unsupported.
-- An unavailable companion must produce a bounded, actionable error and must
-  not affect ordinary viewing or mutate source/shared state.
+- An unavailable companion must not affect ordinary viewing or source images.
+  An explicit enqueue either publishes a bounded durable reservation or reports
+  that nothing was saved; it must never report success for a failed local save.
 
 ## Source images and destructive actions
 
@@ -65,8 +73,9 @@ The shared durable set is:
 - `albums.json`;
 - `search-history.json`;
 - `recent-folders.json`;
-- `enhance/jobs.json`, `enhance/output-root.txt`, and managed outputs below the
-  configured parent (with `enhance/outputs/**` retained as the fallback).
+- `enhance/jobs.json`, `enhance/output-root.txt`, the versioned explicit-enqueue
+  inbox below `enhance/enqueue-inbox/**`, and managed outputs below the configured
+  parent (with `enhance/outputs/**` retained as the fallback).
 
 The current shared `settings.json` allowlist includes
 `confirmBeforeDelete` and `thumbnailStatusBorders`. WPF adopts the shared
@@ -311,6 +320,22 @@ or stores.
 
 ## Favorite safety
 
+- In the enlarged-image modal, Favorite targets the version actually displayed.
+  Original uses the canonical source path as its shared `favorites.json` key.
+  A validated managed Photoreal version uses that exact output path as a
+  separate key, so each Photoreal output and its Original keep independent
+  levels. Upscale, I2I, and Video displays retain the Original/source Favorite
+  meaning in this contract version.
+- Gallery Favorite badges, filters, and sorting retain Original/source
+  semantics even when the gallery thumbnail preference displays a managed
+  Photoreal image. Version-specific Favorite is exposed only in the modal.
+  Every supported writer must merge only its changed path keys into the latest
+  shared map; a normal write must preserve catalog-external managed-output keys.
+- Removing or temporarily losing a managed output does not delete its Favorite
+  entry. The entry is invisible while that exact path is unavailable and is
+  reused only if the same validated output path becomes available again. This
+  matches the existing retention of Favorite history when an Original leaves
+  the active catalog.
 - Gallery compact/card/list surfaces, the right-preview action row, and the
   bulk relative controls do not expose a Favorite decrement button. Gallery
   users may increment or choose an explicit level 0 through 5. Modal decrement
@@ -434,16 +459,22 @@ or stores.
   no manual mask, face-restoration pass, hidden upscale, second worker, or
   parallel GPU queue is introduced.
 - I2I controls are explicit and transient: opening a menu, modal, source list,
-  or settings board remains passive. The modal and gallery context menu open a
-  bounded `AI編集` board for hair color. The gallery uses Original; the modal
-  fixes the exact version currently displayed, using its valid photoreal
-  producer when applicable. There is no source picker in the first slice.
+  or settings board remains passive. Only the enlarged-image modal opens the
+  bounded `AI編集` boards. The source is the exact version currently displayed,
+  using its valid photoreal producer when applicable. There is no gallery-list
+  enqueue action or source picker in the first slice.
   I2I outputs and upscaled outputs are not v1 input choices. Retry copies the
   complete saved preset and source provenance; Cancel, queue order, enqueue-next,
   pause/resume, output open, and output delete retain the existing Jobs rules.
-  Enqueue is enabled only when `capabilities.i2i` reports the exact contract,
-  target, revisions, and all reader/writer/backend/ready flags as ready. A
-  not-ready POST returns 503 without adding a durable row or waking the queue.
+  Enqueue is enabled only after the open edit board has observed
+  the schema-matched `capabilities.i2i` or `capabilities.i2iV2` object reporting
+  the exact contract, target, revisions, and all reader/writer/backend/ready
+  flags as ready. After that proof, a transiently
+  unavailable second health probe may still save the explicit create
+  reservation locally; a positive not-ready response rejects it before save.
+  Retry has no board-scoped proof and therefore requires an exact ready health
+  response on that action before its reservation is saved. A not-ready POST
+  returns 503 without adding a durable row or waking the queue.
   The companion writer is default-off and requires the explicit local
   `PVU_I2I_WRITER_ENABLED=1` process gate in addition to the verified mask
   assets. Removing that gate disables new enqueue while retaining the reader
@@ -494,11 +525,15 @@ or stores.
   paths. A queued job resolves the current parent when it starts processing;
   a running job keeps its already recorded destination. Existing recorded
   absolute output paths remain readable.
-- The H25 Browser companion owns the current local Enhancement API and worker.
-  WPF owns its loopback client and must keep the API optional.
+- The dedicated H25 Enhancement companion owns the local Enhancement API,
+  durable inbox consumer, and worker. WPF owns its loopback client and the
+  explicit enqueue publisher; ordinary viewing must keep the API optional.
 - Modal and batch Start/Retry first reuse an already-ready loopback companion.
   If none is ready, that same explicit action may launch the separately
-  installed H25 companion with Browser opening and ComfyUI autostart disabled.
+  installed API-only H25 companion through the default launcher. It must not
+  start or load the Browser
+  Viewer, React, Albums, Search, thumbnails, or Favorites, and ComfyUI autostart
+  remains disabled.
   A successful ready companion continues the durable ordered queue after WPF
   closes. Reopening WPF passively reads the persisted queue, operation type,
   status, and latest saved integer progress. On companion startup, the worker
@@ -570,8 +605,54 @@ or stores.
     Cancel, Retry, re-run, Open output, and Delete output remain explicit user
     actions.
   WPF validates source identity, source signature, and managed-output ownership
-  before opening or deleting an output. The workspace does not change the
-  `enhance/jobs.json` schema and never starts a worker from ordinary browsing.
+  before opening or deleting an output. WPF never writes `enhance/jobs.json`
+  directly and never starts a worker from ordinary browsing.
+- `PV-ENHANCE-ENQUEUE-INBOX-001` defines durable registration of explicit
+  create and Retry actions. WPF performs one bounded health probe. An exact v1
+  capability publishes the request before any immediate POST nudge. A timeout,
+  transport error, retryable status, malformed/ambiguous health response, or
+  companion without the v1 capability also publishes first and sends no
+  ambiguous POST. Only the exact v1 capability permits an immediate nudge.
+  Feature-gated I2I create actions use this unknown-probe fallback only after
+  the open edit board has already observed the exact ready I2I capability.
+  I2I Retry requires an exact ready health response for the Retry action and
+  never publishes from an unknown capability state.
+  - A publish writes one bounded envelope to a same-directory temporary file,
+    flushes it through the storage stack, and moves it without overwrite into
+    `enhance/enqueue-inbox/v1/pending`. Passive viewing and health reads never
+    create this directory. A failed write or move is an explicit no-save error.
+  - The API-only companion claims envelopes through `processing`, dispatches
+    the fixed create or Retry route with the saved request ID as its idempotency
+    key, and deletes the envelope only after a matching durable receipt. A lost
+    response, timeout, 408, 425, 429, 5xx, job-store contention, restart, or
+    WPF exit retains the reservation and retries it in FIFO order. Definitive
+    4xx input failures move to `needs-action` without blocking later valid
+    items in the same batch.
+  - After a successful publish, one valid request converges to at most one Jobs
+    row even when the immediate response is lost or dispatch is repeated. The
+    guarantee begins when the durable move succeeds; disk-full, access-denied,
+    unsupported-state, or media failure must remain visible as a local save
+    failure rather than a false queued state.
+  - `enhance/jobs.json` remains version 1 and may contain the additive optional
+    root array `idempotencyReceipts`. A receipt contains only request ID,
+    SHA-256 request fingerprint, original job ID, and original creation time;
+    it never stores a source path, prompt, or request body. Terminal history
+    dismissal creates the receipt under the same lock and atomic replacement
+    before removing the visible row. A matching replay after dismissal returns
+    the original job ID without creating another row; a different fingerprint
+    for the same request ID conflicts.
+  - Receipts have no TTL or eviction and are bounded at 8192 entries. If a new
+    receipt is required at capacity, dismissal returns conflict and preserves
+    the visible row. Legacy version-1 stores without the array remain valid.
+    Unknown root and receipt fields round-trip unchanged; malformed, duplicate,
+    or conflicting receipt state fails closed without replacing the store.
+  - Rollout installs and starts the inbox-capable companion before installing
+    this WPF writer. Rollback restores the prior WPF and companion as a pair;
+    already-published envelopes remain intact for a later inbox-capable
+    companion and are never converted to an unsafe legacy POST.
+  - The versioned wire shape, bounds, fixed routes, hash, capability, and
+    synthetic vectors are canonical in
+    `contracts/enhancement-enqueue-inbox-v1.json`.
 - A completed photoreal PNG stores its effective Positive, Negative, numeric
   settings, seed, model, and LoRA state in its own A1111-compatible
   `parameters` text chunk. No per-image JSON sidecar is created. For existing
@@ -600,12 +681,14 @@ or stores.
   WPF does not infer a stall from elapsed time alone until a measured threshold
   is adopted. The canonical reader fixture is
   `contracts/enhancement-health-v1.json`.
-- Removing the in-repository Browser backend is not merge-ready until a named
-  H25 commit passes an isolated TEMP compatibility test against the exact WPF
-  candidate. That test must prove request and response compatibility, one
-  absolute Enhancement root for `jobs.json` and `outputs/**`, WPF output
-  ownership checks, restart recovery, unchanged source bytes, and zero writes
-  to user-owned state or caches.
+- Replacing `next start` as WPF's launch target is not merge-ready until a named
+  H25 API-companion commit passes an isolated TEMP compatibility test against
+  the exact WPF candidate. That test must prove the existing URL contracts,
+  durable inbox recovery and idempotency, one absolute Enhancement root for
+  `jobs.json`, the inbox, and `outputs/**`, WPF output ownership checks,
+  unchanged source bytes, and zero writes to unrelated user-owned state or
+  caches. The independently maintained Browser product remains present and
+  unchanged; it is only excluded from the WPF companion launch path.
 
 ### `PV-ENHANCE-VIDEO-001` — Reader-first managed video operation
 

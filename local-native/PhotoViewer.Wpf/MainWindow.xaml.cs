@@ -51,7 +51,7 @@ public partial class MainWindow : Window
     private static readonly StringComparer EnhancementSourceIdentityComparer = StringComparer.OrdinalIgnoreCase;
     private static readonly HttpClient ModalEnhancementHttpClient = new()
     {
-        Timeout = TimeSpan.FromSeconds(5),
+        Timeout = TimeSpan.FromSeconds(30),
     };
     private static readonly HashSet<string> SupportedImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1415,16 +1415,12 @@ public partial class MainWindow : Window
         bool Unseen,
         DateTime ModifiedUtc,
         DateTime CreatedUtc,
-        DateTimeOffset? UpscaleCompletedAtUtc,
-        DateTimeOffset? PhotorealCompletedAtUtc,
-        DateTimeOffset? VideoCompletedAtUtc,
-        bool UpscaleQueueActive,
-        DateTimeOffset? UpscaleQueueAddedAtUtc,
-        bool PhotorealQueueActive,
-        DateTimeOffset? PhotorealQueueAddedAtUtc,
-        bool VideoQueueActive,
-        DateTimeOffset? VideoQueueAddedAtUtc,
-        DateTimeOffset? FavoriteChangedAtUtc);
+        FilterTileSortActivitySnapshot SortActivity);
+
+    private readonly record struct FilterTileSortActivitySnapshot(
+        bool Active,
+        bool HasTimestamp,
+        long UtcTicks);
 
     private sealed record FilterResult(
         Tile[] Tiles,
@@ -1703,7 +1699,13 @@ public partial class MainWindow : Window
 
     private sealed record DisplayedAssetResolution(string Path, long SizeBytes, bool Enhanced, string? FallbackReason);
 
-    private sealed record EnhancementApiResponse(bool Ok, int StatusCode, JsonElement? Payload, string Error);
+    private sealed record EnhancementApiResponse(
+        bool Ok,
+        int StatusCode,
+        JsonElement? Payload,
+        string Error,
+        bool SavedForDelivery = false,
+        string? DeliveryRequestId = null);
     private sealed record EnhancedStateSnapshot(
         Dictionary<string, ManagedEnhancedOutput> Outputs,
         Dictionary<string, ManagedEnhancedOutput> CatalogOutputsByPath,
@@ -6130,6 +6132,7 @@ public partial class MainWindow : Window
         }
 
         SyncFavoriteLevelReadouts(selected.Fav);
+        SyncDisplayedModalFavoriteLevel(selected);
         if (Modal.Visibility != Visibility.Visible)
             return;
         if (!string.Equals(_modalSourceTilePath, selected.Path, StringComparison.OrdinalIgnoreCase))
@@ -6138,11 +6141,48 @@ public partial class MainWindow : Window
             SyncModalFilmstripSelection(selected);
     }
 
+    private void SyncDisplayedModalFavoriteLevel(Tile selected)
+    {
+        if (Modal.Visibility != Visibility.Visible)
+        {
+            ModalFavoriteDecreaseButton.IsEnabled = true;
+            ModalFavoriteIncreaseButton.IsEnabled = true;
+            SyncModalFavoriteLevelReadout(selected.Fav);
+            return;
+        }
+
+        bool resolved = TryResolveDisplayedModalFavoriteTarget(
+            out string targetPath,
+            out _,
+            out bool independentTarget);
+        int modalLevel = resolved && independentTarget
+            ? FavoriteLevelForPath(targetPath)
+            : resolved
+                ? selected.Fav
+                : 0;
+        ModalFavoriteDecreaseButton.IsEnabled = resolved;
+        ModalFavoriteIncreaseButton.IsEnabled = resolved;
+        SyncModalFavoriteLevelReadout(modalLevel);
+        if (!resolved)
+        {
+            AutomationProperties.SetName(
+                ModalFavoriteLevelText,
+                "Favorite target unavailable");
+        }
+    }
+
     private void SyncFavoriteLevelReadouts(int level)
     {
         int normalized = Math.Clamp(level, 0, 5);
         string text = normalized.ToString(CultureInfo.InvariantCulture);
         FavoriteLevelText.Text = text;
+        SyncModalFavoriteLevelReadout(normalized);
+    }
+
+    private void SyncModalFavoriteLevelReadout(int level)
+    {
+        int normalized = Math.Clamp(level, 0, 5);
+        string text = normalized.ToString(CultureInfo.InvariantCulture);
         ModalFavoriteLevelText.Text = text;
         AutomationProperties.SetName(ModalFavoriteLevelText, $"Favorite level {text}");
 
@@ -8578,23 +8618,15 @@ public partial class MainWindow : Window
                 return;
             }
         }
-        EnhancementApiResponse readiness =
-            await EnsureImageEnhancementCompanionReadyForExplicitActionAsync(
+        Func<JsonElement, string?>? healthValidator =
+            CreateImageEnhancementHealthValidator(
                 normalizedOperation,
                 enqueueNext,
-                sourceIdentity,
                 requiresPhotorealSourceUpscale:
                     requestSource.UsesPhotorealSource,
                 requiresRecoveredPhotorealSourceUpscale:
                     requestSource.UsesRecoveredPhotorealSource,
                 requiresPhotorealSeedControl: photorealSeed.HasValue);
-        if (!readiness.Ok)
-        {
-            SetStatusToast(readiness.Error);
-            if (photorealSeed.HasValue)
-                SetPhotorealSeedStatus(readiness.Error);
-            return;
-        }
 
         string? originalPromptSnapshot = normalizedOperation == "upscale"
             && !requestSource.UsesPhotorealSource
@@ -8620,10 +8652,11 @@ public partial class MainWindow : Window
                 photorealSeed,
                 enqueueNext ? "next" : "last")
             : BuildUpscaleRequestBody(confirmLargeJob: false);
-        EnhancementApiResponse response = await SendEnhancementApiAsync(
-            HttpMethod.Post,
-            "api/enhance/jobs",
-            requestBody);
+        EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+            requestBody,
+            enqueueNext ? "next" : "last",
+            healthValidator: healthValidator,
+            recoverySourceIdentity: sourceIdentity);
 
         bool needsConfirmation = normalizedOperation == "upscale"
             && response.StatusCode == 409
@@ -8642,10 +8675,18 @@ public partial class MainWindow : Window
             if (!confirmed)
                 return;
 
-            response = await SendEnhancementApiAsync(
-                HttpMethod.Post,
-                "api/enhance/jobs",
-                BuildUpscaleRequestBody(confirmLargeJob: true));
+            response = await SendEnhancementEnqueueAsync(
+                BuildUpscaleRequestBody(confirmLargeJob: true),
+                enqueueNext ? "next" : "last",
+                healthValidator: healthValidator,
+                recoverySourceIdentity: sourceIdentity);
+        }
+
+        if (response.SavedForDelivery)
+        {
+            SetTransientStatusToast(
+                $"{tile.FileName}: 予約を保存しました。Jobsへの登録を継続しています。");
+            return;
         }
 
         if (!response.Ok || response.Payload is not JsonElement payload
@@ -10444,7 +10485,7 @@ public partial class MainWindow : Window
                 return;
             }
             _ = ApplyCatalogProjectionAsync(request);
-        }, DispatcherPriority.Background);
+        }, DispatcherPriority.Normal);
     }
 
     private async Task ApplyCatalogProjectionAsync(CatalogProjectionRequest request)
@@ -11420,6 +11461,32 @@ public partial class MainWindow : Window
 
     private bool AdjustSelectedFavorite(int delta)
     {
+        if (Modal.Visibility == Visibility.Visible)
+        {
+            if (!TryResolveDisplayedModalFavoriteTarget(
+                    out string targetPath,
+                    out string targetName,
+                    out bool independentTarget))
+            {
+                ShowFavoriteChangeStatus(
+                    "The displayed Favorite target is unavailable. Select a version again.");
+                return false;
+            }
+
+            if (independentTarget)
+            {
+                int nextTargetLevel = Math.Clamp(
+                    FavoriteLevelForPath(targetPath) + delta,
+                    0,
+                    5);
+                return SetIndependentFavoriteLevel(
+                    targetPath,
+                    targetName,
+                    nextTargetLevel,
+                    $"Set favorite level {nextTargetLevel}.");
+            }
+        }
+
         if (_selectedPaths.Count > 1)
             return MutateSelectedFavorites(tile => Math.Clamp(tile.Fav + delta, 0, 5), $"Adjusted favorite for {{0:N0}} selected images.");
 
@@ -11433,6 +11500,28 @@ public partial class MainWindow : Window
     private bool SetFavoriteLevelForSelection(int level)
     {
         int clamped = Math.Clamp(level, 0, 5);
+        if (Modal.Visibility == Visibility.Visible)
+        {
+            if (!TryResolveDisplayedModalFavoriteTarget(
+                    out string targetPath,
+                    out string targetName,
+                    out bool independentTarget))
+            {
+                ShowFavoriteChangeStatus(
+                    "The displayed Favorite target is unavailable. Select a version again.");
+                return false;
+            }
+
+            if (independentTarget)
+            {
+                return SetIndependentFavoriteLevel(
+                    targetPath,
+                    targetName,
+                    clamped,
+                    $"Set favorite level {clamped}.");
+            }
+        }
+
         return MutateSelectedFavorites(_ => clamped, $"Set favorite level {clamped} for {{0:N0}} selected images.");
     }
 
@@ -11582,6 +11671,219 @@ public partial class MainWindow : Window
         ]);
         RecordFavoriteHistory([(tile, displayedBefore, clamped)]);
         ShowModalFavoriteIncreaseEffect(tile, displayedBefore, clamped);
+        return true;
+    }
+
+    private bool IsModalPhotorealFavoriteContext()
+        => Modal.Visibility == Visibility.Visible
+            && !_modalShowingVideo
+            && CurrentModalEnhancementVersionIsPhotoreal();
+
+    private bool TryGetModalPhotorealFavoriteTarget(
+        out string targetPath,
+        out string targetName)
+    {
+        targetPath = "";
+        targetName = "";
+        if (!IsModalPhotorealFavoriteContext()
+            || SelectedTile() is not Tile tile
+            || !TryGetCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion version)
+            || !string.Equals(
+                version.Operation,
+                "photoreal",
+                StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(version.Output.OutputPath))
+        {
+            return false;
+        }
+
+        targetPath = NormalizeFavoritePath(version.Output.OutputPath);
+        string displayedPath = NormalizeFavoritePath(_modalDisplayPath ?? "");
+        if (string.IsNullOrWhiteSpace(displayedPath)
+            || !string.Equals(
+                displayedPath,
+                targetPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            targetPath = "";
+            return false;
+        }
+        targetName = $"{tile.FileName} · {CurrentModalEnhancementVersionLabel()}";
+        return !string.IsNullOrWhiteSpace(targetPath);
+    }
+
+    private bool TryResolveDisplayedModalFavoriteTarget(
+        out string targetPath,
+        out string targetName,
+        out bool independentTarget)
+    {
+        targetPath = "";
+        targetName = "";
+        independentTarget = false;
+        if (Modal.Visibility != Visibility.Visible
+            || SelectedTile() is not Tile tile)
+        {
+            return false;
+        }
+
+        if (CurrentModalEnhancementVersionIsPhotoreal())
+        {
+            independentTarget = true;
+            return TryGetModalPhotorealFavoriteTarget(
+                out targetPath,
+                out targetName);
+        }
+
+        if (_modalShowingVideo)
+        {
+            if (!TryGetDisplayedModalVideoVersion(tile, out _))
+                return false;
+        }
+        else if (_modalShowingEnhanced)
+        {
+            if (!TryGetCurrentModalEnhancementVersion(
+                    tile,
+                    out ManagedEnhancementVersion version)
+                || version.Operation is not ("upscale" or "i2i")
+                || !string.Equals(
+                    NormalizeFavoritePath(_modalDisplayPath ?? ""),
+                    NormalizeFavoritePath(version.Output.OutputPath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+        else if (!string.Equals(
+                     NormalizeFavoritePath(_modalDisplayPath ?? ""),
+                     NormalizeFavoritePath(tile.Path),
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        targetPath = NormalizeFavoritePath(tile.Path);
+        targetName = tile.FileName;
+        return !string.IsNullOrWhiteSpace(targetPath);
+    }
+
+    private bool SetIndependentFavoriteLevel(
+        string path,
+        string displayName,
+        int level,
+        string successMessage)
+    {
+        if (!CanStartSharedStateAction(SharedStoreKind.Favorite))
+            return false;
+
+        string key = NormalizeFavoritePath(path);
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        int clamped = Math.Clamp(level, 0, 5);
+        int displayedBefore = FavoriteLevelForPath(key);
+        if (ShouldUseFavoriteWriter())
+        {
+            bool queued = QueueIndependentFavoriteLevel(
+                key,
+                clamped,
+                successMessage);
+            if (queued)
+            {
+                RecordIndependentFavoriteHistory(
+                    key,
+                    displayName,
+                    displayedBefore,
+                    clamped);
+                if (SelectedTile() is Tile selected)
+                {
+                    ShowModalFavoriteIncreaseEffect(
+                        selected,
+                        displayedBefore,
+                        clamped);
+                }
+            }
+            return queued;
+        }
+
+        bool hadStoredLevel = _favorites.TryGetValue(
+            key,
+            out int previousStoredLevel);
+        if (clamped > 0)
+            _favorites[key] = clamped;
+        else
+            _favorites.Remove(key);
+        _favoriteDirtyPaths.Add(key);
+
+        if (!SaveFavorites())
+        {
+            if (hadStoredLevel)
+                _favorites[key] = previousStoredLevel;
+            else
+                _favorites.Remove(key);
+            _favoriteDirtyPaths.Remove(key);
+            RefreshModalFavoriteSurface();
+            return false;
+        }
+
+        RefreshModalFavoriteSurface();
+        RecordIndependentFavoriteHistory(
+            key,
+            displayName,
+            displayedBefore,
+            clamped);
+        if (SelectedTile() is Tile tile)
+        {
+            ShowModalFavoriteIncreaseEffect(
+                tile,
+                displayedBefore,
+                clamped);
+        }
+        ShowFavoriteChangeStatus(successMessage);
+        return true;
+    }
+
+    private bool QueueIndependentFavoriteLevel(
+        string path,
+        int level,
+        string successMessage)
+    {
+        if (_favoritesWriteBlocked)
+        {
+            ReportPersistenceRefusal(
+                "Favorites",
+                ResolvedFavoritesPath,
+                protectedFile: true);
+            return false;
+        }
+
+        _favoriteSaveAttemptCount++;
+        string key = NormalizeFavoritePath(path);
+        int desired = Math.Clamp(level, 0, 5);
+        int displayedBefore = FavoriteLevelForPath(key);
+        int durable = _pendingFavoriteMutations.TryGetValue(
+            key,
+            out FavoritePendingMutation? existing)
+                ? existing.DurableLevel
+                : displayedBefore;
+        long generation = ++_favoriteMutationGeneration;
+        _pendingFavoriteMutations[key] = new FavoritePendingMutation(
+            durable,
+            desired,
+            generation,
+            DateTimeOffset.UtcNow);
+
+        if (desired > 0)
+            _favorites[key] = desired;
+        else
+            _favorites.Remove(key);
+        EnsureFavoriteWriter().Enqueue(
+            new FavoriteDelta(key, durable, desired, generation));
+
+        RefreshModalFavoriteSurface();
+        ShowFavoriteChangeStatus($"{successMessage} Saving...");
+        ScheduleFavoriteWriterPump();
         return true;
     }
 
@@ -12530,16 +12832,7 @@ public partial class MainWindow : Window
                     tile.Unseen,
                     tile.ModifiedUtc,
                     tile.CreatedUtc,
-                    tile.UpscaleCompletedAtUtc,
-                    tile.PhotorealCompletedAtUtc,
-                    tile.VideoCompletedAtUtc,
-                    tile.UpscaleQueueActive,
-                    tile.UpscaleQueueAddedAtUtc,
-                    tile.PhotorealQueueActive,
-                    tile.PhotorealQueueAddedAtUtc,
-                    tile.VideoQueueActive,
-                    tile.VideoQueueAddedAtUtc,
-                    tile.FavoriteChangedAtUtc);
+                    CaptureFilterTileSortActivity(tile, _sortBy));
             }
 
             Tile? previous = SelectedTile();
@@ -12693,24 +12986,31 @@ public partial class MainWindow : Window
             && snapshot.HiddenFolderBuckets.Count == 0
             && !snapshot.DateFromLocal.HasValue
             && !snapshot.DateToLocal.HasValue;
+        int[]? sortOrder = null;
         if (snapshot.ReorderCatalog && snapshot.TileCount > 1)
         {
+            sortOrder = new int[snapshot.TileCount];
+            for (int index = 0; index < sortOrder.Length; index++)
+                sortOrder[index] = index;
             int comparisons = 0;
             Array.Sort(
-                snapshot.Tiles,
+                sortOrder,
                 0,
                 snapshot.TileCount,
-                Comparer<FilterTileSnapshot>.Create((left, right) =>
+                Comparer<int>.Create((leftIndex, rightIndex) =>
                 {
                     if ((++comparisons & 1023) == 0)
                         cancellationToken.ThrowIfCancellationRequested();
                     return CompareFilterTilesForSort(
-                        left,
-                        right,
+                        in snapshot.Tiles[leftIndex],
+                        in snapshot.Tiles[rightIndex],
                         snapshot.SortBy,
                         snapshot.RandomSortSeed);
                 }));
         }
+
+        int SnapshotIndexAt(int orderedIndex)
+            => sortOrder is null ? orderedIndex : sortOrder[orderedIndex];
 
         Tile[]? orderedCatalogProjection = null;
         List<Tile>? orderedCatalog = null;
@@ -12718,7 +13018,7 @@ public partial class MainWindow : Window
         {
             orderedCatalogProjection = new Tile[snapshot.TileCount];
             for (int index = 0; index < snapshot.TileCount; index++)
-                orderedCatalogProjection[index] = snapshot.Tiles[index].Tile;
+                orderedCatalogProjection[index] = snapshot.Tiles[SnapshotIndexAt(index)].Tile;
             orderedCatalog = new List<Tile>(orderedCatalogProjection);
         }
 
@@ -12735,10 +13035,11 @@ public partial class MainWindow : Window
         {
             CheckCatalogWorkerInputHandoff(index, snapshot.TileCount, cancellationToken);
 
-            FilterTileSnapshot tile = snapshot.Tiles[index];
+            int snapshotIndex = SnapshotIndexAt(index);
+            FilterTileSnapshot tile = snapshot.Tiles[snapshotIndex];
             if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot))
                 continue;
-            matchedIndices?.Add(index);
+            matchedIndices?.Add(snapshotIndex);
             if (!hasLayoutItem)
             {
                 hasLayoutItem = true;
@@ -12787,7 +13088,7 @@ public partial class MainWindow : Window
             for (int index = 0; index < snapshot.TileCount; index++)
             {
                 CheckCatalogWorkerInputHandoff(index, snapshot.TileCount, cancellationToken);
-                FilterTileSnapshot tile = snapshot.Tiles[index];
+                FilterTileSnapshot tile = snapshot.Tiles[SnapshotIndexAt(index)];
                 filteredLayoutItems[index] = new VirtualizingLayoutItem(tile.Group, tile.CardHeight);
             }
         }
@@ -12979,8 +13280,8 @@ public partial class MainWindow : Window
     }
 
     private static int CompareFilterTilesForSort(
-        FilterTileSnapshot left,
-        FilterTileSnapshot right,
+        in FilterTileSnapshot left,
+        in FilterTileSnapshot right,
         string sortBy,
         string randomSortSeed)
     {
@@ -12989,33 +13290,19 @@ public partial class MainWindow : Window
             SortModifiedOldestValue => left.ModifiedUtc.CompareTo(right.ModifiedUtc),
             SortCreatedNewestValue => right.CreatedUtc.CompareTo(left.CreatedUtc),
             SortCreatedOldestValue => left.CreatedUtc.CompareTo(right.CreatedUtc),
-            SortUpscaleNewestValue => CompareOptionalActivityNewest(
-                left.UpscaleCompletedAtUtc,
-                right.UpscaleCompletedAtUtc),
-            SortUpscaleQueuedNewestValue => CompareQueueActivityNewest(
-                left.UpscaleQueueActive,
-                left.UpscaleQueueAddedAtUtc,
-                right.UpscaleQueueActive,
-                right.UpscaleQueueAddedAtUtc),
-            SortPhotorealNewestValue => CompareOptionalActivityNewest(
-                left.PhotorealCompletedAtUtc,
-                right.PhotorealCompletedAtUtc),
-            SortPhotorealQueuedNewestValue => CompareQueueActivityNewest(
-                left.PhotorealQueueActive,
-                left.PhotorealQueueAddedAtUtc,
-                right.PhotorealQueueActive,
-                right.PhotorealQueueAddedAtUtc),
-            SortVideoNewestValue => CompareOptionalActivityNewest(
-                left.VideoCompletedAtUtc,
-                right.VideoCompletedAtUtc),
-            SortVideoQueuedNewestValue => CompareQueueActivityNewest(
-                left.VideoQueueActive,
-                left.VideoQueueAddedAtUtc,
-                right.VideoQueueActive,
-                right.VideoQueueAddedAtUtc),
-            SortFavoriteChangedNewestValue => CompareOptionalActivityNewest(
-                left.FavoriteChangedAtUtc,
-                right.FavoriteChangedAtUtc),
+            SortUpscaleNewestValue
+                or SortPhotorealNewestValue
+                or SortVideoNewestValue
+                or SortFavoriteChangedNewestValue =>
+                    CompareFilterTileOptionalActivityNewest(
+                        left.SortActivity,
+                        right.SortActivity),
+            SortUpscaleQueuedNewestValue
+                or SortPhotorealQueuedNewestValue
+                or SortVideoQueuedNewestValue =>
+                    CompareFilterTileQueueActivityNewest(
+                        left.SortActivity,
+                        right.SortActivity),
             SortRandomValue => StableRandomSortKey(randomSortSeed, left.Path)
                 .CompareTo(StableRandomSortKey(randomSortSeed, right.Path)),
             SortNameValue => StringComparer.OrdinalIgnoreCase.Compare(left.FileName, right.FileName),
@@ -13038,6 +13325,64 @@ public partial class MainWindow : Window
         }
 
         return StringComparer.OrdinalIgnoreCase.Compare(left.Path, right.Path);
+    }
+
+    private static FilterTileSortActivitySnapshot CaptureFilterTileSortActivity(
+        Tile tile,
+        string sortBy)
+        => sortBy switch
+        {
+            SortUpscaleNewestValue => FilterTileOptionalActivity(tile.UpscaleCompletedAtUtc),
+            SortUpscaleQueuedNewestValue => FilterTileQueueActivity(
+                tile.UpscaleQueueActive,
+                tile.UpscaleQueueAddedAtUtc),
+            SortPhotorealNewestValue => FilterTileOptionalActivity(tile.PhotorealCompletedAtUtc),
+            SortPhotorealQueuedNewestValue => FilterTileQueueActivity(
+                tile.PhotorealQueueActive,
+                tile.PhotorealQueueAddedAtUtc),
+            SortVideoNewestValue => FilterTileOptionalActivity(tile.VideoCompletedAtUtc),
+            SortVideoQueuedNewestValue => FilterTileQueueActivity(
+                tile.VideoQueueActive,
+                tile.VideoQueueAddedAtUtc),
+            SortFavoriteChangedNewestValue => FilterTileOptionalActivity(tile.FavoriteChangedAtUtc),
+            _ => default,
+        };
+
+    private static FilterTileSortActivitySnapshot FilterTileOptionalActivity(
+        DateTimeOffset? timestamp)
+        => new(
+            Active: timestamp.HasValue,
+            HasTimestamp: timestamp.HasValue,
+            UtcTicks: timestamp?.UtcDateTime.Ticks ?? 0);
+
+    private static FilterTileSortActivitySnapshot FilterTileQueueActivity(
+        bool active,
+        DateTimeOffset? timestamp)
+        => new(
+            Active: active,
+            HasTimestamp: timestamp.HasValue,
+            UtcTicks: timestamp?.UtcDateTime.Ticks ?? 0);
+
+    private static int CompareFilterTileOptionalActivityNewest(
+        FilterTileSortActivitySnapshot left,
+        FilterTileSortActivitySnapshot right)
+    {
+        if (left.HasTimestamp && right.HasTimestamp)
+            return right.UtcTicks.CompareTo(left.UtcTicks);
+        if (left.HasTimestamp)
+            return -1;
+        return right.HasTimestamp ? 1 : 0;
+    }
+
+    private static int CompareFilterTileQueueActivityNewest(
+        FilterTileSortActivitySnapshot left,
+        FilterTileSortActivitySnapshot right)
+    {
+        if (left.Active != right.Active)
+            return left.Active ? -1 : 1;
+        return left.Active
+            ? CompareFilterTileOptionalActivityNewest(left, right)
+            : 0;
     }
 
     private static bool MatchesFilterSnapshot(FilterTileSnapshot tile, FilterSnapshot snapshot)
@@ -15988,6 +16333,8 @@ public partial class MainWindow : Window
             SetModalMetadataSidebarVisible(false);
         Modal.Visibility = Visibility.Visible;
         if (opening)
+            SyncDisplayedModalFavoriteLevel(t);
+        if (opening)
             Dispatcher.BeginInvoke(Modal.Focus, DispatcherPriority.Input);
         ScheduleModalFitUpdate();
         if (sourceChanged && restoreVideoOnOpen)
@@ -16170,6 +16517,11 @@ public partial class MainWindow : Window
                     ? $"{currentDisplay} output"
                     : "Original";
         UpdateModalDisplayedDeletePresentation();
+        if (Modal.Visibility == Visibility.Visible
+            && SelectedTile() is Tile selected)
+        {
+            SyncDisplayedModalFavoriteLevel(selected);
+        }
     }
 
     private async Task LoadModalBitmapAsync(
@@ -16418,13 +16770,34 @@ public partial class MainWindow : Window
         HttpMethod method,
         string relativePath,
         object? body = null,
-        CancellationToken token = default)
+        CancellationToken token = default,
+        string? exactBodyJson = null,
+        string? idempotencyKey = null,
+        int? timeoutMilliseconds = null)
     {
+        CancellationTokenSource? requestTimeoutCts = null;
         try
         {
+            CancellationToken requestToken = token;
+            if (timeoutMilliseconds is int boundedTimeout)
+            {
+                requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                requestTimeoutCts.CancelAfter(Math.Max(1, boundedTimeout));
+                requestToken = requestTimeoutCts.Token;
+            }
+
             Uri endpoint = new(ResolveBrowserEnhancementBaseUri(), relativePath.TrimStart('/'));
             using var request = new HttpRequestMessage(method, endpoint);
-            if (body is not null)
+            if (!string.IsNullOrWhiteSpace(idempotencyKey))
+                request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+            if (exactBodyJson is not null)
+            {
+                request.Content = new StringContent(
+                    exactBodyJson,
+                    Encoding.UTF8,
+                    "application/json");
+            }
+            else if (body is not null)
             {
                 request.Content = new StringContent(
                     JsonSerializer.Serialize(body),
@@ -16432,8 +16805,8 @@ public partial class MainWindow : Window
                     "application/json");
             }
 
-            using HttpResponseMessage response = await _modalEnhancementSender(request, token);
-            string text = await response.Content.ReadAsStringAsync(token);
+            using HttpResponseMessage response = await _modalEnhancementSender(request, requestToken);
+            string text = await response.Content.ReadAsStringAsync(requestToken);
             JsonElement? payload = null;
             if (!string.IsNullOrWhiteSpace(text))
             {
@@ -16457,6 +16830,23 @@ public partial class MainWindow : Window
             }
             return new EnhancementApiResponse(response.IsSuccessStatusCode, (int)response.StatusCode, payload, error);
         }
+        catch (OperationCanceledException) when (
+            !token.IsCancellationRequested
+            && requestTimeoutCts?.IsCancellationRequested == true)
+        {
+            return new EnhancementApiResponse(
+                false,
+                0,
+                null,
+                "The local AI companion did not return an immediate receipt.");
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            string error = method == HttpMethod.Get
+                ? "The local AI companion did not answer within 30 seconds. Try the request again."
+                : "The local AI companion did not return a receipt within 30 seconds. The change may already have been applied; check Jobs before retrying.";
+            return new EnhancementApiResponse(false, 0, null, error);
+        }
         catch (OperationCanceledException)
         {
             return new EnhancementApiResponse(false, 0, null, "Enhancement request was canceled.");
@@ -16468,6 +16858,10 @@ public partial class MainWindow : Window
                 0,
                 null,
                 $"The optional Browser Enhancement companion is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start the H25 Browser application, then retry.");
+        }
+        finally
+        {
+            requestTimeoutCts?.Dispose();
         }
     }
 
@@ -16907,11 +17301,10 @@ public partial class MainWindow : Window
         UpdateModalEnhancementActionControls();
         try
         {
-            EnhancementApiResponse readiness =
-                await EnsureImageEnhancementCompanionReadyForExplicitActionAsync(
+            Func<JsonElement, string?>? healthValidator =
+                CreateImageEnhancementHealthValidator(
                     normalizedOperation,
                     enqueueNext: false,
-                    sourceIdentity: sourceIdentity,
                     requiresPhotorealSourceUpscale:
                         requestSource.UsesPhotorealSource,
                     requiresRecoveredPhotorealSourceUpscale:
@@ -16920,14 +17313,6 @@ public partial class MainWindow : Window
                         !retry && photorealSeed.HasValue);
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
-            if (!readiness.Ok)
-            {
-                _modalEnhancementError = readiness.Error;
-                SetStatusToast(readiness.Error);
-                if (photorealSeed.HasValue)
-                    SetPhotorealSeedStatus(readiness.Error);
-                return;
-            }
 
             ModalPhotorealRequestSettings photoreal = CurrentModalPhotorealRequestSettings();
             if (normalizedOperation == "photoreal" && !retry)
@@ -16969,9 +17354,12 @@ public partial class MainWindow : Window
                     photoreal,
                     photorealSeed)
                 : BuildUpscaleRequestBody(confirmLargeJob: false);
-            EnhancementApiResponse response = retry
-                ? await SendEnhancementApiAsync(HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId!)}/retry")
-                : await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", requestBody);
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+                retry ? null : requestBody,
+                queuePlacement: "last",
+                retryJobId: retry ? requestJobId : null,
+                healthValidator: healthValidator,
+                recoverySourceIdentity: sourceIdentity);
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
@@ -16992,13 +17380,22 @@ public partial class MainWindow : Window
                         MessageBoxResult.No) == MessageBoxResult.Yes;
                 if (confirmed)
                 {
-                    response = await SendEnhancementApiAsync(
-                        HttpMethod.Post,
-                        "api/enhance/jobs",
-                        BuildUpscaleRequestBody(confirmLargeJob: true));
+                    response = await SendEnhancementEnqueueAsync(
+                        BuildUpscaleRequestBody(confirmLargeJob: true),
+                        healthValidator: healthValidator,
+                        recoverySourceIdentity: sourceIdentity);
                     if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                         return;
                 }
+            }
+
+            if (response.SavedForDelivery)
+            {
+                _modalEnhancementError = null;
+                SetTransientStatusToast(
+                    $"{tile.FileName}: 予約を保存しました。Jobsへの登録を継続しています。");
+                ShowModalInteractionFeedback("AI予約を保存しました");
+                return;
             }
 
             if (!response.Ok || response.Payload is not JsonElement payload
@@ -21825,6 +22222,7 @@ public partial class MainWindow : Window
     }
 
     // ─────────── Window chrome buttons ───────────
+    private const int WindowMessageGetMinMaxInfo = 0x0024;
     private const int WindowMessageNonClientLeftButtonDown = 0x00A1;
     private const int WindowMessageNonClientLeftButtonDoubleClick = 0x00A3;
     private const int HitTestCaption = 2;
@@ -21863,6 +22261,13 @@ public partial class MainWindow : Window
         nint lParam,
         ref bool handled)
     {
+        if (message == WindowMessageGetMinMaxInfo && lParam != 0)
+        {
+            if (TryApplyNativeMaximizedBounds(windowHandle, lParam))
+                handled = true;
+            return 0;
+        }
+
         if (message != WindowMessageNonClientLeftButtonDoubleClick
             || wParam != (nint)HitTestCaption)
         {
@@ -21874,6 +22279,68 @@ public partial class MainWindow : Window
             () => Maximize_Click(this, new RoutedEventArgs()),
             DispatcherPriority.Input);
         return 0;
+    }
+
+    private bool TryApplyNativeMaximizedBounds(
+        nint windowHandle,
+        nint minMaxInfoPointer)
+    {
+        nint monitor = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
+        if (monitor == 0)
+            return false;
+
+        var monitorInfo = new NativeMonitorInfo
+        {
+            Size = (uint)Marshal.SizeOf<NativeMonitorInfo>(),
+        };
+        if (!GetMonitorInfo(monitor, ref monitorInfo)
+            || !TryCalculateNativeMaximizedBounds(
+                monitorInfo.MonitorArea,
+                monitorInfo.WorkArea,
+                _modalFullScreen,
+                out NativePoint maxPosition,
+                out NativePoint maxSize))
+        {
+            return false;
+        }
+
+        NativeMinMaxInfo minMaxInfo =
+            Marshal.PtrToStructure<NativeMinMaxInfo>(minMaxInfoPointer);
+        minMaxInfo.MaxPosition = maxPosition;
+        minMaxInfo.MaxSize = maxSize;
+        Marshal.StructureToPtr(minMaxInfo, minMaxInfoPointer, fDeleteOld: false);
+        return true;
+    }
+
+    private static bool TryCalculateNativeMaximizedBounds(
+        NativeRect monitorArea,
+        NativeRect workArea,
+        bool fullScreen,
+        out NativePoint maxPosition,
+        out NativePoint maxSize)
+    {
+        NativeRect target = fullScreen ? monitorArea : workArea;
+        if (monitorArea.Right <= monitorArea.Left
+            || monitorArea.Bottom <= monitorArea.Top
+            || target.Right <= target.Left
+            || target.Bottom <= target.Top)
+        {
+            maxPosition = default;
+            maxSize = default;
+            return false;
+        }
+
+        maxPosition = new NativePoint
+        {
+            X = target.Left - monitorArea.Left,
+            Y = target.Top - monitorArea.Top,
+        };
+        maxSize = new NativePoint
+        {
+            X = target.Right - target.Left,
+            Y = target.Bottom - target.Top,
+        };
+        return true;
     }
 
     private bool DismissModalSettingsBoardForWindowChrome()
@@ -22202,6 +22669,10 @@ public partial class MainWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorInfo(nint monitor, ref NativeMonitorInfo info);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(nint windowHandle, out NativeRect rectangle);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeMonitorInfo
     {
@@ -22218,6 +22689,23 @@ public partial class MainWindow : Window
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeMinMaxInfo
+    {
+        public NativePoint Reserved;
+        public NativePoint MaxSize;
+        public NativePoint MaxPosition;
+        public NativePoint MinTrackSize;
+        public NativePoint MaxTrackSize;
     }
 
     private void Close_Click(object sender, RoutedEventArgs e)
@@ -25041,13 +25529,50 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible || delta == 0)
             return false;
 
-        int before = SelectedFavoriteLevelForSmoke;
+        int before = ModalFavoriteLevelForSmoke;
         Button button = delta > 0 ? ModalFavoriteIncreaseButton : ModalFavoriteDecreaseButton;
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, button));
-        return SelectedFavoriteLevelForSmoke == Math.Clamp(before + Math.Sign(delta), 0, 5);
+        return ModalFavoriteLevelForSmoke == Math.Clamp(before + Math.Sign(delta), 0, 5);
     }
     public int ModalFavoriteLevelForSmoke
-        => SelectedTile()?.Fav ?? -1;
+        => Modal.Visibility != Visibility.Visible
+            ? SelectedTile()?.Fav ?? -1
+            : TryResolveDisplayedModalFavoriteTarget(
+                out string targetPath,
+                out _,
+                out bool independentTarget)
+                    ? independentTarget
+                        ? FavoriteLevelForPath(targetPath)
+                        : SelectedTile()?.Fav ?? -1
+                    : -1;
+
+    public bool RejectStaleModalFavoriteSourceFallbackForSmoke()
+    {
+        if (SelectedTile() is not Tile tile
+            || !TryGetModalPhotorealFavoriteTarget(
+                out string targetPath,
+                out _))
+        {
+            return false;
+        }
+
+        int sourceBefore = tile.Fav;
+        int targetBefore = FavoriteLevelForPath(targetPath);
+        bool showingEnhancedBefore = _modalShowingEnhanced;
+        try
+        {
+            _modalShowingEnhanced = false;
+            bool changed = AdjustSelectedFavorite(1);
+            return !changed
+                && tile.Fav == sourceBefore
+                && FavoriteLevelForPath(targetPath) == targetBefore;
+        }
+        finally
+        {
+            _modalShowingEnhanced = showingEnhancedBefore;
+            SyncDisplayedModalFavoriteLevel(tile);
+        }
+    }
     public bool MarkSelectedSeenForSmoke() => SelectedTile() is { IsRealFile: true } tile && MarkTileSeen(tile);
     public bool SetFileFavoriteLevelForSmoke(string fileName, int level)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase)) is { IsRealFile: true } tile
@@ -25570,6 +26095,7 @@ public partial class MainWindow : Window
         => _modalFullScreen
             && WindowState == WindowState.Maximized
             && ResizeMode == ResizeMode.NoResize
+            && NativeMaximizedWindowMatchesCurrentMonitor(fullScreen: true)
             && ModalWindowCaptionControls.Visibility == Visibility.Visible
             && WindowMaximizePresentationMatches(restore: true)
             && ModalImageAreaCoversWindowForSmoke
@@ -25604,12 +26130,12 @@ public partial class MainWindow : Window
         }
     }
     public bool ModalFavoriteNeutralSurfaceForSmoke
-        => SelectedTile()?.Fav == 0
+        => ModalFavoriteLevelForSmoke == 0
             && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("BgTertiary"))
             && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("GlassBorder"))
             && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("TextSecondary"));
     public bool ModalFavoriteActiveSurfaceForSmoke
-        => SelectedTile()?.Fav > 0
+        => ModalFavoriteLevelForSmoke > 0
             && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("FavoriteSoft"))
             && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("Favorite"))
             && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("FavoriteText"));
@@ -25699,16 +26225,73 @@ public partial class MainWindow : Window
         bool nativeStatePreserved = WindowState == WindowState.Maximized
             && !_fakeMaximized
             && WindowMaximizePresentationMatches(restore: true);
+        bool nativeBoundsUseWorkArea =
+            NativeMaximizedWindowMatchesCurrentMonitor(fullScreen: false);
+        bool maximizeMathHandlesNegativeMonitor =
+            TryCalculateNativeMaximizedBounds(
+                new NativeRect
+                {
+                    Left = -1920,
+                    Top = 0,
+                    Right = 0,
+                    Bottom = 1080,
+                },
+                new NativeRect
+                {
+                    Left = -1872,
+                    Top = 0,
+                    Right = 0,
+                    Bottom = 1040,
+                },
+                fullScreen: false,
+                out NativePoint negativeMonitorPosition,
+                out NativePoint negativeMonitorSize)
+            && negativeMonitorPosition.X == 48
+            && negativeMonitorPosition.Y == 0
+            && negativeMonitorSize.X == 1872
+            && negativeMonitorSize.Y == 1040;
         WindowState = WindowState.Normal;
         await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
         Rect restored = WindowBoundsForSmoke;
         return nativeStatePreserved
+            && nativeBoundsUseWorkArea
+            && maximizeMathHandlesNegativeMonitor
             && !_fakeMaximized
             && WindowMaximizePresentationMatches(restore: false)
             && Math.Abs(restored.Left - before.Left) < 1
             && Math.Abs(restored.Top - before.Top) < 1
             && Math.Abs(restored.Width - before.Width) < 1
             && Math.Abs(restored.Height - before.Height) < 1;
+    }
+
+    private bool NativeMaximizedWindowMatchesCurrentMonitor(bool fullScreen)
+    {
+        nint windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (windowHandle == 0
+            || !GetWindowRect(windowHandle, out NativeRect windowRectangle))
+        {
+            return false;
+        }
+
+        nint monitor = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
+        if (monitor == 0)
+            return false;
+
+        var monitorInfo = new NativeMonitorInfo
+        {
+            Size = (uint)Marshal.SizeOf<NativeMonitorInfo>(),
+        };
+        if (!GetMonitorInfo(monitor, ref monitorInfo))
+            return false;
+
+        NativeRect target = fullScreen
+            ? monitorInfo.MonitorArea
+            : monitorInfo.WorkArea;
+        const int tolerance = 1;
+        return Math.Abs(windowRectangle.Left - target.Left) <= tolerance
+            && Math.Abs(windowRectangle.Top - target.Top) <= tolerance
+            && Math.Abs(windowRectangle.Right - target.Right) <= tolerance
+            && Math.Abs(windowRectangle.Bottom - target.Bottom) <= tolerance;
     }
     public bool ModalTopBarPointerHitTestContractForSmoke
         => WindowChrome.GetIsHitTestVisibleInChrome(ModalTopBar)
@@ -25748,14 +26331,14 @@ public partial class MainWindow : Window
                 "one image pixel per screen pixel",
                 StringComparison.OrdinalIgnoreCase) == true;
     public bool ModalFavoriteLevelReadoutContractForSmoke
-        => SelectedTile() is Tile selected
+        => ModalFavoriteLevelForSmoke is int level && level >= 0
             && string.Equals(
                 ModalFavoriteLevelText.Text,
-                Math.Clamp(selected.Fav, 0, 5).ToString(CultureInfo.InvariantCulture),
+                Math.Clamp(level, 0, 5).ToString(CultureInfo.InvariantCulture),
                 StringComparison.Ordinal)
             && string.Equals(
                 AutomationProperties.GetName(ModalFavoriteLevelText),
-                $"Favorite level {Math.Clamp(selected.Fav, 0, 5)}",
+                $"Favorite level {Math.Clamp(level, 0, 5)}",
                 StringComparison.Ordinal);
     public bool ModalContextMenuContractForSmoke
         => Modal.ContextMenu is null

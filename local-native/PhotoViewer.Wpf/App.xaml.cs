@@ -17459,6 +17459,12 @@ public partial class App : Application
                                 {
                                     capabilities = new
                                     {
+                                        durableEnqueueInboxV1 = new
+                                        {
+                                            ready = true,
+                                            protocolVersion = 1,
+                                            backendGeneration = "json-v1",
+                                        },
                                         videoSeedControlV1 =
                                             videoSeedCapabilityAvailable,
                                     },
@@ -17478,12 +17484,27 @@ public partial class App : Application
                     videoRequestJson = request.Content is null
                         ? ""
                         : await request.Content.ReadAsStringAsync(token);
+                    string requestId = request.Headers.TryGetValues(
+                            "Idempotency-Key",
+                            out IEnumerable<string>? requestIds)
+                        ? requestIds.Single()
+                        : "missing-request-id";
                     return new HttpResponseMessage(HttpStatusCode.Created)
                     {
-                        Content = new StringContent(
-                            "{\"job\":{\"id\":\"video-smoke-job\",\"operation\":\"video\",\"status\":\"queued\"}}",
-                            Encoding.UTF8,
-                            "application/json"),
+                        Content = JsonContent.Create(new
+                        {
+                            job = new
+                            {
+                                id = "video-smoke-job",
+                                operation = "video",
+                                status = "queued",
+                            },
+                            receipt = new
+                            {
+                                idempotencyKey = requestId,
+                                jobId = "video-smoke-job",
+                            },
+                        }),
                     };
                 });
                 bool videoBoardSourceSelected =
@@ -18265,8 +18286,88 @@ public partial class App : Application
 
     private void CaptureEnhancementJobsWorkspaceSmoke(string resultPath)
     {
+        static Dictionary<string, object?> CreateVideoSmokeSnapshot(
+            string requestedPrompt = "",
+            string? effectivePositivePrompt = null,
+            string delivery = "legacy",
+            int durationSeconds = 6,
+            int playbackFps = 16,
+            int nativeFrameCount = 97,
+            string presetId = "wan22-ti2v-5b-normal-v1",
+            int steps = 20)
+        {
+            var video = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["presetId"] = presetId,
+                ["backendId"] = "wan22-ti2v-5b-core-v1",
+                ["modelName"] = "wan2.2_ti2v_5B_fp16.safetensors",
+                ["requested"] = new
+                {
+                    durationSeconds,
+                    playbackFps,
+                    maximumPixelArea = 409600,
+                    prompt = requestedPrompt,
+                },
+                ["effective"] = new
+                {
+                    frameCount = nativeFrameCount,
+                    width = 736,
+                    height = 544,
+                    positivePrompt = effectivePositivePrompt
+                        ?? string.Join(
+                            " ",
+                            WpfLocalPromptPolicy.Current.Video!
+                                .PreservationPreamble,
+                            WpfLocalPromptPolicy.Current.Video!
+                                .BlankPromptMotion),
+                    negativePrompt = WpfLocalPromptPolicy.Current.Video!
+                        .NegativePrompt,
+                    steps,
+                    cfg = 5,
+                    sampler = "uni_pc",
+                    scheduler = "simple",
+                    shift = 8,
+                    denoise = 1,
+                },
+                ["seed"] = 123456789,
+                ["codec"] = "h264",
+                ["container"] = "mp4",
+                ["bitDepth"] = 8,
+            };
+            if (delivery is "current" or "malformed")
+            {
+                video["delivery"] = new
+                {
+                    backendId = "vs-rife-5.7.0-rife-4.25-v1",
+                    model = "4.25",
+                    targetFps = 30,
+                    frameCount = delivery == "current"
+                        ? checked(durationSeconds * 30)
+                        : checked(durationSeconds * 30 - 1),
+                    durationSeconds,
+                    pixelFormat = "yuv420p",
+                    audio = false,
+                };
+            }
+            return video;
+        }
+
+        static string VideoSmokePresetHash(
+            Dictionary<string, object?> video)
+            => PhotoViewer.Wpf.MainWindow.ComputeVideoPresetHashForSmoke(
+                JsonSerializer.SerializeToElement(video));
+
         string resultFullPath = Path.GetFullPath(resultPath);
         string smokeRoot = Directory.CreateTempSubdirectory("aibos-enhancement-jobs-workspace-").FullName;
+        string currentVideoHash = VideoSmokePresetHash(
+            CreateVideoSmokeSnapshot(delivery: "current"));
+        string legacyVideoHash = VideoSmokePresetHash(
+            CreateVideoSmokeSnapshot());
+        string highMismatchVideoHash = VideoSmokePresetHash(
+            CreateVideoSmokeSnapshot(
+                delivery: "current",
+                presetId: "wan22-ti2v-5b-high-v1",
+                steps: 20));
         string sourcePath = Path.Combine(smokeRoot, "images", "workspace-source.png");
         string outputPath = Path.Combine(smokeRoot, "stores", "enhance", "outputs", "workspace-output.webp");
         string videoOutputPath = Path.Combine(
@@ -18275,21 +18376,21 @@ public partial class App : Application
             "enhance",
             "outputs",
             "Videos",
-            "video-reader-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__f102bafe68e9.mp4");
+            $"video-reader-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__{currentVideoHash}.mp4");
         string videoSiblingOutputPath = Path.Combine(
             smokeRoot,
             "stores",
             "enhance",
             "outputs",
             "Videos",
-            "video-sibling-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__22467069a81f.mp4");
+            $"video-sibling-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__{legacyVideoHash}.mp4");
         string videoQualityMismatchOutputPath = Path.Combine(
             smokeRoot,
             "stores",
             "enhance",
             "outputs",
             "Videos",
-            "video-reader-only-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-high-v1__0b6b30d0ae9d.mp4");
+            $"video-reader-only-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-high-v1__{highMismatchVideoHash}.mp4");
         string statePath = Path.Combine(smokeRoot, "stores", "state.json");
         string favoritesPath = Path.Combine(smokeRoot, "stores", "favorites.json");
         string seenPath = Path.Combine(smokeRoot, "stores", "seen.json");
@@ -18434,7 +18535,6 @@ public partial class App : Application
                     int? queueOrder = null,
                     string requestedPrompt = "",
                     string? effectivePositivePrompt = null,
-                    string presetHash = "22467069a81f",
                     string delivery = "legacy",
                     int durationSeconds = 6,
                     int playbackFps = 16,
@@ -18443,62 +18543,15 @@ public partial class App : Application
                     int steps = 20,
                     object? sourceProducerJobId = null)
                 {
-                    var video = new Dictionary<string, object?>(
-                        StringComparer.Ordinal)
-                    {
-                        ["presetId"] = presetId,
-                        ["backendId"] = "wan22-ti2v-5b-core-v1",
-                        ["modelName"] =
-                            "wan2.2_ti2v_5B_fp16.safetensors",
-                        ["requested"] = new
-                        {
-                            durationSeconds,
-                            playbackFps,
-                            maximumPixelArea = 409600,
-                            prompt = requestedPrompt,
-                        },
-                        ["effective"] = new
-                        {
-                            frameCount = nativeFrameCount,
-                            width = 736,
-                            height = 544,
-                            positivePrompt = effectivePositivePrompt
-                                ?? string.Join(
-                                    " ",
-                                    WpfLocalPromptPolicy.Current.Video!
-                                        .PreservationPreamble,
-                                    WpfLocalPromptPolicy.Current.Video!
-                                        .BlankPromptMotion),
-                            negativePrompt = WpfLocalPromptPolicy.Current.Video!
-                                .NegativePrompt,
-                            steps,
-                            cfg = 5,
-                            sampler = "uni_pc",
-                            scheduler = "simple",
-                            shift = 8,
-                            denoise = 1,
-                        },
-                        ["seed"] = 123456789,
-                        ["codec"] = "h264",
-                        ["container"] = "mp4",
-                        ["bitDepth"] = 8,
-                    };
-                    if (delivery is "current" or "malformed")
-                    {
-                        video["delivery"] = new
-                        {
-                            backendId =
-                                "vs-rife-5.7.0-rife-4.25-v1",
-                            model = "4.25",
-                            targetFps = 30,
-                            frameCount = delivery == "current"
-                                ? checked(durationSeconds * 30)
-                                : checked(durationSeconds * 30 - 1),
-                            durationSeconds,
-                            pixelFormat = "yuv420p",
-                            audio = false,
-                        };
-                    }
+                    Dictionary<string, object?> video = CreateVideoSmokeSnapshot(
+                        requestedPrompt,
+                        effectivePositivePrompt,
+                        delivery,
+                        durationSeconds,
+                        playbackFps,
+                        nativeFrameCount,
+                        presetId,
+                        steps);
 
                     var job = new Dictionary<string, object?>(
                         StringComparer.OrdinalIgnoreCase)
@@ -18513,7 +18566,7 @@ public partial class App : Application
                         },
                         ["sourceSha256"] = new string('a', 64),
                         ["presetId"] = presetId,
-                        ["presetHash"] = presetHash,
+                        ["presetHash"] = VideoSmokePresetHash(video),
                         ["adapterId"] = "wan22-ti2v-5b-core-v1",
                         ["operation"] = "video",
                         ["mediaKind"] = "video",
@@ -18567,7 +18620,6 @@ public partial class App : Application
                             0,
                             createdAt: "2026-07-23T00:00:03.500Z",
                             queueOrder: 2,
-                            presetHash: "25464cb5d9ce",
                             delivery: "current",
                             durationSeconds: 4,
                             playbackFps: 12,
@@ -18590,14 +18642,12 @@ public partial class App : Application
                                 " ",
                                 WpfLocalPromptPolicy.Current.Video!
                                     .PreservationPreamble,
-                                "Follow this motion direction: example motion"),
-                            presetHash: "ef83960a4509"),
+                                "Follow this motion direction: example motion")),
                         VideoJob(
                             "delivery-failed-job",
                             "failed",
                             29,
                             error: "Delivery runtime stopped",
-                            presetHash: "f102bafe68e9",
                             delivery: "current"),
                         VideoJob(
                             "active-job",
@@ -18631,7 +18681,6 @@ public partial class App : Application
                             videoOutputDeleted ? "deleted" : "succeeded",
                             100,
                             output: videoOutputDeleted ? null : videoOutputPath,
-                            presetHash: "f102bafe68e9",
                             delivery: "current"),
                         VideoJob(
                             "video-sibling-job",
@@ -18644,7 +18693,6 @@ public partial class App : Application
                             "succeeded",
                             100,
                             output: videoQualityMismatchOutputPath,
-                            presetHash: "0b6b30d0ae9d",
                             delivery: "current",
                             presetId: "wan22-ti2v-5b-high-v1",
                             steps: 20),
@@ -18733,6 +18781,12 @@ public partial class App : Application
                         capabilities["queuedPhotorealPromptUpdate"] = true;
                     capabilities["photorealPromptControlsV2"] = true;
                     capabilities["atomicImageEnqueueNext"] = true;
+                    capabilities["durableEnqueueInboxV1"] = new
+                    {
+                        ready = true,
+                        protocolVersion = 1,
+                        backendGeneration = "json-v1",
+                    };
                     if (photorealSeedCapabilityAvailable)
                         capabilities["photorealSeedControlV1"] = true;
 
@@ -18792,6 +18846,15 @@ public partial class App : Application
 
                 static HttpResponseMessage JsonResponse(HttpStatusCode status, object payload)
                     => new(status) { Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json") };
+                static object DurableReceipt(HttpRequestMessage request, string jobId)
+                {
+                    string requestId = request.Headers.TryGetValues(
+                            "Idempotency-Key",
+                            out IEnumerable<string>? requestIds)
+                        ? requestIds.Single()
+                        : "missing-request-id";
+                    return new { idempotencyKey = requestId, jobId };
+                }
 
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
@@ -18858,7 +18921,11 @@ public partial class App : Application
                         retryCreated = true;
                         return Task.FromResult(JsonResponse(
                             HttpStatusCode.Accepted,
-                            new { job = VideoJob("retry-job", "queued", 0) }));
+                            new
+                            {
+                                job = VideoJob("retry-job", "queued", 0),
+                                receipt = DurableReceipt(request, "retry-job"),
+                            }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/canceled-job/retry", StringComparison.Ordinal))
                     {
@@ -18870,6 +18937,7 @@ public partial class App : Application
                                 "queued",
                                 0,
                                 operation: "photoreal"),
+                            receipt = DurableReceipt(request, "canceled-retry-job"),
                         }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/queue-later-job/queue", StringComparison.Ordinal))
@@ -18934,6 +19002,7 @@ public partial class App : Application
                                 0,
                                 operation: "photoreal",
                                 queueOrder: 5),
+                            receipt = DurableReceipt(request, "rerun-job"),
                         }));
                     }
                     if (request.Method == HttpMethod.Delete && route.EndsWith("/done-job/output", StringComparison.Ordinal))
@@ -18956,7 +19025,6 @@ public partial class App : Application
                                     "video-reader-job",
                                     "deleted",
                                     100,
-                                    presetHash: "f102bafe68e9",
                                     delivery: "current"),
                             }));
                     }
@@ -20437,6 +20505,25 @@ public partial class App : Application
                     requests.Add($"{request.Method.Method} {route}");
                     if (request.Method == HttpMethod.Get)
                     {
+                        if (route.EndsWith(
+                                "/api/enhance/health",
+                                StringComparison.Ordinal))
+                        {
+                            return JsonResponse(
+                                HttpStatusCode.OK,
+                                new
+                                {
+                                    capabilities = new
+                                    {
+                                        durableEnqueueInboxV1 = new
+                                        {
+                                            ready = true,
+                                            protocolVersion = 1,
+                                            backendGeneration = "json-v1",
+                                        },
+                                    },
+                                });
+                        }
                         string query = request.RequestUri?.Query ?? "";
                         const string sourcePrefix = "?sourceId=";
                         if (query.StartsWith(sourcePrefix, StringComparison.Ordinal))
@@ -20458,16 +20545,30 @@ public partial class App : Application
                     if (request.Method == HttpMethod.Post && route.EndsWith("/api/enhance/jobs", StringComparison.Ordinal))
                     {
                         createBody = request.Content is null ? "" : await request.Content.ReadAsStringAsync(token);
+                        string requestId = request.Headers.TryGetValues(
+                                "Idempotency-Key",
+                                out IEnumerable<string>? requestIds)
+                            ? requestIds.Single()
+                            : "missing-request-id";
+                        object QueuedResponse() => new
+                        {
+                            job = Job("queued"),
+                            receipt = new
+                            {
+                                idempotencyKey = requestId,
+                                jobId = "smoke-enhancement-job",
+                            },
+                        };
                         if (delayNextCreate)
                         {
                             delayNextCreate = false;
                             staleCreateEntered.TrySetResult(true);
                             await staleCreateRelease.Task.WaitAsync(token);
-                            return JsonResponse(HttpStatusCode.Accepted, new { job = Job("queued") });
+                            return JsonResponse(HttpStatusCode.Accepted, QueuedResponse());
                         }
 
                         mode = "queued";
-                        return JsonResponse(HttpStatusCode.Accepted, new { job = Job("queued") });
+                        return JsonResponse(HttpStatusCode.Accepted, QueuedResponse());
                     }
 
                     if (request.Method == HttpMethod.Post && route.EndsWith("/cancel", StringComparison.Ordinal))
@@ -21977,10 +22078,14 @@ public partial class App : Application
                     && win.ModalCompactToolbarContractForSmoke
                     && win.ApplyModalToolbarWidthForSmoke(1280)
                     && win.ModalWideToolbarContractForSmoke;
-                bool windowCaptionControls = win.ModalWindowCaptionControlsContractForSmoke
-                    && win.ActivateModalMinimizeForSmoke()
-                    && await win.ActivateModalMaximizeForSmokeAsync()
+                bool windowCaptionControlsContract = win.ModalWindowCaptionControlsContractForSmoke;
+                bool windowCaptionMinimize = windowCaptionControlsContract
+                    && win.ActivateModalMinimizeForSmoke();
+                bool windowCaptionMaximize = windowCaptionMinimize
+                    && await win.ActivateModalMaximizeForSmokeAsync();
+                bool windowCaptionDoubleClick = windowCaptionMaximize
                     && await win.ActivateCaptionDoubleClickForSmokeAsync();
+                bool windowCaptionControls = windowCaptionDoubleClick;
                 bool nativeMaximizeWorkArea = await win.PreserveNativeMaximizeForSmokeAsync();
                 win.UpdateLayout();
                 // Opening and the caption-control smoke both queue actual-bounds
@@ -22443,6 +22548,10 @@ public partial class App : Application
                     EnhancementBackgroundResolverCount = backgroundRefreshResolverCount,
                     EnhancementNonBlockingOpenElapsedMs = nonBlockingOpenElapsedMs,
                     WindowCaptionControls = windowCaptionControls,
+                    WindowCaptionControlsContract = windowCaptionControlsContract,
+                    WindowCaptionMinimize = windowCaptionMinimize,
+                    WindowCaptionMaximize = windowCaptionMaximize,
+                    WindowCaptionDoubleClick = windowCaptionDoubleClick,
                     EdgeChrome = edgeChrome,
                     EdgePercentageSetting = edgePercentageSetting,
                     EdgeImageIntersection = edgeImageIntersection,
@@ -28779,6 +28888,10 @@ public partial class App : Application
         public int EnhancementBackgroundResolverCount { get; init; }
         public long EnhancementNonBlockingOpenElapsedMs { get; init; }
         public bool WindowCaptionControls { get; init; }
+        public bool WindowCaptionControlsContract { get; init; }
+        public bool WindowCaptionMinimize { get; init; }
+        public bool WindowCaptionMaximize { get; init; }
+        public bool WindowCaptionDoubleClick { get; init; }
         public bool EdgeChrome { get; init; }
         public bool EdgePercentageSetting { get; init; }
         public bool EdgeImageIntersection { get; init; }
