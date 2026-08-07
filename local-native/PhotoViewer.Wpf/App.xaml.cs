@@ -22704,6 +22704,8 @@ public partial class App : Application
                 await win.LoadFolderAsync(folder);
                 bool selected = win.SelectIndexForSmoke(selectIndex);
                 win.ShowModalForShot();
+                await win.WaitForModalFullDecodeForSmokeAsync();
+                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
                 var initial = win.ModalTransformForSmoke();
                 bool flipped = win.ToggleModalFlipForSmoke();
                 var afterFlip = win.ModalTransformForSmoke();
@@ -22718,10 +22720,17 @@ public partial class App : Application
                 bool settledScaling = win.SettleModalTransformQualityForSmoke();
                 bool reset = win.ModalZoomShortcutForSmoke("0");
                 var afterReset = win.ModalTransformForSmoke();
+                bool navigationZoomed = win.ModalZoomShortcutForSmoke("plus");
+                var beforeNavigation = win.ModalTransformForSmoke();
                 string? startPath = win.SelectedPathForSmoke;
                 bool movedNext = win.NavigateModalForSmoke(1);
+                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
                 string? nextPath = win.SelectedPathForSmoke;
                 var afterNavigation = win.ModalTransformForSmoke();
+                bool movedPrevious = win.NavigateModalForSmoke(-1);
+                await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
+                string? previousPath = win.SelectedPathForSmoke;
+                var afterPreviousNavigation = win.ModalTransformForSmoke();
                 bool modalVisibleBeforeClose = win.ModalVisibleForSmoke;
                 bool closed = win.CloseTopmostOverlayForSmoke();
                 var afterClose = win.ModalTransformForSmoke();
@@ -22754,11 +22763,22 @@ public partial class App : Application
                     && Math.Abs(afterReset.Zoom - 1) < 0.0001
                     && !afterReset.Flipped
                     && afterReset.ZoomLabel == initial.ZoomLabel
+                    && navigationZoomed
+                    && beforeNavigation.Zoom > 1
                     && movedNext
                     && !string.Equals(startPath, nextPath, StringComparison.OrdinalIgnoreCase)
-                    && Math.Abs(afterNavigation.Zoom - 1) < 0.0001
-                    && afterNavigation.ZoomLabel == initial.ZoomLabel
+                    && Math.Abs(afterNavigation.Zoom - beforeNavigation.Zoom) < 0.0001
+                    && afterNavigation.ZoomLabel == beforeNavigation.ZoomLabel
                     && !afterNavigation.Flipped
+                    && Math.Abs(afterNavigation.PanX) < 0.0001
+                    && Math.Abs(afterNavigation.PanY) < 0.0001
+                    && movedPrevious
+                    && string.Equals(previousPath, startPath, StringComparison.OrdinalIgnoreCase)
+                    && Math.Abs(afterPreviousNavigation.Zoom - beforeNavigation.Zoom) < 0.0001
+                    && afterPreviousNavigation.ZoomLabel == beforeNavigation.ZoomLabel
+                    && !afterPreviousNavigation.Flipped
+                    && Math.Abs(afterPreviousNavigation.PanX) < 0.0001
+                    && Math.Abs(afterPreviousNavigation.PanY) < 0.0001
                     && closed
                     && !win.ModalVisibleForSmoke
                     && Math.Abs(afterClose.Zoom - 1) < 0.0001
@@ -22768,7 +22788,7 @@ public partial class App : Application
 
                 result = new ModalTransformSmokeResult(
                     ok,
-                    ok ? "modal flip, proportional high-resolution wheel zoom, reset, and navigation reset passed" : "modal transform smoke did not meet expected behavior",
+                    ok ? "modal flip, proportional high-resolution wheel zoom, reset, and navigation zoom retention passed" : "modal transform smoke did not meet expected behavior",
                     folder,
                     selectIndex,
                     selected,
@@ -22786,10 +22806,15 @@ public partial class App : Application
                     standardWheelFactor,
                     reset,
                     afterReset,
+                    navigationZoomed,
+                    beforeNavigation,
                     movedNext,
                     startPath,
                     nextPath,
                     afterNavigation,
+                    movedPrevious,
+                    previousPath,
+                    afterPreviousNavigation,
                     closed,
                     afterClose,
                     zoomMotionActive,
@@ -28844,10 +28869,15 @@ public partial class App : Application
         double StandardWheelFactor = 0,
         bool Reset = false,
         ModalTransformSnapshot AfterReset = default,
+        bool NavigationZoomed = false,
+        ModalTransformSnapshot BeforeNavigation = default,
         bool MovedNext = false,
         string? StartPath = null,
         string? NextPath = null,
         ModalTransformSnapshot AfterNavigation = default,
+        bool MovedPrevious = false,
+        string? PreviousPath = null,
+        ModalTransformSnapshot AfterPreviousNavigation = default,
         bool Closed = false,
         ModalTransformSnapshot AfterClose = default,
         bool ZoomMotionActive = false,

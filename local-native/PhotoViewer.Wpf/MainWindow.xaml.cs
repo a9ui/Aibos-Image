@@ -562,6 +562,7 @@ public partial class MainWindow : Window
     private bool _cardWidthMigrationPending;
     private double _modalZoom = 1;
     private double _modalFitScale = 1;
+    private string? _modalFitPath;
     private bool _modalFitUpdateQueued;
     private bool _modalFlipped;
     private double _modalPanX;
@@ -16295,7 +16296,7 @@ public partial class MainWindow : Window
         if (opening)
             _modalFocusBeforeOverlay = Keyboard.FocusedElement;
         if (!string.Equals(_modalTransformPath, t.Path, StringComparison.OrdinalIgnoreCase))
-            ResetModalTransform(t.Path);
+            ResetModalTransform(t.Path, preserveZoom: !opening);
         if (sourceChanged)
         {
             StopAndHideModalVideo(clearSource: true);
@@ -17845,18 +17846,24 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private bool ResetModalTransform(string? path = null, bool showFeedback = false)
+    private bool ResetModalTransform(
+        string? path = null,
+        bool showFeedback = false,
+        bool preserveZoom = false)
     {
-        bool changed = Math.Abs(_modalZoom - 1) >= 0.0001
+        double nextZoom = preserveZoom ? _modalZoom : 1;
+        bool changed = Math.Abs(_modalZoom - nextZoom) >= 0.0001
             || _modalFlipped
             || !string.Equals(_modalTransformPath, path, StringComparison.OrdinalIgnoreCase);
         CancelPendingModalPanRender();
         EndModalPan();
-        _modalZoom = 1;
+        _modalZoom = nextZoom;
         _modalFlipped = false;
         _modalPanX = 0;
         _modalPanY = 0;
         _modalTransformPath = path;
+        if (path is null)
+            _modalFitPath = null;
         UpdateModalTransform(animate: showFeedback);
         return changed;
     }
@@ -18041,14 +18048,22 @@ public partial class MainWindow : Window
     {
         if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile)
             return;
-        double sourceWidth = _modalDisplayedImagePixelWidth > 0
+        bool hasDisplayedSize = _modalDisplayedImagePixelWidth > 0
+            && _modalDisplayedImagePixelHeight > 0;
+        bool hasCatalogSize = tile.ImagePixelWidth > 0
+            && tile.ImagePixelHeight > 0;
+        bool sourceChanged = !string.Equals(
+            _modalFitPath,
+            tile.Path,
+            StringComparison.OrdinalIgnoreCase);
+        double sourceWidth = hasDisplayedSize
             ? _modalDisplayedImagePixelWidth
-            : tile.ImagePixelWidth > 0
+            : hasCatalogSize
                 ? tile.ImagePixelWidth
                 : ModalBitmap.Source?.Width ?? 440;
-        double sourceHeight = _modalDisplayedImagePixelHeight > 0
+        double sourceHeight = hasDisplayedSize
             ? _modalDisplayedImagePixelHeight
-            : tile.ImagePixelHeight > 0
+            : hasCatalogSize
                 ? tile.ImagePixelHeight
                 : ModalBitmap.Source?.Height ?? 640;
         double oldEffectiveScale = _modalFitScale * _modalZoom;
@@ -18061,8 +18076,10 @@ public partial class MainWindow : Window
         ModalImage.Width = Math.Max(1, sourceWidth * _modalFitScale);
         ModalImage.Height = Math.Max(1, sourceHeight * _modalFitScale);
         ModalMetadataSidebar.MaxHeight = Math.Max(1, areaHeight - 24);
-        if (preserveUserZoom)
+        if (preserveUserZoom && !sourceChanged)
             _modalZoom = Math.Clamp(oldEffectiveScale / _modalFitScale, ModalZoomMin, ModalZoomMax);
+        if (hasDisplayedSize || hasCatalogSize)
+            _modalFitPath = tile.Path;
         ClampModalPan();
         UpdateModalTransform();
     }
