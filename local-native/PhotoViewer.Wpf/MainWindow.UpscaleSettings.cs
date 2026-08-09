@@ -10,7 +10,7 @@ namespace PhotoViewer.Wpf;
 public partial class MainWindow
 {
     private const string DefaultUpscalePresetId = "anime-sharp-x2";
-    private const string DefaultUpscaleAdapterId = "realesrgan-ncnn";
+    private const string DefaultUpscaleAdapterId = "comfyui";
     private const double DefaultUpscaleScale = 2d;
     private const string DefaultUpscaleOutputFormat = "webp";
 
@@ -39,7 +39,8 @@ public partial class MainWindow
     private void RestoreUpscaleSettings(ViewerState? state)
     {
         _modalEnhancementPresetId = NormalizeUpscalePresetId(state?.UpscalePresetId);
-        _modalEnhancementAdapterId = NormalizeUpscaleAdapterId(state?.UpscaleAdapterId);
+        _modalEnhancementAdapterId = NormalizeUpscaleAdapterId(
+            state?.UpscaleAdapterId);
         _modalEnhancementScale = NormalizeUpscaleScale(
             state?.UpscaleScale,
             _modalEnhancementAdapterId,
@@ -282,8 +283,8 @@ public partial class MainWindow
             _modalEnhancementAdapterId,
             "comfyui",
             StringComparison.Ordinal)
-                ? "ComfyUI AI upscale"
-                : "Real-ESRGAN fast GPU";
+                ? "ComfyUI quality (overlap blend)"
+                : "Real-ESRGAN fast (tile seams possible)";
         string scale = _modalEnhancementScale.ToString(
             "0.#",
             CultureInfo.InvariantCulture);
@@ -384,6 +385,9 @@ public partial class MainWindow
         if (!_initializing)
             SaveState();
     }
+
+    public void RestoreUpscaleSettingsForSmoke(ViewerState state)
+        => RestoreUpscaleSettings(state);
 
     public (string PresetId, string AdapterId, double Scale, string OutputFormat)
         UpscaleSettingsForSmoke => (

@@ -25,7 +25,7 @@ public partial class MainWindow
     private const int MaxPhotorealStyleNameLength = 40;
     private const int MaxPhotorealPromptLength = 2_000;
     private const string PhotorealUpscalePresetId = "photo-natural-x2";
-    private const string PhotorealUpscaleAdapterId = "realesrgan-ncnn";
+    private const string PhotorealUpscaleAdapterId = "comfyui";
     private const int PhotorealUpscaleScale = 2;
     private static readonly string DefaultPhotorealPrompt =
         WpfLocalPromptPolicy.Current.Photoreal!.Prompt;

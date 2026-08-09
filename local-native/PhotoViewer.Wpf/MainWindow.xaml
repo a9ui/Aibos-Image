@@ -488,6 +488,17 @@
                   <CheckBox x:Name="FavoriteLevel5Filter" Content="Lv 5" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
                 </WrapPanel>
                 <TextBlock x:Name="FavoriteFilterSummary" Text="{DynamicResource UiAllRatings}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6"/>
+                <TextBlock Text="実写ファボ" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,2,0,4"/>
+                <WrapPanel x:Name="PhotorealFavoriteLevelFilterPanel" Margin="0,0,0,4">
+                  <WrapPanel.Resources><Style TargetType="CheckBox" BasedOn="{StaticResource Pill}"><Setter Property="Margin" Value="0,0,6,4"/></Style></WrapPanel.Resources>
+                  <CheckBox x:Name="PhotorealFavoriteLevel0Filter" Content="0" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 0" AutomationProperties.HelpText="有効な実写版があり、どの実写版にもFavoriteがない画像"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel1Filter" Content="1" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 1"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel2Filter" Content="2" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 2"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel3Filter" Content="3" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 3"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel4Filter" Content="4" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 4"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel5Filter" Content="5" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 5"/>
+                </WrapPanel>
+                <TextBlock x:Name="PhotorealFavoriteFilterSummary" Text="すべて" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6" ToolTip="有効な実写版のうち最も高いFavoriteで絞り込み。0は実写版があり、どの実写版にもFavoriteがない画像"/>
                 <CheckBox x:Name="EnhancedOnlyFilter" Content="AI高画質化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI高画質化の完了画像だけを表示"/>
                 <CheckBox x:Name="UnenhancedOnlyFilter" Content="未高画質化のみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="まだAI高画質化されていない画像だけを表示"/>
                 <CheckBox x:Name="PhotorealOnlyFilter" Content="AI実写化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI実写化の完了画像だけを表示"/>
@@ -710,12 +721,18 @@
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
               <MenuItem Header="AI実写高画質化のみ" Click="GalleryContextPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
+              <Separator/>
               <MenuItem Header="次に高画質化" Click="GalleryContextUpscaleNext_Click" AutomationProperties.Name="次に高画質化"/>
               <MenuItem Header="次に実写化" Click="GalleryContextPhotorealNext_Click" AutomationProperties.Name="次に実写化"/>
               <MenuItem Header="動画化" AutomationProperties.Name="Choose video generation source">
                 <MenuItem Header="Originalから..." Tag="original" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from Original"/>
                 <MenuItem Header="最新の実写版から..." Tag="photoreal" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from latest photoreal version"/>
               </MenuItem>
+              <Separator/>
+              <MenuItem Header="拡大表示" Click="GalleryContextOpenModal_Click" AutomationProperties.Name="Open enlarged image"/>
+              <MenuItem Header="外部アプリで開く" Click="OpenSelectedExternally_Click" AutomationProperties.Name="Open selected image externally"/>
+              <MenuItem Header="元画像の場所を開く" Click="ShowSelectedInFolder_Click" AutomationProperties.Name="Show selected source in folder"/>
+              <MenuItem Header="Albumへ追加" Click="AddCurrentToAlbum_Click" AutomationProperties.Name="Add selected image to Album"/>
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.GroupStyle>
@@ -755,12 +772,18 @@
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
               <MenuItem Header="AI実写高画質化のみ" Click="GalleryContextPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
+              <Separator/>
               <MenuItem Header="次に高画質化" Click="GalleryContextUpscaleNext_Click" AutomationProperties.Name="次に高画質化"/>
               <MenuItem Header="次に実写化" Click="GalleryContextPhotorealNext_Click" AutomationProperties.Name="次に実写化"/>
               <MenuItem Header="動画化" AutomationProperties.Name="Choose video generation source">
                 <MenuItem Header="Originalから..." Tag="original" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from Original"/>
                 <MenuItem Header="最新の実写版から..." Tag="photoreal" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from latest photoreal version"/>
               </MenuItem>
+              <Separator/>
+              <MenuItem Header="拡大表示" Click="GalleryContextOpenModal_Click" AutomationProperties.Name="Open enlarged image"/>
+              <MenuItem Header="外部アプリで開く" Click="OpenSelectedExternally_Click" AutomationProperties.Name="Open selected image externally"/>
+              <MenuItem Header="元画像の場所を開く" Click="ShowSelectedInFolder_Click" AutomationProperties.Name="Show selected source in folder"/>
+              <MenuItem Header="Albumへ追加" Click="AddCurrentToAlbum_Click" AutomationProperties.Name="Add selected image to Album"/>
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -1426,7 +1449,7 @@
                 <Button x:Name="EnhancementJobsUpdateQueuedPromptsButton" Style="{StaticResource GhostButton}" Content="待機中を現在Promptへ"
                         Click="UpdateAllQueuedPhotorealPrompts_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
                         AutomationProperties.Name="Update all queued photoreal prompts"
-                        ToolTip="待機中の実写化ジョブすべてのPositive／Negativeを、各元画像と現在設定から作り直します。数値設定・LoRA・待ち順は維持します"/>
+                        ToolTip="待機中の実写化ジョブへ、各PNGの有効なメタデータ変換を加えた現在Positiveと、現在Negativeを一括反映します。PNG内Negativeは継承せず、数値設定・LoRA・待ち順は変更しません"/>
                 <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機中をすべて消す"
                         Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
                         AutomationProperties.Name="Cancel all queued enhancement jobs"
@@ -1533,10 +1556,10 @@
                           <DockPanel Grid.Row="4" Margin="0,8,0,0" LastChildFill="True">
                             <TextBlock Text="{Binding TimestampText}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" VerticalAlignment="Center"/>
                             <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
-                              <Button Style="{StaticResource GhostButton}" Content="↑" Tag="{Binding}" CommandParameter="up" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="32" Margin="6,0,0,0" Visibility="{Binding CanMoveUp, Converter={StaticResource BoolToVis}}" ToolTip="待機順を1つ上へ"/>
-                              <Button Style="{StaticResource GhostButton}" Content="↓" Tag="{Binding}" CommandParameter="down" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="32" Margin="6,0,0,0" Visibility="{Binding CanMoveDown, Converter={StaticResource BoolToVis}}" ToolTip="待機順を1つ下へ"/>
-                              <Button Style="{StaticResource GhostButton}" Content="これを次に処理" Tag="{Binding}" CommandParameter="next" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="96" Margin="6,0,0,0" Visibility="{Binding CanMoveNext, Converter={StaticResource BoolToVis}}"/>
-                              <Button Style="{StaticResource GhostButton}" Content="現在のPromptへ更新" Tag="{Binding}" Click="UpdateQueuedPhotorealPrompts_Click" Height="28" MinWidth="126" Margin="6,0,0,0" Visibility="{Binding CanUpdatePhotorealPrompts, Converter={StaticResource BoolToVis}}" ToolTip="待機中の実写化ジョブのPositive／Negativeだけを現在設定へ更新。数値設定・LoRA・待ち順は維持"/>
+                              <Button Style="{StaticResource GhostButton}" Content="↑" Tag="{Binding}" CommandParameter="up" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="32" Margin="6,0,0,0" Visibility="{Binding ShowMoveUp, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding CanMoveUp}" ToolTip="待機順を1つ上へ"/>
+                              <Button Style="{StaticResource GhostButton}" Content="↓" Tag="{Binding}" CommandParameter="down" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="32" Margin="6,0,0,0" Visibility="{Binding ShowMoveDown, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding CanMoveDown}" ToolTip="待機順を1つ下へ"/>
+                              <Button Style="{StaticResource GhostButton}" Content="これを次に処理" Tag="{Binding}" CommandParameter="next" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="96" Margin="6,0,0,0" Visibility="{Binding ShowMoveNext, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding CanMoveNext}" ToolTip="画面へすぐ反映し、処理中ジョブの直後へ保存" AutomationProperties.Name="このジョブを次に処理"/>
+                              <Button Style="{StaticResource GhostButton}" Content="現在のPromptへ更新" Tag="{Binding}" Click="UpdateQueuedPhotorealPrompts_Click" Height="28" MinWidth="126" Margin="6,0,0,0" Visibility="{Binding CanUpdatePhotorealPrompts, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding CanUpdatePhotorealPrompts}" ToolTip="待機中の実写化ジョブのPositive／Negativeだけを現在設定へ更新。有効なPNGメタデータPrompt変換も元画像ごとに反映し、数値設定・LoRA・待ち順は維持"/>
                               <Button Style="{StaticResource GhostButton}" Content="{Binding CancelLabel}" Tag="{Binding}" Click="CancelEnhancementJob_Click" Height="28" MinWidth="76" Margin="6,0,0,0" Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}"/>
                               <Button Style="{StaticResource GhostButton}" Content="元設定でRetry" Tag="{Binding}" Click="RetryEnhancementJob_Click" Height="28" MinWidth="88" Margin="6,0,0,0" Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}" ToolTip="失敗・キャンセル時に保存された元の設定で再試行"/>
                               <Button Style="{StaticResource GhostButton}" Content="現在設定で再実写化" Tag="{Binding}" Click="RerunPhotorealJob_Click" Height="28" MinWidth="126" Margin="6,0,0,0" Visibility="{Binding CanRerunWithCurrentSettings, Converter={StaticResource BoolToVis}}" ToolTip="設定画面の現在のPromptと実写化設定で新しいジョブを追加"/>
@@ -2151,8 +2174,8 @@
                   <TextBlock Text="方式" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
                   <ComboBox x:Name="AppUpscaleAdapterComboBox" Style="{StaticResource PhotorealSettingsComboBox}"
                             SelectionChanged="AppUpscaleSetting_SelectionChanged" AutomationProperties.Name="Default AI upscale method">
-                    <ComboBoxItem Content="Real-ESRGAN fast GPU" Tag="realesrgan-ncnn"/>
-                    <ComboBoxItem Content="ComfyUI AI upscale" Tag="comfyui"/>
+                    <ComboBoxItem Content="ComfyUI 品質優先（境界を重ねて合成）" Tag="comfyui"/>
+                    <ComboBoxItem Content="Real-ESRGAN 速度優先（タイル模様が出る場合あり）" Tag="realesrgan-ncnn"/>
                   </ComboBox>
                 </StackPanel>
                 <StackPanel Grid.Column="2">
@@ -2746,8 +2769,8 @@
             <TextBlock Text="方式" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalUpscaleAdapterComboBox" Style="{StaticResource PhotorealSettingsComboBox}" Margin="0,0,0,9"
                       SelectionChanged="ModalUpscaleSetting_SelectionChanged" AutomationProperties.Name="AI upscale method">
-              <ComboBoxItem Content="Real-ESRGAN fast GPU" Tag="realesrgan-ncnn"/>
-              <ComboBoxItem Content="ComfyUI AI upscale" Tag="comfyui"/>
+              <ComboBoxItem Content="ComfyUI 品質優先（境界を重ねて合成）" Tag="comfyui"/>
+              <ComboBoxItem Content="Real-ESRGAN 速度優先（タイル模様が出る場合あり）" Tag="realesrgan-ncnn"/>
             </ComboBox>
             <TextBlock Text="モデルpreset" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalUpscalePresetComboBox" Style="{StaticResource PhotorealSettingsComboBox}" Margin="0,0,0,9"
@@ -3186,11 +3209,17 @@
             <MenuItem Header="Favorite +1" Click="ModalFavoriteIncrease_Click" AutomationProperties.Name="Increase favorite level"/>
             <MenuItem Header="Favorite -1" Click="ModalFavoriteDecrease_Click" AutomationProperties.Name="Decrease favorite level"/>
             <Separator/>
+            <MenuItem x:Name="ModalContextUpscale" Header="AI高画質化" Click="StartModalEnhancement_Click" AutomationProperties.Name="AI高画質化"/>
+            <MenuItem x:Name="ModalContextPhotoreal" Header="AI実写化" Click="StartModalPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
+            <MenuItem x:Name="ModalContextPhotorealUpscale" Header="AI実写高画質化のみ" Click="StartModalPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
             <MenuItem Header="表示中の画像を動画化..." Click="ModalContextVideo_Click" AutomationProperties.Name="Open video generation board for displayed image"/>
             <MenuItem x:Name="ModalContextI2iEdit" Header="AI編集（髪色）…" Click="OpenModalI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
             <MenuItem x:Name="ModalContextI2iV2Edit" Header="AI編集（服・表情・背景・ポーズ）…" Click="OpenModalI2iEditV2_Click"
                       AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
-            <MenuItem x:Name="ModalContextPhotorealUpscale" Header="AI実写高画質化のみ" Click="StartModalPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
+            <Separator/>
+            <MenuItem x:Name="ModalContextUpscaleNext" Header="次に高画質化" Click="ModalContextUpscaleNext_Click" AutomationProperties.Name="次に高画質化"/>
+            <MenuItem x:Name="ModalContextPhotorealNext" Header="次に実写化" Click="ModalContextPhotorealNext_Click" AutomationProperties.Name="次に実写化"/>
+            <Separator/>
             <MenuItem x:Name="ModalContextEnhancedToggle" Header="Show Enhanced / Original" Click="ToggleModalEnhanced_Click" AutomationProperties.Name="Toggle enhanced image output"/>
             <MenuItem Header="左右反転 (H)" Click="ToggleModalFlip_Click" AutomationProperties.Name="Flip image horizontally"/>
             <MenuItem Header="100%表示" Click="ModalOneToOne_Click" AutomationProperties.Name="Show actual pixels at 100 percent"/>

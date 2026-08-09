@@ -18476,6 +18476,9 @@ public partial class App : Application
                 bool canceledRetryCreated = false;
                 bool rerunCreated = false;
                 bool queueLaterFirst = false;
+                TaskCompletionSource<bool>? queueMoveGate = null;
+                TaskCompletionSource<bool>? jobsGetEntered = null;
+                TaskCompletionSource<bool>? jobsGetGate = null;
                 bool allQueuedCanceled = false;
                 bool outputDeleted = false;
                 bool videoOutputDeleted = false;
@@ -18743,6 +18746,33 @@ public partial class App : Application
                     return jobs.ToArray();
                 }
 
+                object[] CurrentQueuedJobs()
+                {
+                    return CurrentJobs()
+                        .Select(job =>
+                        {
+                            using JsonDocument document = JsonDocument.Parse(
+                                JsonSerializer.Serialize(job));
+                            JsonElement root = document.RootElement;
+                            return new
+                            {
+                                Job = job,
+                                Status = root.GetProperty("status").GetString(),
+                                QueueOrder = root.TryGetProperty(
+                                        "queueOrder",
+                                        out JsonElement queueOrder)
+                                    && queueOrder.ValueKind == JsonValueKind.Number
+                                    && queueOrder.TryGetInt32(out int parsed)
+                                        ? parsed
+                                        : int.MaxValue,
+                            };
+                        })
+                        .Where(static item => item.Status == "queued")
+                        .OrderBy(static item => item.QueueOrder)
+                        .Select(static item => item.Job)
+                        .ToArray();
+                }
+
                 object CurrentHealth()
                 {
                     var counts = new Dictionary<string, int>(StringComparer.Ordinal)
@@ -18856,6 +18886,39 @@ public partial class App : Application
                     return new { idempotencyKey = requestId, jobId };
                 }
 
+                HttpResponseMessage CurrentQueueMoveResponse()
+                    => JsonResponse(HttpStatusCode.OK, new
+                    {
+                        moved = queueLaterFirst,
+                        job = VideoJob(
+                            "queue-later-job",
+                            "queued",
+                            0,
+                            queueOrder: 0),
+                        queue = CurrentQueuedJobs(),
+                    });
+
+                async Task<HttpResponseMessage> WaitForQueueMoveResponseAsync(
+                    TaskCompletionSource<bool> gate)
+                {
+                    await gate.Task;
+                    return CurrentQueueMoveResponse();
+                }
+
+                async Task<HttpResponseMessage> CurrentJobsResponseAsync()
+                {
+                    HttpResponseMessage response = JsonResponse(
+                        HttpStatusCode.OK,
+                        new { jobs = CurrentJobs() });
+                    TaskCompletionSource<bool>? gate = jobsGetGate;
+                    if (gate is not null)
+                    {
+                        jobsGetEntered?.TrySetResult(true);
+                        await gate.Task;
+                    }
+                    return response;
+                }
+
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
                 window.ConfigureModalEnhancementForSmoke((request, _) =>
@@ -18871,7 +18934,7 @@ public partial class App : Application
                             else
                                 activeCancelPendingJobReads--;
                         }
-                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new { jobs = CurrentJobs() }));
+                        return CurrentJobsResponseAsync();
                     }
                     if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/health", StringComparison.Ordinal))
                     {
@@ -18945,16 +19008,9 @@ public partial class App : Application
                         string body = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "";
                         using JsonDocument moveDocument = JsonDocument.Parse(body);
                         queueLaterFirst = moveDocument.RootElement.GetProperty("move").GetString() == "next";
-                        return Task.FromResult(JsonResponse(HttpStatusCode.OK, new
-                        {
-                            moved = queueLaterFirst,
-                            job = VideoJob(
-                                "queue-later-job",
-                                "queued",
-                                0,
-                                queueOrder: 0),
-                            queue = CurrentJobs(),
-                        }));
+                        return queueMoveGate is null
+                            ? Task.FromResult(CurrentQueueMoveResponse())
+                            : WaitForQueueMoveResponseAsync(queueMoveGate);
                     }
                     if (request.Method == HttpMethod.Post
                         && route.EndsWith("/prompts", StringComparison.Ordinal))
@@ -19372,11 +19428,65 @@ public partial class App : Application
                 bool imageVersionsExcludeVideo =
                     window.EnhancedCandidateCountForSmoke == 1;
 
-                bool moveNextIssued = await window.MoveEnhancementJobForSmokeAsync(
+                int jobsGetsBeforeMove =
+                    window.EnhancementJobsWorkspaceForSmoke().GetRequests;
+                queueMoveGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                Task<bool> moveNextTask = window.MoveEnhancementJobForSmokeAsync(
                     "queue-later-job",
                     "next");
+                EnhancementJobsWorkspaceSmokeSnapshot whileMoveSaving =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool moveReflectedImmediately =
+                    whileMoveSaving.VisibleIds.Take(4).SequenceEqual(
+                        [
+                            "active-job",
+                            "queue-later-job",
+                            "queue-first-job",
+                            "delivery-queue-job",
+                        ],
+                        StringComparer.Ordinal)
+                    && whileMoveSaving.Status.Contains(
+                        "保存しています",
+                        StringComparison.Ordinal);
+                queueMoveGate.SetResult(true);
+                bool moveNextIssued = await moveNextTask;
+                queueMoveGate = null;
                 EnhancementJobsWorkspaceSmokeSnapshot afterMove =
                     window.EnhancementJobsWorkspaceForSmoke();
+                bool moveAvoidedFullInventoryReload =
+                    afterMove.GetRequests == jobsGetsBeforeMove;
+                jobsGetEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                jobsGetGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                Task staleRefresh = window.RefreshEnhancementJobsForSmokeAsync();
+                await jobsGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                bool moveDuringStaleRefresh =
+                    await window.MoveEnhancementJobForSmokeAsync(
+                        "queue-later-job",
+                        "down",
+                        waitForWorkspaceIdle: false);
+                EnhancementJobsWorkspaceSmokeSnapshot afterMoveDuringRefresh =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                jobsGetGate.SetResult(true);
+                await staleRefresh;
+                jobsGetGate = null;
+                jobsGetEntered = null;
+                EnhancementJobsWorkspaceSmokeSnapshot afterStaleRefresh =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool staleQueueRefreshSuppressed = moveDuringStaleRefresh
+                    && afterMoveDuringRefresh.VisibleIds.Take(4).SequenceEqual(
+                        [
+                            "active-job",
+                            "queue-first-job",
+                            "queue-later-job",
+                            "delivery-queue-job",
+                        ],
+                        StringComparer.Ordinal)
+                    && afterStaleRefresh.VisibleIds.Take(4).SequenceEqual(
+                        afterMoveDuringRefresh.VisibleIds.Take(4),
+                        StringComparer.Ordinal);
                 bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterCancel = window.EnhancementJobsWorkspaceForSmoke();
                 var cancelPendingVideoView =
@@ -19424,6 +19534,16 @@ public partial class App : Application
                     randomRerunBody = rerunBodies[^1];
                 EnhancementJobsWorkspaceSmokeSnapshot afterRerun =
                     window.EnhancementJobsWorkspaceForSmoke();
+                window.RestorePhotorealPromptMappingsForSmoke(
+                    [
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = true,
+                            Category = "smoke",
+                            SourceTag = "workspace source tag",
+                            OutputPrompt = "workspace metadata mapped",
+                        },
+                    ]);
                 bool queuedPromptUpdateIssued =
                     await window.UpdateQueuedPhotorealPromptsForSmokeAsync(
                         "rerun-job");
@@ -19670,7 +19790,7 @@ public partial class App : Application
                     queuedPromptUpdateContract =
                         body.EnumerateObject().Count() == 2
                         && body.GetProperty("prompt").GetString()
-                            == "workspace rerun prompt"
+                            == "workspace rerun prompt, workspace metadata mapped"
                         && body.GetProperty("negativePrompt").GetString()
                             == "workspace negative prompt";
                 }
@@ -19692,7 +19812,7 @@ public partial class App : Application
                         JsonElement body = document.RootElement;
                         return body.EnumerateObject().Count() == 2
                             && body.GetProperty("prompt").GetString()
-                                == "workspace rerun prompt"
+                                == "workspace rerun prompt, workspace metadata mapped"
                             && body.GetProperty("negativePrompt").GetString()
                                 == "workspace negative prompt";
                     });
@@ -19731,6 +19851,9 @@ public partial class App : Application
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
                     && moveNextIssued
+                    && moveReflectedImmediately
+                    && moveAvoidedFullInventoryReload
+                    && staleQueueRefreshSuppressed
                     && cancelIssued
                     && afterCancel.Total == 16
                     && afterCancel.Active == 4
@@ -19826,6 +19949,10 @@ public partial class App : Application
                     completed,
                     canceled,
                     moveNextIssued,
+                    moveReflectedImmediately,
+                    moveAvoidedFullInventoryReload,
+                    staleQueueRefreshSuppressed,
+                    afterStaleRefresh,
                     afterMove,
                     afterCancel,
                     videoCancelPendingSafe,
@@ -19843,6 +19970,7 @@ public partial class App : Application
                     afterRerun,
                     queuedPromptUpdateIssued,
                     queuedPromptUpdateContract,
+                    bulkQueuedPromptUpdateContract,
                     afterQueuedPromptUpdate,
                     clearQueuedIssued,
                     afterClearQueued,
@@ -20690,7 +20818,7 @@ public partial class App : Application
                     createContract = string.Equals(createRoot.GetProperty("sourceId").GetString(), canonicalSourcePath, StringComparison.OrdinalIgnoreCase)
                         && !string.Equals(createRoot.GetProperty("sourceId").GetString(), sourcePath, StringComparison.OrdinalIgnoreCase)
                         && string.Equals(createRoot.GetProperty("presetId").GetString(), "anime-sharp-x2", StringComparison.Ordinal)
-                        && string.Equals(createRoot.GetProperty("adapterId").GetString(), "realesrgan-ncnn", StringComparison.Ordinal)
+                        && string.Equals(createRoot.GetProperty("adapterId").GetString(), "comfyui", StringComparison.Ordinal)
                         && createRoot.GetProperty("scale").GetInt32() == 2;
                 }
                 catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)

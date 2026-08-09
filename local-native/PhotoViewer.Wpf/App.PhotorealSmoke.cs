@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -53,17 +54,22 @@ public partial class App
             bool sharedQueueRoute = false;
             bool versionCycleContract = false;
             bool versionSpecificFavoriteContract = false;
+            bool photorealFavoriteBadgeFilterContract = false;
+            bool photorealFavoriteLayoutContract = false;
+            bool photorealFavoriteRetryContract = false;
             bool staleFavoriteSourceFallbackRejected = false;
             bool versionWheelCycleContract = false;
             bool thumbnailVersionPreferenceContract = false;
             bool thumbnailVariantCountContract = false;
             bool upscaleSettingsContract = false;
+            bool persistedNcnnUpscaleChoiceContract = false;
             bool photorealShortcutContract = false;
             bool sourceUntouched = false;
             bool independentCompanionContract = false;
             bool galleryContextNoModal = false;
             bool galleryContextDirectContract = false;
             bool galleryEnqueueNextContract = false;
+            bool modalEnqueueNextDisplayedPhotorealContract = false;
             bool legacyPhotorealCapabilitySafe = false;
             bool modalPhotorealOperation = false;
             bool recoveredReferenceExact = false;
@@ -82,6 +88,11 @@ public partial class App
             bool recoveredHqButtonContract = false;
             bool recoveredHqCapabilityGateContract = false;
             bool photorealSeedContract = false;
+            bool randomSeedOmitted = false;
+            bool seedDefaultAndSurface = false;
+            bool fixedSeedExact = false;
+            bool invalidSeedBlocked = false;
+            bool missingSeedCapabilityBlocked = false;
             bool gallerySingleFlightContract = false;
             object? recoveredReferencePerformance = null;
             string recoveredReferenceDiagnostic = "";
@@ -1162,6 +1173,17 @@ public partial class App
                         ["Original", "実写化 1/1", "高画質化 1/1"],
                         StringComparer.Ordinal);
                 toolbarContract = window.ModalPhotorealToolbarContractForSmoke;
+                var initialUpscaleSettings = window.UpscaleSettingsForSmoke;
+                window.RestoreUpscaleSettingsForSmoke(new ViewerState
+                {
+                    UpscalePresetId = "anime-sharp-x2",
+                    UpscaleAdapterId = "realesrgan-ncnn",
+                    UpscaleScale = 2d,
+                    UpscaleOutputFormat = "webp",
+                });
+                persistedNcnnUpscaleChoiceContract =
+                    window.UpscaleSettingsForSmoke.AdapterId ==
+                        "realesrgan-ncnn";
                 window.ConfigureUpscaleSettingsForSmoke(
                     "general-balanced-x4",
                     "comfyui",
@@ -1179,6 +1201,8 @@ public partial class App
                     window.UpscaleSettingsSurfaceContractForSmoke
                     && upscaleSettingsPopupOpened
                     && upscaleSettingsPopupClosed
+                    && initialUpscaleSettings.AdapterId == "comfyui"
+                    && persistedNcnnUpscaleChoiceContract
                     && configuredUpscaleSettings.PresetId == "general-balanced-x4"
                     && configuredUpscaleSettings.AdapterId == "comfyui"
                     && configuredUpscaleSettings.Scale == 3d
@@ -1196,7 +1220,7 @@ public partial class App
                     && photoUpscaleProfile.SourceProducerJobId == "photoreal-version"
                     && photoUpscaleProfile.SourceRecoveredOutputPath is null
                     && photoUpscaleProfile.PresetId == "photo-natural-x2"
-                    && photoUpscaleProfile.AdapterId == "realesrgan-ncnn"
+                    && photoUpscaleProfile.AdapterId == "comfyui"
                     && photoUpscaleProfile.Scale == 2
                     && string.IsNullOrEmpty(photoUpscaleProfile.Error);
                 bool downToUpscale = window.InvokePreviewKeyForSmoke(Key.Down, ModifierKeys.Control)
@@ -1270,6 +1294,40 @@ public partial class App
                     && galleryVariantCounts.Video == 0
                     && PhotoViewer.Wpf.MainWindow
                         .ThumbnailVariantCountVisibilityContractForSmoke();
+                int modalNextHqBodyIndex = createBodies.Count;
+                bool modalNextHqStarted =
+                    await window.StartModalContextEnhancementNextForSmokeAsync(
+                        "upscale");
+                JsonElement modalNextHqBody = ParseRequestBody(
+                    createBodies[modalNextHqBodyIndex]);
+                modalEnqueueNextDisplayedPhotorealContract =
+                    producerVersionSelected
+                    && modalNextHqStarted
+                    && createBodies.Count == modalNextHqBodyIndex + 1
+                    && modalNextHqBody.GetProperty("operation").GetString()
+                        == "upscale"
+                    && modalNextHqBody.GetProperty("queuePlacement").GetString()
+                        == "next"
+                    && modalNextHqBody.GetProperty("sourceProducerJobId")
+                        .GetString() == "photoreal-version"
+                    && modalNextHqBody.GetProperty("presetId").GetString()
+                        == "photo-natural-x2"
+                    && modalNextHqBody.GetProperty("adapterId").GetString()
+                        == "comfyui"
+                    && modalNextHqBody.GetProperty("scale").GetDouble() == 2d
+                    && string.Equals(
+                        modalNextHqBody.GetProperty("sourceId").GetString(),
+                        sourcePath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && !modalNextHqBody.TryGetProperty("prompt", out _)
+                    && !modalNextHqBody.TryGetProperty("outputFormat", out _)
+                    && !modalNextHqBody.TryGetProperty(
+                        "sourceRecoveredOutputPath",
+                        out _)
+                    && string.Equals(
+                        window.ModalDisplayPathForSmoke,
+                        photorealOutputPath,
+                        StringComparison.OrdinalIgnoreCase);
                 int producerHqBodyIndex = createBodies.Count;
                 bool producerHqStarted =
                     await window.StartModalEnhancementForSmokeAsync();
@@ -1282,7 +1340,7 @@ public partial class App
                     && producerHqBody.GetProperty("presetId").GetString()
                         == "photo-natural-x2"
                     && producerHqBody.GetProperty("adapterId").GetString()
-                        == "realesrgan-ncnn"
+                        == "comfyui"
                     && producerHqBody.GetProperty("scale").GetDouble() == 2d
                     && !producerHqBody.TryGetProperty("outputFormat", out _)
                     && producerHqBody.GetProperty("sourceProducerJobId")
@@ -1352,9 +1410,9 @@ public partial class App
                 string randomPhotorealBody = createBody;
                 using JsonDocument randomSeedDocument = JsonDocument.Parse(
                     randomPhotorealBody);
-                bool randomSeedOmitted = !randomSeedDocument.RootElement
+                randomSeedOmitted = !randomSeedDocument.RootElement
                     .TryGetProperty("seed", out _);
-                bool seedDefaultAndSurface = window.PhotorealSeedForSmoke
+                seedDefaultAndSurface = window.PhotorealSeedForSmoke
                         is (false, "0", true)
                     && window.PhotorealSeedSurfaceForSmoke;
 
@@ -1372,7 +1430,7 @@ public partial class App
                     "photoreal");
                 JsonElement fixedSeedBody = ParseRequestBody(
                     createBodies[fixedSeedBodyIndex]);
-                bool fixedSeedExact = fixedSeedBody.GetProperty("seed")
+                fixedSeedExact = fixedSeedBody.GetProperty("seed")
                         .GetInt32() == fixedPhotorealSeed
                     && persistedPhotorealSeedState?.PhotorealSeedMode == "fixed"
                     && persistedPhotorealSeedState.PhotorealSeedValue
@@ -1384,7 +1442,7 @@ public partial class App
                 int postsBeforeInvalidSeed = createBodies.Count;
                 _ = await window.StartGalleryContextEnhancementForSmokeAsync(
                     "photoreal");
-                bool invalidSeedBlocked = createBodies.Count
+                invalidSeedBlocked = createBodies.Count
                         == postsBeforeInvalidSeed
                     && !window.PhotorealSeedForSmoke.Valid
                     && window.PhotorealSeedStatusForSmoke.Contains(
@@ -1398,7 +1456,7 @@ public partial class App
                 int postsBeforeMissingSeedCapability = createBodies.Count;
                 _ = await window.StartGalleryContextEnhancementForSmokeAsync(
                     "photoreal");
-                bool missingSeedCapabilityBlocked = createBodies.Count
+                missingSeedCapabilityBlocked = createBodies.Count
                         == postsBeforeMissingSeedCapability
                     && window.PhotorealSeedStatusForSmoke.Contains(
                         "fixed photoreal seeds",
@@ -1796,6 +1854,169 @@ public partial class App
                     && photorealFavoriteRestored
                     && staleFavoriteSourceFallbackRejected
                     && favoriteKeysPersisted;
+                string sourceFileNameForFavorite = Path.GetFileName(sourcePath);
+                bool badgeShowsMaximum =
+                    window.PhotorealFavoriteLevelForFileForSmoke(
+                        sourceFileNameForFavorite) == 2
+                    && window.PhotorealFavoriteBadgeForFileForSmoke(
+                        sourceFileNameForFavorite);
+                window.CloseModalForSmoke();
+                Tile? favoriteTile = window.TileForFileForSmoke(
+                    sourceFileNameForFavorite);
+                int photorealBadgeLayoutNotifications = 0;
+                PropertyChangedEventHandler photorealBadgeLayoutHandler =
+                    (_, args) =>
+                    {
+                        if (args.PropertyName ==
+                            nameof(Tile.ShowPhotorealFavoriteBadge))
+                        {
+                            photorealBadgeLayoutNotifications++;
+                        }
+                    };
+                if (favoriteTile is not null)
+                    favoriteTile.PropertyChanged += photorealBadgeLayoutHandler;
+                try
+                {
+                    bool zoomedBelowBadgeThreshold =
+                        window.SetGridZoomForSmoke(20d);
+                    bool badgeHiddenAtSmallZoom =
+                        favoriteTile?.ShowPhotorealFavoriteBadge == false;
+                    bool zoomedAboveBadgeThreshold =
+                        window.SetGridZoomForSmoke(200d);
+                    bool badgeRestoredAtLargeZoom =
+                        favoriteTile?.ShowPhotorealFavoriteBadge == true;
+                    photorealFavoriteLayoutContract =
+                        zoomedBelowBadgeThreshold
+                        && badgeHiddenAtSmallZoom
+                        && zoomedAboveBadgeThreshold
+                        && badgeRestoredAtLargeZoom
+                        && photorealBadgeLayoutNotifications >= 2;
+                }
+                finally
+                {
+                    if (favoriteTile is not null)
+                    {
+                        favoriteTile.PropertyChanged -=
+                            photorealBadgeLayoutHandler;
+                    }
+                }
+                bool levelTwoIncludes =
+                    window.SetPhotorealFavoriteFilterLevelsForSmoke(2)
+                    && window.FilteredFileNamesForSmoke().Contains(
+                        sourceFileNameForFavorite,
+                        StringComparer.OrdinalIgnoreCase);
+                bool levelOneExcludes =
+                    window.SetPhotorealFavoriteFilterLevelsForSmoke(1)
+                    && !window.FilteredFileNamesForSmoke().Contains(
+                        sourceFileNameForFavorite,
+                        StringComparer.OrdinalIgnoreCase);
+                _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
+                bool sourceReselectedForZero = window.SelectFileNameForSmoke(
+                    sourceFileNameForFavorite);
+                bool zeroFavoriteApplied = sourceReselectedForZero
+                    && window.OpenModalForSmoke()
+                    && window.SelectModalEnhancementJobVersionForSmoke(
+                        "photoreal-version")
+                    && window.AdjustModalFavoriteForSmoke(-1)
+                    && window.AdjustModalFavoriteForSmoke(-1)
+                    && window.ModalFavoriteLevelForSmoke == 0;
+                window.CloseModalForSmoke();
+                window.ForceSharedStoreWritersForSmoke();
+                window.FailNextFavoriteWriterForSmoke();
+                bool failedFavoriteAccepted = zeroFavoriteApplied
+                    && window.SetIndependentFavoriteLevelForSmoke(
+                        photorealOutputPath,
+                        1);
+                SharedWriteStatus[] failedFavoriteStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                bool failedFavoriteRolledBack = failedFavoriteAccepted
+                    && failedFavoriteStatuses.Contains(
+                        SharedWriteStatus.Failed)
+                    && window.FailedFavoriteRetryPendingForSmoke
+                    && window.PhotorealFavoriteLevelForFileForSmoke(
+                        sourceFileNameForFavorite) == 0
+                    && !window.PhotorealFavoriteBadgeForFileForSmoke(
+                        sourceFileNameForFavorite);
+                window.RetryFailedFavoriteForSmoke();
+                int retryPresentationLevel =
+                    window.PhotorealFavoriteLevelForFileForSmoke(
+                        sourceFileNameForFavorite);
+                bool retryPresentationBadge =
+                    window.PhotorealFavoriteBadgeForFileForSmoke(
+                        sourceFileNameForFavorite);
+                bool retryPresentationAppliedImmediately =
+                    retryPresentationLevel == 1
+                    && retryPresentationBadge;
+                SharedWriteStatus[] retriedFavoriteStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                bool retriedFavoritePersisted =
+                    retriedFavoriteStatuses.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && !window.FailedFavoriteRetryPendingForSmoke
+                    && ReadFavoriteLevel(
+                        favoritesPath,
+                        photorealOutputPath) == 1;
+                bool retryFavoriteResetAccepted =
+                    window.SetIndependentFavoriteLevelForSmoke(
+                        photorealOutputPath,
+                        0);
+                SharedWriteStatus[] retryFavoriteResetStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                bool retryFavoriteReset = retryFavoriteResetAccepted
+                    && retryFavoriteResetStatuses.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && window.PhotorealFavoriteLevelForFileForSmoke(
+                        sourceFileNameForFavorite) == 0
+                    && !window.PhotorealFavoriteBadgeForFileForSmoke(
+                        sourceFileNameForFavorite)
+                    && ReadFavoriteLevel(
+                        favoritesPath,
+                        photorealOutputPath) == 0;
+                photorealFavoriteRetryContract =
+                    failedFavoriteRolledBack
+                    && retryPresentationAppliedImmediately
+                    && retriedFavoritePersisted
+                    && retryFavoriteReset;
+                if (!photorealFavoriteRetryContract)
+                {
+                    failure =
+                        $"Photoreal Favorite retry: accepted={failedFavoriteAccepted}; "
+                        + $"rolledBack={failedFavoriteRolledBack}; "
+                        + $"immediate={retryPresentationAppliedImmediately}; "
+                        + $"retryLevel={retryPresentationLevel}; "
+                        + $"retryBadge={retryPresentationBadge}; "
+                        + $"persisted={retriedFavoritePersisted}; "
+                        + $"reset={retryFavoriteReset}; "
+                        + $"resetAccepted={retryFavoriteResetAccepted}; "
+                        + $"resetLevel={window.PhotorealFavoriteLevelForFileForSmoke(sourceFileNameForFavorite)}; "
+                        + $"resetBadge={window.PhotorealFavoriteBadgeForFileForSmoke(sourceFileNameForFavorite)}; "
+                        + $"resetDurable={ReadFavoriteLevel(favoritesPath, photorealOutputPath)}; "
+                        + $"failedStatuses={string.Join(',', failedFavoriteStatuses)}; "
+                        + $"retryStatuses={string.Join(',', retriedFavoriteStatuses)}; "
+                        + $"resetStatuses={string.Join(',', retryFavoriteResetStatuses)}";
+                }
+                bool levelZeroIncludes = zeroFavoriteApplied
+                    && window.PhotorealFavoriteLevelForFileForSmoke(
+                        sourceFileNameForFavorite) == 0
+                    && !window.PhotorealFavoriteBadgeForFileForSmoke(
+                        sourceFileNameForFavorite)
+                    && window.SetPhotorealFavoriteFilterLevelsForSmoke(0)
+                    && window.FilteredFileNamesForSmoke().Contains(
+                        sourceFileNameForFavorite,
+                        StringComparer.OrdinalIgnoreCase);
+                ViewerState? persistedPhotorealFavoriteFilter =
+                    JsonSerializer.Deserialize<ViewerState>(File.ReadAllText(
+                        environment["PHOTOVIEWER_WPF_STATE_PATH"]));
+                bool filterPersisted = persistedPhotorealFavoriteFilter
+                    ?.PhotorealFavoriteFilterLevels?.SequenceEqual([0]) == true;
+                photorealFavoriteBadgeFilterContract = badgeShowsMaximum
+                    && photorealFavoriteLayoutContract
+                    && photorealFavoriteRetryContract
+                    && levelTwoIncludes
+                    && levelOneExcludes
+                    && levelZeroIncludes
+                    && filterPersisted;
+                _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
                 sourceUntouched = sourceHashBefore == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)));
                 Dictionary<string, string> recoveredFixtureHashesAfter =
                     FingerprintRecoveredSmokeFiles(recoveredFixtureFiles);
@@ -1816,10 +2037,14 @@ public partial class App
                     && toolbarContract
                     && versionCycleContract
                     && versionSpecificFavoriteContract
+                    && photorealFavoriteBadgeFilterContract
+                    && photorealFavoriteLayoutContract
+                    && photorealFavoriteRetryContract
                     && versionWheelCycleContract
                     && thumbnailVersionPreferenceContract
                     && thumbnailVariantCountContract
                     && upscaleSettingsContract
+                    && persistedNcnnUpscaleChoiceContract
                     && photorealShortcutContract
                     && requestContract
                     && fallbackPromptContract
@@ -1842,6 +2067,7 @@ public partial class App
                     && independentCompanionContract
                     && galleryContextDirectContract
                     && galleryEnqueueNextContract
+                    && modalEnqueueNextDisplayedPhotorealContract
                     && legacyPhotorealCapabilitySafe
                     && sharedQueueRoute
                     && sourceUntouched
@@ -1892,11 +2118,15 @@ public partial class App
                     toolbarContract,
                     versionCycleContract,
                     versionSpecificFavoriteContract,
+                    photorealFavoriteBadgeFilterContract,
+                    photorealFavoriteLayoutContract,
+                    photorealFavoriteRetryContract,
                     staleFavoriteSourceFallbackRejected,
                     versionWheelCycleContract,
                     thumbnailVersionPreferenceContract,
                     thumbnailVariantCountContract,
                     upscaleSettingsContract,
+                    persistedNcnnUpscaleChoiceContract,
                     photorealShortcutContract,
                     requestContract,
                     fallbackPromptContract,
@@ -1923,6 +2153,7 @@ public partial class App
                     galleryContextNoModal,
                     galleryContextDirectContract,
                     galleryEnqueueNextContract,
+                    modalEnqueueNextDisplayedPhotorealContract,
                     legacyPhotorealCapabilitySafe,
                     modalPhotorealOperation,
                     sharedQueueRoute,
@@ -1943,6 +2174,14 @@ public partial class App
                     recoveredHqButtonContract,
                     recoveredHqCapabilityGateContract,
                     photorealSeedContract,
+                    photorealSeedDetails = new
+                    {
+                        randomSeedOmitted,
+                        seedDefaultAndSurface,
+                        fixedSeedExact,
+                        invalidSeedBlocked,
+                        missingSeedCapabilityBlocked,
+                    },
                     gallerySingleFlightContract,
                     recoveredReferencePerformance,
                     recoveredReferenceDiagnostic,

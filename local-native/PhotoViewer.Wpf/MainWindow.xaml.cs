@@ -166,6 +166,7 @@ public partial class MainWindow : Window
     private const string ModalMetadataSettingsTab = "settings";
     private const int MinFavoriteFilterLevel = 1;
     private const int MaxFavoriteFilterLevel = 5;
+    private const int MinPhotorealFavoriteFilterLevel = 0;
     private const int MaxPersistedPreviewTabs = 30;
     private static readonly JsonSerializerOptions SharedRecentJsonOptions = new()
     {
@@ -433,7 +434,7 @@ public partial class MainWindow : Window
         = static (request, token) => ModalEnhancementHttpClient.SendAsync(request, token);
     private bool _usingDefaultModalEnhancementSender = true;
     private string _modalEnhancementPresetId = "anime-sharp-x2";
-    private string _modalEnhancementAdapterId = "realesrgan-ncnn";
+    private string _modalEnhancementAdapterId = "comfyui";
     private double _modalEnhancementScale = 2d;
     private Func<bool>? _confirmLargeEnhancementForSmoke;
     private Func<bool>? _confirmEnhancedOutputDeleteForSmoke;
@@ -530,6 +531,7 @@ public partial class MainWindow : Window
     private DateTime? _dateFromLocal;
     private DateTime? _dateToLocal;
     private readonly HashSet<int> _favoriteFilterLevels = [];
+    private readonly HashSet<int> _photorealFavoriteFilterLevels = [];
     private bool _showUnseenDots;
     private bool _syncingUnseenDotsControls;
     private bool _showFavoriteChangeNotifications = true;
@@ -1395,6 +1397,7 @@ public partial class MainWindow : Window
         bool VideoOnly,
         bool UnseenOnly,
         FrozenSet<int> FavoriteLevels,
+        FrozenSet<int> PhotorealFavoriteLevels,
         FrozenSet<string> HiddenFolderBuckets,
         DateTime? DateFromLocal,
         DateTime? DateToLocal);
@@ -1409,6 +1412,7 @@ public partial class MainWindow : Window
         double CardHeight,
         string Prompt,
         int FavoriteLevel,
+        int PhotorealFavoriteLevel,
         bool Enhanced,
         bool Upscaled,
         bool Photorealized,
@@ -2178,6 +2182,9 @@ public partial class MainWindow : Window
                     StringComparer.OrdinalIgnoreCase),
                 BuildEnhancementAvailabilityByPath(
                     _catalogEnhancementVersionsByPath),
+                BuildPhotorealFavoriteLevelsByPath(
+                    _catalogEnhancementVersionsByPath,
+                    _favorites),
                 _catalogVideoVersionsByPath
                     .Where(static item => item.Value.Count > 0)
                     .ToDictionary(
@@ -3748,6 +3755,12 @@ public partial class MainWindow : Window
                 out EnhancementAvailability knownEnhancementAvailability)
                 ? knownEnhancementAvailability
                 : default;
+        int photorealFavoriteLevel = enhancementAlias is not null
+            && sharedState.PhotorealFavoriteLevelsByPath.TryGetValue(
+                enhancementAlias,
+                out int knownPhotorealFavoriteLevel)
+                ? Math.Clamp(knownPhotorealFavoriteLevel, 0, 5)
+                : 0;
         int videoVersionCount = enhancementAlias is not null
             && sharedState.VideoVersionCountsByPath.TryGetValue(
                 enhancementAlias,
@@ -3846,6 +3859,7 @@ public partial class MainWindow : Window
             UpscaleVersionCount = enhancementAvailability.UpscaleCount,
             Photorealized = photorealized,
             PhotorealVersionCount = enhancementAvailability.PhotorealCount,
+            PhotorealFavoriteLevel = photorealFavoriteLevel,
             I2iEdited = i2iEdited,
             I2iVersionCount = enhancementAvailability.I2iCount,
             VideoGenerated = videoGenerated,
@@ -5196,11 +5210,12 @@ public partial class MainWindow : Window
         return new EnhancementAvailability(upscaleCount, photorealCount, i2iCount);
     }
 
-    private static void ApplyTileEnhancementAvailability(
+    private void ApplyTileEnhancementAvailability(
         Tile tile,
         IEnumerable<ManagedEnhancementVersion> versions)
     {
-        EnhancementAvailability availability = GetEnhancementAvailability(versions);
+        ManagedEnhancementVersion[] versionSnapshot = versions.ToArray();
+        EnhancementAvailability availability = GetEnhancementAvailability(versionSnapshot);
         tile.UpscaleVersionCount = availability.UpscaleCount;
         tile.PhotorealVersionCount = availability.PhotorealCount;
         tile.I2iVersionCount = availability.I2iCount;
@@ -5212,8 +5227,13 @@ public partial class MainWindow : Window
             versions,
             "upscale");
         tile.PhotorealCompletedAtUtc = LatestEnhancementActivityUtc(
-            versions,
+            versionSnapshot,
             "photoreal");
+        tile.PhotorealFavoriteLevel = versionSnapshot
+            .Where(static version => version.Operation == "photoreal")
+            .Select(version => FavoriteLevelForPath(version.Output.OutputPath))
+            .DefaultIfEmpty(0)
+            .Max();
     }
 
     private void ApplyTileEnhancementQueueActivity(Tile tile)
@@ -5725,6 +5745,7 @@ public partial class MainWindow : Window
                 _favorites[delta.Path] = current.DurableLevel;
             else
                 _favorites.Remove(delta.Path);
+            RefreshPhotorealFavoritePresentationForPath(delta.Path);
             SetTileFavoriteLevel(delta.Path, current.DurableLevel);
             _pendingFavoriteMutations.Remove(delta.Path);
             failed.Add(delta with { DurableBefore = current.DurableLevel });
@@ -5830,6 +5851,7 @@ public partial class MainWindow : Window
 
         SharedStoreWriter<FavoriteDelta> writer = EnsureFavoriteWriter();
         DateTimeOffset changedAtUtc = DateTimeOffset.UtcNow;
+        Tile? selectedTile = SelectedTile();
         foreach (FavoriteDelta previous in failed)
         {
             int durable = FavoriteLevelForPath(previous.Path);
@@ -5843,6 +5865,9 @@ public partial class MainWindow : Window
                 _favorites[previous.Path] = previous.DesiredLevel;
             else
                 _favorites.Remove(previous.Path);
+            RefreshPhotorealFavoritePresentationForPath(
+                previous.Path,
+                selectedTile);
             SetTileFavoriteLevel(previous.Path, previous.DesiredLevel);
             writer.Enqueue(new FavoriteDelta(previous.Path, durable, previous.DesiredLevel, generation));
         }
@@ -5902,6 +5927,49 @@ public partial class MainWindow : Window
         {
             if (string.Equals(tile.Path, path, StringComparison.OrdinalIgnoreCase))
                 tile.Fav = Math.Clamp(level, 0, 5);
+        }
+    }
+
+    private void RefreshPhotorealFavoritePresentationForPath(
+        string favoritePath,
+        Tile? preferredTile = null)
+    {
+        string normalizedFavoritePath = NormalizeFavoritePath(favoritePath);
+        var affected = new List<Tile>();
+
+        bool TryRefresh(Tile tile)
+        {
+            IReadOnlyList<ManagedEnhancementVersion> versions =
+                GetCatalogManagedEnhancementVersionsForPath(tile.Path);
+            if (!versions.Any(version =>
+                    version.Operation == "photoreal"
+                    && string.Equals(
+                        NormalizeFavoritePath(version.Output.OutputPath),
+                        normalizedFavoritePath,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            ApplyTileEnhancementAvailability(tile, versions);
+            affected.Add(tile);
+            return true;
+        }
+
+        if (preferredTile is not null)
+            TryRefresh(preferredTile);
+        if (affected.Count == 0)
+        {
+            foreach (Tile tile in _allTiles)
+                TryRefresh(tile);
+        }
+
+        if (affected.Count > 0 && _photorealFavoriteFilterLevels.Count > 0)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
         }
     }
 
@@ -8476,9 +8544,14 @@ public partial class MainWindow : Window
         ListBoxItem? item = hit is null
             ? null
             : ItemsControl.ContainerFromElement(list, hit) as ListBoxItem;
-        item ??= list.SelectedItem is null
-            ? null
-            : list.ItemContainerGenerator.ContainerFromItem(list.SelectedItem) as ListBoxItem;
+        bool keyboardInvocation = e.CursorLeft < 0 || e.CursorTop < 0;
+        if (item is null && keyboardInvocation)
+        {
+            item = list.SelectedItem is null
+                ? null
+                : list.ItemContainerGenerator.ContainerFromItem(
+                    list.SelectedItem) as ListBoxItem;
+        }
         if (item?.DataContext is not Tile { IsRealFile: true })
         {
             e.Handled = true;
@@ -8568,10 +8641,31 @@ public partial class MainWindow : Window
     private async void GalleryContextPhotorealNext_Click(object sender, RoutedEventArgs e)
         => await StartGalleryContextEnhancementAsync("photoreal", enqueueNext: true);
 
+    private async void ModalContextUpscaleNext_Click(object sender, RoutedEventArgs e)
+        => await StartModalContextEnhancementNextAsync("upscale");
+
+    private async void ModalContextPhotorealNext_Click(object sender, RoutedEventArgs e)
+        => await StartModalContextEnhancementNextAsync("photoreal");
+
+    private Task StartModalContextEnhancementNextAsync(string operation)
+        => Modal.Visibility == Visibility.Visible
+            ? StartGalleryContextEnhancementAsync(
+                operation,
+                enqueueNext: true,
+                useModalDisplayedVersion: true)
+            : Task.CompletedTask;
+
+    private void GalleryContextOpenModal_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedTile() is Tile { IsRealFile: true })
+            OpenModal();
+    }
+
     private async Task StartGalleryContextEnhancementAsync(
         string operation,
         bool enqueueNext = false,
-        bool requirePhotorealSource = false)
+        bool requirePhotorealSource = false,
+        bool useModalDisplayedVersion = false)
     {
         if (operation is not ("upscale" or "photoreal"))
         {
@@ -8601,15 +8695,25 @@ public partial class MainWindow : Window
         string upscalePresetId = _modalEnhancementPresetId;
         string upscaleAdapterId = _modalEnhancementAdapterId;
         double upscaleScale = _modalEnhancementScale;
-        if (normalizedOperation == "upscale"
-            && requirePhotorealSource
-            && !TryResolveLatestPhotorealUpscaleProfile(
-                tile,
-                out requestSource,
-                out upscalePresetId,
-                out upscaleAdapterId,
-                out upscaleScale,
-                out string upscaleProfileError))
+        string upscaleProfileError = "";
+        bool upscaleProfileResolved = normalizedOperation != "upscale"
+            || !requirePhotorealSource && !useModalDisplayedVersion
+            || (useModalDisplayedVersion
+                ? TryResolveModalUpscaleProfile(
+                    tile,
+                    out requestSource,
+                    out upscalePresetId,
+                    out upscaleAdapterId,
+                    out upscaleScale,
+                    out upscaleProfileError)
+                : TryResolveLatestPhotorealUpscaleProfile(
+                    tile,
+                    out requestSource,
+                    out upscalePresetId,
+                    out upscaleAdapterId,
+                    out upscaleScale,
+                    out upscaleProfileError));
+        if (!upscaleProfileResolved)
         {
             SetStatusToast(upscaleProfileError);
             return;
@@ -8714,6 +8818,12 @@ public partial class MainWindow : Window
             || !payload.TryGetProperty("job", out JsonElement queuedJob))
         {
             SetStatusToast(response.Error);
+            if (normalizedOperation == "photoreal"
+                && photorealSeed.HasValue
+                && response.StatusCode == 426)
+            {
+                SetPhotorealSeedStatus(response.Error);
+            }
             return;
         }
 
@@ -10800,6 +10910,19 @@ public partial class MainWindow : Window
         SaveState();
     }
 
+    private void PhotorealFavoriteLevelFilter_Changed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_initializing || _syncingFavoriteFilterControls) return;
+        SyncPhotorealFavoriteFilterLevelsFromControls();
+        _ = QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: true);
+        SaveState();
+    }
+
     private void ShowUnseenDots_Changed(object sender, RoutedEventArgs e)
     {
         if (_initializing || _syncingUnseenDotsControls) return;
@@ -11272,6 +11395,38 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private bool SetPhotorealFavoriteFilterLevels(
+        IEnumerable<int> levels,
+        bool asynchronous = true)
+    {
+        var normalized = levels
+            .Where(level => level is >= MinPhotorealFavoriteFilterLevel
+                and <= MaxFavoriteFilterLevel)
+            .ToHashSet();
+        if (_photorealFavoriteFilterLevels.SetEquals(normalized))
+            return false;
+
+        _photorealFavoriteFilterLevels.Clear();
+        _photorealFavoriteFilterLevels.UnionWith(normalized);
+        SyncPhotorealFavoriteFilterControls();
+        if (!_initializing)
+        {
+            if (asynchronous)
+            {
+                _ = QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: false,
+                    selectFirst: true);
+            }
+            else
+            {
+                ApplyFilters();
+            }
+            SaveState();
+        }
+        return true;
+    }
+
     private void SetFavoriteFilterState(
         bool favoritesOnly,
         bool unfavoriteOnly,
@@ -11353,6 +11508,8 @@ public partial class MainWindow : Window
             && FavoriteLevelFilterPanel.IsEnabled != favoritesOnly)
             FavoriteLevelFilterPanel.IsEnabled = favoritesOnly;
 
+        SyncPhotorealFavoriteFilterControls();
+
         if (FavoriteFilterSummary is null)
             return;
 
@@ -11380,6 +11537,57 @@ public partial class MainWindow : Window
         if (FavoriteLevel4Filter?.IsChecked == true) _favoriteFilterLevels.Add(4);
         if (FavoriteLevel5Filter?.IsChecked == true) _favoriteFilterLevels.Add(5);
         SyncFavoriteFilterControls();
+    }
+
+    private void SyncPhotorealFavoriteFilterControls()
+    {
+        if (PhotorealFavoriteLevel0Filter is null
+            || PhotorealFavoriteLevel1Filter is null
+            || PhotorealFavoriteLevel2Filter is null
+            || PhotorealFavoriteLevel3Filter is null
+            || PhotorealFavoriteLevel4Filter is null
+            || PhotorealFavoriteLevel5Filter is null)
+        {
+            return;
+        }
+
+        _syncingFavoriteFilterControls = true;
+        try
+        {
+            SetCheckBoxState(PhotorealFavoriteLevel0Filter, _photorealFavoriteFilterLevels.Contains(0));
+            SetCheckBoxState(PhotorealFavoriteLevel1Filter, _photorealFavoriteFilterLevels.Contains(1));
+            SetCheckBoxState(PhotorealFavoriteLevel2Filter, _photorealFavoriteFilterLevels.Contains(2));
+            SetCheckBoxState(PhotorealFavoriteLevel3Filter, _photorealFavoriteFilterLevels.Contains(3));
+            SetCheckBoxState(PhotorealFavoriteLevel4Filter, _photorealFavoriteFilterLevels.Contains(4));
+            SetCheckBoxState(PhotorealFavoriteLevel5Filter, _photorealFavoriteFilterLevels.Contains(5));
+        }
+        finally
+        {
+            _syncingFavoriteFilterControls = false;
+        }
+
+        if (PhotorealFavoriteFilterSummary is not null)
+        {
+            PhotorealFavoriteFilterSummary.Text =
+                _photorealFavoriteFilterLevels.Count == 0
+                    ? "すべて"
+                    : string.Join(
+                        " + ",
+                        _photorealFavoriteFilterLevels
+                            .OrderBy(static level => level));
+        }
+    }
+
+    private void SyncPhotorealFavoriteFilterLevelsFromControls()
+    {
+        _photorealFavoriteFilterLevels.Clear();
+        if (PhotorealFavoriteLevel0Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(0);
+        if (PhotorealFavoriteLevel1Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(1);
+        if (PhotorealFavoriteLevel2Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(2);
+        if (PhotorealFavoriteLevel3Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(3);
+        if (PhotorealFavoriteLevel4Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(4);
+        if (PhotorealFavoriteLevel5Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(5);
+        SyncPhotorealFavoriteFilterControls();
     }
 
     private void PruneHiddenFolderBucketsToCurrentSet()
@@ -11673,6 +11881,7 @@ public partial class MainWindow : Window
         else
             _favorites.Remove(key);
         _favoriteDirtyPaths.Add(key);
+        RefreshPhotorealFavoritePresentationForPath(key, SelectedTile());
 
         if (!SaveFavorites())
         {
@@ -11844,10 +12053,12 @@ public partial class MainWindow : Window
             else
                 _favorites.Remove(key);
             _favoriteDirtyPaths.Remove(key);
+            RefreshPhotorealFavoritePresentationForPath(key, SelectedTile());
             RefreshModalFavoriteSurface();
             return false;
         }
 
+        RefreshPhotorealFavoritePresentationForPath(key, SelectedTile());
         RefreshModalFavoriteSurface();
         RecordIndependentFavoriteHistory(
             key,
@@ -11899,6 +12110,7 @@ public partial class MainWindow : Window
             _favorites[key] = desired;
         else
             _favorites.Remove(key);
+        RefreshPhotorealFavoritePresentationForPath(key, SelectedTile());
         EnsureFavoriteWriter().Enqueue(
             new FavoriteDelta(key, durable, desired, generation));
 
@@ -12846,6 +13058,7 @@ public partial class MainWindow : Window
                     Math.Max(1, tile.CardHeight + 4),
                     tile.Prompt,
                     tile.Fav,
+                    tile.PhotorealFavoriteLevel,
                     tile.Enhanced,
                     tile.Upscaled,
                     tile.Photorealized,
@@ -12879,6 +13092,8 @@ public partial class MainWindow : Window
             bool videoOnly = VideoOnlyFilter?.IsChecked == true;
             bool unseenOnly = UnseenOnlyFilter?.IsChecked == true;
             FrozenSet<int> favoriteLevels = _favoriteFilterLevels.ToFrozenSet();
+            FrozenSet<int> photorealFavoriteLevels =
+                _photorealFavoriteFilterLevels.ToFrozenSet();
             FrozenSet<string> hiddenFolderBuckets =
                 _hiddenFolderBuckets.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
             bool unfiltered = !albumActive
@@ -12891,6 +13106,7 @@ public partial class MainWindow : Window
                 && !unphotorealOnly
                 && !videoOnly
                 && !unseenOnly
+                && photorealFavoriteLevels.Count == 0
                 && hiddenFolderBuckets.Count == 0
                 && !_dateFromLocal.HasValue
                 && !_dateToLocal.HasValue;
@@ -12941,6 +13157,7 @@ public partial class MainWindow : Window
                 videoOnly,
                 unseenOnly,
                 favoriteLevels,
+                photorealFavoriteLevels,
                 hiddenFolderBuckets,
                 _dateFromLocal,
                 _dateToLocal);
@@ -13004,6 +13221,7 @@ public partial class MainWindow : Window
             && !snapshot.UnphotorealOnly
             && !snapshot.VideoOnly
             && !snapshot.UnseenOnly
+            && snapshot.PhotorealFavoriteLevels.Count == 0
             && snapshot.HiddenFolderBuckets.Count == 0
             && !snapshot.DateFromLocal.HasValue
             && !snapshot.DateToLocal.HasValue;
@@ -13420,6 +13638,13 @@ public partial class MainWindow : Window
             return false;
         if (snapshot.UnfavoriteOnly && tile.FavoriteLevel > 0)
             return false;
+        if (snapshot.PhotorealFavoriteLevels.Count > 0
+            && (!tile.Photorealized
+                || !snapshot.PhotorealFavoriteLevels.Contains(
+                    tile.PhotorealFavoriteLevel)))
+        {
+            return false;
+        }
         if (!MatchesEnhancementFilters(
                 tile.Upscaled,
                 tile.Photorealized,
@@ -14702,6 +14927,7 @@ public partial class MainWindow : Window
         IReadOnlySet<string> SeenPaths,
         IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs,
         IReadOnlyDictionary<string, EnhancementAvailability> EnhancementAvailabilityByPath,
+        IReadOnlyDictionary<string, int> PhotorealFavoriteLevelsByPath,
         IReadOnlyDictionary<string, int> VideoVersionCountsByPath,
         IReadOnlyDictionary<string, string> VideoOutputs,
         IReadOnlyDictionary<string, DateTimeOffset> UpscaleCompletedAtUtcByPath,
@@ -14717,6 +14943,27 @@ public partial class MainWindow : Window
             StringComparer.OrdinalIgnoreCase);
         foreach ((string path, List<ManagedEnhancementVersion> versions) in versionsByPath)
             result[path] = GetEnhancementAvailability(versions);
+        return result;
+    }
+
+    private static Dictionary<string, int> BuildPhotorealFavoriteLevelsByPath(
+        IReadOnlyDictionary<string, List<ManagedEnhancementVersion>> versionsByPath,
+        IReadOnlyDictionary<string, int> favorites)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, List<ManagedEnhancementVersion> versions) in versionsByPath)
+        {
+            int maximum = versions
+                .Where(static version => version.Operation == "photoreal")
+                .Select(version => favorites.TryGetValue(
+                        NormalizeFavoritePath(version.Output.OutputPath),
+                        out int level)
+                    ? Math.Clamp(level, 0, 5)
+                    : 0)
+                .DefaultIfEmpty(0)
+                .Max();
+            result[path] = maximum;
+        }
         return result;
     }
 
@@ -16665,6 +16912,16 @@ public partial class MainWindow : Window
     {
         UpdateModalDisplayedDeletePresentation(validateOriginalSource: true);
         UpdateModalI2iEditActionAvailability();
+        UpdateModalEnhancementActionControls();
+        ModalContextUpscale.IsEnabled = ModalEnhanceButton.IsEnabled;
+        ModalContextUpscale.ToolTip = ModalEnhanceButton.ToolTip;
+        ModalContextPhotoreal.IsEnabled = ModalPhotorealButton.IsEnabled;
+        ModalContextPhotoreal.ToolTip = ModalPhotorealButton.ToolTip;
+        bool canEnqueueNext = SelectedTile() is Tile { IsRealFile: true } sourceTile
+            && File.Exists(sourceTile.Path)
+            && !_galleryContextEnhancementRequestPending;
+        ModalContextUpscaleNext.IsEnabled = canEnqueueNext;
+        ModalContextPhotorealNext.IsEnabled = canEnqueueNext;
         bool enhancedAvailable = SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
         ModalContextEnhancedToggle.IsEnabled = enhancedAvailable;
         string outputLabel = _modalEnhancementOperation == "photoreal" ? "Photoreal" : "Enhanced";
@@ -21120,6 +21377,14 @@ public partial class MainWindow : Window
             _favoriteFilterLevels.UnionWith(state.FavoriteFilterLevels.Where(level => level is >= MinFavoriteFilterLevel and <= MaxFavoriteFilterLevel));
         else if (state.FavoriteFilterLevel is >= MinFavoriteFilterLevel and <= MaxFavoriteFilterLevel)
             _favoriteFilterLevels.Add(state.FavoriteFilterLevel.Value); // additive migration from the scalar schema
+        _photorealFavoriteFilterLevels.Clear();
+        if (state.PhotorealFavoriteFilterLevels is { Count: > 0 })
+        {
+            _photorealFavoriteFilterLevels.UnionWith(
+                state.PhotorealFavoriteFilterLevels.Where(level =>
+                    level is >= MinPhotorealFavoriteFilterLevel
+                        and <= MaxFavoriteFilterLevel));
+        }
         _showUnseenDots = state.ShowUnseenDots;
         _confirmBeforeDelete = state.ConfirmBeforeDelete;
         _foldersSectionExpanded = state.FoldersSectionExpanded ?? true;
@@ -21278,6 +21543,9 @@ public partial class MainWindow : Window
                 ShowFavoritesOnly = FavoriteOnlyFilter?.IsChecked == true,
                 ShowUnfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true,
                 FavoriteFilterLevels = _favoriteFilterLevels.Count > 0 ? _favoriteFilterLevels.OrderBy(static level => level).ToList() : null,
+                PhotorealFavoriteFilterLevels = _photorealFavoriteFilterLevels.Count > 0
+                    ? _photorealFavoriteFilterLevels.OrderBy(static level => level).ToList()
+                    : null,
                 ShowUnseenDots = _showUnseenDots,
                 ShowFavoriteChangeNotifications = _showFavoriteChangeNotifications,
                 UseLastDisplayedImageVersionForThumbnails =
@@ -25481,6 +25749,25 @@ public partial class MainWindow : Window
     public bool IsAppSettingsUnseenDotsFocusedForSmoke => AppSettingsUnseenDotsCheckBox.IsKeyboardFocused;
     public bool UnseenOnlyForSmoke => UnseenOnlyFilter?.IsChecked == true;
     public List<int> FavoriteFilterLevelsForSmoke => _favoriteFilterLevels.OrderBy(static level => level).ToList();
+    public List<int> PhotorealFavoriteFilterLevelsForSmoke
+        => _photorealFavoriteFilterLevels.OrderBy(static level => level).ToList();
+    public int PhotorealFavoriteLevelForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+                tile.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            ?.PhotorealFavoriteLevel ?? -1;
+    public bool PhotorealFavoriteBadgeForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+                tile.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            ?.ShowPhotorealFavoriteBadge == true;
+    internal Tile? TileForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+            tile.FileName,
+            fileName,
+            StringComparison.OrdinalIgnoreCase));
     public bool GridModeVisibleForSmoke => CardsList.Visibility == Visibility.Visible;
     public bool ListModeVisibleForSmoke => RowsList.Visibility == Visibility.Visible;
 
@@ -25571,6 +25858,12 @@ public partial class MainWindow : Window
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, button));
         return ModalFavoriteLevelForSmoke == Math.Clamp(before + Math.Sign(delta), 0, 5);
     }
+    public bool SetIndependentFavoriteLevelForSmoke(string path, int level)
+        => SetIndependentFavoriteLevel(
+            path,
+            Path.GetFileName(path),
+            level,
+            $"Set independent Favorite level {Math.Clamp(level, 0, 5)}.");
     public int ModalFavoriteLevelForSmoke
         => Modal.Visibility != Visibility.Visible
             ? SelectedTile()?.Fav ?? -1
@@ -25807,6 +26100,8 @@ public partial class MainWindow : Window
         => SetManualDateRange(ParseStateDate(from), ParseStateDate(to), asynchronous: false);
     public bool SetFavoriteFilterLevelsForSmoke(params int[] levels)
         => SetFavoriteFilterLevels(levels, asynchronous: false);
+    public bool SetPhotorealFavoriteFilterLevelsForSmoke(params int[] levels)
+        => SetPhotorealFavoriteFilterLevels(levels, asynchronous: false);
     public void SetShowUnseenDotsForSmoke(bool enabled)
         => SetShowUnseenDots(enabled, persist: true);
     public void SetSidebarUnseenDotsForSmoke(bool enabled) => ShowUnseenDots.IsChecked = enabled;
@@ -26384,10 +26679,22 @@ public partial class MainWindow : Window
             && ModalContextMenu.Items.OfType<MenuItem>().Count() >= 8
             && ModalContextMenu.Items.OfType<MenuItem>().All(item =>
                 !string.IsNullOrWhiteSpace(item.Header?.ToString())
-                && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(item)));
+                && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(item)))
+            && new[]
+            {
+                "AI高画質化",
+                "AI実写化",
+                "AI実写高画質化のみ",
+                "次に高画質化",
+                "次に実写化",
+            }.All(name => ModalContextMenu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(
+                    AutomationProperties.GetName(item),
+                    name,
+                    StringComparison.Ordinal)));
     public bool GalleryContextMenuContractForSmoke
         => new[] { CardsContextMenu, RowsContextMenu }.All(menu =>
-            menu.Items.OfType<MenuItem>().Count() == 6
+            menu.Items.OfType<MenuItem>().Count() >= 10
             && menu.Items.OfType<MenuItem>().Any(item =>
                 string.Equals(item.Header?.ToString(), "AI高画質化", StringComparison.Ordinal)
                 && string.Equals(AutomationProperties.GetName(item), "AI高画質化", StringComparison.Ordinal))
@@ -26426,7 +26733,18 @@ public partial class MainWindow : Window
                         StringComparison.Ordinal)
                     || child.Tag?.ToString()?.StartsWith(
                         PhotorealVideoSourceRequestPrefix,
-                        StringComparison.Ordinal) == true)));
+                        StringComparison.Ordinal) == true))
+            && new[]
+            {
+                "Open enlarged image",
+                "Open selected image externally",
+                "Show selected source in folder",
+                "Add selected image to Album",
+            }.All(name => menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(
+                    AutomationProperties.GetName(item),
+                    name,
+                    StringComparison.Ordinal))));
     public bool ModalEdgeChromeContractForSmoke
         => ModalPreviousZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalCenterZoneColumn.Width.GridUnitType == GridUnitType.Star
@@ -26814,6 +27132,16 @@ public partial class MainWindow : Window
             enqueueNext,
             requirePhotorealSource);
         return Modal.Visibility != Visibility.Visible;
+    }
+
+    public async Task<bool> StartModalContextEnhancementNextForSmokeAsync(
+        string operation)
+    {
+        if (Modal.Visibility != Visibility.Visible)
+            return false;
+        await StartModalContextEnhancementNextAsync(operation);
+        return Modal.Visibility == Visibility.Visible
+            && !_galleryContextEnhancementRequestPending;
     }
 
     public async Task<bool> StartGalleryContextEnhancementDoubleActivationForSmokeAsync(
@@ -27569,6 +27897,9 @@ public sealed class ViewerState
     public bool ShowFavoritesOnly { get; set; }
     public bool ShowUnfavoriteOnly { get; set; }
     public List<int>? FavoriteFilterLevels { get; set; }
+    // WPF-local gallery filter over the highest Favorite level among validated
+    // managed Photoreal outputs. Level 0 still requires a Photoreal version.
+    public List<int>? PhotorealFavoriteFilterLevels { get; set; }
     public bool ShowUnseenDots { get; set; }
     // WPF-local presentation only. Missing in older state keeps notifications on.
     public bool? ShowFavoriteChangeNotifications { get; set; }
@@ -28534,6 +28865,7 @@ public sealed class Tile : INotifyPropertyChanged
     private static readonly PropertyChangedEventArgs ListThumbnailHeightChanged = new(nameof(ListThumbnailHeight));
     private static readonly PropertyChangedEventArgs ListThumbnailSizeChanged = new(nameof(ListThumbnailSize));
     private static readonly PropertyChangedEventArgs ShowFavoriteBadgeChanged = new(nameof(ShowFavoriteBadge));
+    private static readonly PropertyChangedEventArgs ShowPhotorealFavoriteBadgeChanged = new(nameof(ShowPhotorealFavoriteBadge));
     private static readonly PropertyChangedEventArgs ShowEnhancedBadgeChanged = new(nameof(ShowEnhancedBadge));
     private static readonly PropertyChangedEventArgs ShowUpscaleBadgeChanged = new(nameof(ShowUpscaleBadge));
     private static readonly PropertyChangedEventArgs ShowPhotorealBadgeChanged = new(nameof(ShowPhotorealBadge));
@@ -28576,6 +28908,7 @@ public sealed class Tile : INotifyPropertyChanged
     public string ModifiedText { get; set; } = "";
     public string AutomationHelpText
         => $"{SizeText}. Favorite level {_fav}. "
+            + $"{(_photorealized ? $"Highest Photoreal favorite level {_photorealFavoriteLevel}. " : "")}"
             + $"{(_upscaled ? _upscaleVersionCount > 1 ? $"AI-upscaled versions {_upscaleVersionCount}. " : "AI-upscaled. " : "")}"
             + $"{(_upscaleQueueActive ? "AI-upscale queued. " : "")}"
             + $"{(_photorealized ? _photorealVersionCount > 1 ? $"AI-photorealized versions {_photorealVersionCount}. " : "AI-photorealized. " : "")}"
@@ -28597,6 +28930,7 @@ public sealed class Tile : INotifyPropertyChanged
     private bool _videoGenerated;
     private int _upscaleVersionCount;
     private int _photorealVersionCount;
+    private int _photorealFavoriteLevel;
     private int _i2iVersionCount;
     private int _videoVersionCount;
     private bool _upscaleQueueActive;
@@ -28654,6 +28988,7 @@ public sealed class Tile : INotifyPropertyChanged
             _photorealized = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Photorealized)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealVariantCount)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
@@ -28711,6 +29046,20 @@ public sealed class Tile : INotifyPropertyChanged
             _photorealVersionCount = normalized;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhotorealVersionCount)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public int PhotorealFavoriteLevel
+    {
+        get => _photorealFavoriteLevel;
+        set
+        {
+            int normalized = Math.Clamp(value, 0, 5);
+            if (_photorealFavoriteLevel == normalized) return;
+            _photorealFavoriteLevel = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhotorealFavoriteLevel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
@@ -28815,6 +29164,7 @@ public sealed class Tile : INotifyPropertyChanged
             _showCardStatusBadge = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowCardStatusBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowEnhancedBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
@@ -28833,6 +29183,8 @@ public sealed class Tile : INotifyPropertyChanged
     }
 
     public bool ShowFavoriteBadge => _showCardStatusBadge && _fav > 0;
+    public bool ShowPhotorealFavoriteBadge =>
+        _showCardStatusBadge && _photorealized && _photorealFavoriteLevel > 0;
     public string FavoriteGlyph => _fav > 0 ? "\uEB52" : "\uEB51";
     public bool ShowEnhancedBadge => _showCardStatusBadge && _enhanced;
     public bool ShowUpscaleBadge => _showCardStatusBadge && _upscaled;
@@ -29146,6 +29498,7 @@ public sealed class Tile : INotifyPropertyChanged
         {
             handler(this, ShowCardStatusBadgeChanged);
             handler(this, ShowFavoriteBadgeChanged);
+            handler(this, ShowPhotorealFavoriteBadgeChanged);
             handler(this, ShowEnhancedBadgeChanged);
             handler(this, ShowUpscaleBadgeChanged);
             handler(this, ShowPhotorealBadgeChanged);

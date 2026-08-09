@@ -40,6 +40,7 @@ public partial class MainWindow
     private CancellationTokenSource? _enhancementWorkspaceThumbnailCts;
     private bool _enhancementWorkspaceRefreshPending;
     private long _enhancementWorkspaceRefreshGeneration;
+    private long _enhancementWorkspaceQueuePresentationRevision;
     private bool _enhancementWorkspaceMutationPending;
     private long _enhancementWorkspaceGeneration;
     private string _enhancementWorkspaceFilter = "all";
@@ -756,6 +757,8 @@ public partial class MainWindow
 
         _enhancementWorkspaceRefreshPending = true;
         _enhancementWorkspaceRefreshGeneration = generation;
+        long queuePresentationRevision =
+            _enhancementWorkspaceQueuePresentationRevision;
         EnhancementJobsRefreshButton.IsEnabled = false;
         RefreshEnhancementQueuePauseControl();
         if (!isPoll)
@@ -778,6 +781,15 @@ public partial class MainWindow
             {
                 EnhancementJobsStatusText.Text = error ?? "The companion returned an invalid jobs response.";
                 _enhancementWorkspacePollTimer.Stop();
+                return;
+            }
+
+            // A queue mutation may finish while this GET is in flight. Applying
+            // the older inventory would make the row jump back until the next
+            // poll and makes "これを次に処理" look as though it did nothing.
+            if (queuePresentationRevision
+                != _enhancementWorkspaceQueuePresentationRevision)
+            {
                 return;
             }
 
@@ -1636,15 +1648,194 @@ public partial class MainWindow
             return;
         }
 
-        string message = move == "next"
-            ? "このジョブを次の待機位置へ移動しました。"
-            : "待機順を変更しました。";
-        await RunEnhancementWorkspaceMutationAsync(
-            job,
-            HttpMethod.Post,
-            $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/queue",
-            message,
-            new { move });
+        await MoveEnhancementJobInQueueAsync(job, move);
+    }
+
+    private async Task<bool> MoveEnhancementJobInQueueAsync(
+        EnhancementWorkspaceJobView job,
+        string move)
+    {
+        if (_enhancementWorkspaceMutationPending
+            || job.IsBusy
+            || EnhancementJobsDialog.Visibility != Visibility.Visible
+            || move is not ("up" or "down" or "next")
+            || !job.CanReorder)
+        {
+            return false;
+        }
+
+        string[] previousOrder = CurrentEnhancementWorkspaceQueueOrder();
+        string[] optimisticOrder = MoveEnhancementWorkspaceQueueId(
+            previousOrder,
+            job.Id,
+            move);
+        if (optimisticOrder.SequenceEqual(previousOrder, StringComparer.Ordinal))
+            return false;
+
+        _enhancementWorkspaceMutationPending = true;
+        job.IsBusy = true;
+        long generation = _enhancementWorkspaceGeneration;
+        _enhancementWorkspaceQueuePresentationRevision++;
+        ApplyEnhancementWorkspaceQueuePresentation(optimisticOrder);
+        EnhancementJobsStatusText.Text = move == "next"
+            ? "次の処理位置へすぐ反映しました。キューへ保存しています…"
+            : "待機順へすぐ反映しました。キューへ保存しています…";
+        try
+        {
+            EnhancementApiResponse response = await SendEnhancementApiAsync(
+                HttpMethod.Post,
+                $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/queue",
+                new { move });
+            if (generation != _enhancementWorkspaceGeneration
+                || EnhancementJobsDialog.Visibility != Visibility.Visible)
+            {
+                return false;
+            }
+
+            if (!response.Ok)
+            {
+                _enhancementWorkspaceQueuePresentationRevision++;
+                ApplyEnhancementWorkspaceQueuePresentation(previousOrder);
+                EnhancementJobsStatusText.Text =
+                    $"待機順を元に戻しました。{response.Error}";
+                return false;
+            }
+
+            JsonElement movedElement = default;
+            bool hasMovedResult = response.Payload is JsonElement payload
+                && payload.ValueKind == JsonValueKind.Object
+                && payload.TryGetProperty("moved", out movedElement)
+                && movedElement.ValueKind is JsonValueKind.True or JsonValueKind.False;
+            bool moved = hasMovedResult && movedElement.GetBoolean();
+            bool authoritativeApplied = response.Payload is JsonElement queuePayload
+                && TryReadEnhancementWorkspaceQueueOrder(
+                    queuePayload,
+                    out string[] authoritativeOrder)
+                && ApplyEnhancementWorkspaceQueuePresentation(
+                    authoritativeOrder);
+            if (authoritativeApplied)
+            {
+                _enhancementWorkspaceQueuePresentationRevision++;
+            }
+
+            if (!moved && !authoritativeApplied)
+            {
+                _enhancementWorkspaceQueuePresentationRevision++;
+                ApplyEnhancementWorkspaceQueuePresentation(previousOrder);
+                EnhancementJobsStatusText.Text = hasMovedResult
+                    ? "待機順は変わりませんでした。最新の一覧を更新してください。"
+                    : "companionの応答を確認できないため、待機順を元に戻しました。";
+                return false;
+            }
+
+            EnhancementJobsStatusText.Text = !moved && authoritativeApplied
+                ? "最新の待機順に同期しました。"
+                : move == "next"
+                ? "このジョブを次の処理位置へ移動しました。"
+                : "待機順を変更しました。";
+            return true;
+        }
+        finally
+        {
+            job.IsBusy = false;
+            _enhancementWorkspaceMutationPending = false;
+            RefreshEnhancementQueueBulkControls();
+            RefreshEnhancementQueuePauseControl();
+        }
+    }
+
+    private string[] CurrentEnhancementWorkspaceQueueOrder()
+        => _enhancementWorkspaceJobs
+            .Where(static candidate => candidate.Status == "queued")
+            .OrderBy(static candidate => candidate.QueuePosition ?? int.MaxValue)
+            .ThenBy(static candidate => candidate.CreatedAt)
+            .ThenBy(static candidate => candidate.ApiOrdinal)
+            .Select(static candidate => candidate.Id)
+            .ToArray();
+
+    private static string[] MoveEnhancementWorkspaceQueueId(
+        IReadOnlyList<string> current,
+        string id,
+        string move)
+    {
+        var next = current.ToList();
+        int from = next.FindIndex(candidate => string.Equals(
+            candidate,
+            id,
+            StringComparison.Ordinal));
+        if (from < 0)
+            return current.ToArray();
+
+        int to = move switch
+        {
+            "up" => Math.Max(0, from - 1),
+            "down" => Math.Min(next.Count - 1, from + 1),
+            "next" => 0,
+            _ => from,
+        };
+        if (from == to)
+            return current.ToArray();
+
+        next.RemoveAt(from);
+        next.Insert(to, id);
+        return next.ToArray();
+    }
+
+    private bool ApplyEnhancementWorkspaceQueuePresentation(
+        IReadOnlyList<string> orderedIds)
+    {
+        EnhancementWorkspaceJobView[] queued = _enhancementWorkspaceJobs
+            .Where(static candidate => candidate.Status == "queued")
+            .ToArray();
+        if (orderedIds.Count != queued.Length
+            || orderedIds.Distinct(StringComparer.Ordinal).Count()
+                != orderedIds.Count)
+        {
+            return false;
+        }
+
+        Dictionary<string, EnhancementWorkspaceJobView> queuedById = queued
+            .ToDictionary(static candidate => candidate.Id, StringComparer.Ordinal);
+        if (orderedIds.Any(id => !queuedById.ContainsKey(id)))
+            return false;
+
+        for (int index = 0; index < orderedIds.Count; index++)
+            queuedById[orderedIds[index]].ApplyQueuePresentation(
+                index + 1,
+                orderedIds.Count,
+                index);
+
+        _enhancementWorkspaceJobs.Sort(CompareEnhancementWorkspaceInventory);
+        ApplyEnhancementWorkspaceFilter(loadThumbnails: false);
+        RefreshEnhancementQueueBulkControls();
+        return true;
+    }
+
+    private static bool TryReadEnhancementWorkspaceQueueOrder(
+        JsonElement payload,
+        out string[] order)
+    {
+        order = [];
+        if (payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty("queue", out JsonElement queue)
+            || queue.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var ids = new List<string>();
+        foreach (JsonElement element in queue.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.Object
+                || !TryGetStringProperty(element, "id", out string? id)
+                || string.IsNullOrWhiteSpace(id))
+            {
+                return false;
+            }
+            ids.Add(id);
+        }
+        order = ids.ToArray();
+        return true;
     }
 
     private async void UpdateQueuedPhotorealPrompts_Click(
@@ -1652,9 +1843,14 @@ public partial class MainWindow
         RoutedEventArgs e)
     {
         if (sender is not Button { Tag: EnhancementWorkspaceJobView job }
-            || !job.CanUpdatePhotorealPrompts
-            || !TryResolveEnhancementWorkspaceInput(job, out string sourceIdentity))
+            || !job.CanUpdatePhotorealPrompts)
         {
+            return;
+        }
+        if (!TryResolveEnhancementWorkspaceInput(job, out string sourceIdentity))
+        {
+            EnhancementJobsStatusText.Text =
+                "元画像を安全に解決できないため、Promptは変更していません。";
             return;
         }
 
@@ -2630,6 +2826,13 @@ public partial class MainWindow
                 reorderCatalog: true,
                 selectFirst: false);
         }
+        else if (_photorealFavoriteFilterLevels.Count > 0)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: false);
+        }
     }
 
     public async Task OpenEnhancementJobsForSmokeAsync()
@@ -2786,20 +2989,19 @@ public partial class MainWindow
         return true;
     }
 
-    public async Task<bool> MoveEnhancementJobForSmokeAsync(string id, string move)
+    public async Task<bool> MoveEnhancementJobForSmokeAsync(
+        string id,
+        string move,
+        bool waitForWorkspaceIdle = true)
     {
         EnhancementWorkspaceJobView? job =
             _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
         if (job is null || !job.CanReorder || move is not ("up" or "down" or "next"))
             return false;
-        await RunEnhancementWorkspaceMutationAsync(
-            job,
-            HttpMethod.Post,
-            $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/queue",
-            "Queue order changed.",
-            new { move });
-        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
-        return true;
+        bool moved = await MoveEnhancementJobInQueueAsync(job, move);
+        if (waitForWorkspaceIdle)
+            await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+        return moved;
     }
 
     public async Task<bool> UpdateQueuedPhotorealPromptsForSmokeAsync(string id)
@@ -3106,16 +3308,19 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         !_isBusy
         && IsSupportedMutationOperation
         && Status is "failed" or "canceled" or "deleted";
-    public bool CanReorder =>
-        !_isBusy
-        && IsSupportedMutationOperation
+    public bool ShowReorderControls =>
+        IsSupportedMutationOperation
         && QueueMutationScopeSafe
         && Status == "queued";
-    public bool CanMoveUp => CanReorder && QueuePosition is > 1;
-    public bool CanMoveDown => CanReorder
+    public bool CanReorder => !_isBusy && ShowReorderControls;
+    public bool ShowMoveUp => ShowReorderControls && QueuePosition is > 1;
+    public bool ShowMoveDown => ShowReorderControls
         && QueuePosition is int position
         && position < QueueCount;
-    public bool CanMoveNext => CanMoveUp;
+    public bool ShowMoveNext => ShowMoveUp;
+    public bool CanMoveUp => !_isBusy && ShowMoveUp;
+    public bool CanMoveDown => !_isBusy && ShowMoveDown;
+    public bool CanMoveNext => !_isBusy && ShowMoveNext;
     public bool CanRerunWithCurrentSettings =>
         !_isBusy
         && Operation == "photoreal"
@@ -3332,6 +3537,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCancel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanRetry)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanReorder)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowReorderControls)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowMoveUp)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowMoveDown)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowMoveNext)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveUp)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveDown)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveNext)));
@@ -3361,6 +3570,33 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             || progressChanged
             || queueChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
+    }
+
+    public void ApplyQueuePresentation(
+        int queuePosition,
+        int queueCount,
+        int queueOrder)
+    {
+        bool positionChanged = QueuePosition != queuePosition;
+        bool countChanged = QueueCount != queueCount;
+        bool orderChanged = QueueOrder != queueOrder;
+        QueuePosition = queuePosition;
+        QueueCount = queueCount;
+        QueueOrder = queueOrder;
+        if (!positionChanged && !countChanged && !orderChanged)
+            return;
+
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueuePosition)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueCount)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(QueueOrder)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowMoveUp)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowMoveDown)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowMoveNext)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveUp)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveDown)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveNext)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
     }
 
     public bool IsHighlighted

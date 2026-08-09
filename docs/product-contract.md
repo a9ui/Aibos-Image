@@ -326,9 +326,16 @@ or stores.
   separate key, so each Photoreal output and its Original keep independent
   levels. Upscale, I2I, and Video displays retain the Original/source Favorite
   meaning in this contract version.
-- Gallery Favorite badges, filters, and sorting retain Original/source
-  semantics even when the gallery thumbnail preference displays a managed
-  Photoreal image. Version-specific Favorite is exposed only in the modal.
+- The gallery's primary red Favorite badge, normal Favorite filters, and
+  `Fav touched` sort retain Original/source semantics even when its thumbnail
+  displays a managed Photoreal image. In addition, one blue heart shows the
+  highest Favorite level among currently validated managed `photoreal`
+  outputs for that Original. The WPF-local `実写ファボ` 0 through 5 pills use
+  union semantics with each other and intersection semantics with other
+  filters. Level 0 requires at least one valid Photoreal output and a maximum
+  level of 0; an Original with no Photoreal output does not match. This is a
+  presentation over existing job and path-keyed Favorite state, not a shared
+  schema change. Individual version editing remains in the modal.
   Every supported writer must merge only its changed path keys into the latest
   shared map; a normal write must preserve catalog-external managed-output keys.
 - Removing or temporarily losing a managed output does not delete its Favorite
@@ -488,9 +495,14 @@ or stores.
   `Ctrl+Up` and `Ctrl+Down` retain
   wraparound cycling of the same inventory. Delete removes only the selected
   managed version and never the source or sibling versions.
+- Ordinary explicit AI upscale uses the existing ComfyUI quality route by
+  default. Its overlapped, feathered tile composition reduces visible grid
+  boundaries. The portable Real-ESRGAN ncnn route remains an explicit
+  speed-first option and is labelled as capable of visible tile/block
+  inconsistency; WPF never silently falls back from the selected route.
 - Explicit `AI高画質化` uses the currently displayed managed photoreal version
   when one is selected. WPF sends only its durable `sourceProducerJobId` and
-  the photo profile `photo-natural-x2` / `realesrgan-ncnn` / scale 2; it never
+  the photo profile `photo-natural-x2` / `comfyui` / scale 2; it never
   sends a managed output path. The companion revalidates that the producer is
   a succeeded photoreal job for the same Original, runs the adapter against
   that exact output, and keeps the Original `sourceId`, `sourcePath`, and
@@ -508,6 +520,10 @@ or stores.
   actions for the clicked real source image. Opening a context menu remains
   passive; only choosing either action may start the companion and enqueue
   work.
+- The enlarged-image menu exposes the same direct and enqueue-next AI actions,
+  while retaining display-version, zoom, file, Album, and delete actions in
+  separate visual groups. Grid and list menus also group direct AI, queue,
+  video, and ordinary file/view actions. Opening any menu remains passive.
 - Those menus also expose `次に高画質化` and `次に実写化`. The companion must
   advertise `atomicImageEnqueueNext`; the POST then carries
   `queuePlacement: "next"` and inserts first among waiting jobs under the claim
@@ -598,6 +614,11 @@ or stores.
     The Jobs header also exposes one bulk variant for all currently waiting,
     eligible rows. It resolves the current WPF Positive and Negative separately
     for each source PNG, then invokes the same per-row replacement contract.
+    Resolved Positive means the current nonblank (or empty-state fallback)
+    Positive plus outputs from enabled WPF-local Prompt mappings matched
+    against that source PNG's `parameters` metadata. Resolved Negative is the
+    current WPF Negative; a metadata `Negative prompt` is intentionally not
+    inherited.
     It does not change LoRA, numeric settings, source identity, status, or queue
     order; ineligible and concurrently claimed rows are skipped or reported
     without rolling back successful updates to other rows.
