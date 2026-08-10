@@ -122,6 +122,11 @@ public partial class App
                 var postAttempts = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 var receivedPrompts = new ConcurrentDictionary<string, string?>(
                     StringComparer.OrdinalIgnoreCase);
+                var receivedUpscaleSettings = new ConcurrentBag<(
+                    string PresetId,
+                    string AdapterId,
+                    double Scale,
+                    string OutputFormat)>();
                 int nextJobId = 0;
                 int inFlight = 0;
                 int maxInFlight = 0;
@@ -224,6 +229,11 @@ public partial class App
                             : await request.Content.ReadAsStringAsync(token);
                         using JsonDocument document = JsonDocument.Parse(body);
                         string source = document.RootElement.GetProperty("sourceId").GetString() ?? "";
+                        receivedUpscaleSettings.Add((
+                            document.RootElement.GetProperty("presetId").GetString() ?? "",
+                            document.RootElement.GetProperty("adapterId").GetString() ?? "",
+                            document.RootElement.GetProperty("scale").GetDouble(),
+                            document.RootElement.GetProperty("outputFormat").GetString() ?? ""));
                         string? receivedPrompt = document.RootElement.TryGetProperty(
                                 "prompt",
                                 out JsonElement promptElement)
@@ -271,6 +281,11 @@ public partial class App
                     string? executable,
                     string? modelDirectory)
                 {
+                    window.ConfigureUpscaleSettingsForSmoke(
+                        "anime-sharp-x2",
+                        "realesrgan-ncnn",
+                        2d,
+                        "webp");
                     SetAdapterOverrides(root, executable, modelDirectory);
                     window.SelectRangeForSmoke(0, 0);
                     await window.OpenBatchEnhancementForSmokeAsync();
@@ -311,6 +326,12 @@ public partial class App
                     @"\\127.0.0.1\aibos-security-smoke\root",
                     @"\\127.0.0.1\aibos-security-smoke\adapter.exe",
                     @"\\127.0.0.1\aibos-security-smoke\models");
+                window.ConfigureUpscaleSettingsForSmoke(
+                    "anime-sharp-x2",
+                    "comfyui",
+                    2d,
+                    "webp");
+                var restoredUpscaleSettings = window.UpscaleSettingsForSmoke;
                 Stage("adapter-security");
 
                 window.SelectRangeForSmoke(0, 9);
@@ -465,6 +486,19 @@ public partial class App
                     && customExecutable.PostRequests == 0
                     && customModelDirectory.PostRequests == 0
                     && whitespaceOverride.PostRequests == 0;
+                bool restoredComfySettings =
+                    restoredUpscaleSettings.PresetId == "anime-sharp-x2"
+                    && restoredUpscaleSettings.AdapterId == "comfyui"
+                    && restoredUpscaleSettings.Scale == 2d
+                    && restoredUpscaleSettings.OutputFormat == "webp";
+                int expectedBatchPostCount = postAttempts.Values.Sum();
+                bool batchPostSettingsMatch = expectedBatchPostCount > 0
+                    && receivedUpscaleSettings.Count == expectedBatchPostCount
+                    && receivedUpscaleSettings.All(static settings =>
+                        settings.PresetId == "anime-sharp-x2"
+                        && settings.AdapterId == "comfyui"
+                        && settings.Scale == 2d
+                        && settings.OutputFormat == "webp");
 
                 ok = ordinaryBrowsingPassive
                     && sizesOk
@@ -475,6 +509,8 @@ public partial class App
                     && narrowLayoutFits
                     && responsiveOpen
                     && customAdapterPathDeferred
+                    && restoredComfySettings
+                    && batchPostSettingsMatch
                     && boundedConcurrency
                     && doubleClickSuppressed
                     && doubleClickPromptProvenance
@@ -509,6 +545,27 @@ public partial class App
                         modelDirectoryStatus = customModelDirectory.AdapterStatus,
                         whitespaceStatus = whitespaceOverride.AdapterStatus,
                     },
+                    restoredComfySettings,
+                    restoredUpscaleSettings = new
+                    {
+                        restoredUpscaleSettings.PresetId,
+                        restoredUpscaleSettings.AdapterId,
+                        restoredUpscaleSettings.Scale,
+                        restoredUpscaleSettings.OutputFormat,
+                    },
+                    batchPostSettingsMatch,
+                    batchPostSettingsCount = receivedUpscaleSettings.Count,
+                    batchPostSettingVariants = receivedUpscaleSettings
+                        .GroupBy(static settings => settings)
+                        .Select(static group => new
+                        {
+                            group.Key.PresetId,
+                            group.Key.AdapterId,
+                            group.Key.Scale,
+                            group.Key.OutputFormat,
+                            RequestCount = group.Count(),
+                        })
+                        .ToArray(),
                     boundedConcurrency,
                     maxInFlight,
                     doubleClickSuppressed,
