@@ -342,12 +342,22 @@ public partial class MainWindow
     }
 
     public async Task<ModalMetadataSmokeSnapshot>
-        WaitForModalDisplayedMetadataForSmokeAsync()
+        WaitForModalDisplayedMetadataForSmokeAsync(
+            string expectedDisplayPath)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedDisplayPath);
         for (int attempt = 0; attempt < 200; attempt++)
         {
-            if (string.IsNullOrWhiteSpace(_modalMetadataLoadingPath))
-                return ModalMetadataForSmoke();
+            ModalMetadataSmokeSnapshot snapshot = ModalMetadataForSmoke();
+            if (string.Equals(
+                    _modalDisplayPath,
+                    expectedDisplayPath,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(_modalMetadataLoadingPath)
+                && snapshot.MetadataCurrent)
+            {
+                return snapshot;
+            }
             await Task.Delay(10);
         }
         return ModalMetadataForSmoke();

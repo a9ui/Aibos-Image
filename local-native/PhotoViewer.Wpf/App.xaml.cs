@@ -25809,7 +25809,8 @@ public partial class App : Application
                     win.CopyCurrentPreviewMetadataForSmoke();
                 win.OpenModalMetadataForSmoke();
                 ModalMetadataSmokeSnapshot comfyModal =
-                    await win.WaitForModalDisplayedMetadataForSmokeAsync();
+                    await win.WaitForModalDisplayedMetadataForSmokeAsync(
+                        comfyPath);
                 win.CloseModalForSmoke();
                 bool comfyGraphRead = string.Equals(
                         comfyCatalogPrompt,

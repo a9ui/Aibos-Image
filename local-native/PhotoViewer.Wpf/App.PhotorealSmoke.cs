@@ -49,6 +49,7 @@ public partial class App
             bool promptMappingDefaultsMigrationContract = false;
             bool promptMappingButtonContrastContract = false;
             bool displayedVersionMetadataContract = false;
+            object? displayedVersionMetadataDiagnostic = null;
             bool photoUpscaleProfileContract = false;
             bool veryHighQualityContract = false;
             bool sharedQueueRoute = false;
@@ -1159,7 +1160,18 @@ public partial class App
                 selected = window.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
                 opened = window.OpenModalForSmoke();
                 ModalMetadataSmokeSnapshot displayedPhotorealMetadata =
-                    await window.WaitForModalDisplayedMetadataForSmokeAsync();
+                    await window.WaitForModalDisplayedMetadataForSmokeAsync(
+                        photorealOutputPath);
+                string[] displayedVersionLabels =
+                    window.ModalDisplayVersionLabelsForSmoke;
+                displayedVersionMetadataDiagnostic = new
+                {
+                    displayedPhotorealMetadata.MetadataCurrent,
+                    displayedPhotorealMetadata.Prompt,
+                    displayedPhotorealMetadata.NegativePrompt,
+                    displayedPhotorealMetadata.Settings,
+                    Labels = displayedVersionLabels,
+                };
                 displayedVersionMetadataContract =
                     displayedPhotorealMetadata.MetadataCurrent
                     && displayedPhotorealMetadata.Prompt ==
@@ -1169,7 +1181,7 @@ public partial class App
                     && displayedPhotorealMetadata.Settings.Contains(
                         "Aibos operation: photoreal",
                         StringComparison.Ordinal)
-                    && window.ModalDisplayVersionLabelsForSmoke.SequenceEqual(
+                    && displayedVersionLabels.SequenceEqual(
                         ["Original", "実写化 1/1", "高画質化 1/1"],
                         StringComparer.Ordinal);
                 toolbarContract = window.ModalPhotorealToolbarContractForSmoke;
@@ -2147,6 +2159,7 @@ public partial class App
                     promptMappingDefaultsMigrationContract,
                     promptMappingButtonContrastContract,
                     displayedVersionMetadataContract,
+                    displayedVersionMetadataDiagnostic,
                     photoUpscaleProfileContract,
                     veryHighQualityContract,
                     independentCompanionContract,

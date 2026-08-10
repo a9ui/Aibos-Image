@@ -37,6 +37,17 @@ try {
     $childExitCode = $LASTEXITCODE
     Assert-True (Test-Path -LiteralPath $resultPath -PathType Leaf) 'Photoreal smoke did not produce JSON.'
     $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+    $falseInvariants = @(
+        $result.PSObject.Properties |
+            Where-Object { $_.Value -is [bool] -and -not $_.Value } |
+            ForEach-Object { $_.Name }
+    )
+    if ($falseInvariants.Count -gt 0) {
+        Write-Output ("False photoreal invariants: " + ($falseInvariants -join ', '))
+        if ($null -ne $result.displayedVersionMetadataDiagnostic) {
+            Write-Output ($result.displayedVersionMetadataDiagnostic | ConvertTo-Json -Depth 6)
+        }
+    }
     Assert-True ($childExitCode -eq 0) "Photoreal smoke exited with $childExitCode."
     foreach ($propertyName in @(
         'ok',
