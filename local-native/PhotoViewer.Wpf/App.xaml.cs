@@ -4080,6 +4080,14 @@ public partial class App : Application
                     && english.UiSearchPlaceholderForSmoke.StartsWith("Search filenames", StringComparison.Ordinal)
                     && english.UiGeneralNavigationForSmoke == "General"
                     && english.UiModalShortcutHintForSmoke.Contains("navigate", StringComparison.Ordinal);
+                bool englishFavoriteFilterSurface = english.FavoriteFilterSurfaceContractForSmoke
+                    && english.OriginalFavoriteFilterTitleForSmoke == "Original Favorite"
+                    && english.PhotorealFavoriteFilterTitleForSmoke == "Photoreal Favorite (highest)"
+                    && english.PhotorealFavoriteFilterSummaryForSmoke == "All ratings"
+                    && english.PhotorealFavoriteLevelZeroHelpForSmoke.Contains("valid Photoreal", StringComparison.Ordinal)
+                    && english.PhotorealFavoriteLevelOneHelpForSmoke.Contains("highest Favorite", StringComparison.Ordinal)
+                    && english.GridFileInfoOverlayLabelForSmoke == "Grid file info overlay"
+                    && english.GridFileInfoOverlayHelpForSmoke.Contains("List identity text", StringComparison.Ordinal);
 
                 bool japaneseSaved = english.SetUiLanguageForSmoke(UiLanguageResources.Japanese);
                 english.FlushStateForSmoke();
@@ -4097,6 +4105,14 @@ public partial class App : Application
                     && japanese.UiSearchPlaceholderForSmoke.StartsWith("ファイル名", StringComparison.Ordinal)
                     && japanese.UiGeneralNavigationForSmoke == "一般"
                     && japanese.UiModalShortcutHintForSmoke.Contains("移動", StringComparison.Ordinal);
+                bool japaneseFavoriteFilterSurface = japanese.FavoriteFilterSurfaceContractForSmoke
+                    && japanese.OriginalFavoriteFilterTitleForSmoke == "Originalファボ"
+                    && japanese.PhotorealFavoriteFilterTitleForSmoke == "実写ファボ（最大）"
+                    && japanese.PhotorealFavoriteFilterSummaryForSmoke == "すべての評価"
+                    && japanese.PhotorealFavoriteLevelZeroHelpForSmoke.Contains("最大Favorite", StringComparison.Ordinal)
+                    && japanese.PhotorealFavoriteLevelOneHelpForSmoke.Contains("最大のFavorite", StringComparison.Ordinal)
+                    && japanese.GridFileInfoOverlayLabelForSmoke == "Gridのファイル情報を重ねる"
+                    && japanese.GridFileInfoOverlayHelpForSmoke.Contains("状態バッジ", StringComparison.Ordinal);
 
                 bool englishSaved = japanese.SetUiLanguageForSmoke(UiLanguageResources.English);
                 japanese.FlushStateForSmoke();
@@ -4116,9 +4132,11 @@ public partial class App : Application
                     StringComparison.Ordinal);
 
                 ok = englishLoaded
+                    && englishFavoriteFilterSurface
                     && japaneseSaved
                     && japanesePersisted
                     && japaneseReloaded
+                    && japaneseFavoriteFilterSurface
                     && englishSaved
                     && englishReloaded
                     && unknownLocalPreserved
@@ -4130,9 +4148,11 @@ public partial class App : Application
                         ? "English/Japanese live resources, WPF-local persistence, and shared-settings isolation passed"
                         : "UI language contract did not match expectations",
                     englishLoaded,
+                    englishFavoriteFilterSurface,
                     japaneseSaved,
                     japanesePersisted,
                     japaneseReloaded,
+                    japaneseFavoriteFilterSurface,
                     englishSaved,
                     englishReloaded,
                     unknownLocalPreserved,
@@ -4190,7 +4210,10 @@ public partial class App : Application
             File.SetLastWriteTimeUtc(fixturePath, fixtureTime.AddMinutes(-index));
         }
         string seededSeenPath = Path.Combine(folder, "unseen-setting-0.png");
-        File.WriteAllText(favoritesPath, "{}");
+        string favoriteFixturePath = Path.Combine(folder, "unseen-setting-1.png");
+        File.WriteAllText(
+            favoritesPath,
+            JsonSerializer.Serialize(new Dictionary<string, int> { [favoriteFixturePath] = 3 }));
         File.WriteAllText(seenPath, JsonSerializer.Serialize(new Dictionary<string, bool> { [seededSeenPath] = true }));
         File.WriteAllText(recentPath, "{\"version\":1,\"lastFolderSet\":[],\"recentFolderSets\":[],\"updatedAtUtc\":\"\"}");
         File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[]}");
@@ -4218,12 +4241,22 @@ public partial class App : Application
                 bool defaultOff = !first.ShowUnseenDotsForSmoke
                     && !first.SidebarUnseenDotsCheckedForSmoke
                     && !first.AppSettingsUnseenDotsCheckedForSmoke;
+                bool gridInfoDefaultOn = first.ShowGridFileInfoOverlayForSmoke
+                    && first.SidebarGridFileInfoOverlayCheckedForSmoke
+                    && first.AppSettingsGridFileInfoOverlayCheckedForSmoke;
                 bool favoriteNotificationsDefaultOn = first.ShowFavoriteChangeNotificationsForSmoke;
                 bool calendarContrast = first.DatePickerCalendarContrastForSmoke;
-                bool landingChrome = first.LandingCaptionControlsContractForSmoke
-                    && first.ActivateLandingMinimizeForSmoke();
+                bool landingCaptionContract = first.LandingCaptionControlsContractForSmoke;
+                bool landingHeaderBorderContract = first.LandingHeaderBorderContractForSmoke;
+                bool landingDragRegionContract = first.LandingDragRegionContractForSmoke;
+                bool landingCaptionButtonsContract = first.LandingCaptionButtonsContractForSmoke;
+                bool landingMinimize = first.ActivateLandingMinimizeForSmoke();
+                bool landingChrome = landingCaptionContract && landingMinimize;
                 await first.LoadFolderAsync(folder);
                 first.UpdateLayout();
+                bool gridInfoVisualRealized = first.GridFileInfoOverlayVisualRealizedForSmoke;
+                bool gridInfoVisibleByDefault = first.GridFileInfoOverlayVisibleForSmoke;
+                bool gridStatusVisibleBeforeToggle = first.FirstGridStatusBadgeVisibleForSmoke;
                 bool searchClear = first.ClearSearchButtonContractForSmoke;
                 bool sidebarScroll = first.SidebarScrollContractForSmoke
                     && first.VisibleWorkbenchChromeContainedForSmoke;
@@ -4235,6 +4268,7 @@ public partial class App : Application
                 await first.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Input);
                 bool settingsFocused = first.FocusAppSettingsUnseenDotsForSmoke() && first.IsAppSettingsUnseenDotsFocusedForSmoke;
                 bool accessible = first.UnseenDotsSurfaceContractForSmoke
+                    && first.GridFileInfoOverlaySurfaceContractForSmoke
                     && first.FavoriteChangeNotificationsSurfaceContractForSmoke
                     && first.SettingsFocusTrapConfiguredForSmoke
                     && first.IsSettingsDialogFocusedForSmoke;
@@ -4243,9 +4277,29 @@ public partial class App : Application
                     && first.SidebarSettingsPinnedForSmoke
                     && first.HoverAndTooltipContractForSmoke;
                 bool defaultSyncedInSettings = !first.SidebarUnseenDotsCheckedForSmoke && !first.AppSettingsUnseenDotsCheckedForSmoke;
+                bool gridInfoDefaultSyncedInSettings = first.SidebarGridFileInfoOverlayCheckedForSmoke
+                    && first.AppSettingsGridFileInfoOverlayCheckedForSmoke;
                 bool favoriteNotificationsDisabled = first.SetFavoriteChangeNotificationsForSmoke(false)
                     && !first.ShowFavoriteChangeNotificationsForSmoke
                     && !first.FavoriteChangeNotificationsCheckedForSmoke;
+
+                first.SetAppSettingsGridFileInfoOverlayForSmoke(false);
+                bool settingsHideGridInfo = !first.ShowGridFileInfoOverlayForSmoke
+                    && !first.SidebarGridFileInfoOverlayCheckedForSmoke
+                    && !first.AppSettingsGridFileInfoOverlayCheckedForSmoke
+                    && first.GridFileInfoOverlayVisualRealizedForSmoke
+                    && !first.GridFileInfoOverlayVisibleForSmoke
+                    && first.FirstGridStatusBadgeVisibleForSmoke == gridStatusVisibleBeforeToggle;
+                first.SetSidebarGridFileInfoOverlayForSmoke(true);
+                bool sidebarRestoreGridInfo = first.ShowGridFileInfoOverlayForSmoke
+                    && first.SidebarGridFileInfoOverlayCheckedForSmoke
+                    && first.AppSettingsGridFileInfoOverlayCheckedForSmoke
+                    && first.GridFileInfoOverlayVisibleForSmoke;
+                first.SetSidebarGridFileInfoOverlayForSmoke(false);
+                bool sidebarHideGridInfo = !first.ShowGridFileInfoOverlayForSmoke
+                    && !first.SidebarGridFileInfoOverlayCheckedForSmoke
+                    && !first.AppSettingsGridFileInfoOverlayCheckedForSmoke
+                    && !first.GridFileInfoOverlayVisibleForSmoke;
 
                 first.SetAppSettingsUnseenDotsForSmoke(true);
                 bool settingsToSidebar = first.ShowUnseenDotsForSmoke
@@ -4268,6 +4322,7 @@ public partial class App : Application
                 first.SetAppSettingsUnseenDotsForSmoke(true);
                 ViewerState? persistedOn = ReadPersistedState(statePath);
                 bool persistedEnabled = persistedOn?.ShowUnseenDots == true;
+                bool gridInfoPersistedOff = persistedOn?.ShowGridFileInfoOverlay == false;
                 bool favoriteNotificationsPersistedOff = persistedOn?.ShowFavoriteChangeNotifications == false;
                 first.Close();
 
@@ -4279,6 +4334,9 @@ public partial class App : Application
                 bool reloadSynced = reload.ShowUnseenDotsForSmoke
                     && reload.SidebarUnseenDotsCheckedForSmoke
                     && reload.AppSettingsUnseenDotsCheckedForSmoke;
+                bool gridInfoReloadedOff = !reload.ShowGridFileInfoOverlayForSmoke
+                    && !reload.SidebarGridFileInfoOverlayCheckedForSmoke
+                    && !reload.AppSettingsGridFileInfoOverlayCheckedForSmoke;
                 bool favoriteNotificationsReloadedOff = !reload.ShowFavoriteChangeNotificationsForSmoke
                     && !reload.FavoriteChangeNotificationsCheckedForSmoke;
                 bool reloadSettingsFocused = reload.FocusAppSettingsUnseenDotsForSmoke() && reload.IsAppSettingsUnseenDotsFocusedForSmoke;
@@ -4293,6 +4351,9 @@ public partial class App : Application
                 bool migrationDefaultOff = !migration.ShowUnseenDotsForSmoke
                     && !migration.SidebarUnseenDotsCheckedForSmoke
                     && !migration.AppSettingsUnseenDotsCheckedForSmoke;
+                bool gridInfoMigrationDefaultOn = migration.ShowGridFileInfoOverlayForSmoke
+                    && migration.SidebarGridFileInfoOverlayCheckedForSmoke
+                    && migration.AppSettingsGridFileInfoOverlayCheckedForSmoke;
                 bool favoriteNotificationsMigrationDefaultOn = migration.ShowFavoriteChangeNotificationsForSmoke
                     && migration.FavoriteChangeNotificationsCheckedForSmoke;
                 migration.Close();
@@ -4307,13 +4368,20 @@ public partial class App : Application
                 bool isolated = new[] { statePath, favoritesPath, seenPath, recentPath, jobsPath }
                     .All(path => Path.GetFullPath(path).StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase));
                 bool residueFree = NoPersistenceResidue(smokeRoot);
-                ok = defaultOff && favoriteNotificationsDefaultOn && calendarContrast && searchClear && sidebarScroll
-                    && landingChrome && defaultSyncedInSettings && sidebarFocused && settingsFocused && accessible
+                ok = defaultOff && gridInfoDefaultOn && gridInfoVisualRealized
+                    && gridInfoVisibleByDefault && gridStatusVisibleBeforeToggle
+                    && favoriteNotificationsDefaultOn && calendarContrast && searchClear && sidebarScroll
+                    && landingChrome && defaultSyncedInSettings && gridInfoDefaultSyncedInSettings
+                    && sidebarFocused && settingsFocused && accessible
                     && settingsSurface && settingsInsideClick && settingsBackdropClose && shortcutEntryOpened
+                    && settingsHideGridInfo && sidebarRestoreGridInfo && sidebarHideGridInfo
                     && settingsToSidebar && sidebarToSettings && settingsReopenedSynced && persistedEnabled
+                    && gridInfoPersistedOff
                     && favoriteNotificationsDisabled && favoriteNotificationsPersistedOff
-                    && reloadSynced && favoriteNotificationsReloadedOff && reloadSettingsFocused
-                    && migrationDefaultOff && favoriteNotificationsMigrationDefaultOn && migrationUnknownPreserved
+                    && reloadSynced && gridInfoReloadedOff
+                    && favoriteNotificationsReloadedOff && reloadSettingsFocused
+                    && migrationDefaultOff && gridInfoMigrationDefaultOn
+                    && favoriteNotificationsMigrationDefaultOn && migrationUnknownPreserved
                     && seenByteIdentical && cacheIsolation && sourceUntouched && isolated && residueFree;
                 result = new
                 {
@@ -4322,12 +4390,22 @@ public partial class App : Application
                         ? "landing chrome, pinned Settings/shortcut entry, dark hover/tooltip, one-scroll backdrop-close Settings, and unseen-dot persistence passed without mutating Seen or unrelated cache"
                         : "unseen-dot Settings parity smoke did not meet its synchronization and isolation contract",
                     defaultOff,
+                    gridInfoDefaultOn,
+                    gridInfoVisualRealized,
+                    gridInfoVisibleByDefault,
+                    gridStatusVisibleBeforeToggle,
                     favoriteNotificationsDefaultOn,
                     calendarContrast,
                     searchClear,
                     sidebarScroll,
                     landingChrome,
+                    landingCaptionContract,
+                    landingHeaderBorderContract,
+                    landingDragRegionContract,
+                    landingCaptionButtonsContract,
+                    landingMinimize,
                     defaultSyncedInSettings,
+                    gridInfoDefaultSyncedInSettings,
                     sidebarFocused,
                     settingsFocused,
                     accessible,
@@ -4335,16 +4413,22 @@ public partial class App : Application
                     settingsInsideClick,
                     settingsBackdropClose,
                     shortcutEntryOpened,
+                    settingsHideGridInfo,
+                    sidebarRestoreGridInfo,
+                    sidebarHideGridInfo,
                     settingsToSidebar,
                     sidebarToSettings,
                     settingsReopenedSynced,
                     persistedEnabled,
+                    gridInfoPersistedOff,
                     favoriteNotificationsDisabled,
                     favoriteNotificationsPersistedOff,
                     reloadSynced,
+                    gridInfoReloadedOff,
                     favoriteNotificationsReloadedOff,
                     reloadSettingsFocused,
                     migrationDefaultOff,
+                    gridInfoMigrationDefaultOn,
                     favoriteNotificationsMigrationDefaultOn,
                     migrationUnknownPreserved,
                     unseenCount,
@@ -5557,6 +5641,8 @@ public partial class App : Application
                 win.ClearSelectionForSmoke();
             if (args.Contains("--folders-collapsed") && win.FoldersSectionExpandedForSmoke)
                 win.ToggleFoldersSectionForSmoke();
+            if (args.Contains("--hide-grid-file-info"))
+                win.SetShowGridFileInfoOverlayForSmoke(false);
             if (args.Contains("--show-unseen-dots"))
                 win.SetShowUnseenDotsForSmoke(true);
             if (args.Contains("--show-app-settings"))

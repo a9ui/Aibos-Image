@@ -16,6 +16,11 @@
   <sys:String x:Key="UiFavoritesOnly">Favorites only</sys:String>
   <sys:String x:Key="UiUnratedOnly">Unrated only</sys:String>
   <sys:String x:Key="UiAllRatings">All ratings</sys:String>
+  <sys:String x:Key="UiOriginalFavoriteFilterTitle">Original Favorite</sys:String>
+  <sys:String x:Key="UiPhotorealFavoriteFilterTitle">Photoreal Favorite (highest)</sys:String>
+  <sys:String x:Key="UiPhotorealFavoriteFilterHelp">Filters by the highest Favorite among valid Photoreal versions. Level 0 means a Photoreal version exists and none is favorited.</sys:String>
+  <sys:String x:Key="UiPhotorealFavoriteLevelZeroHelp">A valid Photoreal version exists, and the highest Favorite across all valid Photoreal versions is level 0.</sys:String>
+  <sys:String x:Key="UiPhotorealFavoriteLevelNameFormat">Photoreal Favorite level {0}</sys:String>
   <sys:String x:Key="UiShowAll">Show all</sys:String>
   <sys:String x:Key="UiHideAll">Hide all</sys:String>
   <sys:String x:Key="UiInvert">Invert</sys:String>
@@ -50,6 +55,8 @@
   <sys:String x:Key="UiLanguageAppliedJapanese">Aibos is using Japanese with compact English technical labels.</sys:String>
   <sys:String x:Key="UiConfirmBeforeDelete">Confirm before delete</sys:String>
   <sys:String x:Key="UiConfirmBeforeDeleteHelp">Moves source images to the Windows Recycle Bin; it never uses a hard-delete fallback.</sys:String>
+  <sys:String x:Key="UiGridFileInfoOverlay">Grid file info overlay</sys:String>
+  <sys:String x:Key="UiGridFileInfoOverlayHelp">Shows filename and file size over large Grid thumbnails. Turning it off keeps status badges and List identity text.</sys:String>
   <sys:String x:Key="UiUnseenDots">Unseen dots</sys:String>
   <sys:String x:Key="UiUnseenDotsHelp">Shows a dot on images that have not been viewed. This display option never changes seen history.</sys:String>
   <sys:String x:Key="UiFavoriteChangeNotifications">Favorite change notifications</sys:String>

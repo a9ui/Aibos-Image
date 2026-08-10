@@ -16,6 +16,11 @@
   <sys:String x:Key="UiFavoritesOnly">Favoritesのみ</sys:String>
   <sys:String x:Key="UiUnratedOnly">未評価のみ</sys:String>
   <sys:String x:Key="UiAllRatings">すべての評価</sys:String>
+  <sys:String x:Key="UiOriginalFavoriteFilterTitle">Originalファボ</sys:String>
+  <sys:String x:Key="UiPhotorealFavoriteFilterTitle">実写ファボ（最大）</sys:String>
+  <sys:String x:Key="UiPhotorealFavoriteFilterHelp">有効な実写版のうち最大のFavoriteで絞り込みます。Lv 0は実写版があり、すべての実写版がFavorite 0の画像です。</sys:String>
+  <sys:String x:Key="UiPhotorealFavoriteLevelZeroHelp">有効な実写版が1つ以上あり、すべての有効な実写版の最大FavoriteがLv 0の画像です。</sys:String>
+  <sys:String x:Key="UiPhotorealFavoriteLevelNameFormat">実写ファボ Lv {0}</sys:String>
   <sys:String x:Key="UiShowAll">すべて表示</sys:String>
   <sys:String x:Key="UiHideAll">すべて隠す</sys:String>
   <sys:String x:Key="UiInvert">反転</sys:String>
@@ -50,6 +55,8 @@
   <sys:String x:Key="UiLanguageAppliedJapanese">主要操作は日本語、技術ラベルは短い英語で表示しています。</sys:String>
   <sys:String x:Key="UiConfirmBeforeDelete">削除前に確認</sys:String>
   <sys:String x:Key="UiConfirmBeforeDeleteHelp">元画像はWindowsのごみ箱へ移動します。完全削除へ切り替えることはありません。</sys:String>
+  <sys:String x:Key="UiGridFileInfoOverlay">Gridのファイル情報を重ねる</sys:String>
+  <sys:String x:Key="UiGridFileInfoOverlayHelp">大きいGridサムネイルにファイル名とサイズを重ねます。OFFでも状態バッジとListのファイル情報は残ります。</sys:String>
   <sys:String x:Key="UiUnseenDots">Unseen dots</sys:String>
   <sys:String x:Key="UiUnseenDotsHelp">未表示の画像にdotを出します。この設定で閲覧履歴は変わりません。</sys:String>
   <sys:String x:Key="UiFavoriteChangeNotifications">Favorite変更の通知</sys:String>

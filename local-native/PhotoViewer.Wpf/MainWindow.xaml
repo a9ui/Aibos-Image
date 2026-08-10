@@ -171,6 +171,12 @@
     <ItemsPanelTemplate x:Key="VirtualizedCardItemsPanel">
       <local:VirtualizingWrapPanel HorizontalSpacing="10" VerticalSpacing="10" OverscanRows="0"/>
     </ItemsPanelTemplate>
+    <Style x:Key="FavoriteLevelPill" TargetType="{x:Type CheckBox}" BasedOn="{StaticResource Pill}">
+      <Setter Property="MinHeight" Value="26"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="Margin" Value="0,0,6,6"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource CommonButtonFocusVisual}"/>
+    </Style>
   </Window.Resources>
 
   <Grid>
@@ -477,28 +483,27 @@
             <Border Padding="16,14,16,12" BorderBrush="{DynamicResource DividerSubtleBrush}" BorderThickness="0,0,0,1">
               <StackPanel>
                 <TextBlock Text="FILTERS" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
+                <TextBlock x:Name="OriginalFavoriteFilterTitle" Text="{DynamicResource UiOriginalFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
                 <CheckBox x:Name="FavoriteOnlyFilter" Content="{DynamicResource UiFavoritesOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="FavoriteFilter_Changed" Unchecked="FavoriteFilter_Changed"/>
                 <CheckBox x:Name="UnfavoriteOnlyFilter" Content="{DynamicResource UiUnratedOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="FavoriteFilter_Changed" Unchecked="FavoriteFilter_Changed"/>
-                <WrapPanel x:Name="FavoriteLevelFilterPanel" Margin="0,0,0,6">
-                  <WrapPanel.Resources><Style TargetType="CheckBox" BasedOn="{StaticResource Pill}"><Setter Property="Margin" Value="0,0,6,0"/></Style></WrapPanel.Resources>
-                  <CheckBox x:Name="FavoriteLevel1Filter" Content="Lv 1" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                  <CheckBox x:Name="FavoriteLevel2Filter" Content="Lv 2" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                  <CheckBox x:Name="FavoriteLevel3Filter" Content="Lv 3" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                  <CheckBox x:Name="FavoriteLevel4Filter" Content="Lv 4" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                  <CheckBox x:Name="FavoriteLevel5Filter" Content="Lv 5" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                </WrapPanel>
+                <UniformGrid x:Name="FavoriteLevelFilterPanel" Columns="3" Margin="0,0,0,0">
+                  <CheckBox x:Name="FavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 1" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                  <CheckBox x:Name="FavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 2" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                  <CheckBox x:Name="FavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 3" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                  <CheckBox x:Name="FavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 4" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                  <CheckBox x:Name="FavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 5" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                </UniformGrid>
                 <TextBlock x:Name="FavoriteFilterSummary" Text="{DynamicResource UiAllRatings}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6"/>
-                <TextBlock Text="実写ファボ" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,2,0,4"/>
-                <WrapPanel x:Name="PhotorealFavoriteLevelFilterPanel" Margin="0,0,0,4">
-                  <WrapPanel.Resources><Style TargetType="CheckBox" BasedOn="{StaticResource Pill}"><Setter Property="Margin" Value="0,0,6,4"/></Style></WrapPanel.Resources>
-                  <CheckBox x:Name="PhotorealFavoriteLevel0Filter" Content="0" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 0" AutomationProperties.HelpText="有効な実写版があり、どの実写版にもFavoriteがない画像"/>
-                  <CheckBox x:Name="PhotorealFavoriteLevel1Filter" Content="1" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 1"/>
-                  <CheckBox x:Name="PhotorealFavoriteLevel2Filter" Content="2" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 2"/>
-                  <CheckBox x:Name="PhotorealFavoriteLevel3Filter" Content="3" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 3"/>
-                  <CheckBox x:Name="PhotorealFavoriteLevel4Filter" Content="4" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 4"/>
-                  <CheckBox x:Name="PhotorealFavoriteLevel5Filter" Content="5" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.Name="Photoreal Favorite level 5"/>
-                </WrapPanel>
-                <TextBlock x:Name="PhotorealFavoriteFilterSummary" Text="すべて" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6" ToolTip="有効な実写版のうち最も高いFavoriteで絞り込み。0は実写版があり、どの実写版にもFavoriteがない画像"/>
+                <TextBlock x:Name="PhotorealFavoriteFilterTitle" Text="{DynamicResource UiPhotorealFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,2,0,5"/>
+                <UniformGrid x:Name="PhotorealFavoriteLevelFilterPanel" Columns="3" Margin="0,0,0,0">
+                  <CheckBox x:Name="PhotorealFavoriteLevel0Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 0" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteLevelZeroHelp}" ToolTip="{DynamicResource UiPhotorealFavoriteLevelZeroHelp}"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 1" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}" ToolTip="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 2" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}" ToolTip="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 3" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}" ToolTip="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 4" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}" ToolTip="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                  <CheckBox x:Name="PhotorealFavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 5" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}" ToolTip="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                </UniformGrid>
+                <TextBlock x:Name="PhotorealFavoriteFilterSummary" Text="{DynamicResource UiAllRatings}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6" ToolTip="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
                 <CheckBox x:Name="EnhancedOnlyFilter" Content="AI高画質化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI高画質化の完了画像だけを表示"/>
                 <CheckBox x:Name="UnenhancedOnlyFilter" Content="未高画質化のみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="まだAI高画質化されていない画像だけを表示"/>
                 <CheckBox x:Name="PhotorealOnlyFilter" Content="AI実写化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI実写化の完了画像だけを表示"/>
@@ -660,6 +665,7 @@
                   <Button Grid.Column="3" Style="{StaticResource StepButton}" Content="0" ToolTip="Reset zoom" Click="ZoomReset_Click" Margin="5,0,5,0"/>
                   <Button Grid.Column="4" Style="{StaticResource StepButton}" Content="+" ToolTip="Zoom in" Click="ZoomIn_Click"/>
                 </Grid>
+                <CheckBox x:Name="ShowGridFileInfoOverlayCheckBox" Content="{DynamicResource UiGridFileInfoOverlay}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,10,0,0" Checked="ShowGridFileInfoOverlay_Changed" Unchecked="ShowGridFileInfoOverlay_Changed" AutomationProperties.Name="Show filename and file size over Grid thumbnails" AutomationProperties.HelpText="{DynamicResource UiGridFileInfoOverlayHelp}" ToolTip="{DynamicResource UiGridFileInfoOverlayHelp}"/>
               </StackPanel>
             </Border>
 
@@ -1914,6 +1920,8 @@
           <CheckBox x:Name="ConfirmBeforeDeleteCheckBox" Content="{DynamicResource UiConfirmBeforeDelete}" Foreground="{StaticResource TextSecondary}" Checked="ConfirmBeforeDelete_Changed" Unchecked="ConfirmBeforeDelete_Changed" AutomationProperties.Name="Confirm before delete"/>
           <TextBlock Text="{DynamicResource UiConfirmBeforeDeleteHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,18"/>
           <TextBlock x:Name="DisplaySettingsHeading" Text="DISPLAY" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Display settings section"/>
+          <CheckBox x:Name="AppSettingsShowGridFileInfoOverlayCheckBox" Content="{DynamicResource UiGridFileInfoOverlay}" Foreground="{StaticResource TextSecondary}" Checked="ShowGridFileInfoOverlay_Changed" Unchecked="ShowGridFileInfoOverlay_Changed" AutomationProperties.Name="Show filename and file size over Grid thumbnails" AutomationProperties.HelpText="{DynamicResource UiGridFileInfoOverlayHelp}"/>
+          <TextBlock Text="{DynamicResource UiGridFileInfoOverlayHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
           <CheckBox x:Name="AppSettingsUnseenDotsCheckBox" Content="{DynamicResource UiUnseenDots}" Foreground="{StaticResource TextSecondary}" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="Changes dot visibility only. Seen history is not changed."/>
           <TextBlock Text="{DynamicResource UiUnseenDotsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
           <CheckBox x:Name="FavoriteChangeNotificationsCheckBox" Content="{DynamicResource UiFavoriteChangeNotifications}" Foreground="{StaticResource TextSecondary}" Checked="FavoriteChangeNotifications_Changed" Unchecked="FavoriteChangeNotifications_Changed" AutomationProperties.Name="Show favorite change notifications"/>

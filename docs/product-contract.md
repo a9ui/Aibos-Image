@@ -315,6 +315,11 @@ or stores.
   otherwise `createdAt`; legacy rows without `completedAt` are therefore an
   explicit last-update approximation. Images without a usable timestamp sort
   after timestamped images with filename and path as stable tie-breakers.
+- WPF exposes one renderer-local, persisted control for the filename/file-size
+  caption over large Grid cards. Turning it off removes the full caption
+  gradient without hiding Favorite, Enhancement, queue, or other status
+  indicators. Compact icon cards already have no caption, and List identity
+  text remains visible because it does not overlap the thumbnail.
 - Presentation geometry and gestures not stated here remain WPF implementation
   details.
 
@@ -330,10 +335,11 @@ or stores.
   `Fav touched` sort retain Original/source semantics even when its thumbnail
   displays a managed Photoreal image. In addition, one blue heart shows the
   highest Favorite level among currently validated managed `photoreal`
-  outputs for that Original. The WPF-local `実写ファボ` 0 through 5 pills use
-  union semantics with each other and intersection semantics with other
-  filters. Level 0 requires at least one valid Photoreal output and a maximum
-  level of 0; an Original with no Photoreal output does not match. This is a
+  outputs for that Original. The WPF-local `実写ファボ` `Lv 0` through `Lv 5`
+  pills use union semantics with each other and intersection semantics with
+  other filters. Level 0 requires at least one valid Photoreal output and a
+  maximum level of 0; an Original with no Photoreal output does not match. This
+  is a
   presentation over existing job and path-keyed Favorite state, not a shared
   schema change. Individual version editing remains in the modal.
   Every supported writer must merge only its changed path keys into the latest

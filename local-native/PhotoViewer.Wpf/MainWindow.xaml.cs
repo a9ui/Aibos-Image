@@ -534,6 +534,8 @@ public partial class MainWindow : Window
     private readonly HashSet<int> _photorealFavoriteFilterLevels = [];
     private bool _showUnseenDots;
     private bool _syncingUnseenDotsControls;
+    private bool _showGridFileInfoOverlay = true;
+    private bool _syncingGridFileInfoOverlayControls;
     private bool _showFavoriteChangeNotifications = true;
     private bool _syncingFavoriteChangeNotifications;
     private bool _useLastDisplayedImageVersionForThumbnails = true;
@@ -10930,6 +10932,13 @@ public partial class MainWindow : Window
         SetShowUnseenDots(enabled, persist: true);
     }
 
+    private void ShowGridFileInfoOverlay_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _syncingGridFileInfoOverlayControls) return;
+        bool enabled = sender is CheckBox checkBox && checkBox.IsChecked == true;
+        SetShowGridFileInfoOverlay(enabled, persist: true);
+    }
+
     private void FavoriteChangeNotifications_Changed(object sender, RoutedEventArgs e)
     {
         if (_initializing || _syncingFavoriteChangeNotifications)
@@ -11247,6 +11256,31 @@ public partial class MainWindow : Window
             SaveState();
     }
 
+    private void SetShowGridFileInfoOverlay(bool enabled, bool persist)
+    {
+        bool changed = _showGridFileInfoOverlay != enabled;
+        _showGridFileInfoOverlay = enabled;
+        _syncingGridFileInfoOverlayControls = true;
+        try
+        {
+            if (ShowGridFileInfoOverlayCheckBox is not null)
+                ShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
+            if (AppSettingsShowGridFileInfoOverlayCheckBox is not null)
+                AppSettingsShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
+        }
+        finally
+        {
+            _syncingGridFileInfoOverlayControls = false;
+        }
+
+        // The card template observes the gallery ListBox once, so this toggle
+        // does not walk or notify a very large catalog merely to hide captions.
+        if (CardsList is not null && !Equals(CardsList.Tag, enabled))
+            CardsList.Tag = enabled;
+        if (changed && persist && !_initializing)
+            SaveState();
+    }
+
     private void ScheduleFavoriteFilterPresentationSync()
     {
         _favoriteFilterPresentationPending = true;
@@ -11560,6 +11594,23 @@ public partial class MainWindow : Window
             SetCheckBoxState(PhotorealFavoriteLevel3Filter, _photorealFavoriteFilterLevels.Contains(3));
             SetCheckBoxState(PhotorealFavoriteLevel4Filter, _photorealFavoriteFilterLevels.Contains(4));
             SetCheckBoxState(PhotorealFavoriteLevel5Filter, _photorealFavoriteFilterLevels.Contains(5));
+            CheckBox[] levelControls =
+            [
+                PhotorealFavoriteLevel0Filter,
+                PhotorealFavoriteLevel1Filter,
+                PhotorealFavoriteLevel2Filter,
+                PhotorealFavoriteLevel3Filter,
+                PhotorealFavoriteLevel4Filter,
+                PhotorealFavoriteLevel5Filter,
+            ];
+            for (int level = 0; level < levelControls.Length; level++)
+            {
+                AutomationProperties.SetName(
+                    levelControls[level],
+                    UiLanguageResources.Format(
+                        "UiPhotorealFavoriteLevelNameFormat",
+                        level));
+            }
         }
         finally
         {
@@ -11570,11 +11621,12 @@ public partial class MainWindow : Window
         {
             PhotorealFavoriteFilterSummary.Text =
                 _photorealFavoriteFilterLevels.Count == 0
-                    ? "すべて"
+                    ? UiLanguageResources.Text("UiAllRatings")
                     : string.Join(
                         " + ",
                         _photorealFavoriteFilterLevels
-                            .OrderBy(static level => level));
+                            .OrderBy(static level => level)
+                            .Select(static level => $"Lv {level}"));
         }
     }
 
@@ -20119,6 +20171,7 @@ public partial class MainWindow : Window
         BeginKeyBindingEdit();
         BeginThumbnailStatusBorderEdit();
         ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
+        SetShowGridFileInfoOverlay(_showGridFileInfoOverlay, persist: false);
         SetShowUnseenDots(_showUnseenDots, persist: false);
         SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
         SetUseLastDisplayedImageVersionForThumbnails(
@@ -21315,6 +21368,9 @@ public partial class MainWindow : Window
         SetUseLastDisplayedImageVersionForThumbnails(
             state?.UseLastDisplayedImageVersionForThumbnails ?? true,
             persist: false);
+        SetShowGridFileInfoOverlay(
+            state?.ShowGridFileInfoOverlay ?? true,
+            persist: false);
         RestoreUpscaleSettings(state);
         SharedRecentReadResult sharedRecent = ReadSharedRecentFolders();
         var lastFolderSet = ResolveStartupFolderSet(
@@ -21547,6 +21603,7 @@ public partial class MainWindow : Window
                     ? _photorealFavoriteFilterLevels.OrderBy(static level => level).ToList()
                     : null,
                 ShowUnseenDots = _showUnseenDots,
+                ShowGridFileInfoOverlay = _showGridFileInfoOverlay,
                 ShowFavoriteChangeNotifications = _showFavoriteChangeNotifications,
                 UseLastDisplayedImageVersionForThumbnails =
                     _useLastDisplayedImageVersionForThumbnails,
@@ -23181,10 +23238,18 @@ public partial class MainWindow : Window
     public void SelectAppSettingsSectionForSmoke(string section)
         => SelectAppSettingsSection(section, bringIntoView: true);
     public bool LandingCaptionControlsContractForSmoke
-        => ReferenceEquals(LandingHeaderSurface.BorderBrush, TryFindResource("GlassBorderHover"))
-            && LandingDragRegion.Width >= 96
-            && WindowChrome.GetIsHitTestVisibleInChrome(LandingDragRegion)
-            && new[] { LandingMinimizeButton, LandingMaximizeButton, LandingCloseButton }.All(button =>
+        => LandingHeaderBorderContractForSmoke
+            && LandingDragRegionContractForSmoke
+            && LandingCaptionButtonsContractForSmoke;
+    public bool LandingHeaderBorderContractForSmoke
+        => LandingHeaderSurface.BorderBrush is SolidColorBrush actual
+            && TryFindResource("GlassBorderHover") is SolidColorBrush expected
+            && actual.Color == expected.Color;
+    public bool LandingDragRegionContractForSmoke
+        => LandingDragRegion.Width >= 96
+            && WindowChrome.GetIsHitTestVisibleInChrome(LandingDragRegion);
+    public bool LandingCaptionButtonsContractForSmoke
+        => new[] { LandingMinimizeButton, LandingMaximizeButton, LandingCloseButton }.All(button =>
                 button.Style is not null
                 && WindowChrome.GetIsHitTestVisibleInChrome(button)
                 && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(button))
@@ -25660,6 +25725,108 @@ public partial class MainWindow : Window
     public bool ShowFavoritesOnlyForSmoke => FavoriteOnlyFilter?.IsChecked == true;
     public bool ShowUnfavoriteOnlyForSmoke => UnfavoriteOnlyFilter?.IsChecked == true;
     public bool ShowUnseenDotsForSmoke => _showUnseenDots;
+    public bool ShowGridFileInfoOverlayForSmoke => _showGridFileInfoOverlay;
+    public bool SidebarGridFileInfoOverlayCheckedForSmoke
+        => ShowGridFileInfoOverlayCheckBox.IsChecked == true;
+    public bool AppSettingsGridFileInfoOverlayCheckedForSmoke
+        => AppSettingsShowGridFileInfoOverlayCheckBox.IsChecked == true;
+    public bool GridFileInfoOverlayVisualRealizedForSmoke
+        => RealizedGridTemplatePartsForSmoke("overlay").Count > 0;
+    public bool GridFileInfoOverlayVisibleForSmoke
+        => RealizedGridTemplatePartsForSmoke("overlay")
+            .FirstOrDefault()?.Visibility == Visibility.Visible;
+    public bool FirstGridStatusBadgeVisibleForSmoke
+        => RealizedGridTemplatePartsForSmoke("favoriteLevelBadge")
+            .Any(static part => part.Visibility == Visibility.Visible);
+
+    private List<FrameworkElement> RealizedGridTemplatePartsForSmoke(string partName)
+    {
+        CardsList.ApplyTemplate();
+        CardsList.UpdateLayout();
+        var parts = new List<FrameworkElement>();
+        foreach (object item in CardsList.Items)
+        {
+            if (CardsList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
+                continue;
+
+            container.ApplyTemplate();
+            if (container.Template.FindName(partName, container) is FrameworkElement part)
+                parts.Add(part);
+        }
+        return parts;
+    }
+    public bool GridFileInfoOverlaySurfaceContractForSmoke
+        => string.Equals(
+                AutomationProperties.GetName(ShowGridFileInfoOverlayCheckBox),
+                "Show filename and file size over Grid thumbnails",
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(AppSettingsShowGridFileInfoOverlayCheckBox),
+                "Show filename and file size over Grid thumbnails",
+                StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetHelpText(ShowGridFileInfoOverlayCheckBox))
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetHelpText(AppSettingsShowGridFileInfoOverlayCheckBox));
+    public string GridFileInfoOverlayLabelForSmoke
+        => ShowGridFileInfoOverlayCheckBox.Content?.ToString() ?? "";
+    public string GridFileInfoOverlayHelpForSmoke
+        => AutomationProperties.GetHelpText(ShowGridFileInfoOverlayCheckBox);
+    public string OriginalFavoriteFilterTitleForSmoke
+        => OriginalFavoriteFilterTitle.Text;
+    public string PhotorealFavoriteFilterTitleForSmoke
+        => PhotorealFavoriteFilterTitle.Text;
+    public string PhotorealFavoriteFilterSummaryForSmoke
+        => PhotorealFavoriteFilterSummary.Text;
+    public string PhotorealFavoriteLevelZeroHelpForSmoke
+        => AutomationProperties.GetHelpText(PhotorealFavoriteLevel0Filter);
+    public string PhotorealFavoriteLevelOneHelpForSmoke
+        => AutomationProperties.GetHelpText(PhotorealFavoriteLevel1Filter);
+    public bool FavoriteFilterSurfaceContractForSmoke
+    {
+        get
+        {
+            CheckBox[] original =
+            [
+                FavoriteLevel1Filter,
+                FavoriteLevel2Filter,
+                FavoriteLevel3Filter,
+                FavoriteLevel4Filter,
+                FavoriteLevel5Filter,
+            ];
+            CheckBox[] photoreal =
+            [
+                PhotorealFavoriteLevel0Filter,
+                PhotorealFavoriteLevel1Filter,
+                PhotorealFavoriteLevel2Filter,
+                PhotorealFavoriteLevel3Filter,
+                PhotorealFavoriteLevel4Filter,
+                PhotorealFavoriteLevel5Filter,
+            ];
+            return FavoriteLevelFilterPanel.Columns == 3
+                && PhotorealFavoriteLevelFilterPanel.Columns == 3
+                && original.Select((control, index) =>
+                        string.Equals(
+                            control.Content?.ToString(),
+                            $"Lv {index + 1}",
+                            StringComparison.Ordinal))
+                    .All(static matched => matched)
+                && photoreal.Select((control, index) =>
+                        string.Equals(
+                            control.Content?.ToString(),
+                            $"Lv {index}",
+                            StringComparison.Ordinal))
+                    .All(static matched => matched)
+                && original.Concat(photoreal).All(static control =>
+                    control.MinHeight >= 24
+                    && control.FocusVisualStyle is not null)
+                && photoreal.All(static control =>
+                    !string.IsNullOrWhiteSpace(
+                        AutomationProperties.GetName(control))
+                    && !string.IsNullOrWhiteSpace(
+                        AutomationProperties.GetHelpText(control)));
+        }
+    }
     public bool ShowFavoriteChangeNotificationsForSmoke => _showFavoriteChangeNotifications;
     public bool FavoriteChangeNotificationsCheckedForSmoke
         => FavoriteChangeNotificationsCheckBox.IsChecked == true;
@@ -26104,6 +26271,12 @@ public partial class MainWindow : Window
         => SetPhotorealFavoriteFilterLevels(levels, asynchronous: false);
     public void SetShowUnseenDotsForSmoke(bool enabled)
         => SetShowUnseenDots(enabled, persist: true);
+    public void SetShowGridFileInfoOverlayForSmoke(bool enabled)
+        => SetShowGridFileInfoOverlay(enabled, persist: true);
+    public void SetSidebarGridFileInfoOverlayForSmoke(bool enabled)
+        => ShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
+    public void SetAppSettingsGridFileInfoOverlayForSmoke(bool enabled)
+        => AppSettingsShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
     public void SetSidebarUnseenDotsForSmoke(bool enabled) => ShowUnseenDots.IsChecked = enabled;
     public void SetAppSettingsUnseenDotsForSmoke(bool enabled) => AppSettingsUnseenDotsCheckBox.IsChecked = enabled;
     public void SetThumbnailStatusBorderDraftForSmoke(
@@ -27901,6 +28074,8 @@ public sealed class ViewerState
     // managed Photoreal outputs. Level 0 still requires a Photoreal version.
     public List<int>? PhotorealFavoriteFilterLevels { get; set; }
     public bool ShowUnseenDots { get; set; }
+    // WPF-local Grid caption presentation. Missing older state keeps captions on.
+    public bool? ShowGridFileInfoOverlay { get; set; }
     // WPF-local presentation only. Missing in older state keeps notifications on.
     public bool? ShowFavoriteChangeNotifications { get; set; }
     // WPF-local gallery presentation. Per-image choices remain session-only.
