@@ -19336,7 +19336,7 @@ public partial class App : Application
                     afterTerminalSignaturePoll.GetRequests
                         == afterHealthOnlyPoll.GetRequests + 1
                     && afterTerminalSignaturePoll.HealthGetRequests
-                        == afterHealthOnlyPoll.HealthGetRequests + 1
+                        == afterHealthOnlyPoll.HealthGetRequests + 2
                     && afterTerminalSignaturePoll.Total
                         == afterHealthOnlyPoll.Total;
                 healthServerStartedAtUtc = "2026-07-30T13:32:00.000Z";
@@ -19349,9 +19349,45 @@ public partial class App : Application
                     afterRestartSignaturePoll.GetRequests
                         == afterTerminalSignaturePoll.GetRequests + 1
                     && afterRestartSignaturePoll.HealthGetRequests
-                        == afterTerminalSignaturePoll.HealthGetRequests + 1
+                        == afterTerminalSignaturePoll.HealthGetRequests + 2
                     && afterRestartSignaturePoll.Total
                         == afterTerminalSignaturePoll.Total;
+                int getsBeforeHealthInventoryRace =
+                    afterRestartSignaturePoll.GetRequests;
+                int healthGetsBeforeHealthInventoryRace =
+                    afterRestartSignaturePoll.HealthGetRequests;
+                jobsGetEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                jobsGetGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                Task staleHealthInventoryRefresh =
+                    window.RefreshEnhancementJobsForSmokeAsync();
+                await jobsGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                queueLaterFirst = true;
+                healthLastTerminalAt = "2026-07-30T13:33:00.000Z";
+                jobsGetGate.SetResult(true);
+                await staleHealthInventoryRefresh;
+                jobsGetGate = null;
+                jobsGetEntered = null;
+                EnhancementJobsWorkspaceSmokeSnapshot
+                    afterHealthInventoryRaceReconcile =
+                        window.EnhancementJobsWorkspaceForSmoke();
+                int reconciledQueueFirstIndex = Array.IndexOf(
+                    afterHealthInventoryRaceReconcile.VisibleIds,
+                    "queue-first-job");
+                int reconciledQueueLaterIndex = Array.IndexOf(
+                    afterHealthInventoryRaceReconcile.VisibleIds,
+                    "queue-later-job");
+                bool healthSignatureNeverBoundToStaleInventory =
+                    reconciledQueueLaterIndex >= 0
+                    && reconciledQueueFirstIndex > reconciledQueueLaterIndex
+                    && afterHealthInventoryRaceReconcile.GetRequests
+                        == getsBeforeHealthInventoryRace + 2
+                    && afterHealthInventoryRaceReconcile.HealthGetRequests
+                        == healthGetsBeforeHealthInventoryRace + 3;
+                queueLaterFirst = false;
+                healthLastTerminalAt = "2026-07-30T13:34:00.000Z";
+                await window.PollEnhancementJobsForSmokeAsync();
                 object? viewBeforeRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
                 healthMode = "legacy-prompt-update";
                 await window.RefreshEnhancementJobsForSmokeAsync();
@@ -20052,6 +20088,7 @@ public partial class App : Application
                     && healthOnlyPollAvoidedFullInventory
                     && terminalSignatureRefreshesSameCountInventory
                     && companionRestartRefreshesInventory
+                    && healthSignatureNeverBoundToStaleInventory
                     && legacyPromptUpdateCapabilitySafe
                     && legacyPauseCapabilitySafe
                     && legacyHealthFallback
@@ -20165,6 +20202,8 @@ public partial class App : Application
                     afterTerminalSignaturePoll,
                     companionRestartRefreshesInventory,
                     afterRestartSignaturePoll,
+                    healthSignatureNeverBoundToStaleInventory,
+                    afterHealthInventoryRaceReconcile,
                     legacyPromptUpdateCapabilitySafe,
                     legacyPauseCapabilitySafe,
                     legacyHealthFallback,

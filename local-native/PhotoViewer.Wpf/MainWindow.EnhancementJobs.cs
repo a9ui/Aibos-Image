@@ -1101,7 +1101,8 @@ public partial class MainWindow
         long generation,
         bool isPoll,
         bool refreshHealth = true,
-        string? observedHealthInventorySignature = null)
+        string? observedHealthInventorySignature = null,
+        int healthInventoryCoalesceAttemptsRemaining = 1)
     {
         if ((_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == generation)
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
@@ -1111,12 +1112,31 @@ public partial class MainWindow
         _enhancementWorkspaceRefreshGeneration = generation;
         long queuePresentationRevision =
             _enhancementWorkspaceQueuePresentationRevision;
+        string? coalescedHealthInventorySignature = null;
+        bool forceHealthPollAfterInventory = false;
         EnhancementJobsRefreshButton.IsEnabled = false;
         RefreshEnhancementQueuePauseControl();
         if (!isPoll)
             EnhancementJobsStatusText.Text = "Refreshing jobs...";
         try
         {
+            if (refreshHealth)
+            {
+                // Bind the full inventory only to a health signature observed
+                // before that inventory is requested. Reading health after an
+                // in-flight jobs response can attach a newer runtime/count
+                // signature to an older snapshot and suppress the next poll.
+                EnhancementQueueHealthView? healthBeforeInventory =
+                    await RefreshEnhancementQueueHealthAsync(generation, isPoll);
+                if (generation != _enhancementWorkspaceGeneration
+                    || EnhancementJobsDialog.Visibility != Visibility.Visible)
+                {
+                    return;
+                }
+                observedHealthInventorySignature =
+                    healthBeforeInventory?.InventorySignature;
+            }
+
             _enhancementWorkspaceGetCount++;
             EnhancementApiResponse response = await SendEnhancementApiAsync(HttpMethod.Get, "api/enhance/jobs");
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
@@ -1149,6 +1169,48 @@ public partial class MainWindow
                 return;
             }
 
+            if (observedHealthInventorySignature is not null
+                && _enhancementWorkspaceHealthEndpointSupported != false)
+            {
+                EnhancementQueueHealthView? healthAfterInventory =
+                    await RefreshEnhancementQueueHealthAsync(generation, isPoll);
+                if (generation != _enhancementWorkspaceGeneration
+                    || EnhancementJobsDialog.Visibility != Visibility.Visible)
+                {
+                    return;
+                }
+
+                string? healthAfterInventorySignature =
+                    healthAfterInventory?.InventorySignature;
+                if (healthAfterInventorySignature is not null
+                    && !string.Equals(
+                        healthAfterInventorySignature,
+                        observedHealthInventorySignature,
+                        StringComparison.Ordinal))
+                {
+                    if (healthInventoryCoalesceAttemptsRemaining > 0)
+                    {
+                        // The inventory was in flight while queue/runtime state
+                        // changed. Do not display it or mark the newer health
+                        // signature handled; coalesce exactly one replacement
+                        // full read after this single-flight section exits.
+                        coalescedHealthInventorySignature =
+                            healthAfterInventorySignature;
+                    }
+                    else
+                    {
+                        // Continuous churn must not create an unbounded chain
+                        // of 24 MiB full reads. Apply this latest inventory
+                        // without accepting a mismatched signature and keep one
+                        // compact-health poll alive for the next reconciliation.
+                        observedHealthInventorySignature = null;
+                        forceHealthPollAfterInventory = true;
+                    }
+                }
+            }
+
+            if (coalescedHealthInventorySignature is null)
+            {
             bool activeMembershipChanged = !SameActiveEnhancementJobIds(
                 _enhancementWorkspaceJobs,
                 jobs);
@@ -1178,7 +1240,7 @@ public partial class MainWindow
                 : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
             if (highlightedBatchAlreadyTerminal)
                 EnhancementJobsStatusText.Text += " The new batch already finished, so all highlighted jobs are shown.";
-            if (activeCount > 0)
+            if (activeCount > 0 || forceHealthPollAfterInventory)
                 _enhancementWorkspacePollTimer.Start();
             else
                 _enhancementWorkspacePollTimer.Stop();
@@ -1188,15 +1250,6 @@ public partial class MainWindow
                 _enhancementWorkspaceHealthInventorySignature =
                     observedHealthInventorySignature;
             }
-            if (refreshHealth)
-            {
-                EnhancementQueueHealthView? health =
-                    await RefreshEnhancementQueueHealthAsync(generation, isPoll);
-                if (health is EnhancementQueueHealthView currentHealth)
-                {
-                    _enhancementWorkspaceHealthInventorySignature =
-                        currentHealth.InventorySignature;
-                }
             }
         }
         finally
@@ -1208,6 +1261,20 @@ public partial class MainWindow
                     EnhancementJobsRefreshButton.IsEnabled = !_enhancementWorkspaceMutationPending;
                 RefreshEnhancementQueuePauseControl();
             }
+        }
+
+        if (coalescedHealthInventorySignature is not null
+            && generation == _enhancementWorkspaceGeneration
+            && EnhancementJobsDialog.Visibility == Visibility.Visible)
+        {
+            await RefreshEnhancementJobsWorkspaceAsync(
+                generation,
+                isPoll,
+                refreshHealth: false,
+                observedHealthInventorySignature:
+                    coalescedHealthInventorySignature,
+                healthInventoryCoalesceAttemptsRemaining:
+                    healthInventoryCoalesceAttemptsRemaining - 1);
         }
     }
 
@@ -1663,6 +1730,13 @@ public partial class MainWindow
         var reconciled = new List<EnhancementWorkspaceJobView>(jobs.Count);
         foreach (EnhancementWorkspaceJobView candidate in jobs)
         {
+            // Health is intentionally sampled before the jobs inventory. Make
+            // that already-observed capability state authoritative for rows
+            // that appear for the first time in the following inventory.
+            candidate.QueuedPhotorealPromptUpdateCapabilitySafe =
+                _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
+            candidate.PhotorealEnqueueNextCapabilitySafe =
+                _enhancementWorkspacePhotorealEnqueueNextSupported;
             if (existingById.TryGetValue(candidate.Id, out EnhancementWorkspaceJobView? existing)
                 && existing.HasSameImmutableIdentity(candidate))
             {

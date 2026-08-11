@@ -223,7 +223,10 @@ public partial class MainWindow
                 requestBody,
                 cts.Token,
                 timeoutMilliseconds: VideoH3PromptRewriteTimeoutMilliseconds,
-                maxResponseBytes: MaxVideoH3PromptRewriteResponseBytes);
+                maxResponseBytes: MaxVideoH3PromptRewriteResponseBytes,
+                timeoutError: VideoH3Localized(
+                    "UiVideoH3StatusTimedOut",
+                    "H3語化が90秒以内に完了しませんでした。入力プロンプトは変更していません。もう一度試してください。"));
             if (cts.IsCancellationRequested)
             {
                 SetStatusIfCurrent(VideoH3Localized(
@@ -841,6 +844,19 @@ public partial class MainWindow
             && value.All(static character =>
                 character is >= '0' and <= '9'
                     or >= 'a' and <= 'f');
+
+    public static VideoH3PromptRewriteTimeoutSmokeSnapshot
+        VideoH3PromptRewriteTimeoutContractForSmoke()
+        => new(
+            ModalEnhancementHttpClient.Timeout
+                == System.Threading.Timeout.InfiniteTimeSpan,
+            DefaultEnhancementApiTimeoutMilliseconds,
+            VideoH3PromptRewriteTimeoutMilliseconds);
+
+    public readonly record struct VideoH3PromptRewriteTimeoutSmokeSnapshot(
+        bool SharedTransportTimeoutIsInfinite,
+        int DefaultRequestTimeoutMilliseconds,
+        int RewriteRequestTimeoutMilliseconds);
 
     private string VideoH3Localized(string key, string fallback)
         => TryFindResource(key) as string ?? fallback;

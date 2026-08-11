@@ -65,10 +65,14 @@ public partial class MainWindow : Window
         Next,
     }
 
+    private const int DefaultEnhancementApiTimeoutMilliseconds = 30_000;
     private static readonly StringComparer EnhancementSourceIdentityComparer = StringComparer.OrdinalIgnoreCase;
     private static readonly HttpClient ModalEnhancementHttpClient = new()
     {
-        Timeout = TimeSpan.FromSeconds(30),
+        // Every request owns its deadline through a linked token below. A
+        // transport-wide timeout would silently cap the H3 rewrite's explicit
+        // 90-second local-inference budget at 30 seconds.
+        Timeout = System.Threading.Timeout.InfiniteTimeSpan,
     };
     private static readonly HashSet<string> SupportedImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -17366,18 +17370,18 @@ public partial class MainWindow : Window
         string? exactBodyJson = null,
         string? idempotencyKey = null,
         int? timeoutMilliseconds = null,
-        int? maxResponseBytes = null)
+        int? maxResponseBytes = null,
+        string? timeoutError = null)
     {
         CancellationTokenSource? requestTimeoutCts = null;
         try
         {
-            CancellationToken requestToken = token;
-            if (timeoutMilliseconds is int boundedTimeout)
-            {
-                requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                requestTimeoutCts.CancelAfter(Math.Max(1, boundedTimeout));
-                requestToken = requestTimeoutCts.Token;
-            }
+            int effectiveTimeoutMilliseconds = Math.Max(
+                1,
+                timeoutMilliseconds ?? DefaultEnhancementApiTimeoutMilliseconds);
+            requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            requestTimeoutCts.CancelAfter(effectiveTimeoutMilliseconds);
+            CancellationToken requestToken = requestTimeoutCts.Token;
 
             Uri endpoint = new(ResolveBrowserEnhancementBaseUri(), relativePath.TrimStart('/'));
             using var request = new HttpRequestMessage(method, endpoint);
@@ -17460,6 +17464,25 @@ public partial class MainWindow : Window
             !token.IsCancellationRequested
             && requestTimeoutCts?.IsCancellationRequested == true)
         {
+            if (!string.IsNullOrWhiteSpace(timeoutError))
+            {
+                return new EnhancementApiResponse(
+                    false,
+                    0,
+                    null,
+                    timeoutError);
+            }
+            if (timeoutMilliseconds is null)
+            {
+                string defaultTimeoutError = method == HttpMethod.Get
+                    ? "The local AI companion did not answer within 30 seconds. Try the request again."
+                    : "The local AI companion did not return a receipt within 30 seconds. The change may already have been applied; check Jobs before retrying.";
+                return new EnhancementApiResponse(
+                    false,
+                    0,
+                    null,
+                    defaultTimeoutError);
+            }
             return new EnhancementApiResponse(
                 false,
                 0,

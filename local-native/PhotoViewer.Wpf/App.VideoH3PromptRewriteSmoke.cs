@@ -78,6 +78,13 @@ public partial class App
                 && routeFixture.GetProperty("cacheControl").GetString()
                     == "no-store, max-age=0"
                 && rewriteRevision == "aibos-h3-i2va-local-v1";
+            PhotoViewer.Wpf.MainWindow.VideoH3PromptRewriteTimeoutSmokeSnapshot
+                timeoutContract = PhotoViewer.Wpf.MainWindow
+                    .VideoH3PromptRewriteTimeoutContractForSmoke();
+            bool timeoutContractExact =
+                timeoutContract.SharedTransportTimeoutIsInfinite
+                && timeoutContract.DefaultRequestTimeoutMilliseconds == 30_000
+                && timeoutContract.RewriteRequestTimeoutMilliseconds == 90_000;
             byte[] sourceBytes = Convert.FromBase64String(
                 sourceFixture.GetProperty("pngBase64").GetString()!);
             string fixtureSourceSha256 = Convert.ToHexStringLower(
@@ -874,6 +881,7 @@ public partial class App
                         && window.EnhancementCompanionLaunchAttemptCountForSmoke == 0
                         && companionStarterCalls == 0;
                     ok = contractIdentity
+                        && timeoutContractExact
                         && sourceFixtureExact
                         && contractUnchanged
                         && surface
@@ -915,6 +923,8 @@ public partial class App
                     {
                         ok,
                         contractIdentity,
+                        timeoutContractExact,
+                        timeoutContract,
                         sourceFixtureExact,
                         contractUnchanged,
                         surface,

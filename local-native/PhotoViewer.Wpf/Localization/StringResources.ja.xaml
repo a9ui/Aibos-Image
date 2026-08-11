@@ -171,6 +171,7 @@
   <sys:String x:Key="UiVideoH3StatusUnavailable">ローカルのH3語化を利用できません。動画ジョブは追加していません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusSourceUnavailable">H3語化する画像が見つかりません。入力を選び直してください。</sys:String>
   <sys:String x:Key="UiVideoH3StatusCanceled">H3語化を中止しました。動画ジョブは追加していません。</sys:String>
+  <sys:String x:Key="UiVideoH3StatusTimedOut">H3語化が90秒以内に完了しませんでした。入力プロンプトは変更していません。もう一度試してください。</sys:String>
   <sys:String x:Key="UiVideoH3StatusApplied">候補を入力プロンプトへ反映しました。動画化はまだ開始していません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusUndone">入力プロンプトを反映前へ戻しました。</sys:String>
 </ResourceDictionary>

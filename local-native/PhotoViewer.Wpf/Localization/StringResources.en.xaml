@@ -171,6 +171,7 @@
   <sys:String x:Key="UiVideoH3StatusUnavailable">Local H3 rewriting is unavailable. No video job was added.</sys:String>
   <sys:String x:Key="UiVideoH3StatusSourceUnavailable">The image for H3 rewriting is unavailable. Select the input again.</sys:String>
   <sys:String x:Key="UiVideoH3StatusCanceled">H3 rewriting was canceled. No video job was added.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusTimedOut">H3 rewriting did not finish within 90 seconds. The input prompt was not changed. Try again.</sys:String>
   <sys:String x:Key="UiVideoH3StatusApplied">Applied the candidate to the input prompt. Video generation has not started.</sys:String>
   <sys:String x:Key="UiVideoH3StatusUndone">Restored the input prompt to its value before the apply.</sys:String>
 </ResourceDictionary>
