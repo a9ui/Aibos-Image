@@ -475,13 +475,16 @@ public partial class MainWindow
             }
         }
 
-        bool sourceReady = h3Selected
-            && TryCaptureVideoH3SourceStamp(
+        bool sourceReady = false;
+        string sourceError = "";
+        if (h3Selected)
+        {
+            sourceReady = TryCaptureVideoH3SourceStamp(
                 out _,
                 out _,
-                out _);
+                out sourceError);
+        }
         ModalVideoH3RewritePromptButton.IsEnabled = h3Selected
-            && sourceReady
             && !_videoH3RewritePending;
         ModalVideoH3RewritePromptButton.Content = VideoH3Localized(
             string.IsNullOrEmpty(_videoH3PromptCandidate)
@@ -506,6 +509,14 @@ public partial class MainWindow
             SetVideoH3PromptRewriteStatus(VideoH3Localized(
                 "UiVideoH3StatusWorking",
                 "画像と入力を確認し、H3向け候補を作成しています…"));
+        }
+        else if (!sourceReady)
+        {
+            SetVideoH3PromptRewriteStatus(string.IsNullOrWhiteSpace(sourceError)
+                ? VideoH3Localized(
+                    "UiVideoH3StatusSourceUnavailable",
+                    "H3語化する画像が見つかりません。入力を選び直してください。")
+                : sourceError);
         }
         else if (string.IsNullOrEmpty(_videoH3PromptCandidate))
         {
@@ -620,7 +631,12 @@ public partial class MainWindow
     {
         stamp = default;
         if (!TryRevalidateCapturedVideoSource(out source, out error))
+        {
+            error = VideoH3Localized(
+                "UiVideoH3StatusSourceUnavailable",
+                "H3語化する画像が見つかりません。入力を選び直してください。");
             return false;
+        }
 
         try
         {
@@ -892,6 +908,8 @@ public partial class MainWindow
         ModalVideoH3PromptCandidateTextBox.IsEnabled;
     public bool VideoH3PromptRewritePendingForSmoke =>
         _videoH3RewritePending;
+    public bool VideoH3PromptRewriteButtonEnabledForSmoke =>
+        ModalVideoH3RewritePromptButton.IsEnabled;
     public bool VideoH3PromptUndoEnabledForSmoke =>
         ModalVideoH3UndoPromptButton.IsEnabled;
     public string VideoH3PromptRewriteStatusForSmoke =>

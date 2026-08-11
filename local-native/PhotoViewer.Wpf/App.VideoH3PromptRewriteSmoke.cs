@@ -317,6 +317,25 @@ public partial class App
                     int launchAttemptsBeforeRewrite =
                         window.EnhancementCompanionLaunchAttemptCountForSmoke;
 
+                    window.SetMiniMaxH3CapabilityForSmoke(
+                        checkedHealth: true,
+                        ready: true,
+                        reasonCode: null);
+                    window.SelectVideoModelForSmoke("minimax-h3");
+                    string missingSourceStatus =
+                        window.FindResource(
+                            "UiVideoH3StatusSourceUnavailable") as string ?? "";
+                    int rewriteCallsBeforeMissingSource = rewritePostCalls;
+                    bool missingSourceButtonActionable =
+                        window.VideoH3PromptRewriteButtonEnabledForSmoke;
+                    bool missingSourceRejectedLocally =
+                        !await window.RewriteVideoPromptForH3ForSmokeAsync()
+                        && rewritePostCalls == rewriteCallsBeforeMissingSource
+                        && string.Equals(
+                            window.VideoH3PromptRewriteStatusForSmoke,
+                            missingSourceStatus,
+                            StringComparison.Ordinal);
+
                     await window.LoadFolderAsync(sourceFolder);
                     bool selected = window.SelectFileNameForSmoke(
                         Path.GetFileName(sourcePath));
@@ -884,6 +903,8 @@ public partial class App
                         && timeoutContractExact
                         && sourceFixtureExact
                         && contractUnchanged
+                        && missingSourceButtonActionable
+                        && missingSourceRejectedLocally
                         && surface
                         && requestExact
                         && responseFixtureAccepted
@@ -927,6 +948,8 @@ public partial class App
                         timeoutContract,
                         sourceFixtureExact,
                         contractUnchanged,
+                        missingSourceButtonActionable,
+                        missingSourceRejectedLocally,
                         surface,
                         surfaceIssues,
                         requestExact,
