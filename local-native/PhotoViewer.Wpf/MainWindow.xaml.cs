@@ -551,11 +551,14 @@ public partial class MainWindow : Window
     private long _catalogProjectionStartPostCount;
     private long _catalogProjectionStartCoalescedCount;
     private long _catalogProjectionCaptureCount;
+    private ManualResetEventSlim? _catalogProjectionComputeEnteredForSmoke;
+    private ManualResetEventSlim? _catalogProjectionComputeGateForSmoke;
     private long _catalogStatsPresentationGeneration;
     private string _displayStyle = DisplayStyleStandard;
     private string _aspectMode = AspectOriginalValue;
     private bool _metadataOriginalAspectLayoutBindingsPending;
     private int _metadataOriginalAspectLayoutPublishCount;
+    private int _metadataOriginalAspectLayoutFallbackCount;
     private string _sortBy = SortModifiedNewestValue;
     private string _randomSortSeed = "default";
     private string _datePreset = DatePresetNoneValue;
@@ -8263,7 +8266,7 @@ public partial class MainWindow : Window
                         refreshRealizedBindings: false);
                     _metadataOriginalAspectLayoutBindingsPending = true;
                     _metadataOriginalAspectLayoutPublishCount++;
-                    _ = PublishCompletedMetadataLayoutAsync(viewportAnchor);
+                    _ = PublishCompletedMetadataLayoutAsync(viewportAnchor, _cardLayoutRevision);
                 }
                 else if (!string.IsNullOrWhiteSpace(SearchInput.Text))
                 {
@@ -8464,6 +8467,7 @@ public partial class MainWindow : Window
     {
         _metadataOriginalAspectLayoutBindingsPending = false;
         _metadataOriginalAspectLayoutPublishCount = 0;
+        _metadataOriginalAspectLayoutFallbackCount = 0;
         _metadataIndexStatus = "loading";
         _metadataIndexProgress = 0;
         _metadataIndexCompleted = 0;
@@ -8721,26 +8725,32 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task PublishCompletedMetadataLayoutAsync(GridZoomAnchor? viewportAnchor)
+    private async Task<SearchFilterCompletion> PublishCompletedMetadataLayoutAsync(
+        GridZoomAnchor? viewportAnchor,
+        long expectedCardLayoutRevision)
     {
         SearchFilterCompletion completion = await QueueCatalogProjection(
             debounce: false,
             reorderCatalog: false,
             selectFirst: false,
             viewportAnchor: viewportAnchor);
-        if (completion.Applied || completion.Discarded)
-            return;
+        if (completion.Applied)
+            return completion;
 
-        // A projection failure must not leave realized containers bound to the
-        // fallback portrait geometry. Keep this as a single fallback reflow;
-        // progressive metadata batches never invalidate the row map.
-        if (_metadataOriginalAspectLayoutBindingsPending)
+        // A selection-only generation change can discard the final projection
+        // without scheduling another one. Complete the already-calculated
+        // card geometry exactly once, but only while the same layout revision
+        // still owns the pending work. Zoom/aspect changes supersede it.
+        if (_metadataOriginalAspectLayoutBindingsPending
+            && _cardLayoutRevision == expectedCardLayoutRevision)
         {
             RefreshRealizedCardLayoutBindings();
             _metadataOriginalAspectLayoutBindingsPending = false;
+            _metadataOriginalAspectLayoutFallbackCount++;
             _galleryVirtualizingPanel?.InvalidateItemLayout();
             ScheduleGridGeometryAnchorRestore(viewportAnchor);
         }
+        return completion;
     }
 
     private static ImageMetadataLoadMetrics ReadImageMetadata(IReadOnlyList<FileInfo> files, CancellationToken token)
@@ -11120,6 +11130,12 @@ public partial class MainWindow : Window
                 ThreadPriority previousPriority = currentThread.Priority;
                 try
                 {
+                    _catalogProjectionComputeEnteredForSmoke?.Set();
+                    if (_catalogProjectionComputeGateForSmoke is { } smokeGate
+                        && !smokeGate.Wait(TimeSpan.FromSeconds(10), cts.Token))
+                    {
+                        throw new TimeoutException("catalog projection smoke gate timed out");
+                    }
                     if (previousPriority > ThreadPriority.Lowest)
                         currentThread.Priority = ThreadPriority.Lowest;
                     return ComputeFilterResult(
@@ -24072,6 +24088,27 @@ public partial class MainWindow : Window
     public bool MetadataIndexProgressVisibleForSmoke => MetadataIndexProgressBar.Visibility == Visibility.Visible;
     public int MetadataOriginalAspectLayoutPublishCountForSmoke
         => _metadataOriginalAspectLayoutPublishCount;
+    public int MetadataOriginalAspectLayoutFallbackCountForSmoke
+        => _metadataOriginalAspectLayoutFallbackCount;
+    public bool MetadataOriginalAspectLayoutPendingForSmoke
+        => _metadataOriginalAspectLayoutBindingsPending;
+    public void ConfigureCatalogProjectionComputeGateForSmoke(
+        ManualResetEventSlim? entered,
+        ManualResetEventSlim? gate)
+    {
+        _catalogProjectionComputeEnteredForSmoke = entered;
+        _catalogProjectionComputeGateForSmoke = gate;
+    }
+    public Task<SearchFilterCompletion> PublishCompletedMetadataLayoutForSmokeAsync()
+    {
+        GridZoomAnchor? viewportAnchor = PreferredGridGeometryAnchor();
+        ApplyCardLayoutToAllTiles(
+            invalidateItemLayout: false,
+            refreshRealizedBindings: false);
+        _metadataOriginalAspectLayoutBindingsPending = true;
+        _metadataOriginalAspectLayoutPublishCount++;
+        return PublishCompletedMetadataLayoutAsync(viewportAnchor, _cardLayoutRevision);
+    }
     public static string ResolveSharedProjectRootForSmoke(string start)
     {
         string fullStart = Path.GetFullPath(start);
