@@ -172,7 +172,8 @@
       <local:VirtualizingWrapPanel HorizontalSpacing="10" VerticalSpacing="10" OverscanRows="0"/>
     </ItemsPanelTemplate>
     <Style x:Key="FavoriteLevelPill" TargetType="{x:Type CheckBox}" BasedOn="{StaticResource Pill}">
-      <Setter Property="MinHeight" Value="26"/>
+      <Setter Property="Height" Value="24"/>
+      <Setter Property="MinHeight" Value="24"/>
       <Setter Property="HorizontalAlignment" Value="Stretch"/>
       <Setter Property="Margin" Value="0,0,6,6"/>
       <Setter Property="FocusVisualStyle" Value="{StaticResource CommonButtonFocusVisual}"/>
@@ -210,6 +211,10 @@
                      AutomationProperties.Name="Aibos Gallery Fold mark"/>
               <TextBlock Text="Aibos" FontSize="18.5" FontWeight="Bold" Foreground="{StaticResource LogoBrush}"
                          VerticalAlignment="Center" Margin="7,0,0,0"/>
+              <TextBlock x:Name="HeaderProductVersionText" Text="v1.0.0"
+                         FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource TextTertiary}"
+                         VerticalAlignment="Center" Margin="6,3,0,0"
+                         AutomationProperties.Name="Aibos Image product version"/>
             </StackPanel>
           </Button>
           <Button Style="{StaticResource IconButton}" ToolTip="Refresh active folder" AutomationProperties.Name="Refresh active folder" Click="RefreshActiveFolder_Click" WindowChrome.IsHitTestVisibleInChrome="True">
@@ -483,6 +488,7 @@
             <Border Padding="16,14,16,12" BorderBrush="{DynamicResource DividerSubtleBrush}" BorderThickness="0,0,0,1">
               <StackPanel>
                 <TextBlock Text="FILTERS" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
+                <TextBlock x:Name="FavoriteFilterGroupTitle" Text="{DynamicResource UiFavoriteFilterGroupTitle}" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,7"/>
                 <TextBlock x:Name="OriginalFavoriteFilterTitle" Text="{DynamicResource UiOriginalFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
                 <CheckBox x:Name="FavoriteOnlyFilter" Content="{DynamicResource UiFavoritesOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="FavoriteFilter_Changed" Unchecked="FavoriteFilter_Changed"/>
                 <CheckBox x:Name="UnfavoriteOnlyFilter" Content="{DynamicResource UiUnratedOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="FavoriteFilter_Changed" Unchecked="FavoriteFilter_Changed"/>
@@ -504,6 +510,16 @@
                   <CheckBox x:Name="PhotorealFavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 5" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}" ToolTip="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
                 </UniformGrid>
                 <TextBlock x:Name="PhotorealFavoriteFilterSummary" Text="{DynamicResource UiAllRatings}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6" ToolTip="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                <TextBlock x:Name="VideoFavoriteFilterTitle" Text="{DynamicResource UiVideoFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,2,0,5" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                <UniformGrid x:Name="VideoFavoriteLevelFilterPanel" Columns="3" Margin="0,0,0,0">
+                  <CheckBox x:Name="VideoFavoriteLevel0Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 0" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteLevelZeroHelp}" ToolTip="{DynamicResource UiVideoFavoriteLevelZeroHelp}"/>
+                  <CheckBox x:Name="VideoFavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 1" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                  <CheckBox x:Name="VideoFavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 2" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                  <CheckBox x:Name="VideoFavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 3" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                  <CheckBox x:Name="VideoFavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 4" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                  <CheckBox x:Name="VideoFavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 5" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                </UniformGrid>
+                <TextBlock x:Name="VideoFavoriteFilterSummary" Text="{DynamicResource UiAllRatings}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}"/>
                 <CheckBox x:Name="EnhancedOnlyFilter" Content="AI高画質化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI高画質化の完了画像だけを表示"/>
                 <CheckBox x:Name="UnenhancedOnlyFilter" Content="未高画質化のみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="まだAI高画質化されていない画像だけを表示"/>
                 <CheckBox x:Name="PhotorealOnlyFilter" Content="AI実写化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI実写化の完了画像だけを表示"/>
@@ -708,7 +724,7 @@
       <!-- ─────── Main grid ─────── -->
       <Border Grid.Row="0" Grid.Column="1" x:Name="ViewerFolderDropTarget" Background="{StaticResource BgPrimary}" AllowDrop="True"
               DragEnter="FolderDropTarget_DragEnter" DragOver="FolderDropTarget_DragOver" DragLeave="FolderDropTarget_DragLeave" Drop="FolderDropTarget_Drop"
-              AutomationProperties.Name="Image viewer folder drop target" AutomationProperties.HelpText="Drop existing folders from Explorer to add them to the current folder set. Files are never copied or moved.">
+              AutomationProperties.Name="{DynamicResource UiViewerDropAutomationName}" AutomationProperties.HelpText="{DynamicResource UiViewerDropAutomationHelp}">
        <Grid>
         <local:VirtualizedGalleryListBox x:Name="CardsList" AutomationProperties.AutomationId="AibosGalleryGrid"
                  Background="Transparent" BorderThickness="0" Padding="14,12,10,18"
@@ -816,8 +832,8 @@
         <Border x:Name="ViewerFolderDropOverlay" Visibility="Collapsed" IsHitTestVisible="False" Margin="18" CornerRadius="12"
                 Background="{DynamicResource DropOverlayBrush}" BorderBrush="{StaticResource AccentLight}" BorderThickness="2">
           <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-            <TextBlock Text="Add folders to this viewer" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"/>
-            <TextBlock Text="Drop existing folders — files will not be copied or moved" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,5,0,0" HorizontalAlignment="Center"/>
+            <TextBlock Text="{DynamicResource UiViewerDropTitle}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+            <TextBlock Text="{DynamicResource UiViewerDropHelp}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,5,0,0" HorizontalAlignment="Center"/>
           </StackPanel>
         </Border>
        </Grid>
@@ -1967,6 +1983,16 @@
                      Margin="0,0,0,6" AutomationProperties.Name="Video generation settings section"/>
           <TextBlock Text="動画ジョブのモデルと初期値です。変更は次に明示的に追加するジョブから使われ、待機中・処理中のジョブは変わりません。"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <TextBlock Text="Template" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
+          <ComboBox x:Name="AppVideoPromptTemplateComboBox"
+                    Style="{StaticResource PhotorealSettingsComboBox}"
+                    DisplayMemberPath="Label"
+                    IsSynchronizedWithCurrentItem="False"
+                    SelectionChanged="VideoPromptTemplate_SelectionChanged"
+                    AutomationProperties.Name="Video prompt template"
+                    AutomationProperties.HelpText="Apply a built-in motion prompt. MiniMax語化 can then add source-image details."/>
+          <TextBlock Text="用途と動き方の土台をPromptへ入れます。画像固有の動作・カメラ・表情はMiniMax語化で追加できます。"
+                     Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,5,0,10"/>
           <TextBlock Text="Style" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,5"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
                   BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,10">
@@ -2055,12 +2081,14 @@
                         SelectionChanged="VideoGenerationModel_SelectionChanged"
                         AutomationProperties.Name="Default video generation model">
                 <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用" Tag="wan22-ti2v-5b"/>
+                <ComboBoxItem Content="MiniMax H3 — 5秒プレビュー・音声あり" Tag="minimax-h3"/>
                 <ComboBoxItem Content="HunyuanVideo 1.5 — 実写・人物向け／実験" Tag="hunyuan-video-1.5-i2v-step-distilled-experimental"/>
               </ComboBox>
               <TextBlock x:Name="AppVideoModelDescriptionText"
                          Text="RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,5,0,9"/>
+              <StackPanel x:Name="AppVideoWanControlsPanel">
               <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
               <ComboBox x:Name="AppVideoQualityComboBox"
                         Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
@@ -2133,6 +2161,7 @@
                            AutomationProperties.Name="Default fixed video generation seed"/>
                 </StackPanel>
               </Grid>
+              </StackPanel>
               <TextBlock x:Name="AppVideoDeliveryText"
                          Text="生成: 16 fps・97f → 最終出力: 30 fps・180f・6.000秒 · RIFE 4.25 · H.264 / yuv420p · 音声なし"
                          Foreground="{StaticResource TextSecondary}" FontSize="10.5"
@@ -3029,13 +3058,24 @@
                            Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,2,0,0"/>
               </StackPanel>
             </DockPanel>
-            <TextBlock Text="選んだ画像を最初のフレームとして使います。空欄なら、構図とキャラクターを保つ穏やかなNormalモーションを使います。"
+            <TextBlock Text="選んだ画像を最初のフレームとして使います。空欄なら選択モデルの既定モーションを使い、MiniMax H3はよく動くDynamicになります。"
                        Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
             <TextBlock x:Name="ModalVideoSourceText"
                        Text="入力: 拡大画面を開いた時点の画像"
                        Foreground="{StaticResource TextPrimary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,0,0,8"
                        AutomationProperties.Name="Video generation source version"/>
+            <TextBlock Text="Template" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalVideoPromptTemplateComboBox"
+                      Style="{StaticResource PhotorealSettingsComboBox}"
+                      DisplayMemberPath="Label"
+                      IsSynchronizedWithCurrentItem="False"
+                      SelectionChanged="VideoPromptTemplate_SelectionChanged"
+                      AutomationProperties.Name="Video prompt template"
+                      AutomationProperties.HelpText="Apply a built-in motion prompt. MiniMax語化 can then add source-image details."/>
+            <TextBlock Text="用途と動き方の土台をPromptへ入れます。画像固有の動作・カメラ・表情はMiniMax語化で追加できます。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,5,0,10"/>
             <TextBlock Text="Style" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalVideoStyleComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}"
@@ -3077,12 +3117,14 @@
                       SelectionChanged="VideoGenerationModel_SelectionChanged"
                       AutomationProperties.Name="Video generation model">
               <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用" Tag="wan22-ti2v-5b"/>
+              <ComboBoxItem Content="MiniMax H3 — 5秒プレビュー・音声あり" Tag="minimax-h3"/>
               <ComboBoxItem Content="HunyuanVideo 1.5 — 実写・人物向け／実験" Tag="hunyuan-video-1.5-i2v-step-distilled-experimental"/>
             </ComboBox>
             <TextBlock x:Name="ModalVideoModelDescriptionText"
                        Text="RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。"
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,5,0,10"/>
+            <StackPanel x:Name="ModalVideoWanControlsPanel">
             <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalVideoQualityComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
@@ -3094,6 +3136,7 @@
             <TextBlock Text="高品質はWan生成だけを40 stepにします。解像度・RIFE 30fps仕上げ・単一GPUキューは標準と同じです。"
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,5,0,10"/>
+            </StackPanel>
             <DockPanel Margin="0,0,0,4">
               <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
                       Content="Reset" Height="24" Padding="8,2"
@@ -3111,6 +3154,91 @@
                      TextChanged="VideoGenerationPrompt_TextChanged"
                      AutomationProperties.Name="Video generation prompt"
                      AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt."/>
+            <Border x:Name="ModalVideoH3PromptRewritePanel"
+                    Visibility="Collapsed" Margin="0,10,0,0" Padding="10"
+                    CornerRadius="5" Background="{StaticResource SoftFill}"
+                    BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                    AutomationProperties.Name="{DynamicResource UiVideoH3PromptAssistantAutomation}">
+              <StackPanel>
+                <DockPanel LastChildFill="True" Margin="0,0,0,5">
+                  <Button x:Name="ModalVideoH3RewritePromptButton"
+                          DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                          Content="{DynamicResource UiVideoH3RewriteButton}"
+                          MinWidth="128" Height="28" Padding="9,2" Margin="10,0,0,0"
+                          Click="RewriteVideoPromptForH3_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoH3RewriteButtonAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoH3RewriteButtonHelp}"/>
+                  <TextBlock Text="{DynamicResource UiVideoH3PromptAssistantTitle}"
+                             Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                             FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </DockPanel>
+                <TextBlock Text="{DynamicResource UiVideoH3PromptAssistantHelp}"
+                           Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                           TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <Grid Margin="0,0,0,6">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Grid.Column="0" Text="{DynamicResource UiVideoH3RewriteModeLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             VerticalAlignment="Center"/>
+                  <ComboBox x:Name="ModalVideoH3RewriteModeComboBox" Grid.Column="2"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="0"
+                            SelectionChanged="VideoH3RewriteMode_SelectionChanged"
+                            AutomationProperties.Name="{DynamicResource UiVideoH3RewriteModeAutomation}"
+                            AutomationProperties.HelpText="{DynamicResource UiVideoH3RewriteModeHelp}">
+                    <ComboBoxItem Content="{DynamicResource UiVideoH3RewriteModePolish}" Tag="polish"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoH3RewriteModeDirection}" Tag="direction"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoH3RewriteModeAuto}" Tag="auto"/>
+                  </ComboBox>
+                </Grid>
+                <TextBlock Text="{DynamicResource UiVideoH3ImageAnalysisOn}"
+                           Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                           TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <TextBlock Text="{DynamicResource UiVideoH3CandidateLabel}"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                           Margin="0,0,0,4"/>
+                <TextBox x:Name="ModalVideoH3PromptCandidateTextBox"
+                         MinHeight="112" MaxHeight="190" MaxLength="2001"
+                         IsEnabled="False" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                         CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                         BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6"
+                         TextChanged="VideoH3PromptCandidate_TextChanged"
+                         AutomationProperties.Name="{DynamicResource UiVideoH3CandidateAutomation}"
+                         AutomationProperties.HelpText="{DynamicResource UiVideoH3CandidateHelp}"/>
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <Button x:Name="ModalVideoH3ApplyPromptButton" Grid.Column="0"
+                          Style="{StaticResource PrimaryButton}"
+                          Content="{DynamicResource UiVideoH3ApplyButton}"
+                          Height="30" HorizontalAlignment="Stretch"
+                          Click="ApplyVideoH3PromptCandidate_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoH3ApplyButtonAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoH3ApplyButtonHelp}"/>
+                  <Button x:Name="ModalVideoH3UndoPromptButton" Grid.Column="2"
+                          Style="{StaticResource GhostButton}"
+                          Content="{DynamicResource UiVideoH3UndoButton}"
+                          MinWidth="92" Height="30" Padding="9,2"
+                          Click="UndoAppliedVideoH3Prompt_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoH3UndoButtonAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoH3UndoButtonHelp}"/>
+                </Grid>
+                <TextBlock x:Name="ModalVideoH3PromptRewriteStatusText"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                           TextWrapping="Wrap" Margin="0,7,0,0"
+                           AutomationProperties.LiveSetting="Polite"/>
+              </StackPanel>
+            </Border>
+            <StackPanel x:Name="ModalVideoWanTuningPanel">
             <Grid Margin="0,12,0,0">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -3172,6 +3300,7 @@
                          AutomationProperties.Name="Fixed video generation seed"/>
               </StackPanel>
             </Grid>
+            </StackPanel>
             <TextBlock x:Name="ModalVideoDeliveryText"
                        Text="生成: 16 fps・97f → 最終出力: 30 fps・180f・6.000秒 · RIFE 4.25 · H.264 / yuv420p · 音声なし"
                        Foreground="{StaticResource TextSecondary}" FontSize="10.5"

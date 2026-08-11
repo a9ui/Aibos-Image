@@ -32,6 +32,23 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow : Window
 {
+    private static string ResolveProductVersionLabel()
+    {
+        Assembly assembly = typeof(MainWindow).Assembly;
+        string? informational = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        string version = informational?.Split('+', 2)[0].Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            Version? assemblyVersion = assembly.GetName().Version;
+            version = assemblyVersion is null
+                ? "0.0.0"
+                : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{Math.Max(0, assemblyVersion.Build)}";
+        }
+        return version.StartsWith('v') ? version : $"v{version}";
+    }
+
     private enum ModalPointerState
     {
         Visible,
@@ -167,6 +184,7 @@ public partial class MainWindow : Window
     private const int MinFavoriteFilterLevel = 1;
     private const int MaxFavoriteFilterLevel = 5;
     private const int MinPhotorealFavoriteFilterLevel = 0;
+    private const int MinVideoFavoriteFilterLevel = 0;
     private const int MaxPersistedPreviewTabs = 30;
     private static readonly JsonSerializerOptions SharedRecentJsonOptions = new()
     {
@@ -431,7 +449,10 @@ public partial class MainWindow : Window
     private long _modalEnhancementGeneration;
     private CancellationTokenSource? _modalEnhancementRefreshCts;
     private Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _modalEnhancementSender
-        = static (request, token) => ModalEnhancementHttpClient.SendAsync(request, token);
+        = static (request, token) => ModalEnhancementHttpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            token);
     private bool _usingDefaultModalEnhancementSender = true;
     private string _modalEnhancementPresetId = "anime-sharp-x2";
     private string _modalEnhancementAdapterId = "comfyui";
@@ -532,6 +553,7 @@ public partial class MainWindow : Window
     private DateTime? _dateToLocal;
     private readonly HashSet<int> _favoriteFilterLevels = [];
     private readonly HashSet<int> _photorealFavoriteFilterLevels = [];
+    private readonly HashSet<int> _videoFavoriteFilterLevels = [];
     private bool _showUnseenDots;
     private bool _syncingUnseenDotsControls;
     private bool _showGridFileInfoOverlay = true;
@@ -620,6 +642,7 @@ public partial class MainWindow : Window
     {
         _tilesView = new SnapshotCollectionView<Tile>(_tiles);
         InitializeComponent();
+        HeaderProductVersionText.Text = ResolveProductVersionLabel();
         InitializeFavoriteHistory();
         if (Application.Current is App app)
             app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
@@ -1342,6 +1365,10 @@ public partial class MainWindow : Window
         _modalTransformQualityTimer.Stop();
         CancelPreviewTabHoverDecode();
 
+        // Never serialize a presentation-only FileDrop source as the current
+        // catalog selection during the forced shutdown save.
+        RestoreExternalFileDropSession();
+
         // Closing flushes only the viewer state. Folder recents, favorites,
         // seen data, enhancement jobs, and source files are separate stores
         // and must not be rewritten merely because the window is closing.
@@ -1400,6 +1427,7 @@ public partial class MainWindow : Window
         bool UnseenOnly,
         FrozenSet<int> FavoriteLevels,
         FrozenSet<int> PhotorealFavoriteLevels,
+        FrozenSet<int> VideoFavoriteLevels,
         FrozenSet<string> HiddenFolderBuckets,
         DateTime? DateFromLocal,
         DateTime? DateToLocal);
@@ -1415,6 +1443,7 @@ public partial class MainWindow : Window
         string Prompt,
         int FavoriteLevel,
         int PhotorealFavoriteLevel,
+        int VideoFavoriteLevel,
         bool Enhanced,
         bool Upscaled,
         bool Photorealized,
@@ -1422,12 +1451,16 @@ public partial class MainWindow : Window
         bool Unseen,
         DateTime ModifiedUtc,
         DateTime CreatedUtc,
-        FilterTileSortActivitySnapshot SortActivity);
-
-    private readonly record struct FilterTileSortActivitySnapshot(
-        bool Active,
-        bool HasTimestamp,
-        long UtcTicks);
+        DateTimeOffset? UpscaleCompletedAtUtc,
+        DateTimeOffset? PhotorealCompletedAtUtc,
+        DateTimeOffset? VideoCompletedAtUtc,
+        bool UpscaleQueueActive,
+        DateTimeOffset? UpscaleQueueAddedAtUtc,
+        bool PhotorealQueueActive,
+        DateTimeOffset? PhotorealQueueAddedAtUtc,
+        bool VideoQueueActive,
+        DateTimeOffset? VideoQueueAddedAtUtc,
+        DateTimeOffset? FavoriteChangedAtUtc);
 
     private sealed record FilterResult(
         Tile[] Tiles,
@@ -1974,6 +2007,10 @@ public partial class MainWindow : Window
 
     public async Task LoadFolderSetAsync(IEnumerable<string> folders, bool commitRecent = true)
     {
+        // A FileDrop viewer cohort is presentation-only. A real folder load
+        // retires it first and restores the catalog selection before the new
+        // load transaction captures any UI state.
+        CloseExternalFileDropSessionForReplacement();
         var totalWatch = Stopwatch.StartNew();
         LastLoadMetrics = null;
         _previewUpdateCount = 0;
@@ -2173,6 +2210,17 @@ public partial class MainWindow : Window
             // Keep those workers off UI-owned mutable stores: modal polling,
             // Enhance completion, and deletion may update the live enhancement
             // map while a reload is preparing the replacement catalog.
+            Dictionary<string, List<ManagedVideoVersion>> validCatalogVideoVersionsByPath =
+                _catalogVideoVersionsByPath
+                    .Select(static item => new KeyValuePair<string, List<ManagedVideoVersion>>(
+                        item.Key,
+                        item.Value.ToList()))
+                    .ToDictionary(
+                        static item => item.Key,
+                        item => item.Value
+                            .Where(version => !_ambiguousEnhancementJobIds.Contains(version.JobId))
+                            .ToList(),
+                        StringComparer.OrdinalIgnoreCase);
             var catalogSharedState = new CatalogSharedStateSnapshot(
                 new Dictionary<string, int>(_favorites, StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, DateTimeOffset>(
@@ -2187,13 +2235,16 @@ public partial class MainWindow : Window
                 BuildPhotorealFavoriteLevelsByPath(
                     _catalogEnhancementVersionsByPath,
                     _favorites),
-                _catalogVideoVersionsByPath
+                BuildVideoFavoriteLevelsByPath(
+                    validCatalogVideoVersionsByPath,
+                    _favorites),
+                validCatalogVideoVersionsByPath
                     .Where(static item => item.Value.Count > 0)
                     .ToDictionary(
                         static item => item.Key,
                         static item => item.Value.Count,
                         StringComparer.OrdinalIgnoreCase),
-                _catalogVideoVersionsByPath
+                validCatalogVideoVersionsByPath
                     .Where(static item => item.Value.Count > 0)
                     .ToDictionary(
                         static item => item.Key,
@@ -2205,7 +2256,7 @@ public partial class MainWindow : Window
                 BuildLatestEnhancementActivityByPath(
                     _catalogEnhancementVersionsByPath,
                     "photoreal"),
-                BuildLatestVideoActivityByPath(_catalogVideoVersionsByPath),
+                BuildLatestVideoActivityByPath(validCatalogVideoVersionsByPath),
                 new Dictionary<string, ManagedEnhancementQueueActivity>(
                     _catalogEnhancementQueueActivityByPath,
                     StringComparer.OrdinalIgnoreCase));
@@ -2297,11 +2348,19 @@ public partial class MainWindow : Window
                     scanAccessFailures.Enqueue(tile.Path);
                     continue;
                 }
+                // Revalidate managed video outputs on the UI thread at the
+                // publication boundary. Files can disappear after the worker
+                // snapshot; stale or ambiguous outputs must not contribute to
+                // the count, maximum Favorite badge, or Lv 0 filter meaning.
+                ApplyTileVideoAvailability(
+                    tile,
+                    GetCatalogManagedVideoVersionsForPath(tile.Path));
                 publishableTiles.Add(tile);
             }
             if (publishableTiles.Count > 1
                 && (!string.Equals(preparedSortBy, _sortBy, StringComparison.Ordinal)
-                    || !string.Equals(preparedRandomSortSeed, _randomSortSeed, StringComparison.Ordinal)))
+                    || !string.Equals(preparedRandomSortSeed, _randomSortSeed, StringComparison.Ordinal)
+                    || string.Equals(_sortBy, SortVideoNewestValue, StringComparison.Ordinal)))
             {
                 publishableTiles.Sort(
                     (left, right) => CompareTilesForSort(left, right, _sortBy, _randomSortSeed));
@@ -3763,6 +3822,12 @@ public partial class MainWindow : Window
                 out int knownPhotorealFavoriteLevel)
                 ? Math.Clamp(knownPhotorealFavoriteLevel, 0, 5)
                 : 0;
+        int videoFavoriteLevel = enhancementAlias is not null
+            && sharedState.VideoFavoriteLevelsByPath.TryGetValue(
+                enhancementAlias,
+                out int knownVideoFavoriteLevel)
+                ? Math.Clamp(knownVideoFavoriteLevel, 0, 5)
+                : 0;
         int videoVersionCount = enhancementAlias is not null
             && sharedState.VideoVersionCountsByPath.TryGetValue(
                 enhancementAlias,
@@ -3866,6 +3931,7 @@ public partial class MainWindow : Window
             I2iVersionCount = enhancementAvailability.I2iCount,
             VideoGenerated = videoGenerated,
             VideoVersionCount = videoVersionCount,
+            VideoFavoriteLevel = videoFavoriteLevel,
             VideoOutputPath = videoOutputPath,
             EnhancedOutputPath = enhancedOutputPath,
             SizeText = FormatBytes(file.Length),
@@ -4182,7 +4248,7 @@ public partial class MainWindow : Window
             committed.Keys,
             StringComparer.OrdinalIgnoreCase);
         TrimFavoriteActivity(_favoriteChangedAtUtcByPath, affectedPaths);
-        foreach (Tile tile in _allTiles)
+        foreach (Tile tile in EnumerateLiveTiles())
         {
             if (!affectedPaths.Contains(tile.Path))
                 continue;
@@ -4195,7 +4261,8 @@ public partial class MainWindow : Window
         }
 
         SaveState();
-        if (_sortBy == SortFavoriteChangedNewestValue)
+        if (!ExternalFileDropSessionActive
+            && _sortBy == SortFavoriteChangedNewestValue)
         {
             _ = QueueCatalogProjection(
                 debounce: false,
@@ -4674,7 +4741,8 @@ public partial class MainWindow : Window
         if (targetTile is not null)
             ApplyTileEnhancementQueueActivity(targetTile);
         UpdateActiveEnhancementStateRefreshTimer();
-        if (_sortBy is SortUpscaleQueuedNewestValue
+        if (!ExternalFileDropSessionActive
+            && _sortBy is SortUpscaleQueuedNewestValue
             or SortPhotorealQueuedNewestValue
             or SortVideoQueuedNewestValue)
         {
@@ -4970,6 +5038,15 @@ public partial class MainWindow : Window
         identity = "";
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
             return false;
+
+        // External FileDrop sources remain usable only while their captured
+        // source signature is unchanged. Explicit AI, I2I, and video actions
+        // all resolve their source here before they can enqueue anything.
+        if (TryGetExternalFileDropSessionTile(path, out Tile externalTile))
+            return TryValidateExternalFileDropTile(
+                externalTile,
+                out identity,
+                out _);
 
         try
         {
@@ -5747,7 +5824,7 @@ public partial class MainWindow : Window
                 _favorites[delta.Path] = current.DurableLevel;
             else
                 _favorites.Remove(delta.Path);
-            RefreshPhotorealFavoritePresentationForPath(delta.Path);
+            RefreshDerivedFavoritePresentationForPath(delta.Path);
             SetTileFavoriteLevel(delta.Path, current.DurableLevel);
             _pendingFavoriteMutations.Remove(delta.Path);
             failed.Add(delta with { DurableBefore = current.DurableLevel });
@@ -5789,7 +5866,9 @@ public partial class MainWindow : Window
                 }
             }
 
-            if (applyUnseenFilter && UnseenOnlyFilter?.IsChecked == true)
+            if (applyUnseenFilter
+                && UnseenOnlyFilter?.IsChecked == true
+                && !ExternalFileDropSessionActive)
             {
                 Tile? selected = SelectedTile();
                 _ = ReconcileUnseenFilterProjectionAsync(selected);
@@ -5867,7 +5946,7 @@ public partial class MainWindow : Window
                 _favorites[previous.Path] = previous.DesiredLevel;
             else
                 _favorites.Remove(previous.Path);
-            RefreshPhotorealFavoritePresentationForPath(
+            RefreshDerivedFavoritePresentationForPath(
                 previous.Path,
                 selectedTile);
             SetTileFavoriteLevel(previous.Path, previous.DesiredLevel);
@@ -5925,48 +6004,59 @@ public partial class MainWindow : Window
 
     private void SetTileFavoriteLevel(string path, int level)
     {
-        foreach (Tile tile in _allTiles)
+        foreach (Tile tile in EnumerateLiveTiles())
         {
             if (string.Equals(tile.Path, path, StringComparison.OrdinalIgnoreCase))
                 tile.Fav = Math.Clamp(level, 0, 5);
         }
     }
 
-    private void RefreshPhotorealFavoritePresentationForPath(
+    private void RefreshDerivedFavoritePresentationForPath(
         string favoritePath,
         Tile? preferredTile = null)
     {
         string normalizedFavoritePath = NormalizeFavoritePath(favoritePath);
-        var affected = new List<Tile>();
+        var visited = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        var affected = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
 
-        bool TryRefresh(Tile tile)
+        void TryRefresh(Tile tile)
         {
+            if (!visited.Add(tile))
+                return;
+
             IReadOnlyList<ManagedEnhancementVersion> versions =
-                GetCatalogManagedEnhancementVersionsForPath(tile.Path);
-            if (!versions.Any(version =>
+                GetManagedEnhancementVersionsForPath(tile.Path);
+            bool photorealAffected = versions.Any(version =>
                     version.Operation == "photoreal"
                     && string.Equals(
                         NormalizeFavoritePath(version.Output.OutputPath),
                         normalizedFavoritePath,
-                        StringComparison.OrdinalIgnoreCase)))
-            {
-                return false;
-            }
+                        StringComparison.OrdinalIgnoreCase));
+            IReadOnlyList<ManagedVideoVersion> videoVersions =
+                GetManagedVideoVersionsForPath(tile.Path);
+            bool videoAffected = videoVersions.Any(version =>
+                string.Equals(
+                    NormalizeFavoritePath(version.Output.OutputPath),
+                    normalizedFavoritePath,
+                    StringComparison.OrdinalIgnoreCase));
+            if (!photorealAffected && !videoAffected)
+                return;
 
-            ApplyTileEnhancementAvailability(tile, versions);
+            if (photorealAffected)
+                ApplyTileEnhancementAvailability(tile, versions);
+            if (videoAffected)
+                ApplyTileVideoAvailability(tile, videoVersions);
             affected.Add(tile);
-            return true;
         }
 
         if (preferredTile is not null)
             TryRefresh(preferredTile);
-        if (affected.Count == 0)
-        {
-            foreach (Tile tile in _allTiles)
-                TryRefresh(tile);
-        }
+        foreach (Tile tile in EnumerateLiveTiles())
+            TryRefresh(tile);
 
-        if (affected.Count > 0 && _photorealFavoriteFilterLevels.Count > 0)
+        if (affected.Any(_allTiles.Contains)
+            && (_photorealFavoriteFilterLevels.Count > 0
+                || _videoFavoriteFilterLevels.Count > 0))
         {
             _ = QueueCatalogProjection(
                 debounce: false,
@@ -5977,7 +6067,7 @@ public partial class MainWindow : Window
 
     private void RestoreTileSeenState(string path, bool unseen, bool showDot)
     {
-        foreach (Tile tile in _allTiles)
+        foreach (Tile tile in EnumerateLiveTiles())
         {
             if (!string.Equals(tile.Path, path, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -6020,7 +6110,9 @@ public partial class MainWindow : Window
 
     private void RefreshFavoriteMutationSurface()
     {
-        if (FavoriteOnlyFilter?.IsChecked == true || UnfavoriteOnlyFilter?.IsChecked == true)
+        if (!ExternalFileDropSessionActive
+            && (FavoriteOnlyFilter?.IsChecked == true
+                || UnfavoriteOnlyFilter?.IsChecked == true))
         {
             int selectedIndex = _primarySelectedIndex >= 0
                 ? _primarySelectedIndex
@@ -6039,7 +6131,8 @@ public partial class MainWindow : Window
     {
         bool favoriteFilterActive = FavoriteOnlyFilter?.IsChecked == true
             || UnfavoriteOnlyFilter?.IsChecked == true;
-        if (favoriteFilterActive)
+        bool catalogPresentationChanged = changedTiles.Any(_allTiles.Contains);
+        if (favoriteFilterActive && catalogPresentationChanged)
             ReconcileFavoriteFilterProjection(changedTiles);
 
         SyncSelectionActionSurface();
@@ -6050,7 +6143,7 @@ public partial class MainWindow : Window
                 StringComparison.OrdinalIgnoreCase))
             : null;
         RefreshModalFavoriteSurface(knownPrimary);
-        return favoriteFilterActive;
+        return favoriteFilterActive && catalogPresentationChanged;
     }
 
     private Task<SearchFilterCompletion>? RemoveChangedTilesExcludedByFavoriteFilter(
@@ -6275,13 +6368,28 @@ public partial class MainWindow : Window
         AutomationProperties.SetName(ModalFavoriteLevelText, $"Favorite level {text}");
 
         bool favorite = normalized > 0;
+        string activeBackground = "FavoriteSoft";
+        string activeBorder = "Favorite";
+        string activeForeground = "FavoriteText";
+        if (_modalShowingVideo)
+        {
+            activeBackground = "VideoFavoriteBackground";
+            activeBorder = "VideoFavorite";
+            activeForeground = "VideoFavoriteText";
+        }
+        else if (CurrentModalEnhancementVersionIsPhotoreal())
+        {
+            activeBackground = "PhotorealFavoriteBackground";
+            activeBorder = "PhotorealFavorite";
+            activeForeground = "PhotorealFavoriteText";
+        }
         ModalFavoriteControlBorder.SetResourceReference(
             Border.BackgroundProperty,
-            favorite ? "FavoriteSoft" : "BgTertiary");
+            favorite ? activeBackground : "BgTertiary");
         ModalFavoriteControlBorder.SetResourceReference(
             Border.BorderBrushProperty,
-            favorite ? "Favorite" : "GlassBorder");
-        string foregroundResource = favorite ? "FavoriteText" : "TextSecondary";
+            favorite ? activeBorder : "GlassBorder");
+        string foregroundResource = favorite ? activeForeground : "TextSecondary";
         ModalFavoriteLevelText.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
         ModalFavoriteDecreaseGlyph.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
         ModalFavoriteIncreaseGlyph.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
@@ -6604,7 +6712,7 @@ public partial class MainWindow : Window
 
     private void RefreshUnseenDots()
     {
-        foreach (var tile in _allTiles)
+        foreach (Tile tile in EnumerateLiveTiles())
             tile.ShowUnseenDot = _showUnseenDots && tile.Unseen;
     }
 
@@ -8400,7 +8508,7 @@ public partial class MainWindow : Window
             Group = group,
             CardWidth = width,
             Prompt = Prompts[idx % Prompts.Length],
-            Path = $@"D:\SD\outputs\txt2img\{name}",
+            Path = $@"X:\AibosSynthetic\outputs\txt2img\{name}",
             ImagePixelWidth = 832,
             ImagePixelHeight = 1216,
             SizeText = "832 x 1216",
@@ -8684,6 +8792,9 @@ public partial class MainWindow : Window
             || !File.Exists(tile.Path))
             return;
 
+        Func<string?>? prePublishValidator =
+            CaptureExternalFileDropPrePublishValidator(tile);
+
         string normalizedOperation = operation;
         string sourcePath = tile.Path;
         if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity)
@@ -8783,7 +8894,8 @@ public partial class MainWindow : Window
             requestBody,
             enqueueNext ? "next" : "last",
             healthValidator: healthValidator,
-            recoverySourceIdentity: sourceIdentity);
+            recoverySourceIdentity: sourceIdentity,
+            prePublishValidator: prePublishValidator);
 
         bool needsConfirmation = normalizedOperation == "upscale"
             && response.StatusCode == 409
@@ -8806,7 +8918,8 @@ public partial class MainWindow : Window
                 BuildUpscaleRequestBody(confirmLargeJob: true),
                 enqueueNext ? "next" : "last",
                 healthValidator: healthValidator,
-                recoverySourceIdentity: sourceIdentity);
+                recoverySourceIdentity: sourceIdentity,
+                prePublishValidator: prePublishValidator);
         }
 
         if (response.SavedForDelivery)
@@ -10618,7 +10731,7 @@ public partial class MainWindow : Window
                 return;
             }
             _ = ApplyCatalogProjectionAsync(request);
-        }, DispatcherPriority.Normal);
+        }, DispatcherPriority.Background);
     }
 
     private async Task ApplyCatalogProjectionAsync(CatalogProjectionRequest request)
@@ -10918,6 +11031,19 @@ public partial class MainWindow : Window
     {
         if (_initializing || _syncingFavoriteFilterControls) return;
         SyncPhotorealFavoriteFilterLevelsFromControls();
+        _ = QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: true);
+        SaveState();
+    }
+
+    private void VideoFavoriteLevelFilter_Changed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_initializing || _syncingFavoriteFilterControls) return;
+        SyncVideoFavoriteFilterLevelsFromControls();
         _ = QueueCatalogProjection(
             debounce: false,
             reorderCatalog: false,
@@ -11461,6 +11587,38 @@ public partial class MainWindow : Window
         return true;
     }
 
+    private bool SetVideoFavoriteFilterLevels(
+        IEnumerable<int> levels,
+        bool asynchronous = true)
+    {
+        var normalized = levels
+            .Where(level => level is >= MinVideoFavoriteFilterLevel
+                and <= MaxFavoriteFilterLevel)
+            .ToHashSet();
+        if (_videoFavoriteFilterLevels.SetEquals(normalized))
+            return false;
+
+        _videoFavoriteFilterLevels.Clear();
+        _videoFavoriteFilterLevels.UnionWith(normalized);
+        SyncVideoFavoriteFilterControls();
+        if (!_initializing)
+        {
+            if (asynchronous)
+            {
+                _ = QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: false,
+                    selectFirst: true);
+            }
+            else
+            {
+                ApplyFilters();
+            }
+            SaveState();
+        }
+        return true;
+    }
+
     private void SetFavoriteFilterState(
         bool favoritesOnly,
         bool unfavoriteOnly,
@@ -11543,6 +11701,7 @@ public partial class MainWindow : Window
             FavoriteLevelFilterPanel.IsEnabled = favoritesOnly;
 
         SyncPhotorealFavoriteFilterControls();
+        SyncVideoFavoriteFilterControls();
 
         if (FavoriteFilterSummary is null)
             return;
@@ -11640,6 +11799,75 @@ public partial class MainWindow : Window
         if (PhotorealFavoriteLevel4Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(4);
         if (PhotorealFavoriteLevel5Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(5);
         SyncPhotorealFavoriteFilterControls();
+    }
+
+    private void SyncVideoFavoriteFilterControls()
+    {
+        if (VideoFavoriteLevel0Filter is null
+            || VideoFavoriteLevel1Filter is null
+            || VideoFavoriteLevel2Filter is null
+            || VideoFavoriteLevel3Filter is null
+            || VideoFavoriteLevel4Filter is null
+            || VideoFavoriteLevel5Filter is null)
+        {
+            return;
+        }
+
+        _syncingFavoriteFilterControls = true;
+        try
+        {
+            SetCheckBoxState(VideoFavoriteLevel0Filter, _videoFavoriteFilterLevels.Contains(0));
+            SetCheckBoxState(VideoFavoriteLevel1Filter, _videoFavoriteFilterLevels.Contains(1));
+            SetCheckBoxState(VideoFavoriteLevel2Filter, _videoFavoriteFilterLevels.Contains(2));
+            SetCheckBoxState(VideoFavoriteLevel3Filter, _videoFavoriteFilterLevels.Contains(3));
+            SetCheckBoxState(VideoFavoriteLevel4Filter, _videoFavoriteFilterLevels.Contains(4));
+            SetCheckBoxState(VideoFavoriteLevel5Filter, _videoFavoriteFilterLevels.Contains(5));
+            CheckBox[] levelControls =
+            [
+                VideoFavoriteLevel0Filter,
+                VideoFavoriteLevel1Filter,
+                VideoFavoriteLevel2Filter,
+                VideoFavoriteLevel3Filter,
+                VideoFavoriteLevel4Filter,
+                VideoFavoriteLevel5Filter,
+            ];
+            for (int level = 0; level < levelControls.Length; level++)
+            {
+                AutomationProperties.SetName(
+                    levelControls[level],
+                    UiLanguageResources.Format(
+                        "UiVideoFavoriteLevelNameFormat",
+                        level));
+            }
+        }
+        finally
+        {
+            _syncingFavoriteFilterControls = false;
+        }
+
+        if (VideoFavoriteFilterSummary is not null)
+        {
+            VideoFavoriteFilterSummary.Text =
+                _videoFavoriteFilterLevels.Count == 0
+                    ? UiLanguageResources.Text("UiAllRatings")
+                    : string.Join(
+                        " + ",
+                        _videoFavoriteFilterLevels
+                            .OrderBy(static level => level)
+                            .Select(static level => $"Lv {level}"));
+        }
+    }
+
+    private void SyncVideoFavoriteFilterLevelsFromControls()
+    {
+        _videoFavoriteFilterLevels.Clear();
+        if (VideoFavoriteLevel0Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(0);
+        if (VideoFavoriteLevel1Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(1);
+        if (VideoFavoriteLevel2Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(2);
+        if (VideoFavoriteLevel3Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(3);
+        if (VideoFavoriteLevel4Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(4);
+        if (VideoFavoriteLevel5Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(5);
+        SyncVideoFavoriteFilterControls();
     }
 
     private void PruneHiddenFolderBucketsToCurrentSet()
@@ -11933,7 +12161,7 @@ public partial class MainWindow : Window
         else
             _favorites.Remove(key);
         _favoriteDirtyPaths.Add(key);
-        RefreshPhotorealFavoritePresentationForPath(key, SelectedTile());
+        RefreshDerivedFavoritePresentationForPath(key, SelectedTile());
 
         if (!SaveFavorites())
         {
@@ -12020,8 +12248,19 @@ public partial class MainWindow : Window
 
         if (_modalShowingVideo)
         {
-            if (!TryGetDisplayedModalVideoVersion(tile, out _))
+            independentTarget = true;
+            if (!TryGetDisplayedModalVideoVersion(
+                    tile,
+                    out ManagedVideoVersion videoVersion)
+                || string.IsNullOrWhiteSpace(videoVersion.Output.OutputPath))
+            {
                 return false;
+            }
+
+            targetPath = NormalizeFavoritePath(
+                videoVersion.Output.OutputPath);
+            targetName = $"{tile.FileName} · Video {videoVersion.JobId}";
+            return !string.IsNullOrWhiteSpace(targetPath);
         }
         else if (_modalShowingEnhanced)
         {
@@ -12105,12 +12344,12 @@ public partial class MainWindow : Window
             else
                 _favorites.Remove(key);
             _favoriteDirtyPaths.Remove(key);
-            RefreshPhotorealFavoritePresentationForPath(key, SelectedTile());
+            RefreshDerivedFavoritePresentationForPath(key, SelectedTile());
             RefreshModalFavoriteSurface();
             return false;
         }
 
-        RefreshPhotorealFavoritePresentationForPath(key, SelectedTile());
+        RefreshDerivedFavoritePresentationForPath(key, SelectedTile());
         RefreshModalFavoriteSurface();
         RecordIndependentFavoriteHistory(
             key,
@@ -12162,7 +12401,7 @@ public partial class MainWindow : Window
             _favorites[key] = desired;
         else
             _favorites.Remove(key);
-        RefreshPhotorealFavoritePresentationForPath(key, SelectedTile());
+        RefreshDerivedFavoritePresentationForPath(key, SelectedTile());
         EnsureFavoriteWriter().Enqueue(
             new FavoriteDelta(key, durable, desired, generation));
 
@@ -13111,6 +13350,7 @@ public partial class MainWindow : Window
                     tile.Prompt,
                     tile.Fav,
                     tile.PhotorealFavoriteLevel,
+                    tile.VideoFavoriteLevel,
                     tile.Enhanced,
                     tile.Upscaled,
                     tile.Photorealized,
@@ -13118,7 +13358,16 @@ public partial class MainWindow : Window
                     tile.Unseen,
                     tile.ModifiedUtc,
                     tile.CreatedUtc,
-                    CaptureFilterTileSortActivity(tile, _sortBy));
+                    tile.UpscaleCompletedAtUtc,
+                    tile.PhotorealCompletedAtUtc,
+                    tile.VideoCompletedAtUtc,
+                    tile.UpscaleQueueActive,
+                    tile.UpscaleQueueAddedAtUtc,
+                    tile.PhotorealQueueActive,
+                    tile.PhotorealQueueAddedAtUtc,
+                    tile.VideoQueueActive,
+                    tile.VideoQueueAddedAtUtc,
+                    tile.FavoriteChangedAtUtc);
             }
 
             Tile? previous = SelectedTile();
@@ -13146,6 +13395,8 @@ public partial class MainWindow : Window
             FrozenSet<int> favoriteLevels = _favoriteFilterLevels.ToFrozenSet();
             FrozenSet<int> photorealFavoriteLevels =
                 _photorealFavoriteFilterLevels.ToFrozenSet();
+            FrozenSet<int> videoFavoriteLevels =
+                _videoFavoriteFilterLevels.ToFrozenSet();
             FrozenSet<string> hiddenFolderBuckets =
                 _hiddenFolderBuckets.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
             bool unfiltered = !albumActive
@@ -13159,6 +13410,7 @@ public partial class MainWindow : Window
                 && !videoOnly
                 && !unseenOnly
                 && photorealFavoriteLevels.Count == 0
+                && videoFavoriteLevels.Count == 0
                 && hiddenFolderBuckets.Count == 0
                 && !_dateFromLocal.HasValue
                 && !_dateToLocal.HasValue;
@@ -13210,6 +13462,7 @@ public partial class MainWindow : Window
                 unseenOnly,
                 favoriteLevels,
                 photorealFavoriteLevels,
+                videoFavoriteLevels,
                 hiddenFolderBuckets,
                 _dateFromLocal,
                 _dateToLocal);
@@ -13274,34 +13527,28 @@ public partial class MainWindow : Window
             && !snapshot.VideoOnly
             && !snapshot.UnseenOnly
             && snapshot.PhotorealFavoriteLevels.Count == 0
+            && snapshot.VideoFavoriteLevels.Count == 0
             && snapshot.HiddenFolderBuckets.Count == 0
             && !snapshot.DateFromLocal.HasValue
             && !snapshot.DateToLocal.HasValue;
-        int[]? sortOrder = null;
         if (snapshot.ReorderCatalog && snapshot.TileCount > 1)
         {
-            sortOrder = new int[snapshot.TileCount];
-            for (int index = 0; index < sortOrder.Length; index++)
-                sortOrder[index] = index;
             int comparisons = 0;
             Array.Sort(
-                sortOrder,
+                snapshot.Tiles,
                 0,
                 snapshot.TileCount,
-                Comparer<int>.Create((leftIndex, rightIndex) =>
+                Comparer<FilterTileSnapshot>.Create((left, right) =>
                 {
                     if ((++comparisons & 1023) == 0)
                         cancellationToken.ThrowIfCancellationRequested();
                     return CompareFilterTilesForSort(
-                        in snapshot.Tiles[leftIndex],
-                        in snapshot.Tiles[rightIndex],
+                        left,
+                        right,
                         snapshot.SortBy,
                         snapshot.RandomSortSeed);
                 }));
         }
-
-        int SnapshotIndexAt(int orderedIndex)
-            => sortOrder is null ? orderedIndex : sortOrder[orderedIndex];
 
         Tile[]? orderedCatalogProjection = null;
         List<Tile>? orderedCatalog = null;
@@ -13309,7 +13556,7 @@ public partial class MainWindow : Window
         {
             orderedCatalogProjection = new Tile[snapshot.TileCount];
             for (int index = 0; index < snapshot.TileCount; index++)
-                orderedCatalogProjection[index] = snapshot.Tiles[SnapshotIndexAt(index)].Tile;
+                orderedCatalogProjection[index] = snapshot.Tiles[index].Tile;
             orderedCatalog = new List<Tile>(orderedCatalogProjection);
         }
 
@@ -13326,11 +13573,10 @@ public partial class MainWindow : Window
         {
             CheckCatalogWorkerInputHandoff(index, snapshot.TileCount, cancellationToken);
 
-            int snapshotIndex = SnapshotIndexAt(index);
-            FilterTileSnapshot tile = snapshot.Tiles[snapshotIndex];
+            FilterTileSnapshot tile = snapshot.Tiles[index];
             if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot))
                 continue;
-            matchedIndices?.Add(snapshotIndex);
+            matchedIndices?.Add(index);
             if (!hasLayoutItem)
             {
                 hasLayoutItem = true;
@@ -13379,7 +13625,7 @@ public partial class MainWindow : Window
             for (int index = 0; index < snapshot.TileCount; index++)
             {
                 CheckCatalogWorkerInputHandoff(index, snapshot.TileCount, cancellationToken);
-                FilterTileSnapshot tile = snapshot.Tiles[SnapshotIndexAt(index)];
+                FilterTileSnapshot tile = snapshot.Tiles[index];
                 filteredLayoutItems[index] = new VirtualizingLayoutItem(tile.Group, tile.CardHeight);
             }
         }
@@ -13571,8 +13817,8 @@ public partial class MainWindow : Window
     }
 
     private static int CompareFilterTilesForSort(
-        in FilterTileSnapshot left,
-        in FilterTileSnapshot right,
+        FilterTileSnapshot left,
+        FilterTileSnapshot right,
         string sortBy,
         string randomSortSeed)
     {
@@ -13581,19 +13827,33 @@ public partial class MainWindow : Window
             SortModifiedOldestValue => left.ModifiedUtc.CompareTo(right.ModifiedUtc),
             SortCreatedNewestValue => right.CreatedUtc.CompareTo(left.CreatedUtc),
             SortCreatedOldestValue => left.CreatedUtc.CompareTo(right.CreatedUtc),
-            SortUpscaleNewestValue
-                or SortPhotorealNewestValue
-                or SortVideoNewestValue
-                or SortFavoriteChangedNewestValue =>
-                    CompareFilterTileOptionalActivityNewest(
-                        left.SortActivity,
-                        right.SortActivity),
-            SortUpscaleQueuedNewestValue
-                or SortPhotorealQueuedNewestValue
-                or SortVideoQueuedNewestValue =>
-                    CompareFilterTileQueueActivityNewest(
-                        left.SortActivity,
-                        right.SortActivity),
+            SortUpscaleNewestValue => CompareOptionalActivityNewest(
+                left.UpscaleCompletedAtUtc,
+                right.UpscaleCompletedAtUtc),
+            SortUpscaleQueuedNewestValue => CompareQueueActivityNewest(
+                left.UpscaleQueueActive,
+                left.UpscaleQueueAddedAtUtc,
+                right.UpscaleQueueActive,
+                right.UpscaleQueueAddedAtUtc),
+            SortPhotorealNewestValue => CompareOptionalActivityNewest(
+                left.PhotorealCompletedAtUtc,
+                right.PhotorealCompletedAtUtc),
+            SortPhotorealQueuedNewestValue => CompareQueueActivityNewest(
+                left.PhotorealQueueActive,
+                left.PhotorealQueueAddedAtUtc,
+                right.PhotorealQueueActive,
+                right.PhotorealQueueAddedAtUtc),
+            SortVideoNewestValue => CompareOptionalActivityNewest(
+                left.VideoCompletedAtUtc,
+                right.VideoCompletedAtUtc),
+            SortVideoQueuedNewestValue => CompareQueueActivityNewest(
+                left.VideoQueueActive,
+                left.VideoQueueAddedAtUtc,
+                right.VideoQueueActive,
+                right.VideoQueueAddedAtUtc),
+            SortFavoriteChangedNewestValue => CompareOptionalActivityNewest(
+                left.FavoriteChangedAtUtc,
+                right.FavoriteChangedAtUtc),
             SortRandomValue => StableRandomSortKey(randomSortSeed, left.Path)
                 .CompareTo(StableRandomSortKey(randomSortSeed, right.Path)),
             SortNameValue => StringComparer.OrdinalIgnoreCase.Compare(left.FileName, right.FileName),
@@ -13618,64 +13878,6 @@ public partial class MainWindow : Window
         return StringComparer.OrdinalIgnoreCase.Compare(left.Path, right.Path);
     }
 
-    private static FilterTileSortActivitySnapshot CaptureFilterTileSortActivity(
-        Tile tile,
-        string sortBy)
-        => sortBy switch
-        {
-            SortUpscaleNewestValue => FilterTileOptionalActivity(tile.UpscaleCompletedAtUtc),
-            SortUpscaleQueuedNewestValue => FilterTileQueueActivity(
-                tile.UpscaleQueueActive,
-                tile.UpscaleQueueAddedAtUtc),
-            SortPhotorealNewestValue => FilterTileOptionalActivity(tile.PhotorealCompletedAtUtc),
-            SortPhotorealQueuedNewestValue => FilterTileQueueActivity(
-                tile.PhotorealQueueActive,
-                tile.PhotorealQueueAddedAtUtc),
-            SortVideoNewestValue => FilterTileOptionalActivity(tile.VideoCompletedAtUtc),
-            SortVideoQueuedNewestValue => FilterTileQueueActivity(
-                tile.VideoQueueActive,
-                tile.VideoQueueAddedAtUtc),
-            SortFavoriteChangedNewestValue => FilterTileOptionalActivity(tile.FavoriteChangedAtUtc),
-            _ => default,
-        };
-
-    private static FilterTileSortActivitySnapshot FilterTileOptionalActivity(
-        DateTimeOffset? timestamp)
-        => new(
-            Active: timestamp.HasValue,
-            HasTimestamp: timestamp.HasValue,
-            UtcTicks: timestamp?.UtcDateTime.Ticks ?? 0);
-
-    private static FilterTileSortActivitySnapshot FilterTileQueueActivity(
-        bool active,
-        DateTimeOffset? timestamp)
-        => new(
-            Active: active,
-            HasTimestamp: timestamp.HasValue,
-            UtcTicks: timestamp?.UtcDateTime.Ticks ?? 0);
-
-    private static int CompareFilterTileOptionalActivityNewest(
-        FilterTileSortActivitySnapshot left,
-        FilterTileSortActivitySnapshot right)
-    {
-        if (left.HasTimestamp && right.HasTimestamp)
-            return right.UtcTicks.CompareTo(left.UtcTicks);
-        if (left.HasTimestamp)
-            return -1;
-        return right.HasTimestamp ? 1 : 0;
-    }
-
-    private static int CompareFilterTileQueueActivityNewest(
-        FilterTileSortActivitySnapshot left,
-        FilterTileSortActivitySnapshot right)
-    {
-        if (left.Active != right.Active)
-            return left.Active ? -1 : 1;
-        return left.Active
-            ? CompareFilterTileOptionalActivityNewest(left, right)
-            : 0;
-    }
-
     private static bool MatchesFilterSnapshot(FilterTileSnapshot tile, FilterSnapshot snapshot)
     {
         if (snapshot.AlbumActive && (!tile.IsRealFile || !snapshot.AlbumMemberPaths.Contains(tile.Path)))
@@ -13694,6 +13896,13 @@ public partial class MainWindow : Window
             && (!tile.Photorealized
                 || !snapshot.PhotorealFavoriteLevels.Contains(
                     tile.PhotorealFavoriteLevel)))
+        {
+            return false;
+        }
+        if (snapshot.VideoFavoriteLevels.Count > 0
+            && (!tile.VideoGenerated
+                || !snapshot.VideoFavoriteLevels.Contains(
+                    tile.VideoFavoriteLevel)))
         {
             return false;
         }
@@ -14980,6 +15189,7 @@ public partial class MainWindow : Window
         IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs,
         IReadOnlyDictionary<string, EnhancementAvailability> EnhancementAvailabilityByPath,
         IReadOnlyDictionary<string, int> PhotorealFavoriteLevelsByPath,
+        IReadOnlyDictionary<string, int> VideoFavoriteLevelsByPath,
         IReadOnlyDictionary<string, int> VideoVersionCountsByPath,
         IReadOnlyDictionary<string, string> VideoOutputs,
         IReadOnlyDictionary<string, DateTimeOffset> UpscaleCompletedAtUtcByPath,
@@ -15015,6 +15225,25 @@ public partial class MainWindow : Window
                 .DefaultIfEmpty(0)
                 .Max();
             result[path] = maximum;
+        }
+        return result;
+    }
+
+    private static Dictionary<string, int> BuildVideoFavoriteLevelsByPath(
+        IReadOnlyDictionary<string, List<ManagedVideoVersion>> versionsByPath,
+        IReadOnlyDictionary<string, int> favorites)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, List<ManagedVideoVersion> versions) in versionsByPath)
+        {
+            result[path] = versions
+                .Select(version => favorites.TryGetValue(
+                        NormalizeFavoritePath(version.Output.OutputPath),
+                        out int level)
+                    ? Math.Clamp(level, 0, 5)
+                    : 0)
+                .DefaultIfEmpty(0)
+                .Max();
         }
         return result;
     }
@@ -16017,21 +16246,45 @@ public partial class MainWindow : Window
     private async void FolderDropTarget_Drop(object sender, DragEventArgs e)
     {
         SetFolderDropAffordance(sender, visible: false);
-        DroppedFolderSet dropped = ReadDroppedFolders(e.Data);
         bool landing = ReferenceEquals(sender, Landing);
-        await ApplyDroppedFoldersAsync(dropped, landing);
+        if (landing)
+        {
+            await ApplyDroppedFoldersAsync(ReadDroppedFolders(e.Data), landing: true);
+        }
+        else
+        {
+            ViewerDropPayload payload = ReadViewerDropPayload(e.Data);
+            if (payload.Kind == ViewerDropPayloadKind.Folders
+                && payload.Folders is not null)
+            {
+                await ApplyDroppedFoldersAsync(payload.Folders, landing: false);
+            }
+            else if (payload.Kind == ViewerDropPayloadKind.Images)
+            {
+                await ApplyDroppedImagesAsync(payload.Paths);
+            }
+            else
+            {
+                string status = UiLanguageResources.Format(
+                    "UiExternalImageDropRejectedFormat",
+                    payload.Reason);
+                SetStatusToast(status);
+            }
+        }
         e.Handled = true;
     }
 
     private void UpdateFolderDropAffordance(object sender, DragEventArgs e)
     {
-        DroppedFolderSet dropped = ReadDroppedFolders(e.Data);
-        bool accepted = dropped.Folders.Count > 0;
+        bool landing = ReferenceEquals(sender, Landing);
+        bool accepted = landing
+            ? ReadDroppedFolders(e.Data).Folders.Count > 0
+            : ViewerDropPayloadHasAcceptableAffordance(
+                ReadViewerDropPayload(e.Data));
         SetFolderDropAffordance(sender, accepted);
 
-        // The intake surface accepts only existing folders.  Image FileDrop
-        // payloads remain Copy payloads at their source, but are explicitly not a
-        // valid drop here, so they cannot be mistaken for a folder intake action.
+        // Both accepted payloads remain references to their original paths;
+        // no drop copies or moves source files.
         e.Effects = accepted ? DragDropEffects.Link : DragDropEffects.None;
         e.Handled = true;
     }
@@ -16531,6 +16784,8 @@ public partial class MainWindow : Window
         canonical = "";
         if (!tile.IsRealFile || string.IsNullOrWhiteSpace(tile.Path))
             return Fail("not a source image", out reason);
+        if (IsExternalFileDropSessionTile(tile))
+            return TryValidateExternalFileDropTile(tile, out canonical, out reason);
         if (!_allTiles.Contains(tile))
             return Fail("not in the current catalog", out reason);
         if (!Path.IsPathFullyQualified(tile.Path))
@@ -16687,19 +16942,24 @@ public partial class MainWindow : Window
         else
             decodeCompletion.TrySetResult(immediate is not null);
 
-        if (opening || sourceChanged)
+        // A passive external FileDrop preview stays fully local. The first
+        // explicit AI action performs the normal health/start/enqueue flow.
+        if ((opening || sourceChanged)
+            && !IsExternalFileDropSessionTile(t))
             BeginModalEnhancementRefresh(t.Path, settleForNavigation: true);
     }
 
     private void UpdateModalPositionText(Tile tile, int projectedIndex = -1)
     {
-        int total = _tiles.Count;
+        IReadOnlyList<Tile> navigationTiles = ModalNavigationTiles();
+        int total = navigationTiles.Count;
         int index = projectedIndex >= 0
-            && projectedIndex < total
+            && projectedIndex < _tiles.Count
             && ReferenceEquals(_tiles[projectedIndex], tile)
+            && !ExternalFileDropSessionActive
                 ? projectedIndex
                 : total > 0
-                    ? _tiles.IndexOf(tile)
+                    ? IndexOfTile(navigationTiles, tile)
                     : -1;
         int position = index >= 0 ? index + 1 : 0;
         ModalPositionText.Text = $"画像 {position.ToString(CultureInfo.InvariantCulture)} / {total.ToString(CultureInfo.InvariantCulture)}";
@@ -17103,7 +17363,8 @@ public partial class MainWindow : Window
         CancellationToken token = default,
         string? exactBodyJson = null,
         string? idempotencyKey = null,
-        int? timeoutMilliseconds = null)
+        int? timeoutMilliseconds = null,
+        int? maxResponseBytes = null)
     {
         CancellationTokenSource? requestTimeoutCts = null;
         try
@@ -17136,17 +17397,50 @@ public partial class MainWindow : Window
             }
 
             using HttpResponseMessage response = await _modalEnhancementSender(request, requestToken);
-            string text = await response.Content.ReadAsStringAsync(requestToken);
             JsonElement? payload = null;
-            if (!string.IsNullOrWhiteSpace(text))
+            if (maxResponseBytes is int requestedResponseLimit)
             {
-                try
+                int responseLimit = Math.Max(1, requestedResponseLimit);
+                byte[]? responseBytes = await ReadBoundedEnhancementResponseAsync(
+                    response.Content,
+                    responseLimit,
+                    requestToken);
+                if (responseBytes is null)
                 {
-                    using JsonDocument document = JsonDocument.Parse(text);
-                    payload = document.RootElement.Clone();
+                    return new EnhancementApiResponse(
+                        false,
+                        (int)response.StatusCode,
+                        null,
+                        "The local AI companion response exceeded the safe size limit.");
                 }
-                catch (JsonException)
+
+                if (responseBytes.Length > 0)
                 {
+                    try
+                    {
+                        using JsonDocument document = JsonDocument.Parse(
+                            responseBytes);
+                        payload = document.RootElement.Clone();
+                    }
+                    catch (JsonException)
+                    {
+                    }
+                }
+            }
+            else
+            {
+                string text = await response.Content.ReadAsStringAsync(
+                    requestToken);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    try
+                    {
+                        using JsonDocument document = JsonDocument.Parse(text);
+                        payload = document.RootElement.Clone();
+                    }
+                    catch (JsonException)
+                    {
+                    }
                 }
             }
 
@@ -17192,6 +17486,53 @@ public partial class MainWindow : Window
         finally
         {
             requestTimeoutCts?.Dispose();
+        }
+    }
+
+    private static async Task<byte[]?> ReadBoundedEnhancementResponseAsync(
+        HttpContent content,
+        int maximumBytes,
+        CancellationToken token)
+    {
+        if (content.Headers.ContentLength is long declaredLength
+            && declaredLength > maximumBytes)
+        {
+            return null;
+        }
+
+        int initialCapacity = content.Headers.ContentLength is long knownLength
+            ? (int)Math.Min(knownLength, maximumBytes)
+            : Math.Min(4_096, maximumBytes);
+        using var buffered = new MemoryStream(initialCapacity);
+        await using Stream responseStream = await content.ReadAsStreamAsync(token);
+        int readBufferSize = maximumBytes >= 8_192
+            ? 8_192
+            : maximumBytes + 1;
+        byte[] readBuffer = ArrayPool<byte>.Shared.Rent(
+            readBufferSize);
+        try
+        {
+            int total = 0;
+            while (true)
+            {
+                int requested = Math.Min(
+                    readBuffer.Length,
+                    (maximumBytes - total) + 1);
+                int read = await responseStream.ReadAsync(
+                    readBuffer.AsMemory(0, requested),
+                    token);
+                if (read == 0)
+                    return buffered.ToArray();
+
+                total += read;
+                if (total > maximumBytes)
+                    return null;
+                buffered.Write(readBuffer, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(readBuffer);
         }
     }
 
@@ -17567,6 +17908,9 @@ public partial class MainWindow : Window
             return;
         }
 
+        Func<string?>? prePublishValidator =
+            CaptureExternalFileDropPrePublishValidator(tile);
+
         long requestGeneration = _modalEnhancementGeneration;
         string sourcePath = tile.Path;
         ResetModalEnhancementRefreshRequest();
@@ -17689,7 +18033,8 @@ public partial class MainWindow : Window
                 queuePlacement: "last",
                 retryJobId: retry ? requestJobId : null,
                 healthValidator: healthValidator,
-                recoverySourceIdentity: sourceIdentity);
+                recoverySourceIdentity: sourceIdentity,
+                prePublishValidator: prePublishValidator);
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
@@ -17713,7 +18058,8 @@ public partial class MainWindow : Window
                     response = await SendEnhancementEnqueueAsync(
                         BuildUpscaleRequestBody(confirmLargeJob: true),
                         healthValidator: healthValidator,
-                        recoverySourceIdentity: sourceIdentity);
+                        recoverySourceIdentity: sourceIdentity,
+                        prePublishValidator: prePublishValidator);
                     if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                         return;
                 }
@@ -17927,7 +18273,15 @@ public partial class MainWindow : Window
         string toolTip;
         string automationName;
         string contextHeader;
-        if (_modalShowingVideo)
+        if (SelectedTile() is Tile temporary
+            && IsExternalFileDropSessionTile(temporary))
+        {
+            enabled = false;
+            toolTip = "Source deletion is unavailable while this image is temporarily open. Use Explorer if you intend to remove it.";
+            automationName = "Source deletion unavailable for temporary image";
+            contextHeader = "Delete unavailable for temporary image";
+        }
+        else if (_modalShowingVideo)
         {
             enabled = SelectedTile() is Tile videoTile
                 && TryGetDisplayedModalVideoVersion(videoTile, out _);
@@ -18014,6 +18368,11 @@ public partial class MainWindow : Window
 
     private void CloseModal(bool restoreFocus = false)
     {
+        // Closing the modal is also a close intent for any FileDrop validation
+        // that has not published its presentation-only cohort yet.  Retire it
+        // before doing synchronous modal cleanup so a late continuation cannot
+        // reopen the overlay.
+        CancelPendingExternalFileDropIntake();
         bool wasVisible = Modal.Visibility == Visibility.Visible;
         IInputElement? focusTarget = _modalFocusBeforeOverlay;
         _modalFocusBeforeOverlay = null;
@@ -18064,6 +18423,8 @@ public partial class MainWindow : Window
         HideModalFavoritePulse();
         CancelModalPromptChipRealization();
         ResetModalTransform();
+        if (wasVisible)
+            RestoreExternalFileDropSession();
         if (wasVisible && restoreFocus)
             RestoreOverlayFocus(focusTarget, preferPrimaryGallery: true);
         ReturnToEnhancementJobsAfterModalClose(wasVisible);
@@ -18361,10 +18722,6 @@ public partial class MainWindow : Window
             && _modalDisplayedImagePixelHeight > 0;
         bool hasCatalogSize = tile.ImagePixelWidth > 0
             && tile.ImagePixelHeight > 0;
-        bool sourceChanged = !string.Equals(
-            _modalFitPath,
-            tile.Path,
-            StringComparison.OrdinalIgnoreCase);
         double sourceWidth = hasDisplayedSize
             ? _modalDisplayedImagePixelWidth
             : hasCatalogSize
@@ -18375,8 +18732,6 @@ public partial class MainWindow : Window
             : hasCatalogSize
                 ? tile.ImagePixelHeight
                 : ModalBitmap.Source?.Height ?? 640;
-        double oldEffectiveScale = _modalFitScale * _modalZoom;
-        bool preserveUserZoom = Math.Abs(_modalZoom - 1) > 0.0001;
         double areaWidth = ModalImageArea.ActualWidth > 0 ? ModalImageArea.ActualWidth : Modal.ActualWidth;
         double areaHeight = ModalImageArea.ActualHeight > 0 ? ModalImageArea.ActualHeight : Modal.ActualHeight;
         double availableWidth = Math.Max(1, areaWidth);
@@ -18385,8 +18740,6 @@ public partial class MainWindow : Window
         ModalImage.Width = Math.Max(1, sourceWidth * _modalFitScale);
         ModalImage.Height = Math.Max(1, sourceHeight * _modalFitScale);
         ModalMetadataSidebar.MaxHeight = Math.Max(1, areaHeight - 24);
-        if (preserveUserZoom && !sourceChanged)
-            _modalZoom = Math.Clamp(oldEffectiveScale / _modalFitScale, ModalZoomMin, ModalZoomMax);
         if (hasDisplayedSize || hasCatalogSize)
             _modalFitPath = tile.Path;
         ClampModalPan();
@@ -18856,32 +19209,36 @@ public partial class MainWindow : Window
 
     private void RefreshModalFilmstripWindow(Tile selected, int projectedIndex = -1)
     {
+        IReadOnlyList<Tile> navigationTiles = ModalNavigationTiles();
         int selectedIndex = projectedIndex >= 0
-            && projectedIndex < _tiles.Count
+            && projectedIndex < navigationTiles.Count
+            && !ExternalFileDropSessionActive
             && ReferenceEquals(_tiles[projectedIndex], selected)
                 ? projectedIndex
-                : _tiles.IndexOf(selected);
+                : IndexOfTile(navigationTiles, selected);
         if (selectedIndex < 0)
         {
             _modalFilmstripTiles.ReplaceAll(Array.Empty<Tile>());
             return;
         }
 
-        int count = Math.Min(MaxModalFilmstripWindowItems, _tiles.Count);
+        int count = Math.Min(MaxModalFilmstripWindowItems, navigationTiles.Count);
         int start = Math.Clamp(
             selectedIndex - (count / 2),
             0,
-            Math.Max(0, _tiles.Count - count));
+            Math.Max(0, navigationTiles.Count - count));
 
         bool unchanged = _modalFilmstripTiles.Count == count;
         for (int index = 0; unchanged && index < count; index++)
-            unchanged = ReferenceEquals(_modalFilmstripTiles[index], _tiles[start + index]);
+            unchanged = ReferenceEquals(
+                _modalFilmstripTiles[index],
+                navigationTiles[start + index]);
         if (unchanged)
             return;
 
         var window = new Tile[count];
         for (int index = 0; index < count; index++)
-            window[index] = _tiles[start + index];
+            window[index] = navigationTiles[start + index];
         _modalFilmstripTiles.ReplaceAll(window, count);
     }
 
@@ -19241,24 +19598,29 @@ public partial class MainWindow : Window
 
     private bool NavigateModal(int delta)
     {
-        if (delta == 0 || _tiles.Count == 0)
+        IReadOnlyList<Tile> navigationTiles = ModalNavigationTiles();
+        if (delta == 0 || navigationTiles.Count == 0)
             return false;
 
         var selected = SelectedTile();
-        int currentIndex = selected is null ? -1 : ResolvePrimarySelectionIndex();
+        int currentIndex = selected is null
+            ? -1
+            : IndexOfTile(navigationTiles, selected);
         int nextIndex;
         if (currentIndex < 0)
         {
-            nextIndex = delta > 0 ? 0 : _tiles.Count - 1;
+            nextIndex = delta > 0 ? 0 : navigationTiles.Count - 1;
         }
         else
         {
-            nextIndex = ((currentIndex + delta) % _tiles.Count + _tiles.Count) % _tiles.Count;
+            nextIndex = ((currentIndex + delta) % navigationTiles.Count
+                + navigationTiles.Count) % navigationTiles.Count;
         }
         if (nextIndex == currentIndex)
             return false;
 
-        SelectTile(_tiles[nextIndex], nextIndex);
+        Tile next = navigationTiles[nextIndex];
+        SelectTile(next, _tiles.IndexOf(next));
 
         if (Modal.Visibility == Visibility.Visible)
         {
@@ -20993,6 +21355,8 @@ public partial class MainWindow : Window
     private bool TryValidateDelete(Tile tile, out string reason)
     {
         reason = "";
+        if (IsExternalFileDropSessionTile(tile))
+            return Fail("temporary FileDrop sources stay outside the active delete root", out reason);
         if (!tile.IsRealFile || string.IsNullOrWhiteSpace(tile.Path))
             return Fail("not a source image", out reason);
         if (!_allTiles.Contains(tile))
@@ -21398,7 +21762,7 @@ public partial class MainWindow : Window
             RestorePhotorealStyles(null, null);
             RestorePhotorealPromptMappings(
                 null,
-                DefaultPhotorealPromptPolicyRevision);
+                CurrentPhotorealPromptMappingDefaultsRevision);
             RestoreVideoGenerationSettings(null, null, null, null);
             RestoreVideoSeedSettings(null, null);
             RestoreVideoStyles(null, null);
@@ -21439,6 +21803,14 @@ public partial class MainWindow : Window
             _photorealFavoriteFilterLevels.UnionWith(
                 state.PhotorealFavoriteFilterLevels.Where(level =>
                     level is >= MinPhotorealFavoriteFilterLevel
+                        and <= MaxFavoriteFilterLevel));
+        }
+        _videoFavoriteFilterLevels.Clear();
+        if (state.VideoFavoriteFilterLevels is { Count: > 0 })
+        {
+            _videoFavoriteFilterLevels.UnionWith(
+                state.VideoFavoriteFilterLevels.Where(level =>
+                    level is >= MinVideoFavoriteFilterLevel
                         and <= MaxFavoriteFilterLevel));
         }
         _showUnseenDots = state.ShowUnseenDots;
@@ -21601,6 +21973,9 @@ public partial class MainWindow : Window
                 FavoriteFilterLevels = _favoriteFilterLevels.Count > 0 ? _favoriteFilterLevels.OrderBy(static level => level).ToList() : null,
                 PhotorealFavoriteFilterLevels = _photorealFavoriteFilterLevels.Count > 0
                     ? _photorealFavoriteFilterLevels.OrderBy(static level => level).ToList()
+                    : null,
+                VideoFavoriteFilterLevels = _videoFavoriteFilterLevels.Count > 0
+                    ? _videoFavoriteFilterLevels.OrderBy(static level => level).ToList()
                     : null,
                 ShowUnseenDots = _showUnseenDots,
                 ShowGridFileInfoOverlay = _showGridFileInfoOverlay,
@@ -23772,6 +24147,8 @@ public partial class MainWindow : Window
     }
     public int SharedRecentCommitAttemptCountForSmoke => _sharedRecentCommitAttemptCount;
     public int SharedRecentCommitSuccessCountForSmoke => _sharedRecentCommitSuccessCount;
+    public void MarkSharedRecentFolderSetCommittedForSmoke(string folder)
+        => _lastSuccessfulSharedRecentFolderSetKey = FormatRecentFolderSet([folder]);
     public async Task RefreshActiveFolderForSmokeAsync()
     {
         if (_currentFolderSet.Any(Directory.Exists))
@@ -25738,6 +26115,42 @@ public partial class MainWindow : Window
     public bool FirstGridStatusBadgeVisibleForSmoke
         => RealizedGridTemplatePartsForSmoke("favoriteLevelBadge")
             .Any(static part => part.Visibility == Visibility.Visible);
+    public FavoriteBadgeVisualSmokeSnapshot FavoriteBadgeVisualsForFileForSmoke(
+        string fileName)
+    {
+        CardsList.ApplyTemplate();
+        Tile? tile = CardsList.Items.OfType<Tile>().FirstOrDefault(candidate =>
+            string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+        if (tile is null)
+            return default;
+
+        CardsList.ScrollIntoView(tile);
+        CardsList.UpdateLayout();
+        if (CardsList.ItemContainerGenerator.ContainerFromItem(tile)
+                is not ListBoxItem container)
+        {
+            return default;
+        }
+
+        container.ApplyTemplate();
+        Border? photoreal = container.Template.FindName(
+            "photorealFavoriteBadge",
+            container) as Border;
+        Border? video = container.Template.FindName(
+            "videoFavoriteBadge",
+            container) as Border;
+        static string BrushColor(Brush? brush) =>
+            brush is SolidColorBrush solid ? solid.Color.ToString() : "";
+        return new FavoriteBadgeVisualSmokeSnapshot(
+            photoreal?.Visibility == Visibility.Visible,
+            video?.Visibility == Visibility.Visible,
+            photoreal is null ? "" : AutomationProperties.GetName(photoreal),
+            video is null ? "" : AutomationProperties.GetName(video),
+            BrushColor(photoreal?.BorderBrush),
+            BrushColor(video?.BorderBrush),
+            BrushColor(photoreal?.Background),
+            BrushColor(video?.Background));
+    }
 
     private List<FrameworkElement> RealizedGridTemplatePartsForSmoke(string partName)
     {
@@ -25774,6 +26187,8 @@ public partial class MainWindow : Window
         => AutomationProperties.GetHelpText(ShowGridFileInfoOverlayCheckBox);
     public string OriginalFavoriteFilterTitleForSmoke
         => OriginalFavoriteFilterTitle.Text;
+    public string FavoriteFilterGroupTitleForSmoke
+        => FavoriteFilterGroupTitle.Text;
     public string PhotorealFavoriteFilterTitleForSmoke
         => PhotorealFavoriteFilterTitle.Text;
     public string PhotorealFavoriteFilterSummaryForSmoke
@@ -25782,6 +26197,14 @@ public partial class MainWindow : Window
         => AutomationProperties.GetHelpText(PhotorealFavoriteLevel0Filter);
     public string PhotorealFavoriteLevelOneHelpForSmoke
         => AutomationProperties.GetHelpText(PhotorealFavoriteLevel1Filter);
+    public string VideoFavoriteFilterTitleForSmoke
+        => VideoFavoriteFilterTitle.Text;
+    public string VideoFavoriteFilterSummaryForSmoke
+        => VideoFavoriteFilterSummary.Text;
+    public string VideoFavoriteLevelZeroHelpForSmoke
+        => AutomationProperties.GetHelpText(VideoFavoriteLevel0Filter);
+    public string VideoFavoriteLevelOneHelpForSmoke
+        => AutomationProperties.GetHelpText(VideoFavoriteLevel1Filter);
     public bool FavoriteFilterSurfaceContractForSmoke
     {
         get
@@ -25803,8 +26226,18 @@ public partial class MainWindow : Window
                 PhotorealFavoriteLevel4Filter,
                 PhotorealFavoriteLevel5Filter,
             ];
+            CheckBox[] video =
+            [
+                VideoFavoriteLevel0Filter,
+                VideoFavoriteLevel1Filter,
+                VideoFavoriteLevel2Filter,
+                VideoFavoriteLevel3Filter,
+                VideoFavoriteLevel4Filter,
+                VideoFavoriteLevel5Filter,
+            ];
             return FavoriteLevelFilterPanel.Columns == 3
                 && PhotorealFavoriteLevelFilterPanel.Columns == 3
+                && VideoFavoriteLevelFilterPanel.Columns == 3
                 && original.Select((control, index) =>
                         string.Equals(
                             control.Content?.ToString(),
@@ -25817,10 +26250,17 @@ public partial class MainWindow : Window
                             $"Lv {index}",
                             StringComparison.Ordinal))
                     .All(static matched => matched)
-                && original.Concat(photoreal).All(static control =>
-                    control.MinHeight >= 24
+                && video.Select((control, index) =>
+                        string.Equals(
+                            control.Content?.ToString(),
+                            $"Lv {index}",
+                            StringComparison.Ordinal))
+                    .All(static matched => matched)
+                && original.Concat(photoreal).Concat(video).All(static control =>
+                    Math.Abs(control.Height - 24) < 0.01
+                    && control.MinHeight >= 24
                     && control.FocusVisualStyle is not null)
-                && photoreal.All(static control =>
+                && photoreal.Concat(video).All(static control =>
                     !string.IsNullOrWhiteSpace(
                         AutomationProperties.GetName(control))
                     && !string.IsNullOrWhiteSpace(
@@ -25918,6 +26358,8 @@ public partial class MainWindow : Window
     public List<int> FavoriteFilterLevelsForSmoke => _favoriteFilterLevels.OrderBy(static level => level).ToList();
     public List<int> PhotorealFavoriteFilterLevelsForSmoke
         => _photorealFavoriteFilterLevels.OrderBy(static level => level).ToList();
+    public List<int> VideoFavoriteFilterLevelsForSmoke
+        => _videoFavoriteFilterLevels.OrderBy(static level => level).ToList();
     public int PhotorealFavoriteLevelForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(
                 tile.FileName,
@@ -25930,6 +26372,18 @@ public partial class MainWindow : Window
                 fileName,
                 StringComparison.OrdinalIgnoreCase))
             ?.ShowPhotorealFavoriteBadge == true;
+    public int VideoFavoriteLevelForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+                tile.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            ?.VideoFavoriteLevel ?? -1;
+    public bool VideoFavoriteBadgeForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+                tile.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            ?.ShowVideoFavoriteBadge == true;
     internal Tile? TileForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(
             tile.FileName,
@@ -26269,6 +26723,8 @@ public partial class MainWindow : Window
         => SetFavoriteFilterLevels(levels, asynchronous: false);
     public bool SetPhotorealFavoriteFilterLevelsForSmoke(params int[] levels)
         => SetPhotorealFavoriteFilterLevels(levels, asynchronous: false);
+    public bool SetVideoFavoriteFilterLevelsForSmoke(params int[] levels)
+        => SetVideoFavoriteFilterLevels(levels, asynchronous: false);
     public void SetShowUnseenDotsForSmoke(bool enabled)
         => SetShowUnseenDots(enabled, persist: true);
     public void SetShowGridFileInfoOverlayForSmoke(bool enabled)
@@ -26644,6 +27100,25 @@ public partial class MainWindow : Window
             && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("FavoriteSoft"))
             && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("Favorite"))
             && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("FavoriteText"));
+    public bool ModalPhotorealFavoriteActiveSurfaceForSmoke
+        => CurrentModalEnhancementVersionIsPhotoreal()
+            && ModalFavoriteLevelForSmoke > 0
+            && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("PhotorealFavoriteBackground"))
+            && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("PhotorealFavorite"))
+            && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("PhotorealFavoriteText"));
+    public bool ModalVideoFavoriteActiveSurfaceForSmoke
+        => _modalShowingVideo
+            && ModalFavoriteLevelForSmoke > 0
+            && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("VideoFavoriteBackground"))
+            && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("VideoFavorite"))
+            && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("VideoFavoriteText"));
+    public bool HeaderProductVersionContractForSmoke
+        => HeaderProductVersionText.Text.StartsWith('v')
+            && Version.TryParse(HeaderProductVersionText.Text[1..], out _)
+            && string.Equals(
+                AutomationProperties.GetName(HeaderProductVersionText),
+                "Aibos Image product version",
+                StringComparison.Ordinal);
     public bool ModalWindowCaptionControlsContractForSmoke
         => Modal.Visibility == Visibility.Visible
             && ModalWindowCaptionControls.Visibility == Visibility.Visible
@@ -27181,7 +27656,9 @@ public partial class MainWindow : Window
             _modalPanX,
             _modalPanY,
             ModalPanLimits().MaxX,
-            ModalPanLimits().MaxY);
+            ModalPanLimits().MaxY,
+            Math.Max(0, ModalImage?.Width ?? 0) * _modalZoom,
+            Math.Max(0, ModalImage?.Height ?? 0) * _modalZoom);
 
     public bool ModalShowingEnhancedForSmoke => _modalShowingEnhanced;
     public int ModalDecodeStartCountForSmoke
@@ -28073,6 +28550,10 @@ public sealed class ViewerState
     // WPF-local gallery filter over the highest Favorite level among validated
     // managed Photoreal outputs. Level 0 still requires a Photoreal version.
     public List<int>? PhotorealFavoriteFilterLevels { get; set; }
+    // WPF-local gallery filter over the highest Favorite level among currently
+    // valid managed Video outputs. Missing older state means no selection, and
+    // Level 0 still requires at least one valid Video output.
+    public List<int>? VideoFavoriteFilterLevels { get; set; }
     public bool ShowUnseenDots { get; set; }
     // WPF-local Grid caption presentation. Missing older state keeps captions on.
     public bool? ShowGridFileInfoOverlay { get; set; }
@@ -28217,7 +28698,9 @@ public readonly record struct ModalTransformSnapshot(
     double PanX,
     double PanY,
     double MaxPanX,
-    double MaxPanY);
+    double MaxPanY,
+    double DisplayedWidth,
+    double DisplayedHeight);
 
 public readonly record struct ModalPanCadenceSnapshot(
     bool Available,
@@ -29025,6 +29508,16 @@ internal sealed class ResettableObservableCollection<T> :
 }
 
 // ─────────── Tile view model ───────────
+public readonly record struct FavoriteBadgeVisualSmokeSnapshot(
+    bool PhotorealVisible,
+    bool VideoVisible,
+    string PhotorealAutomationName,
+    string VideoAutomationName,
+    string PhotorealBorderColor,
+    string VideoBorderColor,
+    string PhotorealBackgroundColor,
+    string VideoBackgroundColor);
+
 public sealed class Tile : INotifyPropertyChanged
 {
     private const double VariantCountCardWidthThreshold = 140;
@@ -29041,6 +29534,7 @@ public sealed class Tile : INotifyPropertyChanged
     private static readonly PropertyChangedEventArgs ListThumbnailSizeChanged = new(nameof(ListThumbnailSize));
     private static readonly PropertyChangedEventArgs ShowFavoriteBadgeChanged = new(nameof(ShowFavoriteBadge));
     private static readonly PropertyChangedEventArgs ShowPhotorealFavoriteBadgeChanged = new(nameof(ShowPhotorealFavoriteBadge));
+    private static readonly PropertyChangedEventArgs ShowVideoFavoriteBadgeChanged = new(nameof(ShowVideoFavoriteBadge));
     private static readonly PropertyChangedEventArgs ShowEnhancedBadgeChanged = new(nameof(ShowEnhancedBadge));
     private static readonly PropertyChangedEventArgs ShowUpscaleBadgeChanged = new(nameof(ShowUpscaleBadge));
     private static readonly PropertyChangedEventArgs ShowPhotorealBadgeChanged = new(nameof(ShowPhotorealBadge));
@@ -29084,6 +29578,7 @@ public sealed class Tile : INotifyPropertyChanged
     public string AutomationHelpText
         => $"{SizeText}. Favorite level {_fav}. "
             + $"{(_photorealized ? $"Highest Photoreal favorite level {_photorealFavoriteLevel}. " : "")}"
+            + $"{(_videoGenerated ? $"Highest Video favorite level {_videoFavoriteLevel}. " : "")}"
             + $"{(_upscaled ? _upscaleVersionCount > 1 ? $"AI-upscaled versions {_upscaleVersionCount}. " : "AI-upscaled. " : "")}"
             + $"{(_upscaleQueueActive ? "AI-upscale queued. " : "")}"
             + $"{(_photorealized ? _photorealVersionCount > 1 ? $"AI-photorealized versions {_photorealVersionCount}. " : "AI-photorealized. " : "")}"
@@ -29108,6 +29603,7 @@ public sealed class Tile : INotifyPropertyChanged
     private int _photorealFavoriteLevel;
     private int _i2iVersionCount;
     private int _videoVersionCount;
+    private int _videoFavoriteLevel;
     private bool _upscaleQueueActive;
     private bool _photorealQueueActive;
     private bool _i2iQueueActive;
@@ -29192,6 +29688,7 @@ public sealed class Tile : INotifyPropertyChanged
             _videoGenerated = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoGenerated)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoVariantCount)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
@@ -29235,6 +29732,7 @@ public sealed class Tile : INotifyPropertyChanged
             _photorealFavoriteLevel = normalized;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhotorealFavoriteLevel)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhotorealFavoriteAutomationName)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
@@ -29263,6 +29761,21 @@ public sealed class Tile : INotifyPropertyChanged
             _videoVersionCount = normalized;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoVersionCount)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public int VideoFavoriteLevel
+    {
+        get => _videoFavoriteLevel;
+        set
+        {
+            int normalized = Math.Clamp(value, 0, 5);
+            if (_videoFavoriteLevel == normalized) return;
+            _videoFavoriteLevel = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoFavoriteLevel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoFavoriteAutomationName)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
@@ -29340,6 +29853,7 @@ public sealed class Tile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowCardStatusBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowEnhancedBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
@@ -29360,6 +29874,12 @@ public sealed class Tile : INotifyPropertyChanged
     public bool ShowFavoriteBadge => _showCardStatusBadge && _fav > 0;
     public bool ShowPhotorealFavoriteBadge =>
         _showCardStatusBadge && _photorealized && _photorealFavoriteLevel > 0;
+    public bool ShowVideoFavoriteBadge =>
+        _showCardStatusBadge && _videoGenerated && _videoFavoriteLevel > 0;
+    public string PhotorealFavoriteAutomationName =>
+        $"Photoreal Favorite level {_photorealFavoriteLevel}";
+    public string VideoFavoriteAutomationName =>
+        $"Video Favorite level {_videoFavoriteLevel}";
     public string FavoriteGlyph => _fav > 0 ? "\uEB52" : "\uEB51";
     public bool ShowEnhancedBadge => _showCardStatusBadge && _enhanced;
     public bool ShowUpscaleBadge => _showCardStatusBadge && _upscaled;
@@ -29674,6 +30194,7 @@ public sealed class Tile : INotifyPropertyChanged
             handler(this, ShowCardStatusBadgeChanged);
             handler(this, ShowFavoriteBadgeChanged);
             handler(this, ShowPhotorealFavoriteBadgeChanged);
+            handler(this, ShowVideoFavoriteBadgeChanged);
             handler(this, ShowEnhancedBadgeChanged);
             handler(this, ShowUpscaleBadgeChanged);
             handler(this, ShowPhotorealBadgeChanged);

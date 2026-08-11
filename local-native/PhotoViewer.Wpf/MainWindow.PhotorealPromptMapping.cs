@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace PhotoViewer.Wpf;
 
@@ -16,19 +17,207 @@ public partial class MainWindow
     private const int MaxPhotorealPromptMappingCount = 256;
     private const int MaxPhotorealPromptMappingTagLength = 160;
     private const int MaxPhotorealPromptMappingOutputLength = 400;
-    private const int DefaultPhotorealPromptPolicyRevision = 0;
-
+    private const int CurrentPhotorealPromptMappingDefaultsRevision = 8;
     private readonly List<PhotorealPromptMappingState> _photorealPromptMappings = [];
     private int _photorealPromptMappingDefaultsRevision =
-        DefaultPhotorealPromptPolicyRevision;
+        CurrentPhotorealPromptMappingDefaultsRevision;
 
     private static List<PhotorealPromptMappingState> CreateDefaultPhotorealPromptMappings()
     {
-        List<PhotorealPromptMappingState> mappings =
-            WpfLocalPromptPolicy.Current.Mappings ?? [];
-        return TryValidatePhotorealPromptMappingsForEditor(mappings, out _)
-            ? mappings.Select(static row => row.Clone()).ToList()
-            : [];
+        var rows = new List<PhotorealPromptMappingState>();
+        void Add(string category, bool enabled, params string[] tags)
+        {
+            rows.AddRange(tags.Select(tag => new PhotorealPromptMappingState
+            {
+                Category = category,
+                Enabled = enabled,
+                SourceTag = tag,
+                OutputPrompt = tag,
+            }));
+        }
+        void AddMapped(
+            string category,
+            bool enabled,
+            params (string SourceTag, string OutputPrompt)[] mappings)
+        {
+            rows.AddRange(mappings.Select(mapping => new PhotorealPromptMappingState
+            {
+                Category = category,
+                Enabled = enabled,
+                SourceTag = mapping.SourceTag,
+                OutputPrompt = mapping.OutputPrompt,
+            }));
+        }
+
+        AddMapped("表情・顔（比較用）", false,
+            ("troubled eyebrows", "barely raised inner brow ends, relaxed forehead"),
+            ("trouble_eyebrows", "barely raised inner brow ends, relaxed forehead"));
+        AddMapped("表情・顔（弱い形状）", true,
+            ("narrowed eyes", "slightly narrowed eyes"),
+            ("upturned eyes", "slightly upward-tilted outer eye corners"),
+            ("open mouth", "lips slightly parted with a small natural opening"),
+            ("wince", "subtle tension around the eyes and mouth"),
+            ("blush", "subtle natural cheek flush"),
+            ("full-face blush", "soft diffuse warmth on cheeks and nose"),
+            ("profile", "face shown in side profile"),
+            ("head back", "head tilted backward"),
+            ("looking at another", "eyes directed toward another person"),
+            ("light frown", "slightly downturned lip corners"),
+            ("tongue out", "tongue visibly extended"),
+            ("closed eyes", "eyes fully closed"),
+            ("round eyes", "wide round eyes"),
+            ("droopy eyes", "softly drooping outer eye corners"),
+            ("thin_eyebrows", "thin natural eyebrows"),
+            ("surprised", "slightly widened eyes and gently raised eyebrows"));
+        AddMapped("表情・顔（比較用）", false,
+            ("light smile", "a faint closed-lip smile"),
+            ("cheerfully smile", "a cheerful natural smile"),
+            ("smile", "a natural smile"),
+            ("grimace", "a tense grimace"),
+            ("tearing up", "slightly watery eyes"),
+            ("flustered", "subtle cheek warmth and mild facial tension"),
+            ("confused", "slightly uncertain gaze and mild brow tension"),
+            ("seductive smile", "a subtle suggestive smile"),
+            ("female_orgasm", "female orgasm"),
+            ("long eyelashes", "long natural eyelashes"));
+        AddMapped("表情・視線（形状）", true,
+            ("frustrated", "slightly furrowed brows, narrowed eyes, and a tense mouth"),
+            ("looking at viewer", "both irises directed toward the camera, direct eye contact"),
+            ("lookingatviewer", "both irises directed toward the camera, direct eye contact"),
+            ("averting eyes", "gaze visibly directed away from the viewer"),
+            ("looking away", "gaze visibly directed away from the viewer"),
+            ("one eye closed", "one eye fully closed and the other eye open"),
+            ("covered mouth", "mouth visibly occluded"));
+        Add("表情・顔（比較用）", false,
+            "torogao", "embarrassed", "shy", "humiliation", "female orgasm",
+            "craving", "anguish", "in_heat", "in heat", "forced orgasm",
+            "aroused", "fucked silly", "heavy breathing",
+            "claving", "cute", "seductive", "CuteSeductive");
+        Add("成人形状", true,
+            "puffy nipples", "huge nipples", "inverted nipples", "erect_nipple",
+            "covered nipples", "areola slip", "large penis", "clitoris",
+            "spread pussy");
+        Add("成人形状（参照優先）", false,
+            "sagging breasts", "unaligned breasts", "medium breasts", "large breasts",
+            "huge breasts", "small breasts", "gigantic breasts");
+        Add("液体・濡れ", true,
+            "breast milk", "lactation", "pussy juice puddle", "pussy juice",
+            "pussy juice trail", "wet_skin", "wet skin", "mucus", "mucus on body",
+            "mucus on face", "mucus on hair", "mucus trail", "cum pool",
+            "cum on body", "cum on breasts", "cum on clothes", "cum on hair",
+            "cum overflow", "cum string", "cum_in_armpit", "cum_trail", "cum trail",
+            "cumdrip", "precum", "cum in pussy");
+        AddMapped("液体・濡れ（可視形状）", true,
+            ("wet", "visibly wet skin with water droplets"),
+            ("shiny skin", "subtle natural skin sheen with soft realistic highlights and visible skin texture"),
+            ("wet hair", "wet hair clumped into damp strands"),
+            ("wet clothes", "visibly soaked fabric"),
+            ("cum_pool", "visible pool of fluid"),
+            ("dripping", "visible liquid dripping"),
+            ("cum on stomach", "visible fluid on the abdomen"),
+            ("cum in mouth", "visible fluid in the mouth"),
+            ("saliva trail", "a visible strand of saliva"),
+            ("saliva", "visible saliva"),
+            ("breast milk in container", "visible milk collected in a container"),
+            ("pouring milk from nipple to a cup", "visible milk pouring into a cup"),
+            ("pouring breast-milk into a teacup on table", "visible milk pouring into a cup"),
+            ("lactating into container", "visible milk collected in a container"));
+        Add("液体・濡れ（増量語）", false,
+            "forced lactation", "projectile lactation", "bukkake", "excessive cum",
+            "projectile cum", "cum_everywhere");
+        AddMapped("液体・濡れ（比較用）", false,
+            ("projectile cumdrip", "projectile fluid droplets"));
+        AddMapped("ガラス・表面への圧迫", true,
+            ("glass wall", "a clear glass wall visibly between the subject and camera"),
+            ("stuck in a glass box", "body visibly enclosed inside a transparent glass box"),
+            ("against glass", "body visibly pressed against glass"),
+            ("breasts on glass", "breasts visibly compressed against glass"),
+            ("hands on glass", "hands visibly pressed flat against glass"),
+            ("ass on glass", "buttocks visibly compressed against glass"),
+            ("pussy on glass", "vulva visibly pressed against glass"),
+            ("breast press", "breasts visibly compressed against a surface"),
+            ("ass press", "buttocks visibly compressed against a surface"));
+        AddMapped("ガラス・表面への圧迫（比較用）", false,
+            ("against fourth wall", "body pressed toward the camera-facing surface"));
+        AddMapped("身体の局所形状", true,
+            ("nipple", "realistic nipple and areola texture with subtle Montgomery glands, fine natural creases, and shallow indentations"),
+            ("nipples", "realistic nipple and areola texture with subtle Montgomery glands, fine natural creases, and shallow indentations"),
+            ("wrinkled nipples", "visible natural wrinkles on the nipples"),
+            ("unaligned nipples", "nipples visibly asymmetric in height"),
+            ("spread nipple", "a nipple visibly stretched sideways"),
+            ("light areolae", "light-colored areolae"),
+            ("nipple press", "a nipple visibly flattened by pressure"),
+            ("nipple pinch", "nipples visibly pinched between fingers"),
+            ("nipples pinch", "nipples visibly pinched between fingers"),
+            ("nipple between fingers", "a nipple visibly held between fingers"),
+            ("nipple pull", "a nipple visibly pulled outward by fingers"),
+            ("nipple rub", "fingertips visibly rubbing the nipple"),
+            ("nipple flick", "a fingertip visibly touching the nipple"),
+            ("nipple tweak", "nipples visibly pinched between fingertips"));
+        AddMapped("ポーズ・身体配置", true,
+            ("arched back", "back visibly arched"),
+            ("spread legs", "legs visibly spread apart"),
+            ("wide spread legs", "legs visibly spread apart"),
+            ("legs apart", "legs visibly spread apart"),
+            ("arms up", "both arms visibly raised"),
+            ("bent over", "torso bent forward at the waist"),
+            ("wariza", "seated with knees forward and lower legs folded beside the hips"),
+            ("on back", "lying on the back"),
+            ("leaning forward", "torso visibly leaning forward"),
+            ("kneeling", "kneeling on both knees"),
+            ("leaning back", "torso visibly leaning backward"),
+            ("arms behind back", "both arms held behind the back"),
+            ("all fours", "supported on both hands and knees"),
+            ("arms behind head", "both arms raised with hands behind the head"));
+        AddMapped("ポーズ・身体配置（比較用）", false,
+            ("standing", "standing upright"),
+            ("lying", "body in a lying position"));
+        Add("拘束具", true,
+            "bound arms", "bound legs", "stationary restraints", "x-cross (bdsm)",
+            "shackle", "strappado");
+        AddMapped("拘束具（可視形状）", true,
+            ("ball gag", "a clearly visible spherical ball between the teeth with a strap around the back of the head"),
+            ("ballgag", "a clearly visible spherical ball between the teeth with a strap around the back of the head"),
+            ("blindfold", "an opaque blindfold completely covering both eyes and secured around the head"),
+            ("black blindfold", "an opaque black blindfold completely covering both eyes and secured around the head"),
+            ("bound thighs", "thighs visibly secured together with rope or straps"),
+            ("bound torso", "torso visibly secured with rope or straps"),
+            ("suspension", "body visibly suspended by restraints"),
+            ("spreader bar", "a visible spreader bar securing the ankles apart"),
+            ("bound ankles", "ankles visibly tied together"),
+            ("chained wrists", "wrists visibly secured by metal chains"),
+            ("bound wrists", "wrists visibly tied together"),
+            ("handcuffs", "metal handcuffs visibly securing the wrists"));
+        AddMapped("可視物・装置", true,
+            ("hold in mouth", "an object visibly held in the mouth"),
+            ("milking machine", "clearly visible milking-machine apparatus"),
+            ("breast pump", "clearly visible breast-pump apparatus"),
+            ("vibrator on nipple", "a visible vibrator touching the nipple"),
+            ("tentacle wall", "clearly visible tentacles with suction cups"),
+            ("tentacle pit", "clearly visible tentacles with suction cups"),
+            ("suction tentacles", "clearly visible tentacles with suction cups"),
+            ("suction cups", "clearly visible tentacles with suction cups"),
+            ("veiny tentacles", "clearly visible tentacles with suction cups"));
+        AddMapped("液体・位置と動き", true,
+            ("projectile trail", "a visible airborne trail of liquid droplets"),
+            ("cum bath", "body visibly immersed in a large pool of fluid"),
+            ("wading semen", "lower legs visibly wading through a pool of fluid"),
+            ("cum on crotch", "visible fluid on the crotch"),
+            ("cum on legs", "visible fluid on the legs"),
+            ("cum on arm", "visible fluid on the arm"),
+            ("in cum container", "body visibly inside a container filled with fluid"),
+            ("cum shower", "visible streams and droplets of fluid falling over the body"),
+            ("cum string between breasts", "a visible strand of fluid stretched between the breasts"));
+        AddMapped("液体・位置と動き（比較用）", false,
+            ("cumdump", "visible fluid on and around the body"),
+            ("unusual bodily fluids", "visible bodily fluid"));
+        Add("拘束（広義）", false, "restrained", "bdsm");
+        var normalizedSources = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
+        return rows
+            .Where(row => normalizedSources.Add(
+                NormalizeA1111PromptTag(row.SourceTag)))
+            .ToList();
     }
 
     private void RestorePhotorealPromptMappings(
@@ -36,34 +225,30 @@ public partial class MainWindow
         int persistedDefaultsRevision)
     {
         _photorealPromptMappings.Clear();
-        List<PhotorealPromptMappingState> configuredDefaults =
-            WpfLocalPromptPolicy.Current.Mappings ?? [];
-        bool policyMappingsValid =
-            TryValidatePhotorealPromptMappingsForEditor(
-                configuredDefaults,
-                out _);
-        int policyRevision = policyMappingsValid
-            ? WpfLocalPromptPolicy.Current.Revision
-            : DefaultPhotorealPromptPolicyRevision;
-        List<PhotorealPromptMappingState> defaults = policyMappingsValid
-            ? configuredDefaults.Select(static row => row.Clone()).ToList()
-            : [];
-
+        List<PhotorealPromptMappingState> defaults =
+            CreateDefaultPhotorealPromptMappings();
         IReadOnlyList<PhotorealPromptMappingState> source;
         if (persisted is null)
         {
             source = defaults;
         }
-        else if (persisted.Count == 0 || persistedDefaultsRevision >= policyRevision)
+        else if (persisted.Count == 0
+            || persistedDefaultsRevision >=
+                CurrentPhotorealPromptMappingDefaultsRevision)
         {
             source = persisted;
         }
         else
         {
-            var upgraded = persisted
-                .Where(static row => row is not null)
-                .Select(static row => row.Clone())
-                .ToList();
+            var upgraded = persisted.Select(static row => row.Clone()).ToList();
+            if (persistedDefaultsRevision < 1)
+                ApplyPromptMappingDefaultsRevision1(upgraded);
+            if (persistedDefaultsRevision < 2)
+                ApplyPromptMappingDefaultsRevision2(upgraded);
+            if (persistedDefaultsRevision < 3)
+                ApplyPromptMappingDefaultsRevision3(upgraded);
+            if (persistedDefaultsRevision < 4)
+                ApplyPromptMappingDefaultsRevision4(upgraded);
             var knownSources = new HashSet<string>(
                 upgraded.Select(static row =>
                     NormalizeA1111PromptTag(row.SourceTag)),
@@ -74,50 +259,252 @@ public partial class MainWindow
                 .Select(static row => row.Clone()));
             source = upgraded;
         }
-
-        var seenSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (PhotorealPromptMappingState? candidate in
-            source.Take(MaxPhotorealPromptMappingCount))
+        var normalizedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (PhotorealPromptMappingState? candidate in source.Take(MaxPhotorealPromptMappingCount))
         {
             if (candidate is null)
                 continue;
-
-            string category = candidate.Category?.Trim() ?? "";
-            string sourceTag = candidate.SourceTag?.Trim() ?? "";
-            string outputPrompt = candidate.OutputPrompt?.Trim() ?? "";
+            string sourceTag = (candidate.SourceTag ?? "").Trim();
+            string outputPrompt = (candidate.OutputPrompt ?? "").Trim();
             if (sourceTag.Length is < 1 or > MaxPhotorealPromptMappingTagLength
                 || outputPrompt.Length is < 1 or > MaxPhotorealPromptMappingOutputLength)
             {
                 continue;
             }
-
             string normalizedSource = NormalizeA1111PromptTag(sourceTag);
             if (normalizedSource.Length == 0
-                || !seenSources.Add(normalizedSource))
+                || !normalizedSources.Add(normalizedSource))
             {
                 continue;
             }
-
+            string category = string.IsNullOrWhiteSpace(candidate.Category)
+                ? "カスタム"
+                : candidate.Category.Trim();
             _photorealPromptMappings.Add(new PhotorealPromptMappingState
             {
                 Enabled = candidate.Enabled,
-                Category = string.IsNullOrWhiteSpace(category)
-                    ? "Custom"
-                    : category,
+                Category = category[..Math.Min(category.Length, 40)],
                 SourceTag = sourceTag,
                 OutputPrompt = outputPrompt,
                 ExtensionData = candidate.ExtensionData is null
                     ? null
                     : new Dictionary<string, JsonElement>(
                         candidate.ExtensionData,
-                        StringComparer.Ordinal),
+                StringComparer.Ordinal),
             });
         }
-
-        _photorealPromptMappingDefaultsRevision = policyRevision;
+        _photorealPromptMappingDefaultsRevision =
+            CurrentPhotorealPromptMappingDefaultsRevision;
         RefreshPhotorealPromptMappingSummary();
     }
 
+    private static void ApplyPromptMappingDefaultsRevision1(
+        List<PhotorealPromptMappingState> mappings)
+    {
+        PhotorealPromptMappingState? troubled = mappings.FirstOrDefault(row =>
+            string.Equals(
+                NormalizeA1111PromptTag(row.SourceTag),
+                "troubled eyebrows",
+                StringComparison.OrdinalIgnoreCase));
+        if (troubled is not null
+            && (string.Equals(
+                    troubled.OutputPrompt.Trim(),
+                    "troubled eyebrows",
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    troubled.OutputPrompt.Trim(),
+                    "slightly raised inner eyebrow ends",
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            troubled.OutputPrompt =
+                "barely raised inner brow ends, relaxed forehead";
+        }
+
+        DisableLegacyDirectMapping(mappings, "light smile");
+        DisableLegacyDirectMapping(mappings, "cheerfully smile");
+        DisableLegacyDirectMapping(mappings, "smile");
+    }
+
+    private static void ApplyPromptMappingDefaultsRevision2(
+        List<PhotorealPromptMappingState> mappings)
+    {
+        ReplaceLegacyDirectMapping(
+            mappings,
+            "ball gag",
+            "a clearly visible spherical ball between the teeth with a strap around the back of the head");
+        ReplaceLegacyDirectMapping(
+            mappings,
+            "ballgag",
+            "a clearly visible spherical ball between the teeth with a strap around the back of the head");
+        ReplaceLegacyDirectMapping(
+            mappings,
+            "black blindfold",
+            "an opaque black blindfold completely covering both eyes and secured around the head");
+        ReplaceAndEnableLegacyDirectMapping(
+            mappings,
+            "looking at viewer",
+            "both irises directed toward the camera, direct eye contact");
+        ReplaceAndEnableLegacyMapping(
+            mappings,
+            "shiny skin",
+            "moist skin with realistic highlights",
+            "subtle natural skin sheen with soft realistic highlights and visible skin texture");
+    }
+
+    private static void ApplyPromptMappingDefaultsRevision3(
+        List<PhotorealPromptMappingState> mappings)
+    {
+        const string replacement =
+            "lips slightly parted with a small natural opening";
+        ReplaceLegacyDirectMapping(mappings, "open mouth", replacement);
+        ReplaceLegacyMapping(
+            mappings,
+            "open mouth",
+            "mouth visibly open with separated lips",
+            replacement);
+    }
+
+    private static void ApplyPromptMappingDefaultsRevision4(
+        List<PhotorealPromptMappingState> mappings)
+    {
+        DisableKnownDefaultMapping(
+            mappings,
+            "troubled eyebrows",
+            "troubled eyebrows",
+            "slightly raised inner eyebrow ends",
+            "barely raised inner brow ends, relaxed forehead");
+        DisableKnownDefaultMapping(
+            mappings,
+            "trouble eyebrows",
+            "trouble eyebrows",
+            "barely raised inner brow ends, relaxed forehead");
+    }
+
+    private static void DisableKnownDefaultMapping(
+        IEnumerable<PhotorealPromptMappingState> mappings,
+        string sourceTag,
+        params string[] knownOutputs)
+    {
+        PhotorealPromptMappingState? mapping = mappings.FirstOrDefault(row =>
+            string.Equals(
+                NormalizeA1111PromptTag(row.SourceTag),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase));
+        if (mapping is null)
+            return;
+
+        string output = NormalizeA1111PromptTag(mapping.OutputPrompt);
+        if (knownOutputs.Any(known => string.Equals(
+                output,
+                NormalizeA1111PromptTag(known),
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            mapping.Enabled = false;
+        }
+    }
+
+    private static void ReplaceLegacyDirectMapping(
+        IEnumerable<PhotorealPromptMappingState> mappings,
+        string sourceTag,
+        string replacement)
+    {
+        PhotorealPromptMappingState? mapping = mappings.FirstOrDefault(row =>
+            string.Equals(
+                NormalizeA1111PromptTag(row.SourceTag),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase));
+        if (mapping is not null
+            && string.Equals(
+                NormalizeA1111PromptTag(mapping.OutputPrompt),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            mapping.OutputPrompt = replacement;
+        }
+    }
+
+    private static void ReplaceAndEnableLegacyDirectMapping(
+        IEnumerable<PhotorealPromptMappingState> mappings,
+        string sourceTag,
+        string replacement)
+    {
+        PhotorealPromptMappingState? mapping = mappings.FirstOrDefault(row =>
+            string.Equals(
+                NormalizeA1111PromptTag(row.SourceTag),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase));
+        if (mapping is not null
+            && string.Equals(
+                NormalizeA1111PromptTag(mapping.OutputPrompt),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            mapping.OutputPrompt = replacement;
+            mapping.Enabled = true;
+        }
+    }
+
+    private static void ReplaceLegacyMapping(
+        IEnumerable<PhotorealPromptMappingState> mappings,
+        string sourceTag,
+        string legacyOutput,
+        string replacement)
+    {
+        PhotorealPromptMappingState? mapping = mappings.FirstOrDefault(row =>
+            string.Equals(
+                NormalizeA1111PromptTag(row.SourceTag),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase));
+        if (mapping is not null
+            && string.Equals(
+                NormalizeA1111PromptTag(mapping.OutputPrompt),
+                NormalizeA1111PromptTag(legacyOutput),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            mapping.OutputPrompt = replacement;
+        }
+    }
+
+    private static void ReplaceAndEnableLegacyMapping(
+        IEnumerable<PhotorealPromptMappingState> mappings,
+        string sourceTag,
+        string legacyOutput,
+        string replacement)
+    {
+        PhotorealPromptMappingState? mapping = mappings.FirstOrDefault(row =>
+            string.Equals(
+                NormalizeA1111PromptTag(row.SourceTag),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase));
+        if (mapping is not null
+            && string.Equals(
+                mapping.OutputPrompt.Trim(),
+                legacyOutput,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            mapping.OutputPrompt = replacement;
+            mapping.Enabled = true;
+        }
+    }
+
+    private static void DisableLegacyDirectMapping(
+        IEnumerable<PhotorealPromptMappingState> mappings,
+        string sourceTag)
+    {
+        PhotorealPromptMappingState? mapping = mappings.FirstOrDefault(row =>
+            string.Equals(
+                NormalizeA1111PromptTag(row.SourceTag),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase));
+        if (mapping is not null
+            && string.Equals(
+                mapping.OutputPrompt.Trim(),
+                sourceTag,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            mapping.Enabled = false;
+        }
+    }
 
     private List<PhotorealPromptMappingState> SnapshotPhotorealPromptMappings()
         => _photorealPromptMappings.Select(static row => new PhotorealPromptMappingState
@@ -337,13 +724,8 @@ public partial class MainWindow
             return false;
         }
         var normalized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (PhotorealPromptMappingState? row in rows)
+        foreach (PhotorealPromptMappingState row in rows)
         {
-            if (row is null)
-            {
-                error = "変換表に空の行があります。";
-                return false;
-            }
             string category = row.Category?.Trim() ?? "";
             string source = row.SourceTag?.Trim() ?? "";
             string output = row.OutputPrompt?.Trim() ?? "";
@@ -458,6 +840,9 @@ public partial class MainWindow
             return true;
         }
 
+        string? nippleTextureOutput = lookup.GetValueOrDefault("nipple")
+            ?? lookup.GetValueOrDefault("nipples");
+        bool appendNippleTexture = false;
         foreach (string rawTag in SplitA1111PromptTags(sourcePrompt))
         {
             string key = NormalizeA1111PromptTag(rawTag);
@@ -466,12 +851,11 @@ public partial class MainWindow
 
             string? exactOutput = lookup.GetValueOrDefault(key);
             TryAppendOutput(exactOutput);
-            foreach (PhotorealPromptMappingState mapping in mappings)
-            {
-                if (MappingMatchesRelatedTokens(mapping, key))
-                    TryAppendOutput(mapping.OutputPrompt);
-            }
+            appendNippleTexture |= nippleTextureOutput is not null
+                && IsNippleOrAreolaPromptTag(key);
         }
+        if (appendNippleTexture)
+            TryAppendOutput(nippleTextureOutput);
         if (appended.Count == 0)
             return basePrompt;
 
@@ -486,61 +870,45 @@ public partial class MainWindow
         return composed;
     }
 
-    private static bool MappingMatchesRelatedTokens(
-        PhotorealPromptMappingState mapping,
-        string normalizedTag)
+    private static bool IsNippleOrAreolaPromptTag(string normalizedTag)
     {
-        string[] required = ReadMappingTokenList(mapping, "matchTokens");
-        if (required.Length == 0)
-            return false;
-
-        var sourceTokens = new HashSet<string>(
-            EnumeratePromptWordTokens(normalizedTag),
-            StringComparer.OrdinalIgnoreCase);
-        if (!required.Any(sourceTokens.Contains))
-            return false;
-
-        string[] excluded = ReadMappingTokenList(mapping, "excludeTokens");
-        return !excluded.Any(sourceTokens.Contains);
-    }
-
-    private static string[] ReadMappingTokenList(
-        PhotorealPromptMappingState mapping,
-        string propertyName)
-    {
-        if (mapping.ExtensionData is null
-            || !mapping.ExtensionData.TryGetValue(propertyName, out JsonElement value)
-            || value.ValueKind != JsonValueKind.Array)
+        int tokenStart = 0;
+        bool anatomyTokenFound = false;
+        bool absenceTokenFound = false;
+        for (int index = 0; index <= normalizedTag.Length; index++)
         {
-            return [];
-        }
-
-        return value.EnumerateArray()
-            .Where(static item => item.ValueKind == JsonValueKind.String)
-            .Select(static item => NormalizeA1111PromptTag(item.GetString() ?? ""))
-            .Where(static item => item.Length > 0)
-            .Take(64)
-            .ToArray();
-    }
-
-    private static IEnumerable<string> EnumeratePromptWordTokens(string value)
-    {
-        int tokenStart = -1;
-        for (int index = 0; index <= value.Length; index++)
-        {
-            bool inToken = index < value.Length && char.IsLetterOrDigit(value[index]);
-            if (inToken && tokenStart < 0)
+            if (index < normalizedTag.Length
+                && char.IsLetterOrDigit(normalizedTag[index]))
             {
-                tokenStart = index;
                 continue;
             }
 
-            if (!inToken && tokenStart >= 0)
+            if (index > tokenStart)
             {
-                yield return value[tokenStart..index];
-                tokenStart = -1;
+                ReadOnlySpan<char> token = normalizedTag.AsSpan(
+                    tokenStart,
+                    index - tokenStart);
+                if (token.Equals("nipple".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("nipples".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("areola".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("areolae".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("areolas".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("areolar".AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    anatomyTokenFound = true;
+                }
+                else if (token.Equals("anti".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("no".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("without".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("missing".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                    || token.Equals("absent".AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    absenceTokenFound = true;
+                }
             }
+            tokenStart = index + 1;
         }
+        return anatomyTokenFound && !absenceTokenFound;
     }
 
     private static IEnumerable<string> SplitA1111PromptTags(string prompt)
@@ -753,7 +1121,7 @@ public partial class MainWindow
 
     public void RestorePhotorealPromptMappingsForSmoke(
         IReadOnlyList<PhotorealPromptMappingState>? persisted,
-        int defaultsRevision = DefaultPhotorealPromptPolicyRevision)
+        int defaultsRevision = CurrentPhotorealPromptMappingDefaultsRevision)
         => RestorePhotorealPromptMappings(persisted, defaultsRevision);
 
     public int PhotorealPromptMappingCountForSmoke =>
@@ -821,6 +1189,9 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
     private readonly DataGrid _grid;
     private readonly TextBox _filter;
     private readonly TextBlock _status;
+    private readonly ICollectionView _rowsView;
+    private bool _filterRefreshDirty;
+    private bool _filterRefreshScheduled;
 
     public IReadOnlyList<PhotorealPromptMappingState> Result { get; private set; } = [];
 
@@ -894,7 +1265,10 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
             AlternatingRowBackground = new SolidColorBrush(Color.FromRgb(36, 39, 46)),
             HorizontalGridLinesBrush = new SolidColorBrush(Color.FromRgb(55, 59, 68)),
         };
-        _filter.TextChanged += (_, _) => CollectionViewSource.GetDefaultView(_grid.ItemsSource).Refresh();
+        _rowsView = CollectionViewSource.GetDefaultView(_grid.ItemsSource);
+        _filter.TextChanged += (_, _) => RequestFilterRefresh();
+        _grid.CellEditEnding += (_, _) => SchedulePendingFilterRefresh();
+        _grid.RowEditEnding += (_, _) => SchedulePendingFilterRefresh();
         _grid.Columns.Add(CreateDirectEnabledColumn());
         _grid.Columns.Add(new DataGridTextColumn
         {
@@ -916,7 +1290,7 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
         });
         Grid.SetRow(_grid, 2);
         root.Children.Add(_grid);
-        CollectionViewSource.GetDefaultView(_grid.ItemsSource).Filter = FilterRow;
+        _rowsView.Filter = FilterRow;
 
         var footer = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
         Grid.SetRow(footer, 3);
@@ -1034,6 +1408,68 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
             && row.Enabled;
     }
 
+    internal async Task<bool> FilterRefreshDuringEditContractForSmokeAsync()
+    {
+        if (_rows.Count == 0
+            || CollectionViewSource.GetDefaultView(_grid.ItemsSource)
+                is not IEditableCollectionView editableView)
+        {
+            return false;
+        }
+
+        PhotorealPromptMappingEditorRow row = _rows[0];
+        string originalFilter = _filter.Text;
+        string matchingFilter = row.SourceTag;
+        try
+        {
+            _filter.Text = matchingFilter;
+            await Dispatcher.InvokeAsync(
+                static () => { },
+                DispatcherPriority.ContextIdle);
+            _grid.SelectedItem = row;
+
+            editableView.EditItem(row);
+            if (!editableView.IsEditingItem)
+                return false;
+
+            row.OutputPrompt = "";
+            await Dispatcher.InvokeAsync(
+                static () => { },
+                DispatcherPriority.ContextIdle);
+            bool rowEditStayedActive = editableView.IsEditingItem;
+            editableView.CommitEdit();
+
+            editableView.EditItem(row);
+            _filter.Text = matchingFilter + " ";
+            await Dispatcher.InvokeAsync(
+                static () => { },
+                DispatcherPriority.ContextIdle);
+            bool filterEditStayedActive = editableView.IsEditingItem;
+            editableView.CommitEdit();
+
+            _filter.Text = matchingFilter;
+            await Dispatcher.InvokeAsync(
+                static () => { },
+                DispatcherPriority.ContextIdle);
+            return rowEditStayedActive
+                && filterEditStayedActive
+                && ReferenceEquals(_grid.SelectedItem, row)
+                && CollectionViewSource.GetDefaultView(_grid.ItemsSource).Contains(row);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (editableView.IsAddingNew)
+                editableView.CancelNew();
+            if (editableView.IsEditingItem)
+                editableView.CancelEdit();
+            _filter.Text = originalFilter;
+        }
+    }
+
     private static PhotorealPromptMappingEditorRow ToEditorRow(PhotorealPromptMappingState row)
         => new()
         {
@@ -1055,6 +1491,50 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
             || row.Category.Contains(query, StringComparison.CurrentCultureIgnoreCase)
             || row.SourceTag.Contains(query, StringComparison.OrdinalIgnoreCase)
             || row.OutputPrompt.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void RequestFilterRefresh()
+    {
+        _filterRefreshDirty = true;
+        SchedulePendingFilterRefresh();
+    }
+
+    private void SchedulePendingFilterRefresh()
+    {
+        if (!_filterRefreshDirty || _filterRefreshScheduled)
+            return;
+
+        _filterRefreshScheduled = true;
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.DataBind,
+            new Action(RefreshFilterWhenEditCompletes));
+    }
+
+    private void RefreshFilterWhenEditCompletes()
+    {
+        _filterRefreshScheduled = false;
+        if (!_filterRefreshDirty)
+            return;
+        if (_rowsView is IEditableCollectionView editableView
+            && (editableView.IsAddingNew || editableView.IsEditingItem))
+        {
+            return;
+        }
+
+        object? selectedItem = _grid.SelectedItem;
+        try
+        {
+            _rowsView.Refresh();
+            _filterRefreshDirty = false;
+            if (selectedItem is not null && _rowsView.Contains(selectedItem))
+                _grid.SelectedItem = selectedItem;
+        }
+        catch (InvalidOperationException) when (
+            _rowsView is IEditableCollectionView retryView
+            && (retryView.IsAddingNew || retryView.IsEditingItem))
+        {
+            _filterRefreshDirty = true;
+        }
     }
 
     private static Button CreateButton(string label, RoutedEventHandler click, bool primary = false)
@@ -1127,6 +1607,8 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
 
     private void AddRow()
     {
+        if (!CommitPendingGridEdit())
+            return;
         var row = new PhotorealPromptMappingEditorRow
         {
             Enabled = true,
@@ -1144,6 +1626,8 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
 
     private void DeleteSelected()
     {
+        if (!CommitPendingGridEdit())
+            return;
         foreach (PhotorealPromptMappingEditorRow row in _grid.SelectedItems.Cast<PhotorealPromptMappingEditorRow>().ToArray())
         {
             row.PropertyChanged -= EditorRow_PropertyChanged;
@@ -1154,6 +1638,8 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
 
     private void ResetDefaults()
     {
+        if (!CommitPendingGridEdit())
+            return;
         foreach (PhotorealPromptMappingEditorRow row in _rows)
             row.PropertyChanged -= EditorRow_PropertyChanged;
         _rows.Clear();
@@ -1174,13 +1660,26 @@ internal sealed class PhotorealPromptMappingEditorWindow : Window
     {
         RefreshStatus();
         if (_filter.Text.Length > 0)
-            CollectionViewSource.GetDefaultView(_grid.ItemsSource).Refresh();
+            RequestFilterRefresh();
+    }
+
+    private bool CommitPendingGridEdit()
+    {
+        bool cellCommitted = _grid.CommitEdit(DataGridEditingUnit.Cell, true);
+        bool rowCommitted = _grid.CommitEdit(DataGridEditingUnit.Row, true);
+        SchedulePendingFilterRefresh();
+        if (cellCommitted && rowCommitted)
+            return true;
+
+        _status.Text = "編集中の行を確定できません。入力内容を確認してください。";
+        _status.Foreground = Brushes.OrangeRed;
+        return false;
     }
 
     private void SaveAndClose()
     {
-        _grid.CommitEdit(DataGridEditingUnit.Cell, true);
-        _grid.CommitEdit(DataGridEditingUnit.Row, true);
+        if (!CommitPendingGridEdit())
+            return;
         PhotorealPromptMappingState[] result = _rows.Select(static row => row.ToState()).ToArray();
         if (!MainWindow.TryValidatePhotorealPromptMappingsForEditor(result, out string error))
         {

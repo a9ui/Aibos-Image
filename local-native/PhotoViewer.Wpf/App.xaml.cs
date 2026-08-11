@@ -44,6 +44,8 @@ public partial class App : Application
         "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor", "TextDisabledColor", "SelectionTextColor",
         "AccentColor", "AccentLightColor", "AccentFillColor", "AccentFillHoverColor",
         "FocusColor", "FavoriteColor", "FavoriteTextColor",
+        "PhotorealFavoriteColor", "PhotorealFavoriteTextColor", "PhotorealFavoriteBackgroundColor",
+        "VideoFavoriteColor", "VideoFavoriteTextColor", "VideoFavoriteBackgroundColor",
         "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
         "SuccessColor", "WarningColor", "DangerColor", "DangerTextColor",
         "DangerFillColor", "DangerFillHoverColor",
@@ -76,6 +78,12 @@ public partial class App : Application
             ["FocusColor"] = "Focus",
             ["FavoriteColor"] = "Favorite",
             ["FavoriteTextColor"] = "FavoriteText",
+            ["PhotorealFavoriteColor"] = "PhotorealFavorite",
+            ["PhotorealFavoriteTextColor"] = "PhotorealFavoriteText",
+            ["PhotorealFavoriteBackgroundColor"] = "PhotorealFavoriteBackground",
+            ["VideoFavoriteColor"] = "VideoFavorite",
+            ["VideoFavoriteTextColor"] = "VideoFavoriteText",
+            ["VideoFavoriteBackgroundColor"] = "VideoFavoriteBackground",
             ["SuccessColor"] = "Success",
             ["WarningColor"] = "Warning",
             ["DangerColor"] = "Danger",
@@ -128,11 +136,28 @@ public partial class App : Application
     {
         int parityContractSmokeIdx = Array.IndexOf(e.Args, "--parity-contract-smoke");
         int h25EnhancementCompanionSmokeIdx = Array.IndexOf(e.Args, "--h25-enhancement-companion-smoke");
+        int videoV2ReaderSmokeIdx = Array.IndexOf(e.Args, "--video-v2-reader-smoke");
         int sharedRootLocatorSmokeIdx = Array.IndexOf(e.Args, "--shared-root-locator-smoke");
         int sharedRootActivationSmokeIdx = Array.IndexOf(e.Args, "--shared-root-activation-smoke");
         int sharedRootLeaseHolderSmokeIdx = Array.IndexOf(e.Args, "--shared-root-lease-holder-smoke");
         int sharedRootLeaseWriterSmokeIdx = Array.IndexOf(e.Args, "--shared-root-lease-writer-smoke");
-        if (parityContractSmokeIdx < 0
+        if (videoV2ReaderSmokeIdx >= 0
+            && videoV2ReaderSmokeIdx + 1 < e.Args.Length)
+        {
+            try
+            {
+                ConfigureVideoV2ReaderSmokeStorage(
+                    e.Args[videoV2ReaderSmokeIdx + 1]);
+            }
+            catch (ArgumentException ex)
+            {
+                Trace.TraceError(ex.Message);
+                Environment.ExitCode = 1;
+                Shutdown(1);
+                return;
+            }
+        }
+        else if (parityContractSmokeIdx < 0
             && h25EnhancementCompanionSmokeIdx < 0
             && sharedRootLocatorSmokeIdx < 0
             && sharedRootActivationSmokeIdx < 0
@@ -156,6 +181,7 @@ public partial class App : Application
         var startupWatch = Stopwatch.StartNew();
         if (parityContractSmokeIdx < 0
             && h25EnhancementCompanionSmokeIdx < 0
+            && videoV2ReaderSmokeIdx < 0
             && sharedRootLocatorSmokeIdx < 0
             && sharedRootActivationSmokeIdx < 0
             && sharedRootLeaseHolderSmokeIdx < 0
@@ -188,6 +214,15 @@ public partial class App : Application
         UiLanguageResources.Apply(UiLanguageResources.English);
         InitializeAccessibilityPalette(e.Args.Contains("--force-high-contrast", StringComparer.OrdinalIgnoreCase));
 
+        if (videoV2ReaderSmokeIdx >= 0
+            && videoV2ReaderSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoV2ReaderSmoke(
+                e.Args[videoV2ReaderSmokeIdx + 1],
+                e.Args);
+            return;
+        }
+
         int i2iReaderSmokeIdx = Array.IndexOf(e.Args, "--i2i-reader-smoke");
         if (i2iReaderSmokeIdx >= 0 && i2iReaderSmokeIdx + 1 < e.Args.Length)
         {
@@ -199,6 +234,31 @@ public partial class App : Application
         if (i2iV2ReaderSmokeIdx >= 0 && i2iV2ReaderSmokeIdx + 1 < e.Args.Length)
         {
             CaptureI2iV2ReaderSmoke(e.Args[i2iV2ReaderSmokeIdx + 1]);
+            return;
+        }
+
+        int videoV2UiSmokeIdx = Array.IndexOf(e.Args, "--video-v2-ui-smoke");
+        if (videoV2UiSmokeIdx >= 0 && videoV2UiSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoV2UiSmoke(e.Args[videoV2UiSmokeIdx + 1]);
+            return;
+        }
+
+        int videoFavoriteSmokeIdx = Array.IndexOf(e.Args, "--video-favorite-smoke");
+        if (videoFavoriteSmokeIdx >= 0 && videoFavoriteSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoFavoriteSmoke(e.Args[videoFavoriteSmokeIdx + 1]);
+            return;
+        }
+
+        int videoH3PromptRewriteSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--video-h3-prompt-rewrite-smoke");
+        if (videoH3PromptRewriteSmokeIdx >= 0
+            && videoH3PromptRewriteSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoH3PromptRewriteSmoke(
+                e.Args[videoH3PromptRewriteSmokeIdx + 1]);
             return;
         }
 
@@ -500,6 +560,13 @@ public partial class App : Application
         if (folderDragInSmokeIdx >= 0 && folderDragInSmokeIdx + 1 < e.Args.Length)
         {
             CaptureFolderDragInSmoke(e.Args[folderDragInSmokeIdx + 1]);
+            return;
+        }
+
+        int imageDragInSmokeIdx = Array.IndexOf(e.Args, "--image-drag-in-smoke");
+        if (imageDragInSmokeIdx >= 0 && imageDragInSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureImageDragInSmoke(e.Args[imageDragInSmokeIdx + 1]);
             return;
         }
 
@@ -1110,16 +1177,18 @@ public partial class App : Application
             "GlassChromeTopColor", "GlassChromeBottomColor",
             "HoverFillColor", "PressedFillColor", "SoftFillColor", "AccentSoftColor", "AccentGlassColor",
             "FavoriteSoftColor", "SuccessSoftColor",
+            "PhotorealFavoriteBackgroundColor", "VideoFavoriteBackgroundColor",
             "OverlaySoftColor", "OverlayStrongColor", "DropOverlayColor",
             "ThumbnailCaptionStartColor", "ThumbnailCaptionEndColor", "AiBadgeBackgroundColor");
         SetThemeColors(SystemColors.WindowTextColor,
             "TextPrimaryColor", "TextSecondaryColor", "TextTertiaryColor",
             "FavoriteTextColor", "SuccessColor", "DangerTextColor", "LogoColor",
-            "ThumbnailCaptionTextColor");
+            "ThumbnailCaptionTextColor", "PhotorealFavoriteTextColor", "VideoFavoriteTextColor");
         SetThemeColors(SystemColors.GrayTextColor, "TextDisabledColor");
         SetThemeColors(SystemColors.HighlightTextColor, "SelectionTextColor");
         SetThemeColors(SystemColors.HotTrackColor,
             "AccentColor", "AccentLightColor", "AccentFillColor", "AccentFillHoverColor", "FavoriteColor",
+            "PhotorealFavoriteColor", "VideoFavoriteColor",
             "FavoriteThumbnailStatusBorderColor", "EnhancedThumbnailStatusBorderColor",
             "WarningColor", "DangerColor", "DangerFillColor", "DangerFillHoverColor",
             "SuccessBorderColor", "FavStepColor",
@@ -3183,6 +3252,32 @@ public partial class App : Application
         ValidateAutomationPathArguments(args);
 
         string root = ResolveAutomationStorageRoot(args);
+        ConfigureAutomationStorageRoot(root);
+    }
+
+    private static void ConfigureVideoV2ReaderSmokeStorage(string resultPath)
+    {
+        string fullResultPath = Path.GetFullPath(resultPath);
+        string tempRoot = Path.GetFullPath(Path.GetTempPath())
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string tempPrefix = tempRoot + Path.DirectorySeparatorChar;
+        if (!fullResultPath.StartsWith(
+                tempPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                "The video v2 reader smoke result must stay under TEMP.");
+        }
+
+        string? resultDirectory = Path.GetDirectoryName(fullResultPath);
+        if (string.IsNullOrWhiteSpace(resultDirectory))
+            throw new ArgumentException("The video v2 reader result path is invalid.");
+        ConfigureAutomationStorageRoot(
+            Path.Combine(resultDirectory, "automation-storage"));
+    }
+
+    private static void ConfigureAutomationStorageRoot(string root)
+    {
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", Path.Combine(root, "state.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", Path.Combine(root, "favorites.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", Path.Combine(root, "seen.json"));
@@ -4081,11 +4176,16 @@ public partial class App : Application
                     && english.UiGeneralNavigationForSmoke == "General"
                     && english.UiModalShortcutHintForSmoke.Contains("navigate", StringComparison.Ordinal);
                 bool englishFavoriteFilterSurface = english.FavoriteFilterSurfaceContractForSmoke
-                    && english.OriginalFavoriteFilterTitleForSmoke == "Original Favorite"
-                    && english.PhotorealFavoriteFilterTitleForSmoke == "Photoreal Favorite (highest)"
+                    && english.FavoriteFilterGroupTitleForSmoke == "Favorites"
+                    && english.OriginalFavoriteFilterTitleForSmoke == "Original"
+                    && english.PhotorealFavoriteFilterTitleForSmoke == "Photoreal"
+                    && english.VideoFavoriteFilterTitleForSmoke == "Video"
                     && english.PhotorealFavoriteFilterSummaryForSmoke == "All ratings"
+                    && english.VideoFavoriteFilterSummaryForSmoke == "All ratings"
                     && english.PhotorealFavoriteLevelZeroHelpForSmoke.Contains("valid Photoreal", StringComparison.Ordinal)
                     && english.PhotorealFavoriteLevelOneHelpForSmoke.Contains("highest Favorite", StringComparison.Ordinal)
+                    && english.VideoFavoriteLevelZeroHelpForSmoke.Contains("valid Video", StringComparison.Ordinal)
+                    && english.VideoFavoriteLevelOneHelpForSmoke.Contains("highest Favorite", StringComparison.Ordinal)
                     && english.GridFileInfoOverlayLabelForSmoke == "Grid file info overlay"
                     && english.GridFileInfoOverlayHelpForSmoke.Contains("List identity text", StringComparison.Ordinal);
 
@@ -4106,11 +4206,16 @@ public partial class App : Application
                     && japanese.UiGeneralNavigationForSmoke == "一般"
                     && japanese.UiModalShortcutHintForSmoke.Contains("移動", StringComparison.Ordinal);
                 bool japaneseFavoriteFilterSurface = japanese.FavoriteFilterSurfaceContractForSmoke
-                    && japanese.OriginalFavoriteFilterTitleForSmoke == "Originalファボ"
-                    && japanese.PhotorealFavoriteFilterTitleForSmoke == "実写ファボ（最大）"
+                    && japanese.FavoriteFilterGroupTitleForSmoke == "お気に入り"
+                    && japanese.OriginalFavoriteFilterTitleForSmoke == "元画像"
+                    && japanese.PhotorealFavoriteFilterTitleForSmoke == "実写"
+                    && japanese.VideoFavoriteFilterTitleForSmoke == "動画"
                     && japanese.PhotorealFavoriteFilterSummaryForSmoke == "すべての評価"
-                    && japanese.PhotorealFavoriteLevelZeroHelpForSmoke.Contains("最大Favorite", StringComparison.Ordinal)
-                    && japanese.PhotorealFavoriteLevelOneHelpForSmoke.Contains("最大のFavorite", StringComparison.Ordinal)
+                    && japanese.VideoFavoriteFilterSummaryForSmoke == "すべての評価"
+                    && japanese.PhotorealFavoriteLevelZeroHelpForSmoke.Contains("最高Lv", StringComparison.Ordinal)
+                    && japanese.PhotorealFavoriteLevelOneHelpForSmoke.Contains("最も高い", StringComparison.Ordinal)
+                    && japanese.VideoFavoriteLevelZeroHelpForSmoke.Contains("最高Lv", StringComparison.Ordinal)
+                    && japanese.VideoFavoriteLevelOneHelpForSmoke.Contains("最も高い", StringComparison.Ordinal)
                     && japanese.GridFileInfoOverlayLabelForSmoke == "Gridのファイル情報を重ねる"
                     && japanese.GridFileInfoOverlayHelpForSmoke.Contains("状態バッジ", StringComparison.Ordinal);
 
@@ -18372,88 +18477,8 @@ public partial class App : Application
 
     private void CaptureEnhancementJobsWorkspaceSmoke(string resultPath)
     {
-        static Dictionary<string, object?> CreateVideoSmokeSnapshot(
-            string requestedPrompt = "",
-            string? effectivePositivePrompt = null,
-            string delivery = "legacy",
-            int durationSeconds = 6,
-            int playbackFps = 16,
-            int nativeFrameCount = 97,
-            string presetId = "wan22-ti2v-5b-normal-v1",
-            int steps = 20)
-        {
-            var video = new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["presetId"] = presetId,
-                ["backendId"] = "wan22-ti2v-5b-core-v1",
-                ["modelName"] = "wan2.2_ti2v_5B_fp16.safetensors",
-                ["requested"] = new
-                {
-                    durationSeconds,
-                    playbackFps,
-                    maximumPixelArea = 409600,
-                    prompt = requestedPrompt,
-                },
-                ["effective"] = new
-                {
-                    frameCount = nativeFrameCount,
-                    width = 736,
-                    height = 544,
-                    positivePrompt = effectivePositivePrompt
-                        ?? string.Join(
-                            " ",
-                            WpfLocalPromptPolicy.Current.Video!
-                                .PreservationPreamble,
-                            WpfLocalPromptPolicy.Current.Video!
-                                .BlankPromptMotion),
-                    negativePrompt = WpfLocalPromptPolicy.Current.Video!
-                        .NegativePrompt,
-                    steps,
-                    cfg = 5,
-                    sampler = "uni_pc",
-                    scheduler = "simple",
-                    shift = 8,
-                    denoise = 1,
-                },
-                ["seed"] = 123456789,
-                ["codec"] = "h264",
-                ["container"] = "mp4",
-                ["bitDepth"] = 8,
-            };
-            if (delivery is "current" or "malformed")
-            {
-                video["delivery"] = new
-                {
-                    backendId = "vs-rife-5.7.0-rife-4.25-v1",
-                    model = "4.25",
-                    targetFps = 30,
-                    frameCount = delivery == "current"
-                        ? checked(durationSeconds * 30)
-                        : checked(durationSeconds * 30 - 1),
-                    durationSeconds,
-                    pixelFormat = "yuv420p",
-                    audio = false,
-                };
-            }
-            return video;
-        }
-
-        static string VideoSmokePresetHash(
-            Dictionary<string, object?> video)
-            => PhotoViewer.Wpf.MainWindow.ComputeVideoPresetHashForSmoke(
-                JsonSerializer.SerializeToElement(video));
-
         string resultFullPath = Path.GetFullPath(resultPath);
         string smokeRoot = Directory.CreateTempSubdirectory("aibos-enhancement-jobs-workspace-").FullName;
-        string currentVideoHash = VideoSmokePresetHash(
-            CreateVideoSmokeSnapshot(delivery: "current"));
-        string legacyVideoHash = VideoSmokePresetHash(
-            CreateVideoSmokeSnapshot());
-        string highMismatchVideoHash = VideoSmokePresetHash(
-            CreateVideoSmokeSnapshot(
-                delivery: "current",
-                presetId: "wan22-ti2v-5b-high-v1",
-                steps: 20));
         string sourcePath = Path.Combine(smokeRoot, "images", "workspace-source.png");
         string outputPath = Path.Combine(smokeRoot, "stores", "enhance", "outputs", "workspace-output.webp");
         string videoOutputPath = Path.Combine(
@@ -18462,21 +18487,21 @@ public partial class App : Application
             "enhance",
             "outputs",
             "Videos",
-            $"video-reader-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__{currentVideoHash}.mp4");
+            "video-reader-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__f102bafe68e9.mp4");
         string videoSiblingOutputPath = Path.Combine(
             smokeRoot,
             "stores",
             "enhance",
             "outputs",
             "Videos",
-            $"video-sibling-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__{legacyVideoHash}.mp4");
+            "video-sibling-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-normal-v1__22467069a81f.mp4");
         string videoQualityMismatchOutputPath = Path.Combine(
             smokeRoot,
             "stores",
             "enhance",
             "outputs",
             "Videos",
-            $"video-reader-only-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-high-v1__{highMismatchVideoHash}.mp4");
+            "video-reader-only-job__workspace-source__aaaaaaaaaaaaaaaa__wan22-ti2v-5b-high-v1__0b6b30d0ae9d.mp4");
         string statePath = Path.Combine(smokeRoot, "stores", "state.json");
         string favoritesPath = Path.Combine(smokeRoot, "stores", "favorites.json");
         string seenPath = Path.Combine(smokeRoot, "stores", "seen.json");
@@ -18624,6 +18649,7 @@ public partial class App : Application
                     int? queueOrder = null,
                     string requestedPrompt = "",
                     string? effectivePositivePrompt = null,
+                    string presetHash = "22467069a81f",
                     string delivery = "legacy",
                     int durationSeconds = 6,
                     int playbackFps = 16,
@@ -18632,15 +18658,62 @@ public partial class App : Application
                     int steps = 20,
                     object? sourceProducerJobId = null)
                 {
-                    Dictionary<string, object?> video = CreateVideoSmokeSnapshot(
-                        requestedPrompt,
-                        effectivePositivePrompt,
-                        delivery,
-                        durationSeconds,
-                        playbackFps,
-                        nativeFrameCount,
-                        presetId,
-                        steps);
+                    var video = new Dictionary<string, object?>(
+                        StringComparer.Ordinal)
+                    {
+                        ["presetId"] = presetId,
+                        ["backendId"] = "wan22-ti2v-5b-core-v1",
+                        ["modelName"] =
+                            "wan2.2_ti2v_5B_fp16.safetensors",
+                        ["requested"] = new
+                        {
+                            durationSeconds,
+                            playbackFps,
+                            maximumPixelArea = 409600,
+                            prompt = requestedPrompt,
+                        },
+                        ["effective"] = new
+                        {
+                            frameCount = nativeFrameCount,
+                            width = 736,
+                            height = 544,
+                            positivePrompt = effectivePositivePrompt
+                                ??
+                                "Animate the supplied image as the exact first frame. "
+                                + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
+                                + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
+                                + "Use subtle natural idle motion only: gentle breathing, an occasional blink, and restrained secondary motion in hair and clothing. "
+                                + "Keep the camera locked and preserve the original framing.",
+                            negativePrompt =
+                                "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark",
+                            steps,
+                            cfg = 5,
+                            sampler = "uni_pc",
+                            scheduler = "simple",
+                            shift = 8,
+                            denoise = 1,
+                        },
+                        ["seed"] = 123456789,
+                        ["codec"] = "h264",
+                        ["container"] = "mp4",
+                        ["bitDepth"] = 8,
+                    };
+                    if (delivery is "current" or "malformed")
+                    {
+                        video["delivery"] = new
+                        {
+                            backendId =
+                                "vs-rife-5.7.0-rife-4.25-v1",
+                            model = "4.25",
+                            targetFps = 30,
+                            frameCount = delivery == "current"
+                                ? checked(durationSeconds * 30)
+                                : checked(durationSeconds * 30 - 1),
+                            durationSeconds,
+                            pixelFormat = "yuv420p",
+                            audio = false,
+                        };
+                    }
 
                     var job = new Dictionary<string, object?>(
                         StringComparer.OrdinalIgnoreCase)
@@ -18655,7 +18728,7 @@ public partial class App : Application
                         },
                         ["sourceSha256"] = new string('a', 64),
                         ["presetId"] = presetId,
-                        ["presetHash"] = VideoSmokePresetHash(video),
+                        ["presetHash"] = presetHash,
                         ["adapterId"] = "wan22-ti2v-5b-core-v1",
                         ["operation"] = "video",
                         ["mediaKind"] = "video",
@@ -18709,6 +18782,7 @@ public partial class App : Application
                             0,
                             createdAt: "2026-07-23T00:00:03.500Z",
                             queueOrder: 2,
+                            presetHash: "25464cb5d9ce",
                             delivery: "current",
                             durationSeconds: 4,
                             playbackFps: 12,
@@ -18726,17 +18800,19 @@ public partial class App : Application
                             "failed",
                             27,
                             error: "Model runtime stopped",
-                            requestedPrompt: "example motion",
-                            effectivePositivePrompt: string.Join(
-                                " ",
-                                WpfLocalPromptPolicy.Current.Video!
-                                    .PreservationPreamble,
-                                "Follow this motion direction: example motion")),
+                            requestedPrompt: "髪を揺らす",
+                            effectivePositivePrompt:
+                                "Animate the supplied image as the exact first frame. "
+                                + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
+                                + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
+                                + "Follow this motion direction: 髪を揺らす",
+                            presetHash: "ef83960a4509"),
                         VideoJob(
                             "delivery-failed-job",
                             "failed",
                             29,
                             error: "Delivery runtime stopped",
+                            presetHash: "f102bafe68e9",
                             delivery: "current"),
                         VideoJob(
                             "active-job",
@@ -18770,6 +18846,7 @@ public partial class App : Application
                             videoOutputDeleted ? "deleted" : "succeeded",
                             100,
                             output: videoOutputDeleted ? null : videoOutputPath,
+                            presetHash: "f102bafe68e9",
                             delivery: "current"),
                         VideoJob(
                             "video-sibling-job",
@@ -18782,6 +18859,7 @@ public partial class App : Application
                             "succeeded",
                             100,
                             output: videoQualityMismatchOutputPath,
+                            presetHash: "0b6b30d0ae9d",
                             delivery: "current",
                             presetId: "wan22-ti2v-5b-high-v1",
                             steps: 20),
@@ -19167,6 +19245,7 @@ public partial class App : Application
                                     "video-reader-job",
                                     "deleted",
                                     100,
+                                    presetHash: "f102bafe68e9",
                                     delivery: "current"),
                             }));
                     }
@@ -22292,14 +22371,10 @@ public partial class App : Application
                     && win.ModalCompactToolbarContractForSmoke
                     && win.ApplyModalToolbarWidthForSmoke(1280)
                     && win.ModalWideToolbarContractForSmoke;
-                bool windowCaptionControlsContract = win.ModalWindowCaptionControlsContractForSmoke;
-                bool windowCaptionMinimize = windowCaptionControlsContract
-                    && win.ActivateModalMinimizeForSmoke();
-                bool windowCaptionMaximize = windowCaptionMinimize
-                    && await win.ActivateModalMaximizeForSmokeAsync();
-                bool windowCaptionDoubleClick = windowCaptionMaximize
+                bool windowCaptionControls = win.ModalWindowCaptionControlsContractForSmoke
+                    && win.ActivateModalMinimizeForSmoke()
+                    && await win.ActivateModalMaximizeForSmokeAsync()
                     && await win.ActivateCaptionDoubleClickForSmokeAsync();
-                bool windowCaptionControls = windowCaptionDoubleClick;
                 bool nativeMaximizeWorkArea = await win.PreserveNativeMaximizeForSmokeAsync();
                 win.UpdateLayout();
                 // Opening and the caption-control smoke both queue actual-bounds
@@ -22762,10 +22837,6 @@ public partial class App : Application
                     EnhancementBackgroundResolverCount = backgroundRefreshResolverCount,
                     EnhancementNonBlockingOpenElapsedMs = nonBlockingOpenElapsedMs,
                     WindowCaptionControls = windowCaptionControls,
-                    WindowCaptionControlsContract = windowCaptionControlsContract,
-                    WindowCaptionMinimize = windowCaptionMinimize,
-                    WindowCaptionMaximize = windowCaptionMaximize,
-                    WindowCaptionDoubleClick = windowCaptionDoubleClick,
                     EdgeChrome = edgeChrome,
                     EdgePercentageSetting = edgePercentageSetting,
                     EdgeImageIntersection = edgeImageIntersection,
@@ -22945,6 +23016,23 @@ public partial class App : Application
                 await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
                 string? previousPath = win.SelectedPathForSmoke;
                 var afterPreviousNavigation = win.ModalTransformForSmoke();
+                bool repeatedNavigationZoomStable = true;
+                bool repeatedNavigationDisplayStable = true;
+                for (int navigationIndex = 0; navigationIndex < 6; navigationIndex++)
+                {
+                    repeatedNavigationZoomStable &= win.NavigateModalForSmoke(1);
+                    await win.Dispatcher.InvokeAsync(win.UpdateLayout, DispatcherPriority.ContextIdle);
+                    ModalTransformSnapshot repeated = win.ModalTransformForSmoke();
+                    repeatedNavigationZoomStable &=
+                        Math.Abs(repeated.Zoom - beforeNavigation.Zoom) < 0.0001;
+                    repeatedNavigationDisplayStable &=
+                        Math.Abs(repeated.DisplayedWidth - beforeNavigation.DisplayedWidth) < 0.5
+                        && Math.Abs(repeated.DisplayedHeight - beforeNavigation.DisplayedHeight) < 0.5;
+                }
+                repeatedNavigationZoomStable &= string.Equals(
+                    win.SelectedPathForSmoke,
+                    startPath,
+                    StringComparison.OrdinalIgnoreCase);
                 bool modalVisibleBeforeClose = win.ModalVisibleForSmoke;
                 bool closed = win.CloseTopmostOverlayForSmoke();
                 var afterClose = win.ModalTransformForSmoke();
@@ -22982,7 +23070,6 @@ public partial class App : Application
                     && movedNext
                     && !string.Equals(startPath, nextPath, StringComparison.OrdinalIgnoreCase)
                     && Math.Abs(afterNavigation.Zoom - beforeNavigation.Zoom) < 0.0001
-                    && afterNavigation.ZoomLabel == beforeNavigation.ZoomLabel
                     && !afterNavigation.Flipped
                     && Math.Abs(afterNavigation.PanX) < 0.0001
                     && Math.Abs(afterNavigation.PanY) < 0.0001
@@ -22993,6 +23080,8 @@ public partial class App : Application
                     && !afterPreviousNavigation.Flipped
                     && Math.Abs(afterPreviousNavigation.PanX) < 0.0001
                     && Math.Abs(afterPreviousNavigation.PanY) < 0.0001
+                    && repeatedNavigationZoomStable
+                    && repeatedNavigationDisplayStable
                     && closed
                     && !win.ModalVisibleForSmoke
                     && Math.Abs(afterClose.Zoom - 1) < 0.0001
@@ -23002,7 +23091,7 @@ public partial class App : Application
 
                 result = new ModalTransformSmokeResult(
                     ok,
-                    ok ? "modal flip, proportional high-resolution wheel zoom, reset, and navigation zoom retention passed" : "modal transform smoke did not meet expected behavior",
+                    ok ? "modal flip, proportional high-resolution wheel zoom, reset, and repeated navigation zoom retention passed" : "modal transform smoke did not meet expected behavior",
                     folder,
                     selectIndex,
                     selected,
@@ -23033,7 +23122,9 @@ public partial class App : Application
                     afterClose,
                     zoomMotionActive,
                     interactiveScaling,
-                    settledScaling);
+                    settledScaling,
+                    repeatedNavigationZoomStable,
+                    repeatedNavigationDisplayStable);
             }
             catch (Exception ex)
             {
@@ -27496,12 +27587,14 @@ public partial class App : Application
                     ["frameCount"] = 97,
                     ["width"] = 736,
                     ["height"] = 544,
-                    ["positivePrompt"] = string.Join(
-                        " ",
-                        WpfLocalPromptPolicy.Current.Video!.PreservationPreamble,
-                        WpfLocalPromptPolicy.Current.Video!.BlankPromptMotion),
+                    ["positivePrompt"] =
+                        "Animate the supplied image as the exact first frame. "
+                        + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
+                        + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency. "
+                        + "Use subtle natural idle motion only: gentle breathing, an occasional blink, and restrained secondary motion in hair and clothing. "
+                        + "Keep the camera locked and preserve the original framing.",
                     ["negativePrompt"] =
-                        WpfLocalPromptPolicy.Current.Video!.NegativePrompt,
+                        "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark",
                     ["steps"] = 20,
                     ["cfg"] = 5,
                     ["sampler"] = "uni_pc",
@@ -29097,7 +29190,9 @@ public partial class App : Application
         ModalTransformSnapshot AfterClose = default,
         bool ZoomMotionActive = false,
         bool InteractiveScaling = false,
-        bool SettledScaling = false);
+        bool SettledScaling = false,
+        bool RepeatedNavigationZoomStable = false,
+        bool RepeatedNavigationDisplayStable = false);
 
     private sealed class ModalInteractionSmokeResult
     {
@@ -29133,10 +29228,6 @@ public partial class App : Application
         public int EnhancementBackgroundResolverCount { get; init; }
         public long EnhancementNonBlockingOpenElapsedMs { get; init; }
         public bool WindowCaptionControls { get; init; }
-        public bool WindowCaptionControlsContract { get; init; }
-        public bool WindowCaptionMinimize { get; init; }
-        public bool WindowCaptionMaximize { get; init; }
-        public bool WindowCaptionDoubleClick { get; init; }
         public bool EdgeChrome { get; init; }
         public bool EdgePercentageSetting { get; init; }
         public bool EdgeImageIntersection { get; init; }

@@ -23,12 +23,17 @@ public partial class MainWindow
     private const int EnhancementJobsThumbnailLimit = 48;
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private const string UnsupportedEnhancementOperation = "unsupported";
-    private static readonly string VideoPreservationPreamble =
-        WpfLocalPromptPolicy.Current.Video!.PreservationPreamble;
-    private static readonly string VideoBlankPromptMotion =
-        WpfLocalPromptPolicy.Current.Video!.BlankPromptMotion;
-    private static readonly string VideoNegativePrompt =
-        WpfLocalPromptPolicy.Current.Video!.NegativePrompt;
+    private const string VideoPreservationPreamble =
+        "Animate the supplied image as the exact first frame. "
+        + "Preserve the same character identity, face, hairstyle, body proportions, outfit, colors, line art, rendering style, composition, background, lighting, and aspect ratio. "
+        + "Keep temporal motion coherent and physically plausible with stable anatomy and clean frame-to-frame consistency.";
+    private const string VideoBlankPromptMotion =
+        "Use subtle natural idle motion only: gentle breathing, an occasional blink, and restrained secondary motion in hair and clothing. "
+        + "Keep the camera locked and preserve the original framing.";
+    private const string VideoNegativePrompt =
+        "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark";
+    private const string MiniMaxH3DefaultPositivePrompt =
+        "Animate the supplied image with subtle natural motion. Keep the camera stable and preserve the exact subject, composition, lighting, and scene. Do not add new objects or cut to another scene. Use only quiet ambient sound, with no speech and no music.";
     private static readonly JsonSerializerOptions VideoStableJsonOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -80,7 +85,16 @@ public partial class MainWindow
         };
     }
 
-    private static bool IsVideoMutationSafe(JsonElement job)
+    private static bool IsStructurallyVideoMutationSafe(JsonElement job)
+        => IsWanV1VideoMutationSafe(job)
+            || IsMiniMaxH3VideoMutationSafe(job);
+
+    private bool IsVideoMutationSafe(JsonElement job)
+        => IsWanV1VideoMutationSafe(job)
+            || (IsMiniMaxH3VideoMutationSafe(job)
+                && IsMiniMaxH3SourceCanvasCurrent(job));
+
+    private static bool IsWanV1VideoMutationSafe(JsonElement job)
     {
         if (!TryReadOptionalVideoSourceProducerJobId(job, out _))
             return false;
@@ -268,6 +282,283 @@ public partial class MainWindow
         }
     }
 
+    private static bool IsMiniMaxH3VideoMutationSafe(JsonElement job)
+    {
+        if (!HasSingleProperty(job, "id")
+            || !HasSingleProperty(job, "operation")
+            || !HasSingleProperty(job, "mediaKind")
+            || !HasSingleProperty(job, "presetId")
+            || !HasSingleProperty(job, "adapterId")
+            || !HasSingleProperty(job, "sourceId")
+            || !HasSingleProperty(job, "sourcePath")
+            || !HasSingleProperty(job, "sourceSignature")
+            || !HasSingleProperty(job, "sourceSha256")
+            || !HasSingleProperty(job, "presetHash")
+            || !HasSingleProperty(job, "status")
+            || !HasSingleProperty(job, "createdAt")
+            || !HasSingleProperty(job, "updatedAt")
+            || !HasSingleProperty(job, "video")
+            || !TryReadOptionalVideoSourceProducerJobId(job, out _)
+            || !TryGetStringProperty(job, "id", out string? jobId)
+            || jobId!.Length > 128
+            || !TryGetExactStringProperty(job, "operation", "video")
+            || !TryGetExactStringProperty(job, "mediaKind", "video")
+            || !TryGetExactStringProperty(
+                job,
+                "presetId",
+                MiniMaxH3VideoPresetId)
+            || !TryGetExactStringProperty(
+                job,
+                "adapterId",
+                MiniMaxH3VideoBackendId)
+            || !TryGetStringProperty(job, "sourceId", out _)
+            || !TryGetStringProperty(job, "sourcePath", out string? sourcePath)
+            || !TryGetStringProperty(job, "sourceSha256", out string? sourceSha256)
+            || !IsLowerHex(sourceSha256, 64)
+            || !TryGetStringProperty(job, "presetHash", out string? presetHash)
+            || !IsLowerHex(presetHash, 12)
+            || !TryGetStringProperty(job, "status", out string? status)
+            || status is not ("queued" or "running" or "succeeded" or "failed" or "canceled" or "deleted")
+            || !TryGetStringProperty(job, "createdAt", out string? createdAt)
+            || !DateTimeOffset.TryParse(
+                createdAt,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out _)
+            || !TryGetStringProperty(job, "updatedAt", out string? updatedAt)
+            || !DateTimeOffset.TryParse(
+                updatedAt,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out _)
+            || !job.TryGetProperty("sourceSignature", out JsonElement signature)
+            || signature.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(signature, "size", "mtimeMs")
+            || !signature.TryGetProperty("size", out JsonElement sizeElement)
+            || !sizeElement.TryGetInt64(out long sourceSize)
+            || sourceSize < 0
+            || !signature.TryGetProperty("mtimeMs", out JsonElement mtimeElement)
+            || !mtimeElement.TryGetDouble(out double sourceMtimeMs)
+            || !double.IsFinite(sourceMtimeMs)
+            || !job.TryGetProperty("video", out JsonElement video)
+            || !IsExactMiniMaxH3VideoSnapshot(video)
+            || !string.Equals(
+                presetHash,
+                HashStableJson(video)[..12],
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (job.TryGetProperty(
+                "cancelRequested",
+                out JsonElement cancelRequestedElement))
+        {
+            if (!HasSingleProperty(job, "cancelRequested")
+                || cancelRequestedElement.ValueKind is not (
+                    JsonValueKind.True
+                    or JsonValueKind.False
+                    or JsonValueKind.Null))
+            {
+                return false;
+            }
+        }
+
+        if (!job.TryGetProperty(
+                "outputPath",
+                out JsonElement outputPathElement)
+            || outputPathElement.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+        if (!HasSingleProperty(job, "outputPath")
+            || outputPathElement.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(outputPathElement.GetString()))
+        {
+            return false;
+        }
+
+        try
+        {
+            string expectedFileName = BuildVideoOutputFileName(
+                jobId!,
+                sourcePath!,
+                sourceSha256!,
+                MiniMaxH3VideoPresetId,
+                presetHash!);
+            return string.Equals(
+                Path.GetFileName(outputPathElement.GetString()),
+                expectedFileName,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsExactMiniMaxH3VideoSnapshot(JsonElement video)
+    {
+        if (video.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(
+                video,
+                "schemaVersion",
+                "workflowRevision",
+                "presetId",
+                "backendId",
+                "modelName",
+                "model",
+                "requested",
+                "effective",
+                "delivery",
+                "seed",
+                "codec",
+                "container",
+                "bitDepth")
+            || !HasExactInt32(video, "schemaVersion", 2)
+            || !TryGetExactStringProperty(
+                video,
+                "workflowRevision",
+                MiniMaxH3VideoWorkflowRevision)
+            || !TryGetExactStringProperty(
+                video,
+                "presetId",
+                MiniMaxH3VideoPresetId)
+            || !TryGetExactStringProperty(
+                video,
+                "backendId",
+                MiniMaxH3VideoBackendId)
+            || !TryGetExactStringProperty(video, "modelName", "MiniMax-H3")
+            || !TryGetExactStringProperty(video, "codec", "h264")
+            || !TryGetExactStringProperty(video, "container", "mp4")
+            || !HasExactInt32(video, "bitDepth", 8)
+            || !video.TryGetProperty("seed", out JsonElement seedElement)
+            || !seedElement.TryGetInt32(out int seed)
+            || seed < 0
+            || !video.TryGetProperty("model", out JsonElement model)
+            || model.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(
+                model,
+                "repository",
+                "revision",
+                "diffusion",
+                "textEncoder",
+                "videoVae",
+                "audioVae")
+            || !TryGetExactStringProperty(model, "repository", "Comfy-Org/MiniMax-H3")
+            || !TryGetExactStringProperty(
+                model,
+                "revision",
+                "014cd40f7e177756c6b2473c0d93b1c89a790dd2")
+            || !TryGetExactStringProperty(
+                model,
+                "diffusion",
+                "minimax_h3_fl2va_pruned_int8_convrot.safetensors")
+            || !TryGetExactStringProperty(
+                model,
+                "textEncoder",
+                "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
+            || !TryGetExactStringProperty(
+                model,
+                "videoVae",
+                "minimax_h3_video_vae_fp16.safetensors")
+            || !TryGetExactStringProperty(
+                model,
+                "audioVae",
+                "minimax_h3_audio_vae_fp32.safetensors")
+            || !video.TryGetProperty("requested", out JsonElement requested)
+            || requested.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(requested, "prompt")
+            || !TryGetStringPropertyAllowEmpty(
+                requested,
+                "prompt",
+                out string? requestedPrompt)
+            || requestedPrompt!.Length > 2_000
+            || !string.Equals(
+                requestedPrompt,
+                requestedPrompt.Trim(),
+                StringComparison.Ordinal)
+            || !video.TryGetProperty("effective", out JsonElement effective)
+            || effective.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(
+                effective,
+                "width",
+                "height",
+                "frameCount",
+                "playbackFps",
+                "steps",
+                "sampler",
+                "scheduler",
+                "denoise",
+                "positivePrompt")
+            || !effective.TryGetProperty("width", out JsonElement widthElement)
+            || !widthElement.TryGetInt32(out int width)
+            || !effective.TryGetProperty("height", out JsonElement heightElement)
+            || !heightElement.TryGetInt32(out int height)
+            || !IsValidMiniMaxH3VideoCanvas(width, height)
+            || !HasExactInt32(
+                effective,
+                "frameCount",
+                MiniMaxH3VideoFrameCount)
+            || !HasExactInt32(
+                effective,
+                "playbackFps",
+                MiniMaxH3VideoPlaybackFps)
+            || !HasExactInt32(effective, "steps", MiniMaxH3VideoSteps)
+            || !TryGetExactStringProperty(
+                effective,
+                "sampler",
+                "res_multistep")
+            || !TryGetExactStringProperty(effective, "scheduler", "simple")
+            || !HasExactInt32(effective, "denoise", 1)
+            || !TryGetStringProperty(
+                effective,
+                "positivePrompt",
+                out string? positivePrompt)
+            || !string.Equals(
+                positivePrompt,
+                requestedPrompt.Length == 0
+                    ? MiniMaxH3DefaultPositivePrompt
+                    : requestedPrompt,
+                StringComparison.Ordinal)
+            || !video.TryGetProperty("delivery", out JsonElement delivery)
+            || delivery.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(
+                delivery,
+                "frameCount",
+                "targetFps",
+                "durationSeconds",
+                "pixelFormat",
+                "videoCodec",
+                "audioCodec",
+                "audio")
+            || !HasExactInt32(
+                delivery,
+                "frameCount",
+                MiniMaxH3VideoFrameCount)
+            || !HasExactInt32(
+                delivery,
+                "targetFps",
+                MiniMaxH3VideoPlaybackFps)
+            || !delivery.TryGetProperty(
+                "durationSeconds",
+                out JsonElement durationElement)
+            || !durationElement.TryGetDouble(out double durationSeconds)
+            || !double.IsFinite(durationSeconds)
+            || durationSeconds != MiniMaxH3VideoDurationSeconds
+            || !TryGetExactStringProperty(delivery, "pixelFormat", "yuv420p")
+            || !TryGetExactStringProperty(delivery, "videoCodec", "h264")
+            || !TryGetExactStringProperty(delivery, "audioCodec", "aac")
+            || !delivery.TryGetProperty("audio", out JsonElement audioElement)
+            || audioElement.ValueKind != JsonValueKind.True)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private static bool TryGetVideoPresetSteps(
         string? presetId,
         out int steps)
@@ -328,6 +619,13 @@ public partial class MainWindow
                 .ToHashSet(StringComparer.Ordinal)
                 .SetEquals(expectedNames);
     }
+
+    private static bool HasSingleProperty(
+        JsonElement element,
+        string propertyName)
+        => element.ValueKind == JsonValueKind.Object
+            && element.EnumerateObject().Count(property =>
+                property.NameEquals(propertyName)) == 1;
 
     private static bool HasExactVideoSnapshotProperties(
         JsonElement video)
@@ -777,7 +1075,11 @@ public partial class MainWindow
                 return;
             }
 
-            if (!TryParseEnhancementWorkspaceJobs(payload, out List<EnhancementWorkspaceJobView> jobs, out string? error))
+        if (!TryParseEnhancementWorkspaceJobs(
+                payload,
+                out List<EnhancementWorkspaceJobView> jobs,
+                out string? error,
+                IsVideoMutationSafe))
             {
                 EnhancementJobsStatusText.Text = error ?? "The companion returned an invalid jobs response.";
                 _enhancementWorkspacePollTimer.Stop();
@@ -1202,7 +1504,8 @@ public partial class MainWindow
     private static bool TryParseEnhancementWorkspaceJobs(
         JsonElement payload,
         out List<EnhancementWorkspaceJobView> jobs,
-        out string? error)
+        out string? error,
+        Func<JsonElement, bool>? videoMutationValidator = null)
     {
         jobs = [];
         error = null;
@@ -1217,7 +1520,10 @@ public partial class MainWindow
         int apiOrdinal = 0;
         foreach (JsonElement element in jobsElement.EnumerateArray())
         {
-            EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(element, apiOrdinal++);
+            EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(
+                element,
+                apiOrdinal++,
+                videoMutationValidator);
             if (job is not null)
                 jobs.Add(job);
         }
@@ -1288,7 +1594,8 @@ public partial class MainWindow
 
     private static EnhancementWorkspaceJobView? ParseEnhancementWorkspaceJob(
         JsonElement element,
-        int apiOrdinal)
+        int apiOrdinal,
+        Func<JsonElement, bool>? videoMutationValidator = null)
     {
         if (element.ValueKind != JsonValueKind.Object
             || !TryGetStringProperty(element, "id", out string? id)
@@ -1360,7 +1667,9 @@ public partial class MainWindow
             presetId ?? "Default preset",
             adapterId ?? "local companion",
             operation,
-            operation == "video" && IsVideoMutationSafe(element),
+            operation == "video"
+                && (videoMutationValidator?.Invoke(element)
+                    ?? IsStructurallyVideoMutationSafe(element)),
             i2iMutationSafe,
             i2iV2Info?.SchemaVersion ?? (i2iMutationSafe ? 1 : null),
             i2iV2Info?.Target ?? (i2iMutationSafe ? "hair-color" : null),
@@ -2164,13 +2473,42 @@ public partial class MainWindow
 
     private Func<JsonElement, string?>? CreateEnhancementRetryHealthValidator(
         EnhancementWorkspaceJobView job)
+        => CreateEnhancementRetryHealthValidator(
+            job.Operation,
+            job.VideoMutationSafe,
+            job.PresetId,
+            job.AdapterId,
+            job.I2iSchemaVersion,
+            job.I2iTarget);
+
+    private Func<JsonElement, string?>? CreateEnhancementRetryHealthValidator(
+        string operation,
+        bool videoMutationSafe,
+        string presetId,
+        string adapterId,
+        int? i2iSchemaVersion,
+        string? i2iTarget)
     {
-        if (!string.Equals(job.Operation, "i2i", StringComparison.Ordinal))
+        if (string.Equals(operation, "video", StringComparison.Ordinal)
+            && videoMutationSafe
+            && string.Equals(
+                presetId,
+                MiniMaxH3VideoPresetId,
+                StringComparison.Ordinal)
+            && string.Equals(
+                adapterId,
+                MiniMaxH3VideoBackendId,
+                StringComparison.Ordinal))
+        {
+            return CreateMiniMaxH3VideoHealthValidator();
+        }
+
+        if (!string.Equals(operation, "i2i", StringComparison.Ordinal))
             return null;
 
-        if (job.I2iSchemaVersion == 2)
+        if (i2iSchemaVersion == 2)
         {
-            string target = job.I2iTarget ?? "";
+            string target = i2iTarget ?? "";
             return payload => TryParseI2iV2Capability(
                     payload,
                     out I2iV2CapabilityState capability)
@@ -2785,18 +3123,32 @@ public partial class MainWindow
     private void ApplyEnhancedOutputsToVisibleCatalog()
     {
         bool refreshPreferredThumbnail = false;
-        foreach (Tile tile in _allTiles)
+        var catalogTiles = new HashSet<Tile>(
+            _allTiles,
+            ReferenceEqualityComparer.Instance);
+        foreach (Tile tile in EnumerateLiveTiles())
         {
-            bool enhanced = TryGetCatalogManagedEnhancedOutputForPath(
-                tile.Path,
-                out ManagedEnhancedOutput output);
+            bool isCatalogTile = catalogTiles.Contains(tile);
+            bool enhanced = isCatalogTile
+                ? TryGetCatalogManagedEnhancedOutputForPath(
+                    tile.Path,
+                    out ManagedEnhancedOutput output)
+                : TryGetManagedEnhancedOutputForPath(
+                    tile.Path,
+                    out output);
             string? outputPath = enhanced ? output.OutputPath : null;
             tile.EnhancedOutputPath = outputPath;
             ApplyTileEnhancementAvailability(
                 tile,
-                GetCatalogManagedEnhancementVersionsForPath(tile.Path));
+                isCatalogTile
+                    ? GetCatalogManagedEnhancementVersionsForPath(tile.Path)
+                    : GetManagedEnhancementVersionsForPath(tile.Path));
             ApplyTileEnhancementQueueActivity(tile);
-            ApplyTileVideoAvailability(tile);
+            ApplyTileVideoAvailability(
+                tile,
+                isCatalogTile
+                    ? GetCatalogManagedVideoVersionsForPath(tile.Path)
+                    : GetManagedVideoVersionsForPath(tile.Path));
             if (_useLastDisplayedImageVersionForThumbnails
                 && tile.Thumbnail is not null
                 && _thumbnailImageDisplayPreferencesByPath.ContainsKey(
@@ -2814,7 +3166,8 @@ public partial class MainWindow
             _thumbnailViewportRevision++;
             QueueGalleryThumbnailPreferenceRefresh();
         }
-        if (_sortBy is SortUpscaleNewestValue
+        if (!ExternalFileDropSessionActive
+            && _sortBy is SortUpscaleNewestValue
             or SortUpscaleQueuedNewestValue
             or SortPhotorealNewestValue
             or SortPhotorealQueuedNewestValue
@@ -2826,7 +3179,9 @@ public partial class MainWindow
                 reorderCatalog: true,
                 selectFirst: false);
         }
-        else if (_photorealFavoriteFilterLevels.Count > 0)
+        else if (!ExternalFileDropSessionActive
+            && (_photorealFavoriteFilterLevels.Count > 0
+                || _videoFavoriteFilterLevels.Count > 0))
         {
             _ = QueueCatalogProjection(
                 debounce: false,
@@ -2987,6 +3342,30 @@ public partial class MainWindow
         await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry", "Retry queued as a new job.");
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
         return true;
+    }
+
+    public async Task<(bool Ok, bool SavedForDelivery, int StatusCode, string Error)>
+        RetryMiniMaxH3JobForSmokeAsync(string id)
+    {
+        Func<JsonElement, string?>? healthValidator =
+            CreateEnhancementRetryHealthValidator(
+                operation: "video",
+                videoMutationSafe: true,
+                presetId: MiniMaxH3VideoPresetId,
+                adapterId: MiniMaxH3VideoBackendId,
+                i2iSchemaVersion: null,
+                i2iTarget: null);
+        EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+            body: null,
+            queuePlacement: "last",
+            retryJobId: id,
+            healthValidator: healthValidator,
+            requireExactHealthValidation: true);
+        return (
+            response.Ok,
+            response.SavedForDelivery,
+            response.StatusCode,
+            response.Error);
     }
 
     public async Task<bool> MoveEnhancementJobForSmokeAsync(
@@ -3196,8 +3575,52 @@ public partial class MainWindow
         return true;
     }
 
-    public static string ComputeVideoPresetHashForSmoke(JsonElement video)
-        => HashStableJson(video)[..12];
+    public static bool IsMiniMaxH3VideoMutationSafeForSmoke(JsonElement job)
+        => IsMiniMaxH3VideoMutationSafe(job);
+
+    public static bool IsExactMiniMaxH3VideoSnapshotForSmoke(JsonElement video)
+        => IsExactMiniMaxH3VideoSnapshot(video);
+
+    public static string ComputeMiniMaxH3VideoSnapshotHashForSmoke(
+        JsonElement video)
+        => HashStableJson(video);
+
+    public static string BuildVideoOutputFileNameForSmoke(
+        string jobId,
+        string sourcePath,
+        string sourceSha256,
+        string presetId,
+        string presetHash)
+        => BuildVideoOutputFileName(
+            jobId,
+            sourcePath,
+            sourceSha256,
+            presetId,
+            presetHash);
+
+    public bool TryReadMiniMaxH3WorkspacePresentationForSmoke(
+        JsonElement job,
+        out string operation,
+        out string presetSummary,
+        out bool mutationSafe,
+        out bool canUseOutput)
+    {
+        operation = "";
+        presetSummary = "";
+        mutationSafe = false;
+        canUseOutput = false;
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(
+            job,
+            0,
+            IsVideoMutationSafe);
+        if (view is null)
+            return false;
+        operation = view.Operation;
+        presetSummary = view.PresetSummary;
+        mutationSafe = view.VideoMutationSafe;
+        canUseOutput = view.CanUseOutput;
+        return true;
+    }
 }
 
 public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
@@ -3392,6 +3815,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string PresetSummary => IsVideoOperation
         ? $"{(PresetId switch
         {
+            "minimax-h3-i2v-preview-v1" => "MiniMax H3 Preview · 24 fps · 音声あり",
             "wan22-ti2v-5b-normal-v1" => "Wan2.2 TI2V 5B · 標準 · 20 step",
             "wan22-ti2v-5b-high-v1" => "Wan2.2 TI2V 5B · 高品質 · 40 step",
             _ => PresetId,

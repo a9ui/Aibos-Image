@@ -235,7 +235,36 @@ public partial class MainWindow
     }
 
     private static string BuildManagedVideoSettingsText(ManagedVideoVersion video)
-        => string.Join(
+    {
+        if (video.IsMiniMaxH3)
+        {
+            return string.Join(
+                "  ·  ",
+                new[]
+                {
+                    "Preset: MiniMax H3 Preview",
+                    $"Backend: {video.BackendId}",
+                    $"Model: {video.ModelName}",
+                    "Model revision: 014cd40f7e177756c6b2473c0d93b1c89a790dd2",
+                    $"Duration: {video.DurationSeconds.ToString("0.#######", CultureInfo.InvariantCulture)} sec",
+                    $"Playback FPS: {video.PlaybackFps}",
+                    $"Frames: {video.FrameCount}",
+                    $"Size: {video.Width} x {video.Height}",
+                    $"Steps: {video.Steps}",
+                    $"Sampler: {video.Sampler}",
+                    $"Scheduler: {video.Scheduler}",
+                    $"Denoise: {video.Denoise}",
+                    $"Seed: {video.Seed}",
+                    $"Container: {video.Container}",
+                    $"Codec: {video.Codec}",
+                    $"Bit depth: {video.BitDepth}",
+                    video.Delivery is null
+                        ? "Delivery: unavailable"
+                        : $"Delivery: {video.Delivery.VideoCodec} / {video.Delivery.PixelFormat} / {video.Delivery.AudioCodec} audio / {video.Delivery.TargetFps} fps / {video.Delivery.FrameCount} frames / audio {video.Delivery.Audio}",
+                });
+        }
+
+        return string.Join(
             "  ·  ",
             new[]
             {
@@ -263,6 +292,7 @@ public partial class MainWindow
                     ? "Delivery: none in stored snapshot"
                     : $"Delivery: {video.Delivery.BackendId} / model {video.Delivery.Model} / {video.Delivery.TargetFps} fps / {video.Delivery.FrameCount} frames / {video.Delivery.PixelFormat} / audio {video.Delivery.Audio}",
             });
+    }
 
     private static string BuildManagedVideoCopyText(ManagedVideoVersion video)
     {

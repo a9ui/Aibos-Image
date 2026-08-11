@@ -893,6 +893,8 @@ public partial class MainWindow
             UpdateI2iV2BoardPresentation(sourceError);
             return false;
         }
+        Func<string?>? prePublishValidator =
+            CaptureExternalFileDropPrePublishValidator(tile);
 
         string target = SelectedI2iV2Target();
         I2iV2CapabilityState? boardCapability = _i2iV2Capability;
@@ -976,7 +978,8 @@ public partial class MainWindow
             EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
                 requestBody,
                 healthValidator: ValidateI2iV2Health,
-                recoverySourceIdentity: source.SourcePath);
+                recoverySourceIdentity: source.SourcePath,
+                prePublishValidator: prePublishValidator);
             if (response.SavedForDelivery)
             {
                 _i2iV2RequestPending = false;

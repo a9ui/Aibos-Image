@@ -46,6 +46,7 @@ public partial class App
             bool defaultPromptContract = false;
             bool promptMappingContract = false;
             bool promptMappingDirectToggleContract = false;
+            bool promptMappingEditRefreshContract = false;
             bool promptMappingDefaultsMigrationContract = false;
             bool promptMappingButtonContrastContract = false;
             bool displayedVersionMetadataContract = false;
@@ -136,7 +137,7 @@ public partial class App
                 WritePhotorealSmokePng(invalidationSourcePath);
                 WritePhotorealSmokePng(ambiguousSourcePath);
                 const string originalEmbeddedPrompt =
-                    "((sample alpha:1.3)), (sample_beta, sample gamma:1.2)";
+                    "((troubled eyebrows:1.3)), (open mouth, blush:1.2), x-cross \\(bdsm\\)";
                 InsertPngTextFixture(
                     sourcePath,
                     "parameters",
@@ -196,8 +197,12 @@ public partial class App
                 const string recoveredPresetId = "photoreal-balanced";
                 const string recoveredPresetHash = "0123456789ab";
                 const string recoveredAdapterId = "comfyui-flux2-photoreal";
-                string recoveredOutputPath = Path.Combine(
+                string recoveredPhotorealDateRoot = Path.Combine(
                     recoveredPhotorealRoot,
+                    "2026-08-11");
+                Directory.CreateDirectory(recoveredPhotorealDateRoot);
+                string recoveredOutputPath = Path.Combine(
+                    recoveredPhotorealDateRoot,
                     BuildRecoveredSmokeOutputFileName(
                         recoveredSourcePath,
                         recoveredJobId,
@@ -772,9 +777,9 @@ public partial class App
                     }
                     return JsonResponse(HttpStatusCode.NotFound, new { error = "unexpected smoke route" });
                 });
-                const string customPrompt = "custom example prompt";
-                const string customEmptyPrompt = "fallback example prompt";
-                const string customNegativePrompt = "example negative prompt";
+                const string customPrompt = "custom adult photoreal portrait";
+                const string customEmptyPrompt = "fallback adult photoreal portrait";
+                const string customNegativePrompt = "anime, illustration, forced smile";
                 window.ConfigureModalPhotorealSettingsForSmoke(
                     0.55,
                     12,
@@ -792,9 +797,9 @@ public partial class App
                     negativePrompt: customNegativePrompt);
                 bool customPromptApplied = window.ModalPhotorealSettingsForSmoke.Prompt == customPrompt;
                 const string styleName = "Soft Japanese portrait";
-                const string stylePrompt = "example style prompt";
-                const string styleEmptyPrompt = "example style fallback";
-                const string styleNegativePrompt = "example style negative";
+                const string stylePrompt = "adult Japanese portrait preserving the source expression";
+                const string styleEmptyPrompt = "same scene as a photograph";
+                const string styleNegativePrompt = "anime, illustration, smile";
                 window.ConfigureModalPhotorealSettingsForSmoke(
                     0.4,
                     6,
@@ -933,9 +938,9 @@ public partial class App
                 {
                     legacyStateWindow.Close();
                 }
-                const string appSettingsPrompt = "example app prompt";
+                const string appSettingsPrompt = "adult Japanese portrait with unchanged expression";
                 const string appSettingsEmptyPrompt = "fallback from app settings";
-                const string appSettingsNegativePrompt = "example app negative";
+                const string appSettingsNegativePrompt = "anime, illustration, smile";
                 window.SetAppPhotorealPromptForSmoke(appSettingsPrompt);
                 window.SetAppPhotorealEmptyPromptForSmoke(appSettingsEmptyPrompt);
                 window.SetAppPhotorealNegativePromptForSmoke(appSettingsNegativePrompt);
@@ -970,70 +975,160 @@ public partial class App
                     && resetSettings.Prompt == window.DefaultModalPhotorealPromptForSmoke
                     && resetSettings.EmptyPrompt == window.DefaultModalPhotorealEmptyPromptForSmoke
                     && resetSettings.NegativePrompt == window.DefaultModalPhotorealNegativePromptForSmoke;
-                defaultPromptContract =
-                    !string.IsNullOrWhiteSpace(window.DefaultModalPhotorealPromptForSmoke)
-                    && window.DefaultModalPhotorealPromptForSmoke.Length <= 2_000
-                    && !string.IsNullOrWhiteSpace(
-                        window.DefaultModalPhotorealEmptyPromptForSmoke)
-                    && window.DefaultModalPhotorealEmptyPromptForSmoke.Length <= 2_000
-                    && window.DefaultModalPhotorealNegativePromptForSmoke.Length <= 2_000;
+                defaultPromptContract = window.DefaultModalPhotorealPromptForSmoke.Contains(
+                        "five natural fingers",
+                        StringComparison.Ordinal)
+                    && window.DefaultModalPhotorealPromptForSmoke.Contains(
+                        "exact expression and emotion",
+                        StringComparison.Ordinal)
+                    && window.DefaultModalPhotorealPromptForSmoke.Contains(
+                        "Do not add a smile unless the source is smiling",
+                        StringComparison.Ordinal)
+                    && !window.DefaultModalPhotorealPromptForSmoke.Contains(
+                        "ADetailer",
+                        StringComparison.OrdinalIgnoreCase)
+                    && window.DefaultModalPhotorealEmptyPromptForSmoke.Contains(
+                        "fresh gentle expression",
+                        StringComparison.Ordinal)
+                    && window.DefaultModalPhotorealNegativePromptForSmoke.Contains(
+                        "exposed nipples",
+                        StringComparison.Ordinal);
+                const string nippleTexturePrompt =
+                    "realistic nipple and areola texture with subtle Montgomery glands, fine natural creases, and shallow indentations";
                 var mappingRows = new[]
                 {
                     new PhotorealPromptMappingState
                     {
                         Enabled = true,
-                        Category = "Example",
-                        SourceTag = "sample alpha",
-                        OutputPrompt = "sample output alpha",
+                        Category = "表情",
+                        SourceTag = "troubled eyebrows",
+                        OutputPrompt = "brows angled upward toward the center",
                     },
                     new PhotorealPromptMappingState
                     {
                         Enabled = true,
-                        Category = "Example",
-                        SourceTag = "sample beta",
-                        OutputPrompt = "sample output beta",
+                        Category = "口",
+                        SourceTag = "open mouth",
+                        OutputPrompt = "lips separated",
                     },
                     new PhotorealPromptMappingState
                     {
                         Enabled = true,
-                        Category = "Example",
-                        SourceTag = "sample related",
-                        OutputPrompt = "sample related output",
+                        Category = "赤面",
+                        SourceTag = "blush",
+                        OutputPrompt = "natural cheek flush",
+                    },
+                    new PhotorealPromptMappingState
+                    {
+                        Enabled = true,
+                        Category = "赤面",
+                        SourceTag = "full-face blush",
+                        OutputPrompt = "natural cheek flush",
+                    },
+                    new PhotorealPromptMappingState
+                    {
+                        Enabled = true,
+                        Category = "拘束具",
+                        SourceTag = "x-cross (bdsm)",
+                        OutputPrompt = "X-shaped restraint frame",
                         ExtensionData = new Dictionary<string, JsonElement>
                         {
                             ["future"] = JsonDocument.Parse("{\"kept\":true}")
                                 .RootElement.Clone(),
-                            ["matchTokens"] = JsonDocument.Parse("[\"variant\"]")
-                                .RootElement.Clone(),
-                            ["excludeTokens"] = JsonDocument.Parse("[\"skip\"]")
-                                .RootElement.Clone(),
                         },
+                    },
+                    new PhotorealPromptMappingState
+                    {
+                        Enabled = true,
+                        Category = "表情",
+                        SourceTag = "embarrassed",
+                        OutputPrompt = "subtle embarrassed tension",
+                    },
+                    new PhotorealPromptMappingState
+                    {
+                        Enabled = true,
+                        Category = "body detail",
+                        SourceTag = "nipple",
+                        OutputPrompt = nippleTexturePrompt,
+                    },
+                    new PhotorealPromptMappingState
+                    {
+                        Enabled = true,
+                        Category = "body detail",
+                        SourceTag = "puffy nipples",
+                        OutputPrompt = "puffy nipples",
                     },
                 };
                 string mappedPrompt = PhotoViewer.Wpf.MainWindow
                     .ComposeMappedPhotorealPromptForSmoke(
-                        "base prompt, sample output beta",
-                        "((sample alpha:1.3)), sample_beta, variant detail",
+                        "neutral lighting, lips separated",
+                        "((troubled eyebrows:1.3)), (open mouth, blush:1.2), full-face blush, x-cross \\(bdsm\\)",
                         mappingRows);
                 string breakSeparatedPrompt = PhotoViewer.Wpf.MainWindow
                     .ComposeMappedPhotorealPromptForSmoke(
-                        "base prompt",
-                        "unused tag\nBREAK\nsample alpha",
+                        "neutral lighting",
+                        "unused tag\nBREAK\nembarrassed",
                         mappingRows);
                 string underscoreMappedPrompt = PhotoViewer.Wpf.MainWindow
                     .ComposeMappedPhotorealPromptForSmoke(
-                        "base prompt",
-                        "sample_beta",
+                        "neutral lighting",
+                        "open_mouth",
                         mappingRows);
-                string excludedRelatedPrompt = PhotoViewer.Wpf.MainWindow
+                string compoundNippleMappedPrompt = PhotoViewer.Wpf.MainWindow
                     .ComposeMappedPhotorealPromptForSmoke(
-                        "base prompt",
-                        "skip variant",
+                        "neutral lighting",
+                        "covered nipples, super_detailed_areola, nipple_pinch",
                         mappingRows);
+                string exactAndCompoundNippleMappedPrompt = PhotoViewer.Wpf.MainWindow
+                    .ComposeMappedPhotorealPromptForSmoke(
+                        "neutral lighting",
+                        "nipple, puffy_nipples, areola slip",
+                        mappingRows);
+                string unrelatedNippleWordPrompt = PhotoViewer.Wpf.MainWindow
+                    .ComposeMappedPhotorealPromptForSmoke(
+                        "neutral lighting",
+                        "nippleless costume",
+                        mappingRows);
+                string absentNipplePrompt = PhotoViewer.Wpf.MainWindow
+                    .ComposeMappedPhotorealPromptForSmoke(
+                        "neutral lighting",
+                        "anti-nipple accessory, no areola",
+                        mappingRows);
+                string existingNippleTexturePrompt = PhotoViewer.Wpf.MainWindow
+                    .ComposeMappedPhotorealPromptForSmoke(
+                        nippleTexturePrompt,
+                        "super_detailed_areola",
+                        mappingRows);
+                string pluralFallbackPrompt = PhotoViewer.Wpf.MainWindow
+                    .ComposeMappedPhotorealPromptForSmoke(
+                        "neutral lighting",
+                        "super_detailed_nipples",
+                        [
+                            new PhotorealPromptMappingState
+                            {
+                                Enabled = true,
+                                Category = "body detail",
+                                SourceTag = "nipples",
+                                OutputPrompt = nippleTexturePrompt,
+                            },
+                        ]);
+                string disabledNippleTexturePrompt = PhotoViewer.Wpf.MainWindow
+                    .ComposeMappedPhotorealPromptForSmoke(
+                        "neutral lighting",
+                        "puffy_nipples",
+                        [
+                            new PhotorealPromptMappingState
+                            {
+                                Enabled = true,
+                                Category = "body detail",
+                                SourceTag = "puffy nipples",
+                                OutputPrompt = "puffy nipples",
+                            },
+                        ]);
                 string lengthCappedPrompt = PhotoViewer.Wpf.MainWindow
                     .ComposeMappedPhotorealPromptForSmoke(
-                        new string('x', 1_990),
-                        "sample alpha",
+                        new string('x', 1_980),
+                        "open mouth, embarrassed",
                         mappingRows);
                 bool underscoreDuplicatesRejected =
                     !PhotoViewer.Wpf.MainWindow
@@ -1042,16 +1137,16 @@ public partial class App
                                 new PhotorealPromptMappingState
                                 {
                                     Enabled = true,
-                                    Category = "Example",
-                                    SourceTag = "sample_tag",
-                                    OutputPrompt = "first output",
+                                    Category = "表記揺れ",
+                                    SourceTag = "wet_skin",
+                                    OutputPrompt = "wet skin",
                                 },
                                 new PhotorealPromptMappingState
                                 {
                                     Enabled = true,
-                                    Category = "Example",
-                                    SourceTag = "sample tag",
-                                    OutputPrompt = "second output",
+                                    Category = "表記揺れ",
+                                    SourceTag = "wet skin",
+                                    OutputPrompt = "wet skin",
                                 },
                             ],
                             out _);
@@ -1064,58 +1159,215 @@ public partial class App
                 IReadOnlyList<PhotorealPromptMappingState> mappingSnapshot =
                     window.SnapshotPhotorealPromptMappingsForSmoke();
                 bool extensionPreserved = mappingSnapshot.FirstOrDefault(
-                    static row => row.SourceTag == "sample related")?
-                    .ExtensionData?.ContainsKey("future") == true
-                    && mappingSnapshot.First(
-                        static row => row.SourceTag == "sample related")
-                        .ExtensionData?.ContainsKey("matchTokens") == true;
+                    static row => row.SourceTag == "x-cross (bdsm)")?
+                    .ExtensionData?.ContainsKey("future") == true;
                 window.RestorePhotorealPromptMappingsForSmoke(null);
-                bool fallbackDefaultsRemainPrivate =
-                    window.PhotorealPromptMappingCountForSmoke == 0;
+                bool defaultsLoaded =
+                    window.PhotorealPromptMappingCountForSmoke > 0;
                 window.RestorePhotorealPromptMappingsForSmoke(
-                    mappingRows,
-                    defaultsRevision: -1);
+                    [
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = true,
+                            Category = "表情・顔",
+                            SourceTag = "troubled eyebrows",
+                            OutputPrompt = "slightly raised inner eyebrow ends",
+                        },
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = false,
+                            Category = "カスタム",
+                            SourceTag = "custom preserved tag",
+                            OutputPrompt = "custom preserved output",
+                        },
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = true,
+                            Category = "表情・顔",
+                            SourceTag = "light smile",
+                            OutputPrompt = "light smile",
+                        },
+                    ],
+                    defaultsRevision: 0);
                 IReadOnlyList<PhotorealPromptMappingState> migratedMappings =
                     window.SnapshotPhotorealPromptMappingsForSmoke();
                 promptMappingDefaultsMigrationContract =
-                    migratedMappings.Count == mappingRows.Length
+                    migratedMappings.Count > mappingRows.Length
+                    && migratedMappings.Count <= 256
                     && migratedMappings.Any(static row =>
-                        row.SourceTag == "sample alpha"
-                        && row.OutputPrompt == "sample output alpha")
+                        !row.Enabled
+                        && row.SourceTag == "troubled eyebrows"
+                        && row.OutputPrompt ==
+                            "barely raised inner brow ends, relaxed forehead")
                     && migratedMappings.Any(static row =>
-                        row.SourceTag == "sample related"
-                        && row.OutputPrompt == "sample related output");
+                        row.SourceTag == "profile"
+                        && row.OutputPrompt == "face shown in side profile")
+                    && migratedMappings.Any(static row =>
+                        row.SourceTag == "wet hair"
+                        && row.OutputPrompt ==
+                            "wet hair clumped into damp strands")
+                    && migratedMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "nipple rub"
+                        && row.OutputPrompt ==
+                            "fingertips visibly rubbing the nipple")
+                    && migratedMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "nipple flick"
+                        && row.OutputPrompt ==
+                            "a fingertip visibly touching the nipple")
+                    && migratedMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "nipple tweak"
+                        && row.OutputPrompt ==
+                            "nipples visibly pinched between fingertips")
+                    && migratedMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "nipple"
+                        && row.OutputPrompt ==
+                            "realistic nipple and areola texture with subtle Montgomery glands, fine natural creases, and shallow indentations")
+                    && migratedMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "nipples"
+                        && row.OutputPrompt ==
+                            "realistic nipple and areola texture with subtle Montgomery glands, fine natural creases, and shallow indentations")
+                    && migratedMappings.Any(static row =>
+                        !row.Enabled
+                        && row.SourceTag == "custom preserved tag"
+                        && row.OutputPrompt == "custom preserved output")
+                    && migratedMappings.Any(static row =>
+                        !row.Enabled
+                        && row.SourceTag == "light smile"
+                        && row.OutputPrompt == "light smile");
+                window.RestorePhotorealPromptMappingsForSmoke(
+                    [
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = true,
+                            Category = "表情・顔",
+                            SourceTag = "light smile",
+                            OutputPrompt = "light smile",
+                        },
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = true,
+                            Category = "拘束具",
+                            SourceTag = "ball gag",
+                            OutputPrompt = "ball gag",
+                        },
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = false,
+                            Category = "表情・顔",
+                            SourceTag = "looking at viewer",
+                            OutputPrompt = "looking at viewer",
+                        },
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = false,
+                            SourceTag = "shiny skin",
+                            OutputPrompt = "moist skin with realistic highlights",
+                        },
+                        new PhotorealPromptMappingState
+                        {
+                            Enabled = true,
+                            SourceTag = "open mouth",
+                            OutputPrompt = "open mouth",
+                        },
+                    ],
+                    defaultsRevision: 1);
+                IReadOnlyList<PhotorealPromptMappingState> revisionTwoMappings =
+                    window.SnapshotPhotorealPromptMappingsForSmoke();
+                promptMappingDefaultsMigrationContract =
+                    promptMappingDefaultsMigrationContract
+                    && revisionTwoMappings.Count <= 256
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "light smile"
+                        && row.OutputPrompt == "light smile")
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "ball gag"
+                        && row.OutputPrompt.StartsWith(
+                            "a clearly visible spherical ball",
+                            StringComparison.Ordinal))
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "looking at viewer"
+                        && row.OutputPrompt.Contains(
+                            "direct eye contact",
+                            StringComparison.Ordinal))
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "shiny skin"
+                        && row.OutputPrompt.StartsWith(
+                            "subtle natural skin sheen",
+                            StringComparison.Ordinal))
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "open mouth"
+                        && row.OutputPrompt ==
+                            "lips slightly parted with a small natural opening")
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "ballgag")
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "blindfold")
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "breasts on glass")
+                    && revisionTwoMappings.Any(static row =>
+                        row.Enabled
+                        && row.SourceTag == "looking away");
                 window.RestorePhotorealPromptMappingsForSmoke(mappingRows);
                 var mappingEditor = new PhotorealPromptMappingEditorWindow(
                     mappingRows,
                     mappingRows);
                 promptMappingDirectToggleContract =
                     mappingEditor.DirectEnabledToggleContractForSmoke();
+                promptMappingEditRefreshContract =
+                    await mappingEditor.FilterRefreshDuringEditContractForSmokeAsync();
                 promptMappingButtonContrastContract =
                     PhotorealPromptMappingEditorWindow
                         .ActionButtonContrastContractForSmoke();
                 mappingEditor.Close();
                 promptMappingContract = mappedPrompt ==
-                        "base prompt, sample output beta, sample output alpha, sample related output"
+                        "neutral lighting, lips separated, brows angled upward toward the center, natural cheek flush, X-shaped restraint frame"
                     && breakSeparatedPrompt ==
-                        "base prompt, sample output alpha"
+                        "neutral lighting, subtle embarrassed tension"
                     && underscoreMappedPrompt ==
-                        "base prompt, sample output beta"
-                    && excludedRelatedPrompt == "base prompt"
+                        "neutral lighting, lips separated"
+                    && compoundNippleMappedPrompt ==
+                        $"neutral lighting, {nippleTexturePrompt}"
+                    && exactAndCompoundNippleMappedPrompt ==
+                        $"neutral lighting, {nippleTexturePrompt}, puffy nipples"
+                    && unrelatedNippleWordPrompt == "neutral lighting"
+                    && absentNipplePrompt == "neutral lighting"
+                    && existingNippleTexturePrompt == nippleTexturePrompt
+                    && pluralFallbackPrompt ==
+                        $"neutral lighting, {nippleTexturePrompt}"
+                    && disabledNippleTexturePrompt ==
+                        "neutral lighting, puffy nipples"
                     && lengthCappedPrompt.Length <= 2_000
+                    && lengthCappedPrompt.EndsWith(
+                        ", lips separated",
+                        StringComparison.Ordinal)
                     && PhotoViewer.Wpf.MainWindow
-                        .NormalizeA1111PromptTagForSmoke("sample_tag") ==
-                            "sample tag"
+                        .NormalizeA1111PromptTagForSmoke("wet_skin") ==
+                            "wet skin"
                     && underscoreDuplicatesRejected
                     && PhotoViewer.Wpf.MainWindow.NormalizeA1111PromptTagForSmoke(
-                        "(((sample alpha:1.30)))") == "sample alpha"
+                        "(((open mouth:1.30)))") == "open mouth"
+                    && PhotoViewer.Wpf.MainWindow.NormalizeA1111PromptTagForSmoke(
+                        "x-cross \\(bdsm\\)") == "x-cross (bdsm)"
                     && emptyMappingPersistsAsEmpty
                     && extensionPreserved
-                    && fallbackDefaultsRemainPrivate
+                    && defaultsLoaded
                     && promptMappingDirectToggleContract
+                    && promptMappingEditRefreshContract
                     && promptMappingDefaultsMigrationContract
                     && promptMappingButtonContrastContract;
-
                 EnhancementCompanionLaunchContractSmokeSnapshot companionLaunch =
                     PhotoViewer.Wpf.MainWindow.EnhancementCompanionLaunchContractForSmoke();
                 independentCompanionContract = !companionLaunch.UseShellExecute
@@ -1184,7 +1436,8 @@ public partial class App
                     && displayedVersionLabels.SequenceEqual(
                         ["Original", "実写化 1/1", "高画質化 1/1"],
                         StringComparer.Ordinal);
-                toolbarContract = window.ModalPhotorealToolbarContractForSmoke;
+                toolbarContract = window.ModalPhotorealToolbarContractForSmoke
+                    && window.HeaderProductVersionContractForSmoke;
                 var initialUpscaleSettings = window.UpscaleSettingsForSmoke;
                 window.RestoreUpscaleSettingsForSmoke(new ViewerState
                 {
@@ -1773,7 +2026,7 @@ public partial class App
                     && body.GetProperty("steps").GetInt32() == 8
                     && body.GetProperty("maxDimension").GetInt32() == 1280
                     && body.GetProperty("prompt").GetString() ==
-                        $"{customEmptyPrompt}, sample output alpha, sample output beta"
+                        $"{customEmptyPrompt}, brows angled upward toward the center, lips separated, natural cheek flush, X-shaped restraint frame"
                     && body.GetProperty("negativePrompt").GetString() == string.Empty
                     && body.GetProperty("queuePlacement").GetString() == "next";
                 var negativeOff = window.ModalPhotorealSettingsForSmoke;
@@ -1864,6 +2117,7 @@ public partial class App
                     && originalFavoriteAbsentAfterPhotoreal
                     && originalFavoriteRaised
                     && photorealFavoriteRestored
+                    && window.ModalPhotorealFavoriteActiveSurfaceForSmoke
                     && staleFavoriteSourceFallbackRejected
                     && favoriteKeysPersisted;
                 string sourceFileNameForFavorite = Path.GetFileName(sourcePath);
@@ -2073,6 +2327,7 @@ public partial class App
                     && styleReloadContract
                     && defaultPromptContract
                     && promptMappingContract
+                    && promptMappingEditRefreshContract
                     && displayedVersionMetadataContract
                     && photoUpscaleProfileContract
                     && veryHighQualityContract
@@ -2156,6 +2411,7 @@ public partial class App
                     defaultPromptContract,
                     promptMappingContract,
                     promptMappingDirectToggleContract,
+                    promptMappingEditRefreshContract,
                     promptMappingDefaultsMigrationContract,
                     promptMappingButtonContrastContract,
                     displayedVersionMetadataContract,

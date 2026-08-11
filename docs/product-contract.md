@@ -837,11 +837,12 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   4:3, and 1:1 buckets remain 832x480, 768x512, 736x544, and 640x640. The
   975x1614 bird input refines to 480x800, reducing edge-copy padding. The
   source is never cropped, rewritten, or used as a temporary output.
-- Final video outputs use the fixed flat `Videos/` folder below the same
-  configured Enhancement output parent. The filename includes job, source,
-  and preset identities. A core ComfyUI staging file is allowed only as an
-  exact adapter-owned transient and must be removed after success, cancel, or
-  failure; the final residue audit is zero.
+- Final video outputs use `Videos/YYYY-MM-DD/` below the configured
+  Enhancement output parent, with the date derived from the durable job. The
+  filename includes job, source, and preset identities. Existing valid flat
+  `Videos/` references remain readable during migration. A core ComfyUI
+  staging file is allowed only as an exact adapter-owned transient and must be
+  removed after success, cancel, or failure; the final residue audit is zero.
 - Wan generation and RIFE delivery remain one video job and share the existing
   durable ordered queue, worker, and exclusive GPU lease with upscale and
   photoreal jobs. Cancel applies to the active stage and leaves no separate
@@ -867,6 +868,32 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   approximately 704p default remain deferred until measured evidence on the
   supported 12GB GPU establishes memory, latency, playback, and anime
   temporal-quality bounds.
+
+### `PV-ENHANCE-VIDEO-002` — MiniMax H3 and prompt conversion
+
+`contracts/enhancement-video-v2.json` is the canonical additive reader and
+writer contract for MiniMax H3. H3 uses the exact `minimax-h3` model choice,
+124 native frames at 24 fps, a 5.167-second bounded output, H.264 video, and
+the contract-defined AAC audio path. Unknown or inconsistent v2 snapshots
+remain protected rather than being coerced to the Wan v1 shape.
+
+- The video input prompt remains the only authoritative prompt. The explicit
+  MiniMax conversion action reads that text and the currently selected source
+  image, then asks the local Qwen 4B companion route for an editable H3-English
+  candidate. It does not enqueue, reorder, wake, pause, or otherwise mutate an
+  AI Job or image queue.
+- Conversion offers three UI modes: `polish` preserves the written intent,
+  `direction` strengthens image-compatible motion and camera direction, and
+  `auto` lets the source image guide that direction. Mode guidance stays
+  inside the bounded rewrite request; the companion protocol remains the
+  exact v1 prompt-rewrite shape.
+- A returned candidate is transient and separate from the input. The user may
+  edit it, convert again, apply it explicitly to the input, or undo the most
+  recent apply. Changing the input, image, model, style, or conversion mode
+  makes the old candidate stale. Conversion never starts video generation.
+- Only the existing explicit video-generation action may enqueue the final H3
+  request. It uses the same durable ordered AI Jobs queue as other managed
+  operations; prompt conversion itself remains outside that queue.
 
 ## Change rule
 

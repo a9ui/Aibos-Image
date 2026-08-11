@@ -319,6 +319,306 @@ public partial class MainWindow
             ? null
             : $"The running H25 companion does not support {capabilityLabel}. Restart H25 first; no job was added.";
 
+    private readonly record struct MiniMaxH3VideoCapabilityState(
+        bool Ready,
+        string? ReasonCode);
+
+    private static readonly string[] MiniMaxH3VideoReasonCodes =
+    [
+        "MINIMAX_H3_WRITER_DISABLED",
+        "MINIMAX_H3_RUNTIME_SEAL_INVALID",
+        "MINIMAX_H3_RUNTIME_MANIFEST_INVALID",
+        "MINIMAX_H3_LICENSE_NOT_ACCEPTED",
+        "MINIMAX_H3_MODELS_UNVERIFIED",
+        "MINIMAX_H3_WORKFLOW_UNVERIFIED",
+        "MINIMAX_H3_GPU_CANARY_UNVERIFIED",
+        "MINIMAX_H3_BACKEND_CONFIG_INVALID",
+    ];
+
+    private static bool TryParseMiniMaxH3VideoCapability(
+        JsonElement payload,
+        out MiniMaxH3VideoCapabilityState state)
+    {
+        state = default;
+        if (payload.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(payload, "capabilities")
+            || !payload.TryGetProperty("capabilities", out JsonElement capabilities)
+            || capabilities.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(capabilities, "videoV2")
+            || !capabilities.TryGetProperty("videoV2", out JsonElement capability)
+            || capability.ValueKind != JsonValueKind.Object
+            || !HasExactVideoV2Properties(
+                capability,
+                "contractId",
+                "protocol",
+                "readerReady",
+                "writerEnabled",
+                "backendConfigured",
+                "runtimeSealVerified",
+                "runtimeManifestVerified",
+                "licenseAccepted",
+                "modelsVerified",
+                "workflowConfigured",
+                "gpuCanaryVerified",
+                "ready",
+                "state",
+                "reasonCode",
+                "presetId",
+                "backendId",
+                "workflowRevision",
+                "runtimeMode",
+                "profile")
+            || !VideoV2ExactString(
+                capability,
+                "contractId",
+                MiniMaxH3VideoContractId)
+            || !VideoV2ExactString(
+                capability,
+                "protocol",
+                MiniMaxH3VideoProtocol)
+            || !VideoV2ExactBoolean(capability, "readerReady", true)
+            || !VideoV2TryBoolean(capability, "writerEnabled", out bool writerEnabled)
+            || !VideoV2TryBoolean(capability, "backendConfigured", out bool backendConfigured)
+            || !VideoV2TryBoolean(
+                capability,
+                "runtimeSealVerified",
+                out bool runtimeSealVerified)
+            || !VideoV2TryBoolean(
+                capability,
+                "runtimeManifestVerified",
+                out bool runtimeManifestVerified)
+            || !VideoV2TryBoolean(capability, "licenseAccepted", out bool licenseAccepted)
+            || !VideoV2TryBoolean(capability, "modelsVerified", out bool modelsVerified)
+            || !VideoV2TryBoolean(capability, "workflowConfigured", out bool workflowConfigured)
+            || !VideoV2TryBoolean(capability, "gpuCanaryVerified", out bool gpuCanaryVerified)
+            || !VideoV2TryBoolean(capability, "ready", out bool ready)
+            || !VideoV2ExactString(
+                capability,
+                "presetId",
+                MiniMaxH3VideoPresetId)
+            || !VideoV2ExactString(
+                capability,
+                "backendId",
+                MiniMaxH3VideoBackendId)
+            || !VideoV2ExactString(
+                capability,
+                "workflowRevision",
+                MiniMaxH3VideoWorkflowRevision)
+            || !VideoV2ExactString(capability, "runtimeMode", "on-demand")
+            || !capability.TryGetProperty("state", out JsonElement stateElement)
+            || stateElement.ValueKind != JsonValueKind.String
+            || !capability.TryGetProperty("reasonCode", out JsonElement reasonElement)
+            || !capability.TryGetProperty("profile", out JsonElement profile)
+            || profile.ValueKind != JsonValueKind.Object
+            || !HasExactVideoV2Properties(
+                profile,
+                "canvasPolicy",
+                "canary",
+                "frameCount",
+                "playbackFps",
+                "steps",
+                "audio")
+            || !profile.TryGetProperty(
+                "canvasPolicy",
+                out JsonElement canvasPolicy)
+            || canvasPolicy.ValueKind != JsonValueKind.Object
+            || !HasExactVideoV2Properties(
+                canvasPolicy,
+                "kind",
+                "alignment",
+                "minDimension",
+                "maxDimension",
+                "maxPixelArea")
+            || !VideoV2ExactString(
+                canvasPolicy,
+                "kind",
+                MiniMaxH3VideoCanvasPolicyKind)
+            || !VideoV2ExactInt32(
+                canvasPolicy,
+                "alignment",
+                MiniMaxH3VideoCanvasAlignment)
+            || !VideoV2ExactInt32(
+                canvasPolicy,
+                "minDimension",
+                MiniMaxH3VideoCanvasMinimumDimension)
+            || !VideoV2ExactInt32(
+                canvasPolicy,
+                "maxDimension",
+                MiniMaxH3VideoCanvasMaximumDimension)
+            || !VideoV2ExactInt32(
+                canvasPolicy,
+                "maxPixelArea",
+                MiniMaxH3VideoCanvasMaximumPixelArea)
+            || !profile.TryGetProperty("canary", out JsonElement canary)
+            || canary.ValueKind != JsonValueKind.Object
+            || !HasExactVideoV2Properties(canary, "width", "height")
+            || !VideoV2ExactInt32(
+                canary,
+                "width",
+                MiniMaxH3VideoCanaryWidth)
+            || !VideoV2ExactInt32(
+                canary,
+                "height",
+                MiniMaxH3VideoCanaryHeight)
+            || !VideoV2ExactInt32(profile, "frameCount", MiniMaxH3VideoFrameCount)
+            || !VideoV2ExactInt32(profile, "playbackFps", MiniMaxH3VideoPlaybackFps)
+            || !VideoV2ExactInt32(profile, "steps", MiniMaxH3VideoSteps)
+            || !VideoV2ExactBoolean(profile, "audio", true))
+        {
+            return false;
+        }
+
+        string capabilityState = stateElement.GetString() ?? "";
+        string? reasonCode = reasonElement.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.String => reasonElement.GetString(),
+            _ => "__invalid__",
+        };
+        bool allReadyFlags = writerEnabled
+            && backendConfigured
+            && runtimeSealVerified
+            && runtimeManifestVerified
+            && licenseAccepted
+            && modelsVerified
+            && workflowConfigured
+            && gpuCanaryVerified;
+        if (ready)
+        {
+            if (!allReadyFlags
+                || !string.Equals(capabilityState, "ready", StringComparison.Ordinal)
+                || reasonCode is not null)
+            {
+                return false;
+            }
+        }
+        else if (capabilityState is not ("disabled" or "unverified")
+            || reasonCode is null
+            || !MiniMaxH3VideoReasonCodes.Contains(
+                reasonCode,
+                StringComparer.Ordinal)
+            || !MiniMaxH3ReasonMatchesFlags(
+                reasonCode,
+                capabilityState,
+                writerEnabled,
+                backendConfigured,
+                runtimeSealVerified,
+                runtimeManifestVerified,
+                licenseAccepted,
+                modelsVerified,
+                workflowConfigured,
+                gpuCanaryVerified))
+        {
+            return false;
+        }
+
+        state = new MiniMaxH3VideoCapabilityState(ready, reasonCode);
+        return true;
+    }
+
+    private static bool MiniMaxH3ReasonMatchesFlags(
+        string reasonCode,
+        string state,
+        bool writerEnabled,
+        bool backendConfigured,
+        bool runtimeSealVerified,
+        bool runtimeManifestVerified,
+        bool licenseAccepted,
+        bool modelsVerified,
+        bool workflowConfigured,
+        bool gpuCanaryVerified)
+        => reasonCode switch
+        {
+            "MINIMAX_H3_WRITER_DISABLED" =>
+                state == "disabled" && !writerEnabled,
+            "MINIMAX_H3_RUNTIME_SEAL_INVALID" =>
+                state == "unverified" && !runtimeSealVerified,
+            "MINIMAX_H3_RUNTIME_MANIFEST_INVALID" =>
+                state == "unverified" && !runtimeManifestVerified,
+            "MINIMAX_H3_LICENSE_NOT_ACCEPTED" =>
+                state == "unverified" && !licenseAccepted,
+            "MINIMAX_H3_MODELS_UNVERIFIED" =>
+                state == "unverified" && !modelsVerified,
+            "MINIMAX_H3_WORKFLOW_UNVERIFIED" =>
+                state == "unverified" && !workflowConfigured,
+            "MINIMAX_H3_GPU_CANARY_UNVERIFIED" =>
+                state == "unverified" && !gpuCanaryVerified,
+            "MINIMAX_H3_BACKEND_CONFIG_INVALID" =>
+                state == "unverified" && !backendConfigured,
+            _ => false,
+        };
+
+    private static Func<JsonElement, string?> CreateMiniMaxH3VideoHealthValidator()
+        => payload => TryParseMiniMaxH3VideoCapability(payload, out var capability)
+            ? capability.Ready
+                ? null
+                : DescribeMiniMaxH3VideoReasonCode(capability.ReasonCode)
+                    + " 動画ジョブは追加していません。"
+            : "MiniMax H3の正確な準備状態を確認できません。動画ジョブは追加していません。";
+
+    private static bool HasExactVideoV2Properties(
+        JsonElement element,
+        params string[] expectedNames)
+    {
+        string[] actualNames = element
+            .EnumerateObject()
+            .Select(static property => property.Name)
+            .ToArray();
+        return actualNames.Length == expectedNames.Length
+            && actualNames
+                .ToHashSet(StringComparer.Ordinal)
+                .SetEquals(expectedNames);
+    }
+
+    private static bool VideoV2ExactString(
+        JsonElement element,
+        string propertyName,
+        string expected)
+        => element.TryGetProperty(propertyName, out JsonElement property)
+            && property.ValueKind == JsonValueKind.String
+            && string.Equals(property.GetString(), expected, StringComparison.Ordinal);
+
+    private static bool VideoV2TryBoolean(
+        JsonElement element,
+        string propertyName,
+        out bool value)
+    {
+        value = false;
+        if (!element.TryGetProperty(propertyName, out JsonElement property)
+            || property.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+        value = property.GetBoolean();
+        return true;
+    }
+
+    private static bool VideoV2ExactBoolean(
+        JsonElement element,
+        string propertyName,
+        bool expected)
+        => VideoV2TryBoolean(element, propertyName, out bool value)
+            && value == expected;
+
+    private static bool VideoV2ExactInt32(
+        JsonElement element,
+        string propertyName,
+        int expected)
+        => element.TryGetProperty(propertyName, out JsonElement property)
+            && property.TryGetInt32(out int value)
+            && value == expected;
+
+    public static bool TryParseMiniMaxH3VideoCapabilityForSmoke(
+        JsonElement payload,
+        out bool ready,
+        out string? reasonCode)
+    {
+        bool parsed = TryParseMiniMaxH3VideoCapability(payload, out var capability);
+        ready = parsed && capability.Ready;
+        reasonCode = parsed ? capability.ReasonCode : null;
+        return parsed;
+    }
+
     private async Task<EnhancementEnqueueProbe> ProbeEnhancementEnqueueBackendAsync(
         CancellationToken token)
     {
@@ -384,7 +684,8 @@ public partial class MainWindow
         CancellationToken token = default,
         Func<JsonElement, string?>? healthValidator = null,
         bool requireExactHealthValidation = false,
-        string? recoverySourceIdentity = null)
+        string? recoverySourceIdentity = null,
+        Func<string?>? prePublishValidator = null)
     {
         string route = retryJobId is null
             ? "api/enhance/jobs"
@@ -408,6 +709,15 @@ public partial class MainWindow
                 kind: retryJobId is null ? "create" : "retry",
                 retryJobId: retryJobId,
                 includeQueuePlacementInBody: includeQueuePlacementInBody);
+            string? prePublishError = prePublishValidator?.Invoke();
+            if (!string.IsNullOrWhiteSpace(prePublishError))
+            {
+                return new EnhancementApiResponse(
+                    false,
+                    409,
+                    null,
+                    prePublishError);
+            }
             _ = EnhancementEnqueueInboxStore.Publish(
                 ResolvedEnhancementJobsPath,
                 [item]);

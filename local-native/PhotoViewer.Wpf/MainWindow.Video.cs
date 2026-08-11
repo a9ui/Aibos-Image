@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace PhotoViewer.Wpf;
@@ -16,6 +17,51 @@ public partial class MainWindow
     private const string ManagedVideoExtension = ".mp4";
     private const int ManagedVideoAlignment = 32;
     private const long ManagedVideoMaximumPixelArea = 409_600;
+
+    private static bool IsManagedVideoOutputLocation(
+        string lexicalOutput,
+        string canonicalOutput,
+        string lexicalRoot,
+        string canonicalRoot)
+    {
+        string? lexicalParent = Path.GetDirectoryName(lexicalOutput);
+        string? canonicalParent = Path.GetDirectoryName(canonicalOutput);
+        if (string.IsNullOrWhiteSpace(lexicalParent)
+            || string.IsNullOrWhiteSpace(canonicalParent))
+        {
+            return false;
+        }
+        if (string.Equals(lexicalParent, lexicalRoot, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(canonicalParent, canonicalRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string dateFolder = Path.GetFileName(
+            Path.TrimEndingDirectorySeparator(lexicalParent));
+        if (!DateTime.TryParseExact(
+                dateFolder,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out _)
+            || !string.Equals(
+                dateFolder,
+                Path.GetFileName(Path.TrimEndingDirectorySeparator(canonicalParent)),
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return string.Equals(
+                Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(lexicalParent)),
+                lexicalRoot,
+                StringComparison.OrdinalIgnoreCase)
+            && string.Equals(
+                Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(canonicalParent)),
+                canonicalRoot,
+                StringComparison.OrdinalIgnoreCase);
+    }
 
     private readonly Dictionary<string, List<ManagedVideoVersion>> _videoVersions =
         new(EnhancementSourceIdentityComparer);
@@ -48,6 +94,7 @@ public partial class MainWindow
         string PresetId,
         string BackendId,
         string ModelName,
+        bool IsMiniMaxH3,
         string? SourceProducerJobId,
         double DurationSeconds,
         int RequestedPlaybackFps,
@@ -79,9 +126,11 @@ public partial class MainWindow
         string Model,
         int TargetFps,
         int FrameCount,
-        int DurationSeconds,
+        double DurationSeconds,
         string PixelFormat,
-        bool Audio);
+        bool Audio,
+        string? VideoCodec = null,
+        string? AudioCodec = null);
 
     private sealed record ModalVideoVersionChoice(int Index, string Label);
     private sealed record ManagedPhotorealVideoSource(
@@ -90,6 +139,120 @@ public partial class MainWindow
         IReadOnlyList<string> CatalogAliases,
         long SourceSize,
         double SourceMtimeMs);
+
+    private static bool TryReadMiniMaxH3SourceDimensions(
+        string path,
+        out int width,
+        out int height)
+    {
+        width = 0;
+        height = 0;
+        try
+        {
+            using Stream stream = OpenBitmapReadStream(
+                path,
+                CancellationToken.None,
+                onFirstRead: null);
+            BitmapDecoder decoder = BitmapDecoder.Create(
+                stream,
+                BitmapCreateOptions.DelayCreation,
+                BitmapCacheOption.None);
+            BitmapFrame frame = decoder.Frames[0];
+            width = frame.PixelWidth;
+            height = frame.PixelHeight;
+            ushort orientation = 1;
+            if (frame.Metadata is BitmapMetadata metadata)
+            {
+                foreach (string query in new[]
+                {
+                    "/app1/ifd/{ushort=274}",
+                    "/ifd/{ushort=274}",
+                })
+                {
+                    try
+                    {
+                        object? value = metadata.GetQuery(query);
+                        if (value is ushort unsignedValue)
+                        {
+                            orientation = unsignedValue;
+                            break;
+                        }
+                        if (value is short signedValue && signedValue > 0)
+                        {
+                            orientation = (ushort)signedValue;
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        // The metadata query is format-specific.
+                    }
+                }
+            }
+            if (orientation is 5 or 6 or 7 or 8)
+                (width, height) = (height, width);
+            return width > 0 && height > 0;
+        }
+        catch
+        {
+            width = 0;
+            height = 0;
+            return false;
+        }
+    }
+
+    private bool IsMiniMaxH3SourceCanvasCurrent(JsonElement job)
+    {
+        try
+        {
+            if (!TryGetStringProperty(job, "sourcePath", out string? sourcePath)
+                || !job.TryGetProperty(
+                    "sourceSignature",
+                    out JsonElement signature)
+                || !signature.TryGetProperty("size", out JsonElement sizeElement)
+                || !sizeElement.TryGetInt64(out long expectedSize)
+                || !signature.TryGetProperty(
+                    "mtimeMs",
+                    out JsonElement mtimeElement)
+                || !mtimeElement.TryGetDouble(out double expectedMtimeMs)
+                || !job.TryGetProperty("video", out JsonElement video)
+                || !video.TryGetProperty(
+                    "effective",
+                    out JsonElement effective)
+                || !effective.TryGetProperty("width", out JsonElement widthElement)
+                || !widthElement.TryGetInt32(out int width)
+                || !effective.TryGetProperty("height", out JsonElement heightElement)
+                || !heightElement.TryGetInt32(out int height)
+                || !TryResolveEnhancementSourceIdentity(
+                    sourcePath,
+                    out string resolvedSource)
+                || !File.Exists(resolvedSource))
+            {
+                return false;
+            }
+
+            var info = new FileInfo(resolvedSource);
+            double currentMtimeMs = new DateTimeOffset(
+                info.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+            if (info.Length != expectedSize
+                || Math.Abs(currentMtimeMs - expectedMtimeMs) > 1
+                || !TryReadMiniMaxH3SourceDimensions(
+                    resolvedSource,
+                    out int sourceWidth,
+                    out int sourceHeight))
+            {
+                return false;
+            }
+
+            (int expectedWidth, int expectedHeight) =
+                NormalizeMiniMaxH3VideoCanvas(sourceWidth, sourceHeight);
+            return width == expectedWidth && height == expectedHeight;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private bool TryBuildManagedVideoVersion(
         JsonElement job,
@@ -102,7 +265,17 @@ public partial class MainWindow
         resolvedSource = "";
         version = null!;
         catalogAliases = [];
-        if (!IsVideoMutationSafe(job)
+        if (IsMiniMaxH3VideoMutationSafe(job))
+        {
+            return TryBuildMiniMaxH3ManagedVideoVersion(
+                job,
+                photorealSources,
+                out resolvedSource,
+                out version,
+                out catalogAliases);
+        }
+
+        if (!IsWanV1VideoMutationSafe(job)
             || !TryGetStringProperty(job, "id", out string? jobId)
             || !TryGetStringProperty(job, "sourcePath", out string? sourcePath)
             || !TryGetStringProperty(job, "sourceId", out string? sourceId)
@@ -282,14 +455,11 @@ public partial class MainWindow
             string lexicalRoot = Path.GetFullPath(
                 Path.Combine(ResolvedManagedEnhancementOutputsRoot, ManagedVideoFolderName));
             string canonicalRoot = _resolveFinalPath(lexicalRoot);
-            if (!string.Equals(
-                    Path.GetDirectoryName(lexicalOutput),
+            if (!IsManagedVideoOutputLocation(
+                    lexicalOutput,
+                    canonicalOutput,
                     lexicalRoot,
-                    StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(
-                    Path.GetDirectoryName(canonicalOutput),
-                    canonicalRoot,
-                    StringComparison.OrdinalIgnoreCase)
+                    canonicalRoot)
                 || !string.Equals(
                     Path.GetExtension(canonicalOutput),
                     ManagedVideoExtension,
@@ -308,6 +478,7 @@ public partial class MainWindow
                 presetId!,
                 backendId!,
                 modelName!,
+                false,
                 sourceProducerJobId,
                 durationSeconds,
                 playbackFps,
@@ -333,6 +504,208 @@ public partial class MainWindow
                 deliverySnapshot,
                 completedAtUtc,
                 new ManagedVideoOutput(canonicalOutput, sourceSize, sourceMtimeMs));
+            catalogAliases = producerAliases
+                .Concat(new[] { sourceId, resolvedSourceId })
+                .Select(NormalizeCatalogEnhancementPath)
+                .Where(static path => path is not null)
+                .Select(static path => path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            return true;
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool TryBuildMiniMaxH3ManagedVideoVersion(
+        JsonElement job,
+        IReadOnlyDictionary<string, ManagedPhotorealVideoSource>
+            photorealSources,
+        out string resolvedSource,
+        out ManagedVideoVersion version,
+        out IReadOnlyList<string> catalogAliases)
+    {
+        resolvedSource = "";
+        version = null!;
+        catalogAliases = [];
+        if (!IsMiniMaxH3VideoMutationSafe(job)
+            || !TryGetStringProperty(job, "id", out string? jobId)
+            || !TryGetStringProperty(job, "sourcePath", out string? sourcePath)
+            || !TryGetStringProperty(job, "sourceId", out string? sourceId)
+            || !TryGetStringProperty(job, "outputPath", out string? outputPath)
+            || !job.TryGetProperty("sourceSignature", out JsonElement signature)
+            || signature.ValueKind != JsonValueKind.Object
+            || !signature.TryGetProperty("size", out JsonElement sizeElement)
+            || !sizeElement.TryGetInt64(out long sourceSize)
+            || !signature.TryGetProperty("mtimeMs", out JsonElement mtimeElement)
+            || !mtimeElement.TryGetDouble(out double sourceMtimeMs)
+            || !job.TryGetProperty("video", out JsonElement video)
+            || !video.TryGetProperty("requested", out JsonElement requested)
+            || !TryGetStringPropertyAllowEmpty(
+                requested,
+                "prompt",
+                out string? requestedPrompt)
+            || !video.TryGetProperty("effective", out JsonElement effective)
+            || !effective.TryGetProperty("width", out JsonElement widthElement)
+            || !widthElement.TryGetInt32(out int width)
+            || !effective.TryGetProperty("height", out JsonElement heightElement)
+            || !heightElement.TryGetInt32(out int height)
+            || !TryGetStringProperty(
+                effective,
+                "positivePrompt",
+                out string? positivePrompt)
+            || !video.TryGetProperty("seed", out JsonElement seedElement)
+            || !seedElement.TryGetInt32(out int seed)
+            || !video.TryGetProperty("delivery", out JsonElement delivery)
+            || !delivery.TryGetProperty(
+                "durationSeconds",
+                out JsonElement durationElement)
+            || !durationElement.TryGetDouble(out double durationSeconds)
+            || !TryReadOptionalVideoSourceProducerJobId(
+                job,
+                out string? sourceProducerJobId))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!TryResolveEnhancementSourceIdentity(
+                    sourcePath,
+                    out string resolvedSourcePath)
+                || !TryResolveEnhancementSourceIdentity(
+                    sourceId,
+                    out string resolvedSourceId))
+            {
+                return false;
+            }
+
+            string resolvedInputPath = resolvedSourcePath;
+            IReadOnlyList<string> producerAliases = [];
+            if (sourceProducerJobId is null)
+            {
+                if (!EnhancementSourceIdentityComparer.Equals(
+                        resolvedSourcePath,
+                        resolvedSourceId))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (!photorealSources.TryGetValue(
+                        sourceProducerJobId,
+                        out ManagedPhotorealVideoSource? producer)
+                    || !EnhancementSourceIdentityComparer.Equals(
+                        producer.ResolvedSource,
+                        resolvedSourceId)
+                    || !string.Equals(
+                        producer.OutputPath,
+                        resolvedSourcePath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                resolvedSourceId = producer.ResolvedSource;
+                resolvedInputPath = producer.OutputPath;
+                producerAliases = producer.CatalogAliases;
+            }
+
+            if (!File.Exists(resolvedInputPath))
+                return false;
+            var sourceInfo = new FileInfo(resolvedInputPath);
+            double currentMtimeMs =
+                new DateTimeOffset(sourceInfo.LastWriteTimeUtc)
+                    .ToUnixTimeMilliseconds();
+            if (sourceInfo.Length != sourceSize
+                || Math.Abs(currentMtimeMs - sourceMtimeMs) > 1)
+            {
+                return false;
+            }
+            if (!TryReadMiniMaxH3SourceDimensions(
+                    resolvedInputPath,
+                    out int sourceWidth,
+                    out int sourceHeight))
+            {
+                return false;
+            }
+            (int expectedWidth, int expectedHeight) =
+                NormalizeMiniMaxH3VideoCanvas(sourceWidth, sourceHeight);
+            if (width != expectedWidth || height != expectedHeight)
+                return false;
+
+            string lexicalOutput = Path.GetFullPath(outputPath!);
+            string canonicalOutput = _resolveFinalPath(lexicalOutput);
+            string lexicalRoot = Path.GetFullPath(
+                Path.Combine(
+                    ResolvedManagedEnhancementOutputsRoot,
+                    ManagedVideoFolderName));
+            string canonicalRoot = _resolveFinalPath(lexicalRoot);
+            if (!IsManagedVideoOutputLocation(
+                    lexicalOutput,
+                    canonicalOutput,
+                    lexicalRoot,
+                    canonicalRoot)
+                || !string.Equals(
+                    Path.GetExtension(canonicalOutput),
+                    ManagedVideoExtension,
+                    StringComparison.OrdinalIgnoreCase)
+                || !File.Exists(canonicalOutput)
+                || new FileInfo(canonicalOutput).Length <= 0)
+            {
+                return false;
+            }
+
+            resolvedSource = resolvedSourceId;
+            version = new ManagedVideoVersion(
+                jobId!,
+                MiniMaxH3VideoPresetId,
+                MiniMaxH3VideoBackendId,
+                "MiniMax-H3",
+                true,
+                sourceProducerJobId,
+                durationSeconds,
+                MiniMaxH3VideoPlaybackFps,
+                MiniMaxH3VideoPlaybackFps,
+                MiniMaxH3VideoFrameCount,
+                MiniMaxH3VideoFrameCount,
+                checked(width * height),
+                width,
+                height,
+                requestedPrompt!,
+                positivePrompt!,
+                "",
+                MiniMaxH3VideoSteps,
+                0,
+                "res_multistep",
+                "simple",
+                0,
+                1,
+                seed,
+                "h264",
+                "mp4",
+                8,
+                new ManagedVideoDeliverySnapshot(
+                    MiniMaxH3VideoBackendId,
+                    "MiniMax-H3",
+                    MiniMaxH3VideoPlaybackFps,
+                    MiniMaxH3VideoFrameCount,
+                    durationSeconds,
+                    "yuv420p",
+                    true,
+                    "h264",
+                    "aac"),
+                ReadEnhancementActivityAtUtc(job),
+                new ManagedVideoOutput(
+                    canonicalOutput,
+                    sourceSize,
+                    sourceMtimeMs));
             catalogAliases = producerAliases
                 .Concat(new[] { sourceId, resolvedSourceId })
                 .Select(NormalizeCatalogEnhancementPath)
@@ -409,14 +782,31 @@ public partial class MainWindow
 
     private void ApplyTileVideoAvailability(Tile tile)
     {
-        IReadOnlyList<ManagedVideoVersion> versions =
-            GetCatalogManagedVideoVersionsForPath(tile.Path);
-        tile.VideoVersionCount = versions.Count;
-        tile.VideoGenerated = versions.Count > 0;
-        tile.VideoOutputPath = versions.Count > 0
-            ? versions[0].Output.OutputPath
+        ApplyTileVideoAvailability(
+            tile,
+            GetManagedVideoVersionsForPath(tile.Path));
+    }
+
+    private void ApplyTileVideoAvailability(
+        Tile tile,
+        IReadOnlyList<ManagedVideoVersion> versions)
+    {
+        ManagedVideoVersion[] validVersions = versions
+            .Where(candidate => TryValidateManagedVideoVersion(
+                tile,
+                candidate,
+                out _))
+            .ToArray();
+        tile.VideoVersionCount = validVersions.Length;
+        tile.VideoGenerated = validVersions.Length > 0;
+        tile.VideoFavoriteLevel = validVersions
+            .Select(version => FavoriteLevelForPath(version.Output.OutputPath))
+            .DefaultIfEmpty(0)
+            .Max();
+        tile.VideoOutputPath = validVersions.Length > 0
+            ? validVersions[0].Output.OutputPath
             : null;
-        tile.VideoCompletedAtUtc = LatestVideoActivityUtc(versions);
+        tile.VideoCompletedAtUtc = LatestVideoActivityUtc(validVersions);
     }
 
     private void InitializeModalVideoVersions(Tile tile)
@@ -455,7 +845,7 @@ public partial class MainWindow
             ModalVideoVersionComboBox.ItemsSource = _modalVideoVersions
                 .Select((version, index) => new ModalVideoVersionChoice(
                     index,
-                    $"V{index + 1} · {version.DurationSeconds:0.#}s · "
+                    $"{(version.IsMiniMaxH3 ? "MiniMax H3 Preview" : $"V{index + 1}")} · {version.DurationSeconds:0.#######}s · "
                         + $"{version.PlaybackFps}fps · {version.FrameCount}f · "
                         + $"{version.Width}×{version.Height}"))
                 .ToArray();
@@ -501,6 +891,21 @@ public partial class MainWindow
                 _modalVideoVersions[index],
                 out ManagedVideoVersion version))
             return false;
+
+        return ShowValidatedModalVideoVersion(version, index, autoplay);
+    }
+
+    private bool ShowValidatedModalVideoVersion(
+        ManagedVideoVersion version,
+        int index,
+        bool autoplay)
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || index < 0
+            || index >= _modalVideoVersions.Count)
+        {
+            return false;
+        }
 
         _modalVideoVersionIndex = index;
         _modalShowingVideo = true;
@@ -567,6 +972,8 @@ public partial class MainWindow
         ModalSourceLabel.Text = $"Video V{index + 1}";
         ModalFileSizeText.Text = FormatFileSizeMb(new FileInfo(version.Output.OutputPath).Length);
         SyncModalMetadataSidebar();
+        SetModalMetadataTab(ModalMetadataSettingsTab);
+        SetModalMetadataSidebarVisible(true);
         return true;
     }
 
@@ -825,14 +1232,11 @@ public partial class MainWindow
                 ResolvedManagedEnhancementOutputsRoot,
                 ManagedVideoFolderName));
             string canonicalRoot = _resolveFinalPath(lexicalRoot);
-            if (!string.Equals(
-                    Path.GetDirectoryName(lexicalOutput),
+            if (!IsManagedVideoOutputLocation(
+                    lexicalOutput,
+                    canonicalOutput,
                     lexicalRoot,
-                    StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(
-                    Path.GetDirectoryName(canonicalOutput),
-                    canonicalRoot,
-                    StringComparison.OrdinalIgnoreCase)
+                    canonicalRoot)
                 || !string.Equals(
                     Path.GetExtension(canonicalOutput),
                     ManagedVideoExtension,
@@ -995,8 +1399,8 @@ public partial class MainWindow
             tile,
             ModalDisplayVersionKind.Original,
             null);
-        foreach (Tile catalogTile in _allTiles)
-            ApplyTileVideoAvailability(catalogTile);
+        foreach (Tile liveTile in EnumerateLiveTiles())
+            ApplyTileVideoAvailability(liveTile);
         RefreshModalVideoVersionChoices();
     }
 
@@ -1396,5 +1800,89 @@ public partial class MainWindow
         _modalVideoVersionIndex = index;
         return Modal.Visibility == Visibility.Visible
             && ShowModalVideoVersion(index, autoplay: true);
+    }
+
+    public bool SelectModalVideoJobForSmoke(string jobId)
+    {
+        int index = _modalVideoVersions.FindIndex(version => string.Equals(
+            version.JobId,
+            jobId,
+            StringComparison.Ordinal));
+        return index >= 0 && SelectModalVideoVersionForSmoke(index);
+    }
+
+    public bool SelectCorruptModalVideoForSmoke(string path)
+    {
+        if (Modal.Visibility != Visibility.Visible
+            || _modalVideoVersions.Count == 0
+            || !File.Exists(path))
+        {
+            return false;
+        }
+
+        int index = Math.Clamp(
+            _modalVideoVersionIndex,
+            0,
+            _modalVideoVersions.Count - 1);
+        if (SelectedTile() is not Tile tile
+            || !TryValidateManagedVideoVersion(
+                tile,
+                _modalVideoVersions[index],
+                out ManagedVideoVersion source))
+        {
+            return false;
+        }
+
+        ManagedVideoVersion corrupt = source with
+        {
+            Output = source.Output with
+            {
+                OutputPath = Path.GetFullPath(path),
+            },
+        };
+        return ShowValidatedModalVideoVersion(
+            corrupt,
+            index,
+            autoplay: true);
+    }
+
+    public bool TryBuildMiniMaxH3ManagedVideoVersionForSmoke(
+        JsonElement job,
+        out int width,
+        out int height,
+        out int playbackFps,
+        out int frameCount,
+        out double durationSeconds,
+        out bool audio,
+        out string settingsText)
+    {
+        width = 0;
+        height = 0;
+        playbackFps = 0;
+        frameCount = 0;
+        durationSeconds = 0;
+        audio = false;
+        settingsText = "";
+        if (!TryBuildMiniMaxH3ManagedVideoVersion(
+                job,
+                new Dictionary<string, ManagedPhotorealVideoSource>(
+                    StringComparer.Ordinal),
+                out _,
+                out ManagedVideoVersion version,
+                out _)
+            || !version.IsMiniMaxH3
+            || version.Delivery is null)
+        {
+            return false;
+        }
+
+        width = version.Width;
+        height = version.Height;
+        playbackFps = version.PlaybackFps;
+        frameCount = version.FrameCount;
+        durationSeconds = version.DurationSeconds;
+        audio = version.Delivery.Audio;
+        settingsText = BuildManagedVideoSettingsText(version);
+        return true;
     }
 }

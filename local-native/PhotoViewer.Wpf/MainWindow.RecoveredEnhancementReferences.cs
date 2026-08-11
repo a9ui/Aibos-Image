@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.Encodings.Web;
@@ -68,6 +69,7 @@ public partial class MainWindow
         string LexicalPath,
         string CanonicalPath,
         long LastWriteTimeUtcTicks,
+        string DatedFolderState,
         IReadOnlyList<string> AdapterIds);
 
     private sealed record RecoveredEnhancementOutputTreeSnapshot(
@@ -467,41 +469,75 @@ public partial class MainWindow
             {
                 if (!folder.Exists || !folder.CanonicallyOwned)
                     continue;
-                string[] files = Directory.GetFiles(
-                    folder.LexicalPath,
-                    "*",
-                    SearchOption.TopDirectoryOnly);
-                _recoveredEnhancementOutputFilesVisited += files.Length;
-                foreach (string file in files)
+                var locations = new List<(string LexicalPath, string CanonicalPath)>
                 {
-                    if (!TryParseRecoveredEnhancementOutputName(
-                            file,
-                            out string jobId,
-                            out string safeBase,
-                            out string sourceHash,
-                            out string presetId,
-                            out string presetHash)
-                        || knownJobIds.Contains(jobId)
-                        || !TryResolveRecoveredEnhancementOutput(
-                            file,
-                            folder.LexicalPath,
-                            folder.CanonicalPath,
-                            out string canonicalOutput,
-                            out DateTimeOffset completedAtUtc))
+                    (folder.LexicalPath, folder.CanonicalPath),
+                };
+                var canonicalLocations = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    folder.CanonicalPath,
+                };
+                foreach (string dateDirectory in Directory.GetDirectories(
+                             folder.LexicalPath,
+                             "*",
+                             SearchOption.TopDirectoryOnly))
+                {
+                    string lexicalDateDirectory = Path.GetFullPath(dateDirectory);
+                    if (!IsRecoveredEnhancementDateFolderName(
+                            Path.GetFileName(Path.TrimEndingDirectorySeparator(
+                                lexicalDateDirectory))))
                     {
                         continue;
                     }
+                    string canonicalDateDirectory = Path.GetFullPath(
+                        _resolveFinalPath(lexicalDateDirectory));
+                    if (IsDirectRecoveredChild(
+                            canonicalDateDirectory,
+                            folder.CanonicalPath)
+                        && canonicalLocations.Add(canonicalDateDirectory))
+                    {
+                        locations.Add((lexicalDateDirectory, canonicalDateDirectory));
+                    }
+                }
 
-                    discovered.Add(new RecoveredEnhancementOutputCandidate(
-                        jobId,
-                        folder.Operation,
-                        safeBase,
-                        sourceHash,
-                        presetId,
-                        presetHash,
-                        canonicalOutput,
-                        completedAtUtc,
-                        folder.AdapterIds));
+                foreach ((string lexicalLocation, string canonicalLocation) in locations)
+                {
+                    string[] files = Directory.GetFiles(
+                        lexicalLocation,
+                        "*",
+                        SearchOption.TopDirectoryOnly);
+                    _recoveredEnhancementOutputFilesVisited += files.Length;
+                    foreach (string file in files)
+                    {
+                        if (!TryParseRecoveredEnhancementOutputName(
+                                file,
+                                out string jobId,
+                                out string safeBase,
+                                out string sourceHash,
+                                out string presetId,
+                                out string presetHash)
+                            || knownJobIds.Contains(jobId)
+                            || !TryResolveRecoveredEnhancementOutput(
+                                file,
+                                lexicalLocation,
+                                canonicalLocation,
+                                out string canonicalOutput,
+                                out DateTimeOffset completedAtUtc))
+                        {
+                            continue;
+                        }
+
+                        discovered.Add(new RecoveredEnhancementOutputCandidate(
+                            jobId,
+                            folder.Operation,
+                            safeBase,
+                            sourceHash,
+                            presetId,
+                            presetHash,
+                            canonicalOutput,
+                            completedAtUtc,
+                            folder.AdapterIds));
+                    }
                 }
             }
             return true;
@@ -621,7 +657,7 @@ public partial class MainWindow
                     string operation,
                     string folderName,
                     IReadOnlyList<string> adapters)
-                    => new(operation, folderName, false, false, "", "", 0, adapters);
+                    => new(operation, folderName, false, false, "", "", 0, "", adapters);
                 snapshot = new RecoveredEnhancementOutputTreeSnapshot(
                     lexicalRoot,
                     "",
@@ -663,12 +699,33 @@ public partial class MainWindow
                         "",
                         "",
                         0,
+                        "",
                         adapters);
                 }
 
                 lexicalFolder = Path.GetFullPath(lexicalFolder);
                 string canonicalFolder = Path.GetFullPath(
                     _resolveFinalPath(lexicalFolder));
+                string datedFolderState = string.Join(
+                    "\n",
+                    Directory.GetDirectories(
+                            lexicalFolder,
+                            "*",
+                            SearchOption.TopDirectoryOnly)
+                        .Select(Path.GetFullPath)
+                        .Where(static directory => IsRecoveredEnhancementDateFolderName(
+                            Path.GetFileName(Path.TrimEndingDirectorySeparator(directory))))
+                        .Select(directory =>
+                        {
+                            string canonicalDirectory = Path.GetFullPath(
+                                _resolveFinalPath(directory));
+                            return IsDirectRecoveredChild(
+                                    canonicalDirectory,
+                                    canonicalFolder)
+                                ? $"{Path.GetFileName(Path.TrimEndingDirectorySeparator(directory))}|{canonicalDirectory}|{Directory.GetLastWriteTimeUtc(directory).Ticks}"
+                                : $"{Path.GetFileName(Path.TrimEndingDirectorySeparator(directory))}|invalid";
+                        })
+                        .OrderBy(static state => state, StringComparer.Ordinal));
                 return new RecoveredEnhancementOutputFolderSnapshot(
                     operation,
                     folderName,
@@ -677,6 +734,7 @@ public partial class MainWindow
                     lexicalFolder,
                     canonicalFolder,
                     Directory.GetLastWriteTimeUtc(lexicalFolder).Ticks,
+                    datedFolderState,
                     adapters);
             }
 
@@ -816,6 +874,18 @@ public partial class MainWindow
                 Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(candidate)) ?? ""),
             Path.TrimEndingDirectorySeparator(parent),
             StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRecoveredEnhancementDateFolderName(string value)
+        => DateOnly.TryParseExact(
+            value,
+            "yyyy-MM-dd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out DateOnly parsed)
+            && string.Equals(
+                parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                value,
+                StringComparison.Ordinal);
 
     private static string BuildRecoveredEnhancementSafeBase(string sourcePath)
     {

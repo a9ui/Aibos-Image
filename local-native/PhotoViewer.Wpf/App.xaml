@@ -15,6 +15,12 @@
     <Color x:Key="AccentFillColor">#FF4E57CF</Color>
     <Color x:Key="AccentFillHoverColor">#FF5962D9</Color>
     <Color x:Key="FavoriteColor">#FFFF4D73</Color>
+    <Color x:Key="PhotorealFavoriteColor">#FF60A5FA</Color>
+    <Color x:Key="PhotorealFavoriteTextColor">#FFDBEAFE</Color>
+    <Color x:Key="PhotorealFavoriteBackgroundColor">#FF172554</Color>
+    <Color x:Key="VideoFavoriteColor">#FFC084FC</Color>
+    <Color x:Key="VideoFavoriteTextColor">#FFF3E8FF</Color>
+    <Color x:Key="VideoFavoriteBackgroundColor">#FF3B0764</Color>
     <Color x:Key="HeaderBgColor">#EB0B0F16</Color>
     <Color x:Key="GlassChromeTopColor">#D9181F2C</Color>
     <Color x:Key="GlassChromeBottomColor">#B8090E17</Color>
@@ -92,6 +98,12 @@
     <SolidColorBrush x:Key="Focus" Color="{DynamicResource FocusColor}"/>
     <SolidColorBrush x:Key="Favorite" Color="{DynamicResource FavoriteColor}"/>
     <SolidColorBrush x:Key="FavoriteText" Color="{DynamicResource FavoriteTextColor}"/>
+    <SolidColorBrush x:Key="PhotorealFavorite" Color="{DynamicResource PhotorealFavoriteColor}"/>
+    <SolidColorBrush x:Key="PhotorealFavoriteText" Color="{DynamicResource PhotorealFavoriteTextColor}"/>
+    <SolidColorBrush x:Key="PhotorealFavoriteBackground" Color="{DynamicResource PhotorealFavoriteBackgroundColor}"/>
+    <SolidColorBrush x:Key="VideoFavorite" Color="{DynamicResource VideoFavoriteColor}"/>
+    <SolidColorBrush x:Key="VideoFavoriteText" Color="{DynamicResource VideoFavoriteTextColor}"/>
+    <SolidColorBrush x:Key="VideoFavoriteBackground" Color="{DynamicResource VideoFavoriteBackgroundColor}"/>
     <SolidColorBrush x:Key="FavoriteThumbnailStatusBorderBrush" Color="{DynamicResource FavoriteThumbnailStatusBorderColor}"/>
     <SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="{DynamicResource EnhancedThumbnailStatusBorderColor}"/>
     <SolidColorBrush x:Key="Success" Color="{DynamicResource SuccessColor}"/>
@@ -774,14 +786,24 @@
           <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3"
                       IsHitTestVisible="False">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-              <Border MinWidth="22" Height="13" Padding="2,0" CornerRadius="3" Margin="0,0,2,0"
-                      Background="#CC172554" BorderBrush="#FF60A5FA" BorderThickness="1"
+              <Border x:Name="compactPhotorealFavoriteBadge" MinWidth="22" Height="13" Padding="2,0" CornerRadius="3" Margin="0,0,2,0"
+                      Background="{DynamicResource PhotorealFavoriteBackground}" BorderBrush="{DynamicResource PhotorealFavorite}" BorderThickness="1"
                       Visibility="{Binding ShowPhotorealFavoriteBadge, Converter={StaticResource BoolToVis}}"
-                      ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写版 Favorite 最大 {0}}"
-                      AutomationProperties.Name="{Binding PhotorealFavoriteLevel, StringFormat={}実写版 Favorite 最大 {0}}">
+                      ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写のお気に入り Lv {0}（有効版の最高Lv）}"
+                      AutomationProperties.Name="{Binding PhotorealFavoriteAutomationName}">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="#FF60A5FA" FontSize="9"/>
-                  <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="#FFBFDBFE" FontSize="8" FontWeight="SemiBold" Margin="1,0,0,0"/>
+                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource PhotorealFavorite}" FontSize="9"/>
+                  <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="{DynamicResource PhotorealFavoriteText}" FontSize="8" FontWeight="SemiBold" Margin="1,0,0,0"/>
+                </StackPanel>
+              </Border>
+              <Border x:Name="compactVideoFavoriteBadge" MinWidth="22" Height="13" Padding="2,0" CornerRadius="3" Margin="0,0,2,0"
+                      Background="{DynamicResource VideoFavoriteBackground}" BorderBrush="{DynamicResource VideoFavorite}" BorderThickness="1"
+                      Visibility="{Binding ShowVideoFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                      ToolTip="{Binding VideoFavoriteLevel, StringFormat={}動画のお気に入り Lv {0}（有効版の最高Lv）}"
+                      AutomationProperties.Name="{Binding VideoFavoriteAutomationName}">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource VideoFavorite}" FontSize="9"/>
+                  <TextBlock Text="{Binding VideoFavoriteLevel}" Foreground="{DynamicResource VideoFavoriteText}" FontSize="8" FontWeight="SemiBold" Margin="1,0,0,0"/>
                 </StackPanel>
               </Border>
             <Border Width="14" Height="13" CornerRadius="3" Margin="0,0,2,0"
@@ -894,14 +916,24 @@
 
                     <!-- Safe direct Favorite increment. Relative decrement is intentionally absent from gallery surfaces. -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="2">
-                      <Border MinWidth="30" Height="26" Padding="5,0" CornerRadius="5" Margin="0,0,2,0"
-                              Background="#CC172554" BorderBrush="#FF60A5FA" BorderThickness="1"
+                      <Border x:Name="photorealFavoriteBadge" MinWidth="30" Height="26" Padding="5,0" CornerRadius="5" Margin="0,0,2,0"
+                              Background="{DynamicResource PhotorealFavoriteBackground}" BorderBrush="{DynamicResource PhotorealFavorite}" BorderThickness="1"
                               Visibility="{Binding ShowPhotorealFavoriteBadge, Converter={StaticResource BoolToVis}}"
-                              ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写版 Favorite 最大 {0}}"
-                              AutomationProperties.Name="{Binding PhotorealFavoriteLevel, StringFormat={}実写版 Favorite 最大 {0}}">
+                              ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写のお気に入り Lv {0}（有効版の最高Lv）}"
+                              AutomationProperties.Name="{Binding PhotorealFavoriteAutomationName}">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="#FF60A5FA" FontSize="14"/>
-                          <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="#FFBFDBFE" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
+                          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource PhotorealFavorite}" FontSize="14"/>
+                          <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="{DynamicResource PhotorealFavoriteText}" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
+                        </StackPanel>
+                      </Border>
+                      <Border x:Name="videoFavoriteBadge" MinWidth="30" Height="26" Padding="5,0" CornerRadius="5" Margin="0,0,2,0"
+                              Background="{DynamicResource VideoFavoriteBackground}" BorderBrush="{DynamicResource VideoFavorite}" BorderThickness="1"
+                              Visibility="{Binding ShowVideoFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                              ToolTip="{Binding VideoFavoriteLevel, StringFormat={}動画のお気に入り Lv {0}（有効版の最高Lv）}"
+                              AutomationProperties.Name="{Binding VideoFavoriteAutomationName}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource VideoFavorite}" FontSize="14"/>
+                          <TextBlock Text="{Binding VideoFavoriteLevel}" Foreground="{DynamicResource VideoFavoriteText}" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
                         </StackPanel>
                       </Border>
                       <Button Style="{StaticResource IconButton}" Width="{Binding CardFavoriteButtonSize}" Height="{Binding CardFavoriteButtonSize}"
@@ -1150,14 +1182,24 @@
                   <TextBlock Text="{Binding Path}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontFamily="{StaticResource MonoFont}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
-                  <Border MinWidth="34" Height="28" Padding="5,0" CornerRadius="5" Margin="0,0,4,0"
-                          Background="#CC172554" BorderBrush="#FF60A5FA" BorderThickness="1"
+                  <Border x:Name="listPhotorealFavoriteBadge" MinWidth="34" Height="28" Padding="5,0" CornerRadius="5" Margin="0,0,4,0"
+                          Background="{DynamicResource PhotorealFavoriteBackground}" BorderBrush="{DynamicResource PhotorealFavorite}" BorderThickness="1"
                           Visibility="{Binding ShowPhotorealFavoriteBadge, Converter={StaticResource BoolToVis}}"
-                          ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写版 Favorite 最大 {0}}"
-                          AutomationProperties.Name="{Binding PhotorealFavoriteLevel, StringFormat={}実写版 Favorite 最大 {0}}">
+                          ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写のお気に入り Lv {0}（有効版の最高Lv）}"
+                          AutomationProperties.Name="{Binding PhotorealFavoriteAutomationName}">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                      <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="#FF60A5FA" FontSize="15"/>
-                      <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="#FFBFDBFE" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
+                      <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource PhotorealFavorite}" FontSize="15"/>
+                      <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="{DynamicResource PhotorealFavoriteText}" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
+                    </StackPanel>
+                  </Border>
+                  <Border x:Name="listVideoFavoriteBadge" MinWidth="34" Height="28" Padding="5,0" CornerRadius="5" Margin="0,0,4,0"
+                          Background="{DynamicResource VideoFavoriteBackground}" BorderBrush="{DynamicResource VideoFavorite}" BorderThickness="1"
+                          Visibility="{Binding ShowVideoFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                          ToolTip="{Binding VideoFavoriteLevel, StringFormat={}動画のお気に入り Lv {0}（有効版の最高Lv）}"
+                          AutomationProperties.Name="{Binding VideoFavoriteAutomationName}">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                      <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource VideoFavorite}" FontSize="15"/>
+                      <TextBlock Text="{Binding VideoFavoriteLevel}" Foreground="{DynamicResource VideoFavoriteText}" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
                     </StackPanel>
                   </Border>
                   <Button Style="{StaticResource IconButton}" MinWidth="34" Width="Auto" Height="28" Padding="5,0" CommandParameter="increase" Tag="{Binding}"

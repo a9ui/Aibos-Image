@@ -885,6 +885,8 @@ public partial class MainWindow
             UpdateI2iEditBoardPresentation(sourceError);
             return false;
         }
+        Func<string?>? prePublishValidator =
+            CaptureExternalFileDropPrePublishValidator(tile);
         if (!_i2iCapabilityReady || _i2iCapabilityCheckPending)
         {
             UpdateI2iEditBoardPresentation(
@@ -956,7 +958,8 @@ public partial class MainWindow
             EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
                 requestBody,
                 healthValidator: ValidateI2iHealth,
-                recoverySourceIdentity: source.SourcePath);
+                recoverySourceIdentity: source.SourcePath,
+                prePublishValidator: prePublishValidator);
             if (response.SavedForDelivery)
             {
                 _i2iRequestPending = false;
