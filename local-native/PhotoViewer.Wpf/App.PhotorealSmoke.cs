@@ -2123,6 +2123,12 @@ public partial class App
                 window.CloseModalForSmoke();
                 Tile? favoriteTile = window.TileForFileForSmoke(
                     sourceFileNameForFavorite);
+                // Card-layout refreshes intentionally notify only realized
+                // containers. Realize this card before asserting the visual
+                // notification contract so the smoke does not require an
+                // O(catalog) notification fan-out for an off-screen Tile.
+                _ = window.FavoriteBadgeVisualsForFileForSmoke(
+                    sourceFileNameForFavorite);
                 int photorealBadgeLayoutNotifications = 0;
                 PropertyChangedEventHandler photorealBadgeLayoutHandler =
                     (_, args) =>
