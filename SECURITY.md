@@ -10,6 +10,11 @@ visibility does not make it a public service.
 - Keep explicit source deletion on the Windows Recycle Bin path; do not add a
   permanent-delete fallback.
 
+Public branches and review material must also follow the repository's
+[publication boundary](docs/publication-boundary.md). A clean working tree is
+not sufficient when a branch still contains private ancestors or an
+unredacted local-development history.
+
 Ordinary WPF viewing does not require a network service. The optional,
 dedicated H25 Enhancement API companion is contacted only over loopback after
 an explicit user action. It opens no Browser window and does not load the
