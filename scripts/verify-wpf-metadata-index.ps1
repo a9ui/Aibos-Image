@@ -3,7 +3,8 @@ param(
     [ValidateRange(32, 2048)]
     [int]$Count = 256,
     [ValidateRange(2, 8)]
-    [int]$FolderCount = 4
+    [int]$FolderCount = 4,
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,8 +55,10 @@ try {
         [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $dotnetRoot)
     }
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
-    & $dotnet build $project -c $Configuration --nologo -v:minimal
-    if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
+    if (-not $SkipBuild) {
+        & $dotnet build $project -c $Configuration --nologo -v:minimal
+        if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
+    }
 
     $process = Start-Process -FilePath $exe `
         -ArgumentList @(
@@ -99,6 +102,10 @@ try {
     Assert-True ($result.legacyMigration.legacyPreserved -eq $true) 'Legacy metadata evidence was unexpectedly removed during migration.'
     Assert-True ($result.rowDeltaRollback.passed -eq $true) 'Rejected SQLite row delta did not roll back atomically.'
     Assert-True ($result.rowDeltaRollback.revisionBefore -eq $result.rowDeltaRollback.revisionAfter) 'Rejected SQLite row delta changed the durable revision.'
+    Assert-True ($result.concurrentReaderRebuild.passed -eq $true) 'Live-reader SQLite full rebuild scenario failed.'
+    Assert-True ($result.concurrentReaderRebuild.walPresentAfterDelta -eq $true) 'Concurrent metadata fixture did not retain committed WAL frames behind the live reader.'
+    Assert-True ($result.concurrentReaderRebuild.walPreservedDuringFullSave -eq $true) 'Full rebuild detached or deleted the live SQLite WAL family.'
+    Assert-True ($result.concurrentReaderRebuild.readerSnapshotCount -eq $Count -and $result.concurrentReaderRebuild.durableEntryCount -eq $Count) 'Concurrent reader/full rebuild did not preserve both snapshots.'
 
     Assert-True ($result.warm.passed -eq $true) 'Separate-window warm metadata scenario failed.'
     Assert-True ($result.warm.cacheHits -eq $Count -and $result.warm.cacheMisses -eq 0) 'Warm metadata load was not an all-hit reuse.'
@@ -109,10 +116,11 @@ try {
     Assert-True ($result.partialInvalidation.refreshedPromptReady -eq $true) 'Single-file mutation did not expose the refreshed prompt.'
     Assert-True ($result.partialInvalidation.rowDeltaCommitted -eq $true) 'Single-file mutation did not commit exactly one SQLite row-delta revision.'
 
-    Assert-True ($result.corruptionRecovery.passed -eq $true) 'SQLite corruption recovery scenario failed.'
+    Assert-True ($result.corruptionRecovery.passed -eq $true) 'Unreadable SQLite target preservation scenario failed.'
     Assert-True ($result.corruptionRecovery.corruptionDetected -eq $true) 'Malformed SQLite metadata cache was not rejected.'
-    Assert-True ($result.corruptionRecovery.cacheHits -eq 0 -and $result.corruptionRecovery.cacheMisses -eq $Count) 'Corrupt metadata index did not safely fall back for every source.'
-    Assert-True ($result.corruptionRecovery.rebuiltEntryCount -eq $Count) 'Corrupt metadata index was not rebuilt completely.'
+    Assert-True ($result.corruptionRecovery.cacheHits -eq 0 -and $result.corruptionRecovery.cacheMisses -eq $Count) 'Corrupt metadata index did not safely fall back to source metadata.'
+    Assert-True ($result.corruptionRecovery.bytesUnchanged -eq $true -and $result.corruptionRecovery.mtimeUnchanged -eq $true) 'Unreadable SQLite target was overwritten or modified.'
+    Assert-True ($result.corruptionRecovery.preservedLoadState -eq 'Invalid') 'Unreadable SQLite target was not preserved fail-closed.'
 
     Assert-True ($result.futureVersionProtection.passed -eq $true) 'Future metadata index protection scenario failed.'
     Assert-True ($result.futureVersionProtection.loadState -eq 'Unsupported') 'Future metadata index was not classified as Unsupported.'

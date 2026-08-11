@@ -217,14 +217,72 @@ internal static class MetadataIndexStore
         {
             Directory.CreateDirectory(directory);
             lockStream = AcquireWriterLock(lockPath, token);
-            if (TryReadExistingSchemaVersion(fullPath, out int existingVersion)
-                && existingVersion > SchemaVersion)
+            if (File.Exists(fullPath))
             {
-                return MetadataIndexSaveResult.Preserved(
-                    fullPath,
-                    entries.Count,
-                    $"newer metadata cache schema version {existingVersion} was preserved at commit time",
-                    MetadataIndexSaveDisposition.Protected);
+                int existingVersion;
+                try
+                {
+                    existingVersion = ReadExistingSchemaVersion(fullPath);
+                }
+                catch (Exception ex) when (IsRecoverableStoreException(ex))
+                {
+                    return MetadataIndexSaveResult.Failed(
+                        fullPath,
+                        $"existing metadata cache was unreadable and preserved: {ex.GetType().Name}: {ex.Message}");
+                }
+                if (existingVersion > SchemaVersion)
+                {
+                    return MetadataIndexSaveResult.Preserved(
+                        fullPath,
+                        entries.Count,
+                        $"newer metadata cache schema version {existingVersion} was preserved at commit time",
+                        MetadataIndexSaveDisposition.Protected);
+                }
+                if (existingVersion != SchemaVersion)
+                {
+                    return MetadataIndexSaveResult.Failed(
+                        fullPath,
+                        $"existing metadata cache schema version {existingVersion} was preserved because it cannot be rebuilt safely");
+                }
+
+                // A WAL database is one live family. Rebuild a readable v1
+                // target inside SQLite so concurrent readers keep their old
+                // snapshot and committed WAL frames are never detached by
+                // file-level replacement.
+                using SqliteConnection connection = OpenConnection(fullPath, SqliteOpenMode.ReadWrite);
+                ConfigureWriter(connection);
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using (SqliteCommand clear = connection.CreateCommand())
+                {
+                    clear.Transaction = transaction;
+                    clear.CommandText = "DELETE FROM metadata;";
+                    _ = clear.ExecuteNonQuery();
+                }
+                using (SqliteCommand insert = CreateInsertCommand(connection, transaction, updateExisting: false))
+                {
+                    int index = 0;
+                    foreach (MetadataIndexEntry entry in entries)
+                    {
+                        if ((index & 255) == 0)
+                            token.ThrowIfCancellationRequested();
+                        ValidateEntry(entry, index);
+                        BindEntry(insert, entry);
+                        if (insert.ExecuteNonQuery() != 1)
+                            throw new InvalidDataException($"metadata cache entry {index} was not inserted exactly once");
+                        index++;
+                    }
+                }
+                using (SqliteCommand revision = connection.CreateCommand())
+                {
+                    revision.Transaction = transaction;
+                    revision.CommandText = "UPDATE store_meta SET entry_revision = entry_revision + 1 WHERE singleton = 1;";
+                    if (revision.ExecuteNonQuery() != 1)
+                        throw new InvalidDataException("metadata cache revision row was unavailable");
+                }
+                CheckExpectedEntryCount(connection, entries.Count, transaction);
+                transaction.Commit();
+                Checkpoint(connection, required: false);
+                return MetadataIndexSaveResult.Saved(fullPath, entries.Count);
             }
 
             CleanupStaleTemporaryFiles(directory, temporaryToken, token);
@@ -253,8 +311,9 @@ internal static class MetadataIndexStore
 
             token.ThrowIfCancellationRequested();
             FlushFile(temporaryPath);
-            DeleteSqliteSidecarsForReplacement(fullPath);
-            File.Move(temporaryPath, fullPath, overwrite: true);
+            // The target was absent while holding the writer lock. Do not
+            // overwrite a file that appeared unexpectedly after that check.
+            File.Move(temporaryPath, fullPath);
             TryDeleteSqliteSidecars(temporaryPath);
             return MetadataIndexSaveResult.Saved(fullPath, entries.Count);
         }
@@ -526,23 +585,6 @@ internal static class MetadataIndexStore
         _ = StrictUtf8.GetCharCount(promptUtf8);
     }
 
-    private static bool TryReadExistingSchemaVersion(string path, out int version)
-    {
-        version = 0;
-        if (!File.Exists(path))
-            return false;
-        try
-        {
-            using SqliteConnection connection = OpenConnection(path, SqliteOpenMode.ReadOnly);
-            version = ReadSchemaVersion(connection);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static int ReadExistingSchemaVersion(string path)
     {
         if (!File.Exists(path))
@@ -584,16 +626,6 @@ internal static class MetadataIndexStore
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
         stream.Flush(flushToDisk: true);
-    }
-
-    private static void DeleteSqliteSidecarsForReplacement(string path)
-    {
-        foreach (string suffix in new[] { "-wal", "-shm", "-journal" })
-        {
-            string sidecar = path + suffix;
-            if (File.Exists(sidecar))
-                File.Delete(sidecar);
-        }
     }
 
     private static bool IsRecoverableStoreException(Exception ex)

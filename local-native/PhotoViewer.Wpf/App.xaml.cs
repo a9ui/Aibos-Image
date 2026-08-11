@@ -9341,6 +9341,35 @@ public partial class App : Application
                 await first.LoadFolderAsync(aspectFolder);
                 bool metadataReady = await first.WaitForCatalogImageDimensionsForSmokeAsync();
                 int metadataLayoutPublishCount = first.MetadataOriginalAspectLayoutPublishCountForSmoke;
+                int metadataFallbackBefore = first.MetadataOriginalAspectLayoutFallbackCountForSmoke;
+                int discardedBefore = first.CatalogProjectionDiscardedCountForSmoke;
+                using var projectionEntered = new ManualResetEventSlim(false);
+                using var projectionRelease = new ManualResetEventSlim(false);
+                first.ConfigureCatalogProjectionComputeGateForSmoke(projectionEntered, projectionRelease);
+                Task<MainWindow.SearchFilterCompletion> metadataRaceTask = first.PublishCompletedMetadataLayoutForSmokeAsync();
+                var projectionWait = Stopwatch.StartNew();
+                while (!projectionEntered.IsSet
+                    && !metadataRaceTask.IsCompleted
+                    && projectionWait.ElapsedMilliseconds < 5_000)
+                {
+                    await Task.Delay(5);
+                }
+                bool metadataRaceComputeEntered = projectionEntered.IsSet;
+                bool metadataRaceSelectionChanged = metadataRaceComputeEntered
+                    && first.SelectFileNameForSmoke("charlie-portrait.png");
+                projectionRelease.Set();
+                MainWindow.SearchFilterCompletion metadataRaceCompletion = await metadataRaceTask;
+                first.ConfigureCatalogProjectionComputeGateForSmoke(null, null);
+                await Task.Delay(20);
+                DisplayStyleMetrics metadataRacePortrait = first.DisplayStyleMetricsForSmoke("charlie-portrait.png");
+                bool metadataSelectionRaceRecovered = metadataRaceComputeEntered
+                    && metadataRaceSelectionChanged
+                    && metadataRaceCompletion.Discarded
+                    && first.CatalogProjectionDiscardedCountForSmoke == discardedBefore + 1
+                    && first.MetadataOriginalAspectLayoutFallbackCountForSmoke == metadataFallbackBefore + 1
+                    && !first.MetadataOriginalAspectLayoutPendingForSmoke
+                    && string.Equals(first.SelectedFileNameForSmoke, "charlie-portrait.png", StringComparison.OrdinalIgnoreCase)
+                    && Math.Abs((metadataRacePortrait.CardHeight / metadataRacePortrait.CardWidth) - 1.5) < 0.03;
                 int filtered = first.FilteredCountForSmoke;
                 List<string> initialOrder = first.FilteredFileNamesForSmoke(3);
                 bool selectedBravo = first.SelectFileNameForSmoke("bravo-square.png");
@@ -9427,13 +9456,14 @@ public partial class App : Application
                     && zoomComposes
                     && runtimeRestore
                     && persistence
-                    && metadataLayoutCoalesced;
+                    && metadataLayoutCoalesced
+                    && metadataSelectionRaceRecovered;
 
                 result = new AspectSmokeResult
                 {
                     Ok = ok,
                     Message = ok
-                        ? "late metadata published Original card geometry once after multiple decode batches; aspect controls preserved order/selection, composed with zoom, and restored from WPF state"
+                        ? "late metadata published Original card geometry once after multiple decode batches; selection-discard fallback completed exactly once; aspect controls preserved order/selection, composed with zoom, and restored from WPF state"
                         : "aspect smoke did not meet dimension/order/selection/persistence expectations",
                     Folder = aspectFolder,
                     ProjectRoot = smokeRoot,
@@ -9464,6 +9494,12 @@ public partial class App : Application
                     MetadataReady = metadataReady,
                     MetadataLayoutPublishCount = metadataLayoutPublishCount,
                     MetadataLayoutCoalesced = metadataLayoutCoalesced,
+                    MetadataRaceComputeEntered = metadataRaceComputeEntered,
+                    MetadataRaceSelectionChanged = metadataRaceSelectionChanged,
+                    MetadataRaceDiscarded = metadataRaceCompletion.Discarded,
+                    MetadataRaceFallbackCount = first.MetadataOriginalAspectLayoutFallbackCountForSmoke - metadataFallbackBefore,
+                    MetadataRacePendingAtEnd = first.MetadataOriginalAspectLayoutPendingForSmoke,
+                    MetadataSelectionRaceRecovered = metadataSelectionRaceRecovered,
                     SquareShape = squareShape,
                     PortraitShape = portraitShape,
                     OriginalShape = originalShape,
@@ -25642,6 +25678,71 @@ public partial class App : Application
                     ["durableEntryCount"] = rollbackProbe.Entries.Count,
                 };
 
+                MetadataIndexEntry concurrentEntry = new(
+                    rollbackProbeEntry.Path,
+                    rollbackProbeEntry.SourceLength,
+                    rollbackProbeEntry.SourceLastWriteUtcTicks,
+                    rollbackProbeEntry.SourceCreationUtcTicks,
+                    rollbackProbeEntry.Width,
+                    rollbackProbeEntry.Height,
+                    MetadataIndexStore.EncodePrompt("concurrent-reader-full-rebuild"));
+                MetadataIndexEntry[] concurrentSnapshot = migratedProbe.Entries.Values.ToArray();
+                MetadataIndexSaveResult concurrentDelta;
+                MetadataIndexSaveResult concurrentFullSave;
+                bool walPresentAfterDelta;
+                bool walPreservedDuringFullSave;
+                long readerSnapshotCount;
+                using (SqliteConnection liveReader = OpenMetadataIndexForSmoke(indexPath, SqliteOpenMode.ReadOnly))
+                using (SqliteTransaction liveReadTransaction = liveReader.BeginTransaction())
+                {
+                    using (SqliteCommand readerCount = liveReader.CreateCommand())
+                    {
+                        readerCount.Transaction = liveReadTransaction;
+                        readerCount.CommandText = "SELECT COUNT(*) FROM metadata;";
+                        readerSnapshotCount = (long)(readerCount.ExecuteScalar()
+                            ?? throw new InvalidDataException("live metadata reader count was unavailable"));
+                    }
+                    concurrentDelta = MetadataIndexStore.ApplyChanges(
+                        indexPath,
+                        [concurrentEntry],
+                        Array.Empty<string>(),
+                        count,
+                        CancellationToken.None);
+                    walPresentAfterDelta = File.Exists(indexPath + "-wal");
+                    concurrentFullSave = MetadataIndexStore.Save(
+                        indexPath,
+                        concurrentSnapshot,
+                        CancellationToken.None);
+                    walPreservedDuringFullSave = File.Exists(indexPath + "-wal");
+                    using SqliteCommand readerCountAfter = liveReader.CreateCommand();
+                    readerCountAfter.Transaction = liveReadTransaction;
+                    readerCountAfter.CommandText = "SELECT COUNT(*) FROM metadata;";
+                    readerSnapshotCount = (long)(readerCountAfter.ExecuteScalar()
+                        ?? throw new InvalidDataException("live metadata reader snapshot was unavailable after rebuild"));
+                }
+                MetadataIndexLoadResult concurrentProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
+                bool concurrentReaderRebuildPassed = concurrentDelta.Ok
+                    && concurrentDelta.Written
+                    && concurrentFullSave.Ok
+                    && concurrentFullSave.Written
+                    && walPresentAfterDelta
+                    && walPreservedDuringFullSave
+                    && readerSnapshotCount == count
+                    && concurrentProbe.State == MetadataIndexLoadState.Loaded
+                    && concurrentProbe.Entries.Count == count
+                    && concurrentProbe.Entries.TryGetValue(concurrentEntry.Path, out MetadataIndexEntry? concurrentStored)
+                    && concurrentStored.PromptUtf8.SequenceEqual(rollbackProbeEntry.PromptUtf8);
+                var concurrentReaderRebuild = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = concurrentReaderRebuildPassed,
+                    ["deltaOk"] = concurrentDelta.Ok,
+                    ["fullSaveOk"] = concurrentFullSave.Ok,
+                    ["walPresentAfterDelta"] = walPresentAfterDelta,
+                    ["walPreservedDuringFullSave"] = walPreservedDuringFullSave,
+                    ["readerSnapshotCount"] = readerSnapshotCount,
+                    ["durableEntryCount"] = concurrentProbe.Entries.Count,
+                };
+
                 string coldIndexFingerprint = FileFingerprint(indexPath);
                 long coldIndexWriteTicks = File.GetLastWriteTimeUtc(indexPath).Ticks;
                 var warmWindow = CreateSmokeWindow();
@@ -25707,26 +25808,35 @@ public partial class App : Application
                 RestoreMetadataIndexBytes(
                     indexPath,
                     Encoding.UTF8.GetBytes("not-a-sqlite-metadata-index"));
+                string corruptFingerprintBefore = FileFingerprint(indexPath);
+                long corruptWriteTicksBefore = File.GetLastWriteTimeUtc(indexPath).Ticks;
                 MetadataIndexLoadResult corruptProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
                 bool corruptionDetected = corruptProbe.State == MetadataIndexLoadState.Invalid;
                 var corruptWindow = CreateSmokeWindow();
                 var corruptObservation = await LoadAndObserveAsync(corruptWindow);
                 Dictionary<string, object?> corruption = LoadSnapshot(corruptWindow, corruptObservation);
-                MetadataIndexLoadResult rebuiltProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
+                string corruptFingerprintAfter = FileFingerprint(indexPath);
+                long corruptWriteTicksAfter = File.GetLastWriteTimeUtc(indexPath).Ticks;
+                MetadataIndexLoadResult preservedCorruptProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
                 bool corruptionPassed = corruptionDetected
                     && string.Equals(corruption["loadState"] as string, MetadataIndexLoadState.Invalid.ToString(), StringComparison.Ordinal)
                     && Convert.ToInt32(corruption["cacheHits"]) == 0
                     && Convert.ToInt32(corruption["cacheMisses"]) == count
-                    && Convert.ToBoolean(corruption["indexSaveSucceeded"])
-                    && rebuiltProbe.State == MetadataIndexLoadState.Loaded
-                    && rebuiltProbe.Entries.Count == count
-                    && (corruption["statusText"] as string)?.Contains("damaged index rebuilt", StringComparison.OrdinalIgnoreCase) == true;
+                    && !Convert.ToBoolean(corruption["indexSaveSucceeded"])
+                    && string.Equals(corruption["status"] as string, "save-failed", StringComparison.Ordinal)
+                    && preservedCorruptProbe.State == MetadataIndexLoadState.Invalid
+                    && string.Equals(corruptFingerprintBefore, corruptFingerprintAfter, StringComparison.Ordinal)
+                    && corruptWriteTicksBefore == corruptWriteTicksAfter
+                    && (corruption["indexSaveMessage"] as string)?.Contains("preserved", StringComparison.OrdinalIgnoreCase) == true;
                 corruption["passed"] = corruptionPassed;
                 corruption["corruptionDetected"] = corruptionDetected;
                 corruption["probeError"] = corruptProbe.Error;
-                corruption["rebuiltEntryCount"] = rebuiltProbe.Entries.Count;
+                corruption["bytesUnchanged"] = string.Equals(corruptFingerprintBefore, corruptFingerprintAfter, StringComparison.Ordinal);
+                corruption["mtimeUnchanged"] = corruptWriteTicksBefore == corruptWriteTicksAfter;
+                corruption["preservedLoadState"] = preservedCorruptProbe.State.ToString();
                 corruptWindow.Close();
 
+                RestoreMetadataIndexBytes(indexPath, cleanRebuiltBytes);
                 byte[] validIndexBytes = File.ReadAllBytes(indexPath);
                 SetMetadataIndexSchemaVersion(indexPath, 2);
                 string futureFingerprintBefore = FileFingerprint(indexPath);
@@ -25754,7 +25864,7 @@ public partial class App : Application
 
                 MetadataIndexSaveResult guardedSave = MetadataIndexStore.Save(
                     indexPath,
-                    rebuiltProbe.Entries.Values.ToArray(),
+                    concurrentProbe.Entries.Values.ToArray(),
                     CancellationToken.None);
                 string commitGuardFingerprintAfter = FileFingerprint(indexPath);
                 long commitGuardWriteTicksAfter = File.GetLastWriteTimeUtc(indexPath).Ticks;
@@ -25964,6 +26074,7 @@ public partial class App : Application
                 result["cold"] = cold;
                 result["legacyMigration"] = migration;
                 result["rowDeltaRollback"] = rowDeltaRollback;
+                result["concurrentReaderRebuild"] = concurrentReaderRebuild;
                 result["warm"] = warm;
                 result["partialInvalidation"] = partial;
                 result["corruptionRecovery"] = corruption;
@@ -25977,6 +26088,7 @@ public partial class App : Application
                     && coldPassed
                     && migrationPassed
                     && rowDeltaRollbackPassed
+                    && concurrentReaderRebuildPassed
                     && warmPassed
                     && partialPassed
                     && corruptionPassed
@@ -26054,7 +26166,7 @@ public partial class App : Application
                 result["environmentRestored"] = environmentRestored;
                 result["ok"] = allPassed;
                 result["message"] = allPassed
-                    ? "Persistent SQLite metadata index cold, legacy migration, warm, row-delta invalidation, corruption, bounded malformed input, future-version commit guard, decode failure preservation, stale-entry pruning, cancellation, progress, and isolation contracts passed."
+                    ? "Persistent SQLite metadata index cold, legacy migration, live-reader-safe full rebuild, warm, row-delta invalidation, unreadable-target preservation, bounded malformed input, future-version commit guard, decode failure preservation, stale-entry pruning, cancellation, progress, and isolation contracts passed."
                     : result["message"] is string message && !string.Equals(message, "metadata index smoke did not complete", StringComparison.Ordinal)
                         ? message
                         : "one or more metadata index contracts failed";
@@ -30450,6 +30562,12 @@ public partial class App : Application
         public bool MetadataReady { get; init; }
         public int MetadataLayoutPublishCount { get; init; }
         public bool MetadataLayoutCoalesced { get; init; }
+        public bool MetadataRaceComputeEntered { get; init; }
+        public bool MetadataRaceSelectionChanged { get; init; }
+        public bool MetadataRaceDiscarded { get; init; }
+        public int MetadataRaceFallbackCount { get; init; }
+        public bool MetadataRacePendingAtEnd { get; init; }
+        public bool MetadataSelectionRaceRecovered { get; init; }
         public bool SquareShape { get; init; }
         public bool PortraitShape { get; init; }
         public bool OriginalShape { get; init; }
