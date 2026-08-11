@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = 'Release',
-    [string]$OutputPath = (Join-Path $env:TEMP ('photoviewer-wpf-prompt-tag-search-' + [guid]::NewGuid().ToString('N') + '.json'))
+    [string]$OutputPath = (Join-Path $env:TEMP ('photoviewer-wpf-prompt-tag-search-' + [guid]::NewGuid().ToString('N') + '.json')),
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,8 +11,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
 
-dotnet build $project -c $Configuration --nologo
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $SkipBuild) {
+    dotnet build $project -c $Configuration --nologo
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 Remove-Item -LiteralPath $OutputPath -ErrorAction SilentlyContinue
 $process = Start-Process -FilePath $exe `
