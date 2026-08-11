@@ -179,8 +179,13 @@ public partial class MainWindow
         prior?.Cancel();
         prior?.Dispose();
         _videoH3RewritePending = true;
+        void SetStatusIfCurrent(string message)
+        {
+            if (generation == _videoH3RewriteGeneration)
+                SetVideoH3PromptRewriteStatus(message);
+        }
         RefreshVideoH3PromptRewriteControls(updateStatus: false);
-        SetVideoH3PromptRewriteStatus(VideoH3Localized(
+        SetStatusIfCurrent(VideoH3Localized(
             "UiVideoH3StatusWorking",
             "画像と入力を確認し、H3向け候補を作成しています…"));
 
@@ -196,7 +201,7 @@ public partial class MainWindow
                     baseMode,
                     baseContextRevision))
             {
-                SetVideoH3PromptRewriteStatus(VideoH3Localized(
+                SetStatusIfCurrent(VideoH3Localized(
                     "UiVideoH3StatusStaleResponse",
                     "作成中に入力・画像・Model・Styleが変わったため、結果を採用しませんでした。"));
                 return false;
@@ -221,14 +226,14 @@ public partial class MainWindow
                 maxResponseBytes: MaxVideoH3PromptRewriteResponseBytes);
             if (cts.IsCancellationRequested)
             {
-                SetVideoH3PromptRewriteStatus(VideoH3Localized(
+                SetStatusIfCurrent(VideoH3Localized(
                     "UiVideoH3StatusCanceled",
                     "H3語化を中止しました。動画ジョブは追加していません。"));
                 return false;
             }
             if (!response.Ok || response.Payload is not JsonElement payload)
             {
-                SetVideoH3PromptRewriteStatus(
+                SetStatusIfCurrent(
                     string.IsNullOrWhiteSpace(response.Error)
                         ? VideoH3Localized(
                             "UiVideoH3StatusInvalidResponse",
@@ -246,7 +251,7 @@ public partial class MainWindow
                     expectedSourceSha256,
                     StringComparison.Ordinal))
             {
-                SetVideoH3PromptRewriteStatus(VideoH3Localized(
+                SetStatusIfCurrent(VideoH3Localized(
                     "UiVideoH3StatusInvalidResponse",
                     "H3語化の応答を確認できません。入力プロンプトは変更していません。"));
                 return false;
@@ -259,7 +264,7 @@ public partial class MainWindow
                     baseMode,
                     baseContextRevision))
             {
-                SetVideoH3PromptRewriteStatus(VideoH3Localized(
+                SetStatusIfCurrent(VideoH3Localized(
                     "UiVideoH3StatusStaleResponse",
                     "作成中に入力・画像・Model・Styleが変わったため、結果を採用しませんでした。"));
                 return false;
@@ -274,14 +279,14 @@ public partial class MainWindow
             _videoH3CandidateRewriteRevision = rewriteRevision;
             _videoH3CandidateSourceSha256 = sourceSha256;
             RefreshVideoH3PromptRewriteControls(updateStatus: false);
-            SetVideoH3PromptRewriteStatus(VideoH3Localized(
+            SetStatusIfCurrent(VideoH3Localized(
                 "UiVideoH3StatusReady",
                 "候補を編集できます。動画生成にはまだ使われていません。"));
             return true;
         }
         catch (OperationCanceledException)
         {
-            SetVideoH3PromptRewriteStatus(VideoH3Localized(
+            SetStatusIfCurrent(VideoH3Localized(
                 "UiVideoH3StatusCanceled",
                 "H3語化を中止しました。動画ジョブは追加していません。"));
             return false;
@@ -292,7 +297,7 @@ public partial class MainWindow
                 or ArgumentException
                 or NotSupportedException)
         {
-            SetVideoH3PromptRewriteStatus(VideoH3Localized(
+            SetStatusIfCurrent(VideoH3Localized(
                 "UiVideoH3StatusSourceUnavailable",
                 "H3語化する画像が見つかりません。入力を選び直してください。"));
             return false;
@@ -400,7 +405,7 @@ public partial class MainWindow
             _videoPromptAfterH3Apply = null;
         }
         if (cancelPending && _videoH3RewritePending)
-            _videoH3RewriteCts?.Cancel();
+            CancelVideoH3PromptRewrite();
         RefreshVideoH3PromptRewriteControls();
     }
 
@@ -869,6 +874,8 @@ public partial class MainWindow
         ModalVideoH3ApplyPromptButton.IsEnabled;
     public bool VideoH3PromptCandidateEditableForSmoke =>
         ModalVideoH3PromptCandidateTextBox.IsEnabled;
+    public bool VideoH3PromptRewritePendingForSmoke =>
+        _videoH3RewritePending;
     public bool VideoH3PromptUndoEnabledForSmoke =>
         ModalVideoH3UndoPromptButton.IsEnabled;
     public string VideoH3PromptRewriteStatusForSmoke =>

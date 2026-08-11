@@ -15954,9 +15954,7 @@ public partial class MainWindow : Window
         ModalI2iEditButton.Visibility = compact
             ? Visibility.Collapsed
             : Visibility.Visible;
-        ModalI2iV2EditButton.Visibility = compact
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        ModalI2iV2EditButton.Visibility = Visibility.Collapsed;
         ModalShortcutsButton.Visibility = Visibility.Collapsed;
         ModalDeleteButton.Visibility = Visibility.Collapsed;
         ModalOpenExternalButton.Visibility = Visibility.Collapsed;

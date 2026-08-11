@@ -194,6 +194,8 @@ public partial class App
 
                     bool aiSourcesAvailable =
                         window.ExternalFileDropExplicitAiSourcesAvailableForSmoke;
+                    bool unifiedI2iEditEntry =
+                        window.ExerciseUnifiedI2iEditEntryForSmoke();
                     int deleteBackendCalls = 0;
                     window.SetRecycleBinDeleteBackendForSmoke(_ =>
                     {
@@ -242,6 +244,63 @@ public partial class App
                             FileFingerprint(environment[
                                 "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"]!),
                             StringComparison.Ordinal);
+                    int unifiedRouteHealthGets = 0;
+                    int unifiedRouteMutations = 0;
+                    var hairHealthEntered = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    var releaseHairHealth = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    window.ConfigureModalEnhancementForSmoke(async (request, token) =>
+                    {
+                        if (request.Method == HttpMethod.Get
+                            && request.RequestUri?.AbsolutePath.EndsWith(
+                                "/api/enhance/health",
+                                StringComparison.Ordinal) == true)
+                        {
+                            int requestNumber = Interlocked.Increment(
+                                ref unifiedRouteHealthGets);
+                            if (requestNumber == 1)
+                            {
+                                hairHealthEntered.TrySetResult(true);
+                                await releaseHairHealth.Task.WaitAsync(token);
+                            }
+                            return new HttpResponseMessage(
+                                HttpStatusCode.ServiceUnavailable);
+                        }
+                        Interlocked.Increment(ref unifiedRouteMutations);
+                        return new HttpResponseMessage(
+                            HttpStatusCode.InternalServerError);
+                    });
+                    Task<bool> openingHairBoard =
+                        window.OpenModalI2iEditBoardForSmokeAsync();
+                    await hairHealthEntered.Task.WaitAsync(
+                        TimeSpan.FromSeconds(10));
+                    bool openedMultiBoard =
+                        await window.OpenModalI2iV2EditBoardForSmokeAsync();
+                    bool multiRetiredPendingHair = openedMultiBoard
+                        && !window.I2iEditBoardVisibleForSmoke
+                        && window.I2iV2EditBoardVisibleForSmoke;
+                    releaseHairHealth.TrySetResult(true);
+                    bool supersededHairOpened = await openingHairBoard;
+                    bool reopenedHairBoard =
+                        await window.OpenModalI2iEditBoardForSmokeAsync();
+                    bool hairRetiredMulti = reopenedHairBoard
+                        && !supersededHairOpened
+                        && window.I2iEditBoardVisibleForSmoke
+                        && !window.I2iV2EditBoardVisibleForSmoke;
+                    window.CloseI2iEditBoardsForSmoke();
+                    bool unifiedI2iRouteSerialized = multiRetiredPendingHair
+                        && hairRetiredMulti
+                        && !window.I2iEditBoardVisibleForSmoke
+                        && !window.I2iV2EditBoardVisibleForSmoke
+                        && unifiedRouteHealthGets == 3
+                        && unifiedRouteMutations == 0;
+                    window.ConfigureModalEnhancementForSmoke((_, _) =>
+                    {
+                        Interlocked.Increment(ref companionCalls);
+                        return Task.FromResult(new HttpResponseMessage(
+                            HttpStatusCode.ServiceUnavailable));
+                    });
                     bool stateUnchangedWhileOpen = string.Equals(
                             stateBefore,
                             FileFingerprint(environment[
@@ -905,6 +964,8 @@ public partial class App
                         && favoriteRolledBack
                         && favoriteRetryApplied
                         && aiSourcesAvailable
+                        && unifiedI2iEditEntry
+                        && unifiedI2iRouteSerialized
                         && deleteRequestRejected
                         && passive
                         && stateUnchangedWhileOpen
@@ -944,6 +1005,10 @@ public partial class App
                         favoriteRolledBack,
                         favoriteRetryApplied,
                         aiSourcesAvailable,
+                        unifiedI2iEditEntry,
+                        unifiedI2iRouteSerialized,
+                        unifiedRouteHealthGets,
+                        unifiedRouteMutations,
                         deleteRequestRejected,
                         passive,
                         companionCalls,

@@ -1297,6 +1297,35 @@ public partial class MainWindow
             firstIssue ??= DescribeEnhancementQueueHealthIssue(issueElement.GetString());
         }
 
+        if (!TryReadOptionalHealthTimestamp(
+                runtimeElement,
+                "serverStartedAtUtc",
+                out string serverStartedAtSignature)
+            || serverStartedAtSignature == "-"
+            || !runtimeElement.TryGetProperty(
+                "processId",
+                out JsonElement processIdElement)
+            || !processIdElement.TryGetInt32(out int processId)
+            || processId <= 0)
+        {
+            return false;
+        }
+        string buildIdSignature = "-";
+        if (!runtimeElement.TryGetProperty("buildId", out JsonElement buildIdElement))
+        {
+            return false;
+        }
+        if (buildIdElement.ValueKind == JsonValueKind.String)
+        {
+            string? buildId = buildIdElement.GetString();
+            if (!string.IsNullOrWhiteSpace(buildId))
+                buildIdSignature = buildId;
+        }
+        else if (buildIdElement.ValueKind != JsonValueKind.Null)
+        {
+            return false;
+        }
+
         string revision = "H25 revision unavailable";
         if (runtimeElement.TryGetProperty("sourceRevision", out JsonElement revisionElement))
         {
@@ -1350,6 +1379,21 @@ public partial class MainWindow
             {
                 currentUpdatedAt = updatedAt;
             }
+        }
+        if (!TryReadOptionalHealthTimestamp(
+                jobsElement,
+                "lastClaimAt",
+                out string lastClaimAtSignature)
+            || !TryReadOptionalHealthTimestamp(
+                jobsElement,
+                "lastProgressAt",
+                out _)
+            || !TryReadOptionalHealthTimestamp(
+                jobsElement,
+                "lastTerminalAt",
+                out string lastTerminalAtSignature))
+        {
+            return false;
         }
 
         if (runtimeElement.TryGetProperty("sourceDirty", out JsonElement dirtyElement))
@@ -1457,8 +1501,12 @@ public partial class MainWindow
             "working" => "AccentLight",
             _ => "Warning",
         };
+        // Progress is applied directly from the compact health payload. Claim,
+        // terminal, and companion-process identity belong in the inventory
+        // signature because they catch a same-count replacement or a companion
+        // restart without restoring full polling on each progress tick.
         string inventorySignature = FormattableString.Invariant(
-            $"{queued}|{running}|{succeeded}|{failed}|{canceled}|{deleted}|{currentJobId ?? "-"}");
+            $"{queued}|{running}|{succeeded}|{failed}|{canceled}|{deleted}|{currentJobId ?? "-"}|{lastClaimAtSignature}|{lastTerminalAtSignature}|{serverStartedAtSignature}|{processId}|{buildIdSignature}");
         health = new EnhancementQueueHealthView(
             stateLabel,
             detail,
@@ -1483,6 +1531,32 @@ public partial class MainWindow
         return counts.TryGetProperty(propertyName, out JsonElement countElement)
             && countElement.TryGetInt32(out value)
             && value >= 0;
+    }
+
+    private static bool TryReadOptionalHealthTimestamp(
+        JsonElement parent,
+        string propertyName,
+        out string signature)
+    {
+        signature = "-";
+        if (!parent.TryGetProperty(propertyName, out JsonElement element))
+            return false;
+        if (element.ValueKind == JsonValueKind.Null)
+            return true;
+        if (element.ValueKind != JsonValueKind.String
+            || !DateTimeOffset.TryParse(
+                element.GetString(),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out DateTimeOffset parsed))
+        {
+            return false;
+        }
+
+        signature = parsed.ToUniversalTime().ToString(
+            "O",
+            CultureInfo.InvariantCulture);
+        return true;
     }
 
     private static string DescribeEnhancementQueueHealthIssue(string? issue)

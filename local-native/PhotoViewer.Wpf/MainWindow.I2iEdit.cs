@@ -705,6 +705,17 @@ public partial class MainWindow
         return true;
     }
 
+    private void OpenModalI2iEditPicker_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.ContextMenu is not ContextMenu menu)
+            return;
+
+        menu.PlacementTarget = button;
+        menu.IsOpen = true;
+    }
+
     private async void OpenModalI2iEdit_Click(
         object sender,
         RoutedEventArgs e)
@@ -718,6 +729,15 @@ public partial class MainWindow
         {
             SetStatusToast(error);
             return false;
+        }
+        if (I2iV2EditDialog?.Visibility == Visibility.Visible)
+        {
+            if (_i2iV2RequestPending)
+            {
+                SetStatusToast("別のAI編集をキューへ追加中です。完了後に切り替えてください。");
+                return false;
+            }
+            CloseI2iV2EditBoard(restoreFocus: false);
         }
 
         _i2iFocusBeforeBoard = Keyboard.FocusedElement;
@@ -1069,20 +1089,30 @@ public partial class MainWindow
         bool available = TryResolveCurrentModalI2iEditSource(
             out _,
             out string error);
-        ModalI2iEditButton.IsEnabled = available && !_modalEnhancementRequestPending;
-        ModalI2iEditButton.ToolTip = available
+        bool enabled = available && !_modalEnhancementRequestPending;
+        string hairToolTip = available
             ? "表示中のOriginalまたは実写化版の髪色をAI編集"
             : error;
-        ModalContextI2iEdit.IsEnabled = ModalI2iEditButton.IsEnabled;
-        ModalContextI2iEdit.ToolTip = ModalI2iEditButton.ToolTip;
+        string multiTargetToolTip = available
+            ? "表示中のOriginalまたは実写化版の服装・表情・背景・ポーズをAI編集"
+            : error;
+        ModalI2iEditButton.IsEnabled = enabled;
+        ModalI2iEditButton.ToolTip = available
+            ? "表示中のOriginalまたは実写化版からAI編集の種類を選択"
+            : error;
+        ModalI2iHairEditMenuItem.IsEnabled = enabled;
+        ModalI2iHairEditMenuItem.ToolTip = hairToolTip;
+        ModalI2iMultiTargetEditMenuItem.IsEnabled = enabled;
+        ModalI2iMultiTargetEditMenuItem.ToolTip = multiTargetToolTip;
+        ModalContextI2iEditMenu.IsEnabled = enabled;
+        ModalContextI2iEdit.IsEnabled = enabled;
+        ModalContextI2iEdit.ToolTip = hairToolTip;
         if (ModalI2iV2EditButton is not null && ModalContextI2iV2Edit is not null)
         {
-            ModalI2iV2EditButton.IsEnabled = ModalI2iEditButton.IsEnabled;
-            ModalI2iV2EditButton.ToolTip = available
-                ? "表示中のOriginalまたは実写化版の服装・表情・背景・ポーズをAI編集"
-                : error;
-            ModalContextI2iV2Edit.IsEnabled = ModalI2iV2EditButton.IsEnabled;
-            ModalContextI2iV2Edit.ToolTip = ModalI2iV2EditButton.ToolTip;
+            ModalI2iV2EditButton.IsEnabled = enabled;
+            ModalI2iV2EditButton.ToolTip = multiTargetToolTip;
+            ModalContextI2iV2Edit.IsEnabled = enabled;
+            ModalContextI2iV2Edit.ToolTip = multiTargetToolTip;
         }
     }
 
@@ -1104,6 +1134,35 @@ public partial class MainWindow
     public async Task<bool> OpenModalI2iEditBoardForSmokeAsync()
         => await OpenI2iEditBoardAsync();
 
+    public bool ExerciseUnifiedI2iEditEntryForSmoke()
+    {
+        if (ModalI2iEditButton.Content is not TextBlock { Text: "AI編集 ▾" }
+            || ModalI2iEditButton.ContextMenu is not ContextMenu picker
+            || picker.Items.Count != 2
+            || !ReferenceEquals(picker.Items[0], ModalI2iHairEditMenuItem)
+            || !ReferenceEquals(picker.Items[1], ModalI2iMultiTargetEditMenuItem)
+            || ModalI2iHairEditMenuItem.IsEnabled
+                != ModalI2iEditButton.IsEnabled
+            || ModalI2iMultiTargetEditMenuItem.IsEnabled
+                != ModalI2iEditButton.IsEnabled
+            || ModalI2iV2EditButton.Visibility != Visibility.Collapsed
+            || ModalContextI2iEditMenu.IsEnabled
+                != ModalI2iEditButton.IsEnabled
+            || ModalContextI2iEditMenu.Items.Count != 2
+            || !ReferenceEquals(ModalContextI2iEditMenu.Items[0], ModalContextI2iEdit)
+            || !ReferenceEquals(ModalContextI2iEditMenu.Items[1], ModalContextI2iV2Edit))
+        {
+            return false;
+        }
+
+        OpenModalI2iEditPicker_Click(
+            ModalI2iEditButton,
+            new RoutedEventArgs(Button.ClickEvent, ModalI2iEditButton));
+        bool opened = picker.IsOpen;
+        picker.IsOpen = false;
+        return opened;
+    }
+
     public void ConfigureI2iEditForSmoke(
         string hairColor,
         string details,
@@ -1124,6 +1183,12 @@ public partial class MainWindow
 
     public bool I2iEditBoardVisibleForSmoke =>
         I2iEditDialog.Visibility == Visibility.Visible;
+
+    public void CloseI2iEditBoardsForSmoke()
+    {
+        CloseI2iEditBoard(restoreFocus: false);
+        CloseI2iV2EditBoard(restoreFocus: false);
+    }
 
     public bool I2iEditQueueEnabledForSmoke => I2iQueueButton.IsEnabled;
 

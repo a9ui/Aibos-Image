@@ -2739,19 +2739,24 @@
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" Foreground="{StaticResource TextSecondary}" FontSize="14"/>
           </Button>
           <Button x:Name="ModalI2iEditButton" Style="{StaticResource GhostButton}"
-                  ToolTip="表示中のOriginalまたは実写化版の髪色をAI編集"
-                  AutomationProperties.Name="髪色のAI編集を開く"
-                  AutomationProperties.HelpText="設定ボードを開くだけではジョブを追加せず、companionも起動しません。"
-                  MinWidth="68" Height="32" Padding="8,0" Click="OpenModalI2iEdit_Click">
-            <TextBlock Text="髪色編集" FontSize="9.5" FontWeight="SemiBold"/>
+                  ToolTip="表示中のOriginalまたは実写化版をAI編集"
+                  AutomationProperties.Name="AI編集メニューを開く"
+                  AutomationProperties.HelpText="髪色、服装、表情、背景、ポーズから編集対象を選びます。メニューを開くだけではジョブを追加しません。"
+                  MinWidth="68" Height="32" Padding="8,0" Click="OpenModalI2iEditPicker_Click">
+            <Button.ContextMenu>
+              <ContextMenu x:Name="ModalI2iEditPickerMenu"
+                           Placement="Bottom"
+                           AutomationProperties.Name="AI編集の種類">
+                <MenuItem x:Name="ModalI2iHairEditMenuItem" Header="髪色…" Click="OpenModalI2iEdit_Click"
+                          AutomationProperties.Name="髪色のAI編集を開く"/>
+                <MenuItem x:Name="ModalI2iMultiTargetEditMenuItem" Header="服装・表情・背景・ポーズ…" Click="OpenModalI2iEditV2_Click"
+                          AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
+              </ContextMenu>
+            </Button.ContextMenu>
+            <TextBlock Text="AI編集 ▾" FontSize="9.5" FontWeight="SemiBold"/>
           </Button>
-          <Button x:Name="ModalI2iV2EditButton" Style="{StaticResource GhostButton}"
-                  ToolTip="表示中のOriginalまたは実写化版の服装・表情・背景・ポーズをAI編集"
-                  AutomationProperties.Name="複数ターゲットのAI編集を開く"
-                  AutomationProperties.HelpText="設定ボードを開くだけではジョブを追加せず、companionも起動しません。"
-                  MinWidth="68" Height="32" Padding="8,0" Click="OpenModalI2iEditV2_Click">
-            <TextBlock Text="AI編集+" FontSize="9.5" FontWeight="SemiBold"/>
-          </Button>
+          <Button x:Name="ModalI2iV2EditButton" Visibility="Collapsed" IsTabStop="False"
+                  AutomationProperties.Name="Legacy AI edit capability proxy"/>
           <Button x:Name="ModalVideoGenerateButton"
                   Style="{StaticResource GhostButton}" ToolTip="この画像から動画を生成"
                   AutomationProperties.Name="Open video generation board"
@@ -3346,9 +3351,11 @@
             <MenuItem x:Name="ModalContextPhotoreal" Header="AI実写化" Click="StartModalPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
             <MenuItem x:Name="ModalContextPhotorealUpscale" Header="AI実写高画質化のみ" Click="StartModalPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
             <MenuItem Header="表示中の画像を動画化..." Click="ModalContextVideo_Click" AutomationProperties.Name="Open video generation board for displayed image"/>
-            <MenuItem x:Name="ModalContextI2iEdit" Header="AI編集（髪色）…" Click="OpenModalI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
-            <MenuItem x:Name="ModalContextI2iV2Edit" Header="AI編集（服・表情・背景・ポーズ）…" Click="OpenModalI2iEditV2_Click"
-                      AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
+            <MenuItem x:Name="ModalContextI2iEditMenu" Header="AI編集" AutomationProperties.Name="AI編集の種類を選ぶ">
+              <MenuItem x:Name="ModalContextI2iEdit" Header="髪色…" Click="OpenModalI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
+              <MenuItem x:Name="ModalContextI2iV2Edit" Header="服装・表情・背景・ポーズ…" Click="OpenModalI2iEditV2_Click"
+                        AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
+            </MenuItem>
             <Separator/>
             <MenuItem x:Name="ModalContextUpscaleNext" Header="次に高画質化" Click="ModalContextUpscaleNext_Click" AutomationProperties.Name="次に高画質化"/>
             <MenuItem x:Name="ModalContextPhotorealNext" Header="次に実写化" Click="ModalContextPhotorealNext_Click" AutomationProperties.Name="次に実写化"/>

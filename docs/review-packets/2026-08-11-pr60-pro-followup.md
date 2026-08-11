@@ -12,6 +12,13 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
 - The prompt compiler is a small editor action: it sends the current input and
   selected image to the already-running local Qwen route, returns an editable
   MiniMax-English candidate, and does not start a companion, worker, or queue.
+- The enlarged viewer now exposes one passive `AI編集` picker instead of two
+  competing `髪色編集` / `AI編集+` toolbar actions. The picker keeps the focused
+  hair-color v1 and multi-target v2 protocols separate internally and opens
+  neither a companion nor a queue by itself.
+- `次に動画化` remains deferred: the current companion contract explicitly
+  rejects image-only `queuePlacement` for video jobs, so WPF does not present a
+  control that could silently append or misrepresent queue placement.
 - Security and public-readiness scanning remain a separate review lane. This
   packet contains only synthetic and aggregate evidence.
 
@@ -23,7 +30,7 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
 | Cold gallery could initially realize only one thumbnail | ADOPT | All missing visible candidates are priority work, and the duplicate-suppression signature now includes visible/realized bounds and candidate counts. |
 | Video Favorite prose contradicted the implementation | ADOPT | The normative contract now defines exact MP4 path keys, purple max badge, Lv0 semantics, filter union/intersection, and missing-output retention. |
 | Wan remained selectable for new work | ADOPT | New-video selectors and Wan tuning panels are hidden, H3 is the only option/default, legacy persisted choices and Styles normalize to H3, and unavailable H3 never falls back to Wan. |
-| One-second Jobs polling repeatedly loaded the full inventory | ADOPT | Polling fetches compact health first and refreshes the full inventory only when its active-job/count signature changes or health is unavailable. |
+| One-second Jobs polling repeatedly loaded the full inventory | ADOPT | Polling fetches compact health first and refreshes the full inventory only when counts, current job, last claim, or last terminal time changes, or health is unavailable. Current progress updates in place. The v1 health contract still lacks a general revision for same-cardinality queued-only changes made by another client; explicit Refresh remains the bounded fallback. |
 | Direction/Auto could silently lose mode guidance near 2,000 characters | ADOPT | The editor rejects the conversion explicitly before transport when input plus guidance exceeds the bound. |
 | Public CI expected an ignored local Photoreal prompt policy | ADOPT | The smoke now forces the bounded public fallback and no longer embeds private-policy wording in tracked source. |
 | Aggregate video smoke still exercised the retired Wan writer | ADOPT | Historical Wan read/playback fixtures remain, while its new-job assertions now require the exact H3 preset/backend/prompt-only payload, omit legacy seed state, reject unavailable H3 without a POST, and preserve source-error feedback across health refresh. |
@@ -33,9 +40,15 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
 
 - Release build: zero warnings, zero errors on .NET SDK 10.0.302.
 - H3 prompt rewrite: exact v1 route/fixture, editable candidate, Apply/Undo,
-  stale-result rejection, response byte bound, mode-overflow rejection,
-  unavailable-compiler fail-closed, companion launch attempts `0`, starter
-  calls `0`, Jobs POST `0`, all other queue mutation routes `0`.
+  stale-result rejection including deliberately delayed responses after input,
+  Style, Model, and source-image changes, response byte bound, mode-overflow
+  rejection, unavailable-compiler fail-closed, companion launch attempts `0`, starter
+  calls `0`, Jobs POST `0`, all other queue mutation routes `0`. The sealed
+  llama.cpp route is explicitly CPU-only (`CUDA_VISIBLE_DEVICES=-1`, device
+  `none`, zero GPU layers/offload, one slot) and never creates the GPU lease.
+  A separate overlapping-request smoke holds request A, changes the prompt,
+  completes request B, and only then releases A; B remains the exact candidate
+  and status, A is rejected, and A cannot clear B's pending state.
 - Video v2 UI: H3-only default surface, unavailable H3 disabled, exact health
   gate, legacy Wan persisted selection migrated to H3, no fallback.
 - Video Favorite: max-level purple badge, Lv0 and union/intersection behavior,
@@ -45,8 +58,10 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
   decode bound, resident bound, progressive layout, and full final visible
   coverage all passed.
 - Jobs workspace: a health-only poll increased health GET count without
-  increasing full-inventory GET count; queue ordering and all existing mutation
-  guards remained green.
+  increasing full-inventory GET count; changing the terminal timestamp with
+  identical counts forced one full refresh, closing the same-count terminal/
+  enqueue race. Changing the companion process/start/build identity also forced
+  one full refresh. Queue ordering and all existing mutation guards remained green.
 - Photoreal modal and shared queue: the exact GitHub Actions failure was
   reproduced locally, traced to a non-deterministic private-policy expectation,
   isolated to the public fallback, and then passed in full.
@@ -60,6 +75,32 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
   hang; its exact owned process was stopped, and the product-level modal
   interaction smoke passed. Treat this as a verifier gap, not proof of a UI
   failure.
+- Unified AI edit entry: the modal toolbar has one picker with exactly the two
+  supported editors, the former second toolbar button stays hidden, the modal
+  context menu uses the same grouping, and the external-image interaction
+  smoke remained passive with companion calls `0` and all stores unchanged.
+  A delayed hair-board health response was retired by opening the multi-target
+  board; opening hair again retired multi-target. At every boundary exactly one
+  board was visible, the three board opens made three health GETs, and mutation
+  calls remained `0`.
+
+## Second Pro adjudication
+
+- Compiler latest-wins and CPU-only ownership are design-closed on the supplied
+  local smoke evidence. Exact-code approval still waits for the pushed SHA.
+- Pro withdrew the proposed 15–30 second full reconciliation after the measured
+  24 MiB / roughly 18 second inventory cost. The known v1 limitation is accepted
+  for this PR: external same-cardinality queued-only changes remain stale until
+  explicit Refresh or reopen. WPF-owned mutations still reconcile immediately;
+  a real inventory revision remains a separate backend/SQLite PR.
+- The picker has two routes, not five direct target choices. Therefore target
+  propagation from picker to `expression`/`background`/`pose` is not applicable;
+  those choices remain inside the v2 board. The applicable P1 gate was route
+  serialization, which is now implemented and covered above.
+- Pro's final local-design verdict closes both the two-route picker conflict and
+  Jobs restart invalidation as P1s. External same-cardinality changes remain the
+  documented P2 limitation. No further product feature or infrastructure work is
+  requested in PR #60 before exact-SHA review; the candidate is feature-frozen.
 
 ## Read-only performance evidence
 
@@ -94,6 +135,17 @@ was deleted or published while gathering this evidence.
 ## Requested follow-up review
 
 Re-check the follow-up commit for the four original merge gates and any
-regression caused by the health-first Jobs poll. In particular, verify that no
-normal UI or persisted-state path can enqueue Wan, while historical Wan/Hunyuan
-reader and managed-output compatibility remains intact.
+regression caused by the health-first Jobs poll or unified AI-edit picker. In
+particular, verify that no normal UI or persisted-state path can enqueue Wan,
+while historical Wan/Hunyuan reader and managed-output compatibility remains
+intact.
+
+## Publication status
+
+- The normal publication command is
+  `git push aibos codex/aibos-h3-i2v-product`.
+- The current Codex host rejected that command before network execution with
+  `approval required by policy, but AskForApproval is set to Never`. This is a
+  host-policy gate, not a GitHub authentication failure. No alternate upload or
+  history bypass was attempted; the local candidate remains ahead of the last
+  published PR revision until an approved push path is available.

@@ -132,6 +132,8 @@ public partial class App
             int enqueueHealthGetCalls = 0;
             TaskCompletionSource<bool>? enqueueHealthEntered = null;
             TaskCompletionSource<bool>? releaseEnqueueHealth = null;
+            TaskCompletionSource<bool>? rewriteResponseEntered = null;
+            TaskCompletionSource<bool>? releaseRewriteResponse = null;
             string rewriteResponseTransport = "normal";
             ChunkedFakeLoopbackStream? declaredOversizeStream = null;
             ChunkedFakeLoopbackStream? chunkedOversizeStream = null;
@@ -189,6 +191,21 @@ public partial class App
                             latestRewriteBody = request.Content is null
                                 ? ""
                                 : await request.Content.ReadAsStringAsync(token);
+                            string capturedResponseCandidate = responseCandidate;
+                            string capturedResponseRevision = responseRevision;
+                            string capturedResponseSourceSha256 =
+                                responseSourceSha256;
+                            string capturedResponseModelId = responseModelId;
+                            double capturedResponseInferenceMilliseconds =
+                                responseInferenceMilliseconds;
+                            rewriteResponseEntered?.TrySetResult(true);
+                            if (releaseRewriteResponse is not null)
+                            {
+                                // Model an already-running compiler that does not
+                                // observe the caller cancellation until after it
+                                // has produced a response.
+                                await releaseRewriteResponse.Task;
+                            }
                             if (activeErrorBody is JsonElement errorBody)
                             {
                                 return JsonResponse(
@@ -213,12 +230,13 @@ public partial class App
                                 string oversizedJson = JsonSerializer.Serialize(
                                     new
                                     {
-                                        candidatePrompt = responseCandidate,
-                                        rewriteRevision = responseRevision,
-                                        sourceSha256 = responseSourceSha256,
-                                        modelId = responseModelId,
+                                        candidatePrompt = capturedResponseCandidate,
+                                        rewriteRevision = capturedResponseRevision,
+                                        sourceSha256 =
+                                            capturedResponseSourceSha256,
+                                        modelId = capturedResponseModelId,
                                         inferenceMilliseconds =
-                                            responseInferenceMilliseconds,
+                                            capturedResponseInferenceMilliseconds,
                                     })
                                     + new string(
                                         ' ',
@@ -255,12 +273,12 @@ public partial class App
                                 HttpStatusCode.OK,
                                 new
                                 {
-                                    candidatePrompt = responseCandidate,
-                                    rewriteRevision = responseRevision,
-                                    sourceSha256 = responseSourceSha256,
-                                    modelId = responseModelId,
+                                    candidatePrompt = capturedResponseCandidate,
+                                    rewriteRevision = capturedResponseRevision,
+                                    sourceSha256 = capturedResponseSourceSha256,
+                                    modelId = capturedResponseModelId,
                                     inferenceMilliseconds =
-                                        responseInferenceMilliseconds,
+                                        capturedResponseInferenceMilliseconds,
                                 });
                         }
                         if (request.Method == HttpMethod.Post
@@ -520,6 +538,107 @@ public partial class App
                         && !window.VideoH3PromptUndoEnabledForSmoke;
 
                     responseCandidate = candidateA;
+                    rewriteResponseEntered = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    releaseRewriteResponse = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    Task<bool> supersededRewrite =
+                        window.RewriteVideoPromptForH3ForSmokeAsync();
+                    bool supersededRewriteEntered =
+                        await rewriteResponseEntered.Task.WaitAsync(
+                            TimeSpan.FromSeconds(5));
+                    TaskCompletionSource<bool> releaseSupersededRewrite =
+                        releaseRewriteResponse!;
+                    string latestPrompt =
+                        basePrompt + " Latest request wins.";
+                    window.SetAuthoritativeVideoPromptForSmoke(latestPrompt);
+                    rewriteResponseEntered = null;
+                    releaseRewriteResponse = null;
+                    responseCandidate = candidateB;
+                    bool latestRewriteAccepted =
+                        await window.RewriteVideoPromptForH3ForSmokeAsync();
+                    string latestStatusBeforeOldCompletion =
+                        window.VideoH3PromptRewriteStatusForSmoke;
+                    releaseSupersededRewrite.TrySetResult(true);
+                    bool supersededRewriteAccepted = await supersededRewrite;
+                    bool latestRewriteWins = supersededRewriteEntered
+                        && latestRewriteAccepted
+                        && !supersededRewriteAccepted
+                        && string.Equals(
+                            window.AuthoritativeVideoPromptForSmoke,
+                            latestPrompt,
+                            StringComparison.Ordinal)
+                        && string.Equals(
+                            window.VideoH3PromptCandidateForSmoke,
+                            candidateB,
+                            StringComparison.Ordinal)
+                        && string.Equals(
+                            window.VideoH3PromptRewriteStatusForSmoke,
+                            latestStatusBeforeOldCompletion,
+                            StringComparison.Ordinal)
+                        && window.VideoH3PromptCandidateFreshForSmoke
+                        && window.VideoH3PromptCandidateApplyEnabledForSmoke
+                        && !window.VideoH3PromptRewritePendingForSmoke;
+                    window.SetAuthoritativeVideoPromptForSmoke(basePrompt);
+
+                    async Task<bool> DelayedRewriteRejectsChangeAsync(
+                        Action changeContext)
+                    {
+                        string retainedCandidate =
+                            window.VideoH3PromptCandidateForSmoke;
+                        rewriteResponseEntered = new TaskCompletionSource<bool>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
+                        releaseRewriteResponse = new TaskCompletionSource<bool>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
+                        Task<bool> rewrite =
+                            window.RewriteVideoPromptForH3ForSmokeAsync();
+                        bool entered = await rewriteResponseEntered.Task.WaitAsync(
+                            TimeSpan.FromSeconds(5));
+                        changeContext();
+                        releaseRewriteResponse.TrySetResult(true);
+                        bool accepted = await rewrite;
+                        rewriteResponseEntered = null;
+                        releaseRewriteResponse = null;
+                        return entered
+                            && !accepted
+                            && string.Equals(
+                                window.VideoH3PromptCandidateForSmoke,
+                                retainedCandidate,
+                                StringComparison.Ordinal)
+                            && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
+                    }
+
+                    responseCandidate = candidateB;
+                    bool delayedInputResponseStale =
+                        await DelayedRewriteRejectsChangeAsync(() =>
+                            window.SetAuthoritativeVideoPromptForSmoke(
+                                basePrompt + " Changed while compiler was running."));
+                    window.SetAuthoritativeVideoPromptForSmoke(basePrompt);
+
+                    bool delayedStyleResponseStale =
+                        await DelayedRewriteRejectsChangeAsync(() =>
+                            window.SaveVideoStyleForSmoke(
+                                "Delayed compiler response style"));
+
+                    bool delayedModelResponseStale =
+                        await DelayedRewriteRejectsChangeAsync(() =>
+                            window.SelectVideoModelForSmoke("wan22-ti2v-5b"));
+                    window.SelectVideoModelForSmoke("minimax-h3");
+
+                    bool delayedSourceResponseStale =
+                        await DelayedRewriteRejectsChangeAsync(() =>
+                        {
+                            using var changedDuringRewrite = new FileStream(
+                                sourcePath,
+                                FileMode.Append,
+                                FileAccess.Write,
+                                FileShare.Read);
+                            changedDuringRewrite.WriteByte(0);
+                        });
+                    responseSourceSha256 = Convert.ToHexStringLower(
+                        SHA256.HashData(File.ReadAllBytes(sourcePath)));
+
+                    responseCandidate = candidateA;
                     bool rewrittenForInputStale =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
                     window.SetAuthoritativeVideoPromptForSmoke(
@@ -774,6 +893,11 @@ public partial class App
                         && queueReadsOnlyInput
                         && applied
                         && undone
+                        && latestRewriteWins
+                        && delayedInputResponseStale
+                        && delayedStyleResponseStale
+                        && delayedModelResponseStale
+                        && delayedSourceResponseStale
                         && inputStale
                         && revertedInputStillStale
                         && styleStale
@@ -811,6 +935,14 @@ public partial class App
                         queueReadsOnlyInput,
                         applied,
                         undone,
+                        latestRewriteWins,
+                        supersededRewriteEntered,
+                        latestRewriteAccepted,
+                        supersededRewriteAccepted,
+                        delayedInputResponseStale,
+                        delayedStyleResponseStale,
+                        delayedModelResponseStale,
+                        delayedSourceResponseStale,
                         inputStale,
                         revertedInputStillStale,
                         styleStale,

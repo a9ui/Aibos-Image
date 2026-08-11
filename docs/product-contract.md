@@ -485,9 +485,18 @@ or stores.
   parallel GPU queue is introduced.
 - I2I controls are explicit and transient: opening a menu, modal, source list,
   or settings board remains passive. Only the enlarged-image modal opens the
-  bounded `AI編集` boards. The source is the exact version currently displayed,
-  using its valid photoreal producer when applicable. There is no gallery-list
-  enqueue action or source picker in the first slice.
+  bounded `AI編集` boards. The modal toolbar and context menu expose one
+  `AI編集` entry whose passive submenu selects either the focused hair-color
+  editor or the multi-target outfit/expression/background/pose editor; those
+  two protocol revisions remain separate internally. The source is the exact
+  version currently displayed, using its valid photoreal producer when
+  applicable. There is no gallery-list enqueue action or source picker in the
+  first slice. The multi-target entry opens the existing board-level target
+  selector; it does not claim that a specific target was chosen in the picker.
+  Opening either board retires the other board generation before showing the
+  new one, and a pending writer action blocks route switching. A retired health
+  response cannot reopen or update the former board. Picker selection and board
+  opening remain read-only; only the board's explicit queue action may publish.
   I2I outputs and upscaled outputs are not v1 input choices. Retry copies the
   complete saved preset and source provenance; Cancel, queue order, enqueue-next,
   pause/resume, output open, and output delete retain the existing Jobs rules.
@@ -579,7 +588,17 @@ or stores.
 - The WPF Enhancement Jobs workspace is a virtualized client view over that
   API. Opening it performs a passive jobs read only. It polls once per second
   only while the workspace is visible and at least one job is queued or
-  running, and stops polling when hidden or when all jobs are terminal.
+  running, and stops polling when hidden or when all jobs are terminal. Active
+  polling reads compact health first. It reloads the full jobs inventory only
+  when counts, current job identity, last claim, or last terminal time changes,
+  when the companion process/start/build identity changes, or when compact
+  health is unavailable. Current progress is applied directly
+  from health without forcing the multi-megabyte inventory read. Mutations
+  issued by this WPF reconcile their returned queue immediately; the v1 health
+  contract has no general inventory revision, so a same-cardinality queued-only
+  mutation issued by another client remains available through explicit Refresh
+  or reopening the workspace until a later companion contract adds such a
+  revision.
   - Jobs may be filtered as All, Queued, Running, Completed, Video, Failed, or
     Canceled. The Video filter includes every video status. Canceled records
     remain durable and visible for audit, Retry, and queue safety.
@@ -902,7 +921,10 @@ remain protected rather than being coerced to the Wan v1 shape.
   candidate. It calls only an already-running loopback compiler and never starts
   the durable companion or a worker. If that compiler is unavailable, the
   action fails closed. It does not enqueue, reorder, wake, pause, or otherwise
-  mutate an AI Job or image queue.
+  mutate an AI Job or image queue. The sealed llama.cpp compiler is CPU-only:
+  `CUDA_VISIBLE_DEVICES=-1`, `--device none`, `--n-gpu-layers 0`, all model/KV/
+  projector offload paths disabled, one inference slot, and at most eight CPU
+  threads. It therefore does not contend for or acquire the product GPU lease.
 - Conversion offers three UI modes: `polish` preserves the written intent,
   `direction` strengthens image-compatible motion and camera direction, and
   `auto` lets the source image guide that direction. Mode guidance stays
@@ -913,7 +935,13 @@ remain protected rather than being coerced to the Wan v1 shape.
 - A returned candidate is transient and separate from the input. The user may
   edit it, convert again, apply it explicitly to the input, or undo the most
   recent apply. Changing the input, image, model, style, or conversion mode
-  makes the old candidate stale. Conversion never starts video generation.
+  makes the old candidate stale. A response already being computed when any of
+  those inputs changes is canceled when possible and rejected again against the
+  captured context before adoption, even if the compiler returns late. Retiring
+  a request also retires its generation immediately: an older completion may
+  change neither candidate, status text, pending state, nor Apply/Undo state
+  after a newer request begins.
+  Conversion never starts video generation.
 - Only the existing explicit video-generation action may enqueue the final H3
   request. It uses the same durable ordered AI Jobs queue as other managed
   operations; prompt conversion itself remains outside that queue.

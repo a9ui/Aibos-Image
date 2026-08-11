@@ -635,6 +635,15 @@ public partial class MainWindow
             SetStatusToast(error);
             return false;
         }
+        if (I2iEditDialog?.Visibility == Visibility.Visible)
+        {
+            if (_i2iRequestPending)
+            {
+                SetStatusToast("別のAI編集をキューへ追加中です。完了後に切り替えてください。");
+                return false;
+            }
+            CloseI2iEditBoard(restoreFocus: false);
+        }
 
         _i2iV2FocusBeforeBoard = Keyboard.FocusedElement;
         _i2iV2EditSource = source;
@@ -1120,6 +1129,12 @@ public partial class MainWindow
 
     public static bool IsI2iV2MutationSafeForSmoke(JsonElement job)
         => IsI2iV2MutationSafe(job);
+
+    public Task<bool> OpenModalI2iV2EditBoardForSmokeAsync()
+        => OpenI2iV2EditBoardAsync();
+
+    public bool I2iV2EditBoardVisibleForSmoke =>
+        I2iV2EditDialog.Visibility == Visibility.Visible;
 
     public static bool IsManagedI2iVersionCandidateForSmoke(JsonElement job)
         => IsI2iMutationSafe(job) || IsI2iV2MutationSafe(job);

@@ -18615,6 +18615,12 @@ public partial class App : Application
                 bool videoOutputDeleted = false;
                 bool reverseJobsForReturn = false;
                 string healthMode = "available";
+                string? healthLastClaimAt = null;
+                string? healthLastTerminalAt = null;
+                string healthServerStartedAtUtc =
+                    "2026-07-30T13:00:00.000Z";
+                int healthProcessId = 1234;
+                string healthBuildId = "aibos-health-smoke";
                 bool queuePaused = false;
                 var queueControlBodies = new List<string>();
                 string? openedOutput = null;
@@ -19023,11 +19029,11 @@ public partial class App : Application
                         {
                             sourceRevision = "696849546ad61383def4d6d050e6fcb66a5fb3cd",
                             sourceDirty = false,
-                            buildId = "aibos-health-smoke",
+                            buildId = healthBuildId,
                             serverHost = "127.0.0.1",
                             serverPort = 3000,
-                            serverStartedAtUtc = "2026-07-30T13:00:00.000Z",
-                            processId = 1234,
+                            serverStartedAtUtc = healthServerStartedAtUtc,
+                            processId = healthProcessId,
                         },
                         store = new { version = 1 },
                         jobs = new
@@ -19042,9 +19048,9 @@ public partial class App : Application
                                 deleted = counts["deleted"],
                             },
                             current = (object?)null,
-                            lastClaimAt = (string?)null,
+                            lastClaimAt = healthLastClaimAt,
                             lastProgressAt = (string?)null,
-                            lastTerminalAt = (string?)null,
+                            lastTerminalAt = healthLastTerminalAt,
                         },
                         worker,
                         capabilities,
@@ -19322,6 +19328,30 @@ public partial class App : Application
                     && afterHealthOnlyPoll.PollRequests
                         == initial.PollRequests + 1
                     && afterHealthOnlyPoll.Total == initial.Total;
+                healthLastTerminalAt = "2026-07-30T13:31:00.000Z";
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterTerminalSignaturePoll =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool terminalSignatureRefreshesSameCountInventory =
+                    afterTerminalSignaturePoll.GetRequests
+                        == afterHealthOnlyPoll.GetRequests + 1
+                    && afterTerminalSignaturePoll.HealthGetRequests
+                        == afterHealthOnlyPoll.HealthGetRequests + 1
+                    && afterTerminalSignaturePoll.Total
+                        == afterHealthOnlyPoll.Total;
+                healthServerStartedAtUtc = "2026-07-30T13:32:00.000Z";
+                healthProcessId = 5678;
+                healthBuildId = "aibos-health-smoke-restarted";
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterRestartSignaturePoll =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool companionRestartRefreshesInventory =
+                    afterRestartSignaturePoll.GetRequests
+                        == afterTerminalSignaturePoll.GetRequests + 1
+                    && afterRestartSignaturePoll.HealthGetRequests
+                        == afterTerminalSignaturePoll.HealthGetRequests + 1
+                    && afterRestartSignaturePoll.Total
+                        == afterTerminalSignaturePoll.Total;
                 object? viewBeforeRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
                 healthMode = "legacy-prompt-update";
                 await window.RefreshEnhancementJobsForSmokeAsync();
@@ -20020,6 +20050,8 @@ public partial class App : Application
                     && healthProvenance
                     && healthPassive
                     && healthOnlyPollAvoidedFullInventory
+                    && terminalSignatureRefreshesSameCountInventory
+                    && companionRestartRefreshesInventory
                     && legacyPromptUpdateCapabilitySafe
                     && legacyPauseCapabilitySafe
                     && legacyHealthFallback
@@ -20129,6 +20161,10 @@ public partial class App : Application
                     healthPassive,
                     healthOnlyPollAvoidedFullInventory,
                     afterHealthOnlyPoll,
+                    terminalSignatureRefreshesSameCountInventory,
+                    afterTerminalSignaturePoll,
+                    companionRestartRefreshesInventory,
+                    afterRestartSignaturePoll,
                     legacyPromptUpdateCapabilitySafe,
                     legacyPauseCapabilitySafe,
                     legacyHealthFallback,
