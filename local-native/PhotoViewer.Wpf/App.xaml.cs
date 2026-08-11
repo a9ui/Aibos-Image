@@ -17573,21 +17573,23 @@ public partial class App : Application
                         olderVideoOutput,
                         StringComparison.OrdinalIgnoreCase);
                 win.CloseModalForSmoke();
-                bool videoDefaults = win.VideoGenerationSettingsForSmoke
-                        is (6, 16, 409600, "")
-                    && win.VideoGenerationEstimateForSmoke
-                        is (97, 158, 293)
-                    && win.VideoModelIdForSmoke == "wan22-ti2v-5b"
-                    && win.VideoQualityIdForSmoke
-                        == "wan22-ti2v-5b-normal-v1"
-                    && win.VideoQualityStepsForSmoke == 20
-                    && win.VideoSeedForSmoke is (false, "0", true)
-                    && win.VideoSeedSurfaceForSmoke;
+                bool videoDefaults = string.IsNullOrEmpty(
+                        win.VideoGenerationSettingsForSmoke.Prompt)
+                    && win.VideoModelIdForSmoke == "minimax-h3"
+                    && win.LegacyVideoModelOptionsRetiredForSmoke
+                    && win.MiniMaxH3SurfaceForSmoke;
                 win.SelectVideoModelForSmoke(
                     "hunyuan-video-1.5-i2v-step-distilled-experimental");
                 bool experimentalVideoModelBlocked =
                     !win.VideoModelRunnableForSmoke;
-                win.SelectVideoModelForSmoke("wan22-ti2v-5b");
+                win.RestorePersistedVideoModelForSmoke("wan22-ti2v-5b");
+                bool legacyVideoModelMigrated =
+                    win.VideoModelIdForSmoke == "minimax-h3"
+                    && win.LegacyVideoModelOptionsRetiredForSmoke;
+                win.SetMiniMaxH3CapabilityForSmoke(
+                    checkedHealth: true,
+                    ready: true,
+                    reasonCode: null);
                 win.ConfigureVideoGenerationForSmoke(
                     4,
                     12,
@@ -17607,7 +17609,7 @@ public partial class App : Application
                     persistedVideoStyleState?.VideoStyles?.SingleOrDefault();
                 bool videoStylePersistence = persistedVideoStyle is not null
                     && persistedVideoStyle.Name == videoStyleName
-                    && persistedVideoStyle.ModelId == "wan22-ti2v-5b"
+                    && persistedVideoStyle.ModelId == "minimax-h3"
                     && persistedVideoStyle.QualityId == "wan22-ti2v-5b-high-v1"
                     && persistedVideoStyle.DurationSeconds == 4
                     && persistedVideoStyle.PlaybackFps == 12
@@ -17629,12 +17631,12 @@ public partial class App : Application
                     win.SelectVideoStyleForSmoke(videoStyleName);
                 bool videoStyleApplied = win.VideoGenerationSettingsForSmoke
                         is (4, 12, 307200, "pan left slowly")
-                    && win.VideoModelIdForSmoke == "wan22-ti2v-5b"
+                    && win.VideoModelIdForSmoke == "minimax-h3"
                     && win.VideoQualityIdForSmoke
                         == "wan22-ti2v-5b-high-v1";
                 string videoRequestJson = "";
                 int enhancementMutationRequestCount = 0;
-                bool videoSeedCapabilityAvailable = true;
+                bool h3WriterReady = true;
                 win.ConfigureModalEnhancementForSmoke(async (request, token) =>
                 {
                     if (request.Method == HttpMethod.Get)
@@ -17646,20 +17648,18 @@ public partial class App : Application
                         {
                             return new HttpResponseMessage(HttpStatusCode.OK)
                             {
-                                Content = JsonContent.Create(new
-                                {
-                                    capabilities = new
-                                    {
-                                        durableEnqueueInboxV1 = new
-                                        {
-                                            ready = true,
-                                            protocolVersion = 1,
-                                            backendGeneration = "json-v1",
-                                        },
-                                        videoSeedControlV1 =
-                                            videoSeedCapabilityAvailable,
-                                    },
-                                }),
+                                Content = new StringContent(
+                                    CreateVideoV2HealthJson(
+                                        writerEnabled: h3WriterReady,
+                                        ready: h3WriterReady,
+                                        state: h3WriterReady
+                                            ? "ready"
+                                            : "disabled",
+                                        reasonCode: h3WriterReady
+                                            ? null
+                                            : "MINIMAX_H3_WRITER_DISABLED"),
+                                    Encoding.UTF8,
+                                    "application/json"),
                             };
                         }
                         using JsonDocument jobsDocument =
@@ -17698,6 +17698,10 @@ public partial class App : Application
                         }),
                     };
                 });
+                win.SetMiniMaxH3CapabilityForSmoke(
+                    checkedHealth: true,
+                    ready: true,
+                    reasonCode: null);
                 bool videoBoardSourceSelected =
                     win.SelectFileNameForSmoke(
                         Path.GetFileName(photorealSource));
@@ -17748,11 +17752,8 @@ public partial class App : Application
                     japaneseVideoPrompt,
                     "wan22-ti2v-5b-high-v1");
                 bool videoSurface = win.VideoGenerationSurfaceForSmoke
-                    && win.VideoGenerationEstimateForSmoke
-                        is (49, 117, 218)
-                    && win.VideoQualityIdForSmoke
-                        == "wan22-ti2v-5b-high-v1"
-                    && win.VideoQualityStepsForSmoke == 40;
+                    && win.VideoModelIdForSmoke == "minimax-h3"
+                    && win.MiniMaxH3SurfaceForSmoke;
                 bool videoQueueSucceeded =
                     await win.QueueVideoGenerationForSmokeAsync();
                 bool videoRequestExact = false;
@@ -17803,16 +17804,15 @@ public partial class App : Application
                         && videoRequest.TryGetProperty(
                             "presetId",
                             out JsonElement videoPresetId)
-                        && videoPresetId.GetString() == "wan22-ti2v-5b-high-v1"
+                        && videoPresetId.GetString()
+                            == "minimax-h3-i2v-preview-v1"
                         && videoRequest.TryGetProperty(
                             "adapterId",
                             out JsonElement videoAdapterId)
-                        && videoAdapterId.GetString() == "wan22-ti2v-5b-core-v1"
+                        && videoAdapterId.GetString() == "minimax-h3-local-v1"
                         && videoRequest.TryGetProperty("video", out JsonElement videoRequestMedia)
                         && videoRequestMedia.TryGetProperty("requested", out JsonElement requestedVideo)
-                        && requestedVideo.GetProperty("durationSeconds").GetInt32() == 4
-                        && requestedVideo.GetProperty("playbackFps").GetInt32() == 12
-                        && requestedVideo.GetProperty("maximumPixelArea").GetInt32() == 307200
+                        && HasExactNames(requestedVideo, "prompt")
                         && requestedVideo.GetProperty("prompt").GetString()
                             == japaneseVideoPrompt;
                 }
@@ -17828,15 +17828,15 @@ public partial class App : Application
                 int postsBeforeFixedVideoSeed = enhancementMutationRequestCount;
                 bool fixedVideoSeedQueued =
                     await win.QueueVideoGenerationForSmokeAsync();
-                bool fixedVideoSeedExact = false;
+                bool fixedVideoSeedOmitted = false;
                 if (fixedVideoSeedQueued
                     && enhancementMutationRequestCount
                         == postsBeforeFixedVideoSeed + 1)
                 {
                     using JsonDocument fixedVideoSeedDocument =
                         JsonDocument.Parse(videoRequestJson);
-                    fixedVideoSeedExact = fixedVideoSeedDocument.RootElement
-                            .GetProperty("seed").GetInt32() == fixedVideoSeed
+                    fixedVideoSeedOmitted = !fixedVideoSeedDocument.RootElement
+                            .TryGetProperty("seed", out _)
                         && persistedVideoSeedState?.VideoSeedMode == "fixed"
                         && persistedVideoSeedState.VideoSeedValue
                             == fixedVideoSeed;
@@ -17846,38 +17846,49 @@ public partial class App : Application
                     fixedMode: true,
                     value: "2147483648");
                 int postsBeforeInvalidVideoSeed = enhancementMutationRequestCount;
-                bool invalidVideoSeedBlocked =
-                    !await win.QueueVideoGenerationForSmokeAsync()
+                bool invalidLegacySeedIgnoredByH3 =
+                    !win.VideoSeedForSmoke.Valid
+                    && win.VideoGenerationQueueEnabledForSmoke
+                    && await win.QueueVideoGenerationForSmokeAsync()
                     && enhancementMutationRequestCount
-                        == postsBeforeInvalidVideoSeed
-                    && !win.VideoSeedForSmoke.Valid
-                    && !win.VideoGenerationQueueEnabledForSmoke
-                    && win.VideoGenerationStatusForSmoke.Contains(
-                        "0〜2147483647",
-                        StringComparison.Ordinal);
+                        == postsBeforeInvalidVideoSeed + 1;
+                if (invalidLegacySeedIgnoredByH3)
+                {
+                    using JsonDocument invalidLegacySeedDocument =
+                        JsonDocument.Parse(videoRequestJson);
+                    invalidLegacySeedIgnoredByH3 =
+                        !invalidLegacySeedDocument.RootElement.TryGetProperty(
+                            "seed",
+                            out _);
+                }
 
-                win.ConfigureVideoSeedForSmoke(
-                    fixedMode: true,
-                    value: "975310");
-                videoSeedCapabilityAvailable = false;
-                int postsBeforeMissingVideoSeedCapability =
-                    enhancementMutationRequestCount;
-                bool missingVideoSeedCapabilityBlocked =
+                h3WriterReady = false;
+                win.SetMiniMaxH3CapabilityForSmoke(
+                    checkedHealth: true,
+                    ready: false,
+                    reasonCode: "MINIMAX_H3_WRITER_DISABLED");
+                int postsBeforeUnavailableH3 = enhancementMutationRequestCount;
+                bool unavailableH3Blocked =
                     !await win.QueueVideoGenerationForSmokeAsync()
                     && enhancementMutationRequestCount
-                        == postsBeforeMissingVideoSeedCapability
-                    && win.VideoGenerationStatusForSmoke.Contains(
-                        "fixed video seeds",
+                        == postsBeforeUnavailableH3
+                    && !win.VideoGenerationQueueEnabledForSmoke
+                    && win.MiniMaxH3ReadinessTextForSmoke.Contains(
+                        "ジョブ登録は現在無効",
                         StringComparison.Ordinal);
-                videoSeedCapabilityAvailable = true;
+                h3WriterReady = true;
+                win.SetMiniMaxH3CapabilityForSmoke(
+                    checkedHealth: true,
+                    ready: true,
+                    reasonCode: null);
                 win.ConfigureVideoSeedForSmoke(
                     fixedMode: false,
                     value: "975310");
                 bool videoSeedContract = videoDefaults
                     && videoRequestExact
-                    && fixedVideoSeedExact
-                    && invalidVideoSeedBlocked
-                    && missingVideoSeedCapabilityBlocked;
+                    && fixedVideoSeedOmitted
+                    && invalidLegacySeedIgnoredByH3
+                    && unavailableH3Blocked;
                 win.ConfigureVideoGenerationForSmoke(
                     4,
                     12,
@@ -18049,10 +18060,10 @@ public partial class App : Application
                         Path.GetFileName(photorealSource));
                 bool reloadVideoSettings = second.VideoGenerationSettingsForSmoke
                         is (4, 12, 307200, "pan left slowly")
-                    && second.VideoModelIdForSmoke == "wan22-ti2v-5b"
+                    && second.VideoModelIdForSmoke == "minimax-h3"
                     && second.VideoQualityIdForSmoke
                         == "wan22-ti2v-5b-high-v1"
-                    && second.VideoQualityStepsForSmoke == 40;
+                    && second.LegacyVideoModelOptionsRetiredForSmoke;
                 bool videoStyleReloaded = second.VideoStyleNamesForSmoke.Contains(
                         videoStyleName,
                         StringComparer.OrdinalIgnoreCase)
@@ -18150,6 +18161,7 @@ public partial class App : Application
                     && lastVideoRestoredAfterReturn
                     && videoDefaults
                     && experimentalVideoModelBlocked
+                    && legacyVideoModelMigrated
                     && videoBoardSourceSelected
                     && galleryVideoSourceVersions
                     && videoBoardModalOpened
@@ -18316,6 +18328,14 @@ public partial class App : Application
             }
 
             WriteEnhancedFilterSmokeResult(resultFullPath, result);
+            try
+            {
+                if (Directory.Exists(smokeRoot))
+                    Directory.Delete(smokeRoot, recursive: true);
+            }
+            catch
+            {
+            }
             Shutdown(result.Ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);
     }

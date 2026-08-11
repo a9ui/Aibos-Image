@@ -430,7 +430,9 @@ public partial class MainWindow
         }
 
         SyncVideoGenerationSettingsControls();
-        if (IsMiniMaxH3VideoModel(_videoModelId))
+        if (IsMiniMaxH3VideoModel(_videoModelId)
+            && (ModalVideoGenerationPopup.Visibility != Visibility.Visible
+                || _videoSourceChoice is not null))
         {
             SetVideoGenerationSettingsStatus(
                 _miniMaxH3Ready
@@ -2396,19 +2398,23 @@ public partial class MainWindow
             && ModalVideoGenerationBoardBorder.MaxHeight <= 680
             && ModalVideoGenerationScrollViewer.VerticalScrollBarVisibility
                 == ScrollBarVisibility.Auto
+            && MiniMaxH3SurfaceForSmoke
             && LegacyVideoModelOptionsRetiredForSmoke
-            && ModalVideoQualityComboBox.Items.Count == 2
-            && AppVideoQualityComboBox.Items.Count == 2
-            && string.Equals(
-                SelectedVideoQualityId(ModalVideoQualityComboBox),
-                _videoQualityId,
-                StringComparison.Ordinal)
-            && string.Equals(
-                SelectedVideoQualityId(AppVideoQualityComboBox),
-                _videoQualityId,
-                StringComparison.Ordinal)
+            && ModalVideoWanControlsPanel.Visibility == Visibility.Collapsed
+            && ModalVideoWanTuningPanel.Visibility == Visibility.Collapsed
+            && AppVideoWanControlsPanel.Visibility == Visibility.Collapsed
+            && !ModalVideoQualityComboBox.IsEnabled
+            && !AppVideoQualityComboBox.IsEnabled
+            && !ModalVideoDurationComboBox.IsEnabled
+            && !ModalVideoFpsComboBox.IsEnabled
+            && !ModalVideoResolutionComboBox.IsEnabled
+            && !AppVideoDurationComboBox.IsEnabled
+            && !AppVideoFpsComboBox.IsEnabled
+            && !AppVideoResolutionComboBox.IsEnabled
+            && !ModalVideoSeedModeComboBox.IsEnabled
+            && !AppVideoSeedModeComboBox.IsEnabled
             && ModalVideoModelDescriptionText.Text.Contains(
-                "12GB",
+                "RTX 4070 SUPER 12GB",
                 StringComparison.Ordinal)
             && ModalVideoPromptTextBox.MaxLength == MaxVideoPromptLength
             && string.Equals(
@@ -2419,48 +2425,20 @@ public partial class MainWindow
                 "MiniMax H3",
                 StringComparison.Ordinal)
             && string.Equals(
-                AppVideoGenerationFpsLabel.Text,
-                "生成FPS",
-                StringComparison.Ordinal)
-            && string.Equals(
-                ModalVideoGenerationFpsLabel.Text,
-                "生成FPS",
-                StringComparison.Ordinal)
-            && string.Equals(
-                AutomationProperties.GetName(AppVideoFpsComboBox),
-                "Default video generation FPS",
-                StringComparison.Ordinal)
-            && string.Equals(
-                AutomationProperties.GetName(ModalVideoFpsComboBox),
-                "Video generation FPS",
-                StringComparison.Ordinal)
-            && string.Equals(
-                AppVideoPixelBudgetLabel.Text,
-                "画素数上限",
-                StringComparison.Ordinal)
-            && string.Equals(
-                ModalVideoPixelBudgetLabel.Text,
-                "画素数上限",
-                StringComparison.Ordinal)
-            && string.Equals(
                 AppVideoDeliveryText.Text,
                 ModalVideoDeliveryText.Text,
                 StringComparison.Ordinal)
             && AppVideoDeliveryText.Text.Contains(
-                $"生成: {_videoPlaybackFps} fps・"
-                    + $"{4 * (_videoDurationSeconds * _videoPlaybackFps / 4) + 1}f",
+                "124f・24fps・5.167秒",
                 StringComparison.Ordinal)
             && ModalVideoDeliveryText.Text.Contains(
-                $"最終出力: 30 fps・{_videoDurationSeconds * 30}f・"
-                    + $"{_videoDurationSeconds}.000秒 · RIFE 4.25",
+                "AAC音声あり",
                 StringComparison.Ordinal)
             && AppVideoResolutionHintText.Text.Contains(
-                $"{_videoMaximumPixelArea.ToString(
-                    "N0",
-                    CultureInfo.InvariantCulture)}px",
+                "最大414,720px",
                 StringComparison.Ordinal)
             && ModalVideoResolutionHintText.Text.Contains(
-                "上限内に自動調整",
+                "H3 preview",
                 StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText is not null
             && AppVideoGenerationEstimateText is not null
@@ -2473,10 +2451,10 @@ public partial class MainWindow
                 VideoGenerationEstimateText(),
                 StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText.Text.Contains(
-                "RTX 4070 SUPER横長/縦長実測範囲",
+                "約5分42秒〜約9分7秒",
                 StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText.Text.Contains(
-                "Wan生成＋RIFE 4.25仕上げ",
+                "RTX 4070 SUPER 12GB",
                 StringComparison.Ordinal)
             && AppVideoSettingsHeading is not null
             && SettingsVideoNav is not null;

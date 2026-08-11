@@ -26,6 +26,7 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
 | One-second Jobs polling repeatedly loaded the full inventory | ADOPT | Polling fetches compact health first and refreshes the full inventory only when its active-job/count signature changes or health is unavailable. |
 | Direction/Auto could silently lose mode guidance near 2,000 characters | ADOPT | The editor rejects the conversion explicitly before transport when input plus guidance exceeds the bound. |
 | Public CI expected an ignored local Photoreal prompt policy | ADOPT | The smoke now forces the bounded public fallback and no longer embeds private-policy wording in tracked source. |
+| Aggregate video smoke still exercised the retired Wan writer | ADOPT | Historical Wan read/playback fixtures remain, while its new-job assertions now require the exact H3 preset/backend/prompt-only payload, omit legacy seed state, reject unavailable H3 without a POST, and preserve source-error feedback across health refresh. |
 | Modal zoom retention and bounded HQ decode looked sound | KEEP | Existing focused zoom, modal-interaction, and decode-bound evidence remains green. |
 
 ## Focused verification
@@ -49,6 +50,11 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
 - Photoreal modal and shared queue: the exact GitHub Actions failure was
   reproduced locally, traced to a non-deterministic private-policy expectation,
   isolated to the public fallback, and then passed in full.
+- Aggregate enhancement/video flow: historical Wan managed-output
+  read/filter/playback/delete compatibility, H3-only new enqueue, exact H3
+  prompt-only payload, ignored legacy seed state, unavailable-writer
+  fail-closed behavior, Style migration/persistence, input-error retention,
+  reload, and unchanged Jobs store all passed together.
 - Existing zoom-anchor, modal-interaction, and bounded-decode smokes remain
   green. The separate hidden-window modal-pan runner has an unresolved cadence
   hang; its exact owned process was stopped, and the product-level modal
@@ -70,6 +76,17 @@ loopback companion, and GPU runtime.
 | Full Jobs vs health | The live full-inventory response was about 24 MiB and took about 18 seconds; compact health was about 3.8 KiB. Local full-store JSON parsing alone was about 1.58 seconds. |
 | Loopback companion | Roughly 416 MiB aggregate working set and idle in the short CPU sample. |
 | GPU runtime | Roughly 10.4–16.0 GiB aggregate working set depending on active inference; intentionally left running. |
+
+Additional bounded probes separate individual viewer paths from the live GPU
+worker:
+
+| Path | Evidence |
+| --- | --- |
+| Favorites | The live store was 4,306,030 bytes. A read-only host baseline under active inference read the whole UTF-8 file in about 34 ms and materialized its JSON in about 488 ms. This is a PowerShell-host diagnostic, not a claim about the WPF parser. |
+| Initial thumbnails | The live large-catalog check filled all 15 initially realized regions without a filter toggle. The synthetic continuity smoke ended with 399/399 visible items covered, four decode workers, and the 256-entry resident bound intact. |
+| Zoom | The 243-image endpoint/anchor smoke passed 20 px through the forced one-column 600 px endpoint, kept anchor drift effectively zero across panel/resize/DPI changes, and bounded maximum realized containers at 214 of the 512 limit. |
+| HQ image load | The oversized-aspect synthetic decode probe deferred preview decode by 13 ms, bounded modal decode at 1,960,000 pixels, grew working set by 13.2 MiB, kept the dispatcher responsive, preserved fidelity, and rejected an over-budget non-native header before decode. |
+| Live CPU contention | During one 100,000-item interaction run, ComfyUI consumed about 77% of total 28-logical-CPU capacity, versus about 4.8% for the Codex/ChatGPT group and 1.7% for the companion. Search/filter p95 still passed at 232/147 ms, but sort p95 was 581.75 ms against 500 ms and the UI heartbeat gap was 76 ms against 50 ms. This contaminated run is retained as contention evidence, not presented as an acceptance pass; clean GitHub Actions remains the aggregate gate. |
 
 No model, source media, generated output, queue entry, or durable product state
 was deleted or published while gathering this evidence.
