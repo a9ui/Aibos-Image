@@ -11,6 +11,9 @@
     <Product>Aibos Image</Product>
     <AssemblyTitle>Aibos</AssemblyTitle>
     <Description>Local-first Aibos Image WPF renderer</Description>
+    <!-- Canonical product version. Keep this SemVer value in sync with each
+         user-facing Aibos release; the title bar and binary metadata read it. -->
+    <VersionPrefix>0.1.0</VersionPrefix>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Brand\Generated\Aibos.App.ico</ApplicationIcon>
     <!-- Published Aibos builds use the registered .NET 10 runtime directly.

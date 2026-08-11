@@ -652,7 +652,9 @@ public partial class MainWindow : Window
     {
         _tilesView = new SnapshotCollectionView<Tile>(_tiles);
         InitializeComponent();
-        HeaderProductVersionText.Text = ResolveProductVersionLabel();
+        string productVersionLabel = ResolveProductVersionLabel();
+        HeaderProductVersionText.Text = productVersionLabel;
+        Title = $"Aibos Image {productVersionLabel}";
         InitializeFavoriteHistory();
         if (Application.Current is App app)
             app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
@@ -27557,6 +27559,7 @@ public partial class MainWindow : Window
     public bool HeaderProductVersionContractForSmoke
         => HeaderProductVersionText.Text.StartsWith('v')
             && Version.TryParse(HeaderProductVersionText.Text[1..], out _)
+            && string.Equals(Title, $"Aibos Image {HeaderProductVersionText.Text}", StringComparison.Ordinal)
             && string.Equals(
                 AutomationProperties.GetName(HeaderProductVersionText),
                 "Aibos Image product version",
