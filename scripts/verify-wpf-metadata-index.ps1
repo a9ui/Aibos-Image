@@ -106,6 +106,11 @@ try {
     Assert-True ($result.concurrentReaderRebuild.walPresentAfterDelta -eq $true) 'Concurrent metadata fixture did not retain committed WAL frames behind the live reader.'
     Assert-True ($result.concurrentReaderRebuild.walPreservedDuringFullSave -eq $true) 'Full rebuild detached or deleted the live SQLite WAL family.'
     Assert-True ($result.concurrentReaderRebuild.readerSnapshotCount -eq $Count -and $result.concurrentReaderRebuild.durableEntryCount -eq $Count) 'Concurrent reader/full rebuild did not preserve both snapshots.'
+    Assert-True ($result.orphanFamilyProtection.passed -eq $true) 'Absent-main orphan SQLite family protection scenario failed.'
+    Assert-True ($result.orphanFamilyProtection.wal.passed -eq $true) 'Committed orphan WAL was not preserved fail-closed.'
+    Assert-True ($result.orphanFamilyProtection.shm.passed -eq $true) 'Orphan SHM namespace was not preserved fail-closed.'
+    Assert-True ($result.orphanFamilyProtection.journal.passed -eq $true) 'Orphan rollback journal was not preserved fail-closed.'
+    Assert-True ($result.orphanFamilyProtection.residueFree -eq $true) 'Orphan SQLite family rejection left temp/lock residue.'
 
     Assert-True ($result.warm.passed -eq $true) 'Separate-window warm metadata scenario failed.'
     Assert-True ($result.warm.cacheHits -eq $Count -and $result.warm.cacheMisses -eq 0) 'Warm metadata load was not an all-hit reuse.'
@@ -135,6 +140,17 @@ try {
     Assert-True ($result.boundedMalformed.loadState -eq 'Invalid') 'Bounded malformed SQLite index was not classified as Invalid.'
     Assert-True ($null -eq $result.boundedMalformed.escapedException) 'Bounded malformed SQLite index escaped MetadataIndexStore.Load as an exception.'
     Assert-True ($result.boundedMalformed.fixtureRemoved -eq $true) 'Bounded malformed SQLite fixture was not removed.'
+    Assert-True ($result.boundedOversizedPrompt.passed -eq $true) 'Oversized SQLite prompt was not rejected before materialization.'
+    Assert-True ($result.boundedOversizedPrompt.loadState -eq 'Invalid') 'Oversized SQLite prompt was not classified as Invalid.'
+    Assert-True ($null -eq $result.boundedOversizedPrompt.escapedException) 'Oversized SQLite prompt escaped MetadataIndexStore.Load as an exception.'
+    Assert-True ($result.sqliteBudgetProtection.passed -eq $true) 'SQLite family/aggregate load and write budget scenario failed.'
+    Assert-True ($result.sqliteBudgetProtection.aggregateLoadState -eq 'Invalid') 'Aggregate SQLite payload was not rejected before materialization.'
+    Assert-True ($result.sqliteBudgetProtection.familyLoadState -eq 'Invalid') 'Oversized SQLite WAL family was not rejected before open.'
+    Assert-True ($result.sqliteBudgetProtection.saveTargetAbsent -eq $true) 'Rejected oversized Save published a target or sidecar.'
+    Assert-True ($result.sqliteBudgetProtection.applyHashUnchanged -eq $true) 'Rejected oversized ApplyChanges modified the durable main database.'
+    Assert-True ($result.sqliteBudgetProtection.applyRevisionBefore -eq $result.sqliteBudgetProtection.applyRevisionAfter) 'Rejected oversized ApplyChanges changed the durable revision.'
+    Assert-True ($null -eq $result.sqliteBudgetProtection.escapedException) 'SQLite budget enforcement escaped as an exception.'
+    Assert-True ($result.sqliteBudgetProtection.residueFree -eq $true) 'SQLite budget enforcement left temp/lock residue.'
 
     Assert-True ($result.decodeFailurePreservation.passed -eq $true) 'Decode-failure last-complete-index preservation scenario failed.'
     Assert-True ($result.decodeFailurePreservation.cacheHits -eq ($Count - 1) -and $result.decodeFailurePreservation.cacheMisses -eq 1) 'Decode-failure scenario did not produce N-1 hits and one miss.'
@@ -166,7 +182,7 @@ try {
     $indexPath = [IO.Path]::GetFullPath([string]$result.indexPath)
     $runPrefix = $runRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     Assert-True $indexPath.StartsWith($runPrefix, [StringComparison]::OrdinalIgnoreCase) "Metadata index escaped the verifier root: $indexPath"
-    Assert-True (-not (Get-ChildItem -LiteralPath $runRoot -Recurse -File -ErrorAction Stop | Where-Object { $_.Name -like '*.tmp' -or $_.Name -like '*.lock' })) 'Verifier root contains temp/lock residue.'
+    Assert-True (-not (Get-ChildItem -LiteralPath $runRoot -Recurse -File -ErrorAction Stop | Where-Object { $_.Name -like '.mi-*' -or $_.Name -like '*.tmp' -or $_.Name -like '*.lock' })) 'Verifier root contains metadata temp/lock residue.'
 
     foreach ($name in $environmentNames) {
         Assert-True ([string]::Equals([Environment]::GetEnvironmentVariable($name), $environmentBefore[$name], [StringComparison]::Ordinal)) "Parent environment variable changed: $name"
@@ -265,7 +281,7 @@ try {
         Assert-True ([string]::Equals($crossIndexHashBeforeWarm, $crossIndexHashAfterWarm, [StringComparison]::Ordinal)) 'Second process rewrote metadata index bytes.'
         Assert-True ($crossIndexMtimeBeforeWarm -eq $crossIndexMtimeAfterWarm) 'Second process rewrote metadata index mtime.'
         Assert-True ([string]::Equals($sourceManifestBefore, $sourceManifestAfter, [StringComparison]::Ordinal)) 'Cross-process metadata loads changed source bytes.'
-        Assert-True (-not (Get-ChildItem -LiteralPath $crossIndexDirectory -Recurse -File | Where-Object { $_.Name -like '*.tmp' -or $_.Name -like '*.lock' })) 'Cross-process metadata loads left temp/lock residue.'
+        Assert-True (-not (Get-ChildItem -LiteralPath $crossIndexDirectory -Recurse -File | Where-Object { $_.Name -like '.mi-*' -or $_.Name -like '*.tmp' -or $_.Name -like '*.lock' })) 'Cross-process metadata loads left metadata temp/lock residue.'
     }
     finally {
         foreach ($name in $crossEnvironmentNames) {
@@ -294,6 +310,9 @@ try {
         futureVersionPreserved = $result.futureVersionProtection.bytesUnchanged
         commitTimeFutureGuard = $result.commitTimeFutureGuard.passed
         boundedMalformedRejected = $result.boundedMalformed.passed
+        oversizedPromptRejected = $result.boundedOversizedPrompt.passed
+        orphanFamilyProtected = $result.orphanFamilyProtection.passed
+        sqliteBudgetsEnforced = $result.sqliteBudgetProtection.passed
         decodeFailurePreserved = $result.decodeFailurePreservation.indexHashUnchanged
         staleEntryPruned = $result.staleEntryPrune.deletedEntryPruned
         cancellationPreserved = $result.cancellation.indexHashUnchanged
