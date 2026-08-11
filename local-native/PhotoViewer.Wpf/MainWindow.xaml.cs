@@ -535,6 +535,7 @@ public partial class MainWindow : Window
     private DispatcherOperation? _catalogProjectionStartOperation;
     private readonly SemaphoreSlim _catalogProjectionApplyGate = new(1, 1);
     private long _catalogProjectionGeneration;
+    private long _cardLayoutRevision;
     private long _unseenFilterReconcileGeneration;
     private CatalogProjectionRequest? _scheduledCatalogProjection;
     private long _lastAppliedCatalogProjectionGeneration;
@@ -553,6 +554,8 @@ public partial class MainWindow : Window
     private long _catalogStatsPresentationGeneration;
     private string _displayStyle = DisplayStyleStandard;
     private string _aspectMode = AspectOriginalValue;
+    private bool _metadataOriginalAspectLayoutBindingsPending;
+    private int _metadataOriginalAspectLayoutPublishCount;
     private string _sortBy = SortModifiedNewestValue;
     private string _randomSortSeed = "default";
     private string _datePreset = DatePresetNoneValue;
@@ -1409,6 +1412,7 @@ public partial class MainWindow : Window
         int TileCount,
         long CatalogRevision,
         long SelectionGeneration,
+        long CardLayoutRevision,
         string[] SelectedPaths,
         string? PrimarySelectedPath,
         string? PreviousSelectedPath,
@@ -1451,7 +1455,7 @@ public partial class MainWindow : Window
         string FolderBucketKey,
         string Group,
         double CardHeight,
-        string Prompt,
+        byte[] PromptUtf8,
         int FavoriteLevel,
         int PhotorealFavoriteLevel,
         int VideoFavoriteLevel,
@@ -8136,6 +8140,10 @@ public partial class MainWindow : Window
             workers,
             tiles.Count,
             StringComparer.OrdinalIgnoreCase);
+        var changedEntries = new ConcurrentDictionary<string, MetadataIndexEntry>(
+            workers,
+            Math.Min(tiles.Count, 4096),
+            StringComparer.OrdinalIgnoreCase);
         int completed = 0;
         int decodeFailures = 0;
         int cacheHits = 0;
@@ -8159,12 +8167,12 @@ public partial class MainWindow : Window
                     && cached.Matches(tile);
                 int width;
                 int height;
-                string prompt;
+                byte[] promptUtf8 = [];
                 if (cacheHit)
                 {
                     width = cached!.Width;
                     height = cached.Height;
-                    prompt = cached.Prompt;
+                    promptUtf8 = cached.PromptUtf8;
                     refreshedEntries[tile.Path] = cached;
                     Interlocked.Increment(ref cacheHits);
                 }
@@ -8190,19 +8198,25 @@ public partial class MainWindow : Window
                     }
                     else
                     {
-                        refreshedEntries[tile.Path] = new MetadataIndexEntry(
+                        promptUtf8 = MetadataIndexStore.EncodePrompt(
+                            pngMetadata?.Prompt);
+                        MetadataIndexEntry refreshed = new(
                             tile.Path,
                             tile.SourceLength,
                             tile.SourceLastWriteUtcTicks,
                             tile.SourceCreationUtcTicks,
                             width,
                             height,
-                            pngMetadata?.Prompt ?? "");
+                            promptUtf8);
+                        refreshedEntries[tile.Path] = refreshed;
+                        changedEntries[tile.Path] = refreshed;
                     }
-                    prompt = pngMetadata?.Prompt ?? "";
                 }
 
-                decoded.Enqueue(new DecodedImageMetadata(tile, new ImageDimensions(width, height), prompt));
+                decoded.Enqueue(new DecodedImageMetadata(
+                    tile,
+                    new ImageDimensions(width, height),
+                    promptUtf8));
                 int done = Interlocked.Increment(ref completed);
                 if (done % uiBatchSize == 0 || done == tiles.Count)
                 {
@@ -8234,8 +8248,23 @@ public partial class MainWindow : Window
                 // Prompt-only matches become available after the background
                 // index is complete. Filename/date/favorite filtering was
                 // already usable from the first published catalog frame.
-                if (!string.IsNullOrWhiteSpace(SearchInput.Text))
-                    ApplyFilters(selectFirst: false);
+                if (string.Equals(_aspectMode, AspectOriginalValue, StringComparison.Ordinal))
+                {
+                    GridZoomAnchor? viewportAnchor = PreferredGridGeometryAnchor();
+                    ApplyCardLayoutToAllTiles(
+                        invalidateItemLayout: false,
+                        refreshRealizedBindings: false);
+                    _metadataOriginalAspectLayoutBindingsPending = true;
+                    _metadataOriginalAspectLayoutPublishCount++;
+                    _ = PublishCompletedMetadataLayoutAsync(viewportAnchor);
+                }
+                else if (!string.IsNullOrWhiteSpace(SearchInput.Text))
+                {
+                    _ = QueueCatalogProjection(
+                        debounce: false,
+                        reorderCatalog: false,
+                        selectFirst: false);
+                }
             },
             DispatcherPriority.Background,
             cts.Token);
@@ -8250,6 +8279,7 @@ public partial class MainWindow : Window
             && refreshedEntries.Count == tiles.Count;
         bool exactLoadedWarmSnapshot = completeMetadataSet
             && index.State == MetadataIndexLoadState.Loaded
+            && !index.RequiresMigration
             && cacheMisses == 0
             && unavailableFolderSet.Count == 0
             && index.Entries.Count == tiles.Count;
@@ -8262,6 +8292,7 @@ public partial class MainWindow : Window
                     unavailableFolderSet,
                     index.Entries,
                     refreshedEntries,
+                    changedEntries,
                     cts.Token),
                 cts.Token);
         }
@@ -8290,6 +8321,7 @@ public partial class MainWindow : Window
                 MetadataIndexSaveDisposition.Incomplete);
         }
         else if (index.State == MetadataIndexLoadState.Loaded
+            && !index.RequiresMigration
             && cacheMisses == 0
             && decodeFailures == 0
             && refreshedEntries.Count == tiles.Count
@@ -8302,6 +8334,20 @@ public partial class MainWindow : Window
                 metadataIndexPath,
                 refreshedEntries.Count,
                 "the complete index was reused byte-for-byte");
+        }
+        else if (index.State == MetadataIndexLoadState.Loaded
+            && !index.RequiresMigration)
+        {
+            MetadataIndexSnapshotPlan plan = snapshotPlan
+                ?? throw new InvalidOperationException("metadata index change plan was unavailable");
+            save = await Task.Run(
+                () => MetadataIndexStore.ApplyChanges(
+                    metadataIndexPath,
+                    plan.Upserts,
+                    plan.RemovedPaths,
+                    plan.Entries.Length,
+                    cts.Token),
+                cts.Token);
         }
         else
         {
@@ -8344,6 +8390,7 @@ public partial class MainWindow : Window
         IReadOnlyList<string> unavailableFolderSet,
         IReadOnlyDictionary<string, MetadataIndexEntry> priorEntries,
         ConcurrentDictionary<string, MetadataIndexEntry> refreshedEntries,
+        ConcurrentDictionary<string, MetadataIndexEntry> changedEntries,
         CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -8352,6 +8399,7 @@ public partial class MainWindow : Window
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
             .ToArray();
         var unavailablePriorEntries = new List<MetadataIndexEntry>();
+        var removedPaths = new List<string>();
         int checkedEntries = 0;
         foreach (MetadataIndexEntry entry in priorEntries.Values)
         {
@@ -8370,6 +8418,7 @@ public partial class MainWindow : Window
                 continue;
             }
 
+            bool unavailable = false;
             foreach (string root in normalizedUnavailableRoots)
             {
                 if (string.Equals(normalizedPath, root, StringComparison.OrdinalIgnoreCase)
@@ -8377,12 +8426,16 @@ public partial class MainWindow : Window
                     || normalizedPath.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 {
                     unavailablePriorEntries.Add(entry);
+                    unavailable = true;
                     break;
                 }
             }
+            if (!unavailable)
+                removedPaths.Add(entry.Path);
         }
         token.ThrowIfCancellationRequested();
-        bool durableEntrySetExact = priorEntries.Count == refreshedEntries.Count + unavailablePriorEntries.Count;
+        bool durableEntrySetExact = removedPaths.Count == 0
+            && priorEntries.Count == refreshedEntries.Count + unavailablePriorEntries.Count;
         var snapshotByPath = new Dictionary<string, MetadataIndexEntry>(
             refreshedEntries,
             StringComparer.OrdinalIgnoreCase);
@@ -8393,11 +8446,17 @@ public partial class MainWindow : Window
         foreach (MetadataIndexEntry prior in unavailablePriorEntries)
             snapshotByPath.TryAdd(prior.Path, prior);
         token.ThrowIfCancellationRequested();
-        return new MetadataIndexSnapshotPlan(snapshotByPath.Values.ToArray(), durableEntrySetExact);
+        return new MetadataIndexSnapshotPlan(
+            snapshotByPath.Values.ToArray(),
+            changedEntries.Values.ToArray(),
+            removedPaths.ToArray(),
+            durableEntrySetExact);
     }
 
     private void BeginMetadataIndexProgress(int total)
     {
+        _metadataOriginalAspectLayoutBindingsPending = false;
+        _metadataOriginalAspectLayoutPublishCount = 0;
         _metadataIndexStatus = "loading";
         _metadataIndexProgress = 0;
         _metadataIndexCompleted = 0;
@@ -8627,51 +8686,13 @@ public partial class MainWindow : Window
     {
         string? selectedPath = SelectedTile()?.Path;
         bool selectedMetadataArrived = false;
-        bool reflowOriginalAspect = string.Equals(
-            _aspectMode,
-            AspectOriginalValue,
-            StringComparison.Ordinal);
-        CatalogCardLayoutContext? cardLayout = reflowOriginalAspect
-            ? CaptureCardLayoutContext()
-            : null;
-        GridZoomAnchor? viewportAnchor = reflowOriginalAspect
-            ? PreferredGridGeometryAnchor()
-            : null;
-        bool cardLayoutChanged = false;
         while (decoded.TryDequeue(out DecodedImageMetadata item))
         {
-            int previousWidth = item.Tile.ImagePixelWidth;
-            int previousHeight = item.Tile.ImagePixelHeight;
             item.Tile.ImagePixelWidth = item.Dimensions.Width;
             item.Tile.ImagePixelHeight = item.Dimensions.Height;
-            item.Tile.Prompt = item.Prompt;
-            if (cardLayout is { } resolvedLayout
-                && item.Dimensions.Width > 0
-                && item.Dimensions.Height > 0
-                && (previousWidth != item.Dimensions.Width
-                    || previousHeight != item.Dimensions.Height))
-            {
-                double previousCardHeight = item.Tile.CardHeight;
-                double previousListThumbnailHeight = item.Tile.ListThumbnailHeight;
-                ApplyCardLayout(item.Tile, resolvedLayout);
-                cardLayoutChanged |= Math.Abs(item.Tile.CardHeight - previousCardHeight) >= 0.01
-                    || Math.Abs(item.Tile.ListThumbnailHeight - previousListThumbnailHeight) >= 0.01;
-            }
+            item.Tile.PromptUtf8 = item.PromptUtf8;
             selectedMetadataArrived |= !string.IsNullOrWhiteSpace(selectedPath)
                 && string.Equals(item.Tile.Path, selectedPath, StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (cardLayoutChanged)
-        {
-            // The catalog is deliberately published before the metadata scan.
-            // Original-aspect cards therefore begin with a safe fallback height.
-            // Reflow only the decoded tiles, invalidate the prepared row map once
-            // per drain, and restore the same viewport anchor after the row
-            // geometry catches up. Without this step landscape images keep the
-            // fallback portrait cell and appear as stale black rectangles.
-            SyncGalleryColumnMode();
-            _galleryVirtualizingPanel?.InvalidateItemLayout();
-            ScheduleGridGeometryAnchorRestore(viewportAnchor);
         }
 
         if (!selectedMetadataArrived
@@ -8690,6 +8711,28 @@ public partial class MainWindow : Window
             && string.Equals(_modalSourceTilePath, selected.Path, StringComparison.OrdinalIgnoreCase))
         {
             OpenModal();
+        }
+    }
+
+    private async Task PublishCompletedMetadataLayoutAsync(GridZoomAnchor? viewportAnchor)
+    {
+        SearchFilterCompletion completion = await QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: false,
+            viewportAnchor: viewportAnchor);
+        if (completion.Applied || completion.Discarded)
+            return;
+
+        // A projection failure must not leave realized containers bound to the
+        // fallback portrait geometry. Keep this as a single fallback reflow;
+        // progressive metadata batches never invalidate the row map.
+        if (_metadataOriginalAspectLayoutBindingsPending)
+        {
+            RefreshRealizedCardLayoutBindings();
+            _metadataOriginalAspectLayoutBindingsPending = false;
+            _galleryVirtualizingPanel?.InvalidateItemLayout();
+            ScheduleGridGeometryAnchorRestore(viewportAnchor);
         }
     }
 
@@ -11092,6 +11135,7 @@ public partial class MainWindow : Window
                 || request.Generation != _catalogProjectionGeneration
                 || snapshot.CatalogRevision != _catalogContentRevision
                 || snapshot.SelectionGeneration != _selectionVisualSyncGeneration
+                || snapshot.CardLayoutRevision != _cardLayoutRevision
                 || !string.Equals(snapshot.SortBy, _sortBy, StringComparison.Ordinal)
                 || !string.Equals(snapshot.RandomSortSeed, _randomSortSeed, StringComparison.Ordinal))
             {
@@ -13637,7 +13681,7 @@ public partial class MainWindow : Window
                     tile.FolderBucketKey,
                     tile.Group,
                     Math.Max(1, tile.CardHeight + 4),
-                    tile.Prompt,
+                    tile.PromptUtf8,
                     tile.Fav,
                     tile.PhotorealFavoriteLevel,
                     tile.VideoFavoriteLevel,
@@ -13721,6 +13765,7 @@ public partial class MainWindow : Window
                 tileCount,
                 _catalogContentRevision,
                 _selectionVisualSyncGeneration,
+                _cardLayoutRevision,
                 _selectedPaths.ToArray(),
                 _primarySelectedPath,
                 previous?.Path,
@@ -13859,12 +13904,15 @@ public partial class MainWindow : Window
         List<int>? matchedIndices = unfiltered
             ? null
             : new List<int>(Math.Min(snapshot.TileCount, 4_096));
+        using var promptMatcher = snapshot.QueryTokens.Length == 0
+            ? null
+            : new Utf8PromptMatcher();
         for (int index = 0; index < snapshot.TileCount; index++)
         {
             CheckCatalogWorkerInputHandoff(index, snapshot.TileCount, cancellationToken);
 
             FilterTileSnapshot tile = snapshot.Tiles[index];
-            if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot))
+            if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot, promptMatcher))
                 continue;
             matchedIndices?.Add(index);
             if (!hasLayoutItem)
@@ -14168,14 +14216,20 @@ public partial class MainWindow : Window
         return StringComparer.OrdinalIgnoreCase.Compare(left.Path, right.Path);
     }
 
-    private static bool MatchesFilterSnapshot(FilterTileSnapshot tile, FilterSnapshot snapshot)
+    private static bool MatchesFilterSnapshot(
+        FilterTileSnapshot tile,
+        FilterSnapshot snapshot,
+        Utf8PromptMatcher? promptMatcher)
     {
         if (snapshot.AlbumActive && (!tile.IsRealFile || !snapshot.AlbumMemberPaths.Contains(tile.Path)))
             return false;
-        foreach (string token in snapshot.QueryTokens)
+        if (snapshot.QueryTokens.Length > 0
+            && !(promptMatcher?.MatchesAll(
+                tile.PromptUtf8,
+                tile.FileName,
+                snapshot.QueryTokens) ?? false))
         {
-            if (!ContainsText(tile.FileName, token) && !ContainsText(tile.Prompt, token))
-                return false;
+            return false;
         }
 
         if (snapshot.FavoritesOnly && (tile.FavoriteLevel <= 0 || (snapshot.FavoriteLevels.Count > 0 && !snapshot.FavoriteLevels.Contains(tile.FavoriteLevel))))
@@ -14427,6 +14481,7 @@ public partial class MainWindow : Window
             if (generation != _catalogProjectionGeneration
                 || snapshot.CatalogRevision != _catalogContentRevision
                 || snapshot.SelectionGeneration != _selectionVisualSyncGeneration
+                || snapshot.CardLayoutRevision != _cardLayoutRevision
                 || !string.Equals(snapshot.SortBy, _sortBy, StringComparison.Ordinal)
                 || !string.Equals(snapshot.RandomSortSeed, _randomSortSeed, StringComparison.Ordinal))
             {
@@ -14541,6 +14596,11 @@ public partial class MainWindow : Window
                     resetPreparationStarted = false;
                 }
                 preparedPanel?.SetPreparedLayout(filterResult.PreparedLayout);
+                if (_metadataOriginalAspectLayoutBindingsPending)
+                {
+                    RefreshRealizedCardLayoutBindings();
+                    _metadataOriginalAspectLayoutBindingsPending = false;
+                }
                 _selectedPaths.Clear();
                 foreach (Tile selectedTile in filterResult.SelectedTiles)
                     _selectedPaths.Add(selectedTile.Path);
@@ -14870,22 +14930,63 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(query)) return true;
 
         var tokens = query.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var token in tokens)
-        {
-            if (ContainsText(tile.FileName, token)
-                || ContainsText(tile.Prompt, token))
-            {
-                continue;
-            }
-
-            return false;
-        }
-
-        return true;
+        using var promptMatcher = new Utf8PromptMatcher();
+        return promptMatcher.MatchesAll(tile.PromptUtf8, tile.FileName, tokens);
     }
 
     private static bool ContainsText(string? value, string token)
         => !string.IsNullOrEmpty(value) && value.Contains(token, StringComparison.OrdinalIgnoreCase);
+
+    private sealed class Utf8PromptMatcher : IDisposable
+    {
+        private char[]? _buffer;
+
+        public bool MatchesAll(
+            byte[]? promptUtf8,
+            string fileName,
+            IReadOnlyList<string> tokens)
+        {
+            ReadOnlySpan<char> prompt = default;
+            bool decoded = false;
+            foreach (string token in tokens)
+            {
+                if (ContainsText(fileName, token))
+                    continue;
+                if (promptUtf8 is null || promptUtf8.Length == 0)
+                    return false;
+                if (!decoded)
+                {
+                    prompt = Decode(promptUtf8);
+                    decoded = true;
+                }
+                if (!prompt.Contains(token.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+            return true;
+        }
+
+        private ReadOnlySpan<char> Decode(byte[] promptUtf8)
+        {
+            int required = Encoding.UTF8.GetMaxCharCount(promptUtf8.Length);
+            if (_buffer is null || _buffer.Length < required)
+            {
+                if (_buffer is not null)
+                    ArrayPool<char>.Shared.Return(_buffer);
+                _buffer = ArrayPool<char>.Shared.Rent(required);
+            }
+
+            int written = Encoding.UTF8.GetChars(promptUtf8, _buffer);
+            return _buffer.AsSpan(0, written);
+        }
+
+        public void Dispose()
+        {
+            if (_buffer is null)
+                return;
+            ArrayPool<char>.Shared.Return(_buffer);
+            _buffer = null;
+        }
+    }
 
     private bool MatchesFavoriteFilter(Tile tile, bool favoritesOnly, bool unfavoriteOnly)
     {
@@ -15407,13 +15508,41 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ApplyCardLayoutToAllTiles()
+    private void RefreshRealizedCardLayoutBindings()
+    {
+        var refreshed = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        if (CardsList is not null)
+            RefreshList(CardsList);
+        if (RowsList is not null)
+            RefreshList(RowsList);
+        return;
+
+        void RefreshList(DependencyObject root)
+        {
+            foreach (ListBoxItem container in FindVisualDescendants<ListBoxItem>(root))
+            {
+                if (container.DataContext is Tile tile && refreshed.Add(tile))
+                    tile.RefreshCardLayoutBindings();
+            }
+        }
+    }
+
+    private void ApplyCardLayoutToAllTiles(
+        bool invalidateItemLayout = true,
+        bool refreshRealizedBindings = true)
     {
         SyncGalleryColumnMode();
         CatalogCardLayoutContext context = CaptureCardLayoutContext();
         foreach (var tile in _allTiles)
-            ApplyCardLayout(tile, context);
-        _galleryVirtualizingPanel?.InvalidateItemLayout();
+            ApplyCardLayout(tile, context, notify: false);
+        _cardLayoutRevision++;
+        if (refreshRealizedBindings)
+        {
+            _metadataOriginalAspectLayoutBindingsPending = false;
+            RefreshRealizedCardLayoutBindings();
+        }
+        if (invalidateItemLayout)
+            _galleryVirtualizingPanel?.InvalidateItemLayout();
     }
 
     private void ApplyCardLayout(Tile tile)
@@ -15427,7 +15556,10 @@ public partial class MainWindow : Window
             _displayStyle,
             _aspectMode);
 
-    private static void ApplyCardLayout(Tile tile, CatalogCardLayoutContext context)
+    private static void ApplyCardLayout(
+        Tile tile,
+        CatalogCardLayoutContext context,
+        bool notify = true)
     {
         (double widthFactor, double listThumbnailBase) = context.DisplayStyle switch
         {
@@ -15451,7 +15583,8 @@ public partial class MainWindow : Window
             showStatusBadge: width >= 72,
             listThumbnailBase,
             listThumbnailHeight,
-            Math.Max(listThumbnailBase, listThumbnailHeight));
+            Math.Max(listThumbnailBase, listThumbnailHeight),
+            notify);
     }
 
     private static double AspectHeightFactor(Tile tile, string aspectMode)
@@ -23872,6 +24005,8 @@ public partial class MainWindow : Window
     public int MetadataIndexCacheMissesForSmoke => _metadataIndexCacheMisses;
     public string MetadataIndexStatusTextForSmoke => MetadataIndexStatusText.Text;
     public bool MetadataIndexProgressVisibleForSmoke => MetadataIndexProgressBar.Visibility == Visibility.Visible;
+    public int MetadataOriginalAspectLayoutPublishCountForSmoke
+        => _metadataOriginalAspectLayoutPublishCount;
     public static string ResolveSharedProjectRootForSmoke(string start)
     {
         string fullStart = Path.GetFullPath(start);
@@ -29532,10 +29667,12 @@ internal readonly record struct DecodedThumbnail(Tile Tile, BitmapSource? Thumbn
 internal readonly record struct DecodedImageMetadata(
     Tile Tile,
     ImageDimensions Dimensions,
-    string Prompt);
+    byte[] PromptUtf8);
 
 internal sealed record MetadataIndexSnapshotPlan(
     MetadataIndexEntry[] Entries,
+    MetadataIndexEntry[] Upserts,
+    string[] RemovedPaths,
     bool DurableEntrySetExact);
 
 internal sealed class SnapshotCollectionView<T> : CollectionView, IReadOnlyList<T>
@@ -29856,6 +29993,7 @@ public sealed class Tile : INotifyPropertyChanged
     private static readonly PropertyChangedEventArgs ShowI2iQueueBadgeChanged = new(nameof(ShowI2iQueueBadge));
     private static readonly PropertyChangedEventArgs ShowVideoQueueBadgeChanged = new(nameof(ShowVideoQueueBadge));
     private static readonly PropertyChangedEventArgs ShowUnseenDotOnCardChanged = new(nameof(ShowUnseenDotOnCard));
+    private static readonly PropertyChangedEventArgs PromptChanged = new(nameof(Prompt));
 
     public Brush? ArtBase { get; set; }
     public Brush? ArtGlow { get; set; }
@@ -29897,7 +30035,7 @@ public sealed class Tile : INotifyPropertyChanged
             + $"{(!_enhanced ? "Original. " : "")}"
             + $"{(_unseen ? "Unseen" : "Seen")}.";
 
-    private string _prompt = "";
+    private byte[] _promptUtf8 = [];
     private int _imagePixelWidth;
     private int _imagePixelHeight;
     private bool _enhanced;
@@ -30220,13 +30358,23 @@ public sealed class Tile : INotifyPropertyChanged
 
     public string Prompt
     {
-        get => _prompt;
+        get => MetadataIndexStore.DecodePrompt(_promptUtf8);
+        set => PromptUtf8 = MetadataIndexStore.EncodePrompt(value);
+    }
+
+    internal byte[] PromptUtf8
+    {
+        get => _promptUtf8;
         set
         {
-            value ??= "";
-            if (string.Equals(_prompt, value, StringComparison.Ordinal)) return;
-            _prompt = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Prompt)));
+            value ??= [];
+            if (ReferenceEquals(_promptUtf8, value)
+                || _promptUtf8.AsSpan().SequenceEqual(value))
+            {
+                return;
+            }
+            _promptUtf8 = value;
+            PropertyChanged?.Invoke(this, PromptChanged);
         }
     }
 
@@ -30439,7 +30587,8 @@ public sealed class Tile : INotifyPropertyChanged
         bool showStatusBadge,
         double listThumbnailWidth,
         double listThumbnailHeight,
-        double listThumbnailSize)
+        double listThumbnailSize,
+        bool notify = true)
     {
         bool cardWidthChanged = Math.Abs(_cardWidth - cardWidth) >= 0.01;
         bool cardHeightChanged = Math.Abs(_cardHeight - cardHeight) >= 0.01;
@@ -30469,6 +30618,9 @@ public sealed class Tile : INotifyPropertyChanged
         _listThumbnailWidth = listThumbnailWidth;
         _listThumbnailHeight = listThumbnailHeight;
         _listThumbnailSize = listThumbnailSize;
+
+        if (!notify)
+            return;
 
         PropertyChangedEventHandler? handler = PropertyChanged;
         if (handler is null)
@@ -30523,6 +30675,42 @@ public sealed class Tile : INotifyPropertyChanged
             handler(this, ListThumbnailHeightChanged);
         if (listThumbnailSizeChanged)
             handler(this, ListThumbnailSizeChanged);
+    }
+
+    internal void RefreshCardLayoutBindings()
+    {
+        PropertyChangedEventHandler? handler = PropertyChanged;
+        if (handler is null)
+            return;
+
+        handler(this, CardWidthChanged);
+        handler(this, CardHeightChanged);
+        handler(this, CardThumbnailStretchChanged);
+        handler(this, ShowCardDetailsChanged);
+        handler(this, ShowCardStatusBadgeChanged);
+        handler(this, CardFavoriteButtonSizeChanged);
+        handler(this, UseCompactCardTemplateChanged);
+        handler(this, CompactFavoriteControlHeightChanged);
+        handler(this, ListThumbnailWidthChanged);
+        handler(this, ListThumbnailHeightChanged);
+        handler(this, ListThumbnailSizeChanged);
+        handler(this, ShowFavoriteBadgeChanged);
+        handler(this, ShowPhotorealFavoriteBadgeChanged);
+        handler(this, ShowVideoFavoriteBadgeChanged);
+        handler(this, ShowEnhancedBadgeChanged);
+        handler(this, ShowUpscaleBadgeChanged);
+        handler(this, ShowPhotorealBadgeChanged);
+        handler(this, ShowI2iBadgeChanged);
+        handler(this, ShowVideoBadgeChanged);
+        handler(this, ShowUpscaleVariantCountChanged);
+        handler(this, ShowPhotorealVariantCountChanged);
+        handler(this, ShowI2iVariantCountChanged);
+        handler(this, ShowVideoVariantCountChanged);
+        handler(this, ShowUpscaleQueueBadgeChanged);
+        handler(this, ShowPhotorealQueueBadgeChanged);
+        handler(this, ShowI2iQueueBadgeChanged);
+        handler(this, ShowVideoQueueBadgeChanged);
+        handler(this, ShowUnseenDotOnCardChanged);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

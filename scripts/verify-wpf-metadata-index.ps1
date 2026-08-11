@@ -16,6 +16,19 @@ function Assert-True {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+$dotnet = 'dotnet.exe'
+$localDotnet10 = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+if (Test-Path -LiteralPath $localDotnet10 -PathType Leaf) {
+    $dotnet = $localDotnet10
+}
+$dotnetRootBefore = [Environment]::GetEnvironmentVariable('DOTNET_ROOT')
+$dotnetRootX64Before = [Environment]::GetEnvironmentVariable('DOTNET_ROOT_X64')
+$dotnetRoot = if ([IO.Path]::IsPathRooted($dotnet)) {
+    Split-Path -Parent $dotnet
+}
+else {
+    $null
+}
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('photoviewer-wpf-metadata-index-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -36,8 +49,12 @@ foreach ($name in $environmentNames) {
 $currentDirectoryBefore = [Environment]::CurrentDirectory
 
 try {
+    if ($dotnetRoot) {
+        [Environment]::SetEnvironmentVariable('DOTNET_ROOT', $dotnetRoot)
+        [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $dotnetRoot)
+    }
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
-    & dotnet build $project -c $Configuration --nologo -v:minimal
+    & $dotnet build $project -c $Configuration --nologo -v:minimal
     if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
     $process = Start-Process -FilePath $exe `
@@ -76,6 +93,13 @@ try {
     Assert-True ($result.cold.progressMonotonic -eq $true) 'Metadata progress regressed during the cold load.'
     Assert-True ($result.cold.progress -eq 100 -and $result.cold.status -eq 'ready') 'Metadata progress did not settle at ready/100%.'
 
+    Assert-True ($result.legacyMigration.passed -eq $true) 'Legacy PVMI-to-SQLite migration scenario failed.'
+    Assert-True ($result.legacyMigration.legacyDetected -eq $true) 'Legacy metadata index was not detected as requiring migration.'
+    Assert-True ($result.legacyMigration.sqliteCreated -eq $true) 'Legacy metadata index was not migrated to SQLite.'
+    Assert-True ($result.legacyMigration.legacyPreserved -eq $true) 'Legacy metadata evidence was unexpectedly removed during migration.'
+    Assert-True ($result.rowDeltaRollback.passed -eq $true) 'Rejected SQLite row delta did not roll back atomically.'
+    Assert-True ($result.rowDeltaRollback.revisionBefore -eq $result.rowDeltaRollback.revisionAfter) 'Rejected SQLite row delta changed the durable revision.'
+
     Assert-True ($result.warm.passed -eq $true) 'Separate-window warm metadata scenario failed.'
     Assert-True ($result.warm.cacheHits -eq $Count -and $result.warm.cacheMisses -eq 0) 'Warm metadata load was not an all-hit reuse.'
     Assert-True ($result.warm.indexHashUnchanged -eq $true -and $result.warm.indexMtimeUnchanged -eq $true) 'Warm metadata reuse rewrote the durable index.'
@@ -83,9 +107,10 @@ try {
     Assert-True ($result.partialInvalidation.passed -eq $true) 'Single-file metadata invalidation scenario failed.'
     Assert-True ($result.partialInvalidation.cacheHits -eq ($Count - 1) -and $result.partialInvalidation.cacheMisses -eq 1) 'Single-file mutation did not produce N-1 hits and one miss.'
     Assert-True ($result.partialInvalidation.refreshedPromptReady -eq $true) 'Single-file mutation did not expose the refreshed prompt.'
+    Assert-True ($result.partialInvalidation.rowDeltaCommitted -eq $true) 'Single-file mutation did not commit exactly one SQLite row-delta revision.'
 
-    Assert-True ($result.corruptionRecovery.passed -eq $true) 'Checksum corruption recovery scenario failed.'
-    Assert-True ($result.corruptionRecovery.checksumDetected -eq $true) 'Payload bit flip was not identified as a checksum failure.'
+    Assert-True ($result.corruptionRecovery.passed -eq $true) 'SQLite corruption recovery scenario failed.'
+    Assert-True ($result.corruptionRecovery.corruptionDetected -eq $true) 'Malformed SQLite metadata cache was not rejected.'
     Assert-True ($result.corruptionRecovery.cacheHits -eq 0 -and $result.corruptionRecovery.cacheMisses -eq $Count) 'Corrupt metadata index did not safely fall back for every source.'
     Assert-True ($result.corruptionRecovery.rebuiltEntryCount -eq $Count) 'Corrupt metadata index was not rebuilt completely.'
 
@@ -98,10 +123,10 @@ try {
     Assert-True ($result.commitTimeFutureGuard.bytesUnchanged -eq $true -and $result.commitTimeFutureGuard.mtimeUnchanged -eq $true) 'Commit-time future guard changed the protected index.'
     Assert-True ($result.commitTimeFutureGuard.residueFree -eq $true) 'Commit-time future guard left temp/lock residue.'
 
-    Assert-True ($result.checksumValidMalformed.passed -eq $true) 'Checksum-valid bounded-length corruption scenario failed.'
-    Assert-True ($result.checksumValidMalformed.loadState -eq 'Invalid') 'Checksum-valid malformed index was not classified as Invalid.'
-    Assert-True ($null -eq $result.checksumValidMalformed.escapedException) 'Checksum-valid malformed index escaped MetadataIndexStore.Load as an exception.'
-    Assert-True ($result.checksumValidMalformed.fixtureRemoved -eq $true) 'Checksum-valid malformed fixture was not removed.'
+    Assert-True ($result.boundedMalformed.passed -eq $true) 'Bounded malformed SQLite scenario failed.'
+    Assert-True ($result.boundedMalformed.loadState -eq 'Invalid') 'Bounded malformed SQLite index was not classified as Invalid.'
+    Assert-True ($null -eq $result.boundedMalformed.escapedException) 'Bounded malformed SQLite index escaped MetadataIndexStore.Load as an exception.'
+    Assert-True ($result.boundedMalformed.fixtureRemoved -eq $true) 'Bounded malformed SQLite fixture was not removed.'
 
     Assert-True ($result.decodeFailurePreservation.passed -eq $true) 'Decode-failure last-complete-index preservation scenario failed.'
     Assert-True ($result.decodeFailurePreservation.cacheHits -eq ($Count - 1) -and $result.decodeFailurePreservation.cacheMisses -eq 1) 'Decode-failure scenario did not produce N-1 hits and one miss.'
@@ -145,7 +170,7 @@ try {
     # Keep the process TEMP short enough that Windows PowerShell can hash and
     # stat the 64-character index filename without crossing MAX_PATH.
     $crossProcessTemp = Join-Path $runRoot 't'
-    $crossAutomationRoot = Join-Path $crossProcessTemp 'photoviewer-wpf-automation-metadata-index-cross-process-v1'
+    $crossAutomationRoot = Join-Path $crossProcessTemp 'pv-mi-x1'
     $crossIndexDirectory = Join-Path $crossAutomationRoot 'metadata-index'
     $crossFolder = Join-Path $runRoot 'fixture\images-00'
     $coldShotPath = Join-Path $crossProjectRoot 'cold.png'
@@ -210,10 +235,11 @@ try {
 
         & $invokeShot $coldShotPath $coldPerfPath
         $coldPerf = Get-Content -Raw -LiteralPath $coldPerfPath | ConvertFrom-Json
+        $coldPerfJson = $coldPerf | ConvertTo-Json -Compress -Depth 5
         Assert-True ($coldPerf.MetadataIndexLoadState -eq 'Missing') "First process metadata state was $($coldPerf.MetadataIndexLoadState), expected Missing."
         Assert-True ($coldPerf.MetadataCacheHits -eq 0 -and $coldPerf.MetadataCacheMisses -eq $crossCount) 'First process was not a complete cold metadata pass.'
-        Assert-True ($coldPerf.MetadataIndexSaveSucceeded -eq $true) 'First process did not save its complete metadata index.'
-        $crossIndexFiles = @(Get-ChildItem -LiteralPath $crossIndexDirectory -Filter '*.pvmi' -File)
+        Assert-True ($coldPerf.MetadataIndexSaveSucceeded -eq $true) "First process did not save its complete metadata index: $coldPerfJson"
+        $crossIndexFiles = @(Get-ChildItem -LiteralPath $crossIndexDirectory -Filter '*.sqlite3' -File)
         Assert-True ($crossIndexFiles.Count -eq 1) "First process produced $($crossIndexFiles.Count) metadata indexes, expected one."
         $crossIndexPath = $crossIndexFiles[0].FullName
         $crossIndexHashBeforeWarm = (Get-FileHash -LiteralPath $crossIndexPath -Algorithm SHA256).Hash
@@ -259,7 +285,7 @@ try {
         corruptionFallbacks = $result.corruptionRecovery.cacheMisses
         futureVersionPreserved = $result.futureVersionProtection.bytesUnchanged
         commitTimeFutureGuard = $result.commitTimeFutureGuard.passed
-        checksumValidMalformedRejected = $result.checksumValidMalformed.passed
+        boundedMalformedRejected = $result.boundedMalformed.passed
         decodeFailurePreserved = $result.decodeFailurePreservation.indexHashUnchanged
         staleEntryPruned = $result.staleEntryPrune.deletedEntryPruned
         cancellationPreserved = $result.cancellation.indexHashUnchanged
@@ -275,6 +301,8 @@ try {
     } | ConvertTo-Json -Depth 5
 }
 finally {
+    [Environment]::SetEnvironmentVariable('DOTNET_ROOT', $dotnetRootBefore)
+    [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $dotnetRootX64Before)
     if (Test-Path -LiteralPath $runRoot) {
         $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
         if (-not $resolvedRunRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {

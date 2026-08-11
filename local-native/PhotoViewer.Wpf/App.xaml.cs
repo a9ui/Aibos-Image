@@ -3319,7 +3319,7 @@ public partial class App : Application
         // reaches a filesystem operation.
         return Path.Combine(
             Path.GetTempPath(),
-            "photoviewer-wpf-automation-metadata-index-cross-process-v1");
+            "pv-mi-x1");
     }
 
     // Automation fixtures never inherit CLI, result-file, or shared-state
@@ -9340,6 +9340,7 @@ public partial class App : Application
             {
                 await first.LoadFolderAsync(aspectFolder);
                 bool metadataReady = await first.WaitForCatalogImageDimensionsForSmokeAsync();
+                int metadataLayoutPublishCount = first.MetadataOriginalAspectLayoutPublishCountForSmoke;
                 int filtered = first.FilteredCountForSmoke;
                 List<string> initialOrder = first.FilteredFileNamesForSmoke(3);
                 bool selectedBravo = first.SelectFileNameForSmoke("bravo-square.png");
@@ -9412,8 +9413,9 @@ public partial class App : Application
                     && string.Equals(restoredOriginalRuntime.AspectMode, "original", StringComparison.OrdinalIgnoreCase)
                     && Math.Abs((restoredOriginalRuntime.CardHeight / restoredOriginalRuntime.CardWidth) - (2d / 3d)) < 0.03
                     && string.Equals(restoredOriginalRuntime.CardThumbnailStretch, "Uniform", StringComparison.Ordinal);
+                bool metadataLayoutCoalesced = metadataLayoutPublishCount == 1;
 
-                bool ok = filtered == 3
+                bool ok = filtered == 131
                     && initialOrder.SequenceEqual(new[] { "alpha-landscape.png", "bravo-square.png", "charlie-portrait.png" })
                     && squareChanged
                     && portraitChanged
@@ -9424,13 +9426,14 @@ public partial class App : Application
                     && selectionStable
                     && zoomComposes
                     && runtimeRestore
-                    && persistence;
+                    && persistence
+                    && metadataLayoutCoalesced;
 
                 result = new AspectSmokeResult
                 {
                     Ok = ok,
                     Message = ok
-                        ? "late metadata reflowed Original cards to source geometry; aspect controls preserved order/selection, composed with zoom, and restored from WPF state"
+                        ? "late metadata published Original card geometry once after multiple decode batches; aspect controls preserved order/selection, composed with zoom, and restored from WPF state"
                         : "aspect smoke did not meet dimension/order/selection/persistence expectations",
                     Folder = aspectFolder,
                     ProjectRoot = smokeRoot,
@@ -9459,6 +9462,8 @@ public partial class App : Application
                     Zoomed = zoomed,
                     PersistedTargetSet = persistedTargetSet,
                     MetadataReady = metadataReady,
+                    MetadataLayoutPublishCount = metadataLayoutPublishCount,
+                    MetadataLayoutCoalesced = metadataLayoutCoalesced,
                     SquareShape = squareShape,
                     PortraitShape = portraitShape,
                     OriginalShape = originalShape,
@@ -25414,6 +25419,139 @@ public partial class App : Application
                     };
                 }
 
+                static SqliteConnection OpenMetadataIndexForSmoke(string path, SqliteOpenMode mode)
+                {
+                    var connection = new SqliteConnection(
+                        new SqliteConnectionStringBuilder
+                        {
+                            DataSource = path,
+                            Mode = mode,
+                            Cache = SqliteCacheMode.Private,
+                            Pooling = false,
+                        }.ToString());
+                    connection.Open();
+                    return connection;
+                }
+
+                static long ReadMetadataIndexRevision(string path)
+                {
+                    using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadOnly);
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = "SELECT entry_revision FROM store_meta WHERE singleton = 1;";
+                    return (long)(command.ExecuteScalar()
+                        ?? throw new InvalidDataException("metadata index revision row was unavailable"));
+                }
+
+                static void SetMetadataIndexSchemaVersion(string path, int version)
+                {
+                    using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWrite);
+                    using (SqliteCommand journal = connection.CreateCommand())
+                    {
+                        journal.CommandText = "PRAGMA journal_mode = DELETE;";
+                        _ = journal.ExecuteScalar();
+                    }
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = "UPDATE store_meta SET schema_version = $version WHERE singleton = 1;";
+                    command.Parameters.AddWithValue("$version", version);
+                    if (command.ExecuteNonQuery() != 1)
+                        throw new InvalidDataException("metadata index schema row was unavailable");
+                }
+
+                static void DeleteMetadataIndexSidecars(string path)
+                {
+                    foreach (string suffix in new[] { "-wal", "-shm" })
+                    {
+                        string sidecar = path + suffix;
+                        if (File.Exists(sidecar))
+                            File.Delete(sidecar);
+                    }
+                }
+
+                static void RestoreMetadataIndexBytes(string path, byte[] bytes)
+                {
+                    DeleteMetadataIndexSidecars(path);
+                    File.WriteAllBytes(path, bytes);
+                }
+
+                static void WriteLegacyMetadataIndex(
+                    string path,
+                    IEnumerable<MetadataIndexEntry> sourceEntries)
+                {
+                    MetadataIndexEntry[] entries = sourceEntries
+                        .OrderBy(static entry => entry.Path, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    using var payload = new MemoryStream();
+                    using (var writer = new BinaryWriter(payload, new UTF8Encoding(false, true), leaveOpen: true))
+                    {
+                        foreach (MetadataIndexEntry entry in entries)
+                        {
+                            byte[] pathUtf8 = Encoding.UTF8.GetBytes(entry.Path);
+                            writer.Write(pathUtf8.Length);
+                            writer.Write(pathUtf8);
+                            writer.Write(entry.SourceLength);
+                            writer.Write(entry.SourceLastWriteUtcTicks);
+                            writer.Write(entry.SourceCreationUtcTicks);
+                            writer.Write(entry.Width);
+                            writer.Write(entry.Height);
+                            writer.Write(entry.PromptUtf8.Length);
+                            writer.Write(entry.PromptUtf8);
+                        }
+                        writer.Flush();
+                    }
+
+                    byte[] payloadBytes = payload.ToArray();
+                    byte[] payloadHash = System.Security.Cryptography.SHA256.HashData(payloadBytes);
+                    using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+                    using var output = new BinaryWriter(stream, new UTF8Encoding(false, true));
+                    output.Write(0x494D5650);
+                    output.Write(1);
+                    output.Write(entries.Length);
+                    output.Write((long)payloadBytes.Length);
+                    output.Write(payloadHash);
+                    output.Write(payloadBytes);
+                    output.Flush();
+                    stream.Flush(flushToDisk: true);
+                }
+
+                static void WriteMalformedMetadataIndex(string path)
+                {
+                    using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWriteCreate);
+                    using (SqliteCommand schema = connection.CreateCommand())
+                    {
+                        schema.CommandText = """
+                            CREATE TABLE store_meta (
+                                singleton INTEGER NOT NULL PRIMARY KEY,
+                                schema_version INTEGER NOT NULL,
+                                entry_revision INTEGER NOT NULL
+                            );
+                            INSERT INTO store_meta(singleton, schema_version, entry_revision) VALUES (1, 1, 0);
+                            CREATE TABLE metadata (
+                                path TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+                                source_length INTEGER NOT NULL,
+                                source_mtime_ticks INTEGER NOT NULL,
+                                source_ctime_ticks INTEGER NOT NULL,
+                                width INTEGER NOT NULL,
+                                height INTEGER NOT NULL,
+                                prompt_utf8 BLOB NOT NULL
+                            );
+                            """;
+                        _ = schema.ExecuteNonQuery();
+                    }
+                    using SqliteCommand insert = connection.CreateCommand();
+                    insert.CommandText = """
+                        INSERT INTO metadata(
+                            path, source_length, source_mtime_ticks, source_ctime_ticks,
+                            width, height, prompt_utf8)
+                        VALUES ($path, 1, $mtime, $ctime, 1, 1, $prompt);
+                        """;
+                    insert.Parameters.AddWithValue("$path", @"C:\" + new string('x', 128 * 1024 + 1));
+                    insert.Parameters.AddWithValue("$mtime", DateTime.UnixEpoch.Ticks);
+                    insert.Parameters.AddWithValue("$ctime", DateTime.UnixEpoch.Ticks);
+                    insert.Parameters.AddWithValue("$prompt", Array.Empty<byte>());
+                    if (insert.ExecuteNonQuery() != 1)
+                        throw new InvalidDataException("malformed metadata fixture row was not inserted");
+                }
+
                 var coldWindow = CreateSmokeWindow();
                 var coldObservation = await LoadAndObserveAsync(coldWindow);
                 string indexPath = coldWindow.MetadataIndexPathForSmoke
@@ -25443,6 +25581,67 @@ public partial class App : Application
                 cold["durableEntryCount"] = coldIndex.Entries.Count;
                 coldWindow.Close();
 
+                string legacyIndexPath = Path.ChangeExtension(indexPath, ".pvmi");
+                File.Delete(indexPath);
+                WriteLegacyMetadataIndex(legacyIndexPath, coldIndex.Entries.Values);
+                MetadataIndexLoadResult legacyProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
+                var migrationWindow = CreateSmokeWindow();
+                var migrationObservation = await LoadAndObserveAsync(migrationWindow);
+                Dictionary<string, object?> migration = LoadSnapshot(migrationWindow, migrationObservation);
+                MetadataIndexLoadResult migratedProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
+                bool migrationPassed = legacyProbe.State == MetadataIndexLoadState.Loaded
+                    && legacyProbe.RequiresMigration
+                    && string.Equals(legacyProbe.SourcePath, legacyIndexPath, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(migration["loadState"] as string, MetadataIndexLoadState.Loaded.ToString(), StringComparison.Ordinal)
+                    && Convert.ToInt32(migration["cacheHits"]) == count
+                    && Convert.ToInt32(migration["cacheMisses"]) == 0
+                    && Convert.ToBoolean(migration["indexSaveSucceeded"])
+                    && File.Exists(indexPath)
+                    && File.Exists(legacyIndexPath)
+                    && migratedProbe.State == MetadataIndexLoadState.Loaded
+                    && !migratedProbe.RequiresMigration
+                    && migratedProbe.Entries.Count == count;
+                migration["passed"] = migrationPassed;
+                migration["legacyDetected"] = legacyProbe.RequiresMigration;
+                migration["sqliteCreated"] = File.Exists(indexPath);
+                migration["legacyPreserved"] = File.Exists(legacyIndexPath);
+                migration["durableEntryCount"] = migratedProbe.Entries.Count;
+                migrationWindow.Close();
+
+                long rollbackRevisionBefore = ReadMetadataIndexRevision(indexPath);
+                MetadataIndexEntry rollbackProbeEntry = migratedProbe.Entries.Values.First();
+                MetadataIndexSaveResult rejectedDelta = MetadataIndexStore.ApplyChanges(
+                    indexPath,
+                    [rollbackProbeEntry],
+                    Array.Empty<string>(),
+                    count + 1,
+                    CancellationToken.None);
+                MetadataIndexLoadResult rollbackProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
+                long rollbackRevisionAfter = ReadMetadataIndexRevision(indexPath);
+                bool rowDeltaRollbackPassed = !rejectedDelta.Ok
+                    && !rejectedDelta.Written
+                    && (rejectedDelta.Error?.Contains("expected", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && rollbackRevisionAfter == rollbackRevisionBefore
+                    && rollbackProbe.State == MetadataIndexLoadState.Loaded
+                    && rollbackProbe.Entries.Count == count
+                    && rollbackProbe.Entries.TryGetValue(rollbackProbeEntry.Path, out MetadataIndexEntry? rolledBackEntry)
+                    && rolledBackEntry.SourceLength == rollbackProbeEntry.SourceLength
+                    && rolledBackEntry.SourceLastWriteUtcTicks == rollbackProbeEntry.SourceLastWriteUtcTicks
+                    && rolledBackEntry.SourceCreationUtcTicks == rollbackProbeEntry.SourceCreationUtcTicks
+                    && rolledBackEntry.Width == rollbackProbeEntry.Width
+                    && rolledBackEntry.Height == rollbackProbeEntry.Height
+                    && rolledBackEntry.PromptUtf8.SequenceEqual(rollbackProbeEntry.PromptUtf8);
+                var rowDeltaRollback = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = rowDeltaRollbackPassed,
+                    ["saveOk"] = rejectedDelta.Ok,
+                    ["written"] = rejectedDelta.Written,
+                    ["message"] = rejectedDelta.Error,
+                    ["revisionBefore"] = rollbackRevisionBefore,
+                    ["revisionAfter"] = rollbackRevisionAfter,
+                    ["durableEntryCount"] = rollbackProbe.Entries.Count,
+                };
+
                 string coldIndexFingerprint = FileFingerprint(indexPath);
                 long coldIndexWriteTicks = File.GetLastWriteTimeUtc(indexPath).Ticks;
                 var warmWindow = CreateSmokeWindow();
@@ -25462,6 +25661,7 @@ public partial class App : Application
                 warm["indexMtimeUnchanged"] = coldIndexWriteTicks == warmIndexWriteTicks;
                 warmWindow.Close();
 
+                long partialRevisionBefore = ReadMetadataIndexRevision(indexPath);
                 int mutatedIndex = count / 2;
                 string mutatedName = $"metadata-{mutatedIndex:D4}.png";
                 mutatedPath = Path.Combine(folders[mutatedIndex % folders.Count], mutatedName);
@@ -25487,31 +25687,33 @@ public partial class App : Application
                     partialWindow.PromptForFileNameForSmoke(mutatedName),
                     refreshedPrompt,
                     StringComparison.Ordinal);
+                long partialRevisionAfter = ReadMetadataIndexRevision(indexPath);
                 bool partialPassed = string.Equals(partial["loadState"] as string, MetadataIndexLoadState.Loaded.ToString(), StringComparison.Ordinal)
                     && Convert.ToInt32(partial["cacheHits"]) == count - 1
                     && Convert.ToInt32(partial["cacheMisses"]) == 1
                     && refreshedPromptReady
-                    && controlledSourceMutationObserved;
+                    && controlledSourceMutationObserved
+                    && partialRevisionAfter == partialRevisionBefore + 1;
                 partial["passed"] = partialPassed;
                 partial["mutatedName"] = mutatedName;
                 partial["refreshedPromptReady"] = refreshedPromptReady;
                 partial["controlledSourceMutationObserved"] = controlledSourceMutationObserved;
+                partial["rowDeltaRevisionBefore"] = partialRevisionBefore;
+                partial["rowDeltaRevisionAfter"] = partialRevisionAfter;
+                partial["rowDeltaCommitted"] = partialRevisionAfter == partialRevisionBefore + 1;
                 partialWindow.Close();
 
                 byte[] cleanRebuiltBytes = File.ReadAllBytes(indexPath);
-                byte[] corruptedBytes = cleanRebuiltBytes.ToArray();
-                if (corruptedBytes.Length <= 52)
-                    throw new InvalidDataException("metadata index was too small for a payload corruption probe");
-                corruptedBytes[52] ^= 0x5a;
-                File.WriteAllBytes(indexPath, corruptedBytes);
+                RestoreMetadataIndexBytes(
+                    indexPath,
+                    Encoding.UTF8.GetBytes("not-a-sqlite-metadata-index"));
                 MetadataIndexLoadResult corruptProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
-                bool checksumDetected = corruptProbe.State == MetadataIndexLoadState.Invalid
-                    && (corruptProbe.Error?.Contains("checksum", StringComparison.OrdinalIgnoreCase) ?? false);
+                bool corruptionDetected = corruptProbe.State == MetadataIndexLoadState.Invalid;
                 var corruptWindow = CreateSmokeWindow();
                 var corruptObservation = await LoadAndObserveAsync(corruptWindow);
                 Dictionary<string, object?> corruption = LoadSnapshot(corruptWindow, corruptObservation);
                 MetadataIndexLoadResult rebuiltProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
-                bool corruptionPassed = checksumDetected
+                bool corruptionPassed = corruptionDetected
                     && string.Equals(corruption["loadState"] as string, MetadataIndexLoadState.Invalid.ToString(), StringComparison.Ordinal)
                     && Convert.ToInt32(corruption["cacheHits"]) == 0
                     && Convert.ToInt32(corruption["cacheMisses"]) == count
@@ -25520,15 +25722,13 @@ public partial class App : Application
                     && rebuiltProbe.Entries.Count == count
                     && (corruption["statusText"] as string)?.Contains("damaged index rebuilt", StringComparison.OrdinalIgnoreCase) == true;
                 corruption["passed"] = corruptionPassed;
-                corruption["checksumDetected"] = checksumDetected;
+                corruption["corruptionDetected"] = corruptionDetected;
                 corruption["probeError"] = corruptProbe.Error;
                 corruption["rebuiltEntryCount"] = rebuiltProbe.Entries.Count;
                 corruptWindow.Close();
 
                 byte[] validIndexBytes = File.ReadAllBytes(indexPath);
-                byte[] futureVersionBytes = validIndexBytes.ToArray();
-                Buffer.BlockCopy(BitConverter.GetBytes(2), 0, futureVersionBytes, sizeof(int), sizeof(int));
-                File.WriteAllBytes(indexPath, futureVersionBytes);
+                SetMetadataIndexSchemaVersion(indexPath, 2);
                 string futureFingerprintBefore = FileFingerprint(indexPath);
                 long futureWriteTicksBefore = File.GetLastWriteTimeUtc(indexPath).Ticks;
                 MetadataIndexLoadResult futureProbeBefore = MetadataIndexStore.Load(indexPath, CancellationToken.None);
@@ -25577,29 +25777,12 @@ public partial class App : Application
                     ["residueFree"] = commitGuardResidueFree,
                 };
 
-                const int metadataIndexHeaderBytes = sizeof(int) * 3 + sizeof(long) + 32;
-                const int metadataIndexPayloadHashOffset = sizeof(int) * 3 + sizeof(long);
-                string malformedPath = Path.Combine(indexDirectory, "checksum-valid-bounded-length.pvmi");
-                byte[] malformedBytes = validIndexBytes.ToArray();
-                Buffer.BlockCopy(
-                    BitConverter.GetBytes(128 * 1024 + 1),
-                    0,
-                    malformedBytes,
-                    metadataIndexHeaderBytes,
-                    sizeof(int));
-                byte[] malformedPayloadHash = System.Security.Cryptography.SHA256.HashData(
-                    malformedBytes.AsSpan(metadataIndexHeaderBytes));
-                Buffer.BlockCopy(
-                    malformedPayloadHash,
-                    0,
-                    malformedBytes,
-                    metadataIndexPayloadHashOffset,
-                    malformedPayloadHash.Length);
+                string malformedPath = Path.Combine(indexDirectory, "bounded-length.sqlite3");
                 MetadataIndexLoadResult? malformedProbe = null;
                 string? malformedEscapedException = null;
                 try
                 {
-                    File.WriteAllBytes(malformedPath, malformedBytes);
+                    WriteMalformedMetadataIndex(malformedPath);
                     try
                     {
                         malformedProbe = MetadataIndexStore.Load(malformedPath, CancellationToken.None);
@@ -25611,6 +25794,7 @@ public partial class App : Application
                 }
                 finally
                 {
+                    DeleteMetadataIndexSidecars(malformedPath);
                     if (File.Exists(malformedPath))
                         File.Delete(malformedPath);
                 }
@@ -25618,7 +25802,7 @@ public partial class App : Application
                     && malformedProbe?.State == MetadataIndexLoadState.Invalid
                     && (malformedProbe.Error?.Contains("outside the safe bound", StringComparison.OrdinalIgnoreCase) ?? false)
                     && !File.Exists(malformedPath);
-                var checksumValidMalformed = new Dictionary<string, object?>(StringComparer.Ordinal)
+                var boundedMalformed = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["passed"] = malformedPassed,
                     ["loadState"] = malformedProbe?.State.ToString(),
@@ -25627,7 +25811,7 @@ public partial class App : Application
                     ["fixtureRemoved"] = !File.Exists(malformedPath),
                 };
 
-                File.WriteAllBytes(indexPath, validIndexBytes);
+                RestoreMetadataIndexBytes(indexPath, validIndexBytes);
                 int failureIndex = (mutatedIndex + 1) % count;
                 string failureName = $"metadata-{failureIndex:D4}.png";
                 string failurePath = Path.Combine(folders[failureIndex % folders.Count], failureName);
@@ -25678,7 +25862,7 @@ public partial class App : Application
                     File.SetLastWriteTimeUtc(failurePath, failureSourceWriteUtc);
                 }
 
-                File.WriteAllBytes(indexPath, validIndexBytes);
+                RestoreMetadataIndexBytes(indexPath, validIndexBytes);
                 int deletedIndex = (mutatedIndex + 3) % count;
                 string deletedName = $"metadata-{deletedIndex:D4}.png";
                 string deletedPath = Path.Combine(folders[deletedIndex % folders.Count], deletedName);
@@ -25723,7 +25907,7 @@ public partial class App : Application
                     File.SetLastWriteTimeUtc(deletedPath, deletedSourceWriteUtc);
                 }
 
-                File.WriteAllBytes(indexPath, validIndexBytes);
+                RestoreMetadataIndexBytes(indexPath, validIndexBytes);
                 DateTime cancelBaselineWriteTimeUtc = DateTime.UtcNow.AddMinutes(-5);
                 File.SetLastWriteTimeUtc(indexPath, cancelBaselineWriteTimeUtc);
                 string cancelFingerprintBefore = FileFingerprint(indexPath);
@@ -25778,17 +25962,21 @@ public partial class App : Application
                 result["isolatedProjectRoot"] = isolatedProjectRoot;
                 result["resolvedProjectRoot"] = resolvedProjectRoot;
                 result["cold"] = cold;
+                result["legacyMigration"] = migration;
+                result["rowDeltaRollback"] = rowDeltaRollback;
                 result["warm"] = warm;
                 result["partialInvalidation"] = partial;
                 result["corruptionRecovery"] = corruption;
                 result["futureVersionProtection"] = future;
                 result["commitTimeFutureGuard"] = commitTimeFutureGuard;
-                result["checksumValidMalformed"] = checksumValidMalformed;
+                result["boundedMalformed"] = boundedMalformed;
                 result["decodeFailurePreservation"] = failurePreservation;
                 result["staleEntryPrune"] = staleEntryPrune;
                 result["cancellation"] = cancellation;
                 scenarioContractPassed = isolatedProjectRoot
                     && coldPassed
+                    && migrationPassed
+                    && rowDeltaRollbackPassed
                     && warmPassed
                     && partialPassed
                     && corruptionPassed
@@ -25866,7 +26054,7 @@ public partial class App : Application
                 result["environmentRestored"] = environmentRestored;
                 result["ok"] = allPassed;
                 result["message"] = allPassed
-                    ? "Persistent metadata index cold, warm, partial invalidation, corruption, bounded malformed input, future-version commit guard, decode failure preservation, stale-entry pruning, cancellation, progress, and isolation contracts passed."
+                    ? "Persistent SQLite metadata index cold, legacy migration, warm, row-delta invalidation, corruption, bounded malformed input, future-version commit guard, decode failure preservation, stale-entry pruning, cancellation, progress, and isolation contracts passed."
                     : result["message"] is string message && !string.Equals(message, "metadata index smoke did not complete", StringComparison.Ordinal)
                         ? message
                         : "one or more metadata index contracts failed";
@@ -28538,6 +28726,20 @@ public partial class App : Application
             File.SetLastWriteTimeUtc(path, input.ModifiedUtc);
         }
 
+        // Cross the 64-item progressive metadata boundary twice. The gallery
+        // must publish source-ratio geometry once after completion, not rebuild
+        // and anchor the row map for every decoded batch.
+        for (int index = 0; index < 128; index++)
+        {
+            string path = Path.Combine(target, $"zz-auxiliary-{index:D3}.png");
+            int width = 2 + index % 3;
+            int height = 2 + (index + 1) % 3;
+            WriteSmokePng(path, width, height, Color.FromRgb(80, 90, 100));
+            File.SetLastWriteTimeUtc(
+                path,
+                new DateTime(2026, 7, 9, 0, 0, 0, DateTimeKind.Utc).AddMinutes(index));
+        }
+
         return target;
     }
 
@@ -30246,6 +30448,8 @@ public partial class App : Application
         public bool Zoomed { get; init; }
         public bool PersistedTargetSet { get; init; }
         public bool MetadataReady { get; init; }
+        public int MetadataLayoutPublishCount { get; init; }
+        public bool MetadataLayoutCoalesced { get; init; }
         public bool SquareShape { get; init; }
         public bool PortraitShape { get; init; }
         public bool OriginalShape { get; init; }

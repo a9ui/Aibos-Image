@@ -34,6 +34,7 @@ if ($smoke.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $resultPath -PathType
 $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
 $required = @(
     'MetadataReady',
+    'MetadataLayoutCoalesced',
     'OriginalShape',
     'SquareShape',
     'PortraitShape',
@@ -60,6 +61,8 @@ if ([Math]::Abs($landscapeRatio - (2 / 3)) -ge 0.03 `
     Result = 'PASS'
     Message = $result.Message
     MetadataReady = $result.MetadataReady
+    MetadataLayoutPublishCount = $result.MetadataLayoutPublishCount
+    MetadataLayoutCoalesced = $result.MetadataLayoutCoalesced
     LandscapeRatio = [Math]::Round($landscapeRatio, 3)
     SquareRatio = [Math]::Round($squareRatio, 3)
     PortraitRatio = [Math]::Round($portraitRatio, 3)
