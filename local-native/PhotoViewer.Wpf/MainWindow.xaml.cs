@@ -4364,19 +4364,76 @@ public partial class MainWindow : Window
         return connection;
     }
 
-    private static long ReadEnhancementCatalogRevision(SqliteConnection connection)
+    private static long ReadRequiredSqliteInteger(
+        SqliteDataReader reader,
+        int ordinal,
+        string fieldName)
+    {
+        if (reader.IsDBNull(ordinal)
+            || reader.GetFieldType(ordinal) != typeof(long))
+        {
+            throw new InvalidDataException(
+                $"Enhancement SQLite {fieldName} must be an integer.");
+        }
+        return reader.GetInt64(ordinal);
+    }
+
+    private static string ReadRequiredSqliteText(
+        SqliteDataReader reader,
+        int ordinal,
+        string fieldName)
+    {
+        if (reader.IsDBNull(ordinal)
+            || reader.GetFieldType(ordinal) != typeof(string))
+        {
+            throw new InvalidDataException(
+                $"Enhancement SQLite {fieldName} must be text.");
+        }
+        return reader.GetString(ordinal);
+    }
+
+    private static bool IsSupportedEnhancementSqliteStatus(string? status)
+        => status is null
+            or "queued"
+            or "running"
+            or "succeeded"
+            or "failed"
+            or "canceled"
+            or "deleted"
+            or "unknown";
+
+    private static long ReadEnhancementCatalogRevision(
+        SqliteConnection connection,
+        SqliteTransaction? transaction = null)
     {
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
-            SELECT catalog_revision
+            SELECT singleton, store_version, catalog_revision
             FROM enhancement_store_metadata
-            WHERE singleton = 1 AND store_version = 1
+            WHERE singleton = 1
             """;
-        object? value = command.ExecuteScalar();
-        return value is long revision && revision >= 0
-            ? revision
-            : throw new InvalidDataException(
-                "Enhancement SQLite metadata is missing or unsupported.");
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            throw new InvalidDataException(
+                "Enhancement SQLite metadata row is missing.");
+        }
+
+        long singleton = ReadRequiredSqliteInteger(reader, 0, "metadata singleton");
+        long storeVersion = ReadRequiredSqliteInteger(reader, 1, "store version");
+        long catalogRevision = ReadRequiredSqliteInteger(reader, 2, "catalog revision");
+        if (singleton != 1 || storeVersion != 1 || catalogRevision < 0)
+        {
+            throw new InvalidDataException(
+                "Enhancement SQLite metadata is unsupported.");
+        }
+        if (reader.Read())
+        {
+            throw new InvalidDataException(
+                "Enhancement SQLite metadata must contain exactly one singleton row.");
+        }
+        return catalogRevision;
     }
 
     private static EnhancementStoreProbe ProbeEnhancementStore(string path)
@@ -4414,20 +4471,7 @@ public partial class MainWindow : Window
 
         using SqliteConnection connection = OpenEnhancementSqliteReadConnection(path);
         using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
-        using (var metadata = connection.CreateCommand())
-        {
-            metadata.Transaction = transaction;
-            metadata.CommandText = """
-                SELECT catalog_revision
-                FROM enhancement_store_metadata
-                WHERE singleton = 1 AND store_version = 1
-                """;
-            object? value = metadata.ExecuteScalar();
-            catalogRevision = value is long revision && revision >= 0
-                ? revision
-                : throw new InvalidDataException(
-                    "Enhancement SQLite metadata is missing or unsupported.");
-        }
+        catalogRevision = ReadEnhancementCatalogRevision(connection, transaction);
 
         using var output = new MemoryStream();
         using (var writer = new Utf8JsonWriter(output))
@@ -4435,33 +4479,100 @@ public partial class MainWindow : Window
         {
             command.Transaction = transaction;
             command.CommandText = """
-                SELECT id, status, reader_payload_json
+                SELECT position, id, status, reader_payload_json
                 FROM enhancement_jobs
                 ORDER BY position ASC
                 """;
             using SqliteDataReader reader = command.ExecuteReader();
+            var jobIds = new HashSet<string>(StringComparer.Ordinal);
+            long? previousPosition = null;
             writer.WriteStartObject();
             writer.WriteNumber("version", 1);
             writer.WritePropertyName("jobs");
             writer.WriteStartArray();
             while (reader.Read())
             {
-                string id = reader.GetString(0);
-                string status = reader.IsDBNull(1) ? "" : reader.GetString(1);
-                if (status is "queued" or "running" or "succeeded")
+                long position = ReadRequiredSqliteInteger(reader, 0, "job position");
+                if (position < 0
+                    || previousPosition.HasValue && position <= previousPosition.Value)
                 {
-                    using JsonDocument payload = JsonDocument.Parse(reader.GetString(2));
-                    payload.RootElement.WriteTo(writer);
+                    throw new InvalidDataException(
+                        "Enhancement SQLite job positions must be unique, non-negative, and strictly increasing.");
                 }
+                previousPosition = position;
+
+                string id = ReadRequiredSqliteText(reader, 1, "job id");
+                if (string.IsNullOrWhiteSpace(id) || !jobIds.Add(id))
+                {
+                    throw new InvalidDataException(
+                        "Enhancement SQLite job ids must be non-empty and unique.");
+                }
+
+                string? status = reader.IsDBNull(2)
+                    ? null
+                    : ReadRequiredSqliteText(reader, 2, "job status");
+                if (!IsSupportedEnhancementSqliteStatus(status))
+                {
+                    throw new InvalidDataException(
+                        $"Enhancement SQLite job {id} has an unsupported status.");
+                }
+
+                string payloadText = ReadRequiredSqliteText(
+                    reader,
+                    3,
+                    "reader payload");
+                JsonDocument payload;
+                try
+                {
+                    payload = JsonDocument.Parse(payloadText);
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidDataException(
+                        $"Enhancement SQLite job {id} has malformed reader payload JSON.",
+                        ex);
+                }
+                using (payload)
+                {
+                    JsonElement root = payload.RootElement;
+                    bool idMatches = root.ValueKind == JsonValueKind.Object
+                        && root.TryGetProperty("id", out JsonElement payloadId)
+                        && payloadId.ValueKind == JsonValueKind.String
+                        && string.Equals(
+                            payloadId.GetString(),
+                            id,
+                            StringComparison.Ordinal);
+                    bool statusMatches = root.ValueKind == JsonValueKind.Object
+                        && root.TryGetProperty("status", out JsonElement payloadStatus)
+                        && (status is null
+                            ? payloadStatus.ValueKind == JsonValueKind.Null
+                            : payloadStatus.ValueKind == JsonValueKind.String
+                                && string.Equals(
+                                    payloadStatus.GetString(),
+                                    status,
+                                    StringComparison.Ordinal));
+                    if (!idMatches || !statusMatches)
+                    {
+                        throw new InvalidDataException(
+                            $"Enhancement SQLite job {id} reader payload does not match its row.");
+                    }
+
+                    if (status is "queued" or "running" or "succeeded")
+                    {
+                        root.WriteTo(writer);
+                        continue;
+                    }
+                }
+
+                // Terminal non-output rows still reserve their durable ID
+                // for orphan-output recovery without hydrating full payloads.
+                writer.WriteStartObject();
+                writer.WriteString("id", id);
+                if (status is null)
+                    writer.WriteNull("status");
                 else
-                {
-                    // Terminal non-output rows still reserve their durable ID
-                    // for orphan-output recovery without hydrating full payloads.
-                    writer.WriteStartObject();
-                    writer.WriteString("id", id);
                     writer.WriteString("status", status);
-                    writer.WriteEndObject();
-                }
+                writer.WriteEndObject();
             }
             writer.WriteEndArray();
             writer.WriteEndObject();
@@ -4470,6 +4581,13 @@ public partial class MainWindow : Window
         transaction.Commit();
         output.Position = 0;
         return JsonDocument.Parse(output);
+    }
+
+    internal static void ValidateEnhancementSqliteStoreForSmoke(string path)
+    {
+        using JsonDocument document = OpenEnhancementJobsDocument(
+            Path.GetFullPath(path),
+            out long _);
     }
 
     private bool LoadEnhancedState(

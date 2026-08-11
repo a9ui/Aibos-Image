@@ -108,6 +108,10 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-enhancement-actions.ps1
 
+      - name: Enhancement SQLite reader smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhancement-sqlite-reader.ps1 -SkipBuild
+
       - name: AI photoreal modal and shared queue smoke
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-photoreal.ps1

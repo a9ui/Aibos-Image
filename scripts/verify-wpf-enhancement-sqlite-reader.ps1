@@ -71,10 +71,12 @@ try {
         'toggledEnhanced',
         'toggledOriginal',
         'navigationResetToOriginal',
-        'enhancementStateUnchanged'
+        'enhancementStateUnchanged',
+        'malformedSqliteCasesRejected'
     )) {
         Assert-True ($result.$propertyName -eq $true) "SQLite reader invariant failed: $propertyName"
     }
+    Assert-True ($result.malformedSqliteCaseCount -eq 7) 'SQLite reader did not execute every malformed row/payload/metadata case.'
     Assert-True ([string]::Equals([IO.Path]::GetFileName($result.jobsPath), 'jobs.sqlite3', [StringComparison]::OrdinalIgnoreCase)) 'WPF did not read the SQLite fixture.'
     $result | ConvertTo-Json -Depth 5
 }

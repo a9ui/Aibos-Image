@@ -18439,6 +18439,15 @@ public partial class App : Application
 
                 byte[] afterJobsBytes = File.ReadAllBytes(jobsPath);
                 bool enhancementStateUnchanged = beforeJobsBytes.AsSpan().SequenceEqual(afterJobsBytes);
+                bool malformedSqliteCasesRejected = true;
+                int malformedSqliteCaseCount = 0;
+                if (sqliteJobs)
+                {
+                    malformedSqliteCasesRejected =
+                        VerifyMalformedEnhancementSqliteFixtures(
+                            smokeRoot,
+                            out malformedSqliteCaseCount);
+                }
                 bool ok = win.EnhancementReadOkForSmoke
                     && selectedValid
                     && validToggleAvailable
@@ -18459,7 +18468,8 @@ public partial class App : Application
                     && movedNext
                     && !string.Equals(nextPath, validSource, StringComparison.OrdinalIgnoreCase)
                     && navigationResetToOriginal
-                    && enhancementStateUnchanged;
+                    && enhancementStateUnchanged
+                    && malformedSqliteCasesRejected;
 
                 result = new ModalEnhancedSmokeResult
                 {
@@ -18489,6 +18499,8 @@ public partial class App : Application
                     EnhancementStateUnchanged = enhancementStateUnchanged,
                     ReadOk = win.EnhancementReadOkForSmoke,
                     ReadError = win.EnhancementReadErrorForSmoke,
+                    MalformedSqliteCasesRejected = malformedSqliteCasesRejected,
+                    MalformedSqliteCaseCount = malformedSqliteCaseCount,
                 };
             }
             catch (Exception ex)
@@ -27699,6 +27711,146 @@ public partial class App : Application
         checkpoint.ExecuteNonQuery();
     }
 
+    private static bool VerifyMalformedEnhancementSqliteFixtures(
+        string smokeRoot,
+        out int caseCount)
+    {
+        string malformedRoot = Path.Combine(
+            smokeRoot,
+            ".cache",
+            "enhance",
+            "malformed-reader-cases");
+        Directory.CreateDirectory(malformedRoot);
+        string[] cases =
+        [
+            "non-object-payload",
+            "id-mismatch",
+            "status-mismatch",
+            "duplicate-id",
+            "duplicate-position",
+            "negative-position",
+            "duplicate-metadata",
+        ];
+        caseCount = cases.Length;
+        foreach (string caseName in cases)
+        {
+            string path = Path.Combine(malformedRoot, caseName + ".sqlite3");
+            WriteMalformedEnhancementSqliteFixture(path, caseName);
+            byte[] before = File.ReadAllBytes(path);
+            bool rejected = false;
+            try
+            {
+                global::PhotoViewer.Wpf.MainWindow
+                    .ValidateEnhancementSqliteStoreForSmoke(path);
+            }
+            catch (InvalidDataException)
+            {
+                rejected = true;
+            }
+            byte[] after = File.ReadAllBytes(path);
+            if (!rejected || !before.AsSpan().SequenceEqual(after))
+                return false;
+        }
+        return true;
+    }
+
+    private static void WriteMalformedEnhancementSqliteFixture(
+        string databasePath,
+        string caseName)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Pooling = false,
+            }.ToString());
+        connection.Open();
+        using (var schema = connection.CreateCommand())
+        {
+            // Constraints are intentionally absent: these fixtures prove the
+            // reader rejects semantically malformed stores instead of relying
+            // on a cooperative writer schema.
+            schema.CommandText = """
+                CREATE TABLE enhancement_store_metadata (
+                    singleton INTEGER,
+                    store_version INTEGER,
+                    catalog_revision INTEGER
+                );
+                CREATE TABLE enhancement_jobs (
+                    position INTEGER,
+                    id TEXT,
+                    status TEXT,
+                    reader_payload_json TEXT
+                );
+                """;
+            schema.ExecuteNonQuery();
+        }
+
+        int metadataRows = caseName == "duplicate-metadata" ? 2 : 1;
+        using (var metadata = connection.CreateCommand())
+        {
+            metadata.CommandText = """
+                INSERT INTO enhancement_store_metadata
+                    (singleton, store_version, catalog_revision)
+                VALUES (1, 1, 1)
+                """;
+            for (int index = 0; index < metadataRows; index++)
+                metadata.ExecuteNonQuery();
+        }
+
+        var rows = new List<(long Position, string Id, string? Status, string Payload)>
+        {
+            (0, "job-A", "succeeded", "{\"id\":\"job-A\",\"status\":\"succeeded\"}"),
+        };
+        switch (caseName)
+        {
+            case "non-object-payload":
+                rows[0] = (0, "job-A", "succeeded", "[]");
+                break;
+            case "id-mismatch":
+                rows[0] = (0, "job-A", "succeeded", "{\"id\":\"job-B\",\"status\":\"succeeded\"}");
+                break;
+            case "status-mismatch":
+                rows[0] = (0, "job-A", "succeeded", "{\"id\":\"job-A\",\"status\":\"running\"}");
+                break;
+            case "duplicate-id":
+                rows.Add((1, "job-A", "succeeded", "{\"id\":\"job-A\",\"status\":\"succeeded\"}"));
+                break;
+            case "duplicate-position":
+                rows.Add((0, "job-B", "succeeded", "{\"id\":\"job-B\",\"status\":\"succeeded\"}"));
+                break;
+            case "negative-position":
+                rows[0] = (-1, "job-A", "succeeded", "{\"id\":\"job-A\",\"status\":\"succeeded\"}");
+                break;
+            case "duplicate-metadata":
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"Unknown malformed SQLite fixture case: {caseName}");
+        }
+
+        using var insert = connection.CreateCommand();
+        insert.CommandText = """
+            INSERT INTO enhancement_jobs
+                (position, id, status, reader_payload_json)
+            VALUES ($position, $id, $status, $payload)
+            """;
+        SqliteParameter position = insert.Parameters.Add("$position", SqliteType.Integer);
+        SqliteParameter id = insert.Parameters.Add("$id", SqliteType.Text);
+        SqliteParameter status = insert.Parameters.Add("$status", SqliteType.Text);
+        SqliteParameter payload = insert.Parameters.Add("$payload", SqliteType.Text);
+        foreach ((long rowPosition, string rowId, string? rowStatus, string rowPayload) in rows)
+        {
+            position.Value = rowPosition;
+            id.Value = rowId;
+            status.Value = rowStatus is null ? DBNull.Value : rowStatus;
+            payload.Value = rowPayload;
+            insert.ExecuteNonQuery();
+        }
+    }
+
     private static void WriteEnhancementOperationJobsFixture(
         string jobsPath,
         string upscaleSourcePath,
@@ -31899,6 +32051,8 @@ public partial class App : Application
         public bool EnhancementStateUnchanged { get; init; }
         public bool ReadOk { get; init; }
         public string? ReadError { get; init; }
+        public bool MalformedSqliteCasesRejected { get; init; }
+        public int MalformedSqliteCaseCount { get; init; }
     }
 
     private sealed record StartupSmokeResult(
