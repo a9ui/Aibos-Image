@@ -19,9 +19,12 @@ internal static class MetadataIndexStore
     private const int MaximumPathBytes = 128 * 1024;
     private const int MaximumPromptBytes = 4 * 1024 * 1024;
     private const long MaximumLegacyIndexBytes = 1024L * 1024 * 1024;
+    private const long MaximumSqliteFamilyBytes = MaximumLegacyIndexBytes;
+    private const long MaximumSqliteAggregateBytes = MaximumLegacyIndexBytes;
     private const int LegacyPayloadHashBytes = 32;
     private const int LegacyHeaderBytes = sizeof(int) * 3 + sizeof(long) + LegacyPayloadHashBytes;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private static readonly string[] SqliteSidecarSuffixes = ["-wal", "-shm", "-journal"];
 
     private const string CreateSchemaSql = """
         CREATE TABLE store_meta (
@@ -71,10 +74,33 @@ internal static class MetadataIndexStore
     }
 
     public static MetadataIndexLoadResult Load(string path, CancellationToken token)
+        => LoadCore(path, token, MaximumSqliteFamilyBytes, MaximumSqliteAggregateBytes);
+
+    internal static MetadataIndexLoadResult LoadWithBudgetForSmoke(
+        string path,
+        CancellationToken token,
+        long maximumFamilyBytes,
+        long maximumAggregateBytes)
+        => LoadCore(path, token, maximumFamilyBytes, maximumAggregateBytes);
+
+    private static MetadataIndexLoadResult LoadCore(
+        string path,
+        CancellationToken token,
+        long maximumFamilyBytes,
+        long maximumAggregateBytes)
     {
         string fullPath = Path.GetFullPath(path);
+        ValidateBudgets(maximumFamilyBytes, maximumAggregateBytes);
         if (!File.Exists(fullPath))
         {
+            string? orphanSidecar = FindExistingSqliteSidecar(fullPath);
+            if (orphanSidecar is not null)
+            {
+                return MetadataIndexLoadResult.Invalid(
+                    fullPath,
+                    $"metadata cache main file was absent while orphan sidecar {Path.GetFileName(orphanSidecar)} was preserved");
+            }
+
             string legacyPath = Path.ChangeExtension(fullPath, ".pvmi");
             if (!File.Exists(legacyPath))
                 return MetadataIndexLoadResult.Missing(fullPath);
@@ -101,9 +127,11 @@ internal static class MetadataIndexStore
         try
         {
             token.ThrowIfCancellationRequested();
+            EnsureSqliteFamilyWithinBudget(fullPath, maximumFamilyBytes);
             using SqliteConnection connection = OpenConnection(fullPath, SqliteOpenMode.ReadOnly);
             ExecuteNonQuery(connection, "PRAGMA query_only = ON;");
-            int schemaVersion = ReadSchemaVersion(connection);
+            using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
+            int schemaVersion = ReadSchemaVersion(connection, transaction);
             if (schemaVersion > SchemaVersion)
             {
                 return MetadataIndexLoadResult.Unsupported(
@@ -117,16 +145,11 @@ internal static class MetadataIndexStore
                     $"metadata cache schema version {schemaVersion} was invalid");
             }
 
-            int count = ReadEntryCount(connection);
-            if (count < 0 || count > MaximumEntryCount)
-            {
-                return MetadataIndexLoadResult.Invalid(
-                    fullPath,
-                    $"metadata cache entry count {count} is outside the safe bound");
-            }
+            int count = ValidateStoredPayloadBudget(connection, transaction, maximumAggregateBytes);
 
             var entries = new Dictionary<string, MetadataIndexEntry>(count, StringComparer.OrdinalIgnoreCase);
             using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 SELECT path,
                        source_length,
@@ -138,48 +161,51 @@ internal static class MetadataIndexStore
                 FROM metadata
                 ORDER BY path COLLATE NOCASE;
                 """;
-            using SqliteDataReader reader = command.ExecuteReader();
             int index = 0;
-            while (reader.Read())
+            using (SqliteDataReader reader = command.ExecuteReader())
             {
-                if ((index & 255) == 0)
-                    token.ThrowIfCancellationRequested();
-                string sourcePath = reader.GetString(0);
-                long sourceLength = reader.GetInt64(1);
-                long sourceLastWriteUtcTicks = reader.GetInt64(2);
-                long sourceCreationUtcTicks = reader.GetInt64(3);
-                int width = reader.GetInt32(4);
-                int height = reader.GetInt32(5);
-                byte[] promptUtf8 = reader.GetFieldValue<byte[]>(6);
-                ValidateEntry(
-                    sourcePath,
-                    sourceLength,
-                    sourceLastWriteUtcTicks,
-                    sourceCreationUtcTicks,
-                    width,
-                    height,
-                    promptUtf8,
-                    index);
-                if (!entries.TryAdd(
-                    sourcePath,
-                    new MetadataIndexEntry(
+                while (reader.Read())
+                {
+                    if ((index & 255) == 0)
+                        token.ThrowIfCancellationRequested();
+                    string sourcePath = reader.GetString(0);
+                    long sourceLength = reader.GetInt64(1);
+                    long sourceLastWriteUtcTicks = reader.GetInt64(2);
+                    long sourceCreationUtcTicks = reader.GetInt64(3);
+                    int width = reader.GetInt32(4);
+                    int height = reader.GetInt32(5);
+                    byte[] promptUtf8 = reader.GetFieldValue<byte[]>(6);
+                    ValidateEntry(
                         sourcePath,
                         sourceLength,
                         sourceLastWriteUtcTicks,
                         sourceCreationUtcTicks,
                         width,
                         height,
-                        promptUtf8)))
-                {
-                    return MetadataIndexLoadResult.Invalid(
-                        fullPath,
-                        $"metadata cache entry {index} duplicated path {sourcePath}");
+                        promptUtf8,
+                        index);
+                    if (!entries.TryAdd(
+                        sourcePath,
+                        new MetadataIndexEntry(
+                            sourcePath,
+                            sourceLength,
+                            sourceLastWriteUtcTicks,
+                            sourceCreationUtcTicks,
+                            width,
+                            height,
+                            promptUtf8)))
+                    {
+                        return MetadataIndexLoadResult.Invalid(
+                            fullPath,
+                            $"metadata cache entry {index} duplicated path {sourcePath}");
+                    }
+                    index++;
                 }
-                index++;
             }
 
             if (index != count)
                 return MetadataIndexLoadResult.Invalid(fullPath, "metadata cache row count changed during the read");
+            transaction.Commit();
             return MetadataIndexLoadResult.Loaded(fullPath, entries);
         }
         catch (OperationCanceledException)
@@ -196,8 +222,25 @@ internal static class MetadataIndexStore
         string path,
         IReadOnlyCollection<MetadataIndexEntry> entries,
         CancellationToken token)
+        => SaveCore(path, entries, token, MaximumSqliteFamilyBytes, MaximumSqliteAggregateBytes);
+
+    internal static MetadataIndexSaveResult SaveWithBudgetForSmoke(
+        string path,
+        IReadOnlyCollection<MetadataIndexEntry> entries,
+        CancellationToken token,
+        long maximumFamilyBytes,
+        long maximumAggregateBytes)
+        => SaveCore(path, entries, token, maximumFamilyBytes, maximumAggregateBytes);
+
+    private static MetadataIndexSaveResult SaveCore(
+        string path,
+        IReadOnlyCollection<MetadataIndexEntry> entries,
+        CancellationToken token,
+        long maximumFamilyBytes,
+        long maximumAggregateBytes)
     {
         string fullPath = Path.GetFullPath(path);
+        ValidateBudgets(maximumFamilyBytes, maximumAggregateBytes);
         if (entries.Count > MaximumEntryCount)
             return MetadataIndexSaveResult.Failed(fullPath, $"entry count {entries.Count} exceeds the safe bound");
 
@@ -219,6 +262,7 @@ internal static class MetadataIndexStore
             lockStream = AcquireWriterLock(lockPath, token);
             if (File.Exists(fullPath))
             {
+                EnsureSqliteFamilyWithinBudget(fullPath, maximumFamilyBytes);
                 int existingVersion;
                 try
                 {
@@ -261,11 +305,16 @@ internal static class MetadataIndexStore
                 using (SqliteCommand insert = CreateInsertCommand(connection, transaction, updateExisting: false))
                 {
                     int index = 0;
+                    long aggregateBytes = 0;
                     foreach (MetadataIndexEntry entry in entries)
                     {
                         if ((index & 255) == 0)
                             token.ThrowIfCancellationRequested();
-                        ValidateEntry(entry, index);
+                        aggregateBytes = AccumulateEntryBudget(
+                            entry,
+                            index,
+                            aggregateBytes,
+                            maximumAggregateBytes);
                         BindEntry(insert, entry);
                         if (insert.ExecuteNonQuery() != 1)
                             throw new InvalidDataException($"metadata cache entry {index} was not inserted exactly once");
@@ -280,9 +329,18 @@ internal static class MetadataIndexStore
                         throw new InvalidDataException("metadata cache revision row was unavailable");
                 }
                 CheckExpectedEntryCount(connection, entries.Count, transaction);
+                _ = ValidateStoredPayloadBudget(connection, transaction, maximumAggregateBytes);
                 transaction.Commit();
                 Checkpoint(connection, required: false);
                 return MetadataIndexSaveResult.Saved(fullPath, entries.Count);
+            }
+
+            string? orphanSidecar = FindExistingSqliteSidecar(fullPath);
+            if (orphanSidecar is not null)
+            {
+                return MetadataIndexSaveResult.Failed(
+                    fullPath,
+                    $"metadata cache main file was absent while orphan sidecar {Path.GetFileName(orphanSidecar)} was preserved");
             }
 
             CleanupStaleTemporaryFiles(directory, temporaryToken, token);
@@ -294,25 +352,41 @@ internal static class MetadataIndexStore
                 using SqliteTransaction transaction = connection.BeginTransaction();
                 using SqliteCommand insert = CreateInsertCommand(connection, transaction, updateExisting: false);
                 int index = 0;
+                long aggregateBytes = 0;
                 foreach (MetadataIndexEntry entry in entries)
                 {
                     if ((index & 255) == 0)
                         token.ThrowIfCancellationRequested();
-                    ValidateEntry(entry, index);
+                    aggregateBytes = AccumulateEntryBudget(
+                        entry,
+                        index,
+                        aggregateBytes,
+                        maximumAggregateBytes);
                     BindEntry(insert, entry);
                     if (insert.ExecuteNonQuery() != 1)
                         throw new InvalidDataException($"metadata cache entry {index} was not inserted exactly once");
                     index++;
                 }
                 CheckExpectedEntryCount(connection, entries.Count, transaction);
+                _ = ValidateStoredPayloadBudget(connection, transaction, maximumAggregateBytes);
                 transaction.Commit();
                 Checkpoint(connection, required: true);
             }
 
             token.ThrowIfCancellationRequested();
             FlushFile(temporaryPath);
+            EnsureSqliteFamilyWithinBudget(temporaryPath, maximumFamilyBytes);
             // The target was absent while holding the writer lock. Do not
-            // overwrite a file that appeared unexpectedly after that check.
+            // publish into a namespace where either a main file or SQLite
+            // sidecar appeared unexpectedly after that check.
+            if (File.Exists(fullPath) || Directory.Exists(fullPath))
+                throw new IOException("metadata cache target appeared before publication and was preserved");
+            orphanSidecar = FindExistingSqliteSidecar(fullPath);
+            if (orphanSidecar is not null)
+            {
+                throw new IOException(
+                    $"metadata cache orphan sidecar {Path.GetFileName(orphanSidecar)} appeared before publication and was preserved");
+            }
             File.Move(temporaryPath, fullPath);
             TryDeleteSqliteSidecars(temporaryPath);
             return MetadataIndexSaveResult.Saved(fullPath, entries.Count);
@@ -340,8 +414,43 @@ internal static class MetadataIndexStore
         IReadOnlyCollection<string> removedPaths,
         int expectedEntryCount,
         CancellationToken token)
+        => ApplyChangesCore(
+            path,
+            upserts,
+            removedPaths,
+            expectedEntryCount,
+            token,
+            MaximumSqliteFamilyBytes,
+            MaximumSqliteAggregateBytes);
+
+    internal static MetadataIndexSaveResult ApplyChangesWithBudgetForSmoke(
+        string path,
+        IReadOnlyCollection<MetadataIndexEntry> upserts,
+        IReadOnlyCollection<string> removedPaths,
+        int expectedEntryCount,
+        CancellationToken token,
+        long maximumFamilyBytes,
+        long maximumAggregateBytes)
+        => ApplyChangesCore(
+            path,
+            upserts,
+            removedPaths,
+            expectedEntryCount,
+            token,
+            maximumFamilyBytes,
+            maximumAggregateBytes);
+
+    private static MetadataIndexSaveResult ApplyChangesCore(
+        string path,
+        IReadOnlyCollection<MetadataIndexEntry> upserts,
+        IReadOnlyCollection<string> removedPaths,
+        int expectedEntryCount,
+        CancellationToken token,
+        long maximumFamilyBytes,
+        long maximumAggregateBytes)
     {
         string fullPath = Path.GetFullPath(path);
+        ValidateBudgets(maximumFamilyBytes, maximumAggregateBytes);
         if (expectedEntryCount < 0 || expectedEntryCount > MaximumEntryCount)
             return MetadataIndexSaveResult.Failed(fullPath, $"entry count {expectedEntryCount} exceeds the safe bound");
         if (upserts.Count == 0 && removedPaths.Count == 0)
@@ -359,6 +468,7 @@ internal static class MetadataIndexStore
         {
             token.ThrowIfCancellationRequested();
             lockStream = AcquireWriterLock(lockPath, token);
+            EnsureSqliteFamilyWithinBudget(fullPath, maximumFamilyBytes);
             int existingVersion = ReadExistingSchemaVersion(fullPath);
             if (existingVersion > SchemaVersion)
             {
@@ -376,11 +486,16 @@ internal static class MetadataIndexStore
             using SqliteTransaction transaction = connection.BeginTransaction();
             using SqliteCommand upsert = CreateInsertCommand(connection, transaction, updateExisting: true);
             int index = 0;
+            long aggregateBytes = 0;
             foreach (MetadataIndexEntry entry in upserts)
             {
                 if ((index & 255) == 0)
                     token.ThrowIfCancellationRequested();
-                ValidateEntry(entry, index);
+                aggregateBytes = AccumulateEntryBudget(
+                    entry,
+                    index,
+                    aggregateBytes,
+                    maximumAggregateBytes);
                 BindEntry(upsert, entry);
                 _ = upsert.ExecuteNonQuery();
                 index++;
@@ -405,6 +520,7 @@ internal static class MetadataIndexStore
                     throw new InvalidDataException("metadata cache revision row was unavailable");
             }
             CheckExpectedEntryCount(connection, expectedEntryCount, transaction);
+            _ = ValidateStoredPayloadBudget(connection, transaction, maximumAggregateBytes);
             transaction.Commit();
             Checkpoint(connection, required: false);
             return MetadataIndexSaveResult.Saved(fullPath, expectedEntryCount);
@@ -467,14 +583,88 @@ internal static class MetadataIndexStore
         _ = command.ExecuteNonQuery();
     }
 
-    private static int ReadSchemaVersion(SqliteConnection connection)
+    private static int ReadSchemaVersion(
+        SqliteConnection connection,
+        SqliteTransaction? transaction = null)
     {
         using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT schema_version FROM store_meta WHERE singleton = 1;";
         object? value = command.ExecuteScalar();
         if (value is not long raw || raw < int.MinValue || raw > int.MaxValue)
             throw new InvalidDataException("metadata cache schema row was unavailable");
         return (int)raw;
+    }
+
+    private static int ValidateStoredPayloadBudget(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long maximumAggregateBytes)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT COUNT(*),
+                   COALESCE(MAX(CASE
+                       WHEN typeof(path) = 'text' AND length(path) <= $maximumPathBytes
+                       THEN length(CAST(path AS BLOB)) ELSE $rejectedPathBytes END), 0),
+                   COALESCE(MAX(CASE
+                       WHEN typeof(prompt_utf8) = 'blob'
+                       THEN length(prompt_utf8) ELSE $rejectedPromptBytes END), 0),
+                   COALESCE(SUM(CASE
+                       WHEN typeof(path) = 'text' AND length(path) <= $maximumPathBytes
+                       THEN length(CAST(path AS BLOB)) ELSE $rejectedPathBytes END), 0),
+                   COALESCE(SUM(CASE
+                       WHEN typeof(prompt_utf8) = 'blob'
+                       THEN length(prompt_utf8) ELSE $rejectedPromptBytes END), 0),
+                   COALESCE(SUM(CASE
+                       WHEN typeof(path) = 'text'
+                        AND typeof(source_length) = 'integer'
+                        AND typeof(source_mtime_ticks) = 'integer'
+                        AND typeof(source_ctime_ticks) = 'integer'
+                        AND typeof(width) = 'integer'
+                        AND typeof(height) = 'integer'
+                        AND typeof(prompt_utf8) = 'blob'
+                       THEN 0 ELSE 1 END), 0)
+            FROM metadata;
+            """;
+        command.Parameters.AddWithValue("$maximumPathBytes", MaximumPathBytes);
+        command.Parameters.AddWithValue("$rejectedPathBytes", (long)MaximumPathBytes + 1);
+        command.Parameters.AddWithValue("$rejectedPromptBytes", (long)MaximumPromptBytes + 1);
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
+            throw new InvalidDataException("metadata cache bounds preflight returned no result");
+
+        long countRaw = ReadNonnegativeInt64(reader, 0, "entry count");
+        long maximumPathBytes = ReadNonnegativeInt64(reader, 1, "maximum path length");
+        long maximumPromptBytes = ReadNonnegativeInt64(reader, 2, "maximum prompt length");
+        long totalPathBytes = ReadNonnegativeInt64(reader, 3, "aggregate path length");
+        long totalPromptBytes = ReadNonnegativeInt64(reader, 4, "aggregate prompt length");
+        long invalidTypeCount = ReadNonnegativeInt64(reader, 5, "invalid type count");
+
+        if (countRaw > MaximumEntryCount)
+            throw new InvalidDataException($"metadata cache entry count {countRaw} is outside the safe bound");
+        if (maximumPathBytes > MaximumPathBytes)
+            throw new InvalidDataException($"metadata cache path length {maximumPathBytes} is outside the safe bound");
+        if (maximumPromptBytes > MaximumPromptBytes)
+            throw new InvalidDataException($"metadata cache prompt length {maximumPromptBytes} is outside the safe bound");
+        if (invalidTypeCount != 0)
+            throw new InvalidDataException($"metadata cache contained {invalidTypeCount} row(s) with invalid SQLite value types");
+        if (totalPathBytes > maximumAggregateBytes
+            || totalPromptBytes > maximumAggregateBytes - totalPathBytes)
+        {
+            throw new InvalidDataException(
+                $"metadata cache aggregate path/prompt payload is outside the {maximumAggregateBytes:N0}-byte safe bound");
+        }
+
+        return (int)countRaw;
+    }
+
+    private static long ReadNonnegativeInt64(SqliteDataReader reader, int ordinal, string name)
+    {
+        if (reader.GetValue(ordinal) is not long value || value < 0)
+            throw new InvalidDataException($"metadata cache {name} was invalid");
+        return value;
     }
 
     private static int ReadEntryCount(
@@ -546,6 +736,23 @@ internal static class MetadataIndexStore
         command.Parameters["$width"].Value = entry.Width;
         command.Parameters["$height"].Value = entry.Height;
         command.Parameters["$prompt"].Value = entry.PromptUtf8;
+    }
+
+    private static long AccumulateEntryBudget(
+        MetadataIndexEntry entry,
+        int index,
+        long aggregateBytes,
+        long maximumAggregateBytes)
+    {
+        ValidateEntry(entry, index);
+        long rowBytes = StrictUtf8.GetByteCount(entry.Path) + (long)entry.PromptUtf8.Length;
+        if (rowBytes > maximumAggregateBytes
+            || aggregateBytes > maximumAggregateBytes - rowBytes)
+        {
+            throw new InvalidDataException(
+                $"metadata cache aggregate path/prompt payload is outside the {maximumAggregateBytes:N0}-byte safe bound");
+        }
+        return aggregateBytes + rowBytes;
     }
 
     private static void ValidateEntry(MetadataIndexEntry entry, int index)
@@ -628,6 +835,54 @@ internal static class MetadataIndexStore
         stream.Flush(flushToDisk: true);
     }
 
+    private static void ValidateBudgets(long maximumFamilyBytes, long maximumAggregateBytes)
+    {
+        if (maximumFamilyBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumFamilyBytes));
+        if (maximumAggregateBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumAggregateBytes));
+    }
+
+    private static void EnsureSqliteFamilyWithinBudget(string path, long maximumFamilyBytes)
+    {
+        long totalBytes = 0;
+        foreach (string member in EnumerateSqliteFamily(path))
+        {
+            if (Directory.Exists(member))
+                throw new InvalidDataException($"metadata cache family member {Path.GetFileName(member)} was not a file");
+            if (!File.Exists(member))
+                continue;
+
+            long length = new FileInfo(member).Length;
+            if (length < 0
+                || length > maximumFamilyBytes
+                || totalBytes > maximumFamilyBytes - length)
+            {
+                throw new InvalidDataException(
+                    $"metadata cache SQLite family is outside the {maximumFamilyBytes:N0}-byte safe bound");
+            }
+            totalBytes += length;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateSqliteFamily(string path)
+    {
+        yield return path;
+        foreach (string suffix in SqliteSidecarSuffixes)
+            yield return path + suffix;
+    }
+
+    private static string? FindExistingSqliteSidecar(string path)
+    {
+        foreach (string suffix in SqliteSidecarSuffixes)
+        {
+            string sidecar = path + suffix;
+            if (File.Exists(sidecar) || Directory.Exists(sidecar))
+                return sidecar;
+        }
+        return null;
+    }
+
     private static bool IsRecoverableStoreException(Exception ex)
         => ex is SqliteException
             or IOException
@@ -636,6 +891,8 @@ internal static class MetadataIndexStore
             or EndOfStreamException
             or DecoderFallbackException
             or ArgumentException
+            or InvalidCastException
+            or OverflowException
             or NotSupportedException;
 
     private static MetadataIndexLoadResult LoadLegacyBinary(string path, CancellationToken token)
@@ -812,8 +1069,8 @@ internal static class MetadataIndexStore
 
     private static void TryDeleteSqliteSidecars(string path)
     {
-        TryDeleteTemporary(path + "-wal");
-        TryDeleteTemporary(path + "-shm");
+        foreach (string suffix in SqliteSidecarSuffixes)
+            TryDeleteTemporary(path + suffix);
     }
 
     private static void TryDeleteTemporary(string path)

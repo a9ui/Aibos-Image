@@ -25469,6 +25469,18 @@ public partial class App : Application
                     return connection;
                 }
 
+                static byte[] ReadSharedBytes(string path)
+                {
+                    using var stream = new FileStream(
+                        path,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var copy = new MemoryStream();
+                    stream.CopyTo(copy);
+                    return copy.ToArray();
+                }
+
                 static long ReadMetadataIndexRevision(string path)
                 {
                     using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadOnly);
@@ -25495,12 +25507,19 @@ public partial class App : Application
 
                 static void DeleteMetadataIndexSidecars(string path)
                 {
-                    foreach (string suffix in new[] { "-wal", "-shm" })
+                    foreach (string suffix in new[] { "-wal", "-shm", "-journal" })
                     {
                         string sidecar = path + suffix;
                         if (File.Exists(sidecar))
                             File.Delete(sidecar);
                     }
+                }
+
+                static void DeleteMetadataIndexFamily(string path)
+                {
+                    DeleteMetadataIndexSidecars(path);
+                    if (File.Exists(path))
+                        File.Delete(path);
                 }
 
                 static void RestoreMetadataIndexBytes(string path, byte[] bytes)
@@ -25549,7 +25568,7 @@ public partial class App : Application
                     stream.Flush(flushToDisk: true);
                 }
 
-                static void WriteMalformedMetadataIndex(string path)
+                static void WriteMalformedMetadataIndex(string path, bool oversizedPrompt = false)
                 {
                     using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWriteCreate);
                     using (SqliteCommand schema = connection.CreateCommand())
@@ -25574,16 +25593,26 @@ public partial class App : Application
                         _ = schema.ExecuteNonQuery();
                     }
                     using SqliteCommand insert = connection.CreateCommand();
-                    insert.CommandText = """
-                        INSERT INTO metadata(
-                            path, source_length, source_mtime_ticks, source_ctime_ticks,
-                            width, height, prompt_utf8)
-                        VALUES ($path, 1, $mtime, $ctime, 1, 1, $prompt);
-                        """;
-                    insert.Parameters.AddWithValue("$path", @"C:\" + new string('x', 128 * 1024 + 1));
+                    insert.CommandText = oversizedPrompt
+                        ? """
+                            INSERT INTO metadata(
+                                path, source_length, source_mtime_ticks, source_ctime_ticks,
+                                width, height, prompt_utf8)
+                            VALUES ($path, 1, $mtime, $ctime, 1, 1, zeroblob(4194305));
+                            """
+                        : """
+                            INSERT INTO metadata(
+                                path, source_length, source_mtime_ticks, source_ctime_ticks,
+                                width, height, prompt_utf8)
+                            VALUES ($path, 1, $mtime, $ctime, 1, 1, $prompt);
+                            """;
+                    insert.Parameters.AddWithValue(
+                        "$path",
+                        oversizedPrompt ? @"C:\bounded-prompt.png" : @"C:\" + new string('x', 128 * 1024 + 1));
                     insert.Parameters.AddWithValue("$mtime", DateTime.UnixEpoch.Ticks);
                     insert.Parameters.AddWithValue("$ctime", DateTime.UnixEpoch.Ticks);
-                    insert.Parameters.AddWithValue("$prompt", Array.Empty<byte>());
+                    if (!oversizedPrompt)
+                        insert.Parameters.AddWithValue("$prompt", Array.Empty<byte>());
                     if (insert.ExecuteNonQuery() != 1)
                         throw new InvalidDataException("malformed metadata fixture row was not inserted");
                 }
@@ -25618,7 +25647,7 @@ public partial class App : Application
                 coldWindow.Close();
 
                 string legacyIndexPath = Path.ChangeExtension(indexPath, ".pvmi");
-                File.Delete(indexPath);
+                DeleteMetadataIndexFamily(indexPath);
                 WriteLegacyMetadataIndex(legacyIndexPath, coldIndex.Entries.Values);
                 MetadataIndexLoadResult legacyProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
                 var migrationWindow = CreateSmokeWindow();
@@ -25645,7 +25674,11 @@ public partial class App : Application
                 migrationWindow.Close();
 
                 long rollbackRevisionBefore = ReadMetadataIndexRevision(indexPath);
-                MetadataIndexEntry rollbackProbeEntry = migratedProbe.Entries.Values.First();
+                MetadataIndexEntry rollbackProbeEntry = migratedProbe.Entries.Values.FirstOrDefault()
+                    ?? throw new InvalidDataException(
+                        $"migrated metadata probe was {migratedProbe.State} with zero entries: {migratedProbe.Error}; "
+                        + $"migration state={migration["loadState"]}, save={migration["indexSaveSucceeded"]}, "
+                        + $"save message={migration["indexSaveMessage"]}");
                 MetadataIndexSaveResult rejectedDelta = MetadataIndexStore.ApplyChanges(
                     indexPath,
                     [rollbackProbeEntry],
@@ -25692,6 +25725,7 @@ public partial class App : Application
                 bool walPresentAfterDelta;
                 bool walPreservedDuringFullSave;
                 long readerSnapshotCount;
+                byte[] committedWalBytes;
                 using (SqliteConnection liveReader = OpenMetadataIndexForSmoke(indexPath, SqliteOpenMode.ReadOnly))
                 using (SqliteTransaction liveReadTransaction = liveReader.BeginTransaction())
                 {
@@ -25714,6 +25748,9 @@ public partial class App : Application
                         concurrentSnapshot,
                         CancellationToken.None);
                     walPreservedDuringFullSave = File.Exists(indexPath + "-wal");
+                    committedWalBytes = walPreservedDuringFullSave
+                        ? ReadSharedBytes(indexPath + "-wal")
+                        : [];
                     using SqliteCommand readerCountAfter = liveReader.CreateCommand();
                     readerCountAfter.Transaction = liveReadTransaction;
                     readerCountAfter.CommandText = "SELECT COUNT(*) FROM metadata;";
@@ -25727,6 +25764,7 @@ public partial class App : Application
                     && concurrentFullSave.Written
                     && walPresentAfterDelta
                     && walPreservedDuringFullSave
+                    && committedWalBytes.Length > 0
                     && readerSnapshotCount == count
                     && concurrentProbe.State == MetadataIndexLoadState.Loaded
                     && concurrentProbe.Entries.Count == count
@@ -25742,6 +25780,58 @@ public partial class App : Application
                     ["readerSnapshotCount"] = readerSnapshotCount,
                     ["durableEntryCount"] = concurrentProbe.Entries.Count,
                 };
+
+                string orphanPath = Path.Combine(indexDirectory, "orphan-family.sqlite3");
+                var orphanFamilyProtection = new Dictionary<string, object?>(StringComparer.Ordinal);
+                bool orphanFamilyProtectionPassed = committedWalBytes.Length > 0;
+                foreach ((string suffix, byte[] bytes) in new[]
+                {
+                    ("-wal", committedWalBytes),
+                    ("-shm", Encoding.ASCII.GetBytes("orphan-shm-fixture")),
+                    ("-journal", Encoding.ASCII.GetBytes("orphan-journal-fixture")),
+                })
+                {
+                    DeleteMetadataIndexFamily(orphanPath);
+                    string sidecarPath = orphanPath + suffix;
+                    File.WriteAllBytes(sidecarPath, bytes);
+                    File.SetLastWriteTimeUtc(sidecarPath, DateTime.UtcNow.AddMinutes(-10));
+                    string sidecarFingerprintBefore = FileFingerprint(sidecarPath);
+                    long sidecarWriteTicksBefore = File.GetLastWriteTimeUtc(sidecarPath).Ticks;
+                    MetadataIndexLoadResult orphanLoad = MetadataIndexStore.Load(orphanPath, CancellationToken.None);
+                    MetadataIndexSaveResult orphanSave = MetadataIndexStore.Save(
+                        orphanPath,
+                        [rollbackProbeEntry],
+                        CancellationToken.None);
+                    string sidecarFingerprintAfter = FileFingerprint(sidecarPath);
+                    long sidecarWriteTicksAfter = File.GetLastWriteTimeUtc(sidecarPath).Ticks;
+                    bool suffixPassed = bytes.Length > 0
+                        && orphanLoad.State == MetadataIndexLoadState.Invalid
+                        && (orphanLoad.Error?.Contains("orphan sidecar", StringComparison.OrdinalIgnoreCase) ?? false)
+                        && !orphanSave.Ok
+                        && !orphanSave.Written
+                        && (orphanSave.Error?.Contains("preserved", StringComparison.OrdinalIgnoreCase) ?? false)
+                        && !File.Exists(orphanPath)
+                        && File.Exists(sidecarPath)
+                        && string.Equals(sidecarFingerprintBefore, sidecarFingerprintAfter, StringComparison.Ordinal)
+                        && sidecarWriteTicksBefore == sidecarWriteTicksAfter
+                        && NoPersistenceResidue(indexDirectory);
+                    orphanFamilyProtectionPassed &= suffixPassed;
+                    orphanFamilyProtection[suffix.TrimStart('-')] = new Dictionary<string, object?>
+                    {
+                        ["passed"] = suffixPassed,
+                        ["loadState"] = orphanLoad.State.ToString(),
+                        ["loadError"] = orphanLoad.Error,
+                        ["saveOk"] = orphanSave.Ok,
+                        ["saveError"] = orphanSave.Error,
+                        ["mainAbsent"] = !File.Exists(orphanPath),
+                        ["sidecarPreserved"] = string.Equals(sidecarFingerprintBefore, sidecarFingerprintAfter, StringComparison.Ordinal),
+                        ["mtimePreserved"] = sidecarWriteTicksBefore == sidecarWriteTicksAfter,
+                    };
+                    DeleteMetadataIndexFamily(orphanPath);
+                }
+                orphanFamilyProtection["passed"] = orphanFamilyProtectionPassed;
+                orphanFamilyProtection["committedWalBytes"] = committedWalBytes.Length;
+                orphanFamilyProtection["residueFree"] = NoPersistenceResidue(indexDirectory);
 
                 string coldIndexFingerprint = FileFingerprint(indexPath);
                 long coldIndexWriteTicks = File.GetLastWriteTimeUtc(indexPath).Ticks;
@@ -25904,9 +25994,7 @@ public partial class App : Application
                 }
                 finally
                 {
-                    DeleteMetadataIndexSidecars(malformedPath);
-                    if (File.Exists(malformedPath))
-                        File.Delete(malformedPath);
+                    DeleteMetadataIndexFamily(malformedPath);
                 }
                 bool malformedPassed = malformedEscapedException is null
                     && malformedProbe?.State == MetadataIndexLoadState.Invalid
@@ -25919,6 +26007,180 @@ public partial class App : Application
                     ["error"] = malformedProbe?.Error,
                     ["escapedException"] = malformedEscapedException,
                     ["fixtureRemoved"] = !File.Exists(malformedPath),
+                };
+
+                string oversizedPromptPath = Path.Combine(indexDirectory, "bounded-prompt.sqlite3");
+                MetadataIndexLoadResult? oversizedPromptProbe = null;
+                string? oversizedPromptEscapedException = null;
+                try
+                {
+                    WriteMalformedMetadataIndex(oversizedPromptPath, oversizedPrompt: true);
+                    try
+                    {
+                        oversizedPromptProbe = MetadataIndexStore.Load(oversizedPromptPath, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        oversizedPromptEscapedException = ex.ToString();
+                    }
+                }
+                finally
+                {
+                    DeleteMetadataIndexFamily(oversizedPromptPath);
+                }
+                bool oversizedPromptPassed = oversizedPromptEscapedException is null
+                    && oversizedPromptProbe?.State == MetadataIndexLoadState.Invalid
+                    && (oversizedPromptProbe.Error?.Contains("prompt length", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && !File.Exists(oversizedPromptPath);
+                var boundedOversizedPrompt = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = oversizedPromptPassed,
+                    ["loadState"] = oversizedPromptProbe?.State.ToString(),
+                    ["error"] = oversizedPromptProbe?.Error,
+                    ["escapedException"] = oversizedPromptEscapedException,
+                    ["fixtureRemoved"] = !File.Exists(oversizedPromptPath),
+                };
+
+                const long smokeFamilyBudget = 16L * 1024 * 1024;
+                const long smokeAggregateBudget = 32L * 1024;
+                MetadataIndexEntry[] aggregateEntries =
+                [
+                    new(
+                        Path.Combine(smokeRoot, "budget-a.png"),
+                        1,
+                        DateTime.UnixEpoch.Ticks,
+                        DateTime.UnixEpoch.Ticks,
+                        1,
+                        1,
+                        Enumerable.Repeat((byte)'a', 20 * 1024).ToArray()),
+                    new(
+                        Path.Combine(smokeRoot, "budget-b.png"),
+                        1,
+                        DateTime.UnixEpoch.Ticks,
+                        DateTime.UnixEpoch.Ticks,
+                        1,
+                        1,
+                        Enumerable.Repeat((byte)'b', 20 * 1024).ToArray()),
+                ];
+                string aggregateLoadPath = Path.Combine(indexDirectory, "budget-load.sqlite3");
+                string familyLoadPath = Path.Combine(indexDirectory, "budget-family.sqlite3");
+                string saveBudgetPath = Path.Combine(indexDirectory, "budget-save.sqlite3");
+                string applyBudgetPath = Path.Combine(indexDirectory, "budget-apply.sqlite3");
+                MetadataIndexLoadResult? aggregateBudgetLoad = null;
+                MetadataIndexLoadResult? familyBudgetLoad = null;
+                MetadataIndexSaveResult? saveBudgetResult = null;
+                MetadataIndexSaveResult? applyBudgetResult = null;
+                MetadataIndexLoadResult? applyBudgetProbe = null;
+                string? budgetEscapedException = null;
+                string? applyFingerprintBefore = null;
+                string? applyFingerprintAfter = null;
+                long applyRevisionBefore = -1;
+                long applyRevisionAfter = -2;
+                bool saveBudgetTargetAbsent = false;
+                try
+                {
+                    MetadataIndexSaveResult aggregateSeed = MetadataIndexStore.Save(
+                        aggregateLoadPath,
+                        aggregateEntries,
+                        CancellationToken.None);
+                    if (!aggregateSeed.Ok || !aggregateSeed.Written)
+                        throw new InvalidDataException($"aggregate budget seed failed: {aggregateSeed.Error}");
+                    aggregateBudgetLoad = MetadataIndexStore.LoadWithBudgetForSmoke(
+                        aggregateLoadPath,
+                        CancellationToken.None,
+                        smokeFamilyBudget,
+                        smokeAggregateBudget);
+
+                    MetadataIndexSaveResult familySeed = MetadataIndexStore.Save(
+                        familyLoadPath,
+                        [aggregateEntries[0]],
+                        CancellationToken.None);
+                    if (!familySeed.Ok || !familySeed.Written || committedWalBytes.Length == 0)
+                        throw new InvalidDataException($"SQLite family budget seed failed: {familySeed.Error}");
+                    File.WriteAllBytes(familyLoadPath + "-wal", committedWalBytes);
+                    long reducedFamilyBudget = new FileInfo(familyLoadPath).Length + committedWalBytes.Length - 1;
+                    familyBudgetLoad = MetadataIndexStore.LoadWithBudgetForSmoke(
+                        familyLoadPath,
+                        CancellationToken.None,
+                        reducedFamilyBudget,
+                        smokeAggregateBudget * 4);
+
+                    saveBudgetResult = MetadataIndexStore.SaveWithBudgetForSmoke(
+                        saveBudgetPath,
+                        aggregateEntries,
+                        CancellationToken.None,
+                        smokeFamilyBudget,
+                        smokeAggregateBudget);
+                    saveBudgetTargetAbsent = !File.Exists(saveBudgetPath)
+                        && !new[] { "-wal", "-shm", "-journal" }.Any(suffix => File.Exists(saveBudgetPath + suffix));
+
+                    MetadataIndexSaveResult applySeed = MetadataIndexStore.Save(
+                        applyBudgetPath,
+                        aggregateEntries,
+                        CancellationToken.None);
+                    if (!applySeed.Ok || !applySeed.Written)
+                        throw new InvalidDataException($"apply budget seed failed: {applySeed.Error}");
+                    applyFingerprintBefore = FileFingerprint(applyBudgetPath);
+                    applyRevisionBefore = ReadMetadataIndexRevision(applyBudgetPath);
+                    MetadataIndexEntry boundedUpsert = aggregateEntries[0] with
+                    {
+                        PromptUtf8 = Enumerable.Repeat((byte)'q', 20 * 1024).ToArray(),
+                    };
+                    applyBudgetResult = MetadataIndexStore.ApplyChangesWithBudgetForSmoke(
+                        applyBudgetPath,
+                        [boundedUpsert],
+                        Array.Empty<string>(),
+                        aggregateEntries.Length,
+                        CancellationToken.None,
+                        smokeFamilyBudget,
+                        smokeAggregateBudget);
+                    applyFingerprintAfter = FileFingerprint(applyBudgetPath);
+                    applyRevisionAfter = ReadMetadataIndexRevision(applyBudgetPath);
+                    applyBudgetProbe = MetadataIndexStore.Load(applyBudgetPath, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    budgetEscapedException = ex.ToString();
+                }
+                finally
+                {
+                    DeleteMetadataIndexFamily(aggregateLoadPath);
+                    DeleteMetadataIndexFamily(familyLoadPath);
+                    DeleteMetadataIndexFamily(saveBudgetPath);
+                    DeleteMetadataIndexFamily(applyBudgetPath);
+                }
+                bool sqliteBudgetProtectionPassed = budgetEscapedException is null
+                    && aggregateBudgetLoad?.State == MetadataIndexLoadState.Invalid
+                    && (aggregateBudgetLoad.Error?.Contains("aggregate", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && familyBudgetLoad?.State == MetadataIndexLoadState.Invalid
+                    && (familyBudgetLoad.Error?.Contains("SQLite family", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && saveBudgetResult is { Ok: false, Written: false }
+                    && (saveBudgetResult.Error?.Contains("aggregate", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && saveBudgetTargetAbsent
+                    && applyBudgetResult is { Ok: false, Written: false }
+                    && (applyBudgetResult.Error?.Contains("aggregate", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && string.Equals(applyFingerprintBefore, applyFingerprintAfter, StringComparison.Ordinal)
+                    && applyRevisionBefore == applyRevisionAfter
+                    && applyBudgetProbe?.State == MetadataIndexLoadState.Loaded
+                    && applyBudgetProbe.Entries.Count == aggregateEntries.Length
+                    && NoPersistenceResidue(indexDirectory);
+                var sqliteBudgetProtection = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = sqliteBudgetProtectionPassed,
+                    ["aggregateLoadState"] = aggregateBudgetLoad?.State.ToString(),
+                    ["aggregateLoadError"] = aggregateBudgetLoad?.Error,
+                    ["familyLoadState"] = familyBudgetLoad?.State.ToString(),
+                    ["familyLoadError"] = familyBudgetLoad?.Error,
+                    ["saveOk"] = saveBudgetResult?.Ok,
+                    ["saveError"] = saveBudgetResult?.Error,
+                    ["saveTargetAbsent"] = saveBudgetTargetAbsent,
+                    ["applyOk"] = applyBudgetResult?.Ok,
+                    ["applyError"] = applyBudgetResult?.Error,
+                    ["applyHashUnchanged"] = string.Equals(applyFingerprintBefore, applyFingerprintAfter, StringComparison.Ordinal),
+                    ["applyRevisionBefore"] = applyRevisionBefore,
+                    ["applyRevisionAfter"] = applyRevisionAfter,
+                    ["escapedException"] = budgetEscapedException,
+                    ["residueFree"] = NoPersistenceResidue(indexDirectory),
                 };
 
                 RestoreMetadataIndexBytes(indexPath, validIndexBytes);
@@ -26075,12 +26337,15 @@ public partial class App : Application
                 result["legacyMigration"] = migration;
                 result["rowDeltaRollback"] = rowDeltaRollback;
                 result["concurrentReaderRebuild"] = concurrentReaderRebuild;
+                result["orphanFamilyProtection"] = orphanFamilyProtection;
                 result["warm"] = warm;
                 result["partialInvalidation"] = partial;
                 result["corruptionRecovery"] = corruption;
                 result["futureVersionProtection"] = future;
                 result["commitTimeFutureGuard"] = commitTimeFutureGuard;
                 result["boundedMalformed"] = boundedMalformed;
+                result["boundedOversizedPrompt"] = boundedOversizedPrompt;
+                result["sqliteBudgetProtection"] = sqliteBudgetProtection;
                 result["decodeFailurePreservation"] = failurePreservation;
                 result["staleEntryPrune"] = staleEntryPrune;
                 result["cancellation"] = cancellation;
@@ -26089,12 +26354,15 @@ public partial class App : Application
                     && migrationPassed
                     && rowDeltaRollbackPassed
                     && concurrentReaderRebuildPassed
+                    && orphanFamilyProtectionPassed
                     && warmPassed
                     && partialPassed
                     && corruptionPassed
                     && futurePassed
                     && commitGuardPassed
                     && malformedPassed
+                    && oversizedPromptPassed
+                    && sqliteBudgetProtectionPassed
                     && failurePreservationPassed
                     && staleEntryPrunePassed
                     && cancelPassed;
@@ -26166,7 +26434,7 @@ public partial class App : Application
                 result["environmentRestored"] = environmentRestored;
                 result["ok"] = allPassed;
                 result["message"] = allPassed
-                    ? "Persistent SQLite metadata index cold, legacy migration, live-reader-safe full rebuild, warm, row-delta invalidation, unreadable-target preservation, bounded malformed input, future-version commit guard, decode failure preservation, stale-entry pruning, cancellation, progress, and isolation contracts passed."
+                    ? "Persistent SQLite metadata index cold, legacy migration, live-reader-safe full rebuild, orphan-sidecar protection, bounded SQLite family and aggregate payloads, warm, row-delta invalidation, unreadable-target preservation, bounded malformed input, future-version commit guard, decode failure preservation, stale-entry pruning, cancellation, progress, and isolation contracts passed."
                     : result["message"] is string message && !string.Equals(message, "metadata index smoke did not complete", StringComparison.Ordinal)
                         ? message
                         : "one or more metadata index contracts failed";
@@ -28418,6 +28686,7 @@ public partial class App : Application
 
     private static bool NoPersistenceResidue(string root)
         => Directory.Exists(root)
+            && !Directory.EnumerateFiles(root, ".mi-*", SearchOption.AllDirectories).Any()
             && !Directory.EnumerateFiles(root, "*.lock", SearchOption.AllDirectories).Any()
             && !Directory.EnumerateFiles(root, "*.tmp", SearchOption.AllDirectories).Any();
 
