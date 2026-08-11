@@ -68,6 +68,10 @@
   <sys:String x:Key="UiConfirmBeforeDeleteHelp">Moves source images to the Windows Recycle Bin; it never uses a hard-delete fallback.</sys:String>
   <sys:String x:Key="UiGridFileInfoOverlay">Grid file info overlay</sys:String>
   <sys:String x:Key="UiGridFileInfoOverlayHelp">Shows filename and file size over large Grid thumbnails. Turning it off keeps status badges and List identity text.</sys:String>
+  <sys:String x:Key="UiShowLoadTiming">Show folder load timing</sys:String>
+  <sys:String x:Key="UiShowLoadTimingHelp">Shows the first usable view and full background completion time in the footer. Off by default; enable it only while measuring performance.</sys:String>
+  <sys:String x:Key="UiLoadTimingFormat">Ready {0} · complete {1}</sys:String>
+  <sys:String x:Key="UiLoadTimingEmptyFormat">Loaded in {0} · no images</sys:String>
   <sys:String x:Key="UiUnseenDots">Unseen dots</sys:String>
   <sys:String x:Key="UiUnseenDotsHelp">Shows a dot on images that have not been viewed. This display option never changes seen history.</sys:String>
   <sys:String x:Key="UiFavoriteChangeNotifications">Favorite change notifications</sys:String>

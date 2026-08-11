@@ -1042,6 +1042,11 @@
                    Foreground="{StaticResource TextTertiary}" FontSize="11.5"
                    Margin="10,0,12,0" VerticalAlignment="Center"
                    TextTrimming="CharacterEllipsis"/>
+        <TextBlock x:Name="LoadTimingStatusText" DockPanel.Dock="Right"
+                   Visibility="Collapsed" Foreground="{StaticResource TextTertiary}"
+                   FontSize="10.5" Margin="8,0,2,0" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" IsHitTestVisible="False"
+                   AutomationProperties.Name="Folder load timing"/>
         <Border x:Name="MetadataIndexFooterPanel" DockPanel.Dock="Right" Visibility="Collapsed" MinWidth="190" MaxWidth="340" Margin="8,5,10,5" Padding="10,3" CornerRadius="7"
                 Background="{StaticResource AccentGlass}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" IsHitTestVisible="False">
           <Grid>
@@ -1938,6 +1943,8 @@
           <TextBlock x:Name="DisplaySettingsHeading" Text="DISPLAY" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Display settings section"/>
           <CheckBox x:Name="AppSettingsShowGridFileInfoOverlayCheckBox" Content="{DynamicResource UiGridFileInfoOverlay}" Foreground="{StaticResource TextSecondary}" Checked="ShowGridFileInfoOverlay_Changed" Unchecked="ShowGridFileInfoOverlay_Changed" AutomationProperties.Name="Show filename and file size over Grid thumbnails" AutomationProperties.HelpText="{DynamicResource UiGridFileInfoOverlayHelp}"/>
           <TextBlock Text="{DynamicResource UiGridFileInfoOverlayHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
+          <CheckBox x:Name="ShowLoadTimingCheckBox" Content="{DynamicResource UiShowLoadTiming}" Foreground="{StaticResource TextSecondary}" Checked="ShowLoadTiming_Changed" Unchecked="ShowLoadTiming_Changed" AutomationProperties.Name="Show folder load timing" AutomationProperties.HelpText="{DynamicResource UiShowLoadTimingHelp}"/>
+          <TextBlock Text="{DynamicResource UiShowLoadTimingHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
           <CheckBox x:Name="AppSettingsUnseenDotsCheckBox" Content="{DynamicResource UiUnseenDots}" Foreground="{StaticResource TextSecondary}" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="Changes dot visibility only. Seen history is not changed."/>
           <TextBlock Text="{DynamicResource UiUnseenDotsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
           <CheckBox x:Name="FavoriteChangeNotificationsCheckBox" Content="{DynamicResource UiFavoriteChangeNotifications}" Foreground="{StaticResource TextSecondary}" Checked="FavoriteChangeNotifications_Changed" Unchecked="FavoriteChangeNotifications_Changed" AutomationProperties.Name="Show favorite change notifications"/>

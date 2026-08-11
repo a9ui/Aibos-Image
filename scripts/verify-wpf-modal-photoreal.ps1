@@ -66,6 +66,7 @@ try {
         'passive',
         'started',
         'toolbarContract',
+        'loadTimingContract',
         'versionCycleContract',
         'versionSpecificFavoriteContract',
         'photorealFavoriteBadgeFilterContract',

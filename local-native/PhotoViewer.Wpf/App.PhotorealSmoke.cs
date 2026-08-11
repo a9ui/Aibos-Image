@@ -30,6 +30,7 @@ public partial class App
             bool passive = false;
             bool started = false;
             bool toolbarContract = false;
+            bool loadTimingContract = false;
             bool requestContract = false;
             bool resetPromptContract = false;
             bool appSettingsPromptContract = false;
@@ -1403,6 +1404,19 @@ public partial class App
                     && !loraControls.ModalStrengthEnabled;
                 window.Show();
                 await window.LoadFolderSetAsync([imageRoot], commitRecent: false);
+                bool loadTimingDefaultOff = !window.ShowLoadTimingForSmoke
+                    && !window.LoadTimingVisibleForSmoke
+                    && string.IsNullOrEmpty(window.LoadTimingStatusForSmoke);
+                window.SetShowLoadTimingForSmoke(true);
+                bool loadTimingEnabled = window.ShowLoadTimingForSmoke
+                    && window.LoadTimingVisibleForSmoke
+                    && !string.IsNullOrWhiteSpace(window.LoadTimingStatusForSmoke);
+                window.SetShowLoadTimingForSmoke(false);
+                loadTimingContract = loadTimingDefaultOff
+                    && loadTimingEnabled
+                    && !window.ShowLoadTimingForSmoke
+                    && !window.LoadTimingVisibleForSmoke
+                    && string.IsNullOrEmpty(window.LoadTimingStatusForSmoke);
                 selected = window.SelectFileNameForSmoke(Path.GetFileName(sourcePath));
                 opened = window.OpenModalForSmoke();
                 ModalMetadataSmokeSnapshot displayedPhotorealMetadata =
@@ -2301,6 +2315,7 @@ public partial class App
                     && passive
                     && started
                     && toolbarContract
+                    && loadTimingContract
                     && versionCycleContract
                     && versionSpecificFavoriteContract
                     && photorealFavoriteBadgeFilterContract
@@ -2383,6 +2398,7 @@ public partial class App
                     passive,
                     started,
                     toolbarContract,
+                    loadTimingContract,
                     versionCycleContract,
                     versionSpecificFavoriteContract,
                     photorealFavoriteBadgeFilterContract,

@@ -68,6 +68,10 @@
   <sys:String x:Key="UiConfirmBeforeDeleteHelp">元画像はWindowsのごみ箱へ移動します。完全削除へ切り替えることはありません。</sys:String>
   <sys:String x:Key="UiGridFileInfoOverlay">Gridのファイル情報を重ねる</sys:String>
   <sys:String x:Key="UiGridFileInfoOverlayHelp">大きいGridサムネイルにファイル名とサイズを重ねます。OFFでも状態バッジとListのファイル情報は残ります。</sys:String>
+  <sys:String x:Key="UiShowLoadTiming">フォルダ読み込み時間を表示</sys:String>
+  <sys:String x:Key="UiShowLoadTimingHelp">一覧が操作可能になるまでと、背景処理を含む完了時間をfooterに表示します。既定はOFFで、性能計測中だけONにします。</sys:String>
+  <sys:String x:Key="UiLoadTimingFormat">一覧 {0}・全処理 {1}</sys:String>
+  <sys:String x:Key="UiLoadTimingEmptyFormat">読み込み {0}・画像なし</sys:String>
   <sys:String x:Key="UiUnseenDots">Unseen dots</sys:String>
   <sys:String x:Key="UiUnseenDotsHelp">未表示の画像にdotを出します。この設定で閲覧履歴は変わりません。</sys:String>
   <sys:String x:Key="UiFavoriteChangeNotifications">Favorite変更の通知</sys:String>
