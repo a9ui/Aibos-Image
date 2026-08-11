@@ -13,7 +13,9 @@
   ],
   "operationFolders": {
     "upscale": "Upscaled",
-    "photoreal": "Photorealized"
+    "photoreal": "Photorealized",
+    "i2i": "Edited",
+    "video": "Videos"
   },
   "allocationTime": "when a queued job starts processing",
   "existingJobs": "recorded absolute output paths remain authoritative and are never rewritten by a settings change",

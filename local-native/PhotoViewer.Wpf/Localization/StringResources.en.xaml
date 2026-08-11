@@ -103,6 +103,7 @@
   <sys:String x:Key="UiFlipHorizontalFormat">Flip horizontal ({0})</sys:String>
   <sys:String x:Key="UiToggleEnhancedFormat">Toggle Original / Enhanced ({0})</sys:String>
   <sys:String x:Key="UiEnhanceCurrentFormat">Enhance current image ({0})</sys:String>
+  <sys:String x:Key="UiPhotorealizeCurrentFormat">Photorealize current image ({0})</sys:String>
   <sys:String x:Key="UiZoomOutFormat">Zoom out ({0})</sys:String>
   <sys:String x:Key="UiResetFitFormat">Reset to fit ({0})</sys:String>
   <sys:String x:Key="UiZoomInFormat">Zoom in ({0})</sys:String>

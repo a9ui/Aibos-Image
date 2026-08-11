@@ -34,6 +34,7 @@ internal enum ViewerKeyAction
     ToggleEnhancedPreview,
     ToggleVideoPlayback,
     EnhanceCurrentImage,
+    PhotorealizeCurrentImage,
     GalleryZoomIn,
     GalleryZoomOut,
     GalleryZoomReset,
@@ -359,6 +360,7 @@ internal static class KeyBindingSettings
         Def(ViewerKeyAction.ToggleEnhancedPreview, "toggleEnhancedPreview", "Toggle Original / Enhanced preview", "Switch only between the original and an already-succeeded managed output. This never creates or starts an enhancement job.", ShortcutContext.Modal, Key.E),
         Def(ViewerKeyAction.ToggleVideoPlayback, "toggleVideoPlayback", "Play / pause generated video", "Play or pause an already-succeeded managed video. Ordinary browsing never creates or starts a video job.", ShortcutContext.Modal, Key.Space),
         Def(ViewerKeyAction.EnhanceCurrentImage, "enhanceCurrentImage", "Enhance current image", "Start the explicit AI enhancement action for the current modal image. Ordinary browsing never starts a job.", ShortcutContext.Modal, Key.A),
+        Def(ViewerKeyAction.PhotorealizeCurrentImage, "photorealizeCurrentImage", "Photorealize current image", "Start the explicit AI photorealization action for the current modal image. Ordinary browsing never starts a job.", ShortcutContext.Modal, Key.R),
         Def(ViewerKeyAction.GalleryZoomIn, "galleryZoomIn", "Gallery zoom in", "Increase Grid card size without changing the sidebar, header, or fonts.", ShortcutContext.Gallery, Key.OemPlus, ModifierKeys.Control),
         Def(ViewerKeyAction.GalleryZoomOut, "galleryZoomOut", "Gallery zoom out", "Decrease Grid card size without changing the sidebar, header, or fonts.", ShortcutContext.Gallery, Key.OemMinus, ModifierKeys.Control),
         Def(ViewerKeyAction.GalleryZoomReset, "galleryZoomReset", "Reset gallery zoom", "Reset Grid card size to 200.", ShortcutContext.Gallery, Key.D0, ModifierKeys.Control),
@@ -443,6 +445,7 @@ internal static class KeyBindingSettings
         var normalized = CreateDefaults();
         bool toggleModalFilmstripPersisted = false;
         bool addToAlbumPersisted = false;
+        bool photorealizeCurrentImagePersisted = false;
         Dictionary<string, JsonElement>? unknown = null;
         var unknownReservedChords = new HashSet<KeyChord>();
         if (persisted is not null)
@@ -470,9 +473,18 @@ internal static class KeyBindingSettings
                         toggleModalFilmstripPersisted = true;
                     if (definition.Action == ViewerKeyAction.AddToAlbum)
                         addToAlbumPersisted = true;
+                    if (definition.Action == ViewerKeyAction.PhotorealizeCurrentImage)
+                        photorealizeCurrentImagePersisted = true;
                 }
             }
         }
+
+        if (!photorealizeCurrentImagePersisted)
+            normalized[ViewerKeyAction.PhotorealizeCurrentImage] = AllocateMigrationChord(
+                normalized,
+                unknownReservedChords,
+                ViewerKeyAction.PhotorealizeCurrentImage,
+                SafeMigrationKeys.Prepend(Key.R));
 
         if (!toggleModalFilmstripPersisted)
             normalized[ViewerKeyAction.ToggleModalFilmstrip] = AllocateMigrationChord(

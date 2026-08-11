@@ -1,33 +1,25 @@
 param(
     [string]$Configuration = 'Release',
     [string]$OutputPath = (Join-Path $env:TEMP ('photoviewer-wpf-window-work-area-' + [guid]::NewGuid().ToString('N') + '.json')),
+    [string]$DotnetPath = 'dotnet',
     [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+$dll = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.dll"
 $resultPath = [IO.Path]::GetFullPath($OutputPath)
-$dotnet = if (
-    -not [string]::IsNullOrWhiteSpace($env:DOTNET_ROOT) -and
-    (Test-Path -LiteralPath (Join-Path $env:DOTNET_ROOT 'dotnet.exe') -PathType Leaf)
-) {
-    Join-Path $env:DOTNET_ROOT 'dotnet.exe'
-}
-else {
-    (Get-Command dotnet -ErrorAction Stop).Source
-}
 
 try {
     if (-not $SkipBuild) {
-        & $dotnet build $project -c $Configuration --nologo
+        & $DotnetPath build $project -c $Configuration --nologo
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
-    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "WPF executable was not found: $exe" }
+    if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) { throw "WPF assembly was not found: $dll" }
 
-    $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--window-work-area-smoke', ('"{0}"' -f $resultPath)) `
+    $process = Start-Process -FilePath $DotnetPath `
+        -ArgumentList @(('"{0}"' -f $dll), '--window-work-area-smoke', ('"{0}"' -f $resultPath)) `
         -WindowStyle Hidden -PassThru
     if (-not $process.WaitForExit(30000)) {
         $process.Kill($true)

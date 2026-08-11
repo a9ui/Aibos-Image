@@ -13,9 +13,8 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
-    private const int BatchEnhancementMaxConcurrentRequests = 4;
+    private const int BatchEnhancementMaxConcurrentRequests = 1;
     private const int BatchEnhancementLargeSelectionThreshold = 25;
-    private const string BatchEnhancementOutputFormat = "webp";
     private static readonly string[] RequiredNcnnModelFiles =
     [
         "realesr-animevideov3-x2.param",
@@ -36,6 +35,7 @@ public partial class MainWindow
     private bool _batchEnhancementCompanionReady;
     private bool _batchEnhancementRequestPending;
     private bool _batchEnhancementStopRequested;
+    private bool _batchEnhancementDurablePublishCommitted;
     private bool _batchEnhancementCompleted;
     private long _batchEnhancementGeneration;
     private int _batchEnhancementSelectedCount;
@@ -66,7 +66,8 @@ public partial class MainWindow
             .Select(static tile => new BatchEnhancementSourceSnapshot(
                 tile.Path,
                 tile.FileName,
-                tile.IsRealFile))
+                tile.IsRealFile,
+                tile.Prompt))
             .ToArray();
         if (selected.Length == 0)
         {
@@ -87,6 +88,7 @@ public partial class MainWindow
         _batchEnhancementCompanionReady = false;
         _batchEnhancementRequestPending = false;
         _batchEnhancementStopRequested = false;
+        _batchEnhancementDurablePublishCommitted = false;
         _batchEnhancementCompleted = false;
         _batchEnhancementInFlight = 0;
         _batchEnhancementMaxInFlight = 0;
@@ -94,7 +96,13 @@ public partial class MainWindow
         BatchEnhancementItemsList.ItemsSource = _batchEnhancementItems.ToArray();
         BatchEnhancementDialog.Visibility = Visibility.Visible;
         BatchEnhancementCompanionStatusText.Text = "Checking the local companion and selected sources...";
-        BatchEnhancementAdapterStatusText.Text = "Real-ESRGAN fast GPU · checking local installation";
+        string adapterId = _modalEnhancementAdapterId;
+        BatchEnhancementAdapterStatusText.Text = string.Equals(
+            adapterId,
+            "comfyui",
+            StringComparison.Ordinal)
+                ? "ComfyUI AI upscale · checking companion availability"
+                : "Real-ESRGAN fast GPU · checking local installation";
         BatchEnhancementStatusText.Text = "Review only. No enhancement jobs have been created.";
         RefreshBatchEnhancementSurface();
         long generation = ++_batchEnhancementGeneration;
@@ -103,9 +111,13 @@ public partial class MainWindow
         _batchEnhancementSynchronousOpenMilliseconds = openWatch.ElapsedMilliseconds;
 
         Task<List<BatchEnhancementItemView>> sourceCheck = Task.Run(() => BuildBatchEnhancementItems(selected));
-        Task<BatchEnhancementAdapterAvailability> adapterCheck = Task.Run(CheckBatchEnhancementAdapterAvailability);
+        Task<BatchEnhancementAdapterAvailability> adapterCheck = Task.Run(
+            () => CheckBatchEnhancementAdapterAvailability(adapterId));
         _batchEnhancementGetCount++;
-        Task<EnhancementApiResponse> companionCheck = SendEnhancementApiAsync(HttpMethod.Get, "api/enhance/jobs");
+        Task<EnhancementApiResponse> companionCheck = SendEnhancementApiAsync(
+            HttpMethod.Get,
+            "api/enhance/jobs",
+            timeoutMilliseconds: DurableEnqueueActionDeadlineMilliseconds);
         await Task.WhenAll(sourceCheck, adapterCheck, companionCheck);
 
         if (generation != _batchEnhancementGeneration || BatchEnhancementDialog.Visibility != Visibility.Visible)
@@ -180,13 +192,28 @@ public partial class MainWindow
                 continue;
             }
 
-            result.Add(BatchEnhancementItemView.Ready(source.DisplayName, source.Path, sourceIdentity));
+            string? prompt = ResolveOriginalPromptSnapshot(
+                source.Prompt,
+                sourceIdentity);
+            result.Add(BatchEnhancementItemView.Ready(
+                source.DisplayName,
+                source.Path,
+                sourceIdentity,
+                string.IsNullOrWhiteSpace(prompt) ? null : prompt));
         }
         return result;
     }
 
-    private static BatchEnhancementAdapterAvailability CheckBatchEnhancementAdapterAvailability()
+    private static BatchEnhancementAdapterAvailability CheckBatchEnhancementAdapterAvailability(
+        string adapterId)
     {
+        if (string.Equals(adapterId, "comfyui", StringComparison.Ordinal))
+        {
+            return new BatchEnhancementAdapterAvailability(
+                false,
+                "ComfyUI AI upscale · the companion will validate its workflow and models when submitting");
+        }
+
         try
         {
             string? customRoot = Environment.GetEnvironmentVariable("PVU_REALESRGAN_NCNN_ROOT");
@@ -261,8 +288,6 @@ public partial class MainWindow
     {
         if (_batchEnhancementRequestPending || _batchEnhancementChecking)
             return;
-        if (!await EnsureBatchEnhancementCompanionForExplicitStartAsync())
-            return;
 
         BatchEnhancementItemView[] ready = _batchEnhancementItems
             .Where(static item => item.State == BatchEnhancementItemState.Ready)
@@ -274,8 +299,6 @@ public partial class MainWindow
     {
         if (_batchEnhancementRequestPending || _batchEnhancementChecking)
             return;
-        if (!await EnsureBatchEnhancementCompanionForExplicitStartAsync())
-            return;
 
         BatchEnhancementItemView[] failed = _batchEnhancementItems
             .Where(static item => item.CanRetry)
@@ -283,48 +306,6 @@ public partial class MainWindow
         foreach (BatchEnhancementItemView item in failed)
             item.ResetForRetry();
         await RunBatchEnhancementAsync(failed, retry: true);
-    }
-
-    private async Task<bool> EnsureBatchEnhancementCompanionForExplicitStartAsync()
-    {
-        long generation = _batchEnhancementGeneration;
-        _batchEnhancementChecking = true;
-        BatchEnhancementCompanionStatusText.Text = "Starting the local AI companion...";
-        RefreshBatchEnhancementSurface();
-        EnhancementApiResponse response = await EnsureEnhancementCompanionReadyForExplicitActionAsync();
-        if (generation != _batchEnhancementGeneration
-            || BatchEnhancementDialog.Visibility != Visibility.Visible)
-        {
-            return false;
-        }
-
-        var activeSources = new HashSet<string>(EnhancementSourceIdentityComparer);
-        var knownJobIds = new HashSet<string>(StringComparer.Ordinal);
-        _batchEnhancementCompanionReady = response.Ok
-            && response.Payload is JsonElement payload
-            && TryReadEnhancementJobInventory(payload, out activeSources, out knownJobIds);
-        if (_batchEnhancementCompanionReady)
-        {
-            _batchEnhancementPreflightJobIds.UnionWith(knownJobIds);
-            foreach (BatchEnhancementItemView item in _batchEnhancementItems.Where(
-                         static item => item.State == BatchEnhancementItemState.Ready))
-            {
-                if (activeSources.Contains(item.SourceIdentity))
-                    item.MarkSkipped("Already queued or running.");
-            }
-            BatchEnhancementCompanionStatusText.Text = "Local AI is ready.";
-        }
-        else
-        {
-            BatchEnhancementCompanionStatusText.Text = response.Ok
-                ? "The local companion returned an invalid jobs response."
-                : response.Error;
-        }
-
-        _batchEnhancementChecking = false;
-        BatchEnhancementItemsList.ItemsSource = _batchEnhancementItems.ToArray();
-        RefreshBatchEnhancementSurface();
-        return _batchEnhancementCompanionReady;
     }
 
     private async Task RunBatchEnhancementAsync(
@@ -336,21 +317,50 @@ public partial class MainWindow
 
         _batchEnhancementRequestPending = true;
         _batchEnhancementStopRequested = false;
+        _batchEnhancementDurablePublishCommitted = false;
         _batchEnhancementCompleted = false;
         BatchEnhancementStatusText.Text = retry
             ? $"Retrying {items.Count:N0} failed source{(items.Count == 1 ? "" : "s")}..."
             : $"Submitting {items.Count:N0} eligible source{(items.Count == 1 ? "" : "s")}...";
         RefreshBatchEnhancementSurface();
-        int nextIndex = -1;
         bool confirmLarge = BatchEnhancementAllowLargeCheckBox.IsChecked == true;
-        int workerCount = Math.Min(BatchEnhancementMaxConcurrentRequests, items.Count);
-        Task[] workers = Enumerable.Range(0, workerCount)
-            .Select(_ => SubmitBatchEnhancementWorkerAsync(
-                items,
-                () => Interlocked.Increment(ref nextIndex),
-                confirmLarge))
-            .ToArray();
-        await Task.WhenAll(workers);
+        DurableEnhancementBatchResponse durableBatch =
+            await TrySendDurableEnhancementBatchAsync(
+                items.Select(item => (object?)CreateBatchEnhancementRequestBody(
+                    item.SourceIdentity,
+                    item.Prompt,
+                    confirmLarge)).ToArray(),
+                onFirstPublish: OnFirstDurableBatchPublish,
+                shouldStopBeforeFirstPublish: () => _batchEnhancementStopRequested);
+        _batchEnhancementPostCount += durableBatch.NudgeCount;
+        for (int index = 0; index < items.Count; index++)
+        {
+            BatchEnhancementItemView item = items[index];
+            EnhancementApiResponse response = durableBatch.Responses[index];
+            if (response.StatusCode == 499)
+                continue;
+            item.MarkSubmitting();
+            if (response.SavedForDelivery)
+            {
+                item.MarkSavedForDelivery();
+            }
+            else if (response.Ok
+                && response.Payload is JsonElement payload
+                && TryReadCreatedBatchEnhancementJob(
+                    payload,
+                    item.SourceIdentity,
+                    out string? jobId))
+            {
+                item.MarkQueued(jobId!);
+                _batchEnhancementCreatedJobIds.Add(jobId!);
+            }
+            else
+            {
+                item.MarkFailed(string.IsNullOrWhiteSpace(response.Error)
+                    ? "The durable queue reservation could not be confirmed."
+                    : response.Error);
+            }
+        }
 
         foreach (BatchEnhancementItemView item in items.Where(static item => item.State == BatchEnhancementItemState.Ready))
             item.MarkStopped("Not sent because batch submission was stopped.");
@@ -359,12 +369,14 @@ public partial class MainWindow
         _batchEnhancementCompleted = true;
         int queued = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Queued);
         int failed = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Failed);
+        int saved = _batchEnhancementItems.Count(
+            static item => item.State == BatchEnhancementItemState.SavedForDelivery);
         int outcomeUnknown = _batchEnhancementItems.Count(
             static item => item.State == BatchEnhancementItemState.OutcomeUnknown);
         int stopped = _batchEnhancementItems.Count(static item => item.State == BatchEnhancementItemState.Stopped);
         BatchEnhancementStatusText.Text = _batchEnhancementStopRequested
-            ? $"Stopped. {queued:N0} created · {failed:N0} failed · {outcomeUnknown:N0} receipt unknown · {stopped:N0} not sent. Created jobs were not canceled."
-            : $"{queued:N0} created · {failed:N0} failed · {outcomeUnknown:N0} receipt unknown. Original sources were not changed.";
+            ? $"Stopped. {queued:N0} created · {saved:N0} saved for delivery · {failed:N0} failed · {outcomeUnknown:N0} receipt unknown · {stopped:N0} not sent. Created jobs were not canceled."
+            : $"{queued:N0} created · {saved:N0} saved for delivery · {failed:N0} failed · {outcomeUnknown:N0} receipt unknown. Original sources were not changed.";
         RefreshBatchEnhancementSurface();
         BatchEnhancementItemsList.Items.Refresh();
         _ = Dispatcher.BeginInvoke(FocusFirstAvailableBatchEnhancementControl, DispatcherPriority.Input);
@@ -397,7 +409,10 @@ public partial class MainWindow
                 EnhancementApiResponse response = await SendEnhancementApiAsync(
                     HttpMethod.Post,
                     "api/enhance/jobs",
-                    CreateBatchEnhancementRequestBody(item.SourceIdentity, confirmLarge));
+                    CreateBatchEnhancementRequestBody(
+                        item.SourceIdentity,
+                        item.Prompt,
+                        confirmLarge));
                 if (response.Ok
                     && response.Payload is JsonElement payload
                     && TryReadCreatedBatchEnhancementJob(payload, item.SourceIdentity, out string? jobId))
@@ -534,22 +549,21 @@ public partial class MainWindow
         _ = target?.Focus();
     }
 
-    private Dictionary<string, object> CreateBatchEnhancementRequestBody(
+    private Dictionary<string, object?> CreateBatchEnhancementRequestBody(
         string sourceIdentity,
+        string? prompt,
         bool confirmLarge)
-    {
-        var body = new Dictionary<string, object>(StringComparer.Ordinal)
-        {
-            ["sourceId"] = sourceIdentity,
-            ["presetId"] = _modalEnhancementPresetId,
-            ["adapterId"] = _modalEnhancementAdapterId,
-            ["scale"] = _modalEnhancementScale,
-            ["outputFormat"] = BatchEnhancementOutputFormat,
-        };
-        if (confirmLarge)
-            body["confirmLargeJob"] = true;
-        return body;
-    }
+        => CreateUpscaleRequestBody(
+            sourceIdentity,
+            new UpscaleRequestSource(null, null),
+            _modalEnhancementPresetId,
+            _modalEnhancementAdapterId,
+            _modalEnhancementScale,
+            prompt,
+            confirmLarge ? true : null,
+            outputFormat: _upscaleOutputFormat,
+            includeOperation: false,
+            includeNullOriginalPrompt: false);
 
     private void CancelBatchEnhancement_Click(object sender, RoutedEventArgs e)
     {
@@ -561,10 +575,27 @@ public partial class MainWindow
         CloseBatchEnhancementDialog(restoreFocus: true);
     }
 
+    private void OnFirstDurableBatchPublish()
+    {
+        if (_batchEnhancementDurablePublishCommitted)
+            return;
+        _batchEnhancementDurablePublishCommitted = true;
+        BatchEnhancementStatusText.Text =
+            "Queue reservations are saved locally. Delivery to Jobs will continue; saved reservations can no longer be stopped here.";
+        RefreshBatchEnhancementSurface();
+    }
+
     private void RequestStopBatchEnhancement()
     {
         if (!_batchEnhancementRequestPending || _batchEnhancementStopRequested)
             return;
+        if (_batchEnhancementDurablePublishCommitted)
+        {
+            BatchEnhancementStatusText.Text =
+                "Queue reservations are already saved locally. Delivery to Jobs will continue.";
+            RefreshBatchEnhancementSurface();
+            return;
+        }
         _batchEnhancementStopRequested = true;
         BatchEnhancementStatusText.Text = "Stopping after the current requests finish. Created jobs will keep running.";
         RefreshBatchEnhancementSurface();
@@ -600,9 +631,10 @@ public partial class MainWindow
 
     private async void ViewBatchEnhancementJobs_Click(object sender, RoutedEventArgs e)
     {
-        bool hasUnknownOutcome = _batchEnhancementItems.Any(
-            static item => item.State == BatchEnhancementItemState.OutcomeUnknown);
-        if ((_batchEnhancementCreatedJobIds.Count == 0 && !hasUnknownOutcome)
+        bool hasSavedOrUnknownOutcome = _batchEnhancementItems.Any(
+            static item => item.State is BatchEnhancementItemState.SavedForDelivery
+                or BatchEnhancementItemState.OutcomeUnknown);
+        if ((_batchEnhancementCreatedJobIds.Count == 0 && !hasSavedOrUnknownOutcome)
             || _batchEnhancementRequestPending)
             return;
 
@@ -625,6 +657,8 @@ public partial class MainWindow
         int failed = _batchEnhancementItems.Count(static item => item.CanRetry);
         int outcomeUnknown = _batchEnhancementItems.Count(
             static item => item.State == BatchEnhancementItemState.OutcomeUnknown);
+        int savedForDelivery = _batchEnhancementItems.Count(
+            static item => item.State == BatchEnhancementItemState.SavedForDelivery);
         BatchEnhancementCountsText.Text = _batchEnhancementChecking
             ? $"{_batchEnhancementSelectedCount:N0} selected · checking eligibility"
             : $"{_batchEnhancementSelectedCount:N0} selected · {eligible:N0} eligible · {skipped:N0} skipped";
@@ -651,18 +685,24 @@ public partial class MainWindow
                 : Visibility.Collapsed;
         BatchEnhancementRetryFailedButton.IsEnabled = !_batchEnhancementChecking;
         BatchEnhancementViewJobsButton.Visibility = !_batchEnhancementRequestPending
-            && (_batchEnhancementCreatedJobIds.Count > 0 || outcomeUnknown > 0)
+            && (_batchEnhancementCreatedJobIds.Count > 0
+                || savedForDelivery > 0
+                || outcomeUnknown > 0)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         BatchEnhancementCancelButton.Content = _batchEnhancementRequestPending
-            ? (_batchEnhancementStopRequested ? "Stopping..." : "Stop unsent")
+            ? (_batchEnhancementDurablePublishCommitted
+                ? "Saved"
+                : _batchEnhancementStopRequested ? "Stopping..." : "Stop unsent")
             : "Close";
-        BatchEnhancementCancelButton.IsEnabled = !_batchEnhancementStopRequested;
+        BatchEnhancementCancelButton.IsEnabled = !_batchEnhancementStopRequested
+            && !(_batchEnhancementRequestPending
+                && _batchEnhancementDurablePublishCommitted);
         BatchEnhancementCloseButton.IsEnabled = !_batchEnhancementRequestPending;
         BatchEnhancementAllowLargeCheckBox.IsEnabled = !_batchEnhancementRequestPending;
         AutomationProperties.SetHelpText(
             BatchEnhancementStartButton,
-            $"Starts the local AI companion when needed, then creates at most {BatchEnhancementMaxConcurrentRequests} enqueue requests at once. Opening or closing this review creates no jobs and starts no background process.");
+            "Saves every explicit queue reservation locally. Only an inbox-capable companion receives an immediate delivery nudge. Opening or closing this review creates no jobs and starts no background process.");
     }
 
     public async Task OpenBatchEnhancementForSmokeAsync()
@@ -771,12 +811,14 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
         string displayName,
         string sourcePath,
         string sourceIdentity,
+        string? prompt,
         BatchEnhancementItemState state,
         string detailText)
     {
         DisplayName = string.IsNullOrWhiteSpace(displayName) ? Path.GetFileName(sourcePath) : displayName;
         SourcePath = sourcePath;
         SourceIdentity = sourceIdentity;
+        Prompt = string.IsNullOrWhiteSpace(prompt) ? null : prompt;
         _state = state;
         _detailText = detailText;
     }
@@ -784,6 +826,7 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
     public string DisplayName { get; }
     public string SourcePath { get; }
     public string SourceIdentity { get; }
+    public string? Prompt { get; }
     public BatchEnhancementItemState State => _state;
     public string StatusLabel => _state switch
     {
@@ -792,6 +835,7 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
         BatchEnhancementItemState.Skipped => "Skipped",
         BatchEnhancementItemState.Submitting => "Submitting",
         BatchEnhancementItemState.Queued => "Created",
+        BatchEnhancementItemState.SavedForDelivery => "Saved",
         BatchEnhancementItemState.Failed => "Failed",
         BatchEnhancementItemState.OutcomeUnknown => "Check Jobs",
         BatchEnhancementItemState.Stopped => "Not sent",
@@ -802,25 +846,35 @@ public sealed class BatchEnhancementItemView : INotifyPropertyChanged
     public bool IsEligible => _state is BatchEnhancementItemState.Ready
         or BatchEnhancementItemState.Submitting
         or BatchEnhancementItemState.Queued
+        or BatchEnhancementItemState.SavedForDelivery
         or BatchEnhancementItemState.Failed
         or BatchEnhancementItemState.Stopped;
     public bool CanRetry => _state == BatchEnhancementItemState.Failed;
     public string AccessibleName => $"{DisplayName}, {StatusLabel}, {DetailText}";
 
     public static BatchEnhancementItemView Checking(string displayName, string sourcePath)
-        => new(displayName, sourcePath, "", BatchEnhancementItemState.Checking, "Checking source eligibility.");
+        => new(displayName, sourcePath, "", null, BatchEnhancementItemState.Checking, "Checking source eligibility.");
 
-    public static BatchEnhancementItemView Ready(string displayName, string sourcePath, string sourceIdentity)
-        => new(displayName, sourcePath, sourceIdentity, BatchEnhancementItemState.Ready, "Ready to create one enhancement job.");
+    public static BatchEnhancementItemView Ready(
+        string displayName,
+        string sourcePath,
+        string sourceIdentity,
+        string? prompt)
+        => new(displayName, sourcePath, sourceIdentity, prompt, BatchEnhancementItemState.Ready, "Ready to create one enhancement job.");
 
     public static BatchEnhancementItemView Skipped(string displayName, string sourcePath, string reason)
-        => new(displayName, sourcePath, "", BatchEnhancementItemState.Skipped, reason);
+        => new(displayName, sourcePath, "", null, BatchEnhancementItemState.Skipped, reason);
 
     public void MarkSkipped(string reason) => SetState(BatchEnhancementItemState.Skipped, reason, null);
 
     public void MarkSubmitting() => SetState(BatchEnhancementItemState.Submitting, "Creating job...", null);
 
     public void MarkQueued(string jobId) => SetState(BatchEnhancementItemState.Queued, $"Job {jobId} created.", jobId);
+
+    public void MarkSavedForDelivery() => SetState(
+        BatchEnhancementItemState.SavedForDelivery,
+        "予約を保存しました。Jobsへの登録を継続しています。",
+        null);
 
     public void MarkFailed(string reason) => SetState(BatchEnhancementItemState.Failed, reason, null);
 
@@ -854,6 +908,7 @@ public enum BatchEnhancementItemState
     Skipped,
     Submitting,
     Queued,
+    SavedForDelivery,
     Failed,
     OutcomeUnknown,
     Stopped,
@@ -862,7 +917,8 @@ public enum BatchEnhancementItemState
 internal readonly record struct BatchEnhancementSourceSnapshot(
     string Path,
     string DisplayName,
-    bool IsRealFile);
+    bool IsRealFile,
+    string? Prompt);
 
 internal readonly record struct BatchEnhancementAdapterAvailability(
     bool Detected,

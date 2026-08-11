@@ -95,6 +95,7 @@ try {
     $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
     Assert-True ($state.KeyBindings.favoriteIncrease -eq 'F') 'Reset defaults were not persisted after reload.'
     Assert-True ($state.KeyBindings.nextImage -eq 'Right') 'Default Next binding was not persisted after reset.'
+    Assert-True ($state.KeyBindings.photorealizeCurrentImage -eq 'R') 'Default photorealization binding was not persisted after reset.'
     Assert-True ($state.KeyBindings.reopenLastClosedPreviewTab -eq 'Ctrl+Shift+T') 'Default reopen-tab binding was not persisted after reset.'
     Assert-True ($null -ne $state.futureTop) 'Top-level unknown state was not preserved.'
     Assert-True ($null -eq $state.KeyBindings.futureAction) 'An externally deleted nested unknown field was resurrected.'

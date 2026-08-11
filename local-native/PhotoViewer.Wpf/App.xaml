@@ -61,7 +61,7 @@
     <Color x:Key="ScrollThumbHoverColor">#78FFFFFF</Color>
 
     <!-- Shared vector badge marks avoid per-container symbol-font resolution.
-         Tile AutomationHelpText already exposes all three AI states. -->
+         Tile AutomationHelpText exposes completed and queued AI states. -->
     <Geometry x:Key="UpscaleBadgeIconGeometry">M9,3 L3,3 3,9 M15,3 L21,3 21,9 M9,21 L3,21 3,15 M15,21 L21,21 21,15</Geometry>
     <Geometry x:Key="PhotorealBadgeIconGeometry">M12,3 A4,4 0 1 1 12,11 A4,4 0 1 1 12,3 M5,21 C5,16.8 8.1,14.5 12,14.5 C15.9,14.5 19,16.8 19,21</Geometry>
     <Geometry x:Key="VideoBadgeIconGeometry">M3,4 L21,4 21,20 3,20 Z M7,4 L7,20 M17,4 L17,20 M3,8 L7,8 M3,12 L7,12 M3,16 L7,16 M17,8 L21,8 M17,12 L21,12 M17,16 L21,16</Geometry>
@@ -512,10 +512,11 @@
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Height" Value="32"/>
+      <Setter Property="Padding" Value="10,0"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="4" Padding="10,0"
+            <Border x:Name="bd" CornerRadius="4" Padding="{TemplateBinding Padding}"
                     Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -538,7 +539,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="4" Padding="10,0"
+            <Border x:Name="bd" CornerRadius="4" Padding="{TemplateBinding Padding}"
                     Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -770,8 +771,9 @@
                   IsHitTestVisible="False" Visibility="{Binding Enhanced, Converter={StaticResource BoolToVis}}"/>
           <Border CornerRadius="2" Margin="2" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                   IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
-          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3"
+          <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3"
                       IsHitTestVisible="False">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Border Width="14" Height="13" CornerRadius="3" Margin="0,0,2,0"
                     Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
                     Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}"
@@ -796,6 +798,42 @@
                     StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
                     Width="9.5" Height="9.5" Stretch="Uniform"/>
             </Border>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,0,0">
+              <Border Width="14" Height="13" CornerRadius="3" Margin="0,0,2,0"
+                      Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AA38BDF8" BorderThickness="1"
+                      Visibility="{Binding ShowUpscaleQueueBadge, Converter={StaticResource BoolToVis}}"
+                      AutomationProperties.Name="AI-upscale queued">
+                <Grid>
+                  <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8" StrokeDashArray="1,1"
+                        StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                        Width="9.5" Height="9.5" Stretch="Uniform"/>
+                  <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                </Grid>
+              </Border>
+              <Border Width="14" Height="13" CornerRadius="3" Margin="0,0,2,0"
+                      Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAC084FC" BorderThickness="1"
+                      Visibility="{Binding ShowPhotorealQueueBadge, Converter={StaticResource BoolToVis}}"
+                      AutomationProperties.Name="AI-photoreal queued">
+                <Grid>
+                  <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8" StrokeDashArray="1,1"
+                        StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                        Width="9.5" Height="9.5" Stretch="Uniform"/>
+                  <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                </Grid>
+              </Border>
+              <Border Width="14" Height="13" CornerRadius="3"
+                      Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAF59E0B" BorderThickness="1"
+                      Visibility="{Binding ShowVideoQueueBadge, Converter={StaticResource BoolToVis}}"
+                      AutomationProperties.Name="Video generation queued">
+                <Grid>
+                  <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8" StrokeDashArray="1,1"
+                        StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                        Width="9.5" Height="9.5" Stretch="Uniform"/>
+                  <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                </Grid>
+              </Border>
+            </StackPanel>
           </StackPanel>
           <Grid x:Name="compactFavoriteControls" VerticalAlignment="Bottom"
                 Height="{Binding CompactFavoriteControlHeight}" Opacity="0" IsHitTestVisible="False">
@@ -875,32 +913,84 @@
                             IsHitTestVisible="False" Visibility="{Binding Enhanced, Converter={StaticResource BoolToVis}}"/>
                     <Border CornerRadius="2" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="5"
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="5"
                                 IsHitTestVisible="False">
-                      <Border Width="18" Height="16" CornerRadius="4" Margin="0,0,3,0"
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                      <Border MinWidth="18" Height="16" Padding="3,0" CornerRadius="4" Margin="0,0,3,0"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
                               Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}"
                               AutomationProperties.Name="AI-upscaled">
-                        <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="11" Height="11" Stretch="Uniform"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                          <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8"
+                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                Width="11" Height="11" Stretch="Uniform"/>
+                          <TextBlock Text="{Binding UpscaleVersionCount}" Foreground="#FFBAE6FD" FontSize="9" FontWeight="SemiBold"
+                                     VerticalAlignment="Center" Margin="2,0,0,0"
+                                     Visibility="{Binding ShowUpscaleVariantCount, Converter={StaticResource BoolToVis}}"/>
+                        </StackPanel>
                       </Border>
-                      <Border Width="18" Height="16" CornerRadius="4" Margin="0,0,3,0"
+                      <Border MinWidth="18" Height="16" Padding="3,0" CornerRadius="4" Margin="0,0,3,0"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFC084FC" BorderThickness="1"
                               Visibility="{Binding ShowPhotorealBadge, Converter={StaticResource BoolToVis}}"
                               AutomationProperties.Name="AI-photorealized">
-                        <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="11" Height="11" Stretch="Uniform"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                          <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8"
+                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                Width="11" Height="11" Stretch="Uniform"/>
+                          <TextBlock Text="{Binding PhotorealVersionCount}" Foreground="#FFE9D5FF" FontSize="9" FontWeight="SemiBold"
+                                     VerticalAlignment="Center" Margin="2,0,0,0"
+                                     Visibility="{Binding ShowPhotorealVariantCount, Converter={StaticResource BoolToVis}}"/>
+                        </StackPanel>
                       </Border>
-                      <Border Width="18" Height="16" CornerRadius="4"
+                      <Border MinWidth="18" Height="16" Padding="3,0" CornerRadius="4"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFF59E0B" BorderThickness="1"
                               Visibility="{Binding ShowVideoBadge, Converter={StaticResource BoolToVis}}"
                               AutomationProperties.Name="Generated video available">
-                        <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="11" Height="11" Stretch="Uniform"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                          <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8"
+                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                Width="11" Height="11" Stretch="Uniform"/>
+                          <TextBlock Text="{Binding VideoVersionCount}" Foreground="#FFFFE7B0" FontSize="9" FontWeight="SemiBold"
+                                     VerticalAlignment="Center" Margin="2,0,0,0"
+                                     Visibility="{Binding ShowVideoVariantCount, Converter={StaticResource BoolToVis}}"/>
+                        </StackPanel>
                       </Border>
+                      </StackPanel>
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,3,0,0">
+                        <Border Width="18" Height="16" CornerRadius="4" Margin="0,0,3,0"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AA38BDF8" BorderThickness="1"
+                                Visibility="{Binding ShowUpscaleQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="AI-upscale queued">
+                          <Grid>
+                            <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="11" Height="11" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="8" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                        <Border Width="18" Height="16" CornerRadius="4" Margin="0,0,3,0"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAC084FC" BorderThickness="1"
+                                Visibility="{Binding ShowPhotorealQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="AI-photoreal queued">
+                          <Grid>
+                            <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="11" Height="11" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="8" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                        <Border Width="18" Height="16" CornerRadius="4"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAF59E0B" BorderThickness="1"
+                                Visibility="{Binding ShowVideoQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="Video generation queued">
+                          <Grid>
+                            <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="11" Height="11" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="8" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                      </StackPanel>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -955,8 +1045,9 @@
                     <Border CornerRadius="4" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
                     <Ellipse Width="8" Height="8" Margin="7" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource AccentLight}" Visibility="{Binding ShowUnseenDot, Converter={StaticResource BoolToVis}}"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4"
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4"
                                 IsHitTestVisible="False">
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                       <Border Width="16" Height="14" CornerRadius="3" Margin="0,0,2,0"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
                               Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}"
@@ -981,6 +1072,42 @@
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
                               Width="10" Height="10" Stretch="Uniform"/>
                       </Border>
+                      </StackPanel>
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,0,0">
+                        <Border Width="16" Height="14" CornerRadius="3" Margin="0,0,2,0"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AA38BDF8" BorderThickness="1"
+                                Visibility="{Binding ShowUpscaleQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="AI-upscale queued">
+                          <Grid>
+                            <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="10" Height="10" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                        <Border Width="16" Height="14" CornerRadius="3" Margin="0,0,2,0"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAC084FC" BorderThickness="1"
+                                Visibility="{Binding ShowPhotorealQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="AI-photoreal queued">
+                          <Grid>
+                            <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="10" Height="10" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                        <Border Width="16" Height="14" CornerRadius="3"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAF59E0B" BorderThickness="1"
+                                Visibility="{Binding ShowVideoQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="Video generation queued">
+                          <Grid>
+                            <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="10" Height="10" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                      </StackPanel>
                     </StackPanel>
                   </Grid>
                 </Border>

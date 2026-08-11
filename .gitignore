@@ -22,6 +22,8 @@ exports/
 output/
 reports/
 security-reports/
+config/*.local.json
+local-native/PhotoViewer.Wpf/config/*.local.json
 *.sarif
 *.jsonl
 local-native/**/bin/

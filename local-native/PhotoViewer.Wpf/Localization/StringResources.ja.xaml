@@ -103,6 +103,7 @@
   <sys:String x:Key="UiFlipHorizontalFormat">左右反転 ({0})</sys:String>
   <sys:String x:Key="UiToggleEnhancedFormat">Original / Enhancedを切替 ({0})</sys:String>
   <sys:String x:Key="UiEnhanceCurrentFormat">現在の画像をEnhance ({0})</sys:String>
+  <sys:String x:Key="UiPhotorealizeCurrentFormat">現在の画像をAI実写化 ({0})</sys:String>
   <sys:String x:Key="UiZoomOutFormat">Zoom out ({0})</sys:String>
   <sys:String x:Key="UiResetFitFormat">画面に合わせる ({0})</sys:String>
   <sys:String x:Key="UiZoomInFormat">Zoom in ({0})</sys:String>

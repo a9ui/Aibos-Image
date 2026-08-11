@@ -112,6 +112,7 @@
                   <ContentPresenter Grid.Column="0"
                                     Content="{TemplateBinding SelectionBoxItem}"
                                     ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                    ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
                                     ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                                     TextElement.Foreground="{TemplateBinding Foreground}"
                                     VerticalAlignment="Center"
@@ -176,11 +177,11 @@
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
-      <RowDefinition Height="28"/>
+      <RowDefinition Height="34"/>
     </Grid.RowDefinitions>
 
     <!-- ═══════════════ Header ═══════════════ -->
-    <Border Grid.Row="0" MinHeight="52" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,0,0,1">
+    <Border x:Name="WorkbenchHeaderSurface" Grid.Row="0" MinHeight="52" Background="{StaticResource HeaderBg}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="0,0,0,1">
       <Grid Margin="10,0">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
@@ -383,14 +384,23 @@
 
         <!-- Guaranteed caption drag target. It remains available before any
              lower-priority header action is allowed to consume the width. -->
-        <Border x:Name="HeaderDragRegion" Grid.Column="2" Background="Transparent"
-                WindowChrome.IsHitTestVisibleInChrome="False"
-                AutomationProperties.Name="Window drag region"/>
+        <Border x:Name="HeaderDragRegion" Grid.Column="2" Background="Transparent" Cursor="SizeAll"
+                WindowChrome.IsHitTestVisibleInChrome="True"
+                PreviewMouseLeftButtonDown="WindowDragRegion_PreviewMouseLeftButtonDown"
+                ToolTip="Drag to move · double-click to maximize or restore"
+                AutomationProperties.Name="Window drag region"
+                AutomationProperties.HelpText="Drag this grip to move or snap the window. Double-click to maximize or restore.">
+          <StackPanel Width="24" VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False" Opacity="0.7">
+            <Rectangle Height="1" Fill="{StaticResource TextTertiary}" Margin="0,0,0,3"/>
+            <Rectangle Height="1" Fill="{StaticResource TextTertiary}" Margin="0,0,0,3"/>
+            <Rectangle Height="1" Fill="{StaticResource TextTertiary}"/>
+          </StackPanel>
+        </Border>
 
         <!-- right cluster -->
         <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-          <Button x:Name="OpenAlbumsButton" Style="{StaticResource IconButton}" Foreground="#6EE7B7" ToolTip="Open shared Albums (B)" Click="OpenAlbums_Click" AutomationProperties.Name="Open shared Albums" WindowChrome.IsHitTestVisibleInChrome="True">
-            <Path Data="M12,5 v14 M5,12 h14" Stroke="#6EE7B7" StrokeThickness="2" Stretch="Uniform" Width="17" Height="17"/>
+          <Button x:Name="OpenAlbumsButton" Style="{StaticResource IconButton}" Foreground="{StaticResource Success}" ToolTip="Open shared Albums (B)" Click="OpenAlbums_Click" AutomationProperties.Name="Open shared Albums" WindowChrome.IsHitTestVisibleInChrome="True">
+            <Path Data="M12,5 v14 M5,12 h14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" Stretch="Uniform" Width="17" Height="17"/>
           </Button>
           <Button x:Name="OpenEnhancementJobsButton" Style="{StaticResource GhostButton}" Height="32" MinWidth="52" Padding="9,0" Margin="4,0,4,0"
                   Content="{DynamicResource UiJobs}" Click="OpenEnhancementJobs_Click" ToolTip="Open AI enhancement jobs" AutomationProperties.Name="Open AI enhancement jobs"
@@ -399,7 +409,7 @@
                   Content="{DynamicResource UiShortcuts}" Click="OpenShortcuts_Click" ToolTip="{DynamicResource UiShortcutsToolTip}" AutomationProperties.Name="Open keyboard shortcuts"
                   WindowChrome.IsHitTestVisibleInChrome="True"/>
           <Button x:Name="OpenAppSettingsButton" Style="{StaticResource IconButton}" Click="OpenAppSettings_Click" ToolTip="{DynamicResource UiSettingsToolTip}" AutomationProperties.Name="App settings" WindowChrome.IsHitTestVisibleInChrome="True">
-            <Path Data="M12,8 a4,4 0 1 0 0,8 a4,4 0 1 0 0,-8 M12,2 v3 M12,19 v3 M2,12 h3 M19,12 h3 M4.9,4.9 l2.1,2.1 M17,17 l2.1,2.1 M19.1,4.9 l-2.1,2.1 M7,17 l-2.1,2.1" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.5" Stretch="Uniform" Width="17" Height="17"/>
+            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" Foreground="{StaticResource TextSecondary}" FontSize="14"/>
           </Button>
           <Button x:Name="ToggleRight" Style="{StaticResource IconButtonActive}" Click="ToggleRight_Click" ToolTip="Hide right panel" AutomationProperties.Name="Toggle right panel" WindowChrome.IsHitTestVisibleInChrome="True">
             <Path Data="M3,4 h18 v16 h-18 z M15,4 v16" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Stretch="Uniform" Width="18" Height="18"/>
@@ -479,7 +489,9 @@
                 </WrapPanel>
                 <TextBlock x:Name="FavoriteFilterSummary" Text="{DynamicResource UiAllRatings}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="0,0,0,6"/>
                 <CheckBox x:Name="EnhancedOnlyFilter" Content="AI高画質化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI高画質化の完了画像だけを表示"/>
+                <CheckBox x:Name="UnenhancedOnlyFilter" Content="未高画質化のみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="まだAI高画質化されていない画像だけを表示"/>
                 <CheckBox x:Name="PhotorealOnlyFilter" Content="AI実写化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="AI実写化の完了画像だけを表示"/>
+                <CheckBox x:Name="UnphotorealOnlyFilter" Content="未実写化のみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="まだAI実写化されていない画像だけを表示"/>
                 <CheckBox x:Name="VideoOnlyFilter" Content="動画化済みのみ" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,6" Checked="Filter_Changed" Unchecked="Filter_Changed" ToolTip="動画が完成している元画像だけを表示。この表示中に画像を開くと動画を自動再生します。"/>
                 <CheckBox x:Name="UnseenOnlyFilter" Content="Unseen only" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
                 <CheckBox x:Name="ShowUnseenDots" Content="Unseen dots" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,8" Checked="ShowUnseenDots_Changed" Unchecked="ShowUnseenDots_Changed" AutomationProperties.Name="Show unseen dots in gallery" AutomationProperties.HelpText="Changes dot visibility only. Seen history is not changed."/>
@@ -562,11 +574,18 @@
               <StackPanel>
                 <TextBlock Text="SORT" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
                 <Border CornerRadius="8" Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="3">
-                  <UniformGrid Rows="6">
+                  <UniformGrid Columns="2">
                     <RadioButton x:Name="SortModifiedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Modified new" IsChecked="True" Checked="SortModifiedNewest_Checked"/>
                     <RadioButton x:Name="SortModifiedOldest" Style="{StaticResource Seg}" GroupName="sort" Content="Modified old" Checked="SortModifiedOldest_Checked"/>
                     <RadioButton x:Name="SortCreatedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Created new" Checked="SortCreatedNewest_Checked"/>
                     <RadioButton x:Name="SortCreatedOldest" Style="{StaticResource Seg}" GroupName="sort" Content="Created old" Checked="SortCreatedOldest_Checked"/>
+                    <RadioButton x:Name="SortUpscaleNewest" Style="{StaticResource Seg}" GroupName="sort" Content="HQ済み" Checked="SortUpscaleNewest_Checked" ToolTip="高画質化が最近完了した順"/>
+                    <RadioButton x:Name="SortUpscaleQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="HQ追加済み" Checked="SortUpscaleQueuedNewest_Checked" ToolTip="高画質化を最近キューへ追加した順"/>
+                    <RadioButton x:Name="SortPhotorealNewest" Style="{StaticResource Seg}" GroupName="sort" Content="実写化済み" Checked="SortPhotorealNewest_Checked" ToolTip="実写化が最近完了した順"/>
+                    <RadioButton x:Name="SortPhotorealQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="実写追加済み" Checked="SortPhotorealQueuedNewest_Checked" ToolTip="実写化を最近キューへ追加した順"/>
+                    <RadioButton x:Name="SortVideoNewest" Style="{StaticResource Seg}" GroupName="sort" Content="動画化済み" Checked="SortVideoNewest_Checked" ToolTip="動画化が最近完了した順"/>
+                    <RadioButton x:Name="SortVideoQueuedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="動画追加済み" Checked="SortVideoQueuedNewest_Checked" ToolTip="動画化を最近キューへ追加した順"/>
+                    <RadioButton x:Name="SortFavoriteChangedNewest" Style="{StaticResource Seg}" GroupName="sort" Content="Fav touched" Checked="SortFavoriteChangedNewest_Checked" ToolTip="Most recently changed favorite first, including clearing a favorite"/>
                     <RadioButton x:Name="SortName" Style="{StaticResource Seg}" GroupName="sort" Content="Name" Checked="SortName_Checked"/>
                     <RadioButton x:Name="SortRandom" Style="{StaticResource Seg}" GroupName="sort" Content="Random" Checked="SortRandom_Checked"/>
                   </UniformGrid>
@@ -664,7 +683,7 @@
           </Button>
           <Button x:Name="NarrowSidebarSettingsButton" DockPanel.Dock="Bottom" Style="{StaticResource IconButton}" Margin="5,6,5,0" Click="OpenAppSettings_Click"
                   ToolTip="App Settings" AutomationProperties.Name="Open app settings">
-            <Path Data="M12,8 a4,4 0 1 0 0,8 a4,4 0 1 0 0,-8 M12,2 v3 M12,19 v3 M2,12 h3 M19,12 h3 M4.9,4.9 l2.1,2.1 M17,17 l2.1,2.1 M19.1,4.9 l-2.1,2.1 M7,17 l-2.1,2.1" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" Stretch="Uniform" Width="17" Height="17"/>
+            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" FontSize="14"/>
           </Button>
         </DockPanel>
       </Border>
@@ -690,6 +709,9 @@
             <ContextMenu x:Name="CardsContextMenu" AutomationProperties.Name="Image grid actions">
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
+              <MenuItem Header="AI実写高画質化のみ" Click="GalleryContextPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
+              <MenuItem Header="次に高画質化" Click="GalleryContextUpscaleNext_Click" AutomationProperties.Name="次に高画質化"/>
+              <MenuItem Header="次に実写化" Click="GalleryContextPhotorealNext_Click" AutomationProperties.Name="次に実写化"/>
               <MenuItem Header="動画化" AutomationProperties.Name="Choose video generation source">
                 <MenuItem Header="Originalから..." Tag="original" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from Original"/>
                 <MenuItem Header="最新の実写版から..." Tag="photoreal" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from latest photoreal version"/>
@@ -732,6 +754,9 @@
             <ContextMenu x:Name="RowsContextMenu" AutomationProperties.Name="Image list actions">
               <MenuItem Header="AI高画質化" Click="GalleryContextUpscale_Click" AutomationProperties.Name="AI高画質化"/>
               <MenuItem Header="AI実写化" Click="GalleryContextPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
+              <MenuItem Header="AI実写高画質化のみ" Click="GalleryContextPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
+              <MenuItem Header="次に高画質化" Click="GalleryContextUpscaleNext_Click" AutomationProperties.Name="次に高画質化"/>
+              <MenuItem Header="次に実写化" Click="GalleryContextPhotorealNext_Click" AutomationProperties.Name="次に実写化"/>
               <MenuItem Header="動画化" AutomationProperties.Name="Choose video generation source">
                 <MenuItem Header="Originalから..." Tag="original" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from Original"/>
                 <MenuItem Header="最新の実写版から..." Tag="photoreal" Click="GalleryContextVideo_Click" AutomationProperties.Name="Generate video from latest photoreal version"/>
@@ -1041,6 +1066,21 @@
         <RowDefinition Height="52"/>
         <RowDefinition Height="*"/>
       </Grid.RowDefinitions>
+      <Border x:Name="LandingHeaderSurface" Grid.Row="0" Background="{StaticResource HeaderBg}"
+              BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="0,0,0,1" Panel.ZIndex="1"/>
+      <Border x:Name="LandingDragRegion" Grid.Row="0" Width="160" HorizontalAlignment="Center"
+              Background="Transparent" Cursor="SizeAll" Panel.ZIndex="10"
+              WindowChrome.IsHitTestVisibleInChrome="True"
+              PreviewMouseLeftButtonDown="WindowDragRegion_PreviewMouseLeftButtonDown"
+              ToolTip="Drag to move · double-click to maximize or restore"
+              AutomationProperties.Name="Landing window drag region"
+              AutomationProperties.HelpText="Drag this grip to move or snap the window. Double-click to maximize or restore.">
+        <StackPanel Width="24" VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False" Opacity="0.7">
+          <Rectangle Height="1" Fill="{StaticResource TextTertiary}" Margin="0,0,0,3"/>
+          <Rectangle Height="1" Fill="{StaticResource TextTertiary}" Margin="0,0,0,3"/>
+          <Rectangle Height="1" Fill="{StaticResource TextTertiary}"/>
+        </StackPanel>
+      </Border>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,10,0,0"
                   Height="32" Panel.ZIndex="20" IsHitTestVisible="False">
         <Image Source="Brand/Generated/Aibos.Mark.24.png" Width="24" Height="24" Margin="2"
@@ -1057,8 +1097,8 @@
               HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,10,144,0" Height="32" Padding="9,0"
               Click="OpenAppSettings_Click" ToolTip="{DynamicResource UiSettingsToolTip}" AutomationProperties.Name="App settings" WindowChrome.IsHitTestVisibleInChrome="True">
         <StackPanel Orientation="Horizontal">
-          <Path Data="M12,8 a4,4 0 1 0 0,8 a4,4 0 1 0 0,-8 M12,2 v3 M12,19 v3 M2,12 h3 M19,12 h3 M4.9,4.9 l2.1,2.1 M17,17 l2.1,2.1 M19.1,4.9 l-2.1,2.1 M7,17 l-2.1,2.1"
-                Stroke="{StaticResource TextSecondary}" StrokeThickness="1.5" Stretch="Uniform" Width="15" Height="15" Margin="0,0,7,0"/>
+          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;"
+                     Foreground="{StaticResource TextSecondary}" FontSize="14" Margin="0,0,7,0"/>
           <TextBlock Text="{DynamicResource UiSettings}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
         </StackPanel>
       </Button>
@@ -1368,6 +1408,7 @@
           <Grid Grid.Row="1">
             <Grid.ColumnDefinitions><ColumnDefinition Width="164"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Grid.Column="0" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,1,0" Padding="11,14">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
               <StackPanel>
                 <TextBlock Text="FILTER" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="4,0,0,8"/>
                 <RadioButton x:Name="EnhancementJobsAllFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsFilter_Click"/>
@@ -1378,8 +1419,16 @@
                              AutomationProperties.Name="Show video generation jobs"/>
                 <RadioButton x:Name="EnhancementJobsFailedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="失敗" Tag="failed" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="キャンセル済み" Tag="canceled" Click="EnhancementJobsFilter_Click"/>
+                <Button x:Name="EnhancementJobsPauseResumeButton" Style="{StaticResource GhostButton}" Content="一時停止"
+                        Click="ToggleEnhancementQueuePaused_Click" IsEnabled="False" MinHeight="30" Margin="0,12,0,0"
+                        AutomationProperties.Name="Pause enhancement queue"
+                        ToolTip="処理中の1件は完了させ、次の待機ジョブから止めます"/>
+                <Button x:Name="EnhancementJobsUpdateQueuedPromptsButton" Style="{StaticResource GhostButton}" Content="待機中を現在Promptへ"
+                        Click="UpdateAllQueuedPhotorealPrompts_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
+                        AutomationProperties.Name="Update all queued photoreal prompts"
+                        ToolTip="待機中の実写化ジョブすべてのPositive／Negativeを、各元画像と現在設定から作り直します。数値設定・LoRA・待ち順は維持します"/>
                 <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機中をすべて消す"
-                        Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,12,0,0"
+                        Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
                         AutomationProperties.Name="Cancel all queued enhancement jobs"
                         ToolTip="実行中のジョブは変えず、待機中だけをキャンセルします"/>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="9" Margin="0,16,0,0">
@@ -1398,6 +1447,7 @@
                   </StackPanel>
                 </Border>
               </StackPanel>
+              </ScrollViewer>
             </Border>
 
             <Grid Grid.Column="1" Margin="12,10,10,8">
@@ -1486,14 +1536,16 @@
                               <Button Style="{StaticResource GhostButton}" Content="↑" Tag="{Binding}" CommandParameter="up" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="32" Margin="6,0,0,0" Visibility="{Binding CanMoveUp, Converter={StaticResource BoolToVis}}" ToolTip="待機順を1つ上へ"/>
                               <Button Style="{StaticResource GhostButton}" Content="↓" Tag="{Binding}" CommandParameter="down" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="32" Margin="6,0,0,0" Visibility="{Binding CanMoveDown, Converter={StaticResource BoolToVis}}" ToolTip="待機順を1つ下へ"/>
                               <Button Style="{StaticResource GhostButton}" Content="これを次に処理" Tag="{Binding}" CommandParameter="next" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="96" Margin="6,0,0,0" Visibility="{Binding CanMoveNext, Converter={StaticResource BoolToVis}}"/>
+                              <Button Style="{StaticResource GhostButton}" Content="現在のPromptへ更新" Tag="{Binding}" Click="UpdateQueuedPhotorealPrompts_Click" Height="28" MinWidth="126" Margin="6,0,0,0" Visibility="{Binding CanUpdatePhotorealPrompts, Converter={StaticResource BoolToVis}}" ToolTip="待機中の実写化ジョブのPositive／Negativeだけを現在設定へ更新。数値設定・LoRA・待ち順は維持"/>
                               <Button Style="{StaticResource GhostButton}" Content="{Binding CancelLabel}" Tag="{Binding}" Click="CancelEnhancementJob_Click" Height="28" MinWidth="76" Margin="6,0,0,0" Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}"/>
                               <Button Style="{StaticResource GhostButton}" Content="元設定でRetry" Tag="{Binding}" Click="RetryEnhancementJob_Click" Height="28" MinWidth="88" Margin="6,0,0,0" Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}" ToolTip="失敗・キャンセル時に保存された元の設定で再試行"/>
                               <Button Style="{StaticResource GhostButton}" Content="現在設定で再実写化" Tag="{Binding}" Click="RerunPhotorealJob_Click" Height="28" MinWidth="126" Margin="6,0,0,0" Visibility="{Binding CanRerunWithCurrentSettings, Converter={StaticResource BoolToVis}}" ToolTip="設定画面の現在のPromptと実写化設定で新しいジョブを追加"/>
+                              <Button Style="{StaticResource GhostButton}" Content="現在設定で次に実写化" Tag="{Binding}" Click="RerunPhotorealJobNext_Click" Height="28" MinWidth="144" Margin="6,0,0,0" Visibility="{Binding CanRerunNextWithCurrentSettings, Converter={StaticResource BoolToVis}}" ToolTip="現在の設定で、処理中ジョブの直後へ原子的に追加"/>
                               <Button Style="{StaticResource DangerButton}" Content="Remove" Tag="{Binding}" Click="DismissEnhancementJob_Click" Height="28" MinWidth="72" Margin="6,0,0,0" Visibility="{Binding CanDismiss, Converter={StaticResource BoolToVis}}"
                                       ToolTip="Remove this terminal job from history. Source and output files are not changed." AutomationProperties.Name="Remove terminal job from history"/>
                               <Button Style="{StaticResource GhostButton}" Content="Open output" Tag="{Binding}" Click="OpenEnhancementOutput_Click" Height="28" MinWidth="88" Margin="6,0,0,0"
                                       ToolTip="{Binding OpenOutputToolTip}" Visibility="{Binding CanUseOutput, Converter={StaticResource BoolToVis}}"/>
-                              <Button Style="{StaticResource DangerButton}" Content="Delete output" Tag="{Binding}" Click="DeleteEnhancementOutput_Click" Height="28" MinWidth="94" Margin="6,0,0,0" Visibility="{Binding CanUseOutput, Converter={StaticResource BoolToVis}}"/>
+                              <Button Style="{StaticResource DangerButton}" Content="Delete output" Tag="{Binding}" Click="DeleteEnhancementOutput_Click" Height="28" MinWidth="94" Margin="6,0,0,0" Visibility="{Binding CanDeleteOutput, Converter={StaticResource BoolToVis}}"/>
                             </WrapPanel>
                           </DockPanel>
                         </Grid>
@@ -1513,6 +1565,294 @@
       </Border>
     </Grid>
 
+    <!-- Explicit I2I edit board. Opening this surface performs only a passive
+         capability GET; the companion may start only from the GO button. -->
+    <Grid x:Name="I2iEditDialog" Grid.RowSpan="3" Panel.ZIndex="650"
+          Visibility="Collapsed" Background="#A9000000"
+          MouseLeftButtonDown="I2iEditBackdrop_MouseLeftButtonDown"
+          AutomationProperties.Name="AI編集ボード"
+          AutomationProperties.HelpText="髪色だけを編集するジョブを明示的に追加します。">
+      <Border x:Name="I2iEditBoardBorder" Width="440" MaxHeight="640" Margin="18"
+              HorizontalAlignment="Center" VerticalAlignment="Center"
+              Padding="18" CornerRadius="8" Background="{StaticResource BgElevated}"
+              BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+              KeyboardNavigation.TabNavigation="Cycle"
+              KeyboardNavigation.ControlTabNavigation="Cycle">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+          <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,12">
+            <Button x:Name="I2iCloseButton" DockPanel.Dock="Right"
+                    Style="{StaticResource IconButton}" Width="32" Height="32"
+                    Click="CloseI2iEdit_Click" ToolTip="閉じる"
+                    AutomationProperties.Name="AI編集ボードを閉じる">
+              <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}"
+                    StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
+            </Button>
+            <StackPanel>
+              <TextBlock Text="AI編集" Foreground="{StaticResource TextPrimary}"
+                         FontSize="18" FontWeight="SemiBold"/>
+              <TextBlock Text="髪色" Foreground="{StaticResource TextTertiary}"
+                         FontSize="10.5" Margin="0,3,0,0"/>
+            </StackPanel>
+          </DockPanel>
+          <ScrollViewer x:Name="I2iEditScrollViewer" Grid.Row="1"
+                        VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+              <TextBlock Text="入力元" Foreground="{StaticResource TextTertiary}" FontSize="10.5"/>
+              <TextBlock x:Name="I2iSourceText" Text="Original"
+                         Foreground="{StaticResource TextPrimary}" FontSize="12.5"
+                         FontWeight="SemiBold" Margin="0,2,0,12"/>
+              <TextBlock Text="髪色（必須）" Foreground="{StaticResource TextPrimary}"
+                         FontSize="11.5" Margin="0,0,0,4"/>
+              <TextBox x:Name="I2iHairColorTextBox" MaxLength="160"
+                       Padding="8,6" Foreground="{StaticResource TextPrimary}"
+                       Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}"
+                       SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}"
+                       TextChanged="I2iEditField_TextChanged"
+                       AutomationProperties.Name="編集後の髪色"/>
+              <TextBlock Text="補足（任意・240文字まで）"
+                         Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                         Margin="0,12,0,4"/>
+              <TextBox x:Name="I2iDetailsTextBox" MaxLength="240" MinHeight="68"
+                       AcceptsReturn="True" TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto" Padding="8,6"
+                       Foreground="{StaticResource TextPrimary}"
+                       Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}"
+                       SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}"
+                       TextChanged="I2iEditField_TextChanged"
+                       AutomationProperties.Name="髪色編集の補足"/>
+              <Grid Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="Seed" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="I2iSeedModeComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="0" SelectionChanged="I2iSeedMode_SelectionChanged"
+                            AutomationProperties.Name="AI編集 seed mode">
+                    <ComboBoxItem Content="Random（推奨）" Tag="random"/>
+                    <ComboBoxItem Content="Fixed" Tag="fixed"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="Fixed値（0〜2147483647）" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="I2iSeedValueTextBox" MaxLength="10" IsEnabled="False"
+                           Padding="7,4" Foreground="{StaticResource TextPrimary}"
+                           Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}"
+                           SelectionBrush="{StaticResource AccentFill}"
+                           BorderBrush="{StaticResource BorderStrong}"
+                           TextChanged="I2iEditField_TextChanged"
+                           AutomationProperties.Name="Fixed AI編集 seed"/>
+                </StackPanel>
+              </Grid>
+              <TextBlock x:Name="I2iSeedStatusText" Visibility="Collapsed"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,6,0,0"/>
+              <Border Margin="0,14,0,0" Padding="10" CornerRadius="5"
+                      Background="{StaticResource BgPrimary}"
+                      BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
+                <TextBlock Text="顔の中心部と髪以外の画素は、選択した元版から自動復元されます。顔の同一性と未編集領域を保護します。"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.8"
+                           TextWrapping="Wrap"/>
+              </Border>
+              <TextBlock x:Name="I2iEditStatusText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.8"
+                         TextWrapping="Wrap" Margin="0,12,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </ScrollViewer>
+          <DockPanel Grid.Row="2" Margin="0,14,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                    Content="閉じる" MinWidth="72" Height="32" Margin="8,0,0,0"
+                    Click="CloseI2iEdit_Click"/>
+            <Button x:Name="I2iQueueButton" DockPanel.Dock="Right"
+                    Style="{StaticResource PrimaryButton}" Content="GO"
+                    MinWidth="108" Height="32" IsEnabled="False"
+                    Click="QueueI2iEdit_Click"
+                    AutomationProperties.Name="GO: AI編集ジョブをキューへ追加"
+                    AutomationProperties.HelpText="GOを押した時だけcompanionを起動し、ジョブを追加します。"/>
+          </DockPanel>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- Multi-target I2I v2 board. The source is pinned when opened. Opening
+         performs a passive health GET only; GO is the sole writer action. -->
+    <Grid x:Name="I2iV2EditDialog" Grid.RowSpan="3" Panel.ZIndex="655"
+          Visibility="Collapsed" Background="#A9000000"
+          MouseLeftButtonDown="I2iV2EditBackdrop_MouseLeftButtonDown"
+          AutomationProperties.Name="複数ターゲットAI編集ボード"
+          AutomationProperties.HelpText="服装、表情、場所・背景、ポーズの変更を、元画像を保護しながら明示的に追加します。">
+      <Border x:Name="I2iV2EditBoardBorder" Width="520" MaxHeight="720" Margin="18"
+              HorizontalAlignment="Center" VerticalAlignment="Center"
+              Padding="18" CornerRadius="8" Background="{StaticResource BgElevated}"
+              BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+              KeyboardNavigation.TabNavigation="Cycle"
+              KeyboardNavigation.ControlTabNavigation="Cycle">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+          <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,12">
+            <Button x:Name="I2iV2CloseButton" DockPanel.Dock="Right"
+                    Style="{StaticResource IconButton}" Width="32" Height="32"
+                    Click="CloseI2iV2Edit_Click" ToolTip="閉じる"
+                    AutomationProperties.Name="複数ターゲットAI編集ボードを閉じる">
+              <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}"
+                    StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
+            </Button>
+            <StackPanel>
+              <TextBlock Text="AI編集" Foreground="{StaticResource TextPrimary}"
+                         FontSize="18" FontWeight="SemiBold"/>
+              <TextBlock Text="服装・表情・場所・ポーズ"
+                         Foreground="{StaticResource TextTertiary}"
+                         FontSize="10.5" Margin="0,3,0,0"/>
+            </StackPanel>
+          </DockPanel>
+          <ScrollViewer x:Name="I2iV2EditScrollViewer" Grid.Row="1"
+                        VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+              <TextBlock Text="入力元" Foreground="{StaticResource TextTertiary}" FontSize="10.5"/>
+              <TextBlock x:Name="I2iV2SourceText" Text="Original"
+                         Foreground="{StaticResource TextPrimary}" FontSize="12.5"
+                         FontWeight="SemiBold" Margin="0,2,0,12"/>
+
+              <TextBlock Text="変更するもの" Foreground="{StaticResource TextPrimary}"
+                         FontSize="11.5" Margin="0,0,0,4"/>
+              <ComboBox x:Name="I2iV2TargetComboBox"
+                        Style="{StaticResource PhotorealSettingsComboBox}"
+                        DisplayMemberPath="Label"
+                        SelectionChanged="I2iV2Target_SelectionChanged"
+                        AutomationProperties.Name="AI編集ターゲット"/>
+
+              <TextBlock Text="テンプレート" Foreground="{StaticResource TextPrimary}"
+                         FontSize="11.5" Margin="0,12,0,4"/>
+              <ComboBox x:Name="I2iV2TemplateComboBox"
+                        Style="{StaticResource PhotorealSettingsComboBox}"
+                        DisplayMemberPath="Label"
+                        SelectionChanged="I2iV2Template_SelectionChanged"
+                        AutomationProperties.Name="AI編集プロンプトテンプレート"
+                        AutomationProperties.HelpText="サンプルを変更内容へコピーします。入力を編集するとカスタムになります。"/>
+
+              <TextBlock Text="変更内容・プロンプト（必須）"
+                         Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                         Margin="0,12,0,4"/>
+              <TextBox x:Name="I2iV2InstructionTextBox" MaxLength="4000" MinHeight="84"
+                       AcceptsReturn="True" TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto" Padding="8,6"
+                       Foreground="{StaticResource TextPrimary}"
+                       Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}"
+                       SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}"
+                       TextChanged="I2iV2Instruction_TextChanged"
+                       AutomationProperties.Name="AI編集で行う変更内容"/>
+
+              <TextBlock Text="補足（任意）"
+                         Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                         Margin="0,12,0,4"/>
+              <TextBox x:Name="I2iV2DetailsTextBox" MaxLength="4000" MinHeight="56"
+                       AcceptsReturn="True" TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto" Padding="8,6"
+                       Foreground="{StaticResource TextPrimary}"
+                       Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}"
+                       SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}"
+                       TextChanged="I2iV2EditField_TextChanged"
+                       AutomationProperties.Name="AI編集の補足"/>
+
+              <Grid Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="10"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="Seed" Foreground="{StaticResource TextPrimary}"
+                             FontSize="11.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="I2iV2SeedModeComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="0"
+                            SelectionChanged="I2iV2SeedMode_SelectionChanged"
+                            AutomationProperties.Name="複数ターゲットAI編集 seed mode">
+                    <ComboBoxItem Content="Random（推奨）" Tag="random"/>
+                    <ComboBoxItem Content="Fixed" Tag="fixed"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="Fixed値（0〜2147483647）"
+                             Foreground="{StaticResource TextPrimary}"
+                             FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="I2iV2SeedValueTextBox" MaxLength="10" IsEnabled="False"
+                           Padding="7,4" Foreground="{StaticResource TextPrimary}"
+                           Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}"
+                           SelectionBrush="{StaticResource AccentFill}"
+                           BorderBrush="{StaticResource BorderStrong}"
+                           TextChanged="I2iV2EditField_TextChanged"
+                           AutomationProperties.Name="Fixed 複数ターゲットAI編集 seed"/>
+                </StackPanel>
+              </Grid>
+              <TextBlock x:Name="I2iV2SeedStatusText" Visibility="Collapsed"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,6,0,0"/>
+
+              <Border Margin="0,14,0,0" Padding="10" CornerRadius="5"
+                      Background="{StaticResource BgPrimary}"
+                      BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
+                <StackPanel>
+                  <TextBlock Text="基本の保持設定"
+                             Foreground="{StaticResource TextPrimary}" FontSize="10.8"
+                             FontWeight="SemiBold"/>
+                  <TextBlock x:Name="I2iV2PreservationText"
+                             Text="顔の同一性と元の構図を自動保持します。"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.8"
+                             TextWrapping="Wrap" Margin="0,4,0,0"/>
+                  <TextBlock Text="保持文と生成用の内部promptはcompanionが固定policyから作ります。ここには、変えたい内容だけを入力できます。"
+                             Foreground="{StaticResource TextTertiary}" FontSize="10.2"
+                             TextWrapping="Wrap" Margin="0,4,0,0"/>
+                </StackPanel>
+              </Border>
+              <TextBlock x:Name="I2iV2EditStatusText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.8"
+                         TextWrapping="Wrap" Margin="0,12,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </ScrollViewer>
+          <DockPanel Grid.Row="2" Margin="0,14,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                    Content="閉じる" MinWidth="72" Height="32" Margin="8,0,0,0"
+                    Click="CloseI2iV2Edit_Click"/>
+            <Button x:Name="I2iV2QueueButton" DockPanel.Dock="Right"
+                    Style="{StaticResource PrimaryButton}" Content="GO"
+                    MinWidth="108" Height="32" IsEnabled="False"
+                    Click="QueueI2iV2Edit_Click"
+                    AutomationProperties.Name="GO: 複数ターゲットAI編集ジョブをキューへ追加"
+                    AutomationProperties.HelpText="GOを押した時だけcompanionを起動し、ジョブを追加します。"/>
+            <Button x:Name="I2iV2ResetButton" DockPanel.Dock="Right"
+                    Style="{StaticResource GhostButton}" Content="入力をリセット"
+                    MinWidth="96" Height="32" Click="ResetI2iV2Edit_Click"
+                    AutomationProperties.Name="現在の画像のAI編集入力をリセット"/>
+          </DockPanel>
+        </Grid>
+      </Border>
+    </Grid>
+
     <!-- ═══════════════ Modal ═══════════════ -->
     <!-- App settings are separate from the modal generation-metadata Settings tab. -->
     <Grid x:Name="AppSettingsDialog" Grid.RowSpan="3" Panel.ZIndex="500" Visibility="Collapsed" Background="{StaticResource BgPrimary}"
@@ -1526,6 +1866,7 @@
           <Border Grid.Row="1" Grid.RowSpan="2" Grid.Column="0" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="0,1,1,0" Padding="10,11">
             <StackPanel>
               <RadioButton x:Name="SettingsGeneralNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsGeneral}" Tag="general" IsChecked="True" Click="AppSettingsNavigation_Click" AutomationProperties.Name="General settings"/>
+              <RadioButton x:Name="SettingsUpscaleNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="AI高画質化" Tag="upscale" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI upscale settings"/>
               <RadioButton x:Name="SettingsPhotorealNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="AI実写化" Tag="photoreal" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI photorealization settings"/>
               <RadioButton x:Name="SettingsVideoNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="動画化" Tag="video" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Video generation settings"/>
               <RadioButton x:Name="SettingsDisplayNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsDisplay}" Tag="display" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Display settings"/>
@@ -1740,6 +2081,27 @@
                   </ComboBox>
                 </StackPanel>
               </Grid>
+              <Grid Margin="0,11,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="Seed" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoSeedModeComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                            SelectionChanged="VideoSeedMode_SelectionChanged"
+                            AutomationProperties.Name="Default video generation seed mode"
+                            AutomationProperties.HelpText="Random omits the seed field. Fixed sends the integer shown beside it.">
+                    <ComboBoxItem Content="Random（推奨）" Tag="random"/>
+                    <ComboBoxItem Content="Fixed" Tag="fixed"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="Fixed値（0〜2147483647）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="AppVideoSeedValueTextBox" MaxLength="10" IsEnabled="False"
+                           Padding="7,4" Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                           BorderBrush="{StaticResource BorderStrong}" TextChanged="VideoSeedValue_TextChanged"
+                           AutomationProperties.Name="Default fixed video generation seed"/>
+                </StackPanel>
+              </Grid>
               <TextBlock x:Name="AppVideoDeliveryText"
                          Text="生成: 16 fps・97f → 最終出力: 30 fps・180f・6.000秒 · RIFE 4.25 · H.264 / yuv420p · 音声なし"
                          Foreground="{StaticResource TextSecondary}" FontSize="10.5"
@@ -1778,24 +2140,79 @@
                          AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
           </Border>
+          <TextBlock x:Name="UpscaleSettingsHeading" Text="AI高画質化" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="AI upscale settings section"/>
+          <TextBlock Text="通常のAI高画質化で使う共通設定です。拡大画面・右クリック・選択画像の一括処理へ同期し、次に追加するジョブから使われます。実写版だけをHQ化するときは、既存の実写向け固定プロファイルを維持します。"
+                     Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
+            <StackPanel>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="方式" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppUpscaleAdapterComboBox" Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectionChanged="AppUpscaleSetting_SelectionChanged" AutomationProperties.Name="Default AI upscale method">
+                    <ComboBoxItem Content="Real-ESRGAN fast GPU" Tag="realesrgan-ncnn"/>
+                    <ComboBoxItem Content="ComfyUI AI upscale" Tag="comfyui"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="モデルpreset" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppUpscalePresetComboBox" Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectionChanged="AppUpscaleSetting_SelectionChanged" AutomationProperties.Name="Default AI upscale model preset">
+                    <ComboBoxItem Content="Anime clean x2" Tag="anime-sharp-x2"/>
+                    <ComboBoxItem Content="Anime crisp detail x4" Tag="anime-detail-x4"/>
+                    <ComboBoxItem Content="Photo natural x2" Tag="photo-natural-x2"/>
+                    <ComboBoxItem Content="Photo texture detail x4" Tag="photo-detail-x4"/>
+                    <ComboBoxItem Content="General balanced x4" Tag="general-balanced-x4"/>
+                    <ComboBoxItem Content="General strong detail x6" Tag="general-max-x6"/>
+                  </ComboBox>
+                </StackPanel>
+              </Grid>
+              <Grid Margin="0,10,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="倍率" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppUpscaleScaleComboBox" Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectionChanged="AppUpscaleSetting_SelectionChanged" AutomationProperties.Name="Default AI upscale scale">
+                    <ComboBoxItem Content="1.5x" Tag="1.5"/><ComboBoxItem Content="2x" Tag="2"/><ComboBoxItem Content="3x" Tag="3"/>
+                    <ComboBoxItem Content="4x" Tag="4"/><ComboBoxItem Content="6x" Tag="6"/><ComboBoxItem Content="8x" Tag="8"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="保存形式" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppUpscaleFormatComboBox" Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectionChanged="AppUpscaleSetting_SelectionChanged" AutomationProperties.Name="Default AI upscale output format">
+                    <ComboBoxItem Content="PNG" Tag="png"/><ComboBoxItem Content="WebP" Tag="webp"/><ComboBoxItem Content="JPG" Tag="jpg"/>
+                  </ComboBox>
+                </StackPanel>
+              </Grid>
+              <TextBlock x:Name="AppUpscaleSettingsHintText" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,9,0,0"/>
+              <TextBlock Text="Real-ESRGANは最大4x。ComfyUIは最大8xです。ブラウザ版の補正sliderは隔離テスト専用処理でしか効かないため、実際に効く設定だけを表示しています。"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
+              <DockPanel Margin="0,9,0,0" LastChildFill="True">
+                <Button x:Name="ResetAppUpscaleSettingsButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetAppUpscaleSettings_Click" MinWidth="82" AutomationProperties.Name="Reset AI upscale settings"/>
+                <TextBlock x:Name="AppUpscaleSettingsStatusText" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" AutomationProperties.LiveSetting="Polite"/>
+              </DockPanel>
+            </StackPanel>
+          </Border>
           <TextBlock x:Name="PhotorealSettingsHeading" Text="AI実写化" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="AI photorealization settings section"/>
           <TextBlock Text="すべてのAI実写化で使う共通設定です。ここでの変更は拡大画面にも即時反映され、次にキューへ追加するジョブから使われます。待機中・処理中のジョブは変更されません。" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
             <StackPanel>
+              <CheckBox x:Name="AppPhotorealLoraEnabledCheckBox"
+                        Content="WarmBloodAban Anything-to-Real LoRA（比較用）"
+                        IsChecked="False" Margin="0,0,0,6"
+                        Checked="PhotorealLoraEnabled_Changed" Unchecked="PhotorealLoraEnabled_Changed"
+                        AutomationProperties.Name="Use WarmBloodAban Anything-to-Real LoRA for comparison by default"
+                        AutomationProperties.HelpText="標準はOFF。比較時は25%または40%を目安にします。80%は顔や表情を均しやすいため非推奨です。"/>
+              <TextBlock Text="標準はOFF。比較は25%／40%が目安、80%は非推奨。" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,9"/>
               <DockPanel Margin="0,0,0,3">
-                <TextBlock x:Name="AppPhotorealStrengthValue" DockPanel.Dock="Right" Text="80%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
-                <TextBlock Text="実写化の強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
+                <TextBlock x:Name="AppPhotorealStrengthValue" DockPanel.Dock="Right" Text="40%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
+                <TextBlock Text="LoRAの強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
               </DockPanel>
-              <Slider x:Name="AppPhotorealStrengthSlider" Minimum="20" Maximum="80" Value="80" TickFrequency="1" IsSnapToTickEnabled="True"
+              <Slider x:Name="AppPhotorealStrengthSlider" Minimum="20" Maximum="80" Value="40" TickFrequency="1" IsSnapToTickEnabled="True"
                       AutoToolTipPlacement="TopLeft" ValueChanged="AppPhotorealSetting_ValueChanged"
-                      AutomationProperties.Name="Default photorealization strength"/>
-              <DockPanel Margin="0,9,0,3">
-                <TextBlock x:Name="AppPhotorealStructureValue" DockPanel.Dock="Right" Text="100%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
-                <TextBlock Text="元の構図を保つ強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
-              </DockPanel>
-              <Slider x:Name="AppPhotorealStructureSlider" Minimum="0" Maximum="120" Value="100" TickFrequency="5" IsSnapToTickEnabled="True"
-                      AutoToolTipPlacement="TopLeft" ValueChanged="AppPhotorealSetting_ValueChanged"
-                      AutomationProperties.Name="Default composition preservation strength"/>
+                      AutomationProperties.Name="Default Anything-to-Real LoRA strength"/>
               <DockPanel Margin="0,9,0,3">
                 <TextBlock x:Name="AppPhotorealCfgScaleValue" DockPanel.Dock="Right" Text="1.00" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
                 <TextBlock Text="CFG" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
@@ -1821,6 +2238,27 @@
                     <ComboBoxItem Content="1024 px" Tag="1024"/>
                     <ComboBoxItem Content="1280 px" Tag="1280"/>
                   </ComboBox>
+                </StackPanel>
+              </Grid>
+              <Grid Margin="0,11,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="Seed" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppPhotorealSeedModeComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                            SelectionChanged="PhotorealSeedMode_SelectionChanged"
+                            AutomationProperties.Name="Default AI photorealization seed mode"
+                            AutomationProperties.HelpText="Random omits the seed field. Fixed sends the integer shown beside it.">
+                    <ComboBoxItem Content="Random（推奨）" Tag="random"/>
+                    <ComboBoxItem Content="Fixed" Tag="fixed"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="Fixed値（0〜2147483647）" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="AppPhotorealSeedValueTextBox" MaxLength="10" IsEnabled="False"
+                           Padding="7,4" Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                           BorderBrush="{StaticResource BorderStrong}" TextChanged="PhotorealSeedValue_TextChanged"
+                           AutomationProperties.Name="Default fixed AI photorealization seed"/>
                 </StackPanel>
               </Grid>
               <DockPanel Margin="0,10,0,0" LastChildFill="True">
@@ -1909,20 +2347,69 @@
             </StackPanel>
           </Border>
           <DockPanel LastChildFill="False" Margin="0,0,0,5">
-            <Button x:Name="ResetAppPhotorealPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetAppPhotorealPrompt_Click" MinWidth="72" AutomationProperties.Name="Reset default AI photorealization prompt"/>
-            <TextBlock Text="Prompt" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+            <Button x:Name="ResetAppPhotorealPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetAppPhotorealPrompt_Click" MinWidth="72" AutomationProperties.Name="Reset default AI photorealization positive prompt"/>
+            <TextBlock Text="Positive" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
           </DockPanel>
           <TextBox x:Name="AppPhotorealPromptTextBox"
-                   MinHeight="150" MaxHeight="230" MaxLength="2000"
+                   MinHeight="90" MaxHeight="180" MaxLength="2000"
                    AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap"
                    VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                    Padding="9,7" Background="{StaticResource BgPrimary}"
                    BorderBrush="{StaticResource GlassBorderHover}" Foreground="{StaticResource TextPrimary}"
                    SelectionBrush="{StaticResource AccentFill}" CaretBrush="{StaticResource TextPrimary}"
                    TextChanged="AppPhotorealPrompt_TextChanged"
-                   AutomationProperties.Name="Default AI photorealization prompt"
-                   AutomationProperties.HelpText="Saved as you type and shared with the image preview photorealization settings."/>
+                   AutomationProperties.Name="Default AI photorealization positive prompt"
+                   AutomationProperties.HelpText="Used as-is when nonblank. No composition sentence is appended."/>
+          <DockPanel LastChildFill="False" Margin="0,10,0,5">
+            <Button x:Name="ResetAppPhotorealEmptyPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetAppPhotorealEmptyPrompt_Click" MinWidth="72" AutomationProperties.Name="Reset AI photorealization positive prompt used when blank"/>
+            <TextBlock Text="Positive（空欄時）" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          </DockPanel>
+          <TextBox x:Name="AppPhotorealEmptyPromptTextBox"
+                   MinHeight="70" MaxHeight="150" MaxLength="2000"
+                   AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap"
+                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                   Padding="9,7" Background="{StaticResource BgPrimary}"
+                   BorderBrush="{StaticResource GlassBorderHover}" Foreground="{StaticResource TextPrimary}"
+                   SelectionBrush="{StaticResource AccentFill}" CaretBrush="{StaticResource TextPrimary}"
+                   TextChanged="AppPhotorealEmptyPrompt_TextChanged"
+                   AutomationProperties.Name="AI photorealization positive prompt used when blank"
+                   AutomationProperties.HelpText="Used only when the Positive field is blank."/>
+          <DockPanel LastChildFill="False" Margin="0,10,0,5">
+            <Button x:Name="ResetAppPhotorealNegativePromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetAppPhotorealNegativePrompt_Click" MinWidth="72" AutomationProperties.Name="Reset default AI photorealization negative prompt"/>
+            <TextBlock Text="Negative" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          </DockPanel>
+          <CheckBox x:Name="AppPhotorealNegativePromptEnabledCheckBox"
+                    Content="Negative文を送る（FLUX.2では通常OFF）"
+                    IsChecked="False" Margin="0,0,0,5"
+                    Checked="PhotorealNegativePromptEnabled_Changed"
+                    Unchecked="PhotorealNegativePromptEnabled_Changed"
+                    AutomationProperties.Name="Send negative conditioning for AI photorealization"
+                    AutomationProperties.HelpText="OFF keeps the saved text but sends an empty negative prompt for new FLUX.2 jobs."/>
+          <TextBox x:Name="AppPhotorealNegativePromptTextBox"
+                   MinHeight="70" MaxHeight="150" MaxLength="2000"
+                   AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap"
+                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                   Padding="9,7" Background="{StaticResource BgPrimary}"
+                   BorderBrush="{StaticResource GlassBorderHover}" Foreground="{StaticResource TextPrimary}"
+                   SelectionBrush="{StaticResource AccentFill}" CaretBrush="{StaticResource TextPrimary}"
+                   TextChanged="AppPhotorealNegativePrompt_TextChanged"
+                   AutomationProperties.Name="Default AI photorealization negative prompt"
+                   AutomationProperties.HelpText="Saved locally. It is sent only when the Negative toggle is enabled."/>
           <TextBlock x:Name="AppPhotorealPromptStatusText" Text="入力内容は自動保存されます。" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,18" AutomationProperties.LiveSetting="Polite"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,18">
+            <DockPanel LastChildFill="True">
+              <Button x:Name="OpenPhotorealPromptMappingsButton" DockPanel.Dock="Right"
+                      Style="{StaticResource GhostButton}" Content="変換表を編集..."
+                      Click="OpenPhotorealPromptMappings_Click" MinWidth="112" Margin="10,0,0,0"
+                      AutomationProperties.Name="Edit PNG prompt inheritance mappings"/>
+              <StackPanel>
+                <TextBlock Text="PNG Prompt引き継ぎ" Foreground="{StaticResource TextPrimary}" FontSize="11.5" FontWeight="SemiBold"/>
+                <TextBlock x:Name="AppPhotorealPromptMappingSummaryText"
+                           Text="PNGのA1111 Positiveから一致したタグを実写化Positiveへ追加します。"
+                           Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
+              </StackPanel>
+            </DockPanel>
+          </Border>
           <TextBlock Text="AI処理の出力先" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
           <TextBlock Text="AI高画質化・AI実写化・動画化の共通の親フォルダです。出力は Upscaled、Photorealized、Videos の固定フォルダに分けて保存されます。変更は次に処理を開始する待機ジョブから使われ、既存成果物は移動しません。"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
@@ -1945,7 +2432,17 @@
               <TextBlock x:Name="EnhancementOutputRootStatusText" Foreground="{StaticResource TextTertiary}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
           </Border>
-          <TextBlock x:Name="ThumbnailSettingsHeading" Text="THUMBNAIL STATUS BORDERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Thumbnail settings section"/>
+          <TextBlock x:Name="ThumbnailSettingsHeading" Text="THUMBNAILS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="Thumbnail settings section"/>
+          <CheckBox x:Name="LastDisplayedThumbnailVersionCheckBox"
+                    Content="最後に表示した画像バージョンを一覧サムネイルに使う"
+                    Foreground="{StaticResource TextSecondary}" Margin="0,4,0,4"
+                    Checked="ThumbnailVersionPreference_Changed"
+                    Unchecked="ThumbnailVersionPreference_Changed"
+                    AutomationProperties.Name="Use the last displayed image version for gallery thumbnails"
+                    AutomationProperties.HelpText="OFFでは一覧サムネイルをOriginalに固定します。画像ごとの最後の表示版はWPFの現在のセッション内だけで保持します。"/>
+          <TextBlock Text="OFFではOriginalを表示。動画を見た場合も、直前に表示した画像版を維持します。"
+                     Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,0,0,12"/>
+          <TextBlock Text="STATUS BORDERS" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
           <Grid Margin="0,0,0,6">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="142"/><ColumnDefinition Width="28"/></Grid.ColumnDefinitions>
@@ -2074,7 +2571,7 @@
       <Border x:Name="ModalWindowCaptionControls" Grid.RowSpan="3" Grid.ColumnSpan="2"
               HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0" Padding="0"
               CornerRadius="4" Background="{StaticResource GlassChrome}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1"
-              Panel.ZIndex="80" WindowChrome.IsHitTestVisibleInChrome="True">
+              Panel.ZIndex="120" WindowChrome.IsHitTestVisibleInChrome="True">
         <StackPanel Orientation="Horizontal">
           <Button x:Name="ModalMinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click"
                   ToolTip="Minimize window" AutomationProperties.Name="Minimize window"
@@ -2098,101 +2595,204 @@
 
       <!-- topbar -->
       <Border x:Name="ModalTopBarSurface" Grid.Row="0" Grid.ColumnSpan="2" Background="{StaticResource GlassChrome}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="0,0,0,1" Panel.ZIndex="30"/>
-      <DockPanel x:Name="ModalTopBar" Grid.Row="0" Grid.ColumnSpan="2" Margin="12,7,150,7" LastChildFill="True" Panel.ZIndex="35" WindowChrome.IsHitTestVisibleInChrome="True">
-        <Button DockPanel.Dock="Left" x:Name="ModalCloseBtn" Style="{StaticResource IconButton}" Click="CloseModal_Click" ToolTip="Back to gallery (Esc)" AutomationProperties.Name="Back to gallery" Width="36" Height="32" Margin="0,0,6,0">
-          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72B;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
-        </Button>
-        <TextBlock x:Name="ModalPositionText" DockPanel.Dock="Left" Text="000 / 000"
-                   MinWidth="70" Margin="0,0,10,0" VerticalAlignment="Center"
-                   Foreground="{StaticResource TextTertiary}" FontFamily="{StaticResource MonoFont}"
-                   FontSize="11.5" FontWeight="SemiBold" TextAlignment="Center"
-                   AutomationProperties.Name="Image 0 of 0"/>
-        <Button x:Name="ModalShortcutsButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Height="32" Width="32" Margin="0,0,4,0"
-                Click="OpenShortcuts_Click" ToolTip="{DynamicResource UiShortcutsToolTip}" AutomationProperties.Name="Open keyboard shortcuts">
-          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE765;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
-        </Button>
-        <Button x:Name="ModalDeleteButton" DockPanel.Dock="Right" Style="{StaticResource DangerButton}" Click="DeleteDisplayedModalMedia_Click" ToolTip="Move source to Recycle Bin (Delete)" AutomationProperties.Name="Delete displayed media" Width="32" Height="32" Margin="0,0,4,0">
-          <Path Data="M3,6 h18 M8,6 V4 a2,2 0 0 1 2,-2 h4 a2,2 0 0 1 2,2 v2 M19,6 l-1,14 a2,2 0 0 1 -2,2 H8 a2,2 0 0 1 -2,-2 L5,6" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="14" Height="14"/>
-        </Button>
-        <Button x:Name="ModalMetadataSidebarToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="ToggleModalMetadataSidebar_Click" ToolTip="Show metadata sidebar" AutomationProperties.Name="Toggle metadata sidebar" Width="32" Height="32">
-          <TextBlock x:Name="ModalMetadataSidebarToggleLabel" Text="&lt;" Foreground="{StaticResource TextSecondary}" FontSize="15" FontWeight="SemiBold"/>
-        </Button>
-        <Button x:Name="ModalFilmstripToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Click="ToggleModalFilmstrip_Click" ToolTip="Hide image filmstrip (T)" AutomationProperties.Name="Hide image filmstrip" Width="32" Height="32">
-          <Path x:Name="ModalFilmstripToggleLabel"
-                Data="M3,4 H21 V20 H3 Z M3,8 H21 M3,16 H21 M9,8 V16 M15,8 V16 M7,4 V8 M12,4 V8 M17,4 V8 M7,16 V20 M12,16 V20 M17,16 V20"
-                Stroke="{StaticResource TextSecondary}" StrokeThickness="1.5"
-                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                Fill="Transparent" Stretch="Uniform" Width="18" Height="18"/>
-        </Button>
-        <Button x:Name="ModalOpenExternalButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Open externally" AutomationProperties.Name="Open selected image externally" Width="32" Height="32" Click="OpenSelectedExternally_Click">
-          <Path Data="M18,13 v6 a2,2 0 0 1 -2,2 H5 a2,2 0 0 1 -2,-2 V8 a2,2 0 0 1 2,-2 h6 M15,3 h6 v6 M10,14 L21,3" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="15" Height="15"/>
-        </Button>
-        <Button x:Name="ModalRevealButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Show selected source in folder" AutomationProperties.Name="Show selected source in folder" Width="32" Height="32" Click="ShowSelectedInFolder_Click"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Foreground="{StaticResource TextSecondary}" FontSize="15"/></Button>
-        <Button x:Name="ModalEnhanceCancelButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="Cancel the running enhancement job" AutomationProperties.Name="Cancel image enhancement" MinWidth="92" Height="32" Padding="8,0" Click="CancelModalEnhancement_Click" Visibility="Collapsed"><TextBlock x:Name="ModalEnhanceCancelButtonLabel" Text="処理を中止" FontSize="10"/></Button>
-        <Button x:Name="ModalVideoGenerateButton" DockPanel.Dock="Right"
-                Style="{StaticResource GhostButton}" ToolTip="この画像から動画を生成"
-                AutomationProperties.Name="Open video generation board"
-                AutomationProperties.HelpText="Opens settings first. Video generation starts only after the explicit execute button."
-                MinWidth="68" Height="32" Padding="8,0" Click="OpenModalVideoGeneration_Click">
-          <TextBlock Text="動画化" FontSize="9.5" FontWeight="SemiBold"/>
-        </Button>
-        <Button x:Name="ModalPhotorealSettingsButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="AI実写化の設定" AutomationProperties.Name="Open AI photorealization settings" Width="32" Height="32" Click="ToggleModalPhotorealSettings_Click">
-          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" Foreground="{StaticResource TextSecondary}" FontSize="14"/>
-        </Button>
-        <Button x:Name="ModalPhotorealButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="この画像をローカルAIで実写化" AutomationProperties.Name="AI実写化" AutomationProperties.HelpText="このボタンを押した時だけ、AI高画質化と共通のGPUキューへ実写化ジョブを追加します。" MinWidth="72" Height="32" Padding="8,0" Click="StartModalPhotoreal_Click"><TextBlock x:Name="ModalPhotorealButtonLabel" Text="AI実写化" FontSize="9.5" FontWeight="SemiBold"/></Button>
-        <Button x:Name="ModalEnhanceButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" ToolTip="AI高画質化" AutomationProperties.Name="Enhance selected image with local AI" AutomationProperties.HelpText="Starts the local AI companion only after this button is pressed." MinWidth="72" Height="32" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="AI高画質化" FontSize="9.5" FontWeight="SemiBold"/></Button>
-        <ComboBox x:Name="ModalEnhancementVersionComboBox" DockPanel.Dock="Right"
-                  Width="210" Height="32" Margin="0,0,4,0"
-                  Style="{StaticResource PhotorealSettingsComboBox}"
-                  DisplayMemberPath="Label" IsSynchronizedWithCurrentItem="False"
-                  SelectionChanged="ModalEnhancementVersion_SelectionChanged"
-                  AutomationProperties.Name="表示中: Original. 表示版を選択"
-                  AutomationProperties.HelpText="Original、高画質化、実写化、動画化の全保存版から表示するメディアを選びます。"/>
-        <Button x:Name="ModalEnhancedToggleButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Current display: Original. Toggle enhanced image output" Width="68" Height="32" Click="ToggleModalEnhanced_Click" IsEnabled="False" Visibility="Collapsed">
-          <TextBlock x:Name="ModalEnhancedToggleLabel" Text="Original" Foreground="{StaticResource TextSecondary}" FontSize="9.5" FontWeight="SemiBold"/>
-        </Button>
-        <Button x:Name="ModalFlipButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Flip horizontal (H)" AutomationProperties.Name="Flip image horizontally" Width="32" Height="32" Click="ToggleModalFlip_Click">
-          <Path Data="M12,3 v18 M6,8 l-4,4 l4,4 M18,8 l4,4 l-4,4" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="16" Height="16"/>
-        </Button>
-        <Button x:Name="ModalFullScreenButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Enter full screen (F11)" AutomationProperties.Name="Enter full screen" Width="32" Height="32" Click="ToggleModalFullScreen_Click">
-          <Path x:Name="ModalFullScreenIcon" Data="M3,9 V3 H9 M15,3 H21 V9 M21,15 V21 H15 M9,21 H3 V15" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.6" Stretch="Uniform" Width="16" Height="16"/>
-        </Button>
-        <Border x:Name="ModalFavoriteControlBorder" DockPanel.Dock="Right" Height="32" Margin="0,0,2,0" CornerRadius="4"
-                Background="{StaticResource FavoriteSoft}" BorderBrush="{StaticResource Favorite}" BorderThickness="1"
-                AutomationProperties.Name="Favorite level controls">
-          <StackPanel Orientation="Horizontal">
-            <Button x:Name="ModalFavoriteDecreaseButton" Style="{StaticResource IconButton}" ToolTip="Favorite -1 (U)" AutomationProperties.Name="Decrease favorite level" Width="28" Height="30" Click="ModalFavoriteDecrease_Click">
-              <TextBlock x:Name="ModalFavoriteDecreaseGlyph" FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource FavoriteText}" FontSize="15"/>
-            </Button>
-            <TextBlock x:Name="ModalFavoriteLevelText" Text="0" MinWidth="14" Foreground="{StaticResource FavoriteText}" FontSize="11" FontWeight="Bold"
-                       TextAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="Favorite level 0"/>
-            <Button x:Name="ModalFavoriteIncreaseButton" Style="{StaticResource IconButton}" ToolTip="Favorite +1" AutomationProperties.Name="Increase favorite level" Width="28" Height="30" Click="ModalFavoriteIncrease_Click">
-              <TextBlock x:Name="ModalFavoriteIncreaseGlyph" FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{StaticResource FavoriteText}" FontSize="15"/>
-            </Button>
-          </StackPanel>
-        </Border>
-        <Button x:Name="ModalOneToOneButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" ToolTip="Actual pixels (100%): one image pixel per screen pixel" AutomationProperties.Name="Show actual pixels at 100 percent" Width="42" Height="32" Click="ModalOneToOne_Click">
-          <TextBlock x:Name="ModalOneToOneLabel" Text="100%" Foreground="{StaticResource TextSecondary}" FontSize="10.5" FontWeight="SemiBold"/>
-        </Button>
-        <Grid x:Name="ModalTitleInfoPanel" Margin="0,0,8,0" VerticalAlignment="Center" ClipToBounds="True">
+      <Grid x:Name="ModalTopBar" Grid.Row="0" Grid.ColumnSpan="2" Margin="12,7" Panel.ZIndex="35" WindowChrome.IsHitTestVisibleInChrome="True">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition x:Name="ModalToolbarActionsRow" Height="0"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="138"/>
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal">
+          <Button x:Name="ModalCloseBtn" Style="{StaticResource IconButton}" Click="CloseModal_Click" ToolTip="Back to gallery (Esc)" AutomationProperties.Name="Back to gallery" Width="36" Height="32" Margin="0,0,6,0">
+            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72B;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
+          </Button>
+          <TextBlock x:Name="ModalPositionText" Text="画像 0 / 0"
+                     MinWidth="88" Margin="0,0,10,0" VerticalAlignment="Center"
+                     Foreground="{StaticResource TextSecondary}"
+                     FontSize="12.5" FontWeight="SemiBold" TextAlignment="Center"
+                     AutomationProperties.Name="Image 0 of 0"/>
+        </StackPanel>
+
+        <Grid x:Name="ModalTitleInfoPanel" Grid.Row="0" Grid.Column="1" MinWidth="96" Margin="0,0,8,0" VerticalAlignment="Stretch" ClipToBounds="True"
+              Background="Transparent" Cursor="SizeAll" WindowChrome.IsHitTestVisibleInChrome="True"
+              PreviewMouseLeftButtonDown="WindowDragRegion_PreviewMouseLeftButtonDown"
+              ToolTip="Drag to move · double-click to maximize or restore"
+              AutomationProperties.Name="Preview window drag region"
+              AutomationProperties.HelpText="Drag this title area to move or snap the window. Double-click to maximize or restore.">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
-          <TextBlock x:Name="ModalTitle" Grid.Column="0" Text="00427-portrait.png · 832 × 1216 · animagineXL_v31" Foreground="{StaticResource TextSecondary}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+          <TextBlock x:Name="ModalTitle" Grid.Column="0" Text="-- × --" Foreground="{StaticResource TextSecondary}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
           <TextBlock x:Name="ModalSourceLabel" Grid.Column="1" Text="Original" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="10,0,0,0" VerticalAlignment="Center"/>
           <TextBlock x:Name="ModalFileSizeText" Grid.Column="2" Text="--" AutomationProperties.Name="Displayed file size" Foreground="{StaticResource TextSecondary}" FontSize="11.5" Margin="10,0,0,0" VerticalAlignment="Center"/>
           <TextBlock x:Name="ModalEnhancementStatusText" Grid.Column="3" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" TextTrimming="CharacterEllipsis" MaxWidth="240"/>
         </Grid>
-      </DockPanel>
+
+        <WrapPanel x:Name="ModalToolbarActionsPanel" Grid.Row="0" Grid.Column="2"
+                   Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <Button x:Name="ModalOneToOneButton" Style="{StaticResource IconButton}" ToolTip="Actual pixels (100%): one image pixel per screen pixel" AutomationProperties.Name="Show actual pixels at 100 percent" Width="42" Height="32" Click="ModalOneToOne_Click" Visibility="Collapsed">
+            <TextBlock x:Name="ModalOneToOneLabel" Text="100%" Foreground="{StaticResource TextSecondary}" FontSize="10.5" FontWeight="SemiBold"/>
+          </Button>
+          <Border x:Name="ModalFavoriteControlBorder" Height="32" Margin="0,0,2,0" CornerRadius="4" Visibility="Visible"
+                  Background="{StaticResource FavoriteSoft}" BorderBrush="{StaticResource Favorite}" BorderThickness="1"
+                  AutomationProperties.Name="Favorite level controls">
+            <StackPanel Orientation="Horizontal">
+              <Button x:Name="ModalFavoriteDecreaseButton" Style="{StaticResource IconButton}" ToolTip="Favorite -1 (U)" AutomationProperties.Name="Decrease favorite level" Width="28" Height="30" Click="ModalFavoriteDecrease_Click">
+                <TextBlock x:Name="ModalFavoriteDecreaseGlyph" FontFamily="Segoe MDL2 Assets" Text="&#xEB51;" Foreground="{StaticResource FavoriteText}" FontSize="15"/>
+              </Button>
+              <TextBlock x:Name="ModalFavoriteLevelText" Text="0" MinWidth="14" Foreground="{StaticResource FavoriteText}" FontSize="11" FontWeight="Bold"
+                         TextAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="Favorite level 0"/>
+              <Button x:Name="ModalFavoriteIncreaseButton" Style="{StaticResource IconButton}" ToolTip="Favorite +1" AutomationProperties.Name="Increase favorite level" Width="28" Height="30" Click="ModalFavoriteIncrease_Click">
+                <TextBlock x:Name="ModalFavoriteIncreaseGlyph" FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{StaticResource FavoriteText}" FontSize="15"/>
+              </Button>
+            </StackPanel>
+          </Border>
+          <Button x:Name="ModalFullScreenButton" Style="{StaticResource IconButton}" ToolTip="Enter full screen (F11)" AutomationProperties.Name="Enter full screen" Width="32" Height="32" Click="ToggleModalFullScreen_Click" Visibility="Collapsed">
+            <Path x:Name="ModalFullScreenIcon" Data="M3,9 V3 H9 M15,3 H21 V9 M21,15 V21 H15 M9,21 H3 V15" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.6" Stretch="Uniform" Width="16" Height="16"/>
+          </Button>
+          <Button x:Name="ModalFlipButton" Style="{StaticResource IconButton}" ToolTip="Flip horizontal (H)" AutomationProperties.Name="Flip image horizontally" Width="32" Height="32" Click="ToggleModalFlip_Click" Visibility="Collapsed">
+            <Path Data="M12,3 v18 M6,8 l-4,4 l4,4 M18,8 l4,4 l-4,4" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="16" Height="16"/>
+          </Button>
+          <Button x:Name="ModalEnhancedToggleButton" Style="{StaticResource IconButton}" ToolTip="No enhanced output available" AutomationProperties.Name="Current display: Original. Toggle enhanced image output" Width="68" Height="32" Click="ToggleModalEnhanced_Click" IsEnabled="False" Visibility="Collapsed">
+            <TextBlock x:Name="ModalEnhancedToggleLabel" Text="Original" Foreground="{StaticResource TextSecondary}" FontSize="9.5" FontWeight="SemiBold"/>
+          </Button>
+          <ComboBox x:Name="ModalEnhancementVersionComboBox"
+                    Width="150" Height="32" Margin="0,0,4,0"
+                    Style="{StaticResource PhotorealSettingsComboBox}"
+                    DisplayMemberPath="Label" IsSynchronizedWithCurrentItem="False"
+                    SelectionChanged="ModalEnhancementVersion_SelectionChanged"
+                    AutomationProperties.Name="表示中: Original. 表示版を選択"
+                    AutomationProperties.HelpText="Original、高画質化、実写化、AI編集、動画化の全保存版から表示するメディアを選びます。"/>
+          <Button x:Name="ModalEnhanceButton" Style="{StaticResource GhostButton}" ToolTip="AI高画質化" AutomationProperties.Name="Enhance selected image with local AI" AutomationProperties.HelpText="Starts the local AI companion only after this button is pressed." MinWidth="72" Height="32" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="AI高画質化" FontSize="9.5" FontWeight="SemiBold"/></Button>
+          <Button x:Name="ModalUpscaleSettingsButton" Style="{StaticResource GhostButton}" ToolTip="AI高画質化の設定" AutomationProperties.Name="Open AI upscale settings" Width="46" Height="32" Padding="5,0" Click="ToggleModalUpscaleSettings_Click">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="HQ" Foreground="{StaticResource TextSecondary}" FontSize="9.5" FontWeight="SemiBold" VerticalAlignment="Center"/><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="3,0,0,0" VerticalAlignment="Center"/></StackPanel>
+          </Button>
+          <Button x:Name="ModalPhotorealButton" Style="{StaticResource GhostButton}" ToolTip="この画像をローカルAIで実写化" AutomationProperties.Name="AI実写化" AutomationProperties.HelpText="このボタンを押した時だけ、AI高画質化と共通のGPUキューへ実写化ジョブを追加します。" MinWidth="72" Height="32" Padding="8,0" Click="StartModalPhotoreal_Click"><TextBlock x:Name="ModalPhotorealButtonLabel" Text="AI実写化" FontSize="9.5" FontWeight="SemiBold"/></Button>
+          <Button x:Name="ModalPhotorealUpscaleButton" Style="{StaticResource GhostButton}" ToolTip="最新または表示中の実写版だけを高画質化" AutomationProperties.Name="AI実写高画質化のみ" AutomationProperties.HelpText="Uses the matching managed photoreal output as input and enqueues only the HQ upscale job." MinWidth="72" Height="32" Padding="8,0" Click="StartModalPhotorealUpscale_Click" Visibility="Collapsed"><TextBlock Text="実写HQ" FontSize="9.5" FontWeight="SemiBold"/></Button>
+          <Button x:Name="ModalPhotorealSettingsButton" Style="{StaticResource IconButton}" ToolTip="AI実写化の設定" AutomationProperties.Name="Open AI photorealization settings" Width="32" Height="32" Click="ToggleModalPhotorealSettings_Click">
+            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE713;" Foreground="{StaticResource TextSecondary}" FontSize="14"/>
+          </Button>
+          <Button x:Name="ModalI2iEditButton" Style="{StaticResource GhostButton}"
+                  ToolTip="表示中のOriginalまたは実写化版の髪色をAI編集"
+                  AutomationProperties.Name="髪色のAI編集を開く"
+                  AutomationProperties.HelpText="設定ボードを開くだけではジョブを追加せず、companionも起動しません。"
+                  MinWidth="68" Height="32" Padding="8,0" Click="OpenModalI2iEdit_Click">
+            <TextBlock Text="髪色編集" FontSize="9.5" FontWeight="SemiBold"/>
+          </Button>
+          <Button x:Name="ModalI2iV2EditButton" Style="{StaticResource GhostButton}"
+                  ToolTip="表示中のOriginalまたは実写化版の服装・表情・背景・ポーズをAI編集"
+                  AutomationProperties.Name="複数ターゲットのAI編集を開く"
+                  AutomationProperties.HelpText="設定ボードを開くだけではジョブを追加せず、companionも起動しません。"
+                  MinWidth="68" Height="32" Padding="8,0" Click="OpenModalI2iEditV2_Click">
+            <TextBlock Text="AI編集+" FontSize="9.5" FontWeight="SemiBold"/>
+          </Button>
+          <Button x:Name="ModalVideoGenerateButton"
+                  Style="{StaticResource GhostButton}" ToolTip="この画像から動画を生成"
+                  AutomationProperties.Name="Open video generation board"
+                  AutomationProperties.HelpText="Opens settings first. Video generation starts only after the explicit execute button."
+                  MinWidth="68" Height="32" Padding="8,0" Click="OpenModalVideoGeneration_Click" Visibility="Collapsed">
+            <TextBlock Text="動画化" FontSize="9.5" FontWeight="SemiBold"/>
+          </Button>
+          <Button x:Name="ModalEnhanceCancelButton" Style="{StaticResource GhostButton}" ToolTip="Cancel the running enhancement job" AutomationProperties.Name="Cancel image enhancement" MinWidth="92" Height="32" Padding="8,0" Click="CancelModalEnhancement_Click" Visibility="Collapsed"><TextBlock x:Name="ModalEnhanceCancelButtonLabel" Text="処理を中止" FontSize="10"/></Button>
+          <Button x:Name="ModalRevealButton" Style="{StaticResource IconButton}" ToolTip="Show selected source in folder" AutomationProperties.Name="Show selected source in folder" Width="32" Height="32" Click="ShowSelectedInFolder_Click" Visibility="Collapsed"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" Foreground="{StaticResource TextSecondary}" FontSize="15"/></Button>
+          <Button x:Name="ModalOpenExternalButton" Style="{StaticResource IconButton}" ToolTip="Open externally" AutomationProperties.Name="Open selected image externally" Width="32" Height="32" Click="OpenSelectedExternally_Click" Visibility="Collapsed">
+            <Path Data="M18,13 v6 a2,2 0 0 1 -2,2 H5 a2,2 0 0 1 -2,-2 V8 a2,2 0 0 1 2,-2 h6 M15,3 h6 v6 M10,14 L21,3" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="15" Height="15"/>
+          </Button>
+          <Button x:Name="ModalFilmstripToggleButton" Style="{StaticResource IconButton}" Click="ToggleModalFilmstrip_Click" ToolTip="Hide image filmstrip (T)" AutomationProperties.Name="Hide image filmstrip" Width="32" Height="32" Visibility="Collapsed">
+            <Path x:Name="ModalFilmstripToggleLabel"
+                  Data="M3,4 H21 V20 H3 Z M3,8 H21 M3,16 H21 M9,8 V16 M15,8 V16 M7,4 V8 M12,4 V8 M17,4 V8 M7,16 V20 M12,16 V20 M17,16 V20"
+                  Stroke="{StaticResource TextSecondary}" StrokeThickness="1.5"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                  Fill="Transparent" Stretch="Uniform" Width="18" Height="18"/>
+          </Button>
+          <Button x:Name="ModalMetadataSidebarToggleButton" Style="{StaticResource IconButton}" Click="ToggleModalMetadataSidebar_Click" ToolTip="Show metadata sidebar" AutomationProperties.Name="Toggle metadata sidebar" Width="32" Height="32" Visibility="Collapsed">
+            <TextBlock x:Name="ModalMetadataSidebarToggleLabel" Text="&lt;" Foreground="{StaticResource TextSecondary}" FontSize="15" FontWeight="SemiBold"/>
+          </Button>
+          <Button x:Name="ModalDeleteButton" Style="{StaticResource DangerButton}" Click="DeleteDisplayedModalMedia_Click" ToolTip="Move source to Recycle Bin (Delete)" AutomationProperties.Name="Delete displayed media" Width="32" Height="32" Margin="0,0,4,0" Visibility="Collapsed">
+            <Path Data="M3,6 h18 M8,6 V4 a2,2 0 0 1 2,-2 h4 a2,2 0 0 1 2,2 v2 M19,6 l-1,14 a2,2 0 0 1 -2,2 H8 a2,2 0 0 1 -2,-2 L5,6" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.7" Stretch="Uniform" Width="14" Height="14"/>
+          </Button>
+          <Button x:Name="ModalShortcutsButton" Style="{StaticResource IconButton}" Height="32" Width="32" Margin="0,0,4,0" Visibility="Collapsed"
+                  Click="OpenShortcuts_Click" ToolTip="{DynamicResource UiShortcutsToolTip}" AutomationProperties.Name="Open keyboard shortcuts">
+            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE765;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
+          </Button>
+          <Button x:Name="ModalOverflowButton" Style="{StaticResource IconButton}" Height="32" Width="32"
+                  Click="OpenModalOverflow_Click" ToolTip="その他の表示・ファイル操作" AutomationProperties.Name="Open more image actions">
+            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE712;" Foreground="{StaticResource TextSecondary}" FontSize="15"/>
+          </Button>
+        </WrapPanel>
+      </Grid>
+      <Grid x:Name="ModalUpscaleSettingsPopup" Grid.RowSpan="3" Grid.ColumnSpan="2"
+            Visibility="Collapsed" Panel.ZIndex="91" Background="Transparent"
+            WindowChrome.IsHitTestVisibleInChrome="True"
+            MouseLeftButtonDown="ModalUpscaleSettingsBackdrop_MouseLeftButtonDown"
+            AutomationProperties.Name="AI upscale settings overlay">
+        <Border x:Name="ModalUpscaleSettingsBoardBorder" Width="330" MaxHeight="520" Padding="14" CornerRadius="6"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+                Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
+          <StackPanel>
+            <DockPanel LastChildFill="True" Margin="0,0,0,12">
+              <TextBlock DockPanel.Dock="Right" Text="次のHQジョブから適用" Foreground="{StaticResource TextSecondary}" FontSize="10" VerticalAlignment="Center"/>
+              <TextBlock Text="AI高画質化 設定" Foreground="{StaticResource TextPrimary}" FontSize="14" FontWeight="SemiBold"/>
+            </DockPanel>
+            <TextBlock Text="方式" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalUpscaleAdapterComboBox" Style="{StaticResource PhotorealSettingsComboBox}" Margin="0,0,0,9"
+                      SelectionChanged="ModalUpscaleSetting_SelectionChanged" AutomationProperties.Name="AI upscale method">
+              <ComboBoxItem Content="Real-ESRGAN fast GPU" Tag="realesrgan-ncnn"/>
+              <ComboBoxItem Content="ComfyUI AI upscale" Tag="comfyui"/>
+            </ComboBox>
+            <TextBlock Text="モデルpreset" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+            <ComboBox x:Name="ModalUpscalePresetComboBox" Style="{StaticResource PhotorealSettingsComboBox}" Margin="0,0,0,9"
+                      SelectionChanged="ModalUpscaleSetting_SelectionChanged" AutomationProperties.Name="AI upscale model preset">
+              <ComboBoxItem Content="Anime clean x2" Tag="anime-sharp-x2"/>
+              <ComboBoxItem Content="Anime crisp detail x4" Tag="anime-detail-x4"/>
+              <ComboBoxItem Content="Photo natural x2" Tag="photo-natural-x2"/>
+              <ComboBoxItem Content="Photo texture detail x4" Tag="photo-detail-x4"/>
+              <ComboBoxItem Content="General balanced x4" Tag="general-balanced-x4"/>
+              <ComboBoxItem Content="General strong detail x6" Tag="general-max-x6"/>
+            </ComboBox>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0">
+                <TextBlock Text="倍率" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalUpscaleScaleComboBox" Style="{StaticResource PhotorealSettingsComboBox}"
+                          SelectionChanged="ModalUpscaleSetting_SelectionChanged" AutomationProperties.Name="AI upscale scale">
+                  <ComboBoxItem Content="1.5x" Tag="1.5"/><ComboBoxItem Content="2x" Tag="2"/><ComboBoxItem Content="3x" Tag="3"/>
+                  <ComboBoxItem Content="4x" Tag="4"/><ComboBoxItem Content="6x" Tag="6"/><ComboBoxItem Content="8x" Tag="8"/>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+                <TextBlock Text="保存形式" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalUpscaleFormatComboBox" Style="{StaticResource PhotorealSettingsComboBox}"
+                          SelectionChanged="ModalUpscaleSetting_SelectionChanged" AutomationProperties.Name="AI upscale output format">
+                  <ComboBoxItem Content="PNG" Tag="png"/><ComboBoxItem Content="WebP" Tag="webp"/><ComboBoxItem Content="JPG" Tag="jpg"/>
+                </ComboBox>
+              </StackPanel>
+            </Grid>
+            <TextBlock x:Name="ModalUpscaleSettingsHintText" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,9,0,0"/>
+            <TextBlock Text="実写版をHQ化する場合は、実写向けの既存固定プロファイルを使います。"
+                       Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
+            <DockPanel Margin="0,10,0,0" LastChildFill="True">
+              <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Reset" Click="ResetModalUpscaleSettings_Click" MinWidth="78" AutomationProperties.Name="Reset AI upscale settings"/>
+              <TextBlock x:Name="ModalUpscaleSettingsStatusText" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" AutomationProperties.LiveSetting="Polite"/>
+            </DockPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
       <Grid x:Name="ModalPhotorealSettingsPopup" Grid.RowSpan="3" Grid.ColumnSpan="2"
             Visibility="Collapsed" Panel.ZIndex="90" Background="Transparent"
             WindowChrome.IsHitTestVisibleInChrome="True"
             MouseLeftButtonDown="ModalPhotorealSettingsBackdrop_MouseLeftButtonDown"
             AutomationProperties.Name="AI photorealization settings overlay">
-        <Border Width="300" MaxHeight="680" Padding="14" CornerRadius="6"
+        <Border x:Name="ModalPhotorealSettingsBoardBorder" Width="300" MaxHeight="680" Padding="14" CornerRadius="6"
                 HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
                 Background="{StaticResource BgElevated}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
                 KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
@@ -2209,7 +2809,7 @@
                       IsSynchronizedWithCurrentItem="False"
                       SelectionChanged="PhotorealStyle_SelectionChanged"
                       AutomationProperties.Name="AI photorealization style"
-                      AutomationProperties.HelpText="Apply a saved prompt, strength, composition, quality, and resolution style."/>
+                      AutomationProperties.HelpText="Apply saved Positive, blank-state Positive, Negative, strength, CFG, quality, and resolution settings."/>
             <Grid Margin="0,6,0,10">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
@@ -2241,8 +2841,8 @@
               <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" Padding="8,2"
                       Foreground="{StaticResource TextPrimary}"
                       Content="Reset" Click="ResetModalPhotorealPrompt_Click"
-                      AutomationProperties.Name="Reset AI photorealization prompt"/>
-              <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
+                      AutomationProperties.Name="Reset AI photorealization positive prompt"/>
+              <TextBlock Text="Positive" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
             </DockPanel>
             <TextBox x:Name="ModalPhotorealPromptTextBox"
                      MinHeight="76" MaxHeight="140" MaxLength="2000"
@@ -2252,22 +2852,69 @@
                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6"
                      VerticalScrollBarVisibility="Auto"
                      TextChanged="ModalPhotorealPrompt_TextChanged"
-                     AutomationProperties.Name="AI photorealization prompt"
-                     AutomationProperties.HelpText="Edit the prompt used for AI photorealization. Reset restores the built-in default."/>
-            <DockPanel Margin="0,10,0,3">
-              <TextBlock x:Name="ModalPhotorealStrengthValue" DockPanel.Dock="Right" Text="80%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
-              <TextBlock Text="実写化の強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
+                     AutomationProperties.Name="AI photorealization positive prompt"
+                     AutomationProperties.HelpText="Used as-is when nonblank. No composition sentence is appended."/>
+            <DockPanel Margin="0,10,0,4">
+              <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" Padding="8,2"
+                      Foreground="{StaticResource TextPrimary}"
+                      Content="Reset" Click="ResetModalPhotorealEmptyPrompt_Click"
+                      AutomationProperties.Name="Reset AI photorealization positive prompt used when blank"/>
+              <TextBlock Text="Positive（空欄時）" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
             </DockPanel>
-            <Slider x:Name="ModalPhotorealStrengthSlider" Minimum="20" Maximum="80" Value="80" TickFrequency="1" IsSnapToTickEnabled="True"
-                    AutoToolTipPlacement="TopLeft" ValueChanged="ModalPhotorealSetting_ValueChanged"
-                    AutomationProperties.Name="Photorealization strength"/>
-            <DockPanel Margin="0,10,0,3">
-              <TextBlock x:Name="ModalPhotorealStructureValue" DockPanel.Dock="Right" Text="100%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
-              <TextBlock Text="元の構図を保つ強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
+            <TextBox x:Name="ModalPhotorealEmptyPromptTextBox"
+                     MinHeight="62" MaxHeight="120" MaxLength="2000"
+                     AcceptsReturn="True" TextWrapping="Wrap"
+                     Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                     CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                     BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6"
+                     VerticalScrollBarVisibility="Auto"
+                     TextChanged="ModalPhotorealEmptyPrompt_TextChanged"
+                     AutomationProperties.Name="AI photorealization positive prompt used when blank"
+                     AutomationProperties.HelpText="Used only when Positive is blank."/>
+            <DockPanel Margin="0,10,0,4">
+              <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" Padding="8,2"
+                      Foreground="{StaticResource TextPrimary}"
+                      Content="Reset" Click="ResetModalPhotorealNegativePrompt_Click"
+                      AutomationProperties.Name="Reset AI photorealization negative prompt"/>
+              <TextBlock Text="Negative" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
             </DockPanel>
-            <Slider x:Name="ModalPhotorealStructureSlider" Minimum="0" Maximum="120" Value="100" TickFrequency="5" IsSnapToTickEnabled="True"
+            <CheckBox x:Name="ModalPhotorealNegativePromptEnabledCheckBox"
+                      IsChecked="False" Margin="0,0,0,5"
+                      Checked="PhotorealNegativePromptEnabled_Changed"
+                      Unchecked="PhotorealNegativePromptEnabled_Changed"
+                      AutomationProperties.Name="Send negative conditioning for this AI photorealization"
+                      AutomationProperties.HelpText="OFF keeps the saved text but sends an empty negative prompt for new FLUX.2 jobs.">
+              <TextBlock Text="Negative文を送る（FLUX.2では通常OFF）" TextWrapping="Wrap"/>
+            </CheckBox>
+            <TextBox x:Name="ModalPhotorealNegativePromptTextBox"
+                     MinHeight="62" MaxHeight="120" MaxLength="2000"
+                     AcceptsReturn="True" TextWrapping="Wrap"
+                     Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                     CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                     BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6"
+                     VerticalScrollBarVisibility="Auto"
+                     TextChanged="ModalPhotorealNegativePrompt_TextChanged"
+                     AutomationProperties.Name="AI photorealization negative prompt"
+                     AutomationProperties.HelpText="Saved locally. It is sent only when the Negative toggle is enabled."/>
+            <TextBlock x:Name="ModalPhotorealPromptStatusText"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10"
+                       TextWrapping="Wrap" Margin="0,6,0,0"
+                       AutomationProperties.LiveSetting="Polite"/>
+            <CheckBox x:Name="ModalPhotorealLoraEnabledCheckBox"
+                      IsChecked="False" Margin="0,10,0,6"
+                      Checked="PhotorealLoraEnabled_Changed" Unchecked="PhotorealLoraEnabled_Changed"
+                      AutomationProperties.Name="Use WarmBloodAban Anything-to-Real LoRA for comparison"
+                      AutomationProperties.HelpText="標準はOFF。比較時は25%または40%を目安にします。80%は顔や表情を均しやすいため非推奨です。">
+              <TextBlock Text="WarmBloodAban Anything-to-Real LoRA（比較用）" TextWrapping="Wrap"/>
+            </CheckBox>
+            <TextBlock Text="標準はOFF。比較は25%／40%が目安、80%は非推奨。" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,9"/>
+            <DockPanel Margin="0,0,0,3">
+              <TextBlock x:Name="ModalPhotorealStrengthValue" DockPanel.Dock="Right" Text="40%" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
+              <TextBlock Text="LoRAの強さ" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
+            </DockPanel>
+            <Slider x:Name="ModalPhotorealStrengthSlider" Minimum="20" Maximum="80" Value="40" TickFrequency="1" IsSnapToTickEnabled="True"
                     AutoToolTipPlacement="TopLeft" ValueChanged="ModalPhotorealSetting_ValueChanged"
-                    AutomationProperties.Name="Composition preservation strength"/>
+                    AutomationProperties.Name="Anything-to-Real LoRA strength"/>
             <DockPanel Margin="0,10,0,3">
               <TextBlock x:Name="ModalPhotorealCfgScaleValue" DockPanel.Dock="Right" Text="1.00" Foreground="{StaticResource TextPrimary}" FontFamily="{StaticResource MonoFont}" FontSize="11"/>
               <TextBlock Text="CFG" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
@@ -2295,6 +2942,31 @@
                 </ComboBox>
               </StackPanel>
             </Grid>
+            <Grid Margin="0,12,0,0">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0">
+                <TextBlock Text="Seed" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalPhotorealSeedModeComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                          SelectionChanged="PhotorealSeedMode_SelectionChanged"
+                          AutomationProperties.Name="AI photorealization seed mode"
+                          AutomationProperties.HelpText="Random omits the seed field. Fixed sends the integer shown beside it.">
+                  <ComboBoxItem Content="Random（推奨）" Tag="random"/>
+                  <ComboBoxItem Content="Fixed" Tag="fixed"/>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+                <TextBlock Text="Fixed値（0〜2147483647）" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                <TextBox x:Name="ModalPhotorealSeedValueTextBox" MaxLength="10" IsEnabled="False"
+                         Padding="7,4" Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                         CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                         BorderBrush="{StaticResource BorderStrong}" TextChanged="PhotorealSeedValue_TextChanged"
+                         AutomationProperties.Name="Fixed AI photorealization seed"/>
+              </StackPanel>
+            </Grid>
+            <TextBlock x:Name="ModalPhotorealSeedStatusText"
+                       Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                       TextWrapping="Wrap" Margin="0,6,0,0"
+                       AutomationProperties.LiveSetting="Polite"/>
             <TextBlock Text="設定を閉じても値は保存されます。元画像は変更しません。" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,12,0,0"/>
           </StackPanel>
           </ScrollViewer>
@@ -2448,6 +3120,27 @@
                 </ComboBox>
               </StackPanel>
             </Grid>
+            <Grid Margin="0,12,0,0">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0">
+                <TextBlock Text="Seed" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalVideoSeedModeComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                          SelectionChanged="VideoSeedMode_SelectionChanged"
+                          AutomationProperties.Name="Video generation seed mode"
+                          AutomationProperties.HelpText="Random omits the seed field. Fixed sends the integer shown beside it.">
+                  <ComboBoxItem Content="Random（推奨）" Tag="random"/>
+                  <ComboBoxItem Content="Fixed" Tag="fixed"/>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+                <TextBlock Text="Fixed値（0〜2147483647）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                <TextBox x:Name="ModalVideoSeedValueTextBox" MaxLength="10" IsEnabled="False"
+                         Padding="7,4" Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                         CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                         BorderBrush="{StaticResource BorderStrong}" TextChanged="VideoSeedValue_TextChanged"
+                         AutomationProperties.Name="Fixed video generation seed"/>
+              </StackPanel>
+            </Grid>
             <TextBlock x:Name="ModalVideoDeliveryText"
                        Text="生成: 16 fps・97f → 最終出力: 30 fps・180f・6.000秒 · RIFE 4.25 · H.264 / yuv420p · 音声なし"
                        Foreground="{StaticResource TextSecondary}" FontSize="10.5"
@@ -2494,11 +3187,22 @@
             <MenuItem Header="Favorite -1" Click="ModalFavoriteDecrease_Click" AutomationProperties.Name="Decrease favorite level"/>
             <Separator/>
             <MenuItem Header="表示中の画像を動画化..." Click="ModalContextVideo_Click" AutomationProperties.Name="Open video generation board for displayed image"/>
+            <MenuItem x:Name="ModalContextI2iEdit" Header="AI編集（髪色）…" Click="OpenModalI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
+            <MenuItem x:Name="ModalContextI2iV2Edit" Header="AI編集（服・表情・背景・ポーズ）…" Click="OpenModalI2iEditV2_Click"
+                      AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
+            <MenuItem x:Name="ModalContextPhotorealUpscale" Header="AI実写高画質化のみ" Click="StartModalPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
             <MenuItem x:Name="ModalContextEnhancedToggle" Header="Show Enhanced / Original" Click="ToggleModalEnhanced_Click" AutomationProperties.Name="Toggle enhanced image output"/>
+            <MenuItem Header="左右反転 (H)" Click="ToggleModalFlip_Click" AutomationProperties.Name="Flip image horizontally"/>
+            <MenuItem Header="100%表示" Click="ModalOneToOne_Click" AutomationProperties.Name="Show actual pixels at 100 percent"/>
+            <MenuItem Header="縮小 (-)" Click="ModalZoomOut_Click" AutomationProperties.Name="Zoom image out"/>
+            <MenuItem Header="画面に合わせる (0)" Click="ModalFit_Click" AutomationProperties.Name="Fit image to preview"/>
+            <MenuItem Header="拡大 (+)" Click="ModalZoomIn_Click" AutomationProperties.Name="Zoom image in"/>
+            <Separator/>
             <MenuItem Header="{DynamicResource UiOpenExternally}" Click="OpenSelectedExternally_Click" AutomationProperties.Name="Open displayed image externally"/>
             <MenuItem Header="{DynamicResource UiShowSourceFolder}" Click="ShowSelectedInFolder_Click" AutomationProperties.Name="Show source in folder"/>
             <MenuItem Header="{DynamicResource UiAddToAlbum}" Click="AddCurrentToAlbum_Click" AutomationProperties.Name="Add current image to Album"/>
             <MenuItem Header="{DynamicResource UiToggleFilmstrip}" Click="ToggleModalFilmstrip_Click" AutomationProperties.Name="Toggle image filmstrip"/>
+            <MenuItem Header="メタデータ表示" Click="ToggleModalMetadataSidebar_Click" AutomationProperties.Name="Toggle metadata sidebar"/>
             <MenuItem x:Name="ModalContextFullScreen" Header="Enter full screen (F11)" Click="ToggleModalFullScreen_Click" AutomationProperties.Name="Toggle full screen"/>
             <MenuItem Header="{DynamicResource UiShortcuts}" Click="OpenShortcuts_Click" AutomationProperties.Name="Open keyboard shortcuts"/>
             <Separator/>
@@ -2541,7 +3245,7 @@
 
         <Border x:Name="ModalMetadataSidebar" Grid.ColumnSpan="3" HorizontalAlignment="Right" VerticalAlignment="Center" Width="300" MaxHeight="640" Visibility="Collapsed"
                 Margin="0,0,12,0" CornerRadius="6" Background="{StaticResource GlassChrome}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" Padding="12"
-                AutomationProperties.Name="Image metadata sidebar" AutomationProperties.HelpText="Review prompt, negative prompt, generation settings, and PNG metadata.">
+                AutomationProperties.Name="Displayed version generation settings" AutomationProperties.HelpText="Review the prompt, negative prompt, and stored generation settings for the currently displayed version.">
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
               <Border Background="{StaticResource SoftFill}" CornerRadius="4" Padding="3" Margin="0,0,0,12">
@@ -2554,7 +3258,7 @@
                                AutomationProperties.Name="Negative prompt metadata tab" AutomationProperties.HelpText="Show negative prompt text and copy actions."/>
                   <RadioButton x:Name="ModalSettingsTabButton" Style="{StaticResource Seg}" GroupName="ModalMetadataTabs"
                                Content="Settings" Tag="settings" Click="ModalMetadataTab_Click"
-                               AutomationProperties.Name="Generation settings metadata tab" AutomationProperties.HelpText="Show generation settings parsed from PNG metadata."/>
+                                AutomationProperties.Name="Generation settings metadata tab" AutomationProperties.HelpText="Show generation settings stored for the currently displayed image or video version."/>
                 </UniformGrid>
               </Border>
 
@@ -2562,7 +3266,7 @@
                 <DockPanel Margin="0,0,0,6">
                   <TextBlock Text="PROMPT" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
                   <Button x:Name="CopyModalPromptButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="52" Padding="8,2"
-                          Content="{DynamicResource UiCopy}" IsEnabled="False" ToolTip="No prompt metadata loaded" Click="CopyPreviewPrompt_Click"
+                          Content="{DynamicResource UiCopy}" IsEnabled="False" ToolTip="No prompt metadata loaded" Click="CopyModalPrompt_Click"
                           AutomationProperties.Name="Copy prompt metadata" AutomationProperties.HelpText="Copy the loaded prompt text to the clipboard."/>
                 </DockPanel>
                 <WrapPanel x:Name="ModalPromptChips" Margin="0,0,0,12" AutomationProperties.Name="Prompt search tags" AutomationProperties.HelpText="Choose a prompt tag to append it to search, close the modal, and focus search."/>
@@ -2574,7 +3278,7 @@
                 <DockPanel Margin="0,0,0,6">
                   <TextBlock Text="NEGATIVE" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
                   <Button x:Name="CopyModalNegativeButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="52" Padding="8,2"
-                          Content="Copy" IsEnabled="False" ToolTip="No negative prompt metadata loaded" Click="CopyPreviewNegative_Click"
+                          Content="Copy" IsEnabled="False" ToolTip="No negative prompt metadata loaded" Click="CopyModalNegative_Click"
                           AutomationProperties.Name="Copy negative prompt metadata" AutomationProperties.HelpText="Copy the loaded negative prompt text to the clipboard."/>
                 </DockPanel>
                 <TextBlock x:Name="ModalNegativeText" Text="-" Foreground="#F5A5A5" FontSize="12" TextWrapping="Wrap" LineHeight="18" MaxHeight="180" Margin="0,0,0,12"/>
@@ -2588,21 +3292,21 @@
 
               <Border Height="1" Background="{StaticResource GlassBorder}" Margin="0,0,0,12"/>
               <DockPanel Margin="0,0,0,8">
-                <TextBlock Text="PNG INFO" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBlock Text="GENERATION INFO" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 <Button x:Name="CopyModalMetadataButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Height="24" MinWidth="52" Padding="8,2"
-                        Content="{DynamicResource UiCopy}" IsEnabled="False" ToolTip="No PNG metadata loaded" Click="CopyPreviewMetadata_Click"
-                        AutomationProperties.Name="Copy PNG metadata" AutomationProperties.HelpText="Copy the loaded PNG metadata summary to the clipboard."/>
+                        Content="{DynamicResource UiCopy}" IsEnabled="False" ToolTip="No PNG metadata loaded" Click="CopyModalMetadata_Click"
+                        AutomationProperties.Name="Copy displayed generation metadata" AutomationProperties.HelpText="Copy the stored generation settings for the currently displayed version."/>
               </DockPanel>
               <TextBlock x:Name="ModalMetadataStatusText" Text="{DynamicResource UiNoPngMetadata}" Foreground="{StaticResource TextTertiary}" FontSize="12" TextWrapping="Wrap"/>
             </StackPanel>
           </ScrollViewer>
         </Border>
 
-        <Border x:Name="ModalFooter" Grid.ColumnSpan="3" Height="44" VerticalAlignment="Bottom" HorizontalAlignment="Center" CornerRadius="4" Background="{StaticResource GlassChrome}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" Padding="7,4" Margin="0,0,0,12" Panel.ZIndex="30">
+        <Border x:Name="ModalFooter" Grid.ColumnSpan="3" Height="44" VerticalAlignment="Bottom" HorizontalAlignment="Center" CornerRadius="4" Background="{StaticResource GlassChrome}" BorderBrush="{StaticResource GlassBorderHover}" BorderThickness="1" Padding="7,4" Margin="0,0,0,12" Panel.ZIndex="30" Visibility="Collapsed">
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <Button x:Name="ModalZoomOutButton" Style="{StaticResource GhostButton}" Content="−" ToolTip="Zoom out (-)" AutomationProperties.Name="Zoom image out" Height="32" MinWidth="32" Padding="6,0" Click="ModalZoomOut_Click"/>
-            <Button x:Name="ModalZoomResetButton" Style="{StaticResource GhostButton}" Content="Fit" ToolTip="Reset to fit (0)" AutomationProperties.Name="Fit image to preview" Height="32" MinWidth="48" Padding="7,0" Margin="4,0" Click="ModalFit_Click"/>
-            <Button x:Name="ModalZoomInButton" Style="{StaticResource GhostButton}" Content="+" ToolTip="Zoom in (+)" AutomationProperties.Name="Zoom image in" Height="32" MinWidth="32" Padding="6,0" Margin="4,0,0,0" Click="ModalZoomIn_Click"/>
+            <Button x:Name="ModalZoomOutButton" Style="{StaticResource GhostButton}" Content="−" ToolTip="Zoom out (-)" AutomationProperties.Name="Zoom image out" Height="32" MinWidth="32" Padding="6,0" Click="ModalZoomOut_Click" Visibility="Collapsed"/>
+            <Button x:Name="ModalZoomResetButton" Style="{StaticResource GhostButton}" Content="Fit" ToolTip="Reset to fit (0)" AutomationProperties.Name="Fit image to preview" Height="32" MinWidth="48" Padding="7,0" Margin="4,0" Click="ModalFit_Click" Visibility="Collapsed"/>
+            <Button x:Name="ModalZoomInButton" Style="{StaticResource GhostButton}" Content="+" ToolTip="Zoom in (+)" AutomationProperties.Name="Zoom image in" Height="32" MinWidth="32" Padding="6,0" Margin="4,0,0,0" Click="ModalZoomIn_Click" Visibility="Collapsed"/>
             <Button x:Name="ModalVideoPlaybackButton"
                     Style="{StaticResource GhostButton}" MinWidth="76" Height="32" Padding="8,0"
                     Margin="8,0,4,0" Visibility="Collapsed" Click="ModalVideoPlayback_Click"
