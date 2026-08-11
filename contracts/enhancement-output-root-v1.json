@@ -17,8 +17,30 @@
     "i2i": "Edited",
     "video": "Videos"
   },
-  "allocationTime": "when a queued job starts processing",
-  "existingJobs": "recorded absolute output paths remain authoritative and are never rewritten by a settings change",
+  "allocationTime": "a provisional file is allocated outside every date folder when a queued job starts processing",
+  "finalLayout": {
+    "pattern": "<operation-folder>/YYYY-MM-DD/<managed-filename>",
+    "dateSource": "the published output file's own Windows CreationTime interpreted in the companion's local timezone",
+    "prohibitedDateSources": [
+      "job.createdAt",
+      "job.startedAt",
+      "job.finishedAt",
+      "source EXIF",
+      "source CreationTime",
+      "source LastWriteTime"
+    ],
+    "publication": "after the adapter publishes a regular file, read that file's CreationTime and perform a same-volume no-replace atomic finalize into its date folder",
+    "durablePath": "a running job does not expose the provisional path; only the completed job records the final path",
+    "invalidCreationTime": "fail closed and report the bounded error without guessing a date"
+  },
+  "existingOutputMigration": {
+    "scope": "only the trees rooted at the direct Upscaled, Photorealized, Edited, and Videos folders below the configured output root; accept flat files or one YYYY-MM-DD level and report other layouts",
+    "order": "plan from each real file's CreationTime, atomically move every planned file, then remap durable output and source references in one locked write",
+    "precondition": "the queue is paused and no job is running",
+    "proof": "retain a bounded plan, pre-migration jobs snapshot, receipt, file and byte totals, reference digest, and remaining-move count",
+    "invalidCreationTime": "report separately and leave the file and references unchanged"
+  },
+  "existingJobs": "recorded absolute output paths remain authoritative and are never rewritten by a settings change; only the explicit paused-and-drained CreationTime migration may remap them after all planned file moves succeed",
   "settingsMutation": {
     "trigger": "explicit user folder selection",
     "write": "sibling temporary file with write-through flush, then replace",

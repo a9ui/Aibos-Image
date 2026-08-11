@@ -77,6 +77,27 @@ The shared durable set is:
   inbox below `enhance/enqueue-inbox/**`, and managed outputs below the configured
   parent (with `enhance/outputs/**` retained as the fallback).
 
+Managed outputs use the same final layout for every operation:
+`Upscaled/YYYY-MM-DD/`, `Photorealized/YYYY-MM-DD/`,
+`Edited/YYYY-MM-DD/`, and `Videos/YYYY-MM-DD/`. The date is derived only from
+the completed output file's own Windows CreationTime in the companion's local
+timezone. Job creation/start/finish timestamps, source EXIF, source
+CreationTime, and source LastWriteTime are not date inputs. An adapter writes a
+provisional file outside every date folder; after publication the companion
+reads that file's CreationTime, performs a same-volume no-replace atomic
+finalize, and writes only the final path to the completed durable job. Missing,
+non-finite, implausibly old, or materially future CreationTime fails closed and
+is reported without guessing another date.
+
+The one-time existing-output migration is separately gated. It inventories
+only the four configured operation roots, plans every destination from each
+real file's CreationTime, pauses and drains the queue, completes every
+same-volume file move, and only then remaps durable output/source references in
+one locked store write. Its bounded plan, pre-write snapshot, receipt, file and
+byte totals, reference digest, ambiguous-date report, and zero remaining-move
+check are retained locally. It never uses source or job timestamps and never
+copies, deletes, or republishes model, source, or output bytes.
+
 The current shared `settings.json` allowlist includes
 `confirmBeforeDelete` and `thumbnailStatusBorders`. WPF adopts the shared
 delete-confirmation value when present and keeps its local value only as the
@@ -869,7 +890,8 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   975x1614 bird input refines to 480x800, reducing edge-copy padding. The
   source is never cropped, rewritten, or used as a temporary output.
 - Final video outputs use `Videos/YYYY-MM-DD/` below the configured
-  Enhancement output parent, with the date derived from the durable job. The
+  Enhancement output parent, with the date derived only from the final file's
+  Windows CreationTime under the common managed-output rule above. The
   filename includes job, source, and preset identities. Existing valid flat
   `Videos/` references remain readable during migration. A core ComfyUI
   staging file is allowed only as an exact adapter-owned transient and must be

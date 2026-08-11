@@ -19,6 +19,13 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
 - `次に動画化` remains deferred: the current companion contract explicitly
   rejects image-only `queuePlacement` for video jobs, so WPF does not present a
   control that could silently append or misrepresent queue placement.
+- The paired private companion implementation `PRIVATE-H25-CREATION-A` now
+  applies one output rule to Upscaled, Photorealized, Edited, and Videos: the
+  final folder date comes only from the output file's Windows CreationTime.
+  Its local migration receipt proves unchanged file/byte totals and zero
+  remaining moves. The public candidate carries only the cross-repository
+  contract and synthetic behavior; it does not import the private Node/Next.js
+  implementation or lineage.
 - Security and public-readiness scanning remain a separate review lane. This
   packet contains only synthetic and aggregate evidence.
 
@@ -83,6 +90,15 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
   board; opening hair again retired multi-target. At every boundary exactly one
   board was visible, the three board opens made three health GETs, and mutation
   calls remained `0`.
+- CreationTime output layout: the paired private companion migration planned
+  and moved 2,269 existing artifacts, then remapped 1,367 output paths and two
+  managed-source references in one locked store write. The before/after audit
+  remained 7,640 files and 43,546,828,337 bytes, with zero ambiguous dates and
+  zero remaining moves. Three durable rows with no real output file stayed
+  reported as `missing-output`; no timestamp was guessed for them. Focused
+  companion tests passed 26/26, the companion TypeScript build passed, and
+  scoped ESLint passed. The broader legacy typecheck remains contaminated by
+  unrelated generated experiment source outside this change.
 
 ## Second Pro adjudication
 

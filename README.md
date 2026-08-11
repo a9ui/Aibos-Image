@@ -58,9 +58,11 @@ include:
 - `enhance/jobs.json`, the versioned explicit-enqueue inbox below
   `enhance/enqueue-inbox/**`, plus managed outputs at the parent selected by
   `enhance/output-root.txt` (falling back to `enhance/outputs/**`). Image
-  outputs remain under `Upscaled/`, `Photorealized/`, and `Edited/`; the
-  reader-first managed-video contract reserves the sibling flat `Videos/`
-  folder.
+  outputs remain under `Upscaled/`, `Photorealized/`, and `Edited/`; video uses
+  the sibling `Videos/` folder. Completed files in all four operation folders
+  are finalized below `YYYY-MM-DD/`, where the date comes only from the output
+  file's own Windows CreationTime in the companion's local timezone. Job and
+  source timestamps never choose that date.
 
 Renderer-local presentation state, including WPF window geometry, panel sizes,
 keyboard bindings, current selection, preview layout, and named AI
