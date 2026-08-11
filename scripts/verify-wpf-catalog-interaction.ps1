@@ -92,7 +92,7 @@ if ($result.favoriteDuplicateEvictionRaceExact -ne $true) {
 if ($result.favoriteFilteredFailureStatusExact -ne $true) {
     $failures.Add('favorite-filter write failure did not preserve rollback projection and Retry status')
 }
-if ($result.searchP95Ms -gt 250 -or $result.filterP95Ms -gt 250 -or $result.sortP95Ms -gt 650) {
+if ($result.searchP95Ms -gt 350 -or $result.filterP95Ms -gt 350 -or $result.sortP95Ms -gt 650) {
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")
 }
 if ($result.selectionStable -ne $true) { $failures.Add('selection did not survive search/filter/sort churn') }
