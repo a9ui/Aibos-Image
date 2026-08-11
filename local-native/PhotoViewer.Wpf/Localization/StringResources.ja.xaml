@@ -143,7 +143,7 @@
   <sys:String x:Key="UiVideoH3RewriteButton">MiniMax語に変換</sys:String>
   <sys:String x:Key="UiVideoH3RewriteAgainButton">もう一度変換</sys:String>
   <sys:String x:Key="UiVideoH3RewriteButtonAutomation">画像と入力からMiniMax H3向け候補を作成</sys:String>
-  <sys:String x:Key="UiVideoH3RewriteButtonHelp">ローカルの画像対応モデルを明示的に起動します。動画ジョブは追加しません。</sys:String>
+  <sys:String x:Key="UiVideoH3RewriteButtonHelp">起動済みのlocal Qwen変換器を使います。worker起動や動画ジョブ追加はしません。</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeLabel">変換方法</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeAutomation">MiniMax語への変換方法</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeHelp">整形は入力を忠実に変換し、演出は動きとカメラを強め、おまかせは画像に合う演出を選びます。</sys:String>
@@ -166,6 +166,7 @@
   <sys:String x:Key="UiVideoH3StatusStale">入力・画像・Model・Style・変換方法が変わりました。もう一度変換してください。</sys:String>
   <sys:String x:Key="UiVideoH3StatusStaleResponse">変換中に入力・画像・Model・Style・変換方法が変わったため、結果を採用しませんでした。</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidCandidate">候補はH3形式ではないか、2000文字を超えています。入力には反映していません。</sys:String>
+  <sys:String x:Key="UiVideoH3StatusInputTooLong">選んだ変換方法の指示を含めると2000文字を超えます。入力を少し短くしてください。ジョブやworkerは変更していません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidResponse">H3語化の応答を確認できません。入力プロンプトは変更していません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusUnavailable">ローカルのH3語化を利用できません。動画ジョブは追加していません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusSourceUnavailable">H3語化する画像が見つかりません。入力を選び直してください。</sys:String>

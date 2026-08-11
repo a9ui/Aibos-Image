@@ -19,9 +19,19 @@ Assert-True $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCa
 
 $buildRoot = Join-Path $runRoot 'build'
 $resultPath = Join-Path $runRoot 'result.json'
+$previousPromptPolicyPath = [Environment]::GetEnvironmentVariable(
+    'AIBOS_WPF_PROMPT_POLICY_PATH',
+    'Process')
 
 try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+    # The public smoke must never depend on or expose a developer's ignored
+    # local prompt policy. A missing bounded path deterministically selects the
+    # tracked synthetic fallback.
+    [Environment]::SetEnvironmentVariable(
+        'AIBOS_WPF_PROMPT_POLICY_PATH',
+        (Join-Path $runRoot 'missing-wpf-prompts.local.json'),
+        'Process')
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
         & $DotnetPath build $project -c $Configuration --nologo -v:minimal "-p:OutputPath=$buildOutput"
@@ -105,6 +115,10 @@ try {
     $result | ConvertTo-Json -Depth 5
 }
 finally {
+    [Environment]::SetEnvironmentVariable(
+        'AIBOS_WPF_PROMPT_POLICY_PATH',
+        $previousPromptPolicyPath,
+        'Process')
     if (Test-Path -LiteralPath $runRoot) {
         $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
         Assert-True $resolvedRunRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) 'Refusing cleanup outside TEMP.'

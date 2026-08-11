@@ -44,6 +44,7 @@ public partial class MainWindow
     private DispatcherTimer _enhancementWorkspacePollTimer = null!;
     private CancellationTokenSource? _enhancementWorkspaceThumbnailCts;
     private bool _enhancementWorkspaceRefreshPending;
+    private bool _enhancementWorkspaceHealthPollPending;
     private long _enhancementWorkspaceRefreshGeneration;
     private long _enhancementWorkspaceQueuePresentationRevision;
     private bool _enhancementWorkspaceMutationPending;
@@ -55,6 +56,7 @@ public partial class MainWindow
     private int _enhancementWorkspacePollCount;
     private int _enhancementWorkspaceHealthGetCount;
     private bool? _enhancementWorkspaceHealthEndpointSupported;
+    private string? _enhancementWorkspaceHealthInventorySignature;
     private bool? _enhancementWorkspaceQueuePaused;
     private bool _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
     private bool _enhancementWorkspacePhotorealEnqueueNextSupported;
@@ -915,6 +917,7 @@ public partial class MainWindow
         EnhancementJobsDialog.Visibility = Visibility.Visible;
         EnhancementJobsStatusText.Text = "Loading jobs from the local companion...";
         _enhancementWorkspaceHealthEndpointSupported = null;
+        _enhancementWorkspaceHealthInventorySignature = null;
         _enhancementWorkspaceQueuePaused = null;
         RefreshEnhancementQueuePauseControl();
         ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
@@ -956,7 +959,8 @@ public partial class MainWindow
 
     private async void RefreshEnhancementJobs_Click(object sender, RoutedEventArgs e)
     {
-        if (_enhancementWorkspaceMutationPending)
+        if (_enhancementWorkspaceMutationPending
+            || _enhancementWorkspaceHealthPollPending)
             return;
         await RefreshEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration, isPoll: false);
     }
@@ -1040,14 +1044,64 @@ public partial class MainWindow
     {
         if (EnhancementJobsDialog.Visibility != Visibility.Visible
             || _enhancementWorkspaceMutationPending
+            || _enhancementWorkspaceHealthPollPending
             || (_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == _enhancementWorkspaceGeneration))
             return;
 
         _enhancementWorkspacePollCount++;
-        await RefreshEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration, isPoll: true);
+        await PollEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration);
     }
 
-    private async Task RefreshEnhancementJobsWorkspaceAsync(long generation, bool isPoll)
+    private async Task PollEnhancementJobsWorkspaceAsync(long generation)
+    {
+        if (_enhancementWorkspaceHealthPollPending
+            || _enhancementWorkspaceMutationPending
+            || EnhancementJobsDialog.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _enhancementWorkspaceHealthPollPending = true;
+        try
+        {
+            EnhancementQueueHealthView? health =
+                await RefreshEnhancementQueueHealthAsync(generation, isPoll: true);
+            if (generation != _enhancementWorkspaceGeneration
+                || EnhancementJobsDialog.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+
+            string? observedSignature = health?.InventorySignature;
+            if (observedSignature is not null
+                && string.Equals(
+                    observedSignature,
+                    _enhancementWorkspaceHealthInventorySignature,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            // The compact health payload is enough for idle progress ticks.
+            // Fetch the full inventory only when its status counts/current job
+            // changed, or when an older companion cannot provide health.
+            await RefreshEnhancementJobsWorkspaceAsync(
+                generation,
+                isPoll: true,
+                refreshHealth: false,
+                observedHealthInventorySignature: observedSignature);
+        }
+        finally
+        {
+            _enhancementWorkspaceHealthPollPending = false;
+        }
+    }
+
+    private async Task RefreshEnhancementJobsWorkspaceAsync(
+        long generation,
+        bool isPoll,
+        bool refreshHealth = true,
+        string? observedHealthInventorySignature = null)
     {
         if ((_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == generation)
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
@@ -1129,7 +1183,21 @@ public partial class MainWindow
             else
                 _enhancementWorkspacePollTimer.Stop();
 
-            await RefreshEnhancementQueueHealthAsync(generation, isPoll);
+            if (observedHealthInventorySignature is not null)
+            {
+                _enhancementWorkspaceHealthInventorySignature =
+                    observedHealthInventorySignature;
+            }
+            if (refreshHealth)
+            {
+                EnhancementQueueHealthView? health =
+                    await RefreshEnhancementQueueHealthAsync(generation, isPoll);
+                if (health is EnhancementQueueHealthView currentHealth)
+                {
+                    _enhancementWorkspaceHealthInventorySignature =
+                        currentHealth.InventorySignature;
+                }
+            }
         }
         finally
         {
@@ -1143,10 +1211,12 @@ public partial class MainWindow
         }
     }
 
-    private async Task RefreshEnhancementQueueHealthAsync(long generation, bool isPoll)
+    private async Task<EnhancementQueueHealthView?> RefreshEnhancementQueueHealthAsync(
+        long generation,
+        bool isPoll)
     {
         if (isPoll && _enhancementWorkspaceHealthEndpointSupported == false)
-            return;
+            return null;
 
         _enhancementWorkspaceHealthGetCount++;
         EnhancementApiResponse response =
@@ -1154,7 +1224,7 @@ public partial class MainWindow
         if (generation != _enhancementWorkspaceGeneration
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
         {
-            return;
+            return null;
         }
 
         if (response.StatusCode == 404)
@@ -1162,7 +1232,7 @@ public partial class MainWindow
             _enhancementWorkspaceHealthEndpointSupported = false;
             ApplyEnhancementQueueHealthUnavailable(
                 "Update the local companion to show queue health.");
-            return;
+            return null;
         }
 
         _enhancementWorkspaceHealthEndpointSupported = true;
@@ -1170,17 +1240,18 @@ public partial class MainWindow
         {
             ApplyEnhancementQueueHealthUnavailable(
                 "Queue health could not be read. Jobs remain available.");
-            return;
+            return null;
         }
 
         if (!TryParseEnhancementQueueHealth(payload, out EnhancementQueueHealthView health))
         {
             ApplyEnhancementQueueHealthUnavailable(
                 "The companion returned an unsupported health response.");
-            return;
+            return null;
         }
 
         ApplyEnhancementQueueHealth(health);
+        return health;
     }
 
     private static bool TryParseEnhancementQueueHealth(
@@ -1208,10 +1279,10 @@ public partial class MainWindow
             || countsElement.ValueKind != JsonValueKind.Object
             || !TryReadNonNegativeCount(countsElement, "queued", out int queued)
             || !TryReadNonNegativeCount(countsElement, "running", out int running)
-            || !TryReadNonNegativeCount(countsElement, "succeeded", out _)
-            || !TryReadNonNegativeCount(countsElement, "failed", out _)
-            || !TryReadNonNegativeCount(countsElement, "canceled", out _)
-            || !TryReadNonNegativeCount(countsElement, "deleted", out _)
+            || !TryReadNonNegativeCount(countsElement, "succeeded", out int succeeded)
+            || !TryReadNonNegativeCount(countsElement, "failed", out int failed)
+            || !TryReadNonNegativeCount(countsElement, "canceled", out int canceled)
+            || !TryReadNonNegativeCount(countsElement, "deleted", out int deleted)
             || !payload.TryGetProperty("runtime", out JsonElement runtimeElement)
             || runtimeElement.ValueKind != JsonValueKind.Object)
         {
@@ -1248,6 +1319,37 @@ public partial class MainWindow
         else
         {
             return false;
+        }
+
+        string? currentJobId = null;
+        int? currentProgress = null;
+        DateTimeOffset? currentUpdatedAt = null;
+        if (jobsElement.TryGetProperty("current", out JsonElement currentElement)
+            && currentElement.ValueKind == JsonValueKind.Object)
+        {
+            if (currentElement.TryGetProperty("id", out JsonElement currentIdElement)
+                && currentIdElement.ValueKind == JsonValueKind.String)
+            {
+                currentJobId = currentIdElement.GetString();
+                if (string.IsNullOrWhiteSpace(currentJobId))
+                    currentJobId = null;
+            }
+            if (currentElement.TryGetProperty("progress", out JsonElement progressElement)
+                && progressElement.TryGetInt32(out int progress)
+                && progress is >= 0 and <= 100)
+            {
+                currentProgress = progress;
+            }
+            if (currentElement.TryGetProperty("updatedAt", out JsonElement updatedAtElement)
+                && updatedAtElement.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(
+                    updatedAtElement.GetString(),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out DateTimeOffset updatedAt))
+            {
+                currentUpdatedAt = updatedAt;
+            }
         }
 
         if (runtimeElement.TryGetProperty("sourceDirty", out JsonElement dirtyElement))
@@ -1355,6 +1457,8 @@ public partial class MainWindow
             "working" => "AccentLight",
             _ => "Warning",
         };
+        string inventorySignature = FormattableString.Invariant(
+            $"{queued}|{running}|{succeeded}|{failed}|{canceled}|{deleted}|{currentJobId ?? "-"}");
         health = new EnhancementQueueHealthView(
             stateLabel,
             detail,
@@ -1362,7 +1466,11 @@ public partial class MainWindow
             foregroundResource,
             paused,
             queuedPhotorealPromptUpdate,
-            photorealPromptControls && atomicImageEnqueueNext);
+            photorealPromptControls && atomicImageEnqueueNext,
+            inventorySignature,
+            currentJobId,
+            currentProgress,
+            currentUpdatedAt);
         return true;
     }
 
@@ -1401,6 +1509,16 @@ public partial class MainWindow
             (Brush)FindResource(health.ForegroundResource);
         EnhancementJobsHealthDetailText.Text = health.Detail;
         EnhancementJobsHealthRevisionText.Text = health.Revision;
+        if (health.CurrentJobId is not null
+            && health.CurrentProgress is int currentProgress)
+        {
+            _enhancementWorkspaceJobs
+                .FirstOrDefault(job => string.Equals(
+                    job.Id,
+                    health.CurrentJobId,
+                    StringComparison.Ordinal))?
+                .ApplyHealthProgress(currentProgress, health.CurrentUpdatedAt);
+        }
         RefreshEnhancementQueuePauseControl();
     }
 
@@ -3535,6 +3653,27 @@ public partial class MainWindow
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
     }
 
+    public async Task PollEnhancementJobsForSmokeAsync()
+    {
+        bool resumePolling = _enhancementWorkspacePollTimer.IsEnabled;
+        _enhancementWorkspacePollTimer.Stop();
+        _enhancementWorkspacePollCount++;
+        try
+        {
+            await PollEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration);
+            await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+        }
+        finally
+        {
+            if (resumePolling
+                && EnhancementJobsDialog.Visibility == Visibility.Visible
+                && _enhancementWorkspaceJobs.Any(static job => job.IsActive))
+            {
+                _enhancementWorkspacePollTimer.Start();
+            }
+        }
+    }
+
     public async Task WaitForEnhancementJobsReturnForSmokeAsync()
     {
         for (int attempt = 0; attempt < 400; attempt++)
@@ -3996,6 +4135,31 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
     }
 
+    public void ApplyHealthProgress(int progress, DateTimeOffset? updatedAt)
+    {
+        if (Status != "running")
+            return;
+
+        int nextProgress = Math.Clamp(progress, 0, 100);
+        bool progressChanged = Progress != nextProgress;
+        bool updatedChanged = updatedAt.HasValue && UpdatedAt != updatedAt.Value;
+        if (!progressChanged && !updatedChanged)
+            return;
+
+        Progress = nextProgress;
+        if (updatedAt.HasValue)
+            UpdatedAt = updatedAt.Value;
+        if (progressChanged)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
+        }
+        if (updatedChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TimestampText)));
+    }
+
     public void ApplyQueuePresentation(
         int queuePosition,
         int queueCount,
@@ -4080,7 +4244,11 @@ internal readonly record struct EnhancementQueueHealthView(
     string ForegroundResource,
     bool? Paused,
     bool QueuedPhotorealPromptUpdate,
-    bool PhotorealEnqueueNext);
+    bool PhotorealEnqueueNext,
+    string InventorySignature,
+    string? CurrentJobId,
+    int? CurrentProgress,
+    DateTimeOffset? CurrentUpdatedAt);
 
 public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     bool Visible,

@@ -1028,6 +1028,7 @@ public partial class MainWindow : Window
                 && added.Add(tile.Path))
                 candidates.Add(tile);
         }
+        int visibleCandidateCount = candidates.Count;
         void AddRealizedPrefetchCandidate(int index)
         {
             Tile tile = _tiles[index];
@@ -1060,11 +1061,14 @@ public partial class MainWindow : Window
             }
         }
 
-        string signature = $"grid|{_loadGeneration}|{_thumbnailViewportRevision}|{firstVisible}|{lastVisible}";
+        string signature =
+            $"grid|{_loadGeneration}|{_thumbnailViewportRevision}|{firstVisible}|{lastVisible}|{firstRealized}|{lastRealized}|{visibleCandidateCount}|{candidates.Count}";
         ScheduleThumbnailCandidates(
             candidates,
             signature,
-            Math.Min(ImmediateViewportThumbnailCount, candidates.Count));
+            Math.Min(
+                candidates.Count,
+                Math.Max(ImmediateViewportThumbnailCount, visibleCandidateCount)));
     }
 
     private void ScheduleThumbnailCandidates(

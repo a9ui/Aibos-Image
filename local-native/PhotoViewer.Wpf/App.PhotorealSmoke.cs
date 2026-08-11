@@ -975,24 +975,18 @@ public partial class App
                     && resetSettings.Prompt == window.DefaultModalPhotorealPromptForSmoke
                     && resetSettings.EmptyPrompt == window.DefaultModalPhotorealEmptyPromptForSmoke
                     && resetSettings.NegativePrompt == window.DefaultModalPhotorealNegativePromptForSmoke;
-                defaultPromptContract = window.DefaultModalPhotorealPromptForSmoke.Contains(
-                        "five natural fingers",
+                const string publicFallbackPrompt =
+                    "Convert the supplied image into a faithful realistic photograph while preserving its visible subject and composition.";
+                defaultPromptContract = string.Equals(
+                        window.DefaultModalPhotorealPromptForSmoke,
+                        publicFallbackPrompt,
                         StringComparison.Ordinal)
-                    && window.DefaultModalPhotorealPromptForSmoke.Contains(
-                        "exact expression and emotion",
+                    && string.Equals(
+                        window.DefaultModalPhotorealEmptyPromptForSmoke,
+                        publicFallbackPrompt,
                         StringComparison.Ordinal)
-                    && window.DefaultModalPhotorealPromptForSmoke.Contains(
-                        "Do not add a smile unless the source is smiling",
-                        StringComparison.Ordinal)
-                    && !window.DefaultModalPhotorealPromptForSmoke.Contains(
-                        "ADetailer",
-                        StringComparison.OrdinalIgnoreCase)
-                    && window.DefaultModalPhotorealEmptyPromptForSmoke.Contains(
-                        "fresh gentle expression",
-                        StringComparison.Ordinal)
-                    && window.DefaultModalPhotorealNegativePromptForSmoke.Contains(
-                        "exposed nipples",
-                        StringComparison.Ordinal);
+                    && string.IsNullOrEmpty(
+                        window.DefaultModalPhotorealNegativePromptForSmoke);
                 const string nippleTexturePrompt =
                     "realistic nipple and areola texture with subtle Montgomery glands, fine natural creases, and shallow indentations";
                 var mappingRows = new[]

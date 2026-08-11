@@ -126,6 +126,9 @@ public partial class App
             int readinessGetCalls = 0;
             int rewritePostCalls = 0;
             int jobsPostCalls = 0;
+            int queueMutationCalls = 0;
+            int companionStarterCalls = 0;
+            var queueMutationRoutes = new List<string>();
             int enqueueHealthGetCalls = 0;
             TaskCompletionSource<bool>? enqueueHealthEntered = null;
             TaskCompletionSource<bool>? releaseEnqueueHealth = null;
@@ -193,6 +196,15 @@ public partial class App
                                     errorBody);
                             }
 
+                            if (string.Equals(
+                                    rewriteResponseTransport,
+                                    "unavailable",
+                                    StringComparison.Ordinal))
+                            {
+                                throw new HttpRequestException(
+                                    "synthetic unavailable prompt compiler");
+                            }
+
                             if (!string.Equals(
                                     rewriteResponseTransport,
                                     "normal",
@@ -258,10 +270,27 @@ public partial class App
                         {
                             jobsPostCalls++;
                         }
+                        if (request.Method != HttpMethod.Get
+                            && path.StartsWith(
+                                "/api/enhance/",
+                                StringComparison.Ordinal))
+                        {
+                            queueMutationCalls++;
+                            queueMutationRoutes.Add(
+                                $"{request.Method.Method} {path}");
+                        }
                         return JsonResponse(
                             HttpStatusCode.NotFound,
                             new { error = "unexpected smoke route" });
                     });
+                    window.EnableEnhancementCompanionAutoStartProbeForSmoke(
+                        _ =>
+                        {
+                            companionStarterCalls++;
+                            return (false, "prompt conversion must not start the companion");
+                        });
+                    int launchAttemptsBeforeRewrite =
+                        window.EnhancementCompanionLaunchAttemptCountForSmoke;
 
                     await window.LoadFolderAsync(sourceFolder);
                     bool selected = window.SelectFileNameForSmoke(
@@ -587,6 +616,22 @@ public partial class App
                             retainedBeforeManualEdit,
                             StringComparison.Ordinal);
 
+                    int postsBeforeModeOverflow = rewritePostCalls;
+                    window.SetAuthoritativeVideoPromptForSmoke(
+                        new string('p', 2_000));
+                    window.SetVideoH3PromptRewriteModeForSmoke("direction");
+                    bool modeOverflowRejectedExplicitly =
+                        !await window.RewriteVideoPromptForH3ForSmokeAsync()
+                        && rewritePostCalls == postsBeforeModeOverflow
+                        && (window.VideoH3PromptRewriteStatusForSmoke.Contains(
+                                "2000",
+                                StringComparison.Ordinal)
+                            || window.VideoH3PromptRewriteStatusForSmoke.Contains(
+                                "2,000",
+                                StringComparison.Ordinal));
+                    window.SetVideoH3PromptRewriteModeForSmoke("polish");
+                    window.SetAuthoritativeVideoPromptForSmoke(basePrompt);
+
                     string pendingInboxPath = Path.Combine(
                         Path.GetDirectoryName(Path.GetFullPath(environment[
                             "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"]!))!,
@@ -609,6 +654,15 @@ public partial class App
                     int transportReservationsBefore =
                         PendingReservationCount();
                     int transportJobsPostsBefore = jobsPostCalls;
+                    int transportLaunchAttemptsBefore =
+                        window.EnhancementCompanionLaunchAttemptCountForSmoke;
+                    int transportStarterCallsBefore = companionStarterCalls;
+                    rewriteResponseTransport = "unavailable";
+                    bool unavailableCompilerFailedClosed =
+                        !await window.RewriteVideoPromptForH3ForSmokeAsync()
+                        && window.EnhancementCompanionLaunchAttemptCountForSmoke
+                            == transportLaunchAttemptsBefore
+                        && companionStarterCalls == transportStarterCallsBefore;
                     rewriteResponseTransport = "declared-oversize";
                     bool declaredOversizeRejected =
                         !await window.RewriteVideoPromptForH3ForSmokeAsync();
@@ -619,7 +673,8 @@ public partial class App
                     int responseByteLimit = PhotoViewer.Wpf.MainWindow
                         .VideoH3PromptRewriteResponseByteLimitForSmoke;
                     bool responseTransportBounded =
-                        declaredOversizeRejected
+                        unavailableCompilerFailedClosed
+                        && declaredOversizeRejected
                         && chunkedOversizeRejected
                         && declaredOversizeStream is not null
                         && declaredOversizeStream.BytesRead == 0
@@ -644,10 +699,14 @@ public partial class App
                             StringComparison.Ordinal)
                         && PendingReservationCount()
                             == transportReservationsBefore
-                        && jobsPostCalls == transportJobsPostsBefore;
+                        && jobsPostCalls == transportJobsPostsBefore
+                        && window.EnhancementCompanionLaunchAttemptCountForSmoke
+                            == transportLaunchAttemptsBefore
+                        && companionStarterCalls == transportStarterCallsBefore;
                     int reservationsBeforeSourceRace =
                         PendingReservationCount();
                     int jobsPostsBeforeSourceRace = jobsPostCalls;
+                    int healthGetsBeforeSourceRace = enqueueHealthGetCalls;
                     enqueueHealthEntered = new TaskCompletionSource<bool>(
                         TaskCreationOptions.RunContinuationsAsynchronously);
                     releaseEnqueueHealth = new TaskCompletionSource<bool>(
@@ -674,7 +733,8 @@ public partial class App
                     bool sourceChangedBeforePublishNoReservation =
                         sourceRaceReachedHealth
                         && !sourceRaceQueued
-                        && enqueueHealthGetCalls == 1
+                        && enqueueHealthGetCalls
+                            == healthGetsBeforeSourceRace + 1
                         && jobsPostCalls == jobsPostsBeforeSourceRace
                         && PendingReservationCount()
                             == reservationsBeforeSourceRace;
@@ -687,9 +747,13 @@ public partial class App
 
                     bool contractUnchanged = File.ReadAllBytes(contractPath)
                         .SequenceEqual(contractBefore);
-                    bool noQueueMutation = jobsPostCalls == 0
-                        && readinessGetCalls == rewritePostCalls
-                        && rewritePostCalls >= 8;
+                    bool noQueueMutation = queueMutationCalls == 0
+                        && jobsPostCalls == 0
+                        && readinessGetCalls == 0
+                        && rewritePostCalls >= 8
+                        && launchAttemptsBeforeRewrite == 0
+                        && window.EnhancementCompanionLaunchAttemptCountForSmoke == 0
+                        && companionStarterCalls == 0;
                     ok = contractIdentity
                         && sourceFixtureExact
                         && contractUnchanged
@@ -718,6 +782,7 @@ public partial class App
                         && oversizeRejected
                         && hashMismatchRejected
                         && manualEditInvalidatesUndoAndApply
+                        && modeOverflowRejectedExplicitly
                         && responseTransportBounded
                         && sourceChangedBeforePublishNoReservation
                         && candidateNotRestored
@@ -759,7 +824,9 @@ public partial class App
                         oversizeRejected,
                         hashMismatchRejected,
                         manualEditInvalidatesUndoAndApply,
+                        modeOverflowRejectedExplicitly,
                         responseTransportBounded,
+                        unavailableCompilerFailedClosed,
                         declaredOversizeRejected,
                         declaredOversizeBytesRead =
                             declaredOversizeStream?.BytesRead ?? -1,
@@ -776,6 +843,12 @@ public partial class App
                         readinessGetCalls,
                         rewritePostCalls,
                         jobsPostCalls,
+                        queueMutationCalls,
+                        queueMutationRoutes,
+                        launchAttemptsBeforeRewrite,
+                        launchAttemptsAfterRewrite =
+                            window.EnhancementCompanionLaunchAttemptCountForSmoke,
+                        companionStarterCalls,
                     };
                 }
                 catch (Exception ex)

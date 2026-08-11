@@ -77,7 +77,9 @@ public partial class App
                     oversizedAreaVideo.RootElement);
 
             window = new MainWindow();
-            bool wanDefaultVisible = window.WanVideoControlsVisibleForSmoke;
+            bool h3DefaultOnly = window.VideoModelIdForSmoke == "minimax-h3"
+                && window.LegacyVideoModelOptionsRetiredForSmoke
+                && !window.WanVideoControlsVisibleForSmoke;
             bool templateSurface = window.VideoPromptTemplateSurfaceForSmoke;
             bool templateIdsExact = window.VideoPromptTemplateIdsForSmoke
                 .SequenceEqual(
@@ -292,8 +294,11 @@ public partial class App
             bool h3ReadyRunnable = window.VideoModelRunnableForSmoke;
             string[] h3ReadySurfaceIssues =
                 window.MiniMaxH3SurfaceIssuesForSmoke.ToArray();
-            window.SelectVideoModelForSmoke("wan22-ti2v-5b");
-            bool wanRestored = window.WanVideoControlsVisibleForSmoke
+            window.RestorePersistedVideoModelForSmoke("wan22-ti2v-5b");
+            bool legacyWanMigratedToH3 =
+                window.VideoModelIdForSmoke == "minimax-h3"
+                && window.LegacyVideoModelOptionsRetiredForSmoke
+                && !window.WanVideoControlsVisibleForSmoke
                 && window.VideoModelRunnableForSmoke;
 
             string jobsPath = Environment.GetEnvironmentVariable(
@@ -425,21 +430,21 @@ public partial class App
                 && retryHealthGetCalls == 5
                 && retryPostCalls == 1;
 
-            ok = wanDefaultVisible
+            ok = h3DefaultOnly
                 && templateExact
                 && h3UnavailableSafe
                 && requestExact
                 && healthExact
                 && invalidSealReasonVisible
                 && h3ReadySafe
-                && wanRestored
+                && legacyWanMigratedToH3
                 && durationExact
                 && canvasPolicyExact
                 && h3RetryExactHealth;
             result = new
             {
                 ok,
-                wanDefaultVisible,
+                h3DefaultOnly,
                 templateSurface,
                 templateIdsExact,
                 cuteSexySelected,
@@ -456,7 +461,7 @@ public partial class App
                 h3ReadySafe,
                 h3ReadyRunnable,
                 h3ReadySurfaceIssues,
-                wanRestored,
+                legacyWanMigratedToH3,
                 durationExact,
                 canvasPolicyExact,
                 h3RetryExactHealth,

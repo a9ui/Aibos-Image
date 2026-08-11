@@ -398,6 +398,7 @@ try {
         'moveNextIssued',
         'moveReflectedImmediately',
         'moveAvoidedFullInventoryReload',
+        'healthOnlyPollAvoidedFullInventory',
         'staleQueueRefreshSuppressed',
         'canceledRetryIssued',
         'rerunSettingsContract',

@@ -19292,6 +19292,16 @@ public partial class App : Application
                     && initial.QueuedPhotorealPromptUpdateSupported;
                 bool healthProvenance = initial.HealthRevision == "H25 69684954";
                 bool healthPassive = initial.HealthGetRequests >= 1 && passiveOpen;
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterHealthOnlyPoll =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool healthOnlyPollAvoidedFullInventory =
+                    afterHealthOnlyPoll.GetRequests == initial.GetRequests
+                    && afterHealthOnlyPoll.HealthGetRequests
+                        == initial.HealthGetRequests + 1
+                    && afterHealthOnlyPoll.PollRequests
+                        == initial.PollRequests + 1
+                    && afterHealthOnlyPoll.Total == initial.Total;
                 object? viewBeforeRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
                 healthMode = "legacy-prompt-update";
                 await window.RefreshEnhancementJobsForSmokeAsync();
@@ -19989,6 +19999,7 @@ public partial class App : Application
                     && healthVisible
                     && healthProvenance
                     && healthPassive
+                    && healthOnlyPollAvoidedFullInventory
                     && legacyPromptUpdateCapabilitySafe
                     && legacyPauseCapabilitySafe
                     && legacyHealthFallback
@@ -20096,6 +20107,8 @@ public partial class App : Application
                     healthVisible,
                     healthProvenance,
                     healthPassive,
+                    healthOnlyPollAvoidedFullInventory,
+                    afterHealthOnlyPoll,
                     legacyPromptUpdateCapabilitySafe,
                     legacyPauseCapabilitySafe,
                     legacyHealthFallback,

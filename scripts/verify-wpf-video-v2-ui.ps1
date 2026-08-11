@@ -108,7 +108,7 @@ try {
 
     $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
     if (-not $result.ok `
-        -or -not $result.wanDefaultVisible `
+        -or -not $result.h3DefaultOnly `
         -or -not $result.templateExact `
         -or -not $result.h3UnavailableSafe `
         -or -not $result.requestExact `
@@ -117,7 +117,7 @@ try {
         -or -not $result.duplicateCapabilitiesRejected `
         -or -not $result.duplicateVideoV2Rejected `
         -or -not $result.h3ReadySafe `
-        -or -not $result.wanRestored `
+        -or -not $result.legacyWanMigratedToH3 `
         -or -not $result.durationExact `
         -or -not $result.canvasPolicyExact `
         -or -not $result.h3RetryExactHealth) {
@@ -135,5 +135,16 @@ try {
 finally {
     foreach ($key in $previousEnvironment.Keys) {
         [Environment]::SetEnvironmentVariable($key, $previousEnvironment[$key], 'Process')
+    }
+    if (Test-Path -LiteralPath $runRoot) {
+        $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
+        if ([string]::Equals(
+                [IO.Path]::GetDirectoryName($resolvedRunRoot),
+                $tempRoot,
+                [StringComparison]::OrdinalIgnoreCase) `
+            -and [IO.Path]::GetFileName($resolvedRunRoot) `
+                -match '^aibos-wpf-video-v2-ui-[0-9a-f]{32}$') {
+            Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
+        }
     }
 }

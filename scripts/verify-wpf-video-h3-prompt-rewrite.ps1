@@ -88,7 +88,8 @@ try {
         'UiVideoH3StatusIdle',
         'UiVideoH3StatusReady',
         'UiVideoH3StatusStale',
-        'UiVideoH3StatusInvalidCandidate'
+        'UiVideoH3StatusInvalidCandidate',
+        'UiVideoH3StatusInputTooLong'
     )
     foreach ($resourcePath in @($jaResourcePath, $enResourcePath)) {
         [xml]$resource = Get-Content -Raw -Encoding UTF8 -LiteralPath $resourcePath
@@ -110,6 +111,7 @@ try {
         -or $implementation -notmatch 'VideoH3PromptRewriteMode\.Direction' `
         -or $implementation -notmatch 'VideoH3PromptRewriteMode\.Auto' `
         -or $implementation -notmatch 'MaxVideoPromptLength' `
+        -or $implementation -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync' `
         -or $implementation -match 'SendEnhancementEnqueueAsync' `
         -or $implementation -match '\bSaveState\s*\(') {
         throw 'The H3 prompt assistant crossed its non-queue or non-persistent boundary.'
@@ -190,7 +192,9 @@ try {
         -or -not $result.sourceStale `
         -or -not $result.oversizeRejected `
         -or -not $result.hashMismatchRejected `
+        -or -not $result.modeOverflowRejectedExplicitly `
         -or -not $result.responseTransportBounded `
+        -or -not $result.unavailableCompilerFailedClosed `
         -or -not $result.declaredOversizeRejected `
         -or $result.declaredOversizeBytesRead -ne 0 `
         -or -not $result.chunkedOversizeRejected `
@@ -198,7 +202,12 @@ try {
         -or $result.chunkedOversizeBytesRead -gt ($result.responseByteLimit + 1) `
         -or -not $result.sourceChangedBeforePublishNoReservation `
         -or -not $result.candidateNotRestored `
-        -or -not $result.noQueueMutation) {
+        -or -not $result.noQueueMutation `
+        -or $result.readinessGetCalls -ne 0 `
+        -or $result.jobsPostCalls -ne 0 `
+        -or $result.queueMutationCalls -ne 0 `
+        -or $result.launchAttemptsAfterRewrite -ne 0 `
+        -or $result.companionStarterCalls -ne 0) {
         throw ('H3 prompt rewrite smoke failed: ' + ($result | ConvertTo-Json -Compress -Depth 6))
     }
 

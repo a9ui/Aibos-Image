@@ -16,7 +16,7 @@ public partial class MainWindow
     private const string HunyuanVideoModelId =
         "hunyuan-video-1.5-i2v-step-distilled-experimental";
     private const string MiniMaxH3VideoModelId = "minimax-h3";
-    private const string DefaultVideoModelId = WanVideoModelId;
+    private const string DefaultVideoModelId = MiniMaxH3VideoModelId;
     private const string NormalVideoPresetId = "wan22-ti2v-5b-normal-v1";
     private const string HighVideoPresetId = "wan22-ti2v-5b-high-v1";
     private const string DefaultVideoPresetId = NormalVideoPresetId;
@@ -161,10 +161,9 @@ public partial class MainWindow
     }
 
     private bool IsVideoModelRunnable(string modelId)
-        => string.Equals(modelId, WanVideoModelId, StringComparison.Ordinal)
-            || (string.Equals(modelId, MiniMaxH3VideoModelId, StringComparison.Ordinal)
-                && _miniMaxH3HealthChecked
-                && _miniMaxH3Ready);
+        => string.Equals(modelId, MiniMaxH3VideoModelId, StringComparison.Ordinal)
+            && _miniMaxH3HealthChecked
+            && _miniMaxH3Ready;
 
     private static bool IsMiniMaxH3VideoModel(string modelId)
         => string.Equals(modelId, MiniMaxH3VideoModelId, StringComparison.Ordinal);
@@ -446,10 +445,11 @@ public partial class MainWindow
         string? selected = (comboBox.SelectedItem as ComboBoxItem)
             ?.Tag
             ?.ToString();
-        return selected is WanVideoModelId
-            or HunyuanVideoModelId
-            or MiniMaxH3VideoModelId
-            ? selected
+        return string.Equals(
+                selected,
+                MiniMaxH3VideoModelId,
+                StringComparison.Ordinal)
+            ? MiniMaxH3VideoModelId
             : DefaultVideoModelId;
     }
 
@@ -919,7 +919,7 @@ public partial class MainWindow
                             ? _miniMaxH3ReasonCode
                             : null)
                         + " 準備が整うまで実行しません。"
-                    : "この実験モデルは12GB実測前のため、現在は実行できません。Wanを選ぶと実行できます。";
+                    : "旧動画モデル設定は新規生成に使いません。MiniMax H3へ切り替えてください。";
         }
         VideoH3PromptRewriteContextChanged(cancelPending: false);
         SyncVideoGenerationSettingsControls();
@@ -1029,8 +1029,7 @@ public partial class MainWindow
                             ? _miniMaxH3ReasonCode
                             : null)
                     + " 受動health確認中です。",
-                WanVideoModelId => "Wan2.2を使用します。保存済みです。",
-                _ => "HunyuanVideo 1.5は実写・人物向けの実験候補です。12GB実測前のため実行は無効です。",
+                _ => "旧動画モデルは新規生成UIから退役しています。MiniMax H3を使います。",
             });
         if (IsMiniMaxH3VideoModel(_videoModelId))
             _ = RefreshMiniMaxH3VideoCapabilityAsync();
@@ -1161,7 +1160,7 @@ public partial class MainWindow
         VideoH3PromptRewriteContextChanged();
         RefreshVideoStyleControls(updateNameFields: true);
         SetVideoGenerationSettingsStatus(
-            "6秒・生成16fps・最終30fps・画素数上限409,600px・標準20 step・Normal既定プロンプトに戻しました。");
+            "MiniMax H3の5.167秒・24fps・元画像比率・20 step既定へ戻しました。準備確認後に実行できます。");
         if (!_initializing)
             SaveState();
     }
@@ -1423,7 +1422,9 @@ public partial class MainWindow
         return new VideoStyleState
         {
             Name = name,
-            ModelId = candidate.ModelId,
+            // Wan and Hunyuan remain readable in historical jobs, but saved
+            // new-job styles are migrated to the only selectable writer.
+            ModelId = MiniMaxH3VideoModelId,
             QualityId = candidate.QualityId!,
             DurationSeconds = candidate.DurationSeconds,
             PlaybackFps = candidate.PlaybackFps,
@@ -1579,11 +1580,10 @@ public partial class MainWindow
             && SupportedVideoMaximumPixelAreas.Contains(area)
                 ? area
                 : DefaultVideoMaximumPixelArea;
-        _videoModelId = modelId is WanVideoModelId
-            or HunyuanVideoModelId
-            or MiniMaxH3VideoModelId
-            ? modelId
-            : DefaultVideoModelId;
+        // Retain legacy model ids in job readers, not in the new-job surface.
+        // Persisted Wan/Hunyuan selections migrate to H3 without deleting the
+        // user's prompt or other saved request values.
+        _videoModelId = DefaultVideoModelId;
         _videoQualityId = IsVideoQualitySupported(qualityId ?? "")
             ? qualityId!
             : DefaultVideoPresetId;
@@ -1680,9 +1680,7 @@ public partial class MainWindow
                 $"{VideoModelLabel(_videoModelId)} · {qualityLabel}";
             ModalVideoModelDescriptionText.Text = modelDescription;
             AppVideoModelDescriptionText.Text = modelDescription;
-            Visibility wanControlsVisibility = h3Selected
-                ? Visibility.Collapsed
-                : Visibility.Visible;
+            Visibility wanControlsVisibility = Visibility.Collapsed;
             if (ModalVideoWanControlsPanel is not null)
                 ModalVideoWanControlsPanel.Visibility = wanControlsVisibility;
             if (ModalVideoWanTuningPanel is not null)
@@ -1816,6 +1814,13 @@ public partial class MainWindow
             return false;
         }
         Tile? capturedSourceTile = SelectedTile();
+        if (!IsMiniMaxH3VideoModel(_videoModelId))
+        {
+            SetVideoGenerationSettingsStatus(
+                "旧Wan/Hunyuanモデルは新規動画化に使えません。MiniMax H3へ切り替えてください。ジョブは追加していません。");
+            UpdateVideoGenerationActionControls();
+            return false;
+        }
         if (!IsVideoModelRunnable(_videoModelId))
             return false;
         bool h3Selected = IsMiniMaxH3VideoModel(_videoModelId);
@@ -2057,6 +2062,15 @@ public partial class MainWindow
         SyncVideoGenerationSettingsControls();
     }
 
+    public void RestorePersistedVideoModelForSmoke(string modelId)
+        => RestoreVideoGenerationSettings(
+            _videoDurationSeconds,
+            _videoPlaybackFps,
+            _videoMaximumPixelArea,
+            _videoPrompt,
+            modelId,
+            _videoQualityId);
+
     public string VideoModelIdForSmoke => _videoModelId;
     public bool VideoModelRunnableForSmoke =>
         IsVideoModelRunnable(_videoModelId);
@@ -2116,6 +2130,15 @@ public partial class MainWindow
             {
                 issues.Add("modal-model-option");
             }
+            if (ModalVideoModelComboBox.Items
+                .OfType<ComboBoxItem>()
+                .Any(static item => !string.Equals(
+                    item.Tag?.ToString(),
+                    MiniMaxH3VideoModelId,
+                    StringComparison.Ordinal)))
+            {
+                issues.Add("modal-legacy-model-option");
+            }
             if (!AppVideoModelComboBox.Items
                 .OfType<ComboBoxItem>()
                 .Any(static item => string.Equals(
@@ -2124,6 +2147,15 @@ public partial class MainWindow
                     StringComparison.Ordinal)))
             {
                 issues.Add("app-model-option");
+            }
+            if (AppVideoModelComboBox.Items
+                .OfType<ComboBoxItem>()
+                .Any(static item => !string.Equals(
+                    item.Tag?.ToString(),
+                    MiniMaxH3VideoModelId,
+                    StringComparison.Ordinal)))
+            {
+                issues.Add("app-legacy-model-option");
             }
             if (ModalVideoWanControlsPanel.Visibility != Visibility.Collapsed)
                 issues.Add("modal-wan-quality");
@@ -2174,6 +2206,24 @@ public partial class MainWindow
             && ModalVideoWanControlsPanel.Visibility == Visibility.Visible
             && ModalVideoWanTuningPanel.Visibility == Visibility.Visible
             && AppVideoWanControlsPanel.Visibility == Visibility.Visible;
+
+    public bool LegacyVideoModelOptionsRetiredForSmoke
+        => ModalVideoModelComboBox.Items.Count == 1
+            && AppVideoModelComboBox.Items.Count == 1
+            && ModalVideoModelComboBox.Visibility == Visibility.Collapsed
+            && AppVideoModelComboBox.Visibility == Visibility.Collapsed
+            && ModalVideoModelComboBox.Items
+                .OfType<ComboBoxItem>()
+                .All(static item => string.Equals(
+                    item.Tag?.ToString(),
+                    MiniMaxH3VideoModelId,
+                    StringComparison.Ordinal))
+            && AppVideoModelComboBox.Items
+                .OfType<ComboBoxItem>()
+                .All(static item => string.Equals(
+                    item.Tag?.ToString(),
+                    MiniMaxH3VideoModelId,
+                    StringComparison.Ordinal));
 
     public string MiniMaxH3ReadinessTextForSmoke
         => DescribeMiniMaxH3VideoReasonCode(
@@ -2346,8 +2396,7 @@ public partial class MainWindow
             && ModalVideoGenerationBoardBorder.MaxHeight <= 680
             && ModalVideoGenerationScrollViewer.VerticalScrollBarVisibility
                 == ScrollBarVisibility.Auto
-            && ModalVideoModelComboBox.Items.Count == 3
-            && AppVideoModelComboBox.Items.Count == 3
+            && LegacyVideoModelOptionsRetiredForSmoke
             && ModalVideoQualityComboBox.Items.Count == 2
             && AppVideoQualityComboBox.Items.Count == 2
             && string.Equals(
@@ -2367,7 +2416,7 @@ public partial class MainWindow
                 "Add video generation job",
                 StringComparison.Ordinal)
             && ModalVideoPresetText.Text.Contains(
-                "Wan2.2 TI2V 5B",
+                "MiniMax H3",
                 StringComparison.Ordinal)
             && string.Equals(
                 AppVideoGenerationFpsLabel.Text,

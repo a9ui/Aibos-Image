@@ -143,7 +143,7 @@
   <sys:String x:Key="UiVideoH3RewriteButton">Convert to MiniMax</sys:String>
   <sys:String x:Key="UiVideoH3RewriteAgainButton">Convert again</sys:String>
   <sys:String x:Key="UiVideoH3RewriteButtonAutomation">Create a MiniMax H3 candidate from the image and input</sys:String>
-  <sys:String x:Key="UiVideoH3RewriteButtonHelp">Explicitly starts the local vision model. It does not add a video job.</sys:String>
+  <sys:String x:Key="UiVideoH3RewriteButtonHelp">Uses the already-running local Qwen compiler. It does not start a worker or add a video job.</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeLabel">Conversion</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeAutomation">MiniMax prompt conversion mode</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeHelp">Polish preserves the input, Direction strengthens motion and camera work, and Auto chooses image-compatible direction.</sys:String>
@@ -166,6 +166,7 @@
   <sys:String x:Key="UiVideoH3StatusStale">The input, image, model, style, or conversion mode changed. Convert it again.</sys:String>
   <sys:String x:Key="UiVideoH3StatusStaleResponse">The input, image, model, style, or conversion mode changed while conversion was running, so the result was not accepted.</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidCandidate">The candidate is not valid H3 format or exceeds 2,000 characters. It was not applied.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusInputTooLong">The selected conversion guidance would exceed 2,000 characters. Shorten the input. No job or worker was changed.</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidResponse">The H3 rewrite response was invalid. The input prompt was not changed.</sys:String>
   <sys:String x:Key="UiVideoH3StatusUnavailable">Local H3 rewriting is unavailable. No video job was added.</sys:String>
   <sys:String x:Key="UiVideoH3StatusSourceUnavailable">The image for H3 rewriting is unavailable. Select the input again.</sys:String>

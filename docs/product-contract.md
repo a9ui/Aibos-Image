@@ -329,8 +329,9 @@ or stores.
   Original uses the canonical source path as its shared `favorites.json` key.
   A validated managed Photoreal version uses that exact output path as a
   separate key, so each Photoreal output and its Original keep independent
-  levels. Upscale, I2I, and Video displays retain the Original/source Favorite
-  meaning in this contract version.
+  levels. A validated managed Video version likewise uses that exact MP4 output
+  path as a separate key. Upscale and I2I displays retain the Original/source
+  Favorite meaning in this contract version.
 - The gallery's primary red Favorite badge, normal Favorite filters, and
   `Fav touched` sort retain Original/source semantics even when its thumbnail
   displays a managed Photoreal image. In addition, one blue heart shows the
@@ -344,6 +345,17 @@ or stores.
   schema change. Individual version editing remains in the modal.
   Every supported writer must merge only its changed path keys into the latest
   shared map; a normal write must preserve catalog-external managed-output keys.
+- WPF groups its local Favorite filters into one `お気に入り` section: Original
+  keeps the red heart, managed Photoreal uses the blue heart, and managed Video
+  uses the purple heart. These rows are separate views over the same retained
+  path-keyed Favorite data; they do not merge the three version meanings. The
+  gallery purple heart is the maximum Favorite level among currently validated
+  managed Video outputs for that Original. The Video `Lv 0` through `Lv 5`
+  pills use union semantics with each other and intersection semantics with
+  other filter groups. Video level 0 requires at least one valid managed Video
+  output whose maximum level is 0; an Original without a valid Video output
+  does not match. Temporarily missing output paths retain their keys under the
+  removal rule below.
 - Removing or temporarily losing a managed output does not delete its Favorite
   entry. The entry is invisible while that exact path is unavailable and is
   reused only if the same validated output path becomes available again. This
@@ -783,9 +795,9 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
   conservative anime idle-motion instruction. A custom prompt uses the
   preservation preamble plus the user's instruction and is not contradicted by
   blank-only idle or locked-camera wording.
-- Quality is an exact preset choice, not a free-form step field. Normal remains
-  `wan22-ti2v-5b-normal-v1` at 20 steps and is the persisted default. High is
-  the explicit `wan22-ti2v-5b-high-v1` preset at 40 steps. High keeps the same
+- For historical Wan rows, quality is an exact preset choice, not a free-form
+  step field. Normal is `wan22-ti2v-5b-normal-v1` at 20 steps and High is the
+  explicit `wan22-ti2v-5b-high-v1` preset at 40 steps. High keeps the same
   FP16 model, pixel budget, native frame count, RIFE delivery, one-worker
   queue, and exclusive GPU lease. A known preset paired with the wrong
   `effective.steps` value is protected as reader-only instead of being
@@ -793,20 +805,20 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
 - A named video Style is WPF-local and snapshots the prompt, model, quality
   preset, duration, generation FPS, and maximum pixel budget. Up to 32 Styles
   with names of at most 40 characters are persisted in WPF `state.json`.
-  Selecting one from the video board or application settings applies all six
-  values; a later manual edit returns to the unsaved Custom selection without
-  modifying the stored Style. Saving the same name replaces that Style, and
-  deleting one leaves the current request values unchanged. Jobs still
-  snapshot the effective values only when explicitly enqueued. Restoring a
-  Style that names the 12GB-unverified Hunyuan candidate does not bypass its
-  disabled execution state.
+  Selecting one from the video board or application settings applies its
+  retained prompt and request values, while any legacy Wan/Hunyuan model id is
+  migrated to H3 for new generation. A later manual edit returns to the unsaved
+  Custom selection without modifying the stored Style. Saving the same name
+  replaces that Style, and deleting one leaves the current request values
+  unchanged. Jobs still snapshot the effective values only when explicitly
+  enqueued.
 - The current delivery stage uses RIFE 4.25 to publish exactly 30 fps and
   duration-times-30 frames: 120 frames for 4 seconds or 180 for 6 seconds.
   Final H.264 output is `yuv420p` and contains no audio. Managed-video labels
   and playback metadata use those delivery values when the field is valid;
-  legacy rows continue to show their native values. WPF labels the selectable
-  12/16 fps value as generation FPS and separately identifies the final 30 fps
-  RIFE 4.25 output.
+  legacy rows continue to show their native values. Historical Wan presentation
+  labels 12/16 fps as generation FPS and separately identifies the final 30 fps
+  RIFE 4.25 output; those controls are not part of the new H3 job surface.
 - WPF completion estimates include both Wan generation and RIFE delivery.
   The measured RTX 4070 SUPER 12GB landscape baseline at 832x480 is
   146.691 seconds plus 11.768 seconds. The earlier portrait baseline at
@@ -877,16 +889,27 @@ writer contract for MiniMax H3. H3 uses the exact `minimax-h3` model choice,
 the contract-defined AAC audio path. Unknown or inconsistent v2 snapshots
 remain protected rather than being coerced to the Wan v1 shape.
 
+- MiniMax H3 is the only model exposed by the new-video UI and the persisted
+  default. Wan and Hunyuan model identities remain supported by historical job
+  readers, managed-output playback, deletion guards, and Favorite presentation,
+  but cannot be selected for a new job. A persisted Wan/Hunyuan new-job choice
+  or saved Style is normalized to H3 while retaining its name and prompt; there
+  is no silent fallback from an unavailable H3 writer to Wan.
+
 - The video input prompt remains the only authoritative prompt. The explicit
   MiniMax conversion action reads that text and the currently selected source
   image, then asks the local Qwen 4B companion route for an editable H3-English
-  candidate. It does not enqueue, reorder, wake, pause, or otherwise mutate an
-  AI Job or image queue.
+  candidate. It calls only an already-running loopback compiler and never starts
+  the durable companion or a worker. If that compiler is unavailable, the
+  action fails closed. It does not enqueue, reorder, wake, pause, or otherwise
+  mutate an AI Job or image queue.
 - Conversion offers three UI modes: `polish` preserves the written intent,
   `direction` strengthens image-compatible motion and camera direction, and
   `auto` lets the source image guide that direction. Mode guidance stays
   inside the bounded rewrite request; the companion protocol remains the
-  exact v1 prompt-rewrite shape.
+  exact v1 prompt-rewrite shape. If input plus mode guidance would exceed the
+  2,000-character request bound, conversion is rejected explicitly instead of
+  silently dropping the selected mode.
 - A returned candidate is transient and separate from the input. The user may
   edit it, convert again, apply it explicitly to the input, or undo the most
   recent apply. Changing the input, image, model, style, or conversion mode

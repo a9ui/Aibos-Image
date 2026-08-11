@@ -1356,6 +1356,13 @@ public partial class MainWindow
         _startEnhancementCompanionForSmoke = starter;
     }
 
+    public void EnableEnhancementCompanionAutoStartProbeForSmoke(
+        Func<Uri, (bool Started, string Error)> starter)
+    {
+        _usingDefaultModalEnhancementSender = true;
+        _startEnhancementCompanionForSmoke = starter;
+    }
+
     public async Task<bool> EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
     {
         EnhancementApiResponse response = await EnsureEnhancementCompanionReadyForExplicitActionAsync();

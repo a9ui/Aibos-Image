@@ -109,9 +109,10 @@ public partial class MainWindow
             _ => "polish",
         };
 
-    private static string BuildVideoH3RewriteRequestPrompt(
+    private static bool TryBuildVideoH3RewriteRequestPrompt(
         string inputPrompt,
-        VideoH3PromptRewriteMode mode)
+        VideoH3PromptRewriteMode mode,
+        out string requestPrompt)
     {
         string? instruction = mode switch
         {
@@ -121,15 +122,23 @@ public partial class MainWindow
             _ => null,
         };
         if (instruction is null)
-            return inputPrompt;
+        {
+            requestPrompt = inputPrompt;
+            return requestPrompt.Length <= MaxVideoPromptLength;
+        }
 
         string separator = string.IsNullOrWhiteSpace(inputPrompt)
             ? ""
             : "\n\n";
         string directedPrompt = inputPrompt + separator + instruction;
-        return directedPrompt.Length <= MaxVideoPromptLength
-            ? directedPrompt
-            : inputPrompt;
+        if (directedPrompt.Length > MaxVideoPromptLength)
+        {
+            requestPrompt = "";
+            return false;
+        }
+
+        requestPrompt = directedPrompt;
+        return true;
     }
 
     private async Task<bool> RewriteVideoPromptForH3Async()
@@ -151,6 +160,17 @@ public partial class MainWindow
         string? baseStyleName = _selectedVideoStyleName;
         VideoH3PromptRewriteMode baseMode = _videoH3RewriteMode;
         long baseContextRevision = _videoH3RewriteContextRevision;
+        if (!TryBuildVideoH3RewriteRequestPrompt(
+                basePrompt,
+                baseMode,
+                out string requestPrompt))
+        {
+            SetVideoH3PromptRewriteStatus(VideoH3Localized(
+                "UiVideoH3StatusInputTooLong",
+                "選んだ変換方法の指示を含めると2000文字を超えます。入力を少し短くしてください。動画ジョブやworkerは変更していません。"));
+            RefreshVideoH3PromptRewriteControls(updateStatus: false);
+            return false;
+        }
         long generation = ++_videoH3RewriteGeneration;
         var cts = new CancellationTokenSource();
         CancellationTokenSource? prior = Interlocked.Exchange(
@@ -182,46 +202,10 @@ public partial class MainWindow
                 return false;
             }
 
-            EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
-                    source.SourceIdentity,
-                    cts.Token);
-            if (cts.IsCancellationRequested)
-            {
-                SetVideoH3PromptRewriteStatus(VideoH3Localized(
-                    "UiVideoH3StatusCanceled",
-                    "H3語化を中止しました。動画ジョブは追加していません。"));
-                return false;
-            }
-            if (!readiness.Ok)
-            {
-                SetVideoH3PromptRewriteStatus(
-                    string.IsNullOrWhiteSpace(readiness.Error)
-                        ? VideoH3Localized(
-                            "UiVideoH3StatusUnavailable",
-                            "ローカルのH3語化を利用できません。動画ジョブは追加していません。")
-                        : readiness.Error);
-                return false;
-            }
-            if (!IsVideoH3RewriteContextCurrent(
-                    basePrompt,
-                    sourceStamp,
-                    baseStyleName,
-                    baseMode,
-                    baseContextRevision))
-            {
-                SetVideoH3PromptRewriteStatus(VideoH3Localized(
-                    "UiVideoH3StatusStaleResponse",
-                    "作成中に入力・画像・Model・Styleが変わったため、結果を採用しませんでした。"));
-                return false;
-            }
-
             var requestBody = new Dictionary<string, object?>
             {
                 ["sourceId"] = source.SourceIdentity,
-                ["prompt"] = BuildVideoH3RewriteRequestPrompt(
-                    basePrompt,
-                    baseMode),
+                ["prompt"] = requestPrompt,
                 ["frameCount"] = MiniMaxH3VideoFrameCount,
                 ["playbackFps"] = MiniMaxH3VideoPlaybackFps,
             };
@@ -904,12 +888,14 @@ public partial class MainWindow
         ModalVideoH3RewriteModeComboBox.SelectedItem = item;
     }
 
-    public static string BuildVideoH3RewriteRequestPromptForSmoke(
+    public static bool TryBuildVideoH3RewriteRequestPromptForSmoke(
         string inputPrompt,
-        string mode)
-        => BuildVideoH3RewriteRequestPrompt(
+        string mode,
+        out string requestPrompt)
+        => TryBuildVideoH3RewriteRequestPrompt(
             inputPrompt,
-            ParseVideoH3PromptRewriteMode(mode));
+            ParseVideoH3PromptRewriteMode(mode),
+            out requestPrompt);
 
     public static bool TryParseVideoH3PromptRewriteResponseForSmoke(
         JsonElement payload,

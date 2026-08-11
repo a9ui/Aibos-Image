@@ -2075,20 +2075,18 @@
           <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
                   BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,10">
             <StackPanel>
-              <TextBlock Text="Model" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+              <TextBlock Text="Model · MiniMax H3" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
               <ComboBox x:Name="AppVideoModelComboBox"
-                        Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                        Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0" Visibility="Collapsed"
                         SelectionChanged="VideoGenerationModel_SelectionChanged"
                         AutomationProperties.Name="Default video generation model">
-                <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用" Tag="wan22-ti2v-5b"/>
                 <ComboBoxItem Content="MiniMax H3 — 5秒プレビュー・音声あり" Tag="minimax-h3"/>
-                <ComboBoxItem Content="HunyuanVideo 1.5 — 実写・人物向け／実験" Tag="hunyuan-video-1.5-i2v-step-distilled-experimental"/>
               </ComboBox>
               <TextBlock x:Name="AppVideoModelDescriptionText"
-                         Text="RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。"
+                         Text="MiniMax H3の5.167秒・24fpsプレビュー。元画像比率・20 step・AAC音声あり。"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,5,0,9"/>
-              <StackPanel x:Name="AppVideoWanControlsPanel">
+              <StackPanel x:Name="AppVideoWanControlsPanel" Visibility="Collapsed">
               <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
               <ComboBox x:Name="AppVideoQualityComboBox"
                         Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
@@ -3054,7 +3052,7 @@
               </Button>
               <StackPanel>
                 <TextBlock Text="動画化" Foreground="{StaticResource TextPrimary}" FontSize="16" FontWeight="SemiBold"/>
-                <TextBlock x:Name="ModalVideoPresetText" Text="Wan2.2 TI2V 5B · Normal"
+                <TextBlock x:Name="ModalVideoPresetText" Text="MiniMax H3 · 元画像比率プレビュー · 20 step"
                            Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,2,0,0"/>
               </StackPanel>
             </DockPanel>
@@ -3111,20 +3109,18 @@
                        Foreground="{StaticResource TextSecondary}" FontSize="10"
                        TextWrapping="Wrap" Margin="0,-5,0,8"
                        AutomationProperties.LiveSetting="Polite"/>
-            <TextBlock Text="Model" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+            <TextBlock Text="Model · MiniMax H3" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalVideoModelComboBox"
-                      Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                      Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0" Visibility="Collapsed"
                       SelectionChanged="VideoGenerationModel_SelectionChanged"
                       AutomationProperties.Name="Video generation model">
-              <ComboBoxItem Content="Wan2.2 TI2V 5B — アニメ・汎用" Tag="wan22-ti2v-5b"/>
               <ComboBoxItem Content="MiniMax H3 — 5秒プレビュー・音声あり" Tag="minimax-h3"/>
-              <ComboBoxItem Content="HunyuanVideo 1.5 — 実写・人物向け／実験" Tag="hunyuan-video-1.5-i2v-step-distilled-experimental"/>
             </ComboBox>
             <TextBlock x:Name="ModalVideoModelDescriptionText"
-                       Text="RTX 4070 SUPER 12GBで検証済みの標準モデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。"
+                       Text="MiniMax H3の5.167秒・24fpsプレビュー。元画像比率・20 step・AAC音声あり。"
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,5,0,10"/>
-            <StackPanel x:Name="ModalVideoWanControlsPanel">
+            <StackPanel x:Name="ModalVideoWanControlsPanel" Visibility="Collapsed">
             <TextBlock Text="品質" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalVideoQualityComboBox"
                       Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
@@ -3238,7 +3234,7 @@
                            AutomationProperties.LiveSetting="Polite"/>
               </StackPanel>
             </Border>
-            <StackPanel x:Name="ModalVideoWanTuningPanel">
+            <StackPanel x:Name="ModalVideoWanTuningPanel" Visibility="Collapsed">
             <Grid Margin="0,12,0,0">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
