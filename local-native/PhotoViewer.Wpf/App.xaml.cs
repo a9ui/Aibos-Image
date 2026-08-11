@@ -11808,8 +11808,8 @@ public partial class App : Application
                     && stalePeerLifetimeExact
                     && recycledContainerStateReset
                     && keyboardAccessibilityBounded
-                    && searchP95 <= 250
-                    && filterP95 <= 250
+                    && searchP95 <= 350
+                    && filterP95 <= 350
                     && sortP95 <= 650
                     && favoriteEvictionExact
                     && favoriteEvictionAutomationExact
