@@ -13,6 +13,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Automation;
@@ -309,11 +310,13 @@ public partial class MainWindow : Window
     private string? _enhancementReadError;
     private DateTime _enhancementJobsLastWriteTimeUtc;
     private long _enhancementJobsLength = -1;
+    private long _enhancementCatalogRevision = -1;
     private CancellationTokenSource? _enhancedStateRefreshCts;
     private Task _enhancedStateRefreshTask = Task.CompletedTask;
     private long _enhancedStateRefreshGeneration;
     private DateTime _enhancedStateQueuedWriteTimeUtc;
     private long _enhancedStateQueuedLength = -1;
+    private long _enhancedStateQueuedCatalogRevision = -1;
     private Rect _restoreBounds;
     private bool _fakeMaximized;
     private System.Windows.Interop.HwndSource? _windowChromeSource;
@@ -1768,8 +1771,13 @@ public partial class MainWindow : Window
         int CandidateCount,
         int VideoCandidateCount,
         DateTime LastWriteTimeUtc,
-        long Length);
+        long Length,
+        long CatalogRevision);
     private sealed record EnhancedStateReadResult(EnhancedStateSnapshot? Snapshot, string? Error);
+    private sealed record EnhancementStoreProbe(
+        DateTime LastWriteTimeUtc,
+        long Length,
+        long CatalogRevision);
 
     private async void OpenFolder_Click(object sender, RoutedEventArgs e) => await ChooseAndLoadFolderAsync();
 
@@ -4312,8 +4320,156 @@ public partial class MainWindow : Window
         get
         {
             string? overridePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH");
-            return string.IsNullOrWhiteSpace(overridePath) ? ProjectCachePath(Path.Combine("enhance", "jobs.json")) : Path.GetFullPath(overridePath);
+            if (!string.IsNullOrWhiteSpace(overridePath))
+                return Path.GetFullPath(overridePath);
+
+            string sqlitePath = ProjectCachePath(Path.Combine("enhance", "jobs.sqlite3"));
+            return File.Exists(sqlitePath)
+                ? sqlitePath
+                : ProjectCachePath(Path.Combine("enhance", "jobs.json"));
         }
+    }
+
+    private static bool IsEnhancementSqliteStore(string path)
+        => string.Equals(
+            Path.GetExtension(path),
+            ".sqlite3",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static SqliteConnection OpenEnhancementSqliteReadConnection(string path)
+    {
+        var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadOnly,
+                Cache = SqliteCacheMode.Shared,
+                Pooling = false,
+                DefaultTimeout = 5,
+            }.ToString());
+        connection.Open();
+        using var queryOnly = connection.CreateCommand();
+        queryOnly.CommandText = "PRAGMA query_only = ON;";
+        queryOnly.ExecuteNonQuery();
+        using var version = connection.CreateCommand();
+        version.CommandText = "SELECT sqlite_version();";
+        string? versionText = version.ExecuteScalar() as string;
+        if (!Version.TryParse(versionText, out Version? sqliteVersion)
+            || sqliteVersion < new Version(3, 50, 2))
+        {
+            connection.Dispose();
+            throw new InvalidDataException(
+                $"Windows SQLite 3.50.2 or newer is required; found {versionText ?? "unknown"}.");
+        }
+        return connection;
+    }
+
+    private static long ReadEnhancementCatalogRevision(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT catalog_revision
+            FROM enhancement_store_metadata
+            WHERE singleton = 1 AND store_version = 1
+            """;
+        object? value = command.ExecuteScalar();
+        return value is long revision && revision >= 0
+            ? revision
+            : throw new InvalidDataException(
+                "Enhancement SQLite metadata is missing or unsupported.");
+    }
+
+    private static EnhancementStoreProbe ProbeEnhancementStore(string path)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists)
+            return new EnhancementStoreProbe(default, -1, -1);
+
+        long catalogRevision = -1;
+        if (IsEnhancementSqliteStore(path))
+        {
+            using SqliteConnection connection = OpenEnhancementSqliteReadConnection(path);
+            catalogRevision = ReadEnhancementCatalogRevision(connection);
+        }
+        return new EnhancementStoreProbe(
+            info.LastWriteTimeUtc,
+            info.Length,
+            catalogRevision);
+    }
+
+    private static JsonDocument OpenEnhancementJobsDocument(
+        string path,
+        out long catalogRevision)
+    {
+        catalogRevision = -1;
+        if (!IsEnhancementSqliteStore(path))
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            return JsonDocument.Parse(stream);
+        }
+
+        using SqliteConnection connection = OpenEnhancementSqliteReadConnection(path);
+        using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
+        using (var metadata = connection.CreateCommand())
+        {
+            metadata.Transaction = transaction;
+            metadata.CommandText = """
+                SELECT catalog_revision
+                FROM enhancement_store_metadata
+                WHERE singleton = 1 AND store_version = 1
+                """;
+            object? value = metadata.ExecuteScalar();
+            catalogRevision = value is long revision && revision >= 0
+                ? revision
+                : throw new InvalidDataException(
+                    "Enhancement SQLite metadata is missing or unsupported.");
+        }
+
+        using var output = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(output))
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                SELECT id, status, reader_payload_json
+                FROM enhancement_jobs
+                ORDER BY position ASC
+                """;
+            using SqliteDataReader reader = command.ExecuteReader();
+            writer.WriteStartObject();
+            writer.WriteNumber("version", 1);
+            writer.WritePropertyName("jobs");
+            writer.WriteStartArray();
+            while (reader.Read())
+            {
+                string id = reader.GetString(0);
+                string status = reader.IsDBNull(1) ? "" : reader.GetString(1);
+                if (status is "queued" or "running" or "succeeded")
+                {
+                    using JsonDocument payload = JsonDocument.Parse(reader.GetString(2));
+                    payload.RootElement.WriteTo(writer);
+                }
+                else
+                {
+                    // Terminal non-output rows still reserve their durable ID
+                    // for orphan-output recovery without hydrating full payloads.
+                    writer.WriteStartObject();
+                    writer.WriteString("id", id);
+                    writer.WriteString("status", status);
+                    writer.WriteEndObject();
+                }
+            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+            writer.Flush();
+        }
+        transaction.Commit();
+        output.Position = 0;
+        return JsonDocument.Parse(output);
     }
 
     private bool LoadEnhancedState(
@@ -4388,12 +4544,9 @@ public partial class MainWindow : Window
         int nextVideoCandidateCount = 0;
         try
         {
-            using var stream = new FileStream(
+            using var document = OpenEnhancementJobsDocument(
                 path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
-            using var document = JsonDocument.Parse(stream);
+                out long observedCatalogRevision);
             if (document.RootElement.ValueKind != JsonValueKind.Object ||
                 !document.RootElement.TryGetProperty("jobs", out var jobsElement) ||
                 jobsElement.ValueKind != JsonValueKind.Array)
@@ -4619,7 +4772,8 @@ public partial class MainWindow : Window
                     nextCandidateCount,
                     nextVideoCandidateCount,
                     observedWriteTimeUtc,
-                    observedLength),
+                    observedLength,
+                    observedCatalogRevision),
                 null);
         }
         catch (Exception ex)
@@ -4797,16 +4951,20 @@ public partial class MainWindow : Window
         _enhancementReadError = null;
         _enhancementJobsLastWriteTimeUtc = snapshot.LastWriteTimeUtc;
         _enhancementJobsLength = snapshot.Length;
+        _enhancementCatalogRevision = snapshot.CatalogRevision;
     }
 
     private bool RefreshEnhancedStateIfChanged()
     {
         try
         {
-            var jobsInfo = new FileInfo(ResolvedEnhancementJobsPath);
-            bool changed = jobsInfo.Exists
-                ? jobsInfo.LastWriteTimeUtc != _enhancementJobsLastWriteTimeUtc
-                    || jobsInfo.Length != _enhancementJobsLength
+            string path = ResolvedEnhancementJobsPath;
+            EnhancementStoreProbe probe = ProbeEnhancementStore(path);
+            bool changed = probe.Length >= 0
+                ? probe.CatalogRevision >= 0
+                    ? probe.CatalogRevision != _enhancementCatalogRevision
+                    : probe.LastWriteTimeUtc != _enhancementJobsLastWriteTimeUtc
+                        || probe.Length != _enhancementJobsLength
                 : _enhancementJobsLength >= 0;
             if (!changed)
                 return false;
@@ -4833,24 +4991,29 @@ public partial class MainWindow : Window
             if (!_enhancedStateRefreshTask.IsCompleted)
                 return;
 
-            var jobsInfo = new FileInfo(ResolvedEnhancementJobsPath);
-            DateTime writeTimeUtc = jobsInfo.Exists ? jobsInfo.LastWriteTimeUtc : default;
-            long length = jobsInfo.Exists ? jobsInfo.Length : -1;
-            bool changed = writeTimeUtc != _enhancementJobsLastWriteTimeUtc
-                || length != _enhancementJobsLength;
-            bool alreadyQueued = writeTimeUtc == _enhancedStateQueuedWriteTimeUtc
-                && length == _enhancedStateQueuedLength;
+            string path = ResolvedEnhancementJobsPath;
+            EnhancementStoreProbe probe = ProbeEnhancementStore(path);
+            DateTime writeTimeUtc = probe.LastWriteTimeUtc;
+            long length = probe.Length;
+            bool changed = probe.CatalogRevision >= 0
+                ? probe.CatalogRevision != _enhancementCatalogRevision
+                : writeTimeUtc != _enhancementJobsLastWriteTimeUtc
+                    || length != _enhancementJobsLength;
+            bool alreadyQueued = probe.CatalogRevision >= 0
+                ? probe.CatalogRevision == _enhancedStateQueuedCatalogRevision
+                : writeTimeUtc == _enhancedStateQueuedWriteTimeUtc
+                    && length == _enhancedStateQueuedLength;
             if (!changed || alreadyQueued)
                 return;
 
             _enhancedStateQueuedWriteTimeUtc = writeTimeUtc;
             _enhancedStateQueuedLength = length;
+            _enhancedStateQueuedCatalogRevision = probe.CatalogRevision;
             _enhancedStateRefreshCts?.Cancel();
             _enhancedStateRefreshCts?.Dispose();
             var cts = new CancellationTokenSource();
             _enhancedStateRefreshCts = cts;
             long generation = ++_enhancedStateRefreshGeneration;
-            string path = ResolvedEnhancementJobsPath;
             long catalogRevision = _catalogContentRevision;
             IReadOnlyList<string>? activeCatalogPaths =
                 NeedsRecoveredEnhancementCatalogSnapshot(path, catalogRevision)
@@ -4954,6 +5117,7 @@ public partial class MainWindow : Window
             {
                 _enhancedStateQueuedWriteTimeUtc = default;
                 _enhancedStateQueuedLength = -1;
+                _enhancedStateQueuedCatalogRevision = -1;
             }
         }
     }

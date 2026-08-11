@@ -55,8 +55,10 @@ include:
 
 - `favorites.json`, `seen.json`, `settings.json`, `albums.json`,
   `search-history.json`, and `recent-folders.json`;
-- `enhance/jobs.json`, the versioned explicit-enqueue inbox below
-  `enhance/enqueue-inbox/**`, plus managed outputs at the parent selected by
+- `enhance/jobs.sqlite3` as the current Enhancement Jobs authority,
+  `enhance/jobs.json` as the retained legacy/rollback store, the versioned
+  explicit-enqueue inbox below `enhance/enqueue-inbox/**`, plus managed outputs
+  at the parent selected by
   `enhance/output-root.txt` (falling back to `enhance/outputs/**`). Image
   outputs remain under `Upscaled/`, `Photorealized/`, and `Edited/`; video uses
   the sibling `Videos/` folder. Completed files in all four operation folders
@@ -88,13 +90,15 @@ inheritance table without changing persisted user edits. A
 photoreal output carries its effective generation settings in the PNG
 `parameters` chunk. Existing photoreal PNGs that predate that writer remain
 readable through their bounded ComfyUI `prompt` graph when no `parameters`
-chunk exists; `parameters` always wins when both are present. Video versions
-continue to use their existing immutable snapshot in `enhance/jobs.json`, so
-no per-output JSON sidecars are added.
+  chunk exists; `parameters` always wins when both are present. Video versions
+continue to use their existing immutable snapshot in the active Enhancement
+Jobs store, so no per-output JSON sidecars are added.
 
 Normal application startup remains reader-only: it never creates a locator,
-shared root, durable-data directory, or store. Its only operational write is an
-empty lock file under the operating-system temporary directory. A separate
+shared root, durable-data directory, or logical store. Its operational writes
+are limited to an empty lock file under the operating-system temporary
+directory and SQLite's standard `-wal`/`-shm` coordination sidecars when the
+current Enhancement Jobs database requires them. A separate
 `.NET 10` command-line tool, `Aibos.SharedRootSetup`, can perform the reviewed
 one-time creation of the default locator after an inspection-only preflight and
 an explicit `--apply --confirm CREATE`. It is create-only, requires the
@@ -156,3 +160,8 @@ No license is currently granted. The source is publicly visible, but this
 repository is not described as open source and no permission to use, copy,
 modify, or redistribute is granted beyond rights provided by applicable law.
 A future `LICENSE` file, if added, will supersede this notice.
+
+Third-party packages keep their own terms. In particular,
+`Microsoft.Data.Sqlite.Core` is MIT-licensed and the referenced
+`SQLitePCLRaw` packages are Apache-2.0-licensed; this repository does not vendor
+their source or relicense them under the Aibos notice above.

@@ -73,9 +73,11 @@ The shared durable set is:
 - `albums.json`;
 - `search-history.json`;
 - `recent-folders.json`;
-- `enhance/jobs.json`, `enhance/output-root.txt`, the versioned explicit-enqueue
-  inbox below `enhance/enqueue-inbox/**`, and managed outputs below the configured
-  parent (with `enhance/outputs/**` retained as the fallback).
+- `enhance/jobs.sqlite3` as the current Enhancement Jobs authority,
+  `enhance/jobs.json` as the retained legacy/rollback store,
+  `enhance/output-root.txt`, the versioned explicit-enqueue inbox below
+  `enhance/enqueue-inbox/**`, and managed outputs below the configured parent
+  (with `enhance/outputs/**` retained as the fallback).
 
 Managed outputs use the same final layout for every operation:
 `Upscaled/YYYY-MM-DD/`, `Photorealized/YYYY-MM-DD/`,
@@ -97,6 +99,24 @@ one locked store write. Its bounded plan, pre-write snapshot, receipt, file and
 byte totals, reference digest, ambiguous-date report, and zero remaining-move
 check are retained locally. It never uses source or job timestamps and never
 copies, deletes, or republishes model, source, or output bytes.
+
+`PV-ENHANCE-JOBS-SQLITE-001` defines the current local durable Jobs store.
+The loopback companion is its only writer and commits through SQLite WAL. WPF
+opens only the reader surface in read-only/query-only mode, requires SQLite
+3.50.2 or newer, and never creates, repairs, migrates, pauses, reorders, or
+claims work through the database. A present `enhance/jobs.sqlite3` is preferred
+unless an explicit jobs-path override is set; otherwise the version-1 JSON
+reader remains the compatibility fallback. There is no dual-write mode.
+Migration requires a paused, drained queue plus semantic and ordering checks;
+the source JSON and verified rollback material remain local. The additive
+`catalog_revision` advances only when the WPF-visible managed-media projection
+changes, so heartbeat and progress writes do not force a full direct-reader
+reload. The canonical public schema surface and synthetic fixture are
+`contracts/enhancement-jobs-sqlite-v1.json`.
+SQLite may create or update its standard `-wal`/`-shm` coordination sidecars
+while serving that read-only connection. Those sidecars are not a second
+logical writer or durable-data authority; WPF never writes a table or the main
+database file.
 
 The current shared `settings.json` allowlist includes
 `confirmBeforeDelete` and `thumbnailStatusBorders`. WPF adopts the shared
@@ -140,9 +160,10 @@ opening it.
 
 The WPF activation resolves the root once at process startup and routes only
 the durable set named above. Normal application startup remains reader-only and
-does not create a locator, shared root, durable-data directory, or store. The
-only startup write this activation may make is the empty TEMP coordination
-directory/file defined by the lease protocol below.
+does not create a locator, shared root, durable-data directory, or logical
+store. Startup writes are limited to the empty TEMP coordination directory/file
+defined by the lease protocol below and SQLite's standard WAL coordination
+sidecars when the current Jobs database requires them.
 WPF Settings may display that process-fixed data location and open it in the
 Windows shell only when the directory already exists. Merely opening Settings,
 viewing the location, or pressing the disabled open action never creates a
@@ -188,7 +209,8 @@ The version 1 locator is UTF-8 JSON no larger than 65,536 bytes:
 
 sharedDataRoot names the data directory that directly contains favorites.json,
 seen.json, settings.json, albums.json, search-history.json, and
-recent-folders.json, plus enhance/jobs.json and the output-root configuration.
+recent-folders.json, plus enhance/jobs.sqlite3 (or the retained legacy
+enhance/jobs.json) and the output-root configuration.
 The actual managed output files may live below that configured absolute parent;
 without a configuration they remain below enhance/outputs/**. The shared data
 root is not a repository root. It may therefore point at an existing legacy
@@ -684,8 +706,8 @@ or stores.
     Cancel, Retry, re-run, Open output, and Delete output remain explicit user
     actions.
   WPF validates source identity, source signature, and managed-output ownership
-  before opening or deleting an output. WPF never writes `enhance/jobs.json`
-  directly and never starts a worker from ordinary browsing.
+  before opening or deleting an output. WPF never writes either Enhancement
+  Jobs store directly and never starts a worker from ordinary browsing.
 - `PV-ENHANCE-ENQUEUE-INBOX-001` defines durable registration of explicit
   create and Retry actions. WPF performs one bounded health probe. An exact v1
   capability publishes the request before any immediate POST nudge. A timeout,
@@ -712,8 +734,9 @@ or stores.
     guarantee begins when the durable move succeeds; disk-full, access-denied,
     unsupported-state, or media failure must remain visible as a local save
     failure rather than a false queued state.
-  - `enhance/jobs.json` remains version 1 and may contain the additive optional
-    root array `idempotencyReceipts`. A receipt contains only request ID,
+  - The logical version-1 Jobs store may contain the additive optional receipt
+    ledger. In legacy JSON this is the root array `idempotencyReceipts`; SQLite
+    stores the same logical records transactionally. A receipt contains only request ID,
     SHA-256 request fingerprint, original job ID, and original creation time;
     it never stores a source path, prompt, or request body. Terminal history
     dismissal creates the receipt under the same lock and atomic replacement
@@ -744,7 +767,7 @@ or stores.
   version: Original reads the original PNG, photoreal reads that output PNG,
   and missing metadata is shown as unavailable rather than replaced with
   current defaults. A displayed video reads its exact stored `video` snapshot
-  from the existing `jobs.json`, including native/output FPS and frame counts,
+  from the active Enhancement Jobs store, including native/output FPS and frame counts,
   model, steps, CFG, sampler, scheduler, shift, denoise, seed, codec, and RIFE
   delivery. Missing legacy fields remain visibly unknown.
 - `PV-ENHANCE-HEALTH-001` defines the optional read-only
@@ -764,7 +787,7 @@ or stores.
   H25 API-companion commit passes an isolated TEMP compatibility test against
   the exact WPF candidate. That test must prove the existing URL contracts,
   durable inbox recovery and idempotency, one absolute Enhancement root for
-  `jobs.json`, the inbox, and `outputs/**`, WPF output ownership checks,
+  the active Jobs store, the inbox, and `outputs/**`, WPF output ownership checks,
   unchanged source bytes, and zero writes to unrelated user-owned state or
   caches. The independently maintained Browser product remains present and
   unchanged; it is only excluded from the WPF companion launch path.

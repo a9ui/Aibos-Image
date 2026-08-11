@@ -26,6 +26,11 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
   remaining moves. The public candidate carries only the cross-repository
   contract and synthetic behavior; it does not import the private Node/Next.js
   implementation or lineage.
+- The paired private store implementation `PRIVATE-H25-JOBS-SQLITE-A` migrated
+  the logical Jobs store to SQLite WAL only after a paused/drained cutover and
+  semantic/order verification. The public candidate contains only the WPF
+  read-only projection, versioned contract, and synthetic fixture; private
+  source, queue rows, prompts, paths, and migration evidence stay private.
 - Security and public-readiness scanning remain a separate review lane. This
   packet contains only synthetic and aggregate evidence.
 
@@ -69,6 +74,13 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
   identical counts forced one full refresh, closing the same-count terminal/
   enqueue race. Changing the companion process/start/build identity also forced
   one full refresh. Queue ordering and all existing mutation guards remained green.
+- SQLite Jobs reader: the shared-root locator selected SQLite only when present
+  and no explicit jobs-path override existed; legacy JSON remained readable.
+  The synthetic modal projection passed original/enhanced navigation, stale
+  fallback, and reset checks while the main database bytes stayed unchanged. A
+  controlled approximately 8.7k-row local shape measured about 15x lower
+  writer time and about 6x lower compact-health time than the legacy JSON path;
+  these are directional local measurements, not a production guarantee.
 - Photoreal modal and shared queue: the exact GitHub Actions failure was
   reproduced locally, traced to a non-deterministic private-policy expectation,
   isolated to the public fallback, and then passed in full.
@@ -108,7 +120,9 @@ returned `MERGEABLE_AFTER_FOCUSED_FIXES` with no P0 finding.
   24 MiB / roughly 18 second inventory cost. The known v1 limitation is accepted
   for this PR: external same-cardinality queued-only changes remain stale until
   explicit Refresh or reopen. WPF-owned mutations still reconcile immediately;
-  a real inventory revision remains a separate backend/SQLite PR.
+  SQLite now exposes additive store revisions, but the general queued-only
+  reconciliation remains a separate Jobs API decision because the commit
+  revision also advances for heartbeat/progress writes.
 - The picker has two routes, not five direct target choices. Therefore target
   propagation from picker to `expression`/`background`/`pose` is not applicable;
   those choices remain inside the v2 board. The applicable P1 gate was route
@@ -154,14 +168,13 @@ Re-check the follow-up commit for the four original merge gates and any
 regression caused by the health-first Jobs poll or unified AI-edit picker. In
 particular, verify that no normal UI or persisted-state path can enqueue Wan,
 while historical Wan/Hunyuan reader and managed-output compatibility remains
-intact.
+intact. Also review the additive SQLite reader boundary: WPF must remain
+read-only, explicit JSON overrides must remain exact, heartbeat/progress writes
+must not trigger direct catalog reloads, and private implementation or data must
+not have crossed into this public repository.
 
-## Publication status
+## Publication target
 
-- The normal publication command is
-  `git push aibos codex/aibos-h3-i2v-product`.
-- The current Codex host rejected that command before network execution with
-  `approval required by policy, but AskForApproval is set to Never`. This is a
-  host-policy gate, not a GitHub authentication failure. No alternate upload or
-  history bypass was attempted; the local candidate remains ahead of the last
-  published PR revision until an approved push path is available.
+- Draft PR: <https://github.com/a9ui/Aibos-Image/pull/60>
+- Review the exact pushed commit containing this packet; do not infer approval
+  from the earlier `c602f62` review.

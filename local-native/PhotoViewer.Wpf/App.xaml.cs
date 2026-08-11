@@ -8,6 +8,7 @@ using System.Net.Http.Json;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Automation;
@@ -134,6 +135,7 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        SQLitePCL.Batteries_V2.Init();
         int parityContractSmokeIdx = Array.IndexOf(e.Args, "--parity-contract-smoke");
         int h25EnhancementCompanionSmokeIdx = Array.IndexOf(e.Args, "--h25-enhancement-companion-smoke");
         int videoV2ReaderSmokeIdx = Array.IndexOf(e.Args, "--video-v2-reader-smoke");
@@ -18368,7 +18370,15 @@ public partial class App : Application
         string? previousJobsPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH");
 
         PrepareSharedSeenSmokeEnvironment(smokeRoot);
-        string jobsPath = Path.Combine(smokeRoot, ".cache", "enhance", "jobs.json");
+        bool sqliteJobs = args.Contains("--sqlite-jobs", StringComparer.Ordinal);
+        string jobsPath = Path.Combine(
+            smokeRoot,
+            ".cache",
+            "enhance",
+            sqliteJobs ? "jobs.sqlite3" : "jobs.json");
+        string jobsSeedPath = sqliteJobs
+            ? Path.Combine(Path.GetDirectoryName(jobsPath)!, "jobs.seed.json")
+            : jobsPath;
         string outputRoot = Path.Combine(Path.GetDirectoryName(jobsPath)!, "outputs");
         Directory.CreateDirectory(outputRoot);
 
@@ -18379,9 +18389,14 @@ public partial class App : Application
         string missingOutput = Path.Combine(outputRoot, "missing-output.png");
         string missingSource = Path.Combine(smokeRoot, "missing-source.png");
         File.Copy(validSource, validOutput, overwrite: true);
-        WriteEnhancedJobsFixture(jobsPath, validSource, validOutput, staleSource, missingOutput, failedSource, missingSource);
+        WriteEnhancedJobsFixture(jobsSeedPath, validSource, validOutput, staleSource, missingOutput, failedSource, missingSource);
+        if (sqliteJobs)
+        {
+            WriteEnhancementJobsSqliteFixture(jobsPath, jobsSeedPath);
+            File.Delete(jobsSeedPath);
+        }
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", jobsPath);
-        string beforeJobsJson = File.ReadAllText(jobsPath);
+        byte[] beforeJobsBytes = File.ReadAllBytes(jobsPath);
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         var win = HiddenWindow();
@@ -18422,8 +18437,8 @@ public partial class App : Application
                     && string.Equals(win.ModalDisplayPathForSmoke, nextPath, StringComparison.OrdinalIgnoreCase);
                 win.Close();
 
-                string afterJobsJson = File.ReadAllText(jobsPath);
-                bool enhancementStateUnchanged = string.Equals(beforeJobsJson, afterJobsJson, StringComparison.Ordinal);
+                byte[] afterJobsBytes = File.ReadAllBytes(jobsPath);
+                bool enhancementStateUnchanged = beforeJobsBytes.AsSpan().SequenceEqual(afterJobsBytes);
                 bool ok = win.EnhancementReadOkForSmoke
                     && selectedValid
                     && validToggleAvailable
@@ -27608,6 +27623,80 @@ public partial class App : Application
         };
         var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(jobsPath, json);
+    }
+
+    private static void WriteEnhancementJobsSqliteFixture(
+        string databasePath,
+        string jobsJsonPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
+        using JsonDocument source = JsonDocument.Parse(File.ReadAllText(jobsJsonPath));
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Pooling = false,
+            }.ToString());
+        connection.Open();
+        using (var schema = connection.CreateCommand())
+        {
+            schema.CommandText = """
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = FULL;
+                CREATE TABLE enhancement_store_metadata (
+                    singleton INTEGER PRIMARY KEY,
+                    store_version INTEGER NOT NULL,
+                    catalog_revision INTEGER NOT NULL
+                );
+                INSERT INTO enhancement_store_metadata
+                    (singleton, store_version, catalog_revision)
+                VALUES (1, 1, 1);
+                CREATE TABLE enhancement_jobs (
+                    position INTEGER NOT NULL UNIQUE,
+                    id TEXT PRIMARY KEY,
+                    status TEXT,
+                    reader_payload_json TEXT NOT NULL
+                );
+                """;
+            schema.ExecuteNonQuery();
+        }
+        using (SqliteTransaction transaction = connection.BeginTransaction())
+        using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO enhancement_jobs
+                    (position, id, status, reader_payload_json)
+                VALUES ($position, $id, $status, $payload)
+                """;
+            SqliteParameter position = insert.Parameters.Add("$position", SqliteType.Integer);
+            SqliteParameter id = insert.Parameters.Add("$id", SqliteType.Text);
+            SqliteParameter status = insert.Parameters.Add("$status", SqliteType.Text);
+            SqliteParameter payload = insert.Parameters.Add("$payload", SqliteType.Text);
+            int nextPosition = 0;
+            foreach (JsonElement job in source.RootElement.GetProperty("jobs").EnumerateArray())
+            {
+                if (job.ValueKind != JsonValueKind.Object
+                    || !job.TryGetProperty("id", out JsonElement idElement)
+                    || idElement.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+                position.Value = nextPosition++;
+                id.Value = idElement.GetString()!;
+                status.Value = job.TryGetProperty("status", out JsonElement statusElement)
+                    && statusElement.ValueKind == JsonValueKind.String
+                        ? statusElement.GetString()!
+                        : "";
+                payload.Value = job.GetRawText();
+                insert.ExecuteNonQuery();
+            }
+            transaction.Commit();
+        }
+        using var checkpoint = connection.CreateCommand();
+        checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        checkpoint.ExecuteNonQuery();
     }
 
     private static void WriteEnhancementOperationJobsFixture(

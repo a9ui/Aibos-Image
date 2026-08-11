@@ -121,14 +121,14 @@
     ],
     "createdAt": "the original job creation timestamp",
     "payloadRestriction": "receipt entries contain no source path, prompt, or request body",
-    "atomicity": "job transition and receipt creation share the jobs.json lock and atomic replacement",
+    "atomicity": "job transition and receipt creation share one active-store transaction; legacy JSON uses its existing lock and atomic replacement",
     "matchingReplay": "return a receipt-only 2xx with the original jobId when the visible job no longer exists",
     "conflictingReplay": "return 409 when the same clientRequestId has a different clientRequestHash",
     "retention": "no TTL and no eviction",
     "capacity": "when a new receipt is required at capacity, reject terminal history dismissal with 409 and retain the visible job",
     "compatibility": "legacy version-1 stores without the field remain valid",
     "preservation": "unknown root and receipt fields round-trip unchanged",
-    "integrity": "malformed, duplicate, or conflicting receipt state fails closed without replacing jobs.json"
+    "integrity": "malformed, duplicate, or conflicting receipt state fails closed without replacing or committing the active Jobs store"
   },
   "compatibility": {
     "existingApiUrlsUnchanged": true,

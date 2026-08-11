@@ -502,6 +502,7 @@ internal static class SharedDataRootLocatorContractRunner
             "albums.json",
             "search-history.json",
             "recent-folders.json",
+            "enhance/jobs.sqlite3",
             "enhance/jobs.json",
             "enhance/outputs/**",
         ];

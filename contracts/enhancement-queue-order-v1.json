@@ -9,11 +9,11 @@
     "type": "non-negative integer",
     "optionalForLegacyReaders": true,
     "defaultForNewJobs": "append after every currently queued job",
-    "persistence": "stored atomically in enhance/jobs.json"
+    "persistence": "stored transactionally in the active Enhancement Jobs store; enhance/jobs.sqlite3 is current and enhance/jobs.json is legacy"
   },
   "pauseControl": {
     "field": "queuePaused",
-    "location": "top-level enhance/jobs.json",
+    "location": "enhancement_store_metadata.queue_paused in enhance/jobs.sqlite3, or top-level queuePaused in legacy enhance/jobs.json",
     "type": "boolean",
     "missingValue": false,
     "route": "POST /api/enhance/queue with an explicit paused boolean",

@@ -173,6 +173,7 @@ public partial class MainWindow
             candidateCount,
             0,
             default,
+            -1,
             -1);
     }
 
