@@ -568,6 +568,8 @@ public partial class MainWindow : Window
     private bool _syncingUnseenDotsControls;
     private bool _showGridFileInfoOverlay = true;
     private bool _syncingGridFileInfoOverlayControls;
+    private bool _showLoadTiming;
+    private bool _syncingLoadTimingControl;
     private bool _showFavoriteChangeNotifications = true;
     private bool _syncingFavoriteChangeNotifications;
     private bool _useLastDisplayedImageVersionForThumbnails = true;
@@ -2035,6 +2037,7 @@ public partial class MainWindow : Window
         CloseExternalFileDropSessionForReplacement();
         var totalWatch = Stopwatch.StartNew();
         LastLoadMetrics = null;
+        UpdateLoadTimingPresentation();
         _previewUpdateCount = 0;
         _previewMs = 0;
         _previewDeferredDecodeCount = 0;
@@ -2472,6 +2475,7 @@ public partial class MainWindow : Window
             LastLoadMetrics.InitialFilterMs = initialFilterMs;
             LastLoadMetrics.CatalogStatsMs = catalogStatsMs;
             UpdateGridMetrics(LastLoadMetrics);
+            UpdateLoadTimingPresentation();
             LandingPanel.IsEnabled = true;
             ScanBar.Value = 0;
             ScanPercent.Text = "0%";
@@ -2593,6 +2597,7 @@ public partial class MainWindow : Window
         LastLoadMetrics.MetadataIndexWritten = metadata.IndexWritten;
         LastLoadMetrics.MetadataIndexSaveError = metadata.IndexSaveError;
         UpdateGridMetrics(LastLoadMetrics);
+        UpdateLoadTimingPresentation();
         FinishCurrentLoad(generation, cts);
         }
         finally
@@ -11401,6 +11406,13 @@ public partial class MainWindow : Window
         SetShowGridFileInfoOverlay(enabled, persist: true);
     }
 
+    private void ShowLoadTiming_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _syncingLoadTimingControl) return;
+        bool enabled = sender is CheckBox checkBox && checkBox.IsChecked == true;
+        SetShowLoadTiming(enabled, persist: true);
+    }
+
     private void FavoriteChangeNotifications_Changed(object sender, RoutedEventArgs e)
     {
         if (_initializing || _syncingFavoriteChangeNotifications)
@@ -11560,6 +11572,7 @@ public partial class MainWindow : Window
             RefreshThumbnailStatusBorderIdleText();
         ApplyKeyBindingTooltips();
         SyncAccessibilityPreferenceControls();
+        UpdateLoadTimingPresentation();
         if (changed && persist)
             SaveState();
         return changed;
@@ -11742,6 +11755,51 @@ public partial class MainWindow : Window
         if (changed && persist && !_initializing)
             SaveState();
     }
+
+    private void SetShowLoadTiming(bool enabled, bool persist)
+    {
+        bool changed = _showLoadTiming != enabled;
+        _showLoadTiming = enabled;
+        _syncingLoadTimingControl = true;
+        try
+        {
+            if (ShowLoadTimingCheckBox is not null)
+                ShowLoadTimingCheckBox.IsChecked = enabled;
+        }
+        finally
+        {
+            _syncingLoadTimingControl = false;
+        }
+        UpdateLoadTimingPresentation();
+        if (changed && persist && !_initializing)
+            SaveState();
+    }
+
+    private void UpdateLoadTimingPresentation()
+    {
+        if (LoadTimingStatusText is null)
+            return;
+        if (!_showLoadTiming || LastLoadMetrics is not LoadMetrics metrics)
+        {
+            LoadTimingStatusText.Text = "";
+            LoadTimingStatusText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        string total = FormatLoadDuration(metrics.TotalMs);
+        LoadTimingStatusText.Text = metrics.FileCount == 0
+            ? UiLanguageResources.Format("UiLoadTimingEmptyFormat", total)
+            : UiLanguageResources.Format(
+                "UiLoadTimingFormat",
+                FormatLoadDuration(Math.Max(metrics.CatalogReadyMs, metrics.FirstUsableViewportMs)),
+                total);
+        LoadTimingStatusText.Visibility = Visibility.Visible;
+    }
+
+    private static string FormatLoadDuration(long milliseconds)
+        => milliseconds < 1_000
+            ? $"{Math.Max(0, milliseconds).ToString("N0", CultureInfo.CurrentCulture)} ms"
+            : $"{(Math.Max(0, milliseconds) / 1_000d).ToString(milliseconds < 10_000 ? "0.0" : "0", CultureInfo.CurrentCulture)} s";
 
     private void ScheduleFavoriteFilterPresentationSync()
     {
@@ -20976,6 +21034,7 @@ public partial class MainWindow : Window
         BeginThumbnailStatusBorderEdit();
         ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowGridFileInfoOverlay(_showGridFileInfoOverlay, persist: false);
+        SetShowLoadTiming(_showLoadTiming, persist: false);
         SetShowUnseenDots(_showUnseenDots, persist: false);
         SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
         SetUseLastDisplayedImageVersionForThumbnails(
@@ -22177,6 +22236,9 @@ public partial class MainWindow : Window
         SetShowGridFileInfoOverlay(
             state?.ShowGridFileInfoOverlay ?? true,
             persist: false);
+        SetShowLoadTiming(
+            state?.ShowLoadTiming ?? false,
+            persist: false);
         RestoreUpscaleSettings(state);
         SharedRecentReadResult sharedRecent = ReadSharedRecentFolders();
         var lastFolderSet = ResolveStartupFolderSet(
@@ -22421,6 +22483,7 @@ public partial class MainWindow : Window
                     : null,
                 ShowUnseenDots = _showUnseenDots,
                 ShowGridFileInfoOverlay = _showGridFileInfoOverlay,
+                ShowLoadTiming = _showLoadTiming,
                 ShowFavoriteChangeNotifications = _showFavoriteChangeNotifications,
                 UseLastDisplayedImageVersionForThumbnails =
                     _useLastDisplayedImageVersionForThumbnails,
@@ -26547,6 +26610,10 @@ public partial class MainWindow : Window
     public bool ShowUnfavoriteOnlyForSmoke => UnfavoriteOnlyFilter?.IsChecked == true;
     public bool ShowUnseenDotsForSmoke => _showUnseenDots;
     public bool ShowGridFileInfoOverlayForSmoke => _showGridFileInfoOverlay;
+    public bool ShowLoadTimingForSmoke => _showLoadTiming;
+    public bool LoadTimingVisibleForSmoke
+        => LoadTimingStatusText.Visibility == Visibility.Visible;
+    public string LoadTimingStatusForSmoke => LoadTimingStatusText.Text;
     public bool SidebarGridFileInfoOverlayCheckedForSmoke
         => ShowGridFileInfoOverlayCheckBox.IsChecked == true;
     public bool AppSettingsGridFileInfoOverlayCheckedForSmoke
@@ -27173,6 +27240,8 @@ public partial class MainWindow : Window
         => SetShowUnseenDots(enabled, persist: true);
     public void SetShowGridFileInfoOverlayForSmoke(bool enabled)
         => SetShowGridFileInfoOverlay(enabled, persist: true);
+    public void SetShowLoadTimingForSmoke(bool enabled)
+        => SetShowLoadTiming(enabled, persist: false);
     public void SetSidebarGridFileInfoOverlayForSmoke(bool enabled)
         => ShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
     public void SetAppSettingsGridFileInfoOverlayForSmoke(bool enabled)
@@ -29002,6 +29071,8 @@ public sealed class ViewerState
     public bool ShowUnseenDots { get; set; }
     // WPF-local Grid caption presentation. Missing older state keeps captions on.
     public bool? ShowGridFileInfoOverlay { get; set; }
+    // Optional WPF-local diagnostics. Missing older state stays off.
+    public bool? ShowLoadTiming { get; set; }
     // WPF-local presentation only. Missing in older state keeps notifications on.
     public bool? ShowFavoriteChangeNotifications { get; set; }
     // WPF-local gallery presentation. Per-image choices remain session-only.
