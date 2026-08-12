@@ -331,6 +331,19 @@ public partial class App
                     == asciiHashVector.GetProperty("prompt").GetString()
                 && validVideo.GetProperty("seed").GetInt32()
                     == asciiHashVector.GetProperty("seed").GetInt32();
+            JsonObject longVideoNode = JsonNode.Parse(validVideo.GetRawText())!
+                .AsObject();
+            longVideoNode["requested"]!.AsObject()["profileId"] =
+                "minimax-h3-hq-12s-v1";
+            longVideoNode["effective"]!.AsObject()["frameCount"] = 294;
+            JsonObject longDelivery = longVideoNode["delivery"]!.AsObject();
+            longDelivery["frameCount"] = 294;
+            longDelivery["durationSeconds"] = 12.25;
+            using JsonDocument longVideo = JsonDocument.Parse(
+                longVideoNode.ToJsonString());
+            bool longSnapshotExact = PhotoViewer.Wpf.MainWindow
+                .IsExactMiniMaxH3VideoSnapshotForSmoke(
+                    longVideo.RootElement);
             bool ownedOutputName = resolvedValidOutputFolder is not null
                 && string.Equals(
                     Path.GetDirectoryName(resolvedValidOutputFolder),
@@ -860,6 +873,7 @@ public partial class App
                 && sourceContract
                 && sourceDimensionsExact
                 && stableHashExact
+                && longSnapshotExact
                 && japaneseHashInterop
                 && portraitHashInterop
                 && canvasPolicyVectorsExact
@@ -898,6 +912,7 @@ public partial class App
                 sourceContract,
                 sourceDimensionsExact,
                 stableHashExact,
+                longSnapshotExact,
                 japaneseHashInterop,
                 portraitHashInterop,
                 canvasPolicyVectorsExact,

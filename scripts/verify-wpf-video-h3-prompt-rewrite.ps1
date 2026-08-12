@@ -72,7 +72,11 @@ try {
         'UiVideoH3PromptAssistantHelp',
         'UiVideoH3RewriteButton',
         'UiVideoH3RewriteAgainButton',
+        'UiVideoH3RewriteWorkingButton',
+        'UiVideoH3RewriteCancelButton',
         'UiVideoH3RewriteButtonAutomation',
+        'UiVideoH3RewriteCancelButtonAutomation',
+        'UiVideoH3RewriteCancelButtonHelp',
         'UiVideoH3RewriteModeLabel',
         'UiVideoH3RewriteModeAutomation',
         'UiVideoH3RewriteModePolish',
@@ -90,6 +94,7 @@ try {
         'UiVideoH3StatusStale',
         'UiVideoH3StatusInvalidCandidate',
         'UiVideoH3StatusInputTooLong'
+        'UiVideoH3StatusBusy'
     )
     foreach ($resourcePath in @($jaResourcePath, $enResourcePath)) {
         [xml]$resource = Get-Content -Raw -Encoding UTF8 -LiteralPath $resourcePath
@@ -110,6 +115,8 @@ try {
         -or $implementation -notmatch 'VideoH3PromptRewriteMode\.Polish' `
         -or $implementation -notmatch 'VideoH3PromptRewriteMode\.Direction' `
         -or $implementation -notmatch 'VideoH3PromptRewriteMode\.Auto' `
+        -or $implementation -notmatch 'CancelVideoH3PromptRewrite\(userInitiated:\s*true\)' `
+        -or $implementation -notmatch 'UiVideoH3RewriteCancelButton' `
         -or $implementation -notmatch 'MaxVideoPromptLength' `
         -or $implementation -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync' `
         -or $implementation -match 'SendEnhancementEnqueueAsync' `
@@ -186,6 +193,10 @@ try {
         -or -not $result.queueReadsOnlyInput `
         -or -not $result.applied `
         -or -not $result.undone `
+        -or -not $result.explicitCancelContract `
+        -or -not $result.cancellationReachedTransport `
+        -or -not $result.rewriteRequestTokenCanceled `
+        -or $result.activeCancellationAwareRewriteRequests -ne 0 `
         -or -not $result.inputStale `
         -or -not $result.styleStale `
         -or -not $result.modelStale `

@@ -10,9 +10,10 @@ namespace PhotoViewer.Wpf;
 public partial class MainWindow
 {
     private const string DefaultUpscalePresetId = "anime-sharp-x2";
-    private const string DefaultUpscaleAdapterId = "comfyui";
+    private const string DefaultUpscaleAdapterId = "realesrgan-ncnn";
     private const double DefaultUpscaleScale = 2d;
     private const string DefaultUpscaleOutputFormat = "webp";
+    private const int CurrentUpscaleBackendVersion = 2;
 
     private static readonly UpscalePresetDefinition[] UpscalePresetDefinitions =
     [
@@ -58,9 +59,7 @@ public partial class MainWindow
             : DefaultUpscalePresetId;
 
     private static string NormalizeUpscaleAdapterId(string? value)
-        => value is "realesrgan-ncnn" or "comfyui"
-            ? value
-            : DefaultUpscaleAdapterId;
+        => DefaultUpscaleAdapterId;
 
     private static string NormalizeUpscaleOutputFormat(
         string? value,
@@ -80,14 +79,7 @@ public partial class MainWindow
             && double.IsFinite(requested)
             ? requested
             : fallback;
-        double maximum = string.Equals(
-            adapterId,
-            "realesrgan-ncnn",
-            StringComparison.Ordinal)
-                ? 4d
-                : 8d;
         return UpscaleScaleChoices
-            .Where(scale => scale <= maximum)
             .OrderBy(scale => Math.Abs(scale - candidate))
             .ThenBy(static scale => scale)
             .First();
@@ -185,22 +177,10 @@ public partial class MainWindow
             combo.SelectedItem = match;
     }
 
-    private void SetUpscaleScaleItemAvailability(ComboBox combo)
+    private static void SetUpscaleScaleItemAvailability(ComboBox combo)
     {
-        bool ncnn = string.Equals(
-            _modalEnhancementAdapterId,
-            "realesrgan-ncnn",
-            StringComparison.Ordinal);
         foreach (ComboBoxItem item in combo.Items.OfType<ComboBoxItem>())
-        {
-            item.IsEnabled = !ncnn
-                || !double.TryParse(
-                    item.Tag?.ToString(),
-                    NumberStyles.Float,
-                    CultureInfo.InvariantCulture,
-                    out double scale)
-                || scale <= 4d;
-        }
+            item.IsEnabled = true;
     }
 
     private static string? SelectedComboTag(ComboBox combo)
@@ -279,17 +259,20 @@ public partial class MainWindow
     private void RefreshUpscaleSettingsPresentation()
     {
         UpscalePresetDefinition preset = PresetForId(_modalEnhancementPresetId);
-        string method = string.Equals(
-            _modalEnhancementAdapterId,
-            "comfyui",
-            StringComparison.Ordinal)
-                ? "ComfyUI quality (overlap blend)"
-                : "Real-ESRGAN fast (tile seams possible)";
+        const string method = "Real-ESRGAN GPU";
         string scale = _modalEnhancementScale.ToString(
             "0.#",
             CultureInfo.InvariantCulture);
         string summary =
             $"{preset.Label} / {method} / {scale}x / {_upscaleOutputFormat.ToUpperInvariant()}";
+        if (string.Equals(
+                _modalEnhancementAdapterId,
+                "realesrgan-ncnn",
+                StringComparison.Ordinal)
+            && _modalEnhancementScale > 4d)
+        {
+            summary += "（4x AI処理後に指定倍率へ高品質リサイズ）";
+        }
         if (AppUpscaleSettingsHintText is not null)
             AppUpscaleSettingsHintText.Text = summary;
         if (ModalUpscaleSettingsHintText is not null)
@@ -386,6 +369,21 @@ public partial class MainWindow
             SaveState();
     }
 
+    public bool SelectModalUpscaleScaleForSmoke(double scale)
+    {
+        _modalEnhancementScale = NormalizeUpscaleScale(
+            scale,
+            _modalEnhancementAdapterId);
+        SyncUpscaleSettingsControls();
+        return Math.Abs(_modalEnhancementScale - scale) < 0.001
+            && ModalUpscaleScaleComboBox.SelectedItem is ComboBoxItem selected
+            && selected.IsEnabled
+            && string.Equals(
+                selected.Tag?.ToString(),
+                scale.ToString("0.#", CultureInfo.InvariantCulture),
+                StringComparison.Ordinal);
+    }
+
     public void RestoreUpscaleSettingsForSmoke(ViewerState state)
         => RestoreUpscaleSettings(state);
 
@@ -409,7 +407,19 @@ public partial class MainWindow
             && AppUpscalePresetComboBox.Items.Count
                 == UpscalePresetDefinitions.Length
             && ModalUpscalePresetComboBox.Items.Count
-                == UpscalePresetDefinitions.Length;
+                == UpscalePresetDefinitions.Length
+            && AppUpscaleAdapterComboBox.Items.Count == 1
+            && ModalUpscaleAdapterComboBox.Items.Count == 1
+            && AppUpscaleAdapterComboBox.Items[0] is ComboBoxItem appAdapter
+            && ModalUpscaleAdapterComboBox.Items[0] is ComboBoxItem modalAdapter
+            && string.Equals(
+                appAdapter.Tag?.ToString(),
+                DefaultUpscaleAdapterId,
+                StringComparison.Ordinal)
+            && string.Equals(
+                modalAdapter.Tag?.ToString(),
+                DefaultUpscaleAdapterId,
+                StringComparison.Ordinal);
 
     public bool OpenModalUpscaleSettingsForSmoke()
     {

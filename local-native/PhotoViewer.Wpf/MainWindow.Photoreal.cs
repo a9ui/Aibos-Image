@@ -25,7 +25,7 @@ public partial class MainWindow
     private const int MaxPhotorealStyleNameLength = 40;
     private const int MaxPhotorealPromptLength = 2_000;
     private const string PhotorealUpscalePresetId = "photo-natural-x2";
-    private const string PhotorealUpscaleAdapterId = "comfyui";
+    private const string PhotorealUpscaleAdapterId = "realesrgan-ncnn";
     private const int PhotorealUpscaleScale = 2;
     private static readonly string DefaultPhotorealPrompt =
         WpfLocalPromptPolicy.Current.Photoreal!.Prompt;
@@ -251,12 +251,12 @@ public partial class MainWindow
     }
 
     public bool DisplayedManagedImageDeleteVerifiedForSmoke
-        => SelectedTile() is Tile tile
+        => TryGetModalSourceTile(out Tile tile)
             && TryGetDeletableCurrentModalEnhancementVersion(tile, out _);
 
     public bool DisplayedManagedImageDuplicateJobRejectedForSmoke()
     {
-        if (SelectedTile() is not Tile tile
+        if (!TryGetModalSourceTile(out Tile tile)
             || !TryGetDeletableCurrentModalEnhancementVersion(
                 tile,
                 out ManagedEnhancementVersion displayed)
@@ -281,7 +281,7 @@ public partial class MainWindow
 
     public bool DisplayedManagedImageGlobalJobIdRejectedForSmoke()
     {
-        if (SelectedTile() is not Tile tile
+        if (!TryGetModalSourceTile(out Tile tile)
             || !TryGetDeletableCurrentModalEnhancementVersion(
                 tile,
                 out ManagedEnhancementVersion displayed)
@@ -449,6 +449,7 @@ public partial class MainWindow
                     _enhancementVersions[sourceIdentity];
             }
         }
+        RebuildManagedFavoriteSourcePathIndexes();
         UpdateModalEnhancedControls(_modalEnhancementVersions.Count > 0);
     }
 
@@ -497,6 +498,7 @@ public partial class MainWindow
                     _enhancementVersions[sourceIdentity];
             }
         }
+        RebuildManagedFavoriteSourcePathIndexes();
     }
 
     private void RemoveModalEnhancementVersion(Tile tile, string jobId)
@@ -524,6 +526,7 @@ public partial class MainWindow
                 _catalogEnhancedOutputsByPath.Remove(emptyAlias);
                 _catalogEnhancementVersionsByPath.Remove(emptyAlias);
             }
+            RebuildManagedFavoriteSourcePathIndexes();
             return;
         }
 
@@ -539,6 +542,7 @@ public partial class MainWindow
             _catalogEnhancementVersionsByPath[alias] =
                 _enhancementVersions[sourceIdentity];
         }
+        RebuildManagedFavoriteSourcePathIndexes();
     }
 
     private static ModalDisplayVersionKind ModalDisplayKindForOperation(
@@ -903,8 +907,7 @@ public partial class MainWindow
         ModalDisplayVersionChoice choice,
         bool showFeedback)
     {
-        if (Modal.Visibility != Visibility.Visible
-            || SelectedTile() is not Tile tile)
+        if (!TryGetModalSourceTile(out Tile tile))
         {
             return false;
         }
@@ -970,7 +973,7 @@ public partial class MainWindow
                     choice.Kind,
                     version.JobId);
             }
-            OpenModal();
+            OpenModal(tile);
             applied = true;
         }
 
@@ -2524,16 +2527,12 @@ public partial class MainWindow
 
     public bool ModalPhotorealToolbarContractForSmoke
         => !ReferenceEquals(ModalEnhanceButton, ModalPhotorealButton)
-            && (string.Equals(
-                    ModalEnhanceButtonLabel.Text,
-                    "AI高画質化",
-                    StringComparison.Ordinal)
-                || string.Equals(
-                    ModalEnhanceButtonLabel.Text,
-                    "実写HQ",
-                    StringComparison.Ordinal))
-            && string.Equals(ModalPhotorealButtonLabel.Text, "AI実写化", StringComparison.Ordinal)
-            && AutomationProperties.GetName(ModalPhotorealButton) == "AI実写化"
+            && string.Equals(
+                ModalEnhanceButtonLabel.Text,
+                "HQ",
+                StringComparison.Ordinal)
+            && string.Equals(ModalPhotorealButtonLabel.Text, "実写化", StringComparison.Ordinal)
+            && AutomationProperties.GetName(ModalPhotorealButton) == "実写化"
             && ModalPhotorealSettingsPopup is not null
             && GalleryContextMenuContractForSmoke;
 

@@ -116,7 +116,7 @@ public partial class App
             bool h3UnavailableSafe = !window.VideoModelRunnableForSmoke
                 && window.MiniMaxH3SurfaceForSmoke
                 && window.MiniMaxH3ReadinessTextForSmoke.Contains(
-                    "ジョブ登録は現在無効",
+                    "待機ジョブの登録はできます",
                     StringComparison.Ordinal);
             bool h3UnavailableRunnable = window.VideoModelRunnableForSmoke;
             string[] h3UnavailableSurfaceIssues =
@@ -148,11 +148,24 @@ public partial class App
                 && requestRoot.TryGetProperty("video", out JsonElement video)
                 && HasExactNames(video, "requested")
                 && video.TryGetProperty("requested", out JsonElement requested)
-                && HasExactNames(requested, "prompt")
+                && HasExactNames(requested, "profileId", "prompt")
+                && ExactString(
+                    requested,
+                    "profileId",
+                    "minimax-h3-hq-5s-v1")
                 && ExactString(
                     requested,
                     "prompt",
                     "A gentle head turn in dawn light.");
+            using JsonDocument longRequest = JsonDocument.Parse(
+                window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
+                    "three connected phases",
+                    durationSeconds: 12));
+            bool longRequestExact = longRequest.RootElement
+                    .GetProperty("video")
+                    .GetProperty("requested")
+                    .GetProperty("profileId")
+                    .GetString() == "minimax-h3-hq-12s-v1";
 
             string readyHealthJson = CreateVideoV2HealthJson(
                 writerEnabled: true,
@@ -211,6 +224,11 @@ public partial class App
                     "\"videoV2\":{",
                     "\"videoV2\":{},\"videoV2\":{",
                     StringComparison.Ordinal));
+            using JsonDocument malformedProfilesHealth = JsonDocument.Parse(
+                readyHealthJson.Replace(
+                    "\"frameCount\":362",
+                    "\"frameCount\":361",
+                    StringComparison.Ordinal));
             bool readyParsed = PhotoViewer.Wpf.MainWindow
                 .TryParseMiniMaxH3VideoCapabilityForSmoke(
                     readyHealth.RootElement,
@@ -256,6 +274,12 @@ public partial class App
                     duplicateVideoV2Health.RootElement,
                     out _,
                     out _);
+            bool profilesParsed = PhotoViewer.Wpf.MainWindow
+                .TryParseMiniMaxH3VideoProfilesCapabilityForSmoke(
+                    readyHealth.RootElement);
+            bool malformedProfilesRejected = !PhotoViewer.Wpf.MainWindow
+                .TryParseMiniMaxH3VideoProfilesCapabilityForSmoke(
+                    malformedProfilesHealth.RootElement);
             bool healthExact = readyParsed
                 && ready
                 && readyReason is null
@@ -276,7 +300,9 @@ public partial class App
                 && malformedRejected
                 && malformedCanvasRejected
                 && duplicateCapabilitiesRejected
-                && duplicateVideoV2Rejected;
+                && duplicateVideoV2Rejected
+                && profilesParsed
+                && malformedProfilesRejected;
 
             window.SetMiniMaxH3CapabilityForSmoke(
                 checkedHealth: true,
@@ -353,6 +379,15 @@ public partial class App
                                 "minimax-h3-local-v1",
                                 "future-h3-backend",
                                 StringComparison.Ordinal),
+                        "legacy-ready" => CreateVideoV2HealthJson(
+                                writerEnabled: true,
+                                ready: true,
+                                state: "ready",
+                                reasonCode: null)
+                            .Replace(
+                                "\"videoH3ProfilesV1\":",
+                                "\"retiredVideoProfiles\":",
+                                StringComparison.Ordinal),
                         "seal-invalid" => CreateVideoV2HealthJson(
                             writerEnabled: true,
                             ready: false,
@@ -408,6 +443,10 @@ public partial class App
             var unavailableRetry = await window.RetryMiniMaxH3JobForSmokeAsync(
                 "h3-unavailable-retry");
             int afterUnavailable = PendingReservationCount();
+            retryHealthMode = "legacy-ready";
+            var legacyReadyRetry = await window.RetryMiniMaxH3JobForSmokeAsync(
+                "h3-legacy-ready-retry");
+            int afterLegacyReady = PendingReservationCount();
             retryHealthMode = "ready";
             var readyRetry = await window.RetryMiniMaxH3JobForSmokeAsync(
                 "h3-ready-retry");
@@ -420,20 +459,24 @@ public partial class App
                 && !malformedRetry.SavedForDelivery
                 && !unavailableRetry.Ok
                 && !unavailableRetry.SavedForDelivery
+                && !legacyReadyRetry.Ok
+                && !legacyReadyRetry.SavedForDelivery
                 && afterDisabled == 0
                 && afterInvalidSeal == 0
                 && afterMalformed == 0
                 && afterUnavailable == 0
+                && afterLegacyReady == 0
                 && readyRetry.Ok
                 && readyRetry.SavedForDelivery
                 && afterReady == 1
-                && retryHealthGetCalls == 5
+                && retryHealthGetCalls == 6
                 && retryPostCalls == 1;
 
             ok = h3DefaultOnly
                 && templateExact
                 && h3UnavailableSafe
                 && requestExact
+                && longRequestExact
                 && healthExact
                 && invalidSealReasonVisible
                 && h3ReadySafe
@@ -454,10 +497,13 @@ public partial class App
                 h3UnavailableSurfaceIssues,
                 h3UnavailableReason,
                 requestExact,
+                longRequestExact,
                 healthExact,
                 invalidSealReasonVisible,
                 duplicateCapabilitiesRejected,
                 duplicateVideoV2Rejected,
+                profilesParsed,
+                malformedProfilesRejected,
                 h3ReadySafe,
                 h3ReadyRunnable,
                 h3ReadySurfaceIssues,
@@ -469,6 +515,7 @@ public partial class App
                 afterInvalidSeal,
                 afterMalformed,
                 afterUnavailable,
+                afterLegacyReady,
                 afterReady,
                 retryHealthGetCalls,
                 retryPostCalls,
@@ -553,6 +600,42 @@ public partial class App
                         playbackFps = 24,
                         steps = 20,
                         audio = true,
+                    },
+                },
+                videoH3ProfilesV1 = new
+                {
+                    contractId = "PV-ENHANCE-VIDEO-H3-PROFILES-001",
+                    protocol = "aibos.enhancement-video-h3-profiles/v1",
+                    defaultProfileId = "minimax-h3-hq-5s-v1",
+                    playbackFps = 24,
+                    steps = 20,
+                    maxPixelArea = 414720,
+                    profiles = new object[]
+                    {
+                        new
+                        {
+                            id = "minimax-h3-hq-5s-v1",
+                            nominalDurationSeconds = 5,
+                            frameCount = 124,
+                        },
+                        new
+                        {
+                            id = "minimax-h3-hq-10s-v1",
+                            nominalDurationSeconds = 10,
+                            frameCount = 243,
+                        },
+                        new
+                        {
+                            id = "minimax-h3-hq-12s-v1",
+                            nominalDurationSeconds = 12,
+                            frameCount = 294,
+                        },
+                        new
+                        {
+                            id = "minimax-h3-hq-15s-v1",
+                            nominalDurationSeconds = 15,
+                            frameCount = 362,
+                        },
                     },
                 },
             },

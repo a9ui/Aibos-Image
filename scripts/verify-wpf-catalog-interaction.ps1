@@ -38,27 +38,34 @@ if (-not $SkipBuild) {
 }
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "WPF executable was not found: $exe" }
 
-Remove-Item -LiteralPath $outputFullPath -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $progressPath -Force -ErrorAction SilentlyContinue
-$process = Start-Process -FilePath $exe `
-    -ArgumentList @('--catalog-interaction-smoke', ('"{0}"' -f $outputFullPath), '--count', $Count.ToString()) `
-    -WindowStyle Hidden -PassThru
-$completed = $process.WaitForExit($OverallTimeoutSeconds * 1000)
-if (-not $completed) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    $progress = if (Test-Path -LiteralPath $progressPath -PathType Leaf) {
-        Get-Content -Raw -LiteralPath $progressPath
-    }
-    else {
-        'unknown'
+$dotNetExecutable = (Get-Command $DotnetPath -ErrorAction Stop).Source
+$dotNetRoot = Split-Path -Parent $dotNetExecutable
+$previousDotNetRoot = $env:DOTNET_ROOT
+$previousDotNetRootX64 = $env:DOTNET_ROOT_X64
+try {
+    $env:DOTNET_ROOT = $dotNetRoot
+    $env:DOTNET_ROOT_X64 = $dotNetRoot
+    Remove-Item -LiteralPath $outputFullPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $progressPath -Force -ErrorAction SilentlyContinue
+    $process = Start-Process -FilePath $exe `
+        -ArgumentList @('--catalog-interaction-smoke', ('"{0}"' -f $outputFullPath), '--count', $Count.ToString()) `
+        -WindowStyle Hidden -PassThru
+    $completed = $process.WaitForExit($OverallTimeoutSeconds * 1000)
+    if (-not $completed) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        $progress = if (Test-Path -LiteralPath $progressPath -PathType Leaf) {
+            Get-Content -Raw -LiteralPath $progressPath
+        }
+        else {
+            'unknown'
+        }
+        Remove-Item -LiteralPath $progressPath -Force -ErrorAction SilentlyContinue
+        throw "WPF catalog interaction smoke timed out after $OverallTimeoutSeconds seconds at $progress."
     }
     Remove-Item -LiteralPath $progressPath -Force -ErrorAction SilentlyContinue
-    throw "WPF catalog interaction smoke timed out after $OverallTimeoutSeconds seconds at $progress."
-}
-Remove-Item -LiteralPath $progressPath -Force -ErrorAction SilentlyContinue
-if (-not (Test-Path -LiteralPath $outputFullPath -PathType Leaf)) {
-    throw "WPF catalog interaction smoke exited without producing $outputFullPath"
-}
+    if (-not (Test-Path -LiteralPath $outputFullPath -PathType Leaf)) {
+        throw "WPF catalog interaction smoke exited without producing $outputFullPath"
+    }
 
 $result = Get-Content -Raw -LiteralPath $outputFullPath | ConvertFrom-Json
 $failures = [Collections.Generic.List[string]]::new()
@@ -404,4 +411,9 @@ if ($result.normalizedWorkingSetRegressionPercent -gt 35) {
 $result | ConvertTo-Json -Depth 8
 if ($failures.Count -gt 0) {
     throw ('WPF catalog interaction gate failed: ' + ($failures -join '; '))
+}
+}
+finally {
+    $env:DOTNET_ROOT = $previousDotNetRoot
+    $env:DOTNET_ROOT_X64 = $previousDotNetRootX64
 }

@@ -63,11 +63,42 @@ try {
         -or $japaneseResources -notmatch 'x:Key="UiVideoFavoriteFilterTitle"') {
         throw 'The Favorite group does not use the required short Japanese row labels.'
     }
-    if ($mainXaml -notmatch '<Setter Property="Height" Value="24"/>' `
-        -or $mainXaml -notmatch 'x:Name="VideoFavoriteLevel0Filter"' `
-        -or $mainXaml -notmatch 'x:Name="VideoFavoriteLevel5Filter"' `
-        -or $mainXaml -notmatch 'Checked="VideoFavoriteLevelFilter_Changed"') {
-        throw 'The shared 24 DIP Video Favorite filter pill surface is incomplete.'
+    $unratedGlyphPattern = [regex]::Escape([string][char]0x2212)
+    $pillChecks = [ordered]@{
+        style = $mainXaml -match '<Style x:Key="FavoriteLevelPill"[^>]*BasedOn="\{StaticResource Pill\}"'
+        retiredSwatchAbsent = $mainXaml -notmatch 'FavoriteLevelSwatch'
+        minWidth = $mainXaml -match '<Setter Property="MinWidth" Value="28"/>'
+        height = $mainXaml -match '<Setter Property="Height" Value="30"/>'
+        originalRow = $mainXaml -match '<Grid x:Name="OriginalFavoriteFilterRow"'
+        photorealRow = $mainXaml -match '<Grid x:Name="PhotorealFavoriteFilterRow"'
+        videoRow = $mainXaml -match '<Grid x:Name="VideoFavoriteFilterRow"'
+        originalPanel = $mainXaml -match 'x:Name="FavoriteLevelFilterPanel" Grid.Column="1" Columns="6"'
+        photorealPanel = $mainXaml -match 'x:Name="PhotorealFavoriteLevelFilterPanel" Grid.Column="1" Columns="6"'
+        videoPanel = $mainXaml -match 'x:Name="VideoFavoriteLevelFilterPanel" Grid.Column="1" Columns="6"'
+        originalUnrated = $mainXaml -match ('x:Name="FavoriteLevel0Filter"[^>]*Content="' + $unratedGlyphPattern + '"[^>]*Tag="0"')
+        photorealUnrated = $mainXaml -match ('x:Name="PhotorealFavoriteLevel0Filter"[^>]*Content="' + $unratedGlyphPattern + '"[^>]*Tag="0"')
+        videoUnrated = $mainXaml -match ('x:Name="VideoFavoriteLevel0Filter"[^>]*Content="' + $unratedGlyphPattern + '"[^>]*Tag="0"')
+        videoChangeHandler = $mainXaml -match 'Checked="VideoFavoriteLevelFilter_Changed"'
+    }
+    $failedPillChecks = @($pillChecks.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object Key)
+    if ($failedPillChecks.Count -gt 0) {
+        throw ('The one-row neutral Favorite level surface is incomplete: ' `
+            + ($failedPillChecks -join ','))
+    }
+    foreach ($prefix in @('Favorite', 'PhotorealFavorite', 'VideoFavorite')) {
+        foreach ($level in 1..5) {
+            $numericLevelPattern = 'x:Name="' + $prefix + 'Level' + $level `
+                + 'Filter"[^>]*Content="' + $level + '"[^>]*Tag="' + $level + '"'
+            if ($mainXaml -notmatch $numericLevelPattern) {
+                throw "Favorite filter $prefix level $level must show its numeric level."
+            }
+            $levelTag = [regex]::Match(
+                $mainXaml,
+                '<CheckBox x:Name="' + $prefix + 'Level' + $level + 'Filter"[^>]*/>')
+            if (-not $levelTag.Success -or $levelTag.Value -match '\sForeground=') {
+                throw "Favorite filter $prefix level $level must use the neutral pill color."
+            }
+        }
     }
     foreach ($partName in @(
         'compactVideoFavoriteBadge',
@@ -83,8 +114,10 @@ try {
         -or $appXaml -notmatch 'AutomationProperties.Name="\{Binding VideoFavoriteAutomationName\}"') {
         throw 'Blue/ purple Favorite badge tokens or accessible names are incomplete.'
     }
-    if ($mainCode -notmatch 'FrozenSet<int> VideoFavoriteLevels' `
-        -or $mainCode -notmatch '!tile.VideoGenerated' `
+    if ($mainCode -notmatch 'int VideoFavoriteLevelMask' `
+        -or $mainCode -notmatch 'BuildFavoriteLevelMask' `
+        -or $mainCode -notmatch 'MatchesSelectedFavoriteLevels' `
+        -or $mainCode -notmatch 'snapshot\.FavoritesOnly' `
         -or $mainCode -notmatch 'VideoFavoriteFilterLevels \{ get; set; \}' `
         -or $videoCode -notmatch 'TryValidateManagedVideoVersion\(' `
         -or $videoCode -notmatch 'tile.VideoFavoriteLevel = validVersions' `
@@ -157,8 +190,9 @@ try {
         'missingStateUnselected',
         'maximumAndInvalidExclusion',
         'zeroAndUnion',
-        'intersection',
+        'categoryOr',
         'modalOutputFavorite',
+        'modalPinnedFavoriteSource',
         'optimisticRetryRollback',
         'persistenceReload',
         'layoutNotifications',
@@ -179,7 +213,9 @@ try {
         structural = [pscustomobject]@{
             retiredLabelAbsent = $true
             shortRows = @('original', 'photoreal', 'video')
-            pillHeightDip = 24
+            levelButtonMinWidthDip = 28
+            levelButtonHeightDip = 30
+            modalFavoritePinsDisplayedSource = $true
             galleryTemplates = 3
             photorealHeart = '#FF60A5FA'
             videoHeart = '#FFC084FC'

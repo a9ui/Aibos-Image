@@ -400,6 +400,45 @@ public partial class MainWindow
         }
     }
 
+    private static bool TryGetMiniMaxH3SnapshotProfile(
+        JsonElement requested,
+        out int frameCount,
+        out double durationSeconds)
+    {
+        frameCount = 0;
+        durationSeconds = 0;
+        string? profileId;
+        if (HasExactProperties(requested, "prompt"))
+        {
+            profileId = MiniMaxH3VideoDefaultProfileId;
+        }
+        else if (HasExactProperties(requested, "profileId", "prompt")
+            && TryGetStringProperty(
+                requested,
+                "profileId",
+                out profileId))
+        {
+            // Parsed below.
+        }
+        else
+        {
+            return false;
+        }
+
+        frameCount = profileId switch
+        {
+            MiniMaxH3VideoDefaultProfileId => 124,
+            MiniMaxH3Video10SecondProfileId => 243,
+            MiniMaxH3Video12SecondProfileId => 294,
+            MiniMaxH3Video15SecondProfileId => 362,
+            _ => 0,
+        };
+        if (frameCount == 0)
+            return false;
+        durationSeconds = frameCount / (double)MiniMaxH3VideoPlaybackFps;
+        return true;
+    }
+
     private static bool IsExactMiniMaxH3VideoSnapshot(JsonElement video)
     {
         if (video.ValueKind != JsonValueKind.Object
@@ -471,7 +510,10 @@ public partial class MainWindow
                 "minimax_h3_audio_vae_fp32.safetensors")
             || !video.TryGetProperty("requested", out JsonElement requested)
             || requested.ValueKind != JsonValueKind.Object
-            || !HasExactProperties(requested, "prompt")
+            || !TryGetMiniMaxH3SnapshotProfile(
+                requested,
+                out int expectedFrameCount,
+                out double expectedDurationSeconds)
             || !TryGetStringPropertyAllowEmpty(
                 requested,
                 "prompt",
@@ -502,7 +544,7 @@ public partial class MainWindow
             || !HasExactInt32(
                 effective,
                 "frameCount",
-                MiniMaxH3VideoFrameCount)
+                expectedFrameCount)
             || !HasExactInt32(
                 effective,
                 "playbackFps",
@@ -538,7 +580,7 @@ public partial class MainWindow
             || !HasExactInt32(
                 delivery,
                 "frameCount",
-                MiniMaxH3VideoFrameCount)
+                expectedFrameCount)
             || !HasExactInt32(
                 delivery,
                 "targetFps",
@@ -548,7 +590,7 @@ public partial class MainWindow
                 out JsonElement durationElement)
             || !durationElement.TryGetDouble(out double durationSeconds)
             || !double.IsFinite(durationSeconds)
-            || durationSeconds != MiniMaxH3VideoDurationSeconds
+            || durationSeconds != expectedDurationSeconds
             || !TryGetExactStringProperty(delivery, "pixelFormat", "yuv420p")
             || !TryGetExactStringProperty(delivery, "videoCodec", "h264")
             || !TryGetExactStringProperty(delivery, "audioCodec", "aac")
@@ -1886,6 +1928,12 @@ public partial class MainWindow
         TryGetStringProperty(element, "errorMessage", out string? errorMessage);
         TryGetStringProperty(element, "createdAt", out string? createdAtText);
         TryGetStringProperty(element, "updatedAt", out string? updatedAtText);
+        DateTimeOffset? startedAt = TryReadEnhancementJobTimestamp(
+            element,
+            "startedAt");
+        DateTimeOffset? finishedAt = TryReadEnhancementJobTimestamp(
+            element,
+            "finishedAt");
         int progress = element.TryGetProperty("progress", out JsonElement progressElement)
             && progressElement.TryGetInt32(out int parsedProgress)
             ? Math.Clamp(parsedProgress, 0, 100)
@@ -1948,10 +1996,30 @@ public partial class MainWindow
             errorMessage,
             createdAt,
             updatedAt,
+            startedAt,
+            finishedAt,
             sourceSize,
             sourceMtimeMs,
             queueOrder,
             apiOrdinal);
+    }
+
+    private static DateTimeOffset? TryReadEnhancementJobTimestamp(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement timestamp)
+            || timestamp.ValueKind != JsonValueKind.String
+            || !DateTimeOffset.TryParse(
+                timestamp.GetString(),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out DateTimeOffset parsed))
+        {
+            return null;
+        }
+
+        return parsed;
     }
 
     private static bool ClaimsI2iV2Envelope(JsonElement element)
@@ -3862,6 +3930,24 @@ public partial class MainWindow
         return true;
     }
 
+    public static bool TryReadEnhancementJobElapsedForSmoke(
+        JsonElement job,
+        out string? elapsedText,
+        out string timestampText,
+        out string accessibleName)
+    {
+        elapsedText = null;
+        timestampText = "";
+        accessibleName = "";
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(job, 0);
+        if (view is null)
+            return false;
+        elapsedText = view.ElapsedText;
+        timestampText = view.TimestampText;
+        accessibleName = view.AccessibleName;
+        return true;
+    }
+
     public static bool IsMiniMaxH3VideoMutationSafeForSmoke(JsonElement job)
         => IsMiniMaxH3VideoMutationSafe(job);
 
@@ -3939,6 +4025,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         string? errorMessage,
         DateTimeOffset createdAt,
         DateTimeOffset updatedAt,
+        DateTimeOffset? startedAt,
+        DateTimeOffset? finishedAt,
         long? sourceSize,
         double? sourceMtimeMs,
         int? queueOrder,
@@ -3964,6 +4052,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ErrorMessage = errorMessage;
         CreatedAt = createdAt;
         UpdatedAt = updatedAt;
+        StartedAt = startedAt;
+        FinishedAt = finishedAt;
         SourceSize = sourceSize;
         SourceMtimeMs = sourceMtimeMs;
         QueueOrder = queueOrder;
@@ -3990,6 +4080,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string? ErrorMessage { get; private set; }
     public DateTimeOffset CreatedAt { get; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    public DateTimeOffset? StartedAt { get; private set; }
+    public DateTimeOffset? FinishedAt { get; private set; }
     public long? SourceSize { get; }
     public double? SourceMtimeMs { get; }
     public int? QueueOrder { get; private set; }
@@ -4176,10 +4268,48 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                     : Status == "deleted"
                         ? "Managed output removed; original source kept."
                         : "Original source remains unchanged.";
-    public string TimestampText => UpdatedAt == DateTimeOffset.MinValue
-        ? "Time unavailable"
-        : $"Updated {UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
-    public string AccessibleName => $"{SourceName}, {OperationLabel}, {StatusLabel}, {PresetId}";
+    public TimeSpan? CompletedElapsed =>
+        Status == "succeeded"
+        && StartedAt is DateTimeOffset startedAt
+        && FinishedAt is DateTimeOffset finishedAt
+        && finishedAt >= startedAt
+            ? finishedAt - startedAt
+            : null;
+    public string? ElapsedText => CompletedElapsed is TimeSpan elapsed
+        ? $"所要 {FormatElapsedDuration(elapsed)}"
+        : null;
+    public string TimestampText
+    {
+        get
+        {
+            string updated = UpdatedAt == DateTimeOffset.MinValue
+                ? "Time unavailable"
+                : $"Updated {UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
+            return ElapsedText is { } elapsed
+                ? $"{updated} · {elapsed}"
+                : updated;
+        }
+    }
+    public string AccessibleName => ElapsedText is { } elapsed
+        ? $"{SourceName}, {OperationLabel}, {StatusLabel}, {PresetId}, {elapsed}"
+        : $"{SourceName}, {OperationLabel}, {StatusLabel}, {PresetId}";
+
+    private static string FormatElapsedDuration(TimeSpan elapsed)
+    {
+        long totalSeconds = Math.Max(
+            0,
+            (long)Math.Round(
+                elapsed.TotalSeconds,
+                MidpointRounding.AwayFromZero));
+        long hours = totalSeconds / 3600;
+        long minutes = totalSeconds % 3600 / 60;
+        long seconds = totalSeconds % 60;
+        if (hours > 0)
+            return $"{hours}時間 {minutes}分 {seconds}秒";
+        if (minutes > 0)
+            return $"{minutes}分 {seconds}秒";
+        return $"{seconds}秒";
+    }
 
     public bool HasSameImmutableIdentity(EnhancementWorkspaceJobView candidate)
         => string.Equals(SourceId, candidate.SourceId, StringComparison.Ordinal)
@@ -4212,6 +4342,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         bool outputChanged = !string.Equals(OutputPath, candidate.OutputPath, StringComparison.OrdinalIgnoreCase);
         bool errorChanged = !string.Equals(ErrorMessage, candidate.ErrorMessage, StringComparison.Ordinal);
         bool updatedChanged = UpdatedAt != candidate.UpdatedAt;
+        bool timingChanged = StartedAt != candidate.StartedAt
+            || FinishedAt != candidate.FinishedAt;
         bool queueChanged = QueuePosition != candidate.QueuePosition;
         bool queueCountChanged = QueueCount != candidate.QueueCount;
         bool queueOrderChanged = QueueOrder != candidate.QueueOrder;
@@ -4226,6 +4358,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         OutputPath = candidate.OutputPath;
         ErrorMessage = candidate.ErrorMessage;
         UpdatedAt = candidate.UpdatedAt;
+        StartedAt = candidate.StartedAt;
+        FinishedAt = candidate.FinishedAt;
         QueueOrder = candidate.QueueOrder;
         QueuePosition = candidate.QueuePosition;
         QueueCount = candidate.QueueCount;
@@ -4274,12 +4408,17 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             || outputChanged
             || errorChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
-        if (updatedChanged)
+        if (statusChanged || updatedChanged || timingChanged)
+        {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TimestampText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CompletedElapsed)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ElapsedText)));
+        }
         if (statusChanged
             || cancelRequestedChanged
             || progressChanged
-            || queueChanged)
+            || queueChanged
+            || timingChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
     }
 
