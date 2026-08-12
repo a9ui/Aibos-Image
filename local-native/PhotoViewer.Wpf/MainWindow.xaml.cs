@@ -8356,6 +8356,7 @@ public partial class MainWindow : Window
                     plan.Upserts,
                     plan.RemovedPaths,
                     plan.Entries.Length,
+                    index.EntryRevision,
                     cts.Token),
                 cts.Token);
         }

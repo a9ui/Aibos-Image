@@ -92,8 +92,23 @@ if ($result.favoriteDuplicateEvictionRaceExact -ne $true) {
 if ($result.favoriteFilteredFailureStatusExact -ne $true) {
     $failures.Add('favorite-filter write failure did not preserve rollback projection and Retry status')
 }
-if ($result.searchP95Ms -gt 350 -or $result.filterP95Ms -gt 350 -or $result.sortP95Ms -gt 650) {
+if ($result.searchProductTargetMs -ne 250 `
+    -or $result.filterProductTargetMs -ne 250 `
+    -or $result.sortProductTargetMs -ne 550 `
+    -or $result.searchHostedAcceptanceMs -ne 350 `
+    -or $result.filterHostedAcceptanceMs -ne 350 `
+    -or $result.sortHostedAcceptanceMs -ne 650) {
+    $failures.Add('interaction product-target/hosted-acceptance contract was missing')
+}
+elseif ($result.searchP95Ms -gt $result.searchHostedAcceptanceMs `
+    -or $result.filterP95Ms -gt $result.filterHostedAcceptanceMs `
+    -or $result.sortP95Ms -gt $result.sortHostedAcceptanceMs) {
     $failures.Add("interaction p95 exceeded its budget (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))")
+}
+if ($result.searchProductTargetMet -ne $true `
+    -or $result.filterProductTargetMet -ne $true `
+    -or $result.sortProductTargetMet -ne $true) {
+    Write-Warning "Product interaction target exceeded but remained within hosted acceptance (search/filter/sort $($result.searchP95Ms)/$($result.filterP95Ms)/$($result.sortP95Ms))."
 }
 if ($result.selectionStable -ne $true) { $failures.Add('selection did not survive search/filter/sort churn') }
 if ($result.keyboardNavigationExact -ne $true `
@@ -285,9 +300,9 @@ if ($result.coldGalleryFocusWarmupBudgetMs -ne 250 `
 }
 $controlConsensus = $result.schedulerControlConsensus
 $dispatcherDiagnostic = $result.dispatcherDiagnostic
-# Keep the product heartbeat target at 50 ms while allowing hosted-runner
-# scheduler/GC sampling noise below a user-visible stall. Structural slice,
-# queue, and input-boundary gates stay exact.
+# Keep the product heartbeat target at 50 ms while separately allowing the
+# measured hosted scheduler/GC variance. Structural slice, queue, and
+# input-boundary gates stay exact.
 $heartbeatMeasurementToleranceMs = 25.0
 $heartbeatAcceptanceLimitMs =
     [double]$result.dispatcherHeartbeatBudgetMs + $heartbeatMeasurementToleranceMs
@@ -326,6 +341,9 @@ elseif ($controlConsensus.sensorValid -ne $true `
     -or $controlConsensus.probeCadenceAgreementToleranceMs -ne 0.25 `
     -or $controlConsensus.probeCadenceAgreementValid -ne $true) {
     $failures.Add('independent high-resolution scheduler probes were invalid or incomplete')
+}
+if ($result.dispatcherHeartbeatProductTargetMet -ne $true) {
+    Write-Warning "Product heartbeat target exceeded but remained eligible for hosted acceptance ($($dispatcherDiagnostic.maxProductGapMs) ms > $($result.dispatcherHeartbeatBudgetMs) ms)."
 }
 if ($null -ne $dispatcherDiagnostic) {
     $classifiedOverBudgetCount =

@@ -33,11 +33,16 @@ public partial class App : Application
     private const long CatalogColdGalleryFocusWarmupBudgetMs = 250;
     private const long CatalogProjectionSingleContainerDetachBudgetMs = 12;
     private const long CatalogInteractionDispatcherHeartbeatBudgetMs = 50;
-    // The hosted runner has repeatedly added 2-3 ms around otherwise bounded
-    // zero/one-slice operations. Keep the 50 ms product target visible, but do
-    // not fail a full workflow on scheduler sampling noise that is two orders
-    // of magnitude below a user-visible stall. Structural slice, queue, and
-    // input-boundary gates below remain exact.
+    private const double CatalogInteractionSearchProductTargetMs = 250;
+    private const double CatalogInteractionFilterProductTargetMs = 250;
+    private const double CatalogInteractionSortProductTargetMs = 550;
+    private const double CatalogInteractionSearchHostedAcceptanceMs = 350;
+    private const double CatalogInteractionFilterHostedAcceptanceMs = 350;
+    private const double CatalogInteractionSortHostedAcceptanceMs = 650;
+    // Hosted runs have shown low-tens-of-milliseconds scheduler/GC overlap
+    // around otherwise bounded zero/one-slice operations. Keep the 50 ms
+    // product target separately visible and retain exact structural, queue,
+    // and input-boundary gates while allowing that measured host variance.
     private const double CatalogInteractionDispatcherHeartbeatMeasurementToleranceMs = 25;
     private const long CatalogFavoriteEvictionBudgetMs = 125;
 
@@ -11808,9 +11813,9 @@ public partial class App : Application
                     && stalePeerLifetimeExact
                     && recycledContainerStateReset
                     && keyboardAccessibilityBounded
-                    && searchP95 <= 350
-                    && filterP95 <= 350
-                    && sortP95 <= 650
+                    && searchP95 <= CatalogInteractionSearchHostedAcceptanceMs
+                    && filterP95 <= CatalogInteractionFilterHostedAcceptanceMs
+                    && sortP95 <= CatalogInteractionSortHostedAcceptanceMs
                     && favoriteEvictionExact
                     && favoriteEvictionAutomationExact
                     && favoriteEvictionSingleRemovalExact
@@ -11854,6 +11859,15 @@ public partial class App : Application
                     SearchP95Ms = searchP95,
                     FilterP95Ms = filterP95,
                     SortP95Ms = sortP95,
+                    SearchProductTargetMs = CatalogInteractionSearchProductTargetMs,
+                    FilterProductTargetMs = CatalogInteractionFilterProductTargetMs,
+                    SortProductTargetMs = CatalogInteractionSortProductTargetMs,
+                    SearchHostedAcceptanceMs = CatalogInteractionSearchHostedAcceptanceMs,
+                    FilterHostedAcceptanceMs = CatalogInteractionFilterHostedAcceptanceMs,
+                    SortHostedAcceptanceMs = CatalogInteractionSortHostedAcceptanceMs,
+                    SearchProductTargetMet = searchP95 <= CatalogInteractionSearchProductTargetMs,
+                    FilterProductTargetMet = filterP95 <= CatalogInteractionFilterProductTargetMs,
+                    SortProductTargetMet = sortP95 <= CatalogInteractionSortProductTargetMs,
                     FavoriteEvictionElapsedMs = favoriteEvictionElapsedMs,
                     FavoriteEvictionApplySliceMs = favoriteEvictionApplySliceMs,
                     FavoriteEvictionExact = favoriteEvictionExact,
@@ -11988,6 +12002,9 @@ public partial class App : Application
                     CatalogProjectionDominantResetSubstep =
                         catalogProjectionDominantResetSubstep,
                     DispatcherHeartbeatBudgetMs = CatalogInteractionDispatcherHeartbeatBudgetMs,
+                    DispatcherHeartbeatProductTargetMet =
+                        dispatcherDiagnostic.MaxProductGapMs
+                            <= CatalogInteractionDispatcherHeartbeatBudgetMs,
                     DispatcherHeartbeatMeasurementToleranceMs =
                         CatalogInteractionDispatcherHeartbeatMeasurementToleranceMs,
                     FavoriteEvictionBudgetMs = CatalogFavoriteEvictionBudgetMs,
@@ -25617,6 +25634,107 @@ public partial class App : Application
                         throw new InvalidDataException("malformed metadata fixture row was not inserted");
                 }
 
+                static void WriteVersionOneMetadataIndex(
+                    string path,
+                    IEnumerable<MetadataIndexEntry> sourceEntries)
+                {
+                    using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWriteCreate);
+                    using (SqliteCommand schema = connection.CreateCommand())
+                    {
+                        schema.CommandText = """
+                            CREATE TABLE store_meta (
+                                singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+                                schema_version INTEGER NOT NULL,
+                                entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0)
+                            ) WITHOUT ROWID;
+                            INSERT INTO store_meta(singleton, schema_version, entry_revision)
+                            VALUES (1, 1, 7);
+                            CREATE TABLE metadata (
+                                path TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+                                source_length INTEGER NOT NULL CHECK (source_length >= 0),
+                                source_mtime_ticks INTEGER NOT NULL,
+                                source_ctime_ticks INTEGER NOT NULL,
+                                width INTEGER NOT NULL CHECK (width > 0),
+                                height INTEGER NOT NULL CHECK (height > 0),
+                                prompt_utf8 BLOB NOT NULL
+                            ) WITHOUT ROWID;
+                            """;
+                        _ = schema.ExecuteNonQuery();
+                    }
+
+                    using SqliteTransaction transaction = connection.BeginTransaction();
+                    using SqliteCommand insert = connection.CreateCommand();
+                    insert.Transaction = transaction;
+                    insert.CommandText = """
+                        INSERT INTO metadata(
+                            path, source_length, source_mtime_ticks, source_ctime_ticks,
+                            width, height, prompt_utf8)
+                        VALUES ($path, $length, $mtime, $ctime, $width, $height, $prompt);
+                        """;
+                    insert.Parameters.Add("$path", SqliteType.Text);
+                    insert.Parameters.Add("$length", SqliteType.Integer);
+                    insert.Parameters.Add("$mtime", SqliteType.Integer);
+                    insert.Parameters.Add("$ctime", SqliteType.Integer);
+                    insert.Parameters.Add("$width", SqliteType.Integer);
+                    insert.Parameters.Add("$height", SqliteType.Integer);
+                    insert.Parameters.Add("$prompt", SqliteType.Blob);
+                    foreach (MetadataIndexEntry entry in sourceEntries)
+                    {
+                        insert.Parameters["$path"].Value = entry.Path;
+                        insert.Parameters["$length"].Value = entry.SourceLength;
+                        insert.Parameters["$mtime"].Value = entry.SourceLastWriteUtcTicks;
+                        insert.Parameters["$ctime"].Value = entry.SourceCreationUtcTicks;
+                        insert.Parameters["$width"].Value = entry.Width;
+                        insert.Parameters["$height"].Value = entry.Height;
+                        insert.Parameters["$prompt"].Value = entry.PromptUtf8;
+                        if (insert.ExecuteNonQuery() != 1)
+                            throw new InvalidDataException("version-one metadata fixture row was not inserted");
+                    }
+                    transaction.Commit();
+                }
+
+                static void WriteLargeNulTextPathMetadataIndex(string path, int payloadBytes)
+                {
+                    using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWriteCreate);
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = """
+                        CREATE TABLE store_meta (
+                            singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+                            schema_version INTEGER NOT NULL,
+                            entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0),
+                            entry_count INTEGER NOT NULL CHECK (entry_count >= 0),
+                            total_path_bytes INTEGER NOT NULL CHECK (total_path_bytes >= 0),
+                            total_prompt_bytes INTEGER NOT NULL CHECK (total_prompt_bytes >= 0)
+                        ) WITHOUT ROWID;
+                        INSERT INTO store_meta(
+                            singleton, schema_version, entry_revision,
+                            entry_count, total_path_bytes, total_prompt_bytes)
+                        VALUES (1, 2, 0, 1, 0, 0);
+                        CREATE TABLE metadata (
+                            path TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+                            source_length INTEGER NOT NULL,
+                            source_mtime_ticks INTEGER NOT NULL,
+                            source_ctime_ticks INTEGER NOT NULL,
+                            width INTEGER NOT NULL,
+                            height INTEGER NOT NULL,
+                            prompt_utf8 BLOB NOT NULL
+                        ) WITHOUT ROWID;
+                        INSERT INTO metadata(
+                            path, source_length, source_mtime_ticks, source_ctime_ticks,
+                            width, height, prompt_utf8)
+                        VALUES (
+                            CAST(X'433A5C' || zeroblob($payloadBytes) || X'7461696C2E706E67' AS TEXT),
+                            1, $mtime, $ctime, 1, 1, X'');
+                        UPDATE store_meta
+                        SET total_path_bytes = (SELECT octet_length(path) FROM metadata)
+                        WHERE singleton = 1;
+                        """;
+                    command.Parameters.AddWithValue("$payloadBytes", payloadBytes);
+                    command.Parameters.AddWithValue("$mtime", DateTime.UnixEpoch.Ticks);
+                    command.Parameters.AddWithValue("$ctime", DateTime.UnixEpoch.Ticks);
+                    _ = command.ExecuteNonQuery();
+                }
+
                 var coldWindow = CreateSmokeWindow();
                 var coldObservation = await LoadAndObserveAsync(coldWindow);
                 string indexPath = coldWindow.MetadataIndexPathForSmoke
@@ -25673,6 +25791,54 @@ public partial class App : Application
                 migration["durableEntryCount"] = migratedProbe.Entries.Count;
                 migrationWindow.Close();
 
+                string versionOnePath = Path.Combine(indexDirectory, "schema-v1.sqlite3");
+                MetadataIndexLoadResult? versionOneBefore = null;
+                MetadataIndexSaveResult? versionOneSave = null;
+                MetadataIndexLoadResult? versionOneAfter = null;
+                try
+                {
+                    WriteVersionOneMetadataIndex(versionOnePath, coldIndex.Entries.Values);
+                    versionOneBefore = MetadataIndexStore.Load(versionOnePath, CancellationToken.None);
+                    versionOneSave = MetadataIndexStore.Save(
+                        versionOnePath,
+                        coldIndex.Entries.Values.ToArray(),
+                        CancellationToken.None);
+                    versionOneAfter = MetadataIndexStore.Load(versionOnePath, CancellationToken.None);
+                }
+                finally
+                {
+                    DeleteMetadataIndexFamily(versionOnePath);
+                }
+                bool sqliteV1MigrationPassed = versionOneBefore is
+                    {
+                        State: MetadataIndexLoadState.Loaded,
+                        RequiresMigration: true,
+                        EntryRevision: 7,
+                    }
+                    && versionOneSave is { Ok: true, Written: true }
+                    && versionOneAfter is
+                    {
+                        State: MetadataIndexLoadState.Loaded,
+                        RequiresMigration: false,
+                        EntryRevision: 8,
+                    }
+                    && versionOneAfter.Entries.Count == count
+                    && !File.Exists(versionOnePath);
+                var sqliteV1Migration = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = sqliteV1MigrationPassed,
+                    ["beforeState"] = versionOneBefore?.State.ToString(),
+                    ["beforeRequiresMigration"] = versionOneBefore?.RequiresMigration,
+                    ["beforeRevision"] = versionOneBefore?.EntryRevision,
+                    ["saveOk"] = versionOneSave?.Ok,
+                    ["saveWritten"] = versionOneSave?.Written,
+                    ["afterState"] = versionOneAfter?.State.ToString(),
+                    ["afterRequiresMigration"] = versionOneAfter?.RequiresMigration,
+                    ["afterRevision"] = versionOneAfter?.EntryRevision,
+                    ["afterEntryCount"] = versionOneAfter?.Entries.Count,
+                    ["fixtureRemoved"] = !File.Exists(versionOnePath),
+                };
+
                 long rollbackRevisionBefore = ReadMetadataIndexRevision(indexPath);
                 MetadataIndexEntry rollbackProbeEntry = migratedProbe.Entries.Values.FirstOrDefault()
                     ?? throw new InvalidDataException(
@@ -25681,10 +25847,11 @@ public partial class App : Application
                         + $"save message={migration["indexSaveMessage"]}");
                 MetadataIndexSaveResult rejectedDelta = MetadataIndexStore.ApplyChanges(
                     indexPath,
-                    [rollbackProbeEntry],
-                    Array.Empty<string>(),
-                    count + 1,
-                    CancellationToken.None);
+                     [rollbackProbeEntry],
+                     Array.Empty<string>(),
+                     count + 1,
+                     migratedProbe.EntryRevision,
+                     CancellationToken.None);
                 MetadataIndexLoadResult rollbackProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
                 long rollbackRevisionAfter = ReadMetadataIndexRevision(indexPath);
                 bool rowDeltaRollbackPassed = !rejectedDelta.Ok
@@ -25721,6 +25888,7 @@ public partial class App : Application
                     MetadataIndexStore.EncodePrompt("concurrent-reader-full-rebuild"));
                 MetadataIndexEntry[] concurrentSnapshot = migratedProbe.Entries.Values.ToArray();
                 MetadataIndexSaveResult concurrentDelta;
+                MetadataIndexSaveResult staleRevisionDelta;
                 MetadataIndexSaveResult concurrentFullSave;
                 bool walPresentAfterDelta;
                 bool walPreservedDuringFullSave;
@@ -25738,9 +25906,20 @@ public partial class App : Application
                     }
                     concurrentDelta = MetadataIndexStore.ApplyChanges(
                         indexPath,
-                        [concurrentEntry],
+                         [concurrentEntry],
+                         Array.Empty<string>(),
+                         count,
+                         rollbackProbe.EntryRevision,
+                         CancellationToken.None);
+                    staleRevisionDelta = MetadataIndexStore.ApplyChanges(
+                        indexPath,
+                        [concurrentEntry with
+                        {
+                            PromptUtf8 = MetadataIndexStore.EncodePrompt("stale-revision-must-not-commit"),
+                        }],
                         Array.Empty<string>(),
                         count,
+                        rollbackProbe.EntryRevision,
                         CancellationToken.None);
                     walPresentAfterDelta = File.Exists(indexPath + "-wal");
                     concurrentFullSave = MetadataIndexStore.Save(
@@ -25760,6 +25939,9 @@ public partial class App : Application
                 MetadataIndexLoadResult concurrentProbe = MetadataIndexStore.Load(indexPath, CancellationToken.None);
                 bool concurrentReaderRebuildPassed = concurrentDelta.Ok
                     && concurrentDelta.Written
+                    && !staleRevisionDelta.Ok
+                    && !staleRevisionDelta.Written
+                    && (staleRevisionDelta.Error?.Contains("revision changed", StringComparison.OrdinalIgnoreCase) ?? false)
                     && concurrentFullSave.Ok
                     && concurrentFullSave.Written
                     && walPresentAfterDelta
@@ -25774,6 +25956,8 @@ public partial class App : Application
                 {
                     ["passed"] = concurrentReaderRebuildPassed,
                     ["deltaOk"] = concurrentDelta.Ok,
+                    ["staleRevisionRejected"] = !staleRevisionDelta.Ok && !staleRevisionDelta.Written,
+                    ["staleRevisionError"] = staleRevisionDelta.Error,
                     ["fullSaveOk"] = concurrentFullSave.Ok,
                     ["walPresentAfterDelta"] = walPresentAfterDelta,
                     ["walPreservedDuringFullSave"] = walPreservedDuringFullSave,
@@ -25928,7 +26112,7 @@ public partial class App : Application
 
                 RestoreMetadataIndexBytes(indexPath, cleanRebuiltBytes);
                 byte[] validIndexBytes = File.ReadAllBytes(indexPath);
-                SetMetadataIndexSchemaVersion(indexPath, 2);
+                SetMetadataIndexSchemaVersion(indexPath, 3);
                 string futureFingerprintBefore = FileFingerprint(indexPath);
                 long futureWriteTicksBefore = File.GetLastWriteTimeUtc(indexPath).Ticks;
                 MetadataIndexLoadResult futureProbeBefore = MetadataIndexStore.Load(indexPath, CancellationToken.None);
@@ -26041,6 +26225,80 @@ public partial class App : Application
                     ["fixtureRemoved"] = !File.Exists(oversizedPromptPath),
                 };
 
+                const int largeNulPathPayloadBytes = 32 * 1024 * 1024;
+                const long largeNulPathPrivateGrowthBudgetBytes = 24L * 1024 * 1024;
+                string largeNulPath = Path.Combine(indexDirectory, "large-nul-path.sqlite3");
+                MetadataIndexLoadResult? largeNulPathProbe = null;
+                string? largeNulPathEscapedException = null;
+                long largeNulPathBaselinePrivateBytes = 0;
+                long largeNulPathPeakPrivateBytes = 0;
+                try
+                {
+                    WriteLargeNulTextPathMetadataIndex(largeNulPath, largeNulPathPayloadBytes);
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect();
+                    using (Process current = Process.GetCurrentProcess())
+                    {
+                        current.Refresh();
+                        largeNulPathBaselinePrivateBytes = current.PrivateMemorySize64;
+                    }
+                    largeNulPathPeakPrivateBytes = largeNulPathBaselinePrivateBytes;
+                    using var sampleCancellation = new CancellationTokenSource();
+                    object sampleLock = new();
+                    Task sampler = Task.Run(() =>
+                    {
+                        using Process sampled = Process.GetProcessById(Environment.ProcessId);
+                        while (!sampleCancellation.IsCancellationRequested)
+                        {
+                            sampled.Refresh();
+                            lock (sampleLock)
+                            {
+                                largeNulPathPeakPrivateBytes = Math.Max(
+                                    largeNulPathPeakPrivateBytes,
+                                    sampled.PrivateMemorySize64);
+                            }
+                            Thread.Sleep(1);
+                        }
+                    });
+                    try
+                    {
+                        largeNulPathProbe = MetadataIndexStore.Load(largeNulPath, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        largeNulPathEscapedException = ex.ToString();
+                    }
+                    finally
+                    {
+                        sampleCancellation.Cancel();
+                        await sampler;
+                    }
+                }
+                finally
+                {
+                    DeleteMetadataIndexFamily(largeNulPath);
+                }
+                long largeNulPathPrivateGrowthBytes = Math.Max(
+                    0,
+                    largeNulPathPeakPrivateBytes - largeNulPathBaselinePrivateBytes);
+                bool largeNulPathPassed = largeNulPathEscapedException is null
+                    && largeNulPathProbe?.State == MetadataIndexLoadState.Invalid
+                    && (largeNulPathProbe.Error?.Contains("path length", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && largeNulPathPrivateGrowthBytes <= largeNulPathPrivateGrowthBudgetBytes
+                    && !File.Exists(largeNulPath);
+                var boundedLargeNulTextPath = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = largeNulPathPassed,
+                    ["payloadBytes"] = largeNulPathPayloadBytes,
+                    ["loadState"] = largeNulPathProbe?.State.ToString(),
+                    ["error"] = largeNulPathProbe?.Error,
+                    ["escapedException"] = largeNulPathEscapedException,
+                    ["privateGrowthBytes"] = largeNulPathPrivateGrowthBytes,
+                    ["privateGrowthBudgetBytes"] = largeNulPathPrivateGrowthBudgetBytes,
+                    ["fixtureRemoved"] = !File.Exists(largeNulPath),
+                };
+
                 const long smokeFamilyBudget = 16L * 1024 * 1024;
                 const long smokeAggregateBudget = 32L * 1024;
                 MetadataIndexEntry[] aggregateEntries =
@@ -26128,10 +26386,11 @@ public partial class App : Application
                     };
                     applyBudgetResult = MetadataIndexStore.ApplyChangesWithBudgetForSmoke(
                         applyBudgetPath,
-                        [boundedUpsert],
-                        Array.Empty<string>(),
-                        aggregateEntries.Length,
-                        CancellationToken.None,
+                         [boundedUpsert],
+                         Array.Empty<string>(),
+                         aggregateEntries.Length,
+                         applyRevisionBefore,
+                         CancellationToken.None,
                         smokeFamilyBudget,
                         smokeAggregateBudget);
                     applyFingerprintAfter = FileFingerprint(applyBudgetPath);
@@ -26180,6 +26439,100 @@ public partial class App : Application
                     ["applyRevisionBefore"] = applyRevisionBefore,
                     ["applyRevisionAfter"] = applyRevisionAfter,
                     ["escapedException"] = budgetEscapedException,
+                    ["residueFree"] = NoPersistenceResidue(indexDirectory),
+                };
+
+                int[] scalingCounts = [10_000, 50_000, 140_000];
+                var oneRowScalingSamples = new List<Dictionary<string, object?>>(scalingCounts.Length);
+                var oneRowScalingP95Values = new List<double>(scalingCounts.Length);
+                bool oneRowScalingPassed = true;
+                string scalingRoot = Path.Combine(smokeRoot, "scaling-source");
+                byte[] scalingPrompt = MetadataIndexStore.EncodePrompt("scaling-baseline");
+                foreach (int scalingCount in scalingCounts)
+                {
+                    string scalingPath = Path.Combine(indexDirectory, $"scaling-{scalingCount}.sqlite3");
+                    try
+                    {
+                        MetadataIndexEntry[] scalingEntries = Enumerable.Range(0, scalingCount)
+                            .Select(index => new MetadataIndexEntry(
+                                Path.Combine(scalingRoot, $"image-{index:D6}.png"),
+                                index + 1L,
+                                DateTime.UnixEpoch.Ticks + index,
+                                DateTime.UnixEpoch.Ticks + index,
+                                64,
+                                64,
+                                scalingPrompt))
+                            .ToArray();
+                        MetadataIndexSaveResult scalingSave = MetadataIndexStore.Save(
+                            scalingPath,
+                            scalingEntries,
+                            CancellationToken.None);
+                        if (!scalingSave.Ok || !scalingSave.Written)
+                            throw new InvalidDataException($"{scalingCount:N0}-row scaling seed failed: {scalingSave.Error}");
+
+                        var elapsedSamples = new List<double>(3);
+                        var rowProbeSamples = new List<int>(3);
+                        var fullScanSamples = new List<int>(3);
+                        long revision = ReadMetadataIndexRevision(scalingPath);
+                        for (int sampleIndex = 0; sampleIndex < 3; sampleIndex++)
+                        {
+                            MetadataIndexEntry changed = scalingEntries[0] with
+                            {
+                                PromptUtf8 = MetadataIndexStore.EncodePrompt($"scaling-change-{sampleIndex}"),
+                            };
+                            var applyWatch = Stopwatch.StartNew();
+                            MetadataIndexApplySmokeResult apply = MetadataIndexStore.ApplyChangesWithDiagnosticsForSmoke(
+                                scalingPath,
+                                [changed],
+                                Array.Empty<string>(),
+                                scalingCount,
+                                revision,
+                                CancellationToken.None);
+                            applyWatch.Stop();
+                            if (!apply.Result.Ok || !apply.Result.Written)
+                                throw new InvalidDataException($"{scalingCount:N0}-row scaling delta failed: {apply.Result.Error}");
+                            elapsedSamples.Add(applyWatch.Elapsed.TotalMilliseconds);
+                            rowProbeSamples.Add(apply.Diagnostics.RowProbeCount);
+                            fullScanSamples.Add(apply.Diagnostics.FullTableValidationCount);
+                            revision++;
+                        }
+
+                        double p95Ms = SmokePercentile(elapsedSamples, 0.95);
+                        bool samplePassed = rowProbeSamples.All(static value => value == 1)
+                            && fullScanSamples.All(static value => value == 0)
+                            && p95Ms <= 750;
+                        oneRowScalingPassed &= samplePassed;
+                        oneRowScalingP95Values.Add(p95Ms);
+                        oneRowScalingSamples.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+                        {
+                            ["entryCount"] = scalingCount,
+                            ["passed"] = samplePassed,
+                            ["elapsedMs"] = elapsedSamples,
+                            ["p95Ms"] = p95Ms,
+                            ["rowProbeCounts"] = rowProbeSamples,
+                            ["fullTableValidationCounts"] = fullScanSamples,
+                            ["databaseBytes"] = new FileInfo(scalingPath).Length,
+                            ["finalRevision"] = ReadMetadataIndexRevision(scalingPath),
+                        });
+                    }
+                    finally
+                    {
+                        DeleteMetadataIndexFamily(scalingPath);
+                    }
+                }
+                double oneRowScalingP95SpreadMs = oneRowScalingP95Values.Count == 0
+                    ? double.PositiveInfinity
+                    : oneRowScalingP95Values.Max() - oneRowScalingP95Values.Min();
+                oneRowScalingPassed &= oneRowScalingP95SpreadMs <= 500
+                    && NoPersistenceResidue(indexDirectory);
+                var oneRowApplyScaling = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = oneRowScalingPassed,
+                    ["counts"] = scalingCounts,
+                    ["samples"] = oneRowScalingSamples,
+                    ["p95SpreadMs"] = oneRowScalingP95SpreadMs,
+                    ["p95SpreadBudgetMs"] = 500,
+                    ["absoluteP95BudgetMs"] = 750,
                     ["residueFree"] = NoPersistenceResidue(indexDirectory),
                 };
 
@@ -26335,6 +26688,7 @@ public partial class App : Application
                 result["resolvedProjectRoot"] = resolvedProjectRoot;
                 result["cold"] = cold;
                 result["legacyMigration"] = migration;
+                result["sqliteV1Migration"] = sqliteV1Migration;
                 result["rowDeltaRollback"] = rowDeltaRollback;
                 result["concurrentReaderRebuild"] = concurrentReaderRebuild;
                 result["orphanFamilyProtection"] = orphanFamilyProtection;
@@ -26345,13 +26699,16 @@ public partial class App : Application
                 result["commitTimeFutureGuard"] = commitTimeFutureGuard;
                 result["boundedMalformed"] = boundedMalformed;
                 result["boundedOversizedPrompt"] = boundedOversizedPrompt;
+                result["boundedLargeNulTextPath"] = boundedLargeNulTextPath;
                 result["sqliteBudgetProtection"] = sqliteBudgetProtection;
+                result["oneRowApplyScaling"] = oneRowApplyScaling;
                 result["decodeFailurePreservation"] = failurePreservation;
                 result["staleEntryPrune"] = staleEntryPrune;
                 result["cancellation"] = cancellation;
                 scenarioContractPassed = isolatedProjectRoot
                     && coldPassed
                     && migrationPassed
+                    && sqliteV1MigrationPassed
                     && rowDeltaRollbackPassed
                     && concurrentReaderRebuildPassed
                     && orphanFamilyProtectionPassed
@@ -26362,7 +26719,9 @@ public partial class App : Application
                     && commitGuardPassed
                     && malformedPassed
                     && oversizedPromptPassed
+                    && largeNulPathPassed
                     && sqliteBudgetProtectionPassed
+                    && oneRowScalingPassed
                     && failurePreservationPassed
                     && staleEntryPrunePassed
                     && cancelPassed;
@@ -27973,6 +28332,19 @@ public partial class App : Application
         if (values.Count == 0)
             return 0;
         long[] sorted = values.OrderBy(static value => value).ToArray();
+        double rank = (sorted.Length - 1) * Math.Clamp(percentile, 0, 1);
+        int lower = (int)Math.Floor(rank);
+        int upper = (int)Math.Ceiling(rank);
+        return lower == upper
+            ? sorted[lower]
+            : sorted[lower] + ((rank - lower) * (sorted[upper] - sorted[lower]));
+    }
+
+    private static double SmokePercentile(IReadOnlyList<double> values, double percentile)
+    {
+        if (values.Count == 0)
+            return 0;
+        double[] sorted = values.OrderBy(static value => value).ToArray();
         double rank = (sorted.Length - 1) * Math.Clamp(percentile, 0, 1);
         int lower = (int)Math.Floor(rank);
         int upper = (int)Math.Ceiling(rank);
@@ -31749,6 +32121,15 @@ public partial class App : Application
         public double SearchP95Ms { get; init; }
         public double FilterP95Ms { get; init; }
         public double SortP95Ms { get; init; }
+        public double SearchProductTargetMs { get; init; }
+        public double FilterProductTargetMs { get; init; }
+        public double SortProductTargetMs { get; init; }
+        public double SearchHostedAcceptanceMs { get; init; }
+        public double FilterHostedAcceptanceMs { get; init; }
+        public double SortHostedAcceptanceMs { get; init; }
+        public bool SearchProductTargetMet { get; init; }
+        public bool FilterProductTargetMet { get; init; }
+        public bool SortProductTargetMet { get; init; }
         public long FavoriteEvictionElapsedMs { get; init; }
         public long FavoriteEvictionApplySliceMs { get; init; }
         public bool FavoriteEvictionExact { get; init; }
@@ -31855,6 +32236,7 @@ public partial class App : Application
         public double CatalogProjectionMaxResetPanelTotalMs { get; init; }
         public string CatalogProjectionDominantResetSubstep { get; init; } = "";
         public long DispatcherHeartbeatBudgetMs { get; init; }
+        public bool DispatcherHeartbeatProductTargetMet { get; init; }
         public double DispatcherHeartbeatMeasurementToleranceMs { get; init; }
         public long FavoriteEvictionBudgetMs { get; init; }
         public int CatalogProjectionDiscardedCount { get; init; }
