@@ -27,6 +27,55 @@ internal static class MetadataIndexStore
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly string[] SqliteSidecarSuffixes = ["-wal", "-shm", "-journal"];
 
+    private const string StoreMetaV1SchemaSql = """
+        CREATE TABLE store_meta (
+            singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+            schema_version INTEGER NOT NULL,
+            entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0)
+        ) WITHOUT ROWID
+        """;
+
+    private const string StoreMetaV2SchemaSql = """
+        CREATE TABLE store_meta (
+            singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+            schema_version INTEGER NOT NULL,
+            entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0),
+            entry_count INTEGER NOT NULL CHECK (entry_count >= 0),
+            total_path_bytes INTEGER NOT NULL CHECK (total_path_bytes >= 0),
+            total_prompt_bytes INTEGER NOT NULL CHECK (total_prompt_bytes >= 0)
+        ) WITHOUT ROWID
+        """;
+
+    // SQLite rewrites sqlite_schema when the accepted v1 table is upgraded
+    // with ALTER TABLE. This is the only alternate v2 definition we emit.
+    private const string MigratedStoreMetaV2SchemaSql = """
+        CREATE TABLE store_meta (
+            singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+            schema_version INTEGER NOT NULL,
+            entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0),
+            entry_count INTEGER NOT NULL DEFAULT 0 CHECK (entry_count >= 0),
+            total_path_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_path_bytes >= 0),
+            total_prompt_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_prompt_bytes >= 0)
+        ) WITHOUT ROWID
+        """;
+
+    private const string MetadataSchemaSql = """
+        CREATE TABLE metadata (
+            path TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+            source_length INTEGER NOT NULL CHECK (source_length >= 0),
+            source_mtime_ticks INTEGER NOT NULL,
+            source_ctime_ticks INTEGER NOT NULL,
+            width INTEGER NOT NULL CHECK (width > 0),
+            height INTEGER NOT NULL CHECK (height > 0),
+            prompt_utf8 BLOB NOT NULL
+        ) WITHOUT ROWID
+        """;
+
+    private static readonly string StoreMetaV1SchemaSignature = NormalizeSchemaSql(StoreMetaV1SchemaSql);
+    private static readonly string StoreMetaV2SchemaSignature = NormalizeSchemaSql(StoreMetaV2SchemaSql);
+    private static readonly string MigratedStoreMetaV2SchemaSignature = NormalizeSchemaSql(MigratedStoreMetaV2SchemaSql);
+    private static readonly string MetadataSchemaSignature = NormalizeSchemaSql(MetadataSchemaSql);
+
     private const string CreateSchemaSql = """
         CREATE TABLE store_meta (
             singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
@@ -137,7 +186,7 @@ internal static class MetadataIndexStore
             using SqliteConnection connection = OpenConnection(fullPath, SqliteOpenMode.ReadOnly);
             ExecuteNonQuery(connection, "PRAGMA query_only = ON;");
             using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
-            int schemaVersion = ReadSchemaVersion(connection, transaction);
+            int schemaVersion = ReadValidatedSchemaVersion(connection, transaction);
             if (schemaVersion > SchemaVersion)
             {
                 return MetadataIndexLoadResult.Unsupported(
@@ -317,9 +366,32 @@ internal static class MetadataIndexStore
                 // snapshot and committed WAL frames are never detached by
                 // file-level replacement.
                 using SqliteConnection connection = OpenConnection(fullPath, SqliteOpenMode.ReadWrite);
+                int connectionVersion = ReadValidatedSchemaVersion(connection);
+                if (connectionVersion > SchemaVersion)
+                {
+                    return MetadataIndexSaveResult.Preserved(
+                        fullPath,
+                        entries.Count,
+                        $"newer metadata cache schema version {connectionVersion} was preserved at commit time",
+                        MetadataIndexSaveDisposition.Protected);
+                }
+                if (connectionVersion < LegacySqliteSchemaVersion)
+                    throw new InvalidDataException($"metadata cache schema version {connectionVersion} cannot be rebuilt safely");
+
                 ConfigureWriter(connection);
                 using SqliteTransaction transaction = connection.BeginTransaction();
-                UpgradeSchemaForFullSave(connection, transaction, existingVersion);
+                int transactionVersion = ReadValidatedSchemaVersion(connection, transaction);
+                if (transactionVersion > SchemaVersion)
+                {
+                    return MetadataIndexSaveResult.Preserved(
+                        fullPath,
+                        entries.Count,
+                        $"newer metadata cache schema version {transactionVersion} was preserved at commit time",
+                        MetadataIndexSaveDisposition.Protected);
+                }
+                if (transactionVersion < LegacySqliteSchemaVersion)
+                    throw new InvalidDataException($"metadata cache schema version {transactionVersion} cannot be rebuilt safely");
+                UpgradeSchemaForFullSave(connection, transaction, transactionVersion);
                 using (SqliteCommand clear = connection.CreateCommand())
                 {
                     clear.Transaction = transaction;
@@ -553,8 +625,39 @@ internal static class MetadataIndexStore
             }
 
             using SqliteConnection connection = OpenConnection(fullPath, SqliteOpenMode.ReadWrite);
+            int connectionVersion = ReadValidatedSchemaVersion(connection);
+            if (connectionVersion > SchemaVersion)
+            {
+                return MetadataIndexSaveResult.Preserved(
+                    fullPath,
+                    expectedEntryCount,
+                    $"newer metadata cache schema version {connectionVersion} was preserved at commit time",
+                    MetadataIndexSaveDisposition.Protected);
+            }
+            if (connectionVersion != SchemaVersion)
+            {
+                return MetadataIndexSaveResult.Failed(
+                    fullPath,
+                    $"metadata cache schema version {connectionVersion} requires a full rebuild");
+            }
+
             ConfigureWriter(connection);
             using SqliteTransaction transaction = connection.BeginTransaction();
+            int transactionVersion = ReadValidatedSchemaVersion(connection, transaction);
+            if (transactionVersion > SchemaVersion)
+            {
+                return MetadataIndexSaveResult.Preserved(
+                    fullPath,
+                    expectedEntryCount,
+                    $"newer metadata cache schema version {transactionVersion} was preserved at commit time",
+                    MetadataIndexSaveDisposition.Protected);
+            }
+            if (transactionVersion != SchemaVersion)
+            {
+                return MetadataIndexSaveResult.Failed(
+                    fullPath,
+                    $"metadata cache schema version {transactionVersion} requires a full rebuild");
+            }
             EnsureOctetLengthAvailable(connection, transaction);
             StoreMetadata initialMetadata = ReadStoreMetadata(
                 connection,
@@ -697,7 +800,20 @@ internal static class MetadataIndexStore
         };
         var connection = new SqliteConnection(builder.ToString());
         connection.Open();
-        return connection;
+        try
+        {
+            ExecuteNonQuery(connection, "PRAGMA trusted_schema = OFF;");
+            using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "PRAGMA trusted_schema;";
+            if (command.ExecuteScalar() is not long value || value != 0)
+                throw new InvalidDataException("metadata cache could not disable SQLite trusted_schema");
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
     }
 
     private static void ConfigureWriter(SqliteConnection connection)
@@ -726,6 +842,82 @@ internal static class MetadataIndexStore
         if (value is not long raw || raw < int.MinValue || raw > int.MaxValue)
             throw new InvalidDataException("metadata cache schema row was unavailable");
         return (int)raw;
+    }
+
+    private static int ReadValidatedSchemaVersion(
+        SqliteConnection connection,
+        SqliteTransaction? transaction = null)
+    {
+        int layoutVersion = ValidateCanonicalSchema(connection, transaction);
+        int storedVersion = ReadSchemaVersion(connection, transaction);
+        if (storedVersion >= LegacySqliteSchemaVersion
+            && storedVersion <= SchemaVersion
+            && storedVersion != layoutVersion)
+        {
+            throw new InvalidDataException(
+                $"metadata cache schema version {storedVersion} did not match canonical layout {layoutVersion}");
+        }
+        return storedVersion;
+    }
+
+    private static int ValidateCanonicalSchema(
+        SqliteConnection connection,
+        SqliteTransaction? transaction = null)
+    {
+        string? storeMetaSql = null;
+        string? metadataSql = null;
+        int objectCount = 0;
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name COLLATE BINARY;";
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            objectCount++;
+            if (reader.GetValue(0) is not string type
+                || reader.GetValue(1) is not string name
+                || reader.GetValue(2) is not string tableName
+                || reader.GetValue(3) is not string sql
+                || !string.Equals(type, "table", StringComparison.Ordinal)
+                || !string.Equals(name, tableName, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("metadata cache canonical schema contained a non-table or executable object");
+            }
+
+            if (string.Equals(name, "store_meta", StringComparison.Ordinal))
+                storeMetaSql = sql;
+            else if (string.Equals(name, "metadata", StringComparison.Ordinal))
+                metadataSql = sql;
+            else
+                throw new InvalidDataException($"metadata cache canonical schema contained unexpected object {name}");
+        }
+
+        if (objectCount != 2 || storeMetaSql is null || metadataSql is null)
+            throw new InvalidDataException("metadata cache canonical schema required exactly store_meta and metadata tables");
+        if (!string.Equals(NormalizeSchemaSql(metadataSql), MetadataSchemaSignature, StringComparison.Ordinal))
+            throw new InvalidDataException("metadata cache canonical schema did not match the metadata table contract");
+
+        string storeMetaSignature = NormalizeSchemaSql(storeMetaSql);
+        if (string.Equals(storeMetaSignature, StoreMetaV1SchemaSignature, StringComparison.Ordinal))
+            return LegacySqliteSchemaVersion;
+        if (string.Equals(storeMetaSignature, StoreMetaV2SchemaSignature, StringComparison.Ordinal)
+            || string.Equals(storeMetaSignature, MigratedStoreMetaV2SchemaSignature, StringComparison.Ordinal))
+        {
+            return SchemaVersion;
+        }
+
+        throw new InvalidDataException("metadata cache canonical schema did not match the store metadata table contract");
+    }
+
+    private static string NormalizeSchemaSql(string sql)
+    {
+        var normalized = new StringBuilder(sql.Length);
+        foreach (char value in sql)
+        {
+            if (!char.IsWhiteSpace(value))
+                normalized.Append(char.ToUpperInvariant(value));
+        }
+        return normalized.ToString();
     }
 
     private static void UpgradeSchemaForFullSave(
@@ -1123,7 +1315,8 @@ internal static class MetadataIndexStore
         if (!File.Exists(path))
             throw new InvalidDataException("metadata cache disappeared before the incremental commit");
         using SqliteConnection connection = OpenConnection(path, SqliteOpenMode.ReadOnly);
-        return ReadSchemaVersion(connection);
+        using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
+        return ReadValidatedSchemaVersion(connection, transaction);
     }
 
     private static void Checkpoint(SqliteConnection connection, bool required)
