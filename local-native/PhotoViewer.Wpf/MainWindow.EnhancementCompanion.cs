@@ -548,13 +548,113 @@ public partial class MainWindow
             _ => false,
         };
 
-    private static Func<JsonElement, string?> CreateMiniMaxH3VideoHealthValidator()
+    private static Func<JsonElement, string?> CreateMiniMaxH3VideoRuntimeHealthValidator()
         => payload => TryParseMiniMaxH3VideoCapability(payload, out var capability)
             ? capability.Ready
                 ? null
                 : DescribeMiniMaxH3VideoReasonCode(capability.ReasonCode)
                     + " 動画ジョブは追加していません。"
             : "MiniMax H3の正確な準備状態を確認できません。動画ジョブは追加していません。";
+
+    private static Func<JsonElement, string?> CreateMiniMaxH3VideoHealthValidator()
+    {
+        Func<JsonElement, string?> runtimeValidator =
+            CreateMiniMaxH3VideoRuntimeHealthValidator();
+        return payload => runtimeValidator(payload) is string runtimeError
+            ? runtimeError
+            : !TryParseMiniMaxH3VideoProfilesCapability(payload)
+                ? "The running H25 companion does not expose the tested MiniMax H3 5, 10, 12, and 15 second profiles. Restart H25 first; no job was added."
+                : null;
+    }
+
+    private static bool TryParseMiniMaxH3VideoProfilesCapability(
+        JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(payload, "capabilities")
+            || !payload.TryGetProperty("capabilities", out JsonElement capabilities)
+            || capabilities.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(capabilities, "videoH3ProfilesV1")
+            || !capabilities.TryGetProperty(
+                "videoH3ProfilesV1",
+                out JsonElement capability)
+            || capability.ValueKind != JsonValueKind.Object
+            || !HasExactVideoV2Properties(
+                capability,
+                "contractId",
+                "protocol",
+                "defaultProfileId",
+                "playbackFps",
+                "steps",
+                "maxPixelArea",
+                "profiles")
+            || !VideoV2ExactString(
+                capability,
+                "contractId",
+                MiniMaxH3VideoProfilesContractId)
+            || !VideoV2ExactString(
+                capability,
+                "protocol",
+                MiniMaxH3VideoProfilesProtocol)
+            || !VideoV2ExactString(
+                capability,
+                "defaultProfileId",
+                MiniMaxH3VideoDefaultProfileId)
+            || !VideoV2ExactInt32(
+                capability,
+                "playbackFps",
+                MiniMaxH3VideoPlaybackFps)
+            || !VideoV2ExactInt32(
+                capability,
+                "steps",
+                MiniMaxH3VideoSteps)
+            || !VideoV2ExactInt32(
+                capability,
+                "maxPixelArea",
+                MiniMaxH3VideoCanvasMaximumPixelArea)
+            || !capability.TryGetProperty("profiles", out JsonElement profiles)
+            || profiles.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        JsonElement[] actualProfiles = profiles.EnumerateArray().ToArray();
+        (string Id, int NominalSeconds, int FrameCount)[] expectedProfiles =
+        [
+            (MiniMaxH3VideoDefaultProfileId, 5, 124),
+            (MiniMaxH3Video10SecondProfileId, 10, 243),
+            (MiniMaxH3Video12SecondProfileId, 12, 294),
+            (MiniMaxH3Video15SecondProfileId, 15, 362),
+        ];
+        if (actualProfiles.Length != expectedProfiles.Length)
+            return false;
+
+        for (int index = 0; index < expectedProfiles.Length; index++)
+        {
+            JsonElement profile = actualProfiles[index];
+            var expected = expectedProfiles[index];
+            if (profile.ValueKind != JsonValueKind.Object
+                || !HasExactVideoV2Properties(
+                    profile,
+                    "id",
+                    "nominalDurationSeconds",
+                    "frameCount")
+                || !VideoV2ExactString(profile, "id", expected.Id)
+                || !VideoV2ExactInt32(
+                    profile,
+                    "nominalDurationSeconds",
+                    expected.NominalSeconds)
+                || !VideoV2ExactInt32(
+                    profile,
+                    "frameCount",
+                    expected.FrameCount))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static bool HasExactVideoV2Properties(
         JsonElement element,
@@ -618,6 +718,10 @@ public partial class MainWindow
         reasonCode = parsed ? capability.ReasonCode : null;
         return parsed;
     }
+
+    public static bool TryParseMiniMaxH3VideoProfilesCapabilityForSmoke(
+        JsonElement payload)
+        => TryParseMiniMaxH3VideoProfilesCapability(payload);
 
     private async Task<EnhancementEnqueueProbe> ProbeEnhancementEnqueueBackendAsync(
         CancellationToken token)

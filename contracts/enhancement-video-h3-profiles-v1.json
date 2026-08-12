@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-H3-PROFILES-001",
+  "protocol": "aibos.enhancement-video-h3-profiles/v1",
+  "extends": {
+    "contractId": "PV-ENHANCE-VIDEO-002",
+    "protocol": "aibos.enhancement-video/v2",
+    "compatibility": "legacy prompt-only v2 requests and rows remain the 124-frame profile; new writers include requested.profileId"
+  },
+  "fixedRuntime": {
+    "presetId": "minimax-h3-i2v-preview-v1",
+    "backendId": "minimax-h3-local-v1",
+    "playbackFps": 24,
+    "steps": 20,
+    "maxPixelArea": 414720,
+    "sampler": "res_multistep",
+    "scheduler": "simple",
+    "audio": true
+  },
+  "healthCapability": {
+    "field": "capabilities.videoH3ProfilesV1",
+    "requireExactBeforeDurablePublish": true,
+    "oldCompanionBehavior": "reject locally with restart guidance and do not reserve or enqueue a job"
+  },
+  "profiles": [
+    { "id": "minimax-h3-hq-5s-v1", "nominalDurationSeconds": 5, "frameCount": 124, "exactDurationSeconds": 5.166666666666667, "default": true },
+    { "id": "minimax-h3-hq-10s-v1", "nominalDurationSeconds": 10, "frameCount": 243, "exactDurationSeconds": 10.125 },
+    { "id": "minimax-h3-hq-12s-v1", "nominalDurationSeconds": 12, "frameCount": 294, "exactDurationSeconds": 12.25 },
+    { "id": "minimax-h3-hq-15s-v1", "nominalDurationSeconds": 15, "frameCount": 362, "exactDurationSeconds": 15.083333333333334 }
+  ],
+  "request": {
+    "shape": { "video": { "requested": { "profileId": "one exact profile id above", "prompt": "trimmed UTF-16 string up to 2000 code units" } } },
+    "arbitraryControls": "reject unknown profile ids and arbitrary duration, frame, FPS, resolution, or step fields"
+  },
+  "promptRewrite": {
+    "acceptedFrameCounts": [124, 243, 294, 362],
+    "playbackFps": 24,
+    "maximumTimelineMilliseconds": [5166, 10125, 12250, 15083],
+    "maximumBeatCount": [2, 3, 3, 3]
+  },
+  "measuredMachine": {
+    "gpu": "NVIDIA GeForce RTX 4070 SUPER 12GB",
+    "physicalRamGiB": 32,
+    "warning": "10 to 15 second profiles use most available physical RAM; close other heavy work and prefer unattended overnight execution"
+  },
+  "evidence": {
+    "sourceSha256": "94398c403bf50d171e2d553c3516cf46b75ade6d9b29e8cce8ccebdfdbeb6395",
+    "twelveSecond512x768": {
+      "wallMilliseconds": 802452,
+      "peakGpuMemoryMiB": 11332,
+      "minimumFreeMemoryGiB": 1.78,
+      "peakGpuTemperatureC": 81,
+      "outputSha256": "03ac08b8364e3610ca2c96cc5da1c2b6b5243787d5479189cfd3beb7a8129ef3"
+    }
+  }
+}

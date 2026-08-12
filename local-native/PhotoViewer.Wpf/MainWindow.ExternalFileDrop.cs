@@ -248,6 +248,69 @@ public partial class MainWindow
         }
     }
 
+    private void RebuildCatalogTileFavoritePathIndex()
+    {
+        _catalogTilesByFavoritePath.Clear();
+        foreach (Tile tile in _allTiles)
+            IndexCatalogTileForFavoritePath(tile);
+    }
+
+    private void IndexCatalogTileForFavoritePath(Tile tile)
+    {
+        string path = NormalizeFavoritePath(tile.Path);
+        if (!_catalogTilesByFavoritePath.TryGetValue(path, out List<Tile>? tiles))
+        {
+            tiles = [];
+            _catalogTilesByFavoritePath[path] = tiles;
+        }
+        if (!tiles.Contains(tile, ReferenceEqualityComparer.Instance))
+            tiles.Add(tile);
+    }
+
+    private void UnindexCatalogTileForFavoritePath(Tile tile)
+    {
+        string path = NormalizeFavoritePath(tile.Path);
+        if (!_catalogTilesByFavoritePath.TryGetValue(path, out List<Tile>? tiles))
+            return;
+        tiles.RemoveAll(candidate => ReferenceEquals(candidate, tile));
+        if (tiles.Count == 0)
+            _catalogTilesByFavoritePath.Remove(path);
+    }
+
+    private void CollectLiveTilesForFavoritePath(
+        string path,
+        Tile? preferredTile,
+        ISet<Tile> destination)
+    {
+        string normalizedPath = NormalizeFavoritePath(path);
+        if (_catalogTilesByFavoritePath.TryGetValue(
+                normalizedPath,
+                out List<Tile>? catalogTiles))
+        {
+            foreach (Tile tile in catalogTiles)
+                destination.Add(tile);
+        }
+
+        if (preferredTile is not null
+            && string.Equals(
+                NormalizeFavoritePath(preferredTile.Path),
+                normalizedPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            destination.Add(preferredTile);
+        }
+
+        if (TryGetExternalFileDropSessionTile(normalizedPath, out Tile externalTile))
+            destination.Add(externalTile);
+    }
+
+    private bool IsIndexedCatalogTile(Tile tile)
+    {
+        string path = NormalizeFavoritePath(tile.Path);
+        return _catalogTilesByFavoritePath.TryGetValue(path, out List<Tile>? tiles)
+            && tiles.Any(candidate => ReferenceEquals(candidate, tile));
+    }
+
     private ViewerDropPayload ReadViewerDropPayload(IDataObject? data)
     {
         if (data is null || !data.GetDataPresent(DataFormats.FileDrop))

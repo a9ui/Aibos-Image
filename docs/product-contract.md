@@ -351,6 +351,13 @@ or stores.
 
 - The active source owns image order for selection, modal navigation, and the
   Filmstrip.
+- Once the enlarged-image modal is open, its source identity is pinned to the
+  displayed source path until the user navigates or closes it. A background
+  gallery selection, Favorite-filter projection, catalog refresh, or async
+  Enhancement refresh must not retarget the modal decode, Favorite mutation,
+  version selection, AI action, delete, external-open, or video-source action.
+  If that pinned source disappears from the active catalog, the modal closes
+  instead of falling through to an unrelated gallery selection.
 - Album order is preserved when an Album is the active source.
 - Search and Album sources do not overwrite each other's owned collections.
 - The WPF gallery may sort newest-first by completed upscale, photoreal, or
@@ -379,11 +386,12 @@ or stores.
   `Fav touched` sort retain Original/source semantics even when its thumbnail
   displays a managed Photoreal image. In addition, one blue heart shows the
   highest Favorite level among currently validated managed `photoreal`
-  outputs for that Original. The WPF-local `実写ファボ` `Lv 0` through `Lv 5`
-  pills use union semantics with each other and intersection semantics with
-  other filters. Level 0 requires at least one valid Photoreal output and a
-  maximum level of 0; an Original with no Photoreal output does not match. This
-  is a
+  outputs for that Original. Its `実写` internal levels 0 through 5 are
+  selectors for the unified rule below. The UI represents level 0 with one
+  independent unrated (`−`) selector and levels 1 through 5 with five visibly
+  numbered neutral controls. Level 0 requires at least one valid Photoreal output
+  and a maximum level of 0; an Original with no Photoreal output does not
+  match. This is a
   presentation over existing job and path-keyed Favorite state, not a shared
   schema change. Individual version editing remains in the modal.
   Every supported writer must merge only its changed path keys into the latest
@@ -391,11 +399,25 @@ or stores.
 - WPF groups its local Favorite filters into one `お気に入り` section: Original
   keeps the red heart, managed Photoreal uses the blue heart, and managed Video
   uses the purple heart. These rows are separate views over the same retained
-  path-keyed Favorite data; they do not merge the three version meanings. The
+  path-keyed Favorite data; they do not merge the three version meanings. Each
+  row exposes the same internal 0 through 5 selector shape, where 0 means
+  unrated. Each category uses the earlier neutral numbered-button layout: its
+  short label and all six controls share one row, level 0 is the separate `−`
+  unrated control, and levels 1 through 5 are visibly labeled `1` through `5`.
+  Each button has a 30-pixel hit surface; the buttons do not collapse into tiny
+  color swatches.
+  Filter controls do not use category color or intensity to encode levels, and
+  their checked and unchecked states must remain visibly distinct. Gallery
+  hearts retain their red, blue, and purple category meanings.
+  Pressing the checked `お気に入りのみ` control again turns it off. Filter
+  projection and removal run asynchronously so the UI remains responsive.
+  These selectors do not filter the gallery while `お気に入りのみ` is off.
+  While it is on, every selected Original, Photoreal, and Video level is
+  combined with OR semantics: matching any enabled category/level keeps the
+  Original in the gallery. If no level is selected in any row, the master
+  switch means any positive Favorite in any available category. The
   gallery purple heart is the maximum Favorite level among currently validated
-  managed Video outputs for that Original. The Video `Lv 0` through `Lv 5`
-  pills use union semantics with each other and intersection semantics with
-  other filter groups. Video level 0 requires at least one valid managed Video
+  managed Video outputs for that Original. Video level 0 requires at least one valid managed Video
   output whose maximum level is 0; an Original without a valid Video output
   does not match. Temporarily missing output paths retain their keys under the
   removal rule below.
@@ -561,18 +583,24 @@ or stores.
   In the modal, one visible dropdown lists Original and every available
   AI高画質化/AI実写化/AI編集/動画化 version. The inventory is grouped and numbered as
   `Original`, `実写化 n/N`, `高画質化 n/N`, `AI編集 n/N`, and `動画化 n/N`
-  independently.
+  independently. This dropdown is the only visible entry for switching between
+  Original and generated versions; the modal does not expose a separate
+  `差分` button. HQ, 実写化, 動画化, and 実写編集 remain explicit operation buttons.
   `Ctrl+Up` and `Ctrl+Down` retain
   wraparound cycling of the same inventory. Delete removes only the selected
   managed version and never the source or sibling versions.
-- Ordinary explicit AI upscale uses the existing ComfyUI quality route by
-  default. Its overlapped, feathered tile composition reduces visible grid
-  boundaries. The portable Real-ESRGAN ncnn route remains an explicit
-  speed-first option and is labelled as capable of visible tile/block
-  inconsistency; WPF never silently falls back from the selected route.
+- Ordinary explicit AI upscale defaults to the installed portable Real-ESRGAN
+  ncnn route. An explicitly saved ComfyUI selection remains available and WPF
+  never silently falls back from the selected route. The fixed
+  `realesrgan-x4plus` photo network is always invoked at native 4x; requests
+  for other display scales are resized from that valid native output. Scale
+  values must not be passed to the fixed photo network as if it had separate
+  2x or 3x weights, because that mismatches ncnn tile/output geometry and can
+  produce magnified square blocks. The anime family may use its actual
+  scale-specific 2x, 3x, and 4x model files.
 - Explicit `AI高画質化` uses the currently displayed managed photoreal version
   when one is selected. WPF sends only its durable `sourceProducerJobId` and
-  the photo profile `photo-natural-x2` / `comfyui` / scale 2; it never
+  the photo profile `photo-natural-x2` / `realesrgan-ncnn` / scale 2; it never
   sends a managed output path. The companion revalidates that the producer is
   a succeeded photoreal job for the same Original, runs the adapter against
   that exact output, and keeps the Original `sourceId`, `sourcePath`, and
@@ -948,10 +976,15 @@ input in `sourcePath`, `sourceSignature`, and `sourceSha256`.
 ### `PV-ENHANCE-VIDEO-002` — MiniMax H3 and prompt conversion
 
 `contracts/enhancement-video-v2.json` is the canonical additive reader and
-writer contract for MiniMax H3. H3 uses the exact `minimax-h3` model choice,
-124 native frames at 24 fps, a 5.167-second bounded output, H.264 video, and
-the contract-defined AAC audio path. Unknown or inconsistent v2 snapshots
-remain protected rather than being coerced to the Wan v1 shape.
+writer base contract for MiniMax H3. The additive
+`contracts/enhancement-video-h3-profiles-v1.json` contract defines the four
+measured high-quality duration profiles: 124, 243, 294, or 362 native frames
+at 24 fps, delivering 5.167, 10.125, 12.250, or 15.083 seconds. Every profile
+retains the source-aspect canvas capped at 414,720 pixels, 20 steps, H.264,
+and the contract-defined AAC audio path. Legacy prompt-only v2 rows remain the
+124-frame profile. New requests pin `requested.profileId`; arbitrary duration,
+frame, FPS, resolution, or step values are rejected. Unknown or inconsistent
+snapshots remain protected rather than being coerced to the Wan v1 shape.
 
 - MiniMax H3 is the only model exposed by the new-video UI and the persisted
   default. Wan and Hunyuan model identities remain supported by historical job
@@ -959,6 +992,14 @@ remain protected rather than being coerced to the Wan v1 shape.
   but cannot be selected for a new job. A persisted Wan/Hunyuan new-job choice
   or saved Style is normalized to H3 while retaining its name and prompt; there
   is no silent fallback from an unavailable H3 writer to Wan.
+
+- The visible H3 control exposes only the measured 5 / 10 / 12 / 15 second
+  profiles and describes all four as high quality. FPS and steps are fixed at
+  24 and 20; the UI does not fabricate unmeasured quality or FPS choices.
+  The 10-to-15-second options carry an idle-system warning because the RTX
+  4070 SUPER / 32 GiB measurements used most physical RAM. The 12.250-second
+  512x768 run completed in 802.452 seconds with 11,332 MiB peak VRAM,
+  1.78 GiB minimum free physical RAM, and 81 C peak GPU temperature.
 
 - The video input prompt remains the only authoritative prompt. The explicit
   MiniMax conversion action reads that text and the currently selected source
@@ -977,6 +1018,10 @@ remain protected rather than being coerced to the Wan v1 shape.
   exact v1 prompt-rewrite shape. If input plus mode guidance would exceed the
   2,000-character request bound, conversion is rejected explicitly instead of
   silently dropping the selected mode.
+- Conversion receives the selected exact H3 frame count. The local Qwen
+  planner keeps two contiguous beats for the 5.167-second profile and may use
+  three contiguous beats for 10.125, 12.250, and 15.083 seconds, so long clips
+  are not produced merely by stretching a five-second two-beat plan.
 - A returned candidate is transient and separate from the input. The user may
   edit it, convert again, apply it explicitly to the input, or undo the most
   recent apply. Changing the input, image, model, style, or conversion mode

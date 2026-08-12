@@ -186,7 +186,7 @@ public partial class MainWindow : Window
     private const string ModalMetadataPromptTab = "prompt";
     private const string ModalMetadataNegativeTab = "negative";
     private const string ModalMetadataSettingsTab = "settings";
-    private const int MinFavoriteFilterLevel = 1;
+    private const int MinFavoriteFilterLevel = 0;
     private const int MaxFavoriteFilterLevel = 5;
     private const int MinPhotorealFavoriteFilterLevel = 0;
     private const int MinVideoFavoriteFilterLevel = 0;
@@ -212,6 +212,12 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _pinnedPreviewPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _favorites = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _favoriteChangedAtUtcByPath =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<Tile>> _catalogTilesByFavoritePath =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HashSet<string>> _photorealSourcePathsByFavoritePath =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HashSet<string>> _videoSourcePathsByFavoritePath =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _favoriteDirtyPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -357,6 +363,18 @@ public partial class MainWindow : Window
     private int _failNextFavoriteWriterForSmoke;
     private int _failNextSeenWriterForSmoke;
     private bool _stateWriteBlocked;
+    private readonly object _favoritePresentationStateQueueGate = new();
+    private readonly Dictionary<string, DateTimeOffset> _pendingFavoritePresentationActivity =
+        new(StringComparer.OrdinalIgnoreCase);
+    private FavoriteFilterStateSnapshot? _pendingFavoriteFilterState;
+    private FavoritePresentationStateBatch? _failedFavoritePresentationStateBatch;
+    private Task _favoritePresentationStateWriteTask = Task.CompletedTask;
+    private int _favoritePresentationStatePumpRunning;
+    private int _favoritePresentationStateWriteCount;
+    private long _lastFavoriteWriteApplyMilliseconds;
+    private long _maxFavoriteWriteApplyMilliseconds;
+    private int _lastDerivedFavoriteVisitedTileCount;
+    private int _maxDerivedFavoriteVisitedTileCount;
     private double _rightPanelWidth = DefaultRightPanelWidth;
     private bool _adaptiveWorkbench;
     private bool _sidebarVisibleBeforeAdaptive = true;
@@ -462,7 +480,7 @@ public partial class MainWindow : Window
             token);
     private bool _usingDefaultModalEnhancementSender = true;
     private string _modalEnhancementPresetId = "anime-sharp-x2";
-    private string _modalEnhancementAdapterId = "comfyui";
+    private string _modalEnhancementAdapterId = "realesrgan-ncnn";
     private double _modalEnhancementScale = 2d;
     private Func<bool>? _confirmLargeEnhancementForSmoke;
     private Func<bool>? _confirmEnhancedOutputDeleteForSmoke;
@@ -747,6 +765,7 @@ public partial class MainWindow : Window
         LoadThumbnailStatusBorderSettings();
         BuildSampleTiles();
         _allTiles.AddRange(_tiles);
+        RebuildCatalogTileFavoritePathIndex();
         _tiles.Clear();
         ReorderFullCatalogForSort();
         ApplyCardLayoutToAllTiles();
@@ -1447,9 +1466,9 @@ public partial class MainWindow : Window
         bool UnphotorealOnly,
         bool VideoOnly,
         bool UnseenOnly,
-        FrozenSet<int> FavoriteLevels,
-        FrozenSet<int> PhotorealFavoriteLevels,
-        FrozenSet<int> VideoFavoriteLevels,
+        int FavoriteLevelMask,
+        int PhotorealFavoriteLevelMask,
+        int VideoFavoriteLevelMask,
         FrozenSet<string> HiddenFolderBuckets,
         DateTime? DateFromLocal,
         DateTime? DateToLocal);
@@ -2398,6 +2417,7 @@ public partial class MainWindow : Window
             SetLandingFolderSet(_currentFolderSet);
             _allTiles.Clear();
             _allTiles.AddRange(publishableTiles);
+            RebuildCatalogTileFavoritePathIndex();
             // A reload replaces Tile identities even for an empty or
             // single-item catalog. Invalidate the cached unfiltered projection
             // on every publication, not only when sorting can change order.
@@ -4274,23 +4294,23 @@ public partial class MainWindow : Window
 
         foreach ((string path, DateTimeOffset changedAtUtc) in committed)
             _favoriteChangedAtUtcByPath[path] = changedAtUtc;
-        var affectedPaths = new HashSet<string>(
-            committed.Keys,
-            StringComparer.OrdinalIgnoreCase);
-        TrimFavoriteActivity(_favoriteChangedAtUtcByPath, affectedPaths);
-        foreach (Tile tile in EnumerateLiveTiles())
+        var affectedTiles = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        Tile? selectedTile = SelectedTile();
+        foreach (string path in committed.Keys)
+            CollectLiveTilesForFavoritePath(path, selectedTile, affectedTiles);
+        foreach (Tile tile in affectedTiles)
         {
-            if (!affectedPaths.Contains(tile.Path))
-                continue;
             tile.FavoriteChangedAtUtc =
                 _favoriteChangedAtUtcByPath.TryGetValue(
-                    tile.Path,
+                    NormalizeFavoritePath(tile.Path),
                     out DateTimeOffset changedAtUtc)
                     ? changedAtUtc
                     : null;
         }
 
-        SaveState();
+        ScheduleFavoritePresentationStateSave(
+            committed,
+            includeFilterState: false);
         if (!ExternalFileDropSessionActive
             && _sortBy == SortFavoriteChangedNewestValue)
         {
@@ -4327,6 +4347,333 @@ public partial class MainWindow : Window
         activity.Clear();
         foreach ((string path, DateTimeOffset changedAtUtc) in retained)
             activity[path] = changedAtUtc;
+    }
+
+    private FavoriteFilterStateSnapshot CaptureFavoriteFilterStateSnapshot()
+        => new(
+            FavoriteOnlyFilter?.IsChecked == true,
+            UnfavoriteOnlyFilter?.IsChecked == true,
+            _favoriteFilterLevels.OrderBy(static level => level).ToArray(),
+            _photorealFavoriteFilterLevels.OrderBy(static level => level).ToArray(),
+            _videoFavoriteFilterLevels.OrderBy(static level => level).ToArray());
+
+    private void ScheduleFavoritePresentationStateSave(
+        IReadOnlyDictionary<string, DateTimeOffset> activity,
+        bool includeFilterState)
+    {
+        if (_initializing || _suppressStateSave)
+            return;
+        if (_stateWriteBlocked)
+        {
+            ReportPersistenceRefusal(
+                "Viewer settings",
+                ResolvedStatePath,
+                protectedFile: true);
+            return;
+        }
+
+        var normalizedActivity = new Dictionary<string, DateTimeOffset>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, DateTimeOffset changedAtUtc) in activity)
+        {
+            if (string.IsNullOrWhiteSpace(path) || changedAtUtc == default)
+                continue;
+            string normalizedPath = NormalizeFavoritePath(path);
+            DateTimeOffset normalizedTime = changedAtUtc.ToUniversalTime();
+            if (!normalizedActivity.TryGetValue(normalizedPath, out DateTimeOffset current)
+                || normalizedTime > current)
+            {
+                normalizedActivity[normalizedPath] = normalizedTime;
+            }
+        }
+
+        QueueFavoritePresentationStateBatch(new FavoritePresentationStateBatch(
+            normalizedActivity,
+            includeFilterState ? CaptureFavoriteFilterStateSnapshot() : null));
+    }
+
+    private void ScheduleFavoriteFilterStateSave()
+        => ScheduleFavoritePresentationStateSave(
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
+            includeFilterState: true);
+
+    private void QueueFavoritePresentationStateBatch(
+        FavoritePresentationStateBatch batch,
+        bool retrying = false)
+    {
+        lock (_favoritePresentationStateQueueGate)
+        {
+            if (!retrying && _failedFavoritePresentationStateBatch is not null)
+            {
+                _failedFavoritePresentationStateBatch = MergeFavoritePresentationStateBatches(
+                    _failedFavoritePresentationStateBatch,
+                    batch);
+                return;
+            }
+
+            MergeFavoritePresentationStateActivity(
+                _pendingFavoritePresentationActivity,
+                batch.Activity);
+            if (batch.FilterState is not null)
+                _pendingFavoriteFilterState = batch.FilterState;
+
+            if (_favoritePresentationStatePumpRunning != 0)
+                return;
+
+            _favoritePresentationStatePumpRunning = 1;
+            _favoritePresentationStateWriteTask = Task.Run(
+                PumpFavoritePresentationStateSavesAsync);
+        }
+    }
+
+    private static FavoritePresentationStateBatch MergeFavoritePresentationStateBatches(
+        FavoritePresentationStateBatch first,
+        FavoritePresentationStateBatch second)
+    {
+        var activity = new Dictionary<string, DateTimeOffset>(
+            first.Activity,
+            StringComparer.OrdinalIgnoreCase);
+        MergeFavoritePresentationStateActivity(activity, second.Activity);
+        return new FavoritePresentationStateBatch(
+            activity,
+            second.FilterState ?? first.FilterState);
+    }
+
+    private static void MergeFavoritePresentationStateActivity(
+        Dictionary<string, DateTimeOffset> destination,
+        IReadOnlyDictionary<string, DateTimeOffset> source)
+    {
+        foreach ((string path, DateTimeOffset changedAtUtc) in source)
+        {
+            if (!destination.TryGetValue(path, out DateTimeOffset current)
+                || changedAtUtc > current)
+            {
+                destination[path] = changedAtUtc;
+            }
+        }
+    }
+
+    private async Task PumpFavoritePresentationStateSavesAsync()
+    {
+        while (true)
+        {
+            FavoritePresentationStateBatch batch;
+            lock (_favoritePresentationStateQueueGate)
+            {
+                if (_pendingFavoritePresentationActivity.Count == 0
+                    && _pendingFavoriteFilterState is null)
+                {
+                    _favoritePresentationStatePumpRunning = 0;
+                    return;
+                }
+
+                batch = new FavoritePresentationStateBatch(
+                    new Dictionary<string, DateTimeOffset>(
+                        _pendingFavoritePresentationActivity,
+                        StringComparer.OrdinalIgnoreCase),
+                    _pendingFavoriteFilterState);
+                _pendingFavoritePresentationActivity.Clear();
+                _pendingFavoriteFilterState = null;
+            }
+
+            FavoritePresentationStatePersistResult result;
+            try
+            {
+                result = PersistFavoritePresentationStateBatch(
+                    ResolvedStatePath,
+                    batch);
+            }
+            catch (Exception error)
+            {
+                result = new FavoritePresentationStatePersistResult(
+                    Saved: false,
+                    Protected: false,
+                    new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
+                    error.Message);
+            }
+
+            if (!result.Saved)
+            {
+                lock (_favoritePresentationStateQueueGate)
+                {
+                    var pending = new FavoritePresentationStateBatch(
+                        new Dictionary<string, DateTimeOffset>(
+                            _pendingFavoritePresentationActivity,
+                            StringComparer.OrdinalIgnoreCase),
+                        _pendingFavoriteFilterState);
+                    FavoritePresentationStateBatch failed =
+                        MergeFavoritePresentationStateBatches(batch, pending);
+                    _failedFavoritePresentationStateBatch =
+                        _failedFavoritePresentationStateBatch is null
+                            ? failed
+                            : MergeFavoritePresentationStateBatches(
+                                _failedFavoritePresentationStateBatch,
+                                failed);
+                    _pendingFavoritePresentationActivity.Clear();
+                    _pendingFavoriteFilterState = null;
+                    _favoritePresentationStatePumpRunning = 0;
+                }
+
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (result.Protected)
+                    {
+                        _stateWriteBlocked = true;
+                        ReportPersistenceRefusal(
+                            "Viewer settings",
+                            ResolvedStatePath,
+                            protectedFile: true);
+                    }
+                    else
+                    {
+                        ReportPersistenceRefusal(
+                            "Viewer settings",
+                            ResolvedStatePath,
+                            retryAction: RetryFailedFavoritePresentationStateSave);
+                    }
+                }, DispatcherPriority.Background);
+                return;
+            }
+
+            await Dispatcher.InvokeAsync(
+                () => ApplyFavoritePresentationStatePersistResult(result),
+                DispatcherPriority.Background);
+        }
+    }
+
+    private static FavoritePresentationStatePersistResult PersistFavoritePresentationStateBatch(
+        string path,
+        FavoritePresentationStateBatch batch)
+    {
+        bool malformed = false;
+        var evicted = new Dictionary<string, DateTimeOffset>(
+            StringComparer.OrdinalIgnoreCase);
+        bool saved = TryWithPersistenceLock(path, () =>
+        {
+            if (!TryReadViewerStateFile(path, out ViewerState? state))
+            {
+                malformed = true;
+                return false;
+            }
+
+            state ??= new ViewerState { Version = 2 };
+            if (batch.FilterState is { } filter)
+            {
+                state.ShowFavoritesOnly = filter.ShowFavoritesOnly;
+                state.ShowUnfavoriteOnly = filter.ShowUnfavoriteOnly;
+                state.FavoriteFilterLevels = filter.FavoriteLevels.Length == 0
+                    ? null
+                    : filter.FavoriteLevels.ToList();
+                state.PhotorealFavoriteFilterLevels =
+                    filter.PhotorealFavoriteLevels.Length == 0
+                        ? null
+                        : filter.PhotorealFavoriteLevels.ToList();
+                state.VideoFavoriteFilterLevels = filter.VideoFavoriteLevels.Length == 0
+                    ? null
+                    : filter.VideoFavoriteLevels.ToList();
+            }
+
+            if (batch.Activity.Count > 0)
+            {
+                state.FavoriteChangedAtUtcByPath ??=
+                    new Dictionary<string, DateTimeOffset>(
+                        StringComparer.OrdinalIgnoreCase);
+                foreach ((string activityPath, DateTimeOffset activityTime) in batch.Activity)
+                {
+                    string normalizedPath = NormalizeFavoritePath(activityPath);
+                    DateTimeOffset normalizedTime = activityTime.ToUniversalTime();
+                    if (!state.FavoriteChangedAtUtcByPath.TryGetValue(
+                            normalizedPath,
+                            out DateTimeOffset current)
+                        || normalizedTime > current)
+                    {
+                        state.FavoriteChangedAtUtcByPath[normalizedPath] = normalizedTime;
+                    }
+                }
+            }
+
+            if (state.FavoriteChangedAtUtcByPath is not null
+                && state.FavoriteChangedAtUtcByPath.Count
+                    > MaxPersistedFavoriteActivityEntries)
+            {
+                var evictedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                Dictionary<string, DateTimeOffset> beforeTrim =
+                    new(state.FavoriteChangedAtUtcByPath, StringComparer.OrdinalIgnoreCase);
+                TrimFavoriteActivity(
+                    state.FavoriteChangedAtUtcByPath,
+                    evictedPaths);
+                foreach (string evictedPath in evictedPaths)
+                {
+                    if (beforeTrim.TryGetValue(evictedPath, out DateTimeOffset evictedTime))
+                        evicted[evictedPath] = evictedTime;
+                }
+            }
+
+            string json = JsonSerializer.Serialize(
+                state,
+                new JsonSerializerOptions { WriteIndented = true });
+            return TryWriteAtomicText(path, json);
+        });
+
+        return new FavoritePresentationStatePersistResult(
+            saved,
+            Protected: malformed,
+            saved
+                ? evicted
+                : new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private void ApplyFavoritePresentationStatePersistResult(
+        FavoritePresentationStatePersistResult result)
+    {
+        Interlocked.Increment(ref _favoritePresentationStateWriteCount);
+        if (result.EvictedActivity.Count == 0)
+            return;
+
+        var affectedTiles = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        Tile? selectedTile = SelectedTile();
+        foreach ((string path, DateTimeOffset evictedTime) in result.EvictedActivity)
+        {
+            if (!_favoriteChangedAtUtcByPath.TryGetValue(path, out DateTimeOffset current)
+                || current > evictedTime)
+            {
+                continue;
+            }
+
+            _favoriteChangedAtUtcByPath.Remove(path);
+            CollectLiveTilesForFavoritePath(path, selectedTile, affectedTiles);
+        }
+
+        foreach (Tile tile in affectedTiles)
+        {
+            tile.FavoriteChangedAtUtc =
+                _favoriteChangedAtUtcByPath.TryGetValue(
+                    NormalizeFavoritePath(tile.Path),
+                    out DateTimeOffset changedAtUtc)
+                    ? changedAtUtc
+                    : null;
+        }
+
+        if (!ExternalFileDropSessionActive
+            && _sortBy == SortFavoriteChangedNewestValue)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: true,
+                selectFirst: false);
+        }
+    }
+
+    private void RetryFailedFavoritePresentationStateSave()
+    {
+        FavoritePresentationStateBatch? failed;
+        lock (_favoritePresentationStateQueueGate)
+        {
+            failed = _failedFavoritePresentationStateBatch;
+            _failedFavoritePresentationStateBatch = null;
+        }
+        if (failed is not null)
+            QueueFavoritePresentationStateBatch(failed, retrying: true);
     }
 
     private static string ResolvedEnhancementJobsPath
@@ -5067,6 +5414,7 @@ public partial class MainWindow : Window
         _catalogVideoVersionsByPath.Clear();
         foreach ((string alias, List<ManagedVideoVersion> versions) in snapshot.CatalogVideoVersionsByPath)
             _catalogVideoVersionsByPath[alias] = versions;
+        RebuildManagedFavoriteSourcePathIndexes();
         _catalogEnhancementQueueActivityByPath.Clear();
         foreach ((string alias, ManagedEnhancementQueueActivity activity) in snapshot.CatalogQueueActivityByPath)
             _catalogEnhancementQueueActivityByPath[alias] = activity;
@@ -5084,6 +5432,55 @@ public partial class MainWindow : Window
         _enhancementJobsLastWriteTimeUtc = snapshot.LastWriteTimeUtc;
         _enhancementJobsLength = snapshot.Length;
         _enhancementCatalogRevision = snapshot.CatalogRevision;
+    }
+
+    private void RebuildManagedFavoriteSourcePathIndexes()
+    {
+        _photorealSourcePathsByFavoritePath.Clear();
+        foreach ((string sourcePath, List<ManagedEnhancementVersion> versions) in
+                 _catalogEnhancementVersionsByPath)
+        {
+            foreach (ManagedEnhancementVersion version in versions)
+            {
+                if (version.Operation == "photoreal")
+                {
+                    IndexManagedFavoriteSource(
+                        _photorealSourcePathsByFavoritePath,
+                        version.Output.OutputPath,
+                        sourcePath);
+                }
+            }
+        }
+
+        _videoSourcePathsByFavoritePath.Clear();
+        foreach ((string sourcePath, List<ManagedVideoVersion> versions) in
+                 _catalogVideoVersionsByPath)
+        {
+            foreach (ManagedVideoVersion version in versions)
+            {
+                IndexManagedFavoriteSource(
+                    _videoSourcePathsByFavoritePath,
+                    version.Output.OutputPath,
+                    sourcePath);
+            }
+        }
+    }
+
+    private static void IndexManagedFavoriteSource(
+        IDictionary<string, HashSet<string>> index,
+        string favoritePath,
+        string sourcePath)
+    {
+        string normalizedFavoritePath = NormalizeFavoritePath(favoritePath);
+        string normalizedSourcePath = NormalizeFavoritePath(sourcePath);
+        if (!index.TryGetValue(
+                normalizedFavoritePath,
+                out HashSet<string>? sourcePaths))
+        {
+            sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            index[normalizedFavoritePath] = sourcePaths;
+        }
+        sourcePaths.Add(normalizedSourcePath);
     }
 
     private bool RefreshEnhancedStateIfChanged()
@@ -5207,7 +5604,8 @@ public partial class MainWindow : Window
 
             ApplyEnhancedStateSnapshot(result.Snapshot);
             ApplyEnhancedOutputsToVisibleCatalog();
-            if (Modal.Visibility == Visibility.Visible && SelectedTile() is Tile selected)
+            if (Modal.Visibility == Visibility.Visible
+                && TryGetModalSourceTile(out Tile selected))
             {
                 string? activeVideoJobId = _modalShowingVideo
                     && _modalVideoVersionIndex >= 0
@@ -5849,6 +6247,20 @@ public partial class MainWindow : Window
         int DesiredLevel,
         long Generation,
         DateTimeOffset ChangedAtUtc);
+    private sealed record FavoriteFilterStateSnapshot(
+        bool ShowFavoritesOnly,
+        bool ShowUnfavoriteOnly,
+        int[] FavoriteLevels,
+        int[] PhotorealFavoriteLevels,
+        int[] VideoFavoriteLevels);
+    private sealed record FavoritePresentationStateBatch(
+        Dictionary<string, DateTimeOffset> Activity,
+        FavoriteFilterStateSnapshot? FilterState);
+    private sealed record FavoritePresentationStatePersistResult(
+        bool Saved,
+        bool Protected,
+        Dictionary<string, DateTimeOffset> EvictedActivity,
+        string? Error = null);
     private sealed record SeenPendingMutation(bool DurableSeen, bool WasUnseen, bool ShowedUnseenDot, long Generation);
     private enum SharedStoreKind { Favorite, Seen }
 
@@ -6092,6 +6504,23 @@ public partial class MainWindow : Window
 
     private void ApplyFavoriteWriteResult(SharedWriteResult<FavoriteDelta> result)
     {
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            ApplyFavoriteWriteResultCore(result);
+        }
+        finally
+        {
+            watch.Stop();
+            _lastFavoriteWriteApplyMilliseconds = watch.ElapsedMilliseconds;
+            _maxFavoriteWriteApplyMilliseconds = Math.Max(
+                _maxFavoriteWriteApplyMilliseconds,
+                watch.ElapsedMilliseconds);
+        }
+    }
+
+    private void ApplyFavoriteWriteResultCore(SharedWriteResult<FavoriteDelta> result)
+    {
         if (result.Status == SharedWriteStatus.Succeeded)
         {
             bool committedCurrent = false;
@@ -6128,8 +6557,9 @@ public partial class MainWindow : Window
                 _favorites[delta.Path] = current.DurableLevel;
             else
                 _favorites.Remove(delta.Path);
-            RefreshDerivedFavoritePresentationForPath(delta.Path);
-            SetTileFavoriteLevel(delta.Path, current.DurableLevel);
+            Tile? selectedTile = SelectedTile();
+            RefreshDerivedFavoritePresentationForPath(delta.Path, selectedTile);
+            SetTileFavoriteLevel(delta.Path, current.DurableLevel, selectedTile);
             _pendingFavoriteMutations.Remove(delta.Path);
             failed.Add(delta with { DurableBefore = current.DurableLevel });
         }
@@ -6253,7 +6683,7 @@ public partial class MainWindow : Window
             RefreshDerivedFavoritePresentationForPath(
                 previous.Path,
                 selectedTile);
-            SetTileFavoriteLevel(previous.Path, previous.DesiredLevel);
+            SetTileFavoriteLevel(previous.Path, previous.DesiredLevel, selectedTile);
             writer.Enqueue(new FavoriteDelta(previous.Path, durable, previous.DesiredLevel, generation));
         }
         RefreshFavoriteMutationSurface();
@@ -6306,13 +6736,15 @@ public partial class MainWindow : Window
             RetryFailedSeenBatch();
     }
 
-    private void SetTileFavoriteLevel(string path, int level)
+    private void SetTileFavoriteLevel(
+        string path,
+        int level,
+        Tile? preferredTile = null)
     {
-        foreach (Tile tile in EnumerateLiveTiles())
-        {
-            if (string.Equals(tile.Path, path, StringComparison.OrdinalIgnoreCase))
-                tile.Fav = Math.Clamp(level, 0, 5);
-        }
+        var affected = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        CollectLiveTilesForFavoritePath(path, preferredTile, affected);
+        foreach (Tile tile in affected)
+            tile.Fav = Math.Clamp(level, 0, 5);
     }
 
     private void RefreshDerivedFavoritePresentationForPath(
@@ -6320,47 +6752,59 @@ public partial class MainWindow : Window
         Tile? preferredTile = null)
     {
         string normalizedFavoritePath = NormalizeFavoritePath(favoritePath);
-        var visited = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
-        var affected = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
-
-        void TryRefresh(Tile tile)
+        var photorealTiles = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        var videoTiles = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        if (_photorealSourcePathsByFavoritePath.TryGetValue(
+                normalizedFavoritePath,
+                out HashSet<string>? photorealSourcePaths))
         {
-            if (!visited.Add(tile))
-                return;
-
-            IReadOnlyList<ManagedEnhancementVersion> versions =
-                GetManagedEnhancementVersionsForPath(tile.Path);
-            bool photorealAffected = versions.Any(version =>
-                    version.Operation == "photoreal"
-                    && string.Equals(
-                        NormalizeFavoritePath(version.Output.OutputPath),
-                        normalizedFavoritePath,
-                        StringComparison.OrdinalIgnoreCase));
-            IReadOnlyList<ManagedVideoVersion> videoVersions =
-                GetManagedVideoVersionsForPath(tile.Path);
-            bool videoAffected = videoVersions.Any(version =>
-                string.Equals(
-                    NormalizeFavoritePath(version.Output.OutputPath),
-                    normalizedFavoritePath,
-                    StringComparison.OrdinalIgnoreCase));
-            if (!photorealAffected && !videoAffected)
-                return;
-
-            if (photorealAffected)
-                ApplyTileEnhancementAvailability(tile, versions);
-            if (videoAffected)
-                ApplyTileVideoAvailability(tile, videoVersions);
-            affected.Add(tile);
+            foreach (string sourcePath in photorealSourcePaths)
+            {
+                CollectLiveTilesForFavoritePath(
+                    sourcePath,
+                    preferredTile,
+                    photorealTiles);
+            }
+        }
+        if (_videoSourcePathsByFavoritePath.TryGetValue(
+                normalizedFavoritePath,
+                out HashSet<string>? videoSourcePaths))
+        {
+            foreach (string sourcePath in videoSourcePaths)
+            {
+                CollectLiveTilesForFavoritePath(
+                    sourcePath,
+                    preferredTile,
+                    videoTiles);
+            }
         }
 
-        if (preferredTile is not null)
-            TryRefresh(preferredTile);
-        foreach (Tile tile in EnumerateLiveTiles())
-            TryRefresh(tile);
+        foreach (Tile tile in photorealTiles)
+        {
+            ApplyTileEnhancementAvailability(
+                tile,
+                GetManagedEnhancementVersionsForPath(tile.Path));
+        }
+        foreach (Tile tile in videoTiles)
+        {
+            ApplyTileVideoAvailability(
+                tile,
+                GetManagedVideoVersionsForPath(tile.Path));
+        }
 
-        if (affected.Any(_allTiles.Contains)
-            && (_photorealFavoriteFilterLevels.Count > 0
-                || _videoFavoriteFilterLevels.Count > 0))
+        int visitedCount = photorealTiles
+            .Concat(videoTiles)
+            .Distinct(ReferenceEqualityComparer.Instance)
+            .Count();
+        _lastDerivedFavoriteVisitedTileCount = visitedCount;
+        _maxDerivedFavoriteVisitedTileCount = Math.Max(
+            _maxDerivedFavoriteVisitedTileCount,
+            visitedCount);
+        bool catalogAffected = photorealTiles.Any(IsIndexedCatalogTile)
+            || videoTiles.Any(IsIndexedCatalogTile);
+        if (catalogAffected
+            && (FavoriteOnlyFilter?.IsChecked == true
+                || UnfavoriteOnlyFilter?.IsChecked == true))
         {
             _ = QueueCatalogProjection(
                 debounce: false,
@@ -6503,9 +6947,15 @@ public partial class MainWindow : Window
         if (!favoritesOnly && !unfavoriteOnly)
             return false;
         bool remainsIncluded = favoritesOnly
-            ? desiredLevel > 0
-                && (_favoriteFilterLevels.Count == 0
-                    || _favoriteFilterLevels.Contains(desiredLevel))
+            ? MatchesSelectedFavoriteLevels(
+                desiredLevel,
+                tile.Photorealized,
+                tile.PhotorealFavoriteLevel,
+                tile.VideoGenerated,
+                tile.VideoFavoriteLevel,
+                _favoriteFilterLevels,
+                _photorealFavoriteFilterLevels,
+                _videoFavoriteFilterLevels)
             : desiredLevel <= 0;
         return !remainsIncluded
             && CardsList.TryResolveAutomationItem(tile, out _);
@@ -6609,21 +7059,57 @@ public partial class MainWindow : Window
     private void RefreshModalFavoriteSurface(Tile? knownSelected = null)
     {
         Tile? selected = knownSelected ?? SelectedTile();
-        if (selected is null)
+        SyncFavoriteLevelReadouts(selected?.Fav ?? 0);
+        if (Modal.Visibility != Visibility.Visible)
+            return;
+
+        // The modal is a pinned viewing surface. A Favorite filter refresh can
+        // legitimately move the gallery selection to a different tile while
+        // the displayed image remains open. Never reopen the modal from that
+        // background selection: it changes the image and starts another full
+        // decode on an unrelated Favorite click.
+        if (!TryGetModalSourceTile(out Tile modalTile))
         {
-            if (Modal.Visibility == Visibility.Visible)
-                Modal.Visibility = Visibility.Collapsed;
+            bool modalHadFocus = Modal.IsKeyboardFocusWithin;
+            CloseModal();
+            if (modalHadFocus)
+                Dispatcher.BeginInvoke(SearchInput.Focus, DispatcherPriority.Input);
             return;
         }
 
-        SyncFavoriteLevelReadouts(selected.Fav);
-        SyncDisplayedModalFavoriteLevel(selected);
-        if (Modal.Visibility != Visibility.Visible)
-            return;
-        if (!string.Equals(_modalSourceTilePath, selected.Path, StringComparison.OrdinalIgnoreCase))
-            OpenModal();
-        else
-            SyncModalFilmstripSelection(selected);
+        SyncDisplayedModalFavoriteLevel(modalTile);
+        SyncModalFilmstripSelection(modalTile);
+    }
+
+    private bool TryGetModalSourceTile(out Tile tile)
+    {
+        tile = null!;
+        if (Modal.Visibility != Visibility.Visible
+            || string.IsNullOrWhiteSpace(_modalSourceTilePath))
+        {
+            return false;
+        }
+
+        if (TryGetExternalFileDropSessionTile(_modalSourceTilePath, out tile))
+            return true;
+
+        string normalizedPath = NormalizeFavoritePath(_modalSourceTilePath);
+        if (_catalogTilesByFavoritePath.TryGetValue(
+                normalizedPath,
+                out List<Tile>? indexedTiles)
+            && indexedTiles.Count > 0)
+        {
+            tile = indexedTiles[0];
+            return true;
+        }
+
+        // A Jobs/external projection can contain a transient real tile that is
+        // deliberately not part of the catalog index.
+        tile = _tiles.FirstOrDefault(candidate => string.Equals(
+                candidate.Path,
+                _modalSourceTilePath,
+                StringComparison.OrdinalIgnoreCase))!;
+        return tile is not null;
     }
 
     private void SyncDisplayedModalFavoriteLevel(Tile selected)
@@ -6636,6 +7122,9 @@ public partial class MainWindow : Window
             return;
         }
 
+        Tile favoriteTile = TryGetModalSourceTile(out Tile modalTile)
+            ? modalTile
+            : selected;
         bool resolved = TryResolveDisplayedModalFavoriteTarget(
             out string targetPath,
             out _,
@@ -6643,7 +7132,7 @@ public partial class MainWindow : Window
         int modalLevel = resolved && independentTarget
             ? FavoriteLevelForPath(targetPath)
             : resolved
-                ? selected.Fav
+                ? favoriteTile.Fav
                 : 0;
         ModalFavoriteDecreaseButton.IsEnabled = resolved;
         ModalFavoriteIncreaseButton.IsEnabled = resolved;
@@ -11376,11 +11865,14 @@ public partial class MainWindow : Window
     {
         if (_initializing || _syncingFavoriteFilterControls) return;
         SyncFavoriteFilterLevelsFromControls();
-        _ = QueueCatalogProjection(
-            debounce: false,
-            reorderCatalog: false,
-            selectFirst: true);
-        SaveState();
+        if (FavoriteOnlyFilter?.IsChecked == true)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
+        }
+        ScheduleFavoriteFilterStateSave();
     }
 
     private void PhotorealFavoriteLevelFilter_Changed(
@@ -11389,11 +11881,14 @@ public partial class MainWindow : Window
     {
         if (_initializing || _syncingFavoriteFilterControls) return;
         SyncPhotorealFavoriteFilterLevelsFromControls();
-        _ = QueueCatalogProjection(
-            debounce: false,
-            reorderCatalog: false,
-            selectFirst: true);
-        SaveState();
+        if (FavoriteOnlyFilter?.IsChecked == true)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
+        }
+        ScheduleFavoriteFilterStateSave();
     }
 
     private void VideoFavoriteLevelFilter_Changed(
@@ -11402,11 +11897,14 @@ public partial class MainWindow : Window
     {
         if (_initializing || _syncingFavoriteFilterControls) return;
         SyncVideoFavoriteFilterLevelsFromControls();
-        _ = QueueCatalogProjection(
-            debounce: false,
-            reorderCatalog: false,
-            selectFirst: true);
-        SaveState();
+        if (FavoriteOnlyFilter?.IsChecked == true)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
+        }
+        ScheduleFavoriteFilterStateSave();
     }
 
     private void ShowUnseenDots_Changed(object sender, RoutedEventArgs e)
@@ -11950,18 +12448,18 @@ public partial class MainWindow : Window
             SyncFavoriteFilterControls();
         if (!_initializing)
         {
-            if (asynchronous)
+            if (FavoriteOnlyFilter?.IsChecked == true && asynchronous)
             {
                 _ = QueueCatalogProjection(
                     debounce: false,
                     reorderCatalog: false,
                     selectFirst: true);
             }
-            else
+            else if (FavoriteOnlyFilter?.IsChecked == true)
             {
                 ApplyFilters();
             }
-            SaveState();
+            ScheduleFavoriteFilterStateSave();
         }
         return true;
     }
@@ -11982,18 +12480,18 @@ public partial class MainWindow : Window
         SyncPhotorealFavoriteFilterControls();
         if (!_initializing)
         {
-            if (asynchronous)
+            if (FavoriteOnlyFilter?.IsChecked == true && asynchronous)
             {
                 _ = QueueCatalogProjection(
                     debounce: false,
                     reorderCatalog: false,
                     selectFirst: true);
             }
-            else
+            else if (FavoriteOnlyFilter?.IsChecked == true)
             {
                 ApplyFilters();
             }
-            SaveState();
+            ScheduleFavoriteFilterStateSave();
         }
         return true;
     }
@@ -12014,18 +12512,18 @@ public partial class MainWindow : Window
         SyncVideoFavoriteFilterControls();
         if (!_initializing)
         {
-            if (asynchronous)
+            if (FavoriteOnlyFilter?.IsChecked == true && asynchronous)
             {
                 _ = QueueCatalogProjection(
                     debounce: false,
                     reorderCatalog: false,
                     selectFirst: true);
             }
-            else
+            else if (FavoriteOnlyFilter?.IsChecked == true)
             {
                 ApplyFilters();
             }
-            SaveState();
+            ScheduleFavoriteFilterStateSave();
         }
         return true;
     }
@@ -12076,12 +12574,13 @@ public partial class MainWindow : Window
             }
         }
         if (persist && !_initializing)
-            SaveState();
+            ScheduleFavoriteFilterStateSave();
     }
 
     private void SyncFavoriteFilterControls()
     {
-        if (FavoriteLevel1Filter is null
+        if (FavoriteLevel0Filter is null
+            || FavoriteLevel1Filter is null
             || FavoriteLevel2Filter is null
             || FavoriteLevel3Filter is null
             || FavoriteLevel4Filter is null
@@ -12096,11 +12595,36 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
+            SetCheckBoxState(FavoriteLevel0Filter, _favoriteFilterLevels.Contains(0));
             SetCheckBoxState(FavoriteLevel1Filter, _favoriteFilterLevels.Contains(1));
             SetCheckBoxState(FavoriteLevel2Filter, _favoriteFilterLevels.Contains(2));
             SetCheckBoxState(FavoriteLevel3Filter, _favoriteFilterLevels.Contains(3));
             SetCheckBoxState(FavoriteLevel4Filter, _favoriteFilterLevels.Contains(4));
             SetCheckBoxState(FavoriteLevel5Filter, _favoriteFilterLevels.Contains(5));
+            CheckBox[] levelControls =
+            [
+                FavoriteLevel0Filter,
+                FavoriteLevel1Filter,
+                FavoriteLevel2Filter,
+                FavoriteLevel3Filter,
+                FavoriteLevel4Filter,
+                FavoriteLevel5Filter,
+            ];
+            for (int level = 0; level < levelControls.Length; level++)
+            {
+                string accessibleName = level == 0
+                    ? UiLanguageResources.Text("UiOriginalFavoriteLevelZeroHelp")
+                    : UiLanguageResources.Format(
+                        "UiOriginalFavoriteLevelNameFormat",
+                        level);
+                AutomationProperties.SetName(
+                    levelControls[level],
+                    accessibleName);
+                AutomationProperties.SetHelpText(
+                    levelControls[level],
+                    accessibleName);
+                levelControls[level].ToolTip = accessibleName;
+            }
         }
         finally
         {
@@ -12108,8 +12632,8 @@ public partial class MainWindow : Window
         }
 
         if (FavoriteLevelFilterPanel is not null
-            && FavoriteLevelFilterPanel.IsEnabled != favoritesOnly)
-            FavoriteLevelFilterPanel.IsEnabled = favoritesOnly;
+            && !FavoriteLevelFilterPanel.IsEnabled)
+            FavoriteLevelFilterPanel.IsEnabled = true;
 
         SyncPhotorealFavoriteFilterControls();
         SyncVideoFavoriteFilterControls();
@@ -12135,6 +12659,7 @@ public partial class MainWindow : Window
     private void SyncFavoriteFilterLevelsFromControls()
     {
         _favoriteFilterLevels.Clear();
+        if (FavoriteLevel0Filter?.IsChecked == true) _favoriteFilterLevels.Add(0);
         if (FavoriteLevel1Filter?.IsChecked == true) _favoriteFilterLevels.Add(1);
         if (FavoriteLevel2Filter?.IsChecked == true) _favoriteFilterLevels.Add(2);
         if (FavoriteLevel3Filter?.IsChecked == true) _favoriteFilterLevels.Add(3);
@@ -12175,11 +12700,16 @@ public partial class MainWindow : Window
             ];
             for (int level = 0; level < levelControls.Length; level++)
             {
+                string accessibleName = level == 0
+                    ? UiLanguageResources.Text(
+                        "UiPhotorealFavoriteLevelZeroHelp")
+                    : UiLanguageResources.Format(
+                        "UiPhotorealFavoriteLevelNameFormat",
+                        level);
                 AutomationProperties.SetName(
                     levelControls[level],
-                    UiLanguageResources.Format(
-                        "UiPhotorealFavoriteLevelNameFormat",
-                        level));
+                    accessibleName);
+                levelControls[level].ToolTip = accessibleName;
             }
         }
         finally
@@ -12244,11 +12774,16 @@ public partial class MainWindow : Window
             ];
             for (int level = 0; level < levelControls.Length; level++)
             {
+                string accessibleName = level == 0
+                    ? UiLanguageResources.Text(
+                        "UiVideoFavoriteLevelZeroHelp")
+                    : UiLanguageResources.Format(
+                        "UiVideoFavoriteLevelNameFormat",
+                        level);
                 AutomationProperties.SetName(
                     levelControls[level],
-                    UiLanguageResources.Format(
-                        "UiVideoFavoriteLevelNameFormat",
-                        level));
+                    accessibleName);
+                levelControls[level].ToolTip = accessibleName;
             }
         }
         finally
@@ -12373,7 +12908,11 @@ public partial class MainWindow : Window
 
     private bool ToggleSelectedFavorite()
     {
-        if (SelectedTile() is not { IsRealFile: true } tile)
+        Tile? tile = Modal.Visibility == Visibility.Visible
+            && TryGetModalSourceTile(out Tile modalTile)
+                ? modalTile
+                : SelectedTile();
+        if (tile is not { IsRealFile: true })
             return false;
 
         return SetFavoriteLevel(tile, tile.Fav > 0 ? 0 : 5);
@@ -12405,6 +12944,20 @@ public partial class MainWindow : Window
                     nextTargetLevel,
                     $"Set favorite level {nextTargetLevel}.");
             }
+
+            if (!TryGetModalSourceTile(out Tile modalTile)
+                || !string.Equals(
+                    NormalizeFavoritePath(modalTile.Path),
+                    targetPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                ShowFavoriteChangeStatus(
+                    "The displayed Favorite source changed. No Favorite was updated.");
+                return false;
+            }
+
+            int nextModalLevel = Math.Clamp(modalTile.Fav + delta, 0, 5);
+            return SetFavoriteLevel(modalTile, nextModalLevel);
         }
 
         if (_selectedPaths.Count > 1)
@@ -12440,6 +12993,19 @@ public partial class MainWindow : Window
                     clamped,
                     $"Set favorite level {clamped}.");
             }
+
+            if (!TryGetModalSourceTile(out Tile modalTile)
+                || !string.Equals(
+                    NormalizeFavoritePath(modalTile.Path),
+                    targetPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                ShowFavoriteChangeStatus(
+                    "The displayed Favorite source changed. No Favorite was updated.");
+                return false;
+            }
+
+            return SetFavoriteLevel(modalTile, clamped);
         }
 
         return MutateSelectedFavorites(_ => clamped, $"Set favorite level {clamped} for {{0:N0}} selected images.");
@@ -12572,7 +13138,7 @@ public partial class MainWindow : Window
         else
             _favorites.Remove(key);
         _favoriteDirtyPaths.Add(key);
-        RefreshDerivedFavoritePresentationForPath(key, SelectedTile());
+        RefreshDerivedFavoritePresentationForPath(key, tile);
 
         if (!SaveFavorites())
         {
@@ -12607,7 +13173,7 @@ public partial class MainWindow : Window
         targetPath = "";
         targetName = "";
         if (!IsModalPhotorealFavoriteContext()
-            || SelectedTile() is not Tile tile
+            || !TryGetModalSourceTile(out Tile tile)
             || !TryGetCurrentModalEnhancementVersion(
                 tile,
                 out ManagedEnhancementVersion version)
@@ -12644,7 +13210,7 @@ public partial class MainWindow : Window
         targetName = "";
         independentTarget = false;
         if (Modal.Visibility != Visibility.Visible
-            || SelectedTile() is not Tile tile)
+            || !TryGetModalSourceTile(out Tile tile))
         {
             return false;
         }
@@ -13158,9 +13724,9 @@ public partial class MainWindow : Window
     {
         if (modalWasVisible)
         {
-            if (SelectedTile() is not null)
+            if (TryGetModalSourceTile(out Tile modalTile))
             {
-                OpenModal();
+                OpenModal(modalTile);
                 if (modalHadFocus)
                     Dispatcher.BeginInvoke(ModalCloseBtn.Focus, DispatcherPriority.Input);
             }
@@ -13803,11 +14369,12 @@ public partial class MainWindow : Window
             bool unphotorealOnly = UnphotorealOnlyFilter?.IsChecked == true;
             bool videoOnly = VideoOnlyFilter?.IsChecked == true;
             bool unseenOnly = UnseenOnlyFilter?.IsChecked == true;
-            FrozenSet<int> favoriteLevels = _favoriteFilterLevels.ToFrozenSet();
-            FrozenSet<int> photorealFavoriteLevels =
-                _photorealFavoriteFilterLevels.ToFrozenSet();
-            FrozenSet<int> videoFavoriteLevels =
-                _videoFavoriteFilterLevels.ToFrozenSet();
+            int favoriteLevelMask = BuildFavoriteLevelMask(
+                _favoriteFilterLevels);
+            int photorealFavoriteLevelMask = BuildFavoriteLevelMask(
+                _photorealFavoriteFilterLevels);
+            int videoFavoriteLevelMask = BuildFavoriteLevelMask(
+                _videoFavoriteFilterLevels);
             FrozenSet<string> hiddenFolderBuckets =
                 _hiddenFolderBuckets.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
             bool unfiltered = !albumActive
@@ -13820,8 +14387,6 @@ public partial class MainWindow : Window
                 && !unphotorealOnly
                 && !videoOnly
                 && !unseenOnly
-                && photorealFavoriteLevels.Count == 0
-                && videoFavoriteLevels.Count == 0
                 && hiddenFolderBuckets.Count == 0
                 && !_dateFromLocal.HasValue
                 && !_dateToLocal.HasValue;
@@ -13872,9 +14437,9 @@ public partial class MainWindow : Window
                 unphotorealOnly,
                 videoOnly,
                 unseenOnly,
-                favoriteLevels,
-                photorealFavoriteLevels,
-                videoFavoriteLevels,
+                favoriteLevelMask,
+                photorealFavoriteLevelMask,
+                videoFavoriteLevelMask,
                 hiddenFolderBuckets,
                 _dateFromLocal,
                 _dateToLocal);
@@ -13938,8 +14503,6 @@ public partial class MainWindow : Window
             && !snapshot.UnphotorealOnly
             && !snapshot.VideoOnly
             && !snapshot.UnseenOnly
-            && snapshot.PhotorealFavoriteLevels.Count == 0
-            && snapshot.VideoFavoriteLevels.Count == 0
             && snapshot.HiddenFolderBuckets.Count == 0
             && !snapshot.DateFromLocal.HasValue
             && !snapshot.DateToLocal.HasValue;
@@ -14309,24 +14872,21 @@ public partial class MainWindow : Window
             return false;
         }
 
-        if (snapshot.FavoritesOnly && (tile.FavoriteLevel <= 0 || (snapshot.FavoriteLevels.Count > 0 && !snapshot.FavoriteLevels.Contains(tile.FavoriteLevel))))
+        if (snapshot.FavoritesOnly
+            && !MatchesSelectedFavoriteLevels(
+                tile.FavoriteLevel,
+                tile.Photorealized,
+                tile.PhotorealFavoriteLevel,
+                tile.VideoGenerated,
+                tile.VideoFavoriteLevel,
+                snapshot.FavoriteLevelMask,
+                snapshot.PhotorealFavoriteLevelMask,
+                snapshot.VideoFavoriteLevelMask))
+        {
             return false;
+        }
         if (snapshot.UnfavoriteOnly && tile.FavoriteLevel > 0)
             return false;
-        if (snapshot.PhotorealFavoriteLevels.Count > 0
-            && (!tile.Photorealized
-                || !snapshot.PhotorealFavoriteLevels.Contains(
-                    tile.PhotorealFavoriteLevel)))
-        {
-            return false;
-        }
-        if (snapshot.VideoFavoriteLevels.Count > 0
-            && (!tile.VideoGenerated
-                || !snapshot.VideoFavoriteLevels.Contains(
-                    tile.VideoFavoriteLevel)))
-        {
-            return false;
-        }
         if (!MatchesEnhancementFilters(
                 tile.Upscaled,
                 tile.Photorealized,
@@ -14362,6 +14922,72 @@ public partial class MainWindow : Window
             && (!unenhancedOnly || !upscaled)
             && (!photorealOnly || photorealized)
             && (!unphotorealOnly || !photorealized);
+
+    private static bool MatchesSelectedFavoriteLevels(
+        int originalLevel,
+        bool photorealized,
+        int photorealLevel,
+        bool videoGenerated,
+        int videoLevel,
+        IReadOnlySet<int> originalLevels,
+        IReadOnlySet<int> photorealLevels,
+        IReadOnlySet<int> videoLevels)
+    {
+        bool hasExplicitSelection = originalLevels.Count > 0
+            || photorealLevels.Count > 0
+            || videoLevels.Count > 0;
+        if (!hasExplicitSelection)
+        {
+            return originalLevel > 0
+                || (photorealized && photorealLevel > 0)
+                || (videoGenerated && videoLevel > 0);
+        }
+
+        return originalLevels.Contains(Math.Clamp(originalLevel, 0, 5))
+            || (photorealized
+                && photorealLevels.Contains(Math.Clamp(photorealLevel, 0, 5)))
+            || (videoGenerated
+                && videoLevels.Contains(Math.Clamp(videoLevel, 0, 5)));
+    }
+
+    private static int BuildFavoriteLevelMask(IEnumerable<int> levels)
+    {
+        int mask = 0;
+        foreach (int level in levels)
+            mask |= 1 << Math.Clamp(level, 0, 5);
+        return mask;
+    }
+
+    private static bool MatchesSelectedFavoriteLevels(
+        int originalLevel,
+        bool photorealized,
+        int photorealLevel,
+        bool videoGenerated,
+        int videoLevel,
+        int originalLevelMask,
+        int photorealLevelMask,
+        int videoLevelMask)
+    {
+        bool hasExplicitSelection =
+            (originalLevelMask | photorealLevelMask | videoLevelMask) != 0;
+        if (!hasExplicitSelection)
+        {
+            return originalLevel > 0
+                || (photorealized && photorealLevel > 0)
+                || (videoGenerated && videoLevel > 0);
+        }
+
+        return MaskContainsFavoriteLevel(originalLevelMask, originalLevel)
+            || (photorealized
+                && MaskContainsFavoriteLevel(
+                    photorealLevelMask,
+                    photorealLevel))
+            || (videoGenerated
+                && MaskContainsFavoriteLevel(videoLevelMask, videoLevel));
+    }
+
+    private static bool MaskContainsFavoriteLevel(int mask, int level)
+        => (mask & (1 << Math.Clamp(level, 0, 5))) != 0;
 
     private async Task<CatalogProjectionApplyMetrics> ApplyFilterResultAsync(
         FilterResult filterResult,
@@ -14989,7 +15615,7 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible)
             return;
 
-        if (selected is null)
+        if (!TryGetModalSourceTile(out _))
         {
             bool modalHadFocus = Modal.IsKeyboardFocusWithin;
             CloseModal();
@@ -14998,8 +15624,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!string.Equals(_modalSourceTilePath, selected.Path, StringComparison.OrdinalIgnoreCase))
-            OpenModal();
+        RefreshModalFavoriteSurface(selected);
     }
 
     private static bool MatchesSearch(Tile tile, string query)
@@ -15068,7 +15693,17 @@ public partial class MainWindow : Window
     private bool MatchesFavoriteFilter(Tile tile, bool favoritesOnly, bool unfavoriteOnly)
     {
         if (favoritesOnly)
-            return tile.Fav > 0 && (_favoriteFilterLevels.Count == 0 || _favoriteFilterLevels.Contains(tile.Fav));
+        {
+            return MatchesSelectedFavoriteLevels(
+                tile.Fav,
+                tile.Photorealized,
+                tile.PhotorealFavoriteLevel,
+                tile.VideoGenerated,
+                tile.VideoFavoriteLevel,
+                _favoriteFilterLevels,
+                _photorealFavoriteFilterLevels,
+                _videoFavoriteFilterLevels);
+        }
         if (unfavoriteOnly)
             return tile.Fav <= 0;
         return true;
@@ -16445,11 +17080,13 @@ public partial class MainWindow : Window
         ModalFavoriteControlBorder.Visibility = Visibility.Visible;
         ModalFullScreenButton.Visibility = Visibility.Collapsed;
         ModalFlipButton.Visibility = Visibility.Collapsed;
+        ModalEnhancedToggleButton.Visibility = Visibility.Collapsed;
+        ModalEnhancedToggleButton.IsTabStop = false;
         ModalPhotorealUpscaleButton.Visibility = Visibility.Collapsed;
-        ModalVideoGenerateButton.Visibility = Visibility.Collapsed;
-        ModalI2iEditButton.Visibility = compact
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        ModalVideoGenerateButton.Visibility = Visibility.Visible;
+        ModalVideoSettingsButton.Visibility = Visibility.Visible;
+        ModalI2iEditButton.Visibility = Visibility.Visible;
+        ModalI2iEditSettingsButton.Visibility = Visibility.Visible;
         ModalI2iV2EditButton.Visibility = Visibility.Collapsed;
         ModalShortcutsButton.Visibility = Visibility.Collapsed;
         ModalDeleteButton.Visibility = Visibility.Collapsed;
@@ -16739,6 +17376,20 @@ public partial class MainWindow : Window
 
         SetFolderDropAffordance(sender, visible: false);
         e.Handled = true;
+    }
+
+    private void FolderDropOverlay_MouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        DismissFolderDropOverlays();
+        e.Handled = true;
+    }
+
+    private void DismissFolderDropOverlays()
+    {
+        LandingFolderDropOverlay.Visibility = Visibility.Collapsed;
+        ViewerFolderDropOverlay.Visibility = Visibility.Collapsed;
     }
 
     private async void FolderDropTarget_Drop(object sender, DragEventArgs e)
@@ -17331,15 +17982,15 @@ public partial class MainWindow : Window
         return Fail("source is outside the active root", out reason);
     }
 
-    private void OpenModal()
+    private void OpenModal(Tile? requestedTile = null)
     {
         // jobs.json changes on every AI progress update and can contain years
         // of history. Never parse and validate it synchronously on the input
         // path; open the image immediately and hydrate fresh job state in the
         // background.
         QueueEnhancedStateRefreshIfChanged();
-        if (SelectedTile() is not Tile t) return;
-        int projectedIndex = ResolvePrimarySelectionIndex();
+        if ((requestedTile ?? SelectedTile()) is not Tile t) return;
+        int projectedIndex = _tiles.IndexOf(t);
         UpdateModalPositionText(t, projectedIndex);
         StopGalleryAutoScroll();
         bool opening = Modal.Visibility != Visibility.Visible;
@@ -17392,9 +18043,13 @@ public partial class MainWindow : Window
         UpdateModalEnhancedControls(canShowEnhanced);
         UpdateVideoGenerationActionControls();
 
+        bool selectedPreviewMatches = string.Equals(
+            SelectedTile()?.Path,
+            t.Path,
+            StringComparison.OrdinalIgnoreCase);
         var immediate = _modalShowingEnhanced
             ? null
-            : PreviewBitmap.Source as BitmapSource
+            : (selectedPreviewMatches ? PreviewBitmap.Source as BitmapSource : null)
                 ?? (HasOriginalResidentThumbnail(t) ? t.Thumbnail : null);
         ModalBitmap.Source = immediate;
         ModalBitmap.Visibility = immediate is null ? Visibility.Collapsed : Visibility.Visible;
@@ -17405,6 +18060,8 @@ public partial class MainWindow : Window
         if (opening)
             SetModalMetadataSidebarVisible(false);
         Modal.Visibility = Visibility.Visible;
+        UpdateModalEnhancementActionControls();
+        UpdateVideoGenerationActionControls();
         if (opening)
             SyncDisplayedModalFavoriteLevel(t);
         if (opening)
@@ -17581,7 +18238,7 @@ public partial class MainWindow : Window
         }
 
         if (ModalEnhancedToggleLabel is not null)
-            ModalEnhancedToggleLabel.Text = currentDisplay;
+            ModalEnhancedToggleLabel.Text = "差分";
         if (ModalEnhancedToggleButton is not null)
         {
             AutomationProperties.SetName(
@@ -17595,8 +18252,7 @@ public partial class MainWindow : Window
                     ? $"{currentDisplay} output"
                     : "Original";
         UpdateModalDisplayedDeletePresentation();
-        if (Modal.Visibility == Visibility.Visible
-            && SelectedTile() is Tile selected)
+        if (TryGetModalSourceTile(out Tile selected))
         {
             SyncDisplayedModalFavoriteLevel(selected);
         }
@@ -17655,7 +18311,10 @@ public partial class MainWindow : Window
                         completion.TrySetResult(false);
                         return;
                     }
-                    if (SelectedTile()?.Path != selectedPath)
+                    if (!string.Equals(
+                            _modalSourceTilePath,
+                            selectedPath,
+                            StringComparison.OrdinalIgnoreCase))
                     {
                         completion.TrySetResult(false);
                         return;
@@ -17666,7 +18325,8 @@ public partial class MainWindow : Window
                         return;
                     }
 
-                    if (SelectedTile() is Tile selectedTile && decodePlan is BitmapDecodePlan plan)
+                    if (TryGetModalSourceTile(out Tile selectedTile)
+                        && decodePlan is BitmapDecodePlan plan)
                     {
                         UpdateModalDisplayedImageInfo(
                             selectedTile,
@@ -17727,12 +18387,14 @@ public partial class MainWindow : Window
         ModalContextUpscale.ToolTip = ModalEnhanceButton.ToolTip;
         ModalContextPhotoreal.IsEnabled = ModalPhotorealButton.IsEnabled;
         ModalContextPhotoreal.ToolTip = ModalPhotorealButton.ToolTip;
-        bool canEnqueueNext = SelectedTile() is Tile { IsRealFile: true } sourceTile
+        bool canEnqueueNext = TryGetModalSourceTile(out Tile sourceTile)
+            && sourceTile.IsRealFile
             && File.Exists(sourceTile.Path)
             && !_galleryContextEnhancementRequestPending;
         ModalContextUpscaleNext.IsEnabled = canEnqueueNext;
         ModalContextPhotorealNext.IsEnabled = canEnqueueNext;
-        bool enhancedAvailable = SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
+        bool enhancedAvailable = TryGetModalSourceTile(out Tile tile)
+            && TryGetModalEnhancedOutput(tile, out _);
         ModalContextEnhancedToggle.IsEnabled = enhancedAvailable;
         string outputLabel = _modalEnhancementOperation == "photoreal" ? "Photoreal" : "Enhanced";
         ModalContextEnhancedToggle.Header = _modalShowingEnhanced ? "Show Original" : $"Show {outputLabel}";
@@ -17822,8 +18484,7 @@ public partial class MainWindow : Window
     {
         if (_modalEnhancementPolling
             || _modalEnhancementRequestPending
-            || Modal.Visibility != Visibility.Visible
-            || SelectedTile() is not Tile tile)
+            || !TryGetModalSourceTile(out Tile tile))
             return;
 
         _modalEnhancementPolling = true;
@@ -18158,7 +18819,7 @@ public partial class MainWindow : Window
             HttpMethod.Get,
             $"api/enhance/jobs?sourceId={encodedSource}",
             token: token);
-        Task<bool?>? recoveredCapabilityTask = SelectedTile() is Tile currentTile
+        Task<bool?>? recoveredCapabilityTask = TryGetModalSourceTile(out Tile currentTile)
             && string.Equals(
                 currentTile.Path,
                 sourcePath,
@@ -18171,8 +18832,7 @@ public partial class MainWindow : Window
             _ = await recoveredCapabilityTask;
         if (token.IsCancellationRequested
             || generation != _modalEnhancementGeneration
-            || Modal.Visibility != Visibility.Visible
-            || SelectedTile() is not Tile tile
+            || !TryGetModalSourceTile(out Tile tile)
             || !string.Equals(tile.Path, sourcePath, StringComparison.OrdinalIgnoreCase))
         {
             return;
@@ -18193,8 +18853,7 @@ public partial class MainWindow : Window
 
     private bool IsCurrentModalEnhancementContext(Tile tile, string sourcePath, long generation)
         => generation == _modalEnhancementGeneration
-            && Modal.Visibility == Visibility.Visible
-            && SelectedTile() is Tile selected
+            && TryGetModalSourceTile(out Tile selected)
             && ReferenceEquals(selected, tile)
             && string.Equals(selected.Path, sourcePath, StringComparison.OrdinalIgnoreCase);
 
@@ -18234,7 +18893,7 @@ public partial class MainWindow : Window
                 && string.Equals(_modalSourceTilePath, tile.Path, StringComparison.OrdinalIgnoreCase)
                 && _modalShowingEnhanced)
             {
-                OpenModal();
+                OpenModal(tile);
             }
         }
         else if (job is { Status: "succeeded", OutputPath: not null })
@@ -18292,7 +18951,9 @@ public partial class MainWindow : Window
             || ModalPhotorealUpscaleButton is null)
             return;
 
-        Tile? selectedTile = SelectedTile();
+        Tile? selectedTile = TryGetModalSourceTile(out Tile modalTile)
+            ? modalTile
+            : null;
         bool hasRealSource = selectedTile is { IsRealFile: true }
             && File.Exists(selectedTile.Path);
         string photorealUpscaleError =
@@ -18351,24 +19012,20 @@ public partial class MainWindow : Window
         ModalEnhanceButtonLabel.Text = _modalEnhancementRequestPending && !currentIsPhotoreal
             ? "開始中"
             : retryable && !currentIsPhotoreal ? "再試行"
-            : "AI高画質化";
+            : "HQ";
         ModalPhotorealButtonLabel.Text = _modalEnhancementRequestPending && currentIsPhotoreal
             ? "開始中"
             : retryable && currentIsPhotoreal ? "再試行"
-            : "AI実写化";
+            : "実写化";
         if (!_modalEnhancementRequestPending && !retryable)
-        {
-            ModalEnhanceButtonLabel.Text = displayedVersionIsPhotoreal
-                ? "実写HQ"
-                : "AI高画質化";
-        }
+            ModalEnhanceButtonLabel.Text = "HQ";
         ModalEnhanceButton.ToolTip = displayedVersionIsPhotoreal
             && currentUpscaleSource.UsesRecoveredPhotorealSource
             && _recoveredPhotorealSourceUpscaleSupported != true
                 ? "The running H25 companion does not support Recovered photoreal HQ. Restart H25 first; no job was added."
                 : displayedVersionIsPhotoreal
                     ? "表示中の実写化画像を写真向けモデルで高画質化"
-                    : "AI高画質化";
+                    : "表示中の画像を高画質化";
         ModalEnhanceCancelButtonLabel.Text = currentIsPhotoreal
             ? "実写化を中止"
             : currentIsI2i
@@ -18419,7 +19076,8 @@ public partial class MainWindow : Window
         bool active = _modalEnhancementJobStatus is "queued" or "running";
         if (_modalEnhancementRequestPending
             || active
-            || SelectedTile() is not Tile { IsRealFile: true } tile
+            || !TryGetModalSourceTile(out Tile tile)
+            || !tile.IsRealFile
             || !File.Exists(tile.Path))
         {
             return;
@@ -18619,7 +19277,7 @@ public partial class MainWindow : Window
     {
         if (_modalEnhancementRequestPending
             || string.IsNullOrWhiteSpace(_modalEnhancementJobId)
-            || SelectedTile() is not Tile tile)
+            || !TryGetModalSourceTile(out Tile tile))
         {
             return;
         }
@@ -18670,7 +19328,7 @@ public partial class MainWindow : Window
 
         if (_modalShowingVideo)
         {
-            if (SelectedTile() is not Tile videoTile
+            if (!TryGetModalSourceTile(out Tile videoTile)
                 || !TryGetDisplayedModalVideoVersion(videoTile, out _))
             {
                 SetStatusToast("Delete blocked: the displayed managed video could not be verified.");
@@ -18683,7 +19341,7 @@ public partial class MainWindow : Window
 
         if (_modalShowingEnhanced)
         {
-            if (SelectedTile() is not Tile enhancedTile
+            if (!TryGetModalSourceTile(out Tile enhancedTile)
                 || !TryGetDeletableCurrentModalEnhancementVersion(
                     enhancedTile,
                     out _))
@@ -18696,7 +19354,8 @@ public partial class MainWindow : Window
             return true;
         }
 
-        return RequestDeleteSelected(forceConfirmation: true);
+        return TryGetModalSourceTile(out Tile sourceTile)
+            && RequestDeleteTile(sourceTile, forceConfirmation: true);
     }
 
     private async Task<bool> DeleteDisplayedModalMediaAsync()
@@ -18705,13 +19364,14 @@ public partial class MainWindow : Window
             return await DeleteDisplayedModalVideoOutputAsync();
         if (_modalShowingEnhanced)
             return await DeleteDisplayedModalEnhancedOutputAsync();
-        return RequestDeleteSelected(forceConfirmation: true);
+        return TryGetModalSourceTile(out Tile sourceTile)
+            && RequestDeleteTile(sourceTile, forceConfirmation: true);
     }
 
     private async Task<bool> DeleteDisplayedModalEnhancedOutputAsync()
     {
         if (_modalEnhancementRequestPending
-            || SelectedTile() is not Tile tile
+            || !TryGetModalSourceTile(out Tile tile)
             || !TryGetDeletableCurrentModalEnhancementVersion(
                 tile,
                 out ManagedEnhancementVersion version))
@@ -18767,7 +19427,7 @@ public partial class MainWindow : Window
             _modalEnhancementProgress = 0;
             _modalEnhancementError = null;
             _modalEnhancementCancelRequested = false;
-            OpenModal();
+            OpenModal(tile);
             BeginModalEnhancementRefresh(tile.Path);
             ShowModalInteractionFeedback("AI output version deleted; original and other versions kept");
             return true;
@@ -18790,8 +19450,9 @@ public partial class MainWindow : Window
         string toolTip;
         string automationName;
         string contextHeader;
-        if (SelectedTile() is Tile temporary
-            && IsExternalFileDropSessionTile(temporary))
+        bool hasModalTile = TryGetModalSourceTile(out Tile modalTile);
+        if (hasModalTile
+            && IsExternalFileDropSessionTile(modalTile))
         {
             enabled = false;
             toolTip = "Source deletion is unavailable while this image is temporarily open. Use Explorer if you intend to remove it.";
@@ -18800,17 +19461,17 @@ public partial class MainWindow : Window
         }
         else if (_modalShowingVideo)
         {
-            enabled = SelectedTile() is Tile videoTile
-                && TryGetDisplayedModalVideoVersion(videoTile, out _);
+            enabled = hasModalTile
+                && TryGetDisplayedModalVideoVersion(modalTile, out _);
             toolTip = $"Delete only the displayed video output; keep the original and other AI versions ({shortcut})";
             automationName = "Delete displayed managed video output";
             contextHeader = "Delete displayed video output";
         }
         else if (_modalShowingEnhanced)
         {
-            enabled = SelectedTile() is Tile enhancedTile
+            enabled = hasModalTile
                 && TryGetDeletableCurrentModalEnhancementVersion(
-                    enhancedTile,
+                    modalTile,
                     out _);
             toolTip = CurrentModalEnhancementVersionIsPhotoreal()
                 ? $"Delete only the displayed photoreal output; keep the original and other AI versions ({shortcut})"
@@ -18822,10 +19483,10 @@ public partial class MainWindow : Window
         {
             bool requireFullValidation = validateOriginalSource
                 || ModalContextMenu?.IsOpen == true;
-            enabled = SelectedTile() is Tile source
-                && source.IsRealFile
-                && !string.IsNullOrWhiteSpace(source.Path)
-                && (!requireFullValidation || TryValidateDelete(source, out _));
+            enabled = hasModalTile
+                && modalTile.IsRealFile
+                && !string.IsNullOrWhiteSpace(modalTile.Path)
+                && (!requireFullValidation || TryValidateDelete(modalTile, out _));
             toolTip = $"Move the displayed original source to Recycle Bin after confirmation ({shortcut})";
             automationName = "Move displayed original source to Recycle Bin";
             contextHeader = "Move displayed original to Recycle Bin";
@@ -18951,7 +19612,8 @@ public partial class MainWindow : Window
 
     private bool ToggleModalEnhanced()
     {
-        if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile || !TryGetModalEnhancedOutput(tile, out _))
+        if (!TryGetModalSourceTile(out Tile tile)
+            || !TryGetModalEnhancedOutput(tile, out _))
             return false;
 
         if (_modalShowingVideo)
@@ -18975,7 +19637,7 @@ public partial class MainWindow : Window
                 ModalDisplayKindForOperation(version.Operation),
                 version.JobId);
         }
-        OpenModal();
+        OpenModal(tile);
         return true;
     }
 
@@ -19233,7 +19895,7 @@ public partial class MainWindow : Window
 
     private void UpdateModalFit()
     {
-        if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile)
+        if (!TryGetModalSourceTile(out Tile tile))
             return;
         bool hasDisplayedSize = _modalDisplayedImagePixelWidth > 0
             && _modalDisplayedImagePixelHeight > 0;
@@ -19681,7 +20343,7 @@ public partial class MainWindow : Window
         _modalFilmstripOpen = open;
         _modalFilmstripHoverVisible = false;
         UpdateModalChromePresentation();
-        if (open && SelectedTile() is Tile selected)
+        if (open && TryGetModalSourceTile(out Tile selected))
             SyncModalFilmstripSelection(selected);
         if (changed && persist)
             SaveState();
@@ -19692,7 +20354,8 @@ public partial class MainWindow : Window
     {
         if (_syncingModalFilmstripSelection || sender is not ListBox list || list.SelectedItem is not Tile tile)
             return;
-        if (ReferenceEquals(tile, SelectedTile()))
+        if (TryGetModalSourceTile(out Tile current)
+            && ReferenceEquals(tile, current))
             return;
 
         _syncingModalFilmstripSelection = true;
@@ -20119,7 +20782,9 @@ public partial class MainWindow : Window
         if (delta == 0 || navigationTiles.Count == 0)
             return false;
 
-        var selected = SelectedTile();
+        Tile? selected = TryGetModalSourceTile(out Tile modalTile)
+            ? modalTile
+            : SelectedTile();
         int currentIndex = selected is null
             ? -1
             : IndexOfTile(navigationTiles, selected);
@@ -20226,7 +20891,10 @@ public partial class MainWindow : Window
 
     private bool TryOpenSelectedExternally()
     {
-        Tile? tile = SelectedTile();
+        Tile? tile = Modal.Visibility == Visibility.Visible
+            && TryGetModalSourceTile(out Tile modalTile)
+                ? modalTile
+                : SelectedTile();
         string reason = "select a source image";
         bool requestEnhanced = tile is not null
             && Modal.Visibility == Visibility.Visible
@@ -20241,7 +20909,7 @@ public partial class MainWindow : Window
         if (displayedAsset.FallbackReason is not null && Modal.Visibility == Visibility.Visible)
         {
             _modalShowingEnhanced = false;
-            OpenModal();
+            OpenModal(tile);
         }
 
         try
@@ -20285,7 +20953,12 @@ public partial class MainWindow : Window
     private bool ShowSelectedInFolder()
     {
         string reason = "select a source image";
-        if (SelectedTile() is not Tile tile || !TryValidateFileDropTile(tile, out string canonical, out reason))
+        Tile? tile = Modal.Visibility == Visibility.Visible
+            && TryGetModalSourceTile(out Tile modalTile)
+                ? modalTile
+                : SelectedTile();
+        if (tile is null
+            || !TryValidateFileDropTile(tile, out string canonical, out reason))
         {
             SetStatusToast($"Show in folder unavailable: {reason}.");
             return false;
@@ -21465,7 +22138,14 @@ public partial class MainWindow : Window
 
     private bool RequestDeleteSelected(bool forceConfirmation = false)
     {
-        if (SelectedTile() is not Tile tile)
+        return RequestDeleteTile(SelectedTile(), forceConfirmation);
+    }
+
+    private bool RequestDeleteTile(
+        Tile? tile,
+        bool forceConfirmation = false)
+    {
+        if (tile is null)
         {
             SetDeleteStatus("Select an image to move to Recycle Bin.");
             return false;
@@ -21810,8 +22490,15 @@ public partial class MainWindow : Window
         if (_hoverPreviewTabPath is not null && deletedPaths.Contains(_hoverPreviewTabPath))
             HidePreviewTabHover();
 
+        List<Tile> removedCatalogTiles = _allTiles
+            .Where(tile => deletedPaths.Contains(tile.Path))
+            .ToList();
         if (_allTiles.RemoveAll(tile => deletedPaths.Contains(tile.Path)) > 0)
+        {
+            foreach (Tile removedTile in removedCatalogTiles)
+                UnindexCatalogTileForFavoritePath(removedTile);
             _catalogContentRevision++;
+        }
         _selectedPaths.RemoveWhere(deletedPaths.Contains);
         if (_primarySelectedPath is not null && deletedPaths.Contains(_primarySelectedPath))
         {
@@ -22111,6 +22798,16 @@ public partial class MainWindow : Window
         DeleteStatusToast.Visibility = Visibility.Hidden;
     }
 
+    private void StatusToastText_PreviewMouseDown(
+        object sender,
+        MouseButtonEventArgs e)
+        => _statusToastDismissTimer?.Stop();
+
+    private void StatusToastText_GotKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+        => _statusToastDismissTimer?.Stop();
+
     private void RetryDelete_Click(object sender, RoutedEventArgs e)
     {
         Action? retryAction = _statusRetryAction;
@@ -22370,7 +23067,19 @@ public partial class MainWindow : Window
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
-        SetFavoriteFilterState(state.ShowFavoritesOnly, !state.ShowFavoritesOnly && state.ShowUnfavoriteOnly, apply: false, persist: false);
+        bool restoredFavoritesOnly = state.ShowFavoritesOnly;
+        if (!restoredFavoritesOnly && state.ShowUnfavoriteOnly)
+        {
+            // The separate legacy "unrated only" switch is now the original
+            // category's level 0 selection under the single master switch.
+            _favoriteFilterLevels.Add(0);
+            restoredFavoritesOnly = true;
+        }
+        SetFavoriteFilterState(
+            restoredFavoritesOnly,
+            unfavoriteOnly: false,
+            apply: false,
+            persist: false);
         _hiddenFolderBuckets.Clear();
         foreach (string folder in NormalizeFolderSet(state.HiddenFolderBuckets ?? []))
             _hiddenFolderBuckets.Add(folder);
@@ -22506,6 +23215,7 @@ public partial class MainWindow : Window
                     _useLastDisplayedImageVersionForThumbnails,
                 UpscalePresetId = _modalEnhancementPresetId,
                 UpscaleAdapterId = _modalEnhancementAdapterId,
+                UpscaleBackendVersion = CurrentUpscaleBackendVersion,
                 UpscaleScale = _modalEnhancementScale,
                 UpscaleOutputFormat = _upscaleOutputFormat,
                 FavoriteChangedAtUtcByPath = _favoriteChangedAtUtcByPath.Count == 0
@@ -24141,6 +24851,14 @@ public partial class MainWindow : Window
     public bool DeleteDoNotAskAgainAvailableForSmoke
         => DoNotAskAgainCheckBox.Visibility == Visibility.Visible && DoNotAskAgainCheckBox.IsEnabled;
     public bool DeleteStatusVisibleForSmoke => DeleteStatusToast.Visibility == Visibility.Visible;
+    public bool StatusNotificationCopyableForSmoke
+        => DeleteStatusText.IsReadOnly
+            && DeleteStatusText.IsReadOnlyCaretVisible
+            && DeleteStatusText.Focusable
+            && string.Equals(
+                AutomationProperties.GetName(DeleteStatusText),
+                "Selectable status notification text",
+                StringComparison.Ordinal);
     public bool DeleteStatusRetryVisibleForSmoke => DeleteStatusRetryButton.Visibility == Visibility.Visible;
     public int PendingAlbumCleanupCountForSmoke => _pendingAlbumCleanupPaths.Length;
     public bool QueueAlbumMembershipCleanupForSmoke(params string[] paths)
@@ -24598,6 +25316,7 @@ public partial class MainWindow : Window
         if (includeInCatalog)
         {
             _allTiles.Add(tile);
+            IndexCatalogTileForFavoritePath(tile);
             _catalogContentRevision++;
         }
         try
@@ -24608,7 +25327,10 @@ public partial class MainWindow : Window
         finally
         {
             if (_allTiles.Remove(tile))
+            {
+                UnindexCatalogTileForFavoritePath(tile);
                 _catalogContentRevision++;
+            }
         }
     }
 
@@ -24801,6 +25523,7 @@ public partial class MainWindow : Window
         if (includeInCatalog)
         {
             _allTiles.Add(tile);
+            IndexCatalogTileForFavoritePath(tile);
             _catalogContentRevision++;
         }
         if (includeInFiltered)
@@ -24812,7 +25535,10 @@ public partial class MainWindow : Window
         finally
         {
             if (_allTiles.Remove(tile))
+            {
+                UnindexCatalogTileForFavoritePath(tile);
                 _catalogContentRevision++;
+            }
             _tiles.Remove(tile);
         }
     }
@@ -26265,6 +26991,7 @@ public partial class MainWindow : Window
         {
             _allTiles.Clear();
             _allTiles.AddRange(tiles);
+            RebuildCatalogTileFavoritePathIndex();
             ReorderFullCatalogForSort();
             GalleryAutomationProjectionIndex automationProjection =
                 GalleryAutomationProjectionIndex.Create(
@@ -26760,6 +27487,7 @@ public partial class MainWindow : Window
         {
             CheckBox[] original =
             [
+                FavoriteLevel0Filter,
                 FavoriteLevel1Filter,
                 FavoriteLevel2Filter,
                 FavoriteLevel3Filter,
@@ -26784,37 +27512,115 @@ public partial class MainWindow : Window
                 VideoFavoriteLevel4Filter,
                 VideoFavoriteLevel5Filter,
             ];
-            return FavoriteLevelFilterPanel.Columns == 3
-                && PhotorealFavoriteLevelFilterPanel.Columns == 3
-                && VideoFavoriteLevelFilterPanel.Columns == 3
+            return FavoriteLevelFilterPanel.Columns == 6
+                && PhotorealFavoriteLevelFilterPanel.Columns == 6
+                && VideoFavoriteLevelFilterPanel.Columns == 6
+                && OriginalFavoriteFilterRow.ColumnDefinitions.Count == 2
+                && PhotorealFavoriteFilterRow.ColumnDefinitions.Count == 2
+                && VideoFavoriteFilterRow.ColumnDefinitions.Count == 2
+                && Math.Abs(
+                    OriginalFavoriteFilterRow.ColumnDefinitions[0].Width.Value
+                        - 52) < 0.01
+                && Math.Abs(
+                    PhotorealFavoriteFilterRow.ColumnDefinitions[0].Width.Value
+                        - 52) < 0.01
+                && Math.Abs(
+                    VideoFavoriteFilterRow.ColumnDefinitions[0].Width.Value
+                        - 52) < 0.01
                 && original.Select((control, index) =>
                         string.Equals(
-                            control.Content?.ToString(),
-                            $"Lv {index + 1}",
+                            control.Tag?.ToString(),
+                            index.ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && photoreal.Select((control, index) =>
                         string.Equals(
-                            control.Content?.ToString(),
-                            $"Lv {index}",
+                            control.Tag?.ToString(),
+                            index.ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && video.Select((control, index) =>
                         string.Equals(
-                            control.Content?.ToString(),
-                            $"Lv {index}",
+                            control.Tag?.ToString(),
+                            index.ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && original.Concat(photoreal).Concat(video).All(static control =>
-                    Math.Abs(control.Height - 24) < 0.01
-                    && control.MinHeight >= 24
+                    string.Equals(
+                        control.Content?.ToString(),
+                        control.Tag?.ToString() == "0"
+                            ? "−"
+                            : control.Tag?.ToString(),
+                        StringComparison.Ordinal))
+                && original.Concat(photoreal).Concat(video).All(static control =>
+                    Math.Abs(control.Height - 30) < 0.01
+                    && control.MinHeight >= 30
+                    && control.MinWidth >= 28
+                    && control.HorizontalAlignment == HorizontalAlignment.Stretch
                     && control.FocusVisualStyle is not null)
-                && photoreal.Concat(video).All(static control =>
+                && original.Concat(photoreal).Concat(video).All(static control =>
+                    control.ReadLocalValue(Control.ForegroundProperty)
+                        == DependencyProperty.UnsetValue)
+                && FavoriteFilterSummary.Visibility == Visibility.Collapsed
+                && PhotorealFavoriteFilterSummary.Visibility == Visibility.Collapsed
+                && VideoFavoriteFilterSummary.Visibility == Visibility.Collapsed
+                && UnfavoriteOnlyFilter.Visibility == Visibility.Collapsed
+                && original.Concat(photoreal).Concat(video).All(static control =>
                     !string.IsNullOrWhiteSpace(
                         AutomationProperties.GetName(control))
                     && !string.IsNullOrWhiteSpace(
                         AutomationProperties.GetHelpText(control)));
         }
+    }
+    public bool ToggleFavoriteLevelFilterForSmoke(string category, int level)
+    {
+        if (level is < 0 or > 5)
+            return false;
+        CheckBox control = category switch
+        {
+            "original" => new[]
+            {
+                FavoriteLevel0Filter,
+                FavoriteLevel1Filter,
+                FavoriteLevel2Filter,
+                FavoriteLevel3Filter,
+                FavoriteLevel4Filter,
+                FavoriteLevel5Filter,
+            }[level],
+            "photoreal" => new[]
+            {
+                PhotorealFavoriteLevel0Filter,
+                PhotorealFavoriteLevel1Filter,
+                PhotorealFavoriteLevel2Filter,
+                PhotorealFavoriteLevel3Filter,
+                PhotorealFavoriteLevel4Filter,
+                PhotorealFavoriteLevel5Filter,
+            }[level],
+            "video" => new[]
+            {
+                VideoFavoriteLevel0Filter,
+                VideoFavoriteLevel1Filter,
+                VideoFavoriteLevel2Filter,
+                VideoFavoriteLevel3Filter,
+                VideoFavoriteLevel4Filter,
+                VideoFavoriteLevel5Filter,
+            }[level],
+            _ => throw new ArgumentOutOfRangeException(nameof(category)),
+        };
+        bool before = control.IsChecked == true;
+        var peer = new CheckBoxAutomationPeer(control);
+        if (peer.GetPattern(PatternInterface.Toggle) is not IToggleProvider toggle)
+            return false;
+        toggle.Toggle();
+        bool after = control.IsChecked == true;
+        bool stateMatches = category switch
+        {
+            "original" => _favoriteFilterLevels.Contains(level) == after,
+            "photoreal" => _photorealFavoriteFilterLevels.Contains(level) == after,
+            "video" => _videoFavoriteFilterLevels.Contains(level) == after,
+            _ => false,
+        };
+        return after != before && stateMatches;
     }
     public bool ShowFavoriteChangeNotificationsForSmoke => _showFavoriteChangeNotifications;
     public bool FavoriteChangeNotificationsCheckedForSmoke
@@ -26909,6 +27715,34 @@ public partial class MainWindow : Window
         => _photorealFavoriteFilterLevels.OrderBy(static level => level).ToList();
     public List<int> VideoFavoriteFilterLevelsForSmoke
         => _videoFavoriteFilterLevels.OrderBy(static level => level).ToList();
+
+    public static bool FavoriteRatingFilterOrContractForSmoke()
+    {
+        HashSet<int> original = [3, 4, 5];
+        HashSet<int> photoreal = [4, 5];
+        HashSet<int> video = [5];
+        HashSet<int> none = [];
+        HashSet<int> zero = [0];
+
+        return MatchesSelectedFavoriteLevels(
+                3, false, 0, false, 0, original, photoreal, video)
+            && MatchesSelectedFavoriteLevels(
+                0, true, 4, false, 0, original, photoreal, video)
+            && MatchesSelectedFavoriteLevels(
+                0, false, 0, true, 5, original, photoreal, video)
+            && !MatchesSelectedFavoriteLevels(
+                2, true, 3, true, 4, original, photoreal, video)
+            && MatchesSelectedFavoriteLevels(
+                0, false, 0, false, 0, zero, none, none)
+            && MatchesSelectedFavoriteLevels(
+                0, true, 0, false, 0, none, zero, none)
+            && !MatchesSelectedFavoriteLevels(
+                0, false, 0, false, 0, none, zero, none)
+            && MatchesSelectedFavoriteLevels(
+                0, true, 2, false, 0, none, none, none)
+            && !MatchesSelectedFavoriteLevels(
+                0, true, 0, true, 0, none, none, none);
+    }
     public int PhotorealFavoriteLevelForFileForSmoke(string fileName)
         => _allTiles.FirstOrDefault(tile => string.Equals(
                 tile.FileName,
@@ -27043,12 +27877,14 @@ public partial class MainWindow : Window
                 out bool independentTarget)
                     ? independentTarget
                         ? FavoriteLevelForPath(targetPath)
-                        : SelectedTile()?.Fav ?? -1
+                        : TryGetModalSourceTile(out Tile modalTile)
+                            ? modalTile.Fav
+                            : -1
                     : -1;
 
     public bool RejectStaleModalFavoriteSourceFallbackForSmoke()
     {
-        if (SelectedTile() is not Tile tile
+        if (!TryGetModalSourceTile(out Tile tile)
             || !TryGetModalPhotorealFavoriteTarget(
                 out string targetPath,
                 out _))
@@ -27155,15 +27991,24 @@ public partial class MainWindow : Window
             && ModalFilmstripToggleButton.Visibility == Visibility.Collapsed
             && ModalMetadataSidebarToggleButton.Visibility == Visibility.Collapsed
             && ModalPhotorealUpscaleButton.Visibility == Visibility.Collapsed
-            && ModalVideoGenerateButton.Visibility == Visibility.Collapsed
+            && ModalEnhancedToggleButton.Visibility == Visibility.Collapsed
+            && !ModalEnhancedToggleButton.IsTabStop
+            && ModalVideoGenerateButton.Visibility == Visibility.Visible
+            && ModalVideoSettingsButton.Visibility == Visibility.Visible
+            && ModalI2iEditButton.Visibility == Visibility.Visible
+            && ModalI2iEditSettingsButton.Visibility == Visibility.Visible
             && ModalUpscaleSettingsButton.Visibility == Visibility.Visible
             && ModalPhotorealSettingsButton.Visibility == Visibility.Visible
             && ModalOverflowButton.Visibility == Visibility.Visible
             && ModalPhotorealSettingsButton.Content is TextBlock
             {
                 FontFamily.Source: "Segoe MDL2 Assets",
-                Text: "\uE713",
+                Text: "\uE70D",
             }
+            && ModalUpscaleSettingsButton.Width == 24
+            && ModalPhotorealSettingsButton.Width == 24
+            && ModalVideoSettingsButton.Width == 24
+            && ModalI2iEditSettingsButton.Width == 24
             && Grid.GetRow(ModalToolbarActionsPanel) == 1
             && Grid.GetColumn(ModalToolbarActionsPanel) == 0
             && Grid.GetColumnSpan(ModalToolbarActionsPanel) == 4
@@ -27185,6 +28030,12 @@ public partial class MainWindow : Window
             && ModalRevealButton.Visibility == Visibility.Collapsed
             && ModalFavoriteControlBorder.Visibility == Visibility.Visible
             && ModalPhotorealUpscaleButton.Visibility == Visibility.Collapsed
+            && ModalEnhancedToggleButton.Visibility == Visibility.Collapsed
+            && !ModalEnhancedToggleButton.IsTabStop
+            && ModalVideoGenerateButton.Visibility == Visibility.Visible
+            && ModalVideoSettingsButton.Visibility == Visibility.Visible
+            && ModalI2iEditButton.Visibility == Visibility.Visible
+            && ModalI2iEditSettingsButton.Visibility == Visibility.Visible
             && ModalUpscaleSettingsButton.Visibility == Visibility.Visible
             && ModalOverflowButton.Visibility == Visibility.Visible
             && Grid.GetRow(ModalToolbarActionsPanel) == 0
@@ -27193,6 +28044,35 @@ public partial class MainWindow : Window
             && ModalToolbarActionsRow.Height.Value == 0
             && ModalEnhancementVersionComboBox.Width >= 150
             && ModalTitle.MaxWidth >= 360;
+
+    public bool ModalPrimaryWorkflowToolbarContractForSmoke
+        => ModalFavoriteControlBorder.Visibility == Visibility.Visible
+            && ModalEnhancedToggleButton.Visibility == Visibility.Collapsed
+            && !ModalEnhancedToggleButton.IsTabStop
+            && string.Equals(ModalEnhanceButtonLabel.Text, "HQ", StringComparison.Ordinal)
+            && ModalUpscaleSettingsButton.Visibility == Visibility.Visible
+            && string.Equals(ModalPhotorealButtonLabel.Text, "実写化", StringComparison.Ordinal)
+            && ModalPhotorealSettingsButton.Visibility == Visibility.Visible
+            && ModalVideoGenerateButton.Content is TextBlock { Text: "動画化" }
+            && ModalVideoSettingsButton.Visibility == Visibility.Visible
+            && ModalI2iEditButton.Content is TextBlock { Text: "実写編集" }
+            && ModalI2iEditSettingsButton.Visibility == Visibility.Visible
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalFavoriteControlBorder)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalEnhanceButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalEnhanceButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalUpscaleSettingsButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalUpscaleSettingsButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalPhotorealButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalPhotorealButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalPhotorealSettingsButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalPhotorealSettingsButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalVideoGenerateButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalVideoGenerateButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalVideoSettingsButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalVideoSettingsButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalI2iEditButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalI2iEditButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalI2iEditSettingsButton);
 
     public void SimulateDpiGeometryChangeForSmoke(double width, double height)
     {
@@ -28217,7 +29097,9 @@ public partial class MainWindow : Window
         => Volatile.Read(ref _modalDecodeStartCountForSmoke);
     public int ModalDecodeApplyCountForSmoke
         => Volatile.Read(ref _modalDecodeApplyCountForSmoke);
-    public bool ModalEnhancedToggleAvailableForSmoke => SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
+    public bool ModalEnhancedToggleAvailableForSmoke
+        => TryGetModalSourceTile(out Tile tile)
+            && TryGetModalEnhancedOutput(tile, out _);
     public string? ModalDisplayPathForSmoke => _modalDisplayPath;
     public string? ModalEnhancementJobIdForSmoke => _modalEnhancementJobId;
     public string? ModalEnhancementStatusForSmoke => _modalEnhancementJobStatus;
@@ -28239,11 +29121,10 @@ public partial class MainWindow : Window
                 ? choice.Kind.ToString()
                 : "Unavailable";
     public bool ModalEnhancedToolbarClarityContractForSmoke
-        => string.Equals(
-                ModalEnhancedToggleLabel.Text,
-                CurrentModalEnhancementVersionLabel(),
-                StringComparison.Ordinal)
+        => ModalEnhancedToggleButton.Visibility == Visibility.Collapsed
+            && !ModalEnhancedToggleButton.IsTabStop
             && ModalEnhancementVersionComboBox.Visibility == Visibility.Visible
+            && ModalEnhancementVersionComboBox.IsTabStop
             && ModalEnhancementVersionComboBox.Items.Count
                 == _modalEnhancementVersions.Count + _modalVideoVersions.Count + 1
             && ModalEnhancementVersionComboBox.SelectedItem
@@ -28252,7 +29133,6 @@ public partial class MainWindow : Window
             && AutomationProperties.GetName(ModalEnhancementVersionComboBox).Contains(
                 "動画化",
                 StringComparison.Ordinal)
-            && ModalEnhancedToggleButton.Width >= 64
             && ModalDeleteButton.Width <= 36
             && ModalDeleteButton.Content is System.Windows.Shapes.Path
             && (_modalShowingVideo || _modalShowingEnhanced
@@ -28261,10 +29141,7 @@ public partial class MainWindow : Window
                     StringComparison.OrdinalIgnoreCase) == true
                 : ModalDeleteButton.ToolTip?.ToString()?.Contains(
                     "Recycle Bin",
-                    StringComparison.OrdinalIgnoreCase) == true)
-            && AutomationProperties.GetName(ModalEnhancedToggleButton).Contains(
-                CurrentModalEnhancementVersionLabel(),
-                StringComparison.Ordinal);
+                    StringComparison.OrdinalIgnoreCase) == true);
 
     public void ConfigureModalEnhancementForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
@@ -28309,7 +29186,8 @@ public partial class MainWindow : Window
 
     public async Task<bool> RefreshModalEnhancementForSmokeAsync()
     {
-        if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile)
+        if (Modal.Visibility != Visibility.Visible
+            || !TryGetModalSourceTile(out Tile tile))
             return false;
         await RefreshModalEnhancementStateAsync(tile.Path, _modalEnhancementGeneration, showUnavailableError: true);
         return true;
@@ -28391,7 +29269,9 @@ public partial class MainWindow : Window
     public async Task<bool> DeleteModalEnhancedOutputForSmokeAsync()
     {
         await DeleteDisplayedModalEnhancedOutputAsync();
-        return SelectedTile() is Tile tile && !tile.Enhanced && !_modalShowingEnhanced;
+        return TryGetModalSourceTile(out Tile tile)
+            && !tile.Enhanced
+            && !_modalShowingEnhanced;
     }
 
     private async Task<bool> WaitForModalEnhancementRequestForSmokeAsync(int timeoutMilliseconds = 3000)
@@ -28454,9 +29334,25 @@ public partial class MainWindow : Window
     public void SetFolderDropAffordanceForSmoke(bool landing, bool visible)
         => SetFolderDropAffordance(landing ? Landing : ViewerFolderDropTarget, visible);
 
+    public bool DismissFolderDropAffordanceForSmoke(bool landing)
+    {
+        SetFolderDropAffordance(
+            landing ? Landing : ViewerFolderDropTarget,
+            visible: true);
+        bool shown = (landing
+                ? LandingFolderDropOverlay
+                : ViewerFolderDropOverlay).Visibility == Visibility.Visible;
+        DismissFolderDropOverlays();
+        return shown
+            && LandingFolderDropOverlay.Visibility == Visibility.Collapsed
+            && ViewerFolderDropOverlay.Visibility == Visibility.Collapsed;
+    }
+
     public bool FolderDropSurfaceContractForSmoke
         => !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetHelpText(Landing))
-            && !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetHelpText(ViewerFolderDropTarget));
+            && !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetHelpText(ViewerFolderDropTarget))
+            && LandingFolderDropOverlay.IsHitTestVisible
+            && ViewerFolderDropOverlay.IsHitTestVisible;
 
     public Task<bool> AddFoldersToCurrentSetForSmokeAsync(IEnumerable<string> folders)
         => AddFoldersToCurrentSetAsync(folders);
@@ -28484,6 +29380,28 @@ public partial class MainWindow : Window
     public bool SeenWriterPendingForSmoke => _seenWriter?.HasPendingOrInFlight == true;
     public int FavoriteWriterBatchCountForSmoke => _favoriteWriter?.BatchWriteCount ?? 0;
     public int SeenWriterBatchCountForSmoke => _seenWriter?.BatchWriteCount ?? 0;
+    public long LastFavoriteWriteApplyMillisecondsForSmoke
+        => Interlocked.Read(ref _lastFavoriteWriteApplyMilliseconds);
+    public long MaxFavoriteWriteApplyMillisecondsForSmoke
+        => Interlocked.Read(ref _maxFavoriteWriteApplyMilliseconds);
+    public int LastDerivedFavoriteVisitedTileCountForSmoke
+        => Volatile.Read(ref _lastDerivedFavoriteVisitedTileCount);
+    public int MaxDerivedFavoriteVisitedTileCountForSmoke
+        => Volatile.Read(ref _maxDerivedFavoriteVisitedTileCount);
+    public int FavoritePresentationStateWriteCountForSmoke
+        => Volatile.Read(ref _favoritePresentationStateWriteCount);
+    public bool FavoritePresentationStatePendingForSmoke
+    {
+        get
+        {
+            lock (_favoritePresentationStateQueueGate)
+            {
+                return _favoritePresentationStatePumpRunning != 0
+                    || _pendingFavoritePresentationActivity.Count > 0
+                    || _pendingFavoriteFilterState is not null;
+            }
+        }
+    }
     public int PendingFavoriteMutationCountForSmoke => _pendingFavoriteMutations.Count;
     public int PendingSeenMutationCountForSmoke => _pendingSeenMutations.Count;
     public bool FavoritesWriteBlockedForSmoke => _favoritesWriteBlocked;
@@ -28528,6 +29446,39 @@ public partial class MainWindow : Window
             ? seenWriter.DrainAsync(CancellationToken.None)
             : Task.FromResult(SharedWriteStatus.Succeeded);
         return await Task.WhenAll(favorite, seen);
+    }
+
+    internal async Task<bool> WaitForFavoritePresentationStateForSmokeAsync(
+        TimeSpan timeout)
+    {
+        using var timeoutSource = new CancellationTokenSource(timeout);
+        while (true)
+        {
+            Task activeWrite;
+            bool failed;
+            lock (_favoritePresentationStateQueueGate)
+            {
+                if (_favoritePresentationStatePumpRunning == 0)
+                {
+                    return _pendingFavoritePresentationActivity.Count == 0
+                        && _pendingFavoriteFilterState is null
+                        && _failedFavoritePresentationStateBatch is null;
+                }
+                activeWrite = _favoritePresentationStateWriteTask;
+                failed = _failedFavoritePresentationStateBatch is not null;
+            }
+
+            if (failed)
+                return false;
+            try
+            {
+                await activeWrite.WaitAsync(timeoutSource.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+        }
     }
 
     public Task CloseAndWaitForSmokeAsync()
@@ -28579,6 +29530,21 @@ public partial class MainWindow : Window
             debounce: false,
             reorderCatalog: false,
             selectFirst: true);
+    }
+
+    public Task<SearchFilterCompletion>
+        SetPhotorealFavoriteFilterLevelsForSmokeAsync(params int[] levels)
+    {
+        bool changed = SetPhotorealFavoriteFilterLevels(
+            levels,
+            asynchronous: true);
+        if (!changed)
+            return Task.FromResult(new SearchFilterCompletion(true, false, null));
+        return _pendingSearchFilterCompletion?.Task
+            ?? Task.FromResult(new SearchFilterCompletion(
+                false,
+                false,
+                "photoreal Favorite filter did not schedule a projection"));
     }
 
     public void SetEnhancedOnlyFilterForSmoke(bool enabled)
@@ -29119,6 +30085,7 @@ public sealed class ViewerState
     // Browser settings or an already queued/running job snapshot.
     public string? UpscalePresetId { get; set; }
     public string? UpscaleAdapterId { get; set; }
+    public int? UpscaleBackendVersion { get; set; }
     public double? UpscaleScale { get; set; }
     public string? UpscaleOutputFormat { get; set; }
     // WPF-local activity history used by the "Fav touched" sort. Level 0

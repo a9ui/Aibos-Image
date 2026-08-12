@@ -146,8 +146,12 @@
   <sys:String x:Key="UiVideoH3PromptAssistantHelp">Converts the prompt in the input field to MiniMax H3 English with the local Qwen 4B. It never applies the candidate or adds an AI Job automatically.</sys:String>
   <sys:String x:Key="UiVideoH3RewriteButton">Convert to MiniMax</sys:String>
   <sys:String x:Key="UiVideoH3RewriteAgainButton">Convert again</sys:String>
+  <sys:String x:Key="UiVideoH3RewriteWorkingButton">Converting…</sys:String>
+  <sys:String x:Key="UiVideoH3RewriteCancelButton">Cancel</sys:String>
   <sys:String x:Key="UiVideoH3RewriteButtonAutomation">Create a MiniMax H3 candidate from the image and input</sys:String>
   <sys:String x:Key="UiVideoH3RewriteButtonHelp">Uses the already-running local Qwen compiler. It does not start a worker or add a video job.</sys:String>
+  <sys:String x:Key="UiVideoH3RewriteCancelButtonAutomation">Cancel MiniMax H3 prompt conversion</sys:String>
+  <sys:String x:Key="UiVideoH3RewriteCancelButtonHelp">Immediately cancels the pending HTTP request. The candidate, input prompt, and video jobs stay unchanged.</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeLabel">Conversion</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeAutomation">MiniMax prompt conversion mode</sys:String>
   <sys:String x:Key="UiVideoH3RewriteModeHelp">Polish preserves the input, Direction strengthens motion and camera work, and Auto chooses image-compatible direction.</sys:String>
@@ -173,9 +177,10 @@
   <sys:String x:Key="UiVideoH3StatusInputTooLong">The selected conversion guidance would exceed 2,000 characters. Shorten the input. No job or worker was changed.</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidResponse">The H3 rewrite response was invalid. The input prompt was not changed.</sys:String>
   <sys:String x:Key="UiVideoH3StatusUnavailable">Local H3 rewriting is unavailable. No video job was added.</sys:String>
-  <sys:String x:Key="UiVideoH3StatusSourceUnavailable">The image for H3 rewriting is unavailable. Select the input again.</sys:String>
-  <sys:String x:Key="UiVideoH3StatusCanceled">H3 rewriting was canceled. No video job was added.</sys:String>
-  <sys:String x:Key="UiVideoH3StatusTimedOut">H3 rewriting did not finish within 90 seconds. The input prompt was not changed. Try again.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusBusy">Another MiniMax prompt conversion is running. Try again after it finishes.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusSourceUnavailable">The displayed image file could not be read. Check whether it was moved or deleted.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusCanceled">H3 rewriting was canceled. The candidate, input prompt, and video jobs were not changed.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusTimedOut">H3 rewriting did not finish within 6 minutes. The input prompt was not changed. Try again.</sys:String>
   <sys:String x:Key="UiVideoH3StatusApplied">Applied the candidate to the input prompt. Video generation has not started.</sys:String>
   <sys:String x:Key="UiVideoH3StatusUndone">Restored the input prompt to its value before the apply.</sys:String>
 </ResourceDictionary>

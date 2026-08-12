@@ -151,6 +151,9 @@ public partial class App : Application
         int sharedRootActivationSmokeIdx = Array.IndexOf(e.Args, "--shared-root-activation-smoke");
         int sharedRootLeaseHolderSmokeIdx = Array.IndexOf(e.Args, "--shared-root-lease-holder-smoke");
         int sharedRootLeaseWriterSmokeIdx = Array.IndexOf(e.Args, "--shared-root-lease-writer-smoke");
+        int photorealFavoriteRestoreIdx = Array.IndexOf(
+            e.Args,
+            "--restore-photoreal-favorites");
         if (videoV2ReaderSmokeIdx >= 0
             && videoV2ReaderSmokeIdx + 1 < e.Args.Length)
         {
@@ -173,6 +176,7 @@ public partial class App : Application
             && sharedRootActivationSmokeIdx < 0
             && sharedRootLeaseHolderSmokeIdx < 0
             && sharedRootLeaseWriterSmokeIdx < 0
+            && photorealFavoriteRestoreIdx < 0
             && IsAutomationInvocation(e.Args))
         {
             try
@@ -195,7 +199,8 @@ public partial class App : Application
             && sharedRootLocatorSmokeIdx < 0
             && sharedRootActivationSmokeIdx < 0
             && sharedRootLeaseHolderSmokeIdx < 0
-            && sharedRootLeaseWriterSmokeIdx < 0)
+            && sharedRootLeaseWriterSmokeIdx < 0
+            && photorealFavoriteRestoreIdx < 0)
         {
             SharedDataRootActivationResult activation =
                 SharedDataRootActivation.ActivateForCurrentProcess(
@@ -221,6 +226,13 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+        if (photorealFavoriteRestoreIdx >= 0)
+        {
+            int exitCode = PhotorealFavoriteHistoryRestorer.Run(e.Args);
+            Environment.ExitCode = exitCode;
+            Shutdown(exitCode);
+            return;
+        }
         UiLanguageResources.Apply(UiLanguageResources.English);
         InitializeAccessibilityPalette(e.Args.Contains("--force-high-contrast", StringComparer.OrdinalIgnoreCase));
 
@@ -619,6 +631,17 @@ public partial class App : Application
         if (bulkFavoriteSmokeIdx >= 0 && bulkFavoriteSmokeIdx + 1 < e.Args.Length)
         {
             CaptureBulkFavoriteSmoke(e.Args[bulkFavoriteSmokeIdx + 1]);
+            return;
+        }
+
+        int favoritePerformanceSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--favorite-performance-smoke");
+        if (favoritePerformanceSmokeIdx >= 0
+            && favoritePerformanceSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureFavoritePerformanceSmoke(
+                e.Args[favoritePerformanceSmokeIdx + 1]);
             return;
         }
 
@@ -6795,6 +6818,8 @@ public partial class App : Application
                 first.SetFavoriteOnlyFilterForSmoke(true);
                 first.SetFavoriteFilterLevelsForSmoke(3);
                 bool selectedLevel3 = first.SelectFileNameForSmoke(fixture.Level3Name);
+                _ = await first.WaitForFavoritePresentationStateForSmokeAsync(
+                    TimeSpan.FromSeconds(10));
                 ViewerState? persisted = ReadPersistedState(statePath);
                 first.Close();
 
@@ -18732,7 +18757,9 @@ public partial class App : Application
                     string? operation = "upscale",
                     string createdAt = "2026-07-23T00:00:00.000Z",
                     int? queueOrder = null,
-                    string? adapter = null) => new
+                    string? adapter = null,
+                    string? startedAt = null,
+                    string? finishedAt = null) => new
                 {
                     id,
                     sourceId = sourcePath,
@@ -18750,6 +18777,8 @@ public partial class App : Application
                     errorMessage = error,
                     createdAt,
                     updatedAt = "2026-07-23T00:00:01.000Z",
+                    startedAt,
+                    finishedAt,
                 };
 
                 object VideoJob(
@@ -18947,7 +18976,9 @@ public partial class App : Application
                             outputDeleted ? "deleted" : "succeeded",
                             100,
                             outputDeleted ? null : outputPath,
-                            operation: "photoreal"),
+                            operation: "photoreal",
+                            startedAt: "2026-07-23T00:01:02.000Z",
+                            finishedAt: "2026-07-23T00:02:10.000Z"),
                         Job(
                             "canceled-job",
                             "canceled",
@@ -19772,6 +19803,16 @@ public partial class App : Application
                         CanRerunWithCurrentSettings: false,
                         CanRerunNextWithCurrentSettings: false,
                     };
+                bool completedElapsedVisible = completedPhotorealView is not null
+                    && completedPhotorealView.ElapsedText == "所要 1分 8秒"
+                    && completedPhotorealView.TimestampText.Contains(
+                        "所要 1分 8秒",
+                        StringComparison.Ordinal)
+                    && completedPhotorealView.AccessibleName.Contains(
+                        "所要 1分 8秒",
+                        StringComparison.Ordinal)
+                    && activeVideoView?.ElapsedText is null
+                    && canceledPhotorealView?.ElapsedText is null;
                 bool unsupportedNoMutation =
                     requests.Count == requestsBeforeUnsupportedActions;
                 bool imageVersionsExcludeVideo =
@@ -20201,6 +20242,7 @@ public partial class App : Application
                     && legacyMissingOperation
                     && legacyPhotorealPromptUpdateSafe
                     && photorealTerminalCurrentSettingsActions
+                    && completedElapsedVisible
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
                     && moveNextIssued
@@ -20361,6 +20403,7 @@ public partial class App : Application
                     legacyMissingOperation,
                     legacyPhotorealPromptUpdateSafe,
                     photorealTerminalCurrentSettingsActions,
+                    completedElapsedVisible,
                     unsupportedNoMutation,
                     imageVersionsExcludeVideo,
                     stableJobViews,
@@ -21179,7 +21222,7 @@ public partial class App : Application
                     createContract = string.Equals(createRoot.GetProperty("sourceId").GetString(), canonicalSourcePath, StringComparison.OrdinalIgnoreCase)
                         && !string.Equals(createRoot.GetProperty("sourceId").GetString(), sourcePath, StringComparison.OrdinalIgnoreCase)
                         && string.Equals(createRoot.GetProperty("presetId").GetString(), "anime-sharp-x2", StringComparison.Ordinal)
-                        && string.Equals(createRoot.GetProperty("adapterId").GetString(), "comfyui", StringComparison.Ordinal)
+                        && string.Equals(createRoot.GetProperty("adapterId").GetString(), "realesrgan-ncnn", StringComparison.Ordinal)
                         && createRoot.GetProperty("scale").GetInt32() == 2;
                 }
                 catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
@@ -28480,7 +28523,12 @@ public partial class App : Application
                     && win.CurrentFolderSetForSmoke.Count == 2 && win.CatalogCountForSmoke == 2;
                 bool passive = string.Equals(jobsBefore, FileFingerprint(jobsPath), StringComparison.Ordinal)
                     && win.EnhancementJobsReadForSmoke == 0 && win.EnhancedCandidateCountForSmoke == 0;
-                bool ok = landingOk && rejectedOk && viewerOk && sourceUntouched && isolated && passive && win.FolderDropSurfaceContractForSmoke;
+                bool dropOverlayClickDismissed =
+                    win.DismissFolderDropAffordanceForSmoke(landing: true)
+                    && win.DismissFolderDropAffordanceForSmoke(landing: false);
+                bool ok = landingOk && rejectedOk && viewerOk && sourceUntouched
+                    && isolated && passive && dropOverlayClickDismissed
+                    && win.FolderDropSurfaceContractForSmoke;
                 result = new FolderDragInSmokeResult
                 {
                     Ok = ok,
@@ -28497,6 +28545,7 @@ public partial class App : Application
                     SourceUntouched = sourceUntouched,
                     Isolated = isolated,
                     Passive = passive,
+                    DropOverlayClickDismissed = dropOverlayClickDismissed,
                     SurfaceContract = win.FolderDropSurfaceContractForSmoke,
                 };
             }
@@ -30759,6 +30808,7 @@ public partial class App : Application
         public bool SourceUntouched { get; init; }
         public bool Isolated { get; init; }
         public bool Passive { get; init; }
+        public bool DropOverlayClickDismissed { get; init; }
         public bool SurfaceContract { get; init; }
     }
 

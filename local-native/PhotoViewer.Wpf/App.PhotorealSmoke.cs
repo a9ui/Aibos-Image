@@ -66,6 +66,8 @@ public partial class App
             bool thumbnailVariantCountContract = false;
             bool upscaleSettingsContract = false;
             bool persistedNcnnUpscaleChoiceContract = false;
+            bool ncnnHighScaleSelectionContract = false;
+            bool legacyComfyDefaultMigrationContract = false;
             bool photorealShortcutContract = false;
             bool sourceUntouched = false;
             bool independentCompanionContract = false;
@@ -1445,8 +1447,19 @@ public partial class App
                         ["Original", "実写化 1/1", "高画質化 1/1"],
                         StringComparer.Ordinal);
                 toolbarContract = window.ModalPhotorealToolbarContractForSmoke
+                    && window.ModalPrimaryWorkflowToolbarContractForSmoke
                     && window.HeaderProductVersionContractForSmoke;
                 var initialUpscaleSettings = window.UpscaleSettingsForSmoke;
+                window.RestoreUpscaleSettingsForSmoke(new ViewerState
+                {
+                    UpscalePresetId = "photo-detail-x4",
+                    UpscaleAdapterId = "comfyui",
+                    UpscaleScale = 4d,
+                    UpscaleOutputFormat = "webp",
+                });
+                legacyComfyDefaultMigrationContract =
+                    window.UpscaleSettingsForSmoke.AdapterId ==
+                        "realesrgan-ncnn";
                 window.RestoreUpscaleSettingsForSmoke(new ViewerState
                 {
                     UpscalePresetId = "anime-sharp-x2",
@@ -1457,6 +1470,16 @@ public partial class App
                 persistedNcnnUpscaleChoiceContract =
                     window.UpscaleSettingsForSmoke.AdapterId ==
                         "realesrgan-ncnn";
+                bool selectedNcnn6 = window.SelectModalUpscaleScaleForSmoke(6d);
+                var ncnn6Settings = window.UpscaleSettingsForSmoke;
+                bool selectedNcnn8 = window.SelectModalUpscaleScaleForSmoke(8d);
+                var ncnn8Settings = window.UpscaleSettingsForSmoke;
+                ncnnHighScaleSelectionContract = selectedNcnn6
+                    && ncnn6Settings.AdapterId == "realesrgan-ncnn"
+                    && ncnn6Settings.Scale == 6d
+                    && selectedNcnn8
+                    && ncnn8Settings.AdapterId == "realesrgan-ncnn"
+                    && ncnn8Settings.Scale == 8d;
                 window.ConfigureUpscaleSettingsForSmoke(
                     "general-balanced-x4",
                     "comfyui",
@@ -1474,14 +1497,16 @@ public partial class App
                     window.UpscaleSettingsSurfaceContractForSmoke
                     && upscaleSettingsPopupOpened
                     && upscaleSettingsPopupClosed
-                    && initialUpscaleSettings.AdapterId == "comfyui"
+                    && initialUpscaleSettings.AdapterId == "realesrgan-ncnn"
+                    && legacyComfyDefaultMigrationContract
                     && persistedNcnnUpscaleChoiceContract
+                    && ncnnHighScaleSelectionContract
                     && configuredUpscaleSettings.PresetId == "general-balanced-x4"
-                    && configuredUpscaleSettings.AdapterId == "comfyui"
+                    && configuredUpscaleSettings.AdapterId == "realesrgan-ncnn"
                     && configuredUpscaleSettings.Scale == 3d
                     && configuredUpscaleSettings.OutputFormat == "png"
                     && persistedUpscaleSettings?.UpscalePresetId == "general-balanced-x4"
-                    && persistedUpscaleSettings.UpscaleAdapterId == "comfyui"
+                    && persistedUpscaleSettings.UpscaleAdapterId == "realesrgan-ncnn"
                     && persistedUpscaleSettings.UpscaleScale == 3d
                     && persistedUpscaleSettings.UpscaleOutputFormat == "png";
                 bool initialPhotoreal = string.Equals(
@@ -1493,7 +1518,7 @@ public partial class App
                     && photoUpscaleProfile.SourceProducerJobId == "photoreal-version"
                     && photoUpscaleProfile.SourceRecoveredOutputPath is null
                     && photoUpscaleProfile.PresetId == "photo-natural-x2"
-                    && photoUpscaleProfile.AdapterId == "comfyui"
+                    && photoUpscaleProfile.AdapterId == "realesrgan-ncnn"
                     && photoUpscaleProfile.Scale == 2
                     && string.IsNullOrEmpty(photoUpscaleProfile.Error);
                 bool downToUpscale = window.InvokePreviewKeyForSmoke(Key.Down, ModifierKeys.Control)
@@ -1586,7 +1611,7 @@ public partial class App
                     && modalNextHqBody.GetProperty("presetId").GetString()
                         == "photo-natural-x2"
                     && modalNextHqBody.GetProperty("adapterId").GetString()
-                        == "comfyui"
+                        == "realesrgan-ncnn"
                     && modalNextHqBody.GetProperty("scale").GetDouble() == 2d
                     && string.Equals(
                         modalNextHqBody.GetProperty("sourceId").GetString(),
@@ -1613,7 +1638,7 @@ public partial class App
                     && producerHqBody.GetProperty("presetId").GetString()
                         == "photo-natural-x2"
                     && producerHqBody.GetProperty("adapterId").GetString()
-                        == "comfyui"
+                        == "realesrgan-ncnn"
                     && producerHqBody.GetProperty("scale").GetDouble() == 2d
                     && !producerHqBody.TryGetProperty("outputFormat", out _)
                     && producerHqBody.GetProperty("sourceProducerJobId")
@@ -1640,7 +1665,7 @@ public partial class App
                     && originalHqBody.GetProperty("presetId").GetString()
                         == "general-balanced-x4"
                     && originalHqBody.GetProperty("adapterId").GetString()
-                        == "comfyui"
+                        == "realesrgan-ncnn"
                     && originalHqBody.GetProperty("scale").GetDouble() == 3d
                     && originalHqBody.GetProperty("outputFormat").GetString()
                         == "png"
@@ -2180,8 +2205,11 @@ public partial class App
                             photorealBadgeLayoutHandler;
                     }
                 }
+                bool selectedPhotorealLevelTwo =
+                    window.SetPhotorealFavoriteFilterLevelsForSmoke(2);
+                window.SetFavoriteOnlyFilterForSmoke(true);
                 bool levelTwoIncludes =
-                    window.SetPhotorealFavoriteFilterLevelsForSmoke(2)
+                    selectedPhotorealLevelTwo
                     && window.FilteredFileNamesForSmoke().Contains(
                         sourceFileNameForFavorite,
                         StringComparer.OrdinalIgnoreCase);
@@ -2190,6 +2218,7 @@ public partial class App
                     && !window.FilteredFileNamesForSmoke().Contains(
                         sourceFileNameForFavorite,
                         StringComparer.OrdinalIgnoreCase);
+                window.SetFavoriteOnlyFilterForSmoke(false);
                 _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
                 bool sourceReselectedForZero = window.SelectFileNameForSmoke(
                     sourceFileNameForFavorite);
@@ -2275,20 +2304,26 @@ public partial class App
                         + $"retryStatuses={string.Join(',', retriedFavoriteStatuses)}; "
                         + $"resetStatuses={string.Join(',', retryFavoriteResetStatuses)}";
                 }
+                bool selectedPhotorealLevelZero =
+                    window.SetPhotorealFavoriteFilterLevelsForSmoke(0);
+                window.SetFavoriteOnlyFilterForSmoke(true);
                 bool levelZeroIncludes = zeroFavoriteApplied
                     && window.PhotorealFavoriteLevelForFileForSmoke(
                         sourceFileNameForFavorite) == 0
                     && !window.PhotorealFavoriteBadgeForFileForSmoke(
                         sourceFileNameForFavorite)
-                    && window.SetPhotorealFavoriteFilterLevelsForSmoke(0)
+                    && selectedPhotorealLevelZero
                     && window.FilteredFileNamesForSmoke().Contains(
                         sourceFileNameForFavorite,
                         StringComparer.OrdinalIgnoreCase);
+                _ = await window.WaitForFavoritePresentationStateForSmokeAsync(
+                    TimeSpan.FromSeconds(10));
                 ViewerState? persistedPhotorealFavoriteFilter =
                     JsonSerializer.Deserialize<ViewerState>(File.ReadAllText(
                         environment["PHOTOVIEWER_WPF_STATE_PATH"]));
                 bool filterPersisted = persistedPhotorealFavoriteFilter
-                    ?.PhotorealFavoriteFilterLevels?.SequenceEqual([0]) == true;
+                    ?.PhotorealFavoriteFilterLevels?.SequenceEqual([0]) == true
+                    && persistedPhotorealFavoriteFilter.ShowFavoritesOnly;
                 photorealFavoriteBadgeFilterContract = badgeShowsMaximum
                     && photorealFavoriteLayoutContract
                     && photorealFavoriteRetryContract
@@ -2296,6 +2331,7 @@ public partial class App
                     && levelOneExcludes
                     && levelZeroIncludes
                     && filterPersisted;
+                window.SetFavoriteOnlyFilterForSmoke(false);
                 _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
                 sourceUntouched = sourceHashBefore == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)));
                 Dictionary<string, string> recoveredFixtureHashesAfter =
@@ -2326,6 +2362,8 @@ public partial class App
                     && thumbnailVariantCountContract
                     && upscaleSettingsContract
                     && persistedNcnnUpscaleChoiceContract
+                    && ncnnHighScaleSelectionContract
+                    && legacyComfyDefaultMigrationContract
                     && photorealShortcutContract
                     && requestContract
                     && fallbackPromptContract
@@ -2410,6 +2448,8 @@ public partial class App
                     thumbnailVariantCountContract,
                     upscaleSettingsContract,
                     persistedNcnnUpscaleChoiceContract,
+                    ncnnHighScaleSelectionContract,
+                    legacyComfyDefaultMigrationContract,
                     photorealShortcutContract,
                     requestContract,
                     fallbackPromptContract,

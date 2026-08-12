@@ -547,6 +547,10 @@ public partial class MainWindow
             || !mtimeElement.TryGetDouble(out double sourceMtimeMs)
             || !job.TryGetProperty("video", out JsonElement video)
             || !video.TryGetProperty("requested", out JsonElement requested)
+            || !TryGetMiniMaxH3SnapshotProfile(
+                requested,
+                out int frameCount,
+                out double expectedDurationSeconds)
             || !TryGetStringPropertyAllowEmpty(
                 requested,
                 "prompt",
@@ -567,6 +571,7 @@ public partial class MainWindow
                 "durationSeconds",
                 out JsonElement durationElement)
             || !durationElement.TryGetDouble(out double durationSeconds)
+            || durationSeconds != expectedDurationSeconds
             || !TryReadOptionalVideoSourceProducerJobId(
                 job,
                 out string? sourceProducerJobId))
@@ -673,8 +678,8 @@ public partial class MainWindow
                 durationSeconds,
                 MiniMaxH3VideoPlaybackFps,
                 MiniMaxH3VideoPlaybackFps,
-                MiniMaxH3VideoFrameCount,
-                MiniMaxH3VideoFrameCount,
+                frameCount,
+                frameCount,
                 checked(width * height),
                 width,
                 height,
@@ -695,7 +700,7 @@ public partial class MainWindow
                     MiniMaxH3VideoBackendId,
                     "MiniMax-H3",
                     MiniMaxH3VideoPlaybackFps,
-                    MiniMaxH3VideoFrameCount,
+                    frameCount,
                     durationSeconds,
                     "yuv420p",
                     true,
@@ -885,7 +890,7 @@ public partial class MainWindow
             return false;
         }
 
-        if (SelectedTile() is not Tile tile
+        if (!TryGetModalSourceTile(out Tile tile)
             || !TryValidateManagedVideoVersion(
                 tile,
                 _modalVideoVersions[index],
@@ -956,7 +961,7 @@ public partial class MainWindow
 
         RefreshModalVideoVersionChoices();
         ModalVideoVersionComboBox.SelectedIndex = index;
-        if (SelectedTile() is Tile selected)
+        if (TryGetModalSourceTile(out Tile selected))
         {
             RememberModalDisplayPreference(
                 selected,
@@ -1003,7 +1008,9 @@ public partial class MainWindow
         RestoreModalImageVisibility();
         if (Modal?.Visibility == Visibility.Visible)
         {
-            Tile? selected = SelectedTile();
+            Tile? selected = TryGetModalSourceTile(out Tile modalTile)
+                ? modalTile
+                : null;
             bool canShowEnhanced = selected is not null
                 && TryGetModalEnhancedOutput(selected, out _);
             if (selected is not null)
@@ -1027,8 +1034,7 @@ public partial class MainWindow
     private void RestoreModalOriginalAfterVideoFailure()
     {
         StopAndHideModalVideo(clearSource: true);
-        if (Modal.Visibility != Visibility.Visible
-            || SelectedTile() is not Tile tile)
+        if (!TryGetModalSourceTile(out Tile tile))
         {
             return;
         }
@@ -1039,7 +1045,7 @@ public partial class MainWindow
             tile,
             ModalDisplayVersionKind.Original,
             null);
-        OpenModal();
+        OpenModal(tile);
     }
 
     private void RestoreModalImageVisibility()
@@ -1257,12 +1263,12 @@ public partial class MainWindow
     }
 
     public bool DisplayedManagedVideoDeleteVerifiedForSmoke
-        => SelectedTile() is Tile tile
+        => TryGetModalSourceTile(out Tile tile)
             && TryGetDisplayedModalVideoVersion(tile, out _);
 
     public bool DisplayedManagedVideoDuplicateJobRejectedForSmoke()
     {
-        if (SelectedTile() is not Tile tile
+        if (!TryGetModalSourceTile(out Tile tile)
             || !TryGetDisplayedModalVideoVersion(
                 tile,
                 out ManagedVideoVersion displayed)
@@ -1285,7 +1291,7 @@ public partial class MainWindow
 
     public bool DisplayedManagedVideoGlobalJobIdRejectedForSmoke()
     {
-        if (SelectedTile() is not Tile tile
+        if (!TryGetModalSourceTile(out Tile tile)
             || !TryGetDisplayedModalVideoVersion(
                 tile,
                 out ManagedVideoVersion displayed)
@@ -1307,7 +1313,7 @@ public partial class MainWindow
     private async Task<bool> DeleteDisplayedModalVideoOutputAsync()
     {
         if (_modalEnhancementRequestPending
-            || SelectedTile() is not Tile tile
+            || !TryGetModalSourceTile(out Tile tile)
             || !TryGetDisplayedModalVideoVersion(
                 tile,
                 out ManagedVideoVersion version))
@@ -1359,7 +1365,7 @@ public partial class MainWindow
             }
 
             RemoveManagedVideoVersion(tile, requestJobId);
-            OpenModal();
+            OpenModal(tile);
             BeginModalEnhancementRefresh(tile.Path);
             ShowModalInteractionFeedback(
                 "Video output version deleted; original and other versions kept");
@@ -1390,6 +1396,7 @@ public partial class MainWindow
             if (_catalogVideoVersionsByPath[key].Count == 0)
                 _catalogVideoVersionsByPath.Remove(key);
         }
+        RebuildManagedFavoriteSourcePathIndexes();
 
         _modalVideoVersionIndex = 0;
         _modalShowingVideo = false;
@@ -1824,7 +1831,7 @@ public partial class MainWindow
             _modalVideoVersionIndex,
             0,
             _modalVideoVersions.Count - 1);
-        if (SelectedTile() is not Tile tile
+        if (!TryGetModalSourceTile(out Tile tile)
             || !TryValidateManagedVideoVersion(
                 tile,
                 _modalVideoVersions[index],

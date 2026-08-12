@@ -28,12 +28,14 @@ public partial class App
             bool missingStateUnselected = false;
             bool maximumAndInvalidExclusion = false;
             bool zeroAndUnion = false;
-            bool intersection = false;
+            bool categoryOr = false;
             bool modalOutputFavorite = false;
+            bool modalPinnedFavoriteSource = false;
             bool optimisticRetryRollback = false;
             bool persistenceReload = false;
             bool layoutNotifications = false;
             bool surfaceContract = false;
+            bool levelToggleRoundTrip = false;
             bool badgeVisualContract = false;
             bool contrastContract = false;
             bool highContrastContract = false;
@@ -252,7 +254,10 @@ public partial class App
                     && FavoriteFileContainsPath(favoritesPath, missingVideo)
                     && FavoriteFileContainsPath(favoritesPath, invalidVideo);
 
-                bool zeroOnly = window.SetVideoFavoriteFilterLevelsForSmoke(0)
+                bool selectedVideoZero =
+                    window.SetVideoFavoriteFilterLevelsForSmoke(0);
+                window.SetFavoriteOnlyFilterForSmoke(true);
+                bool zeroOnly = selectedVideoZero
                     && window.FilteredFileNamesForSmoke().SequenceEqual(
                         [fileB],
                         StringComparer.OrdinalIgnoreCase);
@@ -264,11 +269,20 @@ public partial class App
                     fileWithoutVideo,
                     StringComparer.OrdinalIgnoreCase);
                 zeroAndUnion = zeroOnly && union && noVideoExcluded;
-                window.SetFavoriteOnlyFilterForSmoke(true);
-                intersection = window.FilteredFileNamesForSmoke().SequenceEqual(
-                    [fileA],
-                    StringComparer.OrdinalIgnoreCase);
+                bool originalOneSelected =
+                    window.SetFavoriteFilterLevelsForSmoke(1);
+                bool videoZeroSelected =
+                    window.SetVideoFavoriteFilterLevelsForSmoke(0);
+                categoryOr = originalOneSelected
+                    && videoZeroSelected
+                    && window.FilteredFileNamesForSmoke().ToHashSet(
+                            StringComparer.OrdinalIgnoreCase)
+                        .SetEquals([fileA, fileB])
+                    && !window.FilteredFileNamesForSmoke().Contains(
+                        fileWithoutVideo,
+                        StringComparer.OrdinalIgnoreCase);
                 window.SetFavoriteOnlyFilterForSmoke(false);
+                _ = window.SetFavoriteFilterLevelsForSmoke();
                 _ = window.SetVideoFavoriteFilterLevelsForSmoke();
 
                 bool japaneseApplied = window.SetUiLanguageForSmoke(
@@ -287,6 +301,10 @@ public partial class App
                         .Contains(retiredFavoriteLabel, StringComparison.Ordinal);
                 surfaceContract = shortJapaneseLabels
                     && window.FavoriteFilterSurfaceContractForSmoke;
+                levelToggleRoundTrip = new[] { "original", "photoreal", "video" }
+                    .All(category =>
+                        window.ToggleFavoriteLevelFilterForSmoke(category, 3)
+                        && window.ToggleFavoriteLevelFilterForSmoke(category, 3));
                 _ = window.SetUiLanguageForSmoke(UiLanguageResources.English);
 
                 window.EnableModalVideoTransportStubForSmoke();
@@ -306,6 +324,14 @@ public partial class App
                     && ReadFavoriteLevel(favoritesPath, sourceA) == 1;
                 window.CloseModalForSmoke();
 
+                // The production zoom path refreshes layout bindings only for
+                // realized cards. Realize this exact fixture before counting
+                // badge notifications so virtualization timing cannot make the
+                // contract nondeterministic.
+                _ = window.FavoriteBadgeVisualsForFileForSmoke(fileA);
+                await Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.Render);
                 Tile? tileA = window.TileForFileForSmoke(fileA);
                 int layoutNotificationCount = 0;
                 PropertyChangedEventHandler layoutHandler = (_, args) =>
@@ -420,6 +446,7 @@ public partial class App
                     && ResourceColor("VideoFavoriteColor") == standardPurple;
 
                 bool filterFiveSet = window.SetVideoFavoriteFilterLevelsForSmoke(5);
+                window.SetFavoriteOnlyFilterForSmoke(true);
                 bool initiallyExcluded = !window.FilteredFileNamesForSmoke().Contains(
                     fileA,
                     StringComparer.OrdinalIgnoreCase);
@@ -465,11 +492,83 @@ public partial class App
                     && !window.FailedFavoriteRetryPendingForSmoke
                     && ReadFavoriteLevel(favoritesPath, videoANewest) == 5;
 
+                // Reproduce the intermittent production drift directly: the
+                // modal remains on A while the gallery selection moves to B.
+                // A Favorite click must mutate the displayed A, must not reopen
+                // the modal on B, and must not start another modal decode.
+                window.SetFavoriteOnlyFilterForSmoke(false);
+                _ = window.SetVideoFavoriteFilterLevelsForSmoke();
+                _ = await window.PendingCatalogProjectionForSmoke();
+                bool pinnedSourceSelected = window.SelectFileNameForSmoke(fileA);
+                window.ConfigureImageDecodeDelaysForSmoke(
+                    previewMilliseconds: 0,
+                    modalMilliseconds: 150);
+                bool pinnedModalOpened = pinnedSourceSelected
+                    && window.OpenModalForSmoke()
+                    && window.SelectModalOriginalVersionForSmoke();
+                string? pinnedSourcePath = window.ModalSourcePathForSmoke;
+                string? pinnedDisplayPath = window.ModalDisplayPathForSmoke;
+                int pinnedDecodeStarts = window.ModalDecodeStartCountForSmoke;
+                Task<bool> pinnedDecodeTask = pinnedModalOpened
+                    ? window.WaitForModalFullDecodeForSmokeAsync()
+                    : Task.FromResult(false);
+                bool backgroundSelectionMoved = pinnedModalOpened
+                    && window.SelectFileNameForSmoke(fileB);
+                bool pinnedModalDecoded = await pinnedDecodeTask;
+                window.ConfigureImageDecodeDelaysForSmoke(0, 0);
+                bool pinnedVideoBoardOpened = backgroundSelectionMoved
+                    && pinnedModalDecoded
+                    && window.OpenVideoGenerationBoardForSmoke("original");
+                bool pinnedVideoSource = pinnedVideoBoardOpened
+                    && string.Equals(
+                        window.VideoSourceIdentityForSmoke,
+                        sourceA,
+                        StringComparison.OrdinalIgnoreCase);
+                window.CloseVideoGenerationBoardForSmoke();
+                bool displayedFavoriteRaised = pinnedVideoSource
+                    && window.AdjustModalFavoriteForSmoke(1);
+                bool pinnedAfterFavorite = displayedFavoriteRaised
+                    && string.Equals(
+                        window.ModalSourcePathForSmoke,
+                        pinnedSourcePath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        window.ModalDisplayPathForSmoke,
+                        pinnedDisplayPath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && window.ModalDecodeStartCountForSmoke == pinnedDecodeStarts
+                    && window.FavoriteLevelForFileForSmoke(fileA) == 2
+                    && window.FavoriteLevelForFileForSmoke(fileB) == 0
+                    && window.SelectedFavoriteLevelForSmoke == 0;
+                bool pinnedFavoriteRestored = pinnedAfterFavorite
+                    && window.AdjustModalFavoriteForSmoke(-1)
+                    && window.FavoriteLevelForFileForSmoke(fileA) == 1
+                    && window.FavoriteLevelForFileForSmoke(fileB) == 0
+                    && string.Equals(
+                        window.ModalSourcePathForSmoke,
+                        pinnedSourcePath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && window.ModalDecodeStartCountForSmoke == pinnedDecodeStarts;
+                SharedWriteStatus[] pinnedFavoriteStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                modalPinnedFavoriteSource = pinnedAfterFavorite
+                    && pinnedFavoriteRestored
+                    && pinnedFavoriteStatuses.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && !window.FavoriteWriterPendingForSmoke;
+                window.CloseModalForSmoke();
+                _ = window.SetVideoFavoriteFilterLevelsForSmoke(5);
+                window.SetFavoriteOnlyFilterForSmoke(true);
+                _ = await window.PendingCatalogProjectionForSmoke();
+
+                _ = await window.WaitForFavoritePresentationStateForSmokeAsync(
+                    TimeSpan.FromSeconds(10));
                 window.FlushStateForSmoke();
                 ViewerState? persisted = JsonSerializer.Deserialize<ViewerState>(
                     File.ReadAllText(statePath));
                 bool statePersisted = persisted?.VideoFavoriteFilterLevels
-                    ?.SequenceEqual([5]) == true;
+                    ?.SequenceEqual([5]) == true
+                    && persisted.ShowFavoritesOnly;
                 reload = new MainWindow();
                 bool filterRestoredBeforeLoad = reload.VideoFavoriteFilterLevelsForSmoke
                     .SequenceEqual([5]);
@@ -491,12 +590,14 @@ public partial class App
                 ok = missingStateUnselected
                     && maximumAndInvalidExclusion
                     && zeroAndUnion
-                    && intersection
+                    && categoryOr
                     && modalOutputFavorite
+                    && modalPinnedFavoriteSource
                     && optimisticRetryRollback
                     && persistenceReload
                     && layoutNotifications
                     && surfaceContract
+                    && levelToggleRoundTrip
                     && badgeVisualContract
                     && contrastContract
                     && highContrastContract
@@ -532,12 +633,14 @@ public partial class App
                         missingStateUnselected,
                         maximumAndInvalidExclusion,
                         zeroAndUnion,
-                        intersection,
+                        categoryOr,
                         modalOutputFavorite,
+                        modalPinnedFavoriteSource,
                         optimisticRetryRollback,
                         persistenceReload,
                         layoutNotifications,
                         surfaceContract,
+                        levelToggleRoundTrip,
                         badgeVisualContract,
                         contrastContract,
                         highContrastContract,

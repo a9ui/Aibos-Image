@@ -23,6 +23,10 @@ public partial class MainWindow
     private const string DefaultVideoBackendId = "wan22-ti2v-5b-core-v1";
     private const string MiniMaxH3VideoContractId = "PV-ENHANCE-VIDEO-002";
     private const string MiniMaxH3VideoProtocol = "aibos.enhancement-video/v2";
+    private const string MiniMaxH3VideoProfilesContractId =
+        "PV-ENHANCE-VIDEO-H3-PROFILES-001";
+    private const string MiniMaxH3VideoProfilesProtocol =
+        "aibos.enhancement-video-h3-profiles/v1";
     private const string MiniMaxH3VideoPresetId = "minimax-h3-i2v-preview-v1";
     private const string MiniMaxH3VideoBackendId = "minimax-h3-local-v1";
     private const string MiniMaxH3VideoWorkflowRevision =
@@ -38,6 +42,15 @@ public partial class MainWindow
     private const int MiniMaxH3VideoFrameCount = 124;
     private const int MiniMaxH3VideoPlaybackFps = 24;
     private const int MiniMaxH3VideoSteps = 20;
+    private const int MiniMaxH3VideoDefaultNominalDurationSeconds = 5;
+    private const string MiniMaxH3VideoDefaultProfileId =
+        "minimax-h3-hq-5s-v1";
+    private const string MiniMaxH3Video10SecondProfileId =
+        "minimax-h3-hq-10s-v1";
+    private const string MiniMaxH3Video12SecondProfileId =
+        "minimax-h3-hq-12s-v1";
+    private const string MiniMaxH3Video15SecondProfileId =
+        "minimax-h3-hq-15s-v1";
     private const double MiniMaxH3VideoDurationSeconds =
         (double)MiniMaxH3VideoFrameCount / MiniMaxH3VideoPlaybackFps;
     private const string PhotorealVideoSourceRequestPrefix =
@@ -61,10 +74,13 @@ public partial class MainWindow
     private const int VideoEstimateBaselineMaximumPixelArea = 409_600;
 
     private static readonly int[] SupportedVideoDurationSeconds = [4, 6];
+    private static readonly int[] SupportedMiniMaxH3VideoDurationSeconds =
+        [5, 10, 12, 15];
     private static readonly int[] SupportedVideoPlaybackFps = [12, 16];
     private static readonly int[] SupportedVideoMaximumPixelAreas = [230_400, 307_200, 409_600];
 
-    private int _videoDurationSeconds = DefaultVideoDurationSeconds;
+    private int _videoDurationSeconds =
+        MiniMaxH3VideoDefaultNominalDurationSeconds;
     private int _videoPlaybackFps = DefaultVideoPlaybackFps;
     private int _videoMaximumPixelArea = DefaultVideoMaximumPixelArea;
     private string _videoModelId = DefaultVideoModelId;
@@ -89,6 +105,22 @@ public partial class MainWindow
         string DisplayPath,
         string? ProducerJobId,
         string Label);
+
+    private static bool VideoSourceChoicesReferToSameInput(
+        VideoSourceChoice left,
+        VideoSourceChoice right)
+        => string.Equals(
+                left.SourceIdentity,
+                right.SourceIdentity,
+                StringComparison.OrdinalIgnoreCase)
+            && string.Equals(
+                left.DisplayPath,
+                right.DisplayPath,
+                StringComparison.OrdinalIgnoreCase)
+            && string.Equals(
+                left.ProducerJobId,
+                right.ProducerJobId,
+                StringComparison.Ordinal);
 
     private sealed record VideoStyleChoice(string Label, string? StyleName);
 
@@ -125,6 +157,7 @@ public partial class MainWindow
     private sealed record VideoGenerationRequestSettings(
         string PresetId,
         string BackendId,
+        string? ProfileId,
         int DurationSeconds,
         int PlaybackFps,
         int MaximumPixelArea,
@@ -138,6 +171,9 @@ public partial class MainWindow
             string.Equals(_videoModelId, MiniMaxH3VideoModelId, StringComparison.Ordinal)
                 ? MiniMaxH3VideoBackendId
                 : DefaultVideoBackendId,
+            string.Equals(_videoModelId, MiniMaxH3VideoModelId, StringComparison.Ordinal)
+                ? MiniMaxH3ProfileIdForDuration(_videoDurationSeconds)
+                : null,
             _videoDurationSeconds,
             _videoPlaybackFps,
             _videoMaximumPixelArea,
@@ -167,6 +203,33 @@ public partial class MainWindow
 
     private static bool IsMiniMaxH3VideoModel(string modelId)
         => string.Equals(modelId, MiniMaxH3VideoModelId, StringComparison.Ordinal);
+
+    private static int NormalizeMiniMaxH3DurationSeconds(int value)
+        => SupportedMiniMaxH3VideoDurationSeconds.Contains(value)
+            ? value
+            : MiniMaxH3VideoDefaultNominalDurationSeconds;
+
+    private static string MiniMaxH3ProfileIdForDuration(int durationSeconds)
+        => NormalizeMiniMaxH3DurationSeconds(durationSeconds) switch
+        {
+            10 => MiniMaxH3Video10SecondProfileId,
+            12 => MiniMaxH3Video12SecondProfileId,
+            15 => MiniMaxH3Video15SecondProfileId,
+            _ => MiniMaxH3VideoDefaultProfileId,
+        };
+
+    private static int MiniMaxH3FrameCountForDuration(int durationSeconds)
+        => NormalizeMiniMaxH3DurationSeconds(durationSeconds) switch
+        {
+            10 => 243,
+            12 => 294,
+            15 => 362,
+            _ => MiniMaxH3VideoFrameCount,
+        };
+
+    private static double MiniMaxH3ExactDurationSeconds(int durationSeconds)
+        => MiniMaxH3FrameCountForDuration(durationSeconds)
+            / (double)MiniMaxH3VideoPlaybackFps;
 
     private static bool IsValidMiniMaxH3VideoCanvas(int width, int height)
         => width >= MiniMaxH3VideoCanvasMinimumDimension
@@ -355,7 +418,7 @@ public partial class MainWindow
         => modelId switch
         {
             HunyuanVideoModelId => "HunyuanVideo 1.5 — 実写・人物向け／実験",
-            MiniMaxH3VideoModelId => "MiniMax H3 — 5秒プレビュー・音声あり",
+            MiniMaxH3VideoModelId => "MiniMax H3 — 高画質・5〜15秒・音声あり",
             _ => "Wan2.2 TI2V 5B — アニメ・汎用",
         };
 
@@ -365,8 +428,8 @@ public partial class MainWindow
             HunyuanVideoModelId =>
                 "実写・人物の顔や手を重視する候補。12GBの隔離ランタイム実測前なので、現在は選択内容の確認だけできます。",
             MiniMaxH3VideoModelId =>
-                "MiniMax H3の元画像比率プレビュー。32px単位・最大414,720px・124f・24fps・20 step・H.264 / yuv420p・AAC音声あり。"
-                + " RTX 4070 SUPER 12GBの実生成は512×768で約5分42秒、864×480 canaryで約9分7秒（キュー待ちを除く）。"
+                "MiniMax H3の実測済み高画質プロファイル。元画像比率・32px単位・最大414,720px・24fps・20 step・H.264 / yuv420p・AAC音声あり。"
+                + " RTX 4070 SUPER 12GBで5.167秒、10.125秒、12.250秒、15.083秒を選べます。長尺はRAMを大きく使うため、他の重い作業を閉じた就寝・外出中の実行を推奨します。"
                 + MiniMaxH3ReadinessSuffix(),
             _ =>
                 "RTX 4070 SUPER 12GBで検証済みのモデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。",
@@ -374,16 +437,17 @@ public partial class MainWindow
 
     private string MiniMaxH3ReadinessSuffix()
         => !_miniMaxH3HealthChecked
-            ? " 準備状態はまだ確認していません。選択すると受動確認します。"
+            ? " 生成環境はまだ確認していません。ジョブ登録はでき、実行は準備完了後です。"
             : _miniMaxH3Ready
                 ? " ローカルruntimeの準備を確認済みです。"
-                : " " + DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode);
+                : " " + DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode)
+                    + " ジョブ登録はでき、実行は準備完了後です。";
 
     private static string DescribeMiniMaxH3VideoReasonCode(string? reasonCode)
         => reasonCode switch
         {
             "MINIMAX_H3_WRITER_DISABLED" =>
-                "MiniMax H3のジョブ登録は現在無効です。",
+                "MiniMax H3の実行runtimeは現在無効です。待機ジョブの登録はできます。",
             "MINIMAX_H3_RUNTIME_SEAL_INVALID" =>
                 "MiniMax H3の読取専用runtime sealを検証できません。",
             "MINIMAX_H3_RUNTIME_MANIFEST_INVALID" =>
@@ -398,6 +462,8 @@ public partial class MainWindow
                 "MiniMax H3のGPU canary結果を確認できません。",
             "MINIMAX_H3_BACKEND_CONFIG_INVALID" =>
                 "MiniMax H3のloopback backend設定を検証できません。",
+            "MINIMAX_H3_PROFILES_UNAVAILABLE" =>
+                "H25 companionが実測済みの5・10・12・15秒プロファイルを公開していません。再起動してください。",
             "HEALTH_UNAVAILABLE" =>
                 "H25 companionからMiniMax H3の準備状態を取得できません。",
             _ =>
@@ -420,8 +486,14 @@ public partial class MainWindow
                 payload,
                 out MiniMaxH3VideoCapabilityState capability))
         {
-            _miniMaxH3Ready = capability.Ready;
-            _miniMaxH3ReasonCode = capability.ReasonCode;
+            bool profilesReady =
+                TryParseMiniMaxH3VideoProfilesCapability(payload);
+            _miniMaxH3Ready = capability.Ready && profilesReady;
+            _miniMaxH3ReasonCode = !capability.Ready
+                ? capability.ReasonCode
+                : profilesReady
+                    ? null
+                    : "MINIMAX_H3_PROFILES_UNAVAILABLE";
         }
         else
         {
@@ -438,7 +510,7 @@ public partial class MainWindow
                 _miniMaxH3Ready
                     ? "MiniMax H3の準備を確認しました。実行すると既存のAI Jobsキューへ追加します。"
                     : DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode)
-                        + " ジョブは追加しません。");
+                        + " ジョブ登録はできます。実行は準備完了まで待機します。");
         }
     }
 
@@ -630,7 +702,7 @@ public partial class MainWindow
         source = null!;
         error = "動画化の入力を選び直してください。";
         if (_videoSourceChoice is not VideoSourceChoice captured
-            || SelectedTile() is not Tile { IsRealFile: true } tile)
+            || !TryGetVideoGenerationSourceTile(out Tile tile))
         {
             return false;
         }
@@ -643,7 +715,7 @@ public partial class MainWindow
                 requestedSource,
                 out VideoSourceChoice current,
                 out error)
-            || !Equals(current, captured))
+            || !VideoSourceChoicesReferToSameInput(current, captured))
         {
             if (string.IsNullOrWhiteSpace(error))
                 error = "動画化の入力が設定中に変わりました。選び直してください。";
@@ -654,13 +726,32 @@ public partial class MainWindow
         return true;
     }
 
+    private bool TryGetVideoGenerationSourceTile(out Tile tile)
+    {
+        tile = null!;
+        if (Modal.Visibility == Visibility.Visible)
+        {
+            // The modal is pinned independently of the background gallery
+            // selection. Favorite/filter publication is allowed to move that
+            // selection, but every modal action must keep targeting the image
+            // the user can still see.
+            return TryGetModalSourceTile(out tile) && tile.IsRealFile;
+        }
+
+        if (SelectedTile() is not Tile { IsRealFile: true } selected)
+            return false;
+        tile = selected;
+        return true;
+    }
+
     private string? ValidateVideoSourceImmediatelyBeforePublish(
         Tile capturedTile,
         VideoSourceChoice capturedSource,
         VideoH3SourceStamp capturedStamp,
         bool capturedFromExternalFileDrop)
     {
-        if (!ReferenceEquals(SelectedTile(), capturedTile))
+        if (!TryGetVideoGenerationSourceTile(out Tile currentTile)
+            || !ReferenceEquals(currentTile, capturedTile))
             return "動画化の入力セッションが準備確認中に変わりました。予約は保存していません。";
 
         if (capturedFromExternalFileDrop
@@ -677,7 +768,9 @@ public partial class MainWindow
                 out VideoSourceChoice currentSource,
                 out VideoH3SourceStamp currentStamp,
                 out string sourceError)
-            || !Equals(currentSource, capturedSource)
+            || !VideoSourceChoicesReferToSameInput(
+                currentSource,
+                capturedSource)
             || !VideoH3SourceStampsEqual(currentStamp, capturedStamp))
         {
             return string.IsNullOrWhiteSpace(sourceError)
@@ -801,8 +894,16 @@ public partial class MainWindow
     {
         if (IsMiniMaxH3VideoModel(_videoModelId))
         {
-            return "完了目安: 約5分42秒〜約9分7秒"
-                + "（RTX 4070 SUPER 12GBの実測・512×768〜864×480・124f・24fps・20 step・キュー待ちを除く）";
+            string measured = NormalizeMiniMaxH3DurationSeconds(
+                _videoDurationSeconds) switch
+            {
+                10 => "約9分49秒以上",
+                12 => "約12〜16分",
+                15 => "約18分35秒以上",
+                _ => "約3分50秒〜約9分7秒",
+            };
+            return $"完了目安: {measured}"
+                + "（RTX 4070 SUPER 12GB実測・最大414,720px・24fps・20 step・キュー待ちを除く。長尺は他の重い作業を閉じて実行）";
         }
         if (!IsVideoModelRunnable(_videoModelId))
         {
@@ -831,7 +932,13 @@ public partial class MainWindow
     {
         if (IsMiniMaxH3VideoModel(_videoModelId))
         {
-            return "元画像比率出力: 32px単位・最大414,720px・124f・24fps・5.167秒 · 20 step"
+            int frameCount = MiniMaxH3FrameCountForDuration(
+                _videoDurationSeconds);
+            string exactDuration = MiniMaxH3ExactDurationSeconds(
+                _videoDurationSeconds).ToString(
+                    "F3",
+                    CultureInfo.InvariantCulture);
+            return $"元画像比率出力: 32px単位・最大414,720px・{frameCount}f・24fps・{exactDuration}秒 · 20 step"
                 + " · H.264 / yuv420p · AAC音声あり";
         }
         int generationFrameCount =
@@ -853,7 +960,7 @@ public partial class MainWindow
                     ? "空欄はH3のよく動く既定Dynamic。"
                     : "")
                 + "H3 previewは元画像比率に近い32px単位のcanvasを最大414,720px内で選び、ぼかした両サイドを足しません。"
-                + "時間・FPS・stepは固定です。"
+                + "長さは実測済み5/10/12/15秒から選び、FPSとstepは24fps・20 step固定です。"
                 + "既存の単一GPUキューで1 jobずつ実行します。";
         }
         string promptHint = includeDefaultPrompt
@@ -870,6 +977,21 @@ public partial class MainWindow
 
     private void OpenModalVideoGeneration_Click(object sender, RoutedEventArgs e)
         => OpenVideoGenerationBoard(requestedSource: null);
+
+    private void OpenModalVideoSettings_Click(object sender, RoutedEventArgs e)
+    {
+        OpenAppSettings(focusShortcuts: false);
+        SelectAppSettingsSection("video", bringIntoView: false);
+        _ = Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                if (AppSettingsDialog.Visibility != Visibility.Visible)
+                    return;
+                SelectAppSettingsSection("video", bringIntoView: true);
+                SettingsVideoNav?.Focus();
+            }),
+            DispatcherPriority.Input);
+    }
 
     private void GalleryContextVideo_Click(object sender, RoutedEventArgs e)
     {
@@ -897,7 +1019,7 @@ public partial class MainWindow
         CancelVideoH3PromptRewrite();
         _videoSourceChoice = null;
         string status;
-        if (SelectedTile() is not Tile { IsRealFile: true } tile)
+        if (!TryGetVideoGenerationSourceTile(out Tile tile))
         {
             status = "入力画像を選び直してください。設定は確認できますが、入力が確定するまで実行できません。";
         }
@@ -920,7 +1042,7 @@ public partial class MainWindow
                         _miniMaxH3HealthChecked
                             ? _miniMaxH3ReasonCode
                             : null)
-                        + " 準備が整うまで実行しません。"
+                        + " ジョブ登録はできます。実行は準備完了まで待機します。"
                     : "旧動画モデル設定は新規生成に使いません。MiniMax H3へ切り替えてください。";
         }
         VideoH3PromptRewriteContextChanged(cancelPending: false);
@@ -1002,6 +1124,26 @@ public partial class MainWindow
         VideoH3PromptRewriteContextChanged();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus("保存済み。次に追加する動画ジョブから使われます。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void MiniMaxH3Duration_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_syncingVideoGenerationSettings || sender is not ComboBox source)
+            return;
+
+        _videoDurationSeconds = SelectedIntegerTag(
+            source,
+            MiniMaxH3VideoDefaultNominalDurationSeconds,
+            SupportedMiniMaxH3VideoDurationSeconds);
+        MarkVideoStyleAsCustom();
+        VideoH3PromptRewriteContextChanged();
+        SyncVideoGenerationSettingsControls();
+        SetVideoGenerationSettingsStatus(
+            $"MiniMax H3の高画質{MiniMaxH3ExactDurationSeconds(_videoDurationSeconds):F3}秒プロファイルを保存しました。次に追加する動画ジョブから使われます。");
         if (!_initializing)
             SaveState();
     }
@@ -1162,7 +1304,7 @@ public partial class MainWindow
         VideoH3PromptRewriteContextChanged();
         RefreshVideoStyleControls(updateNameFields: true);
         SetVideoGenerationSettingsStatus(
-            "MiniMax H3の5.167秒・24fps・元画像比率・20 step既定へ戻しました。準備確認後に実行できます。");
+            "MiniMax H3の高画質5.167秒・24fps・元画像比率・20 step既定へ戻しました。準備確認後に実行できます。");
         if (!_initializing)
             SaveState();
     }
@@ -1411,7 +1553,9 @@ public partial class MainWindow
                 or HunyuanVideoModelId
                 or MiniMaxH3VideoModelId)
             || !IsVideoQualitySupported(candidate.QualityId ?? "")
-            || !SupportedVideoDurationSeconds.Contains(candidate.DurationSeconds)
+            || (!SupportedVideoDurationSeconds.Contains(candidate.DurationSeconds)
+                && !SupportedMiniMaxH3VideoDurationSeconds.Contains(
+                    candidate.DurationSeconds))
             || !SupportedVideoPlaybackFps.Contains(candidate.PlaybackFps)
             || !SupportedVideoMaximumPixelAreas.Contains(candidate.MaximumPixelArea))
         {
@@ -1428,7 +1572,8 @@ public partial class MainWindow
             // new-job styles are migrated to the only selectable writer.
             ModelId = MiniMaxH3VideoModelId,
             QualityId = candidate.QualityId!,
-            DurationSeconds = candidate.DurationSeconds,
+            DurationSeconds = NormalizeMiniMaxH3DurationSeconds(
+                candidate.DurationSeconds),
             PlaybackFps = candidate.PlaybackFps,
             MaximumPixelArea = candidate.MaximumPixelArea,
             Prompt = prompt,
@@ -1536,7 +1681,7 @@ public partial class MainWindow
             return;
 
         AppVideoStyleSummaryText.Text = IsMiniMaxH3VideoModel(_videoModelId)
-            ? $"現在: {VideoModelLabel(_videoModelId)} / 固定5.167秒 / 24fps / 元画像比率・最大414,720px / 20 step / AAC"
+            ? $"現在: {VideoModelLabel(_videoModelId)} / {MiniMaxH3ExactDurationSeconds(_videoDurationSeconds):F3}秒 / 24fps / 元画像比率・最大414,720px / 20 step / AAC"
             : $"現在: {VideoModelLabel(_videoModelId)} / {VideoQualityLabel(_videoQualityId)} / {_videoDurationSeconds}秒 / 生成{_videoPlaybackFps}fps / {_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}px";
     }
 
@@ -1570,10 +1715,8 @@ public partial class MainWindow
         string? modelId = null,
         string? qualityId = null)
     {
-        _videoDurationSeconds = durationSeconds is int duration
-            && SupportedVideoDurationSeconds.Contains(duration)
-                ? duration
-                : DefaultVideoDurationSeconds;
+        _videoDurationSeconds = NormalizeMiniMaxH3DurationSeconds(
+            durationSeconds ?? MiniMaxH3VideoDefaultNominalDurationSeconds);
         _videoPlaybackFps = playbackFps is int fps
             && SupportedVideoPlaybackFps.Contains(fps)
                 ? fps
@@ -1639,6 +1782,7 @@ public partial class MainWindow
         if (ModalVideoDurationComboBox is null
             || ModalVideoFpsComboBox is null
             || ModalVideoResolutionComboBox is null
+            || ModalVideoH3DurationComboBox is null
             || ModalVideoQualityComboBox is null
             || ModalVideoPromptTextBox is null)
         {
@@ -1649,6 +1793,9 @@ public partial class MainWindow
         try
         {
             SelectIntegerTag(ModalVideoDurationComboBox, _videoDurationSeconds);
+            SelectIntegerTag(
+                ModalVideoH3DurationComboBox,
+                NormalizeMiniMaxH3DurationSeconds(_videoDurationSeconds));
             SelectIntegerTag(ModalVideoFpsComboBox, _videoPlaybackFps);
             SelectIntegerTag(ModalVideoResolutionComboBox, _videoMaximumPixelArea);
             SelectVideoModelId(ModalVideoModelComboBox, _videoModelId);
@@ -1658,6 +1805,13 @@ public partial class MainWindow
             ModalVideoPromptTextBox.Text = _videoPrompt;
             if (AppVideoDurationComboBox is not null)
                 SelectIntegerTag(AppVideoDurationComboBox, _videoDurationSeconds);
+            if (AppVideoH3DurationComboBox is not null)
+            {
+                SelectIntegerTag(
+                    AppVideoH3DurationComboBox,
+                    NormalizeMiniMaxH3DurationSeconds(
+                        _videoDurationSeconds));
+            }
             if (AppVideoFpsComboBox is not null)
                 SelectIntegerTag(AppVideoFpsComboBox, _videoPlaybackFps);
             if (AppVideoResolutionComboBox is not null)
@@ -1689,6 +1843,16 @@ public partial class MainWindow
                 ModalVideoWanTuningPanel.Visibility = wanControlsVisibility;
             if (AppVideoWanControlsPanel is not null)
                 AppVideoWanControlsPanel.Visibility = wanControlsVisibility;
+            Visibility h3ControlsVisibility = h3Selected
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            if (ModalVideoH3ControlsPanel is not null)
+                ModalVideoH3ControlsPanel.Visibility = h3ControlsVisibility;
+            if (AppVideoH3ControlsPanel is not null)
+                AppVideoH3ControlsPanel.Visibility = h3ControlsVisibility;
+            ModalVideoH3DurationComboBox.IsEnabled = h3Selected;
+            if (AppVideoH3DurationComboBox is not null)
+                AppVideoH3DurationComboBox.IsEnabled = h3Selected;
             bool qualityEnabled = string.Equals(
                 _videoModelId,
                 WanVideoModelId,
@@ -1769,29 +1933,23 @@ public partial class MainWindow
         // This is presentation state only. The explicit execute path below
         // canonicalizes the selected source and verifies that it still exists
         // before sending any request.
-        bool hasSource = SelectedTile() is { IsRealFile: true };
+        bool hasSource = TryGetVideoGenerationSourceTile(out _);
         bool capturedSourceReady = TryRevalidateCapturedVideoSource(out _, out _);
-        bool modelReady = IsVideoModelRunnable(_videoModelId);
+        bool modelRegistered = IsMiniMaxH3VideoModel(_videoModelId);
         bool seedReady = IsMiniMaxH3VideoModel(_videoModelId)
             || !_videoSeedFixed
             || TryParseFixedSeed(_videoSeedValueText, out _);
         ModalVideoGenerateButton.IsEnabled = hasSource && !_videoGenerationRequestPending;
         QueueVideoGenerationButton.IsEnabled =
             capturedSourceReady
-            && modelReady
+            && modelRegistered
             && seedReady
             && !_videoGenerationRequestPending;
         QueueVideoGenerationButton.Content = _videoGenerationRequestPending
             ? "追加中..."
-            : modelReady
-                ? IsMiniMaxH3VideoModel(_videoModelId)
-                    ? "H3動画化を実行"
-                    : seedReady
-                    ? "動画化を実行"
-                    : "Seedを確認"
-                : IsMiniMaxH3VideoModel(_videoModelId)
-                    ? "H3準備を確認"
-                    : "実験モデルは準備中";
+            : modelRegistered
+                ? "H3動画化をキューへ追加"
+                : "動画モデルを確認";
         AutomationProperties.SetName(
             QueueVideoGenerationButton,
             _videoGenerationRequestPending
@@ -1815,7 +1973,9 @@ public partial class MainWindow
                 SetVideoGenerationSettingsStatus(sourceError);
             return false;
         }
-        Tile? capturedSourceTile = SelectedTile();
+        Tile? capturedSourceTile = TryGetVideoGenerationSourceTile(out Tile currentTile)
+            ? currentTile
+            : null;
         if (!IsMiniMaxH3VideoModel(_videoModelId))
         {
             SetVideoGenerationSettingsStatus(
@@ -1823,8 +1983,6 @@ public partial class MainWindow
             UpdateVideoGenerationActionControls();
             return false;
         }
-        if (!IsVideoModelRunnable(_videoModelId))
-            return false;
         bool h3Selected = IsMiniMaxH3VideoModel(_videoModelId);
         int? seed = null;
         if (!h3Selected
@@ -1853,7 +2011,9 @@ public partial class MainWindow
             if (!TryRevalidateCapturedVideoSource(
                     out VideoSourceChoice revalidatedSource,
                     out sourceError)
-                || !Equals(revalidatedSource, source))
+                || !VideoSourceChoicesReferToSameInput(
+                    revalidatedSource,
+                    source))
             {
                 _videoSourceChoice = null;
                 SetVideoGenerationSettingsStatus(
@@ -1869,7 +2029,9 @@ public partial class MainWindow
                     out VideoSourceChoice stampedSource,
                     out VideoH3SourceStamp sourceStamp,
                     out sourceError)
-                || !Equals(stampedSource, source))
+                || !VideoSourceChoicesReferToSameInput(
+                    stampedSource,
+                    source))
             {
                 _videoSourceChoice = null;
                 SetVideoGenerationSettingsStatus(
@@ -1950,6 +2112,7 @@ public partial class MainWindow
             {
                 requested = new
                 {
+                    profileId = settings.ProfileId,
                     prompt = settings.Prompt,
                 },
             }
@@ -1985,6 +2148,12 @@ public partial class MainWindow
         OpenVideoGenerationBoard(requestedSource);
         return ModalVideoGenerationPopup.Visibility == Visibility.Visible;
     }
+
+    public void CloseVideoGenerationBoardForSmoke()
+        => CloseModalVideoGenerationBoard();
+
+    public string? VideoSourceIdentityForSmoke
+        => _videoSourceChoice?.SourceIdentity;
 
     public bool OpenDisplayedModalVideoGenerationBoardForSmoke()
     {
@@ -2088,7 +2257,9 @@ public partial class MainWindow
         SyncVideoGenerationSettingsControls();
     }
 
-    public string BuildMiniMaxH3EnqueueRequestJsonForSmoke(string prompt)
+    public string BuildMiniMaxH3EnqueueRequestJsonForSmoke(
+        string prompt,
+        int durationSeconds = MiniMaxH3VideoDefaultNominalDurationSeconds)
     {
         string boundedPrompt = prompt.Length <= MaxVideoPromptLength
             ? prompt
@@ -2101,7 +2272,8 @@ public partial class MainWindow
         var settings = new VideoGenerationRequestSettings(
             MiniMaxH3VideoPresetId,
             MiniMaxH3VideoBackendId,
-            DefaultVideoDurationSeconds,
+            MiniMaxH3ProfileIdForDuration(durationSeconds),
+            NormalizeMiniMaxH3DurationSeconds(durationSeconds),
             DefaultVideoPlaybackFps,
             DefaultVideoMaximumPixelArea,
             boundedPrompt.Trim());
@@ -2165,6 +2337,35 @@ public partial class MainWindow
                 issues.Add("modal-wan-tuning");
             if (AppVideoWanControlsPanel.Visibility != Visibility.Collapsed)
                 issues.Add("app-wan-controls");
+            int[] expectedDurations = [5, 10, 12, 15];
+            if (ModalVideoH3ControlsPanel.Visibility != Visibility.Visible
+                || !ModalVideoH3DurationComboBox.Items
+                    .OfType<ComboBoxItem>()
+                    .Select(static item => int.TryParse(
+                        item.Tag?.ToString(),
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out int value)
+                            ? value
+                            : -1)
+                    .SequenceEqual(expectedDurations))
+            {
+                issues.Add("modal-h3-duration-profiles");
+            }
+            if (AppVideoH3ControlsPanel.Visibility != Visibility.Visible
+                || !AppVideoH3DurationComboBox.Items
+                    .OfType<ComboBoxItem>()
+                    .Select(static item => int.TryParse(
+                        item.Tag?.ToString(),
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out int value)
+                            ? value
+                            : -1)
+                    .SequenceEqual(expectedDurations))
+            {
+                issues.Add("app-h3-duration-profiles");
+            }
             if (ModalVideoPromptTextBox.Visibility != Visibility.Visible)
                 issues.Add("modal-prompt");
             if (AppVideoPromptTextBox.Visibility != Visibility.Visible)
@@ -2182,7 +2383,7 @@ public partial class MainWindow
                 issues.Add("audio");
             }
             if (!ModalVideoGenerationEstimateText.Text.Contains(
-                    "約5分42秒",
+                    "約3分50秒",
                     StringComparison.Ordinal))
             {
                 issues.Add("portrait-estimate");
@@ -2329,6 +2530,14 @@ public partial class MainWindow
             ? null
             : (_videoSourceChoice.Label, _videoSourceChoice.ProducerJobId);
 
+    public bool OverrideVideoSourceLabelForSmoke(string label)
+    {
+        if (_videoSourceChoice is null || string.IsNullOrWhiteSpace(label))
+            return false;
+        _videoSourceChoice = _videoSourceChoice with { Label = label };
+        return true;
+    }
+
     public string[] GalleryVideoSourceRequestsForSmoke
     {
         get
@@ -2411,6 +2620,8 @@ public partial class MainWindow
             && !AppVideoDurationComboBox.IsEnabled
             && !AppVideoFpsComboBox.IsEnabled
             && !AppVideoResolutionComboBox.IsEnabled
+            && ModalVideoH3DurationComboBox.IsEnabled
+            && AppVideoH3DurationComboBox.IsEnabled
             && !ModalVideoSeedModeComboBox.IsEnabled
             && !AppVideoSeedModeComboBox.IsEnabled
             && ModalVideoModelDescriptionText.Text.Contains(
@@ -2451,7 +2662,7 @@ public partial class MainWindow
                 VideoGenerationEstimateText(),
                 StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText.Text.Contains(
-                "約5分42秒〜約9分7秒",
+                "約3分50秒〜約9分7秒",
                 StringComparison.Ordinal)
             && ModalVideoGenerationEstimateText.Text.Contains(
                 "RTX 4070 SUPER 12GB",

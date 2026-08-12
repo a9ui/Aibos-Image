@@ -84,7 +84,7 @@ public partial class App
             bool timeoutContractExact =
                 timeoutContract.SharedTransportTimeoutIsInfinite
                 && timeoutContract.DefaultRequestTimeoutMilliseconds == 30_000
-                && timeoutContract.RewriteRequestTimeoutMilliseconds == 90_000;
+                && timeoutContract.RewriteRequestTimeoutMilliseconds == 360_000;
             byte[] sourceBytes = Convert.FromBase64String(
                 sourceFixture.GetProperty("pngBase64").GetString()!);
             string fixtureSourceSha256 = Convert.ToHexStringLower(
@@ -141,6 +141,11 @@ public partial class App
             TaskCompletionSource<bool>? releaseEnqueueHealth = null;
             TaskCompletionSource<bool>? rewriteResponseEntered = null;
             TaskCompletionSource<bool>? releaseRewriteResponse = null;
+            TaskCompletionSource<bool>? cancellationAwareRewriteEntered = null;
+            TaskCompletionSource<bool>? rewriteCancellationObserved = null;
+            bool cancellationAwareRewrite = false;
+            bool rewriteRequestTokenCanceled = false;
+            int activeCancellationAwareRewriteRequests = 0;
             string rewriteResponseTransport = "normal";
             ChunkedFakeLoopbackStream? declaredOversizeStream = null;
             ChunkedFakeLoopbackStream? chunkedOversizeStream = null;
@@ -205,6 +210,30 @@ public partial class App
                             string capturedResponseModelId = responseModelId;
                             double capturedResponseInferenceMilliseconds =
                                 responseInferenceMilliseconds;
+                            if (cancellationAwareRewrite)
+                            {
+                                Interlocked.Increment(
+                                    ref activeCancellationAwareRewriteRequests);
+                                cancellationAwareRewriteEntered
+                                    ?.TrySetResult(true);
+                                try
+                                {
+                                    await Task.Delay(Timeout.Infinite, token);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    rewriteRequestTokenCanceled =
+                                        token.IsCancellationRequested;
+                                    rewriteCancellationObserved
+                                        ?.TrySetResult(true);
+                                    throw;
+                                }
+                                finally
+                                {
+                                    Interlocked.Decrement(
+                                        ref activeCancellationAwareRewriteRequests);
+                                }
+                            }
                             rewriteResponseEntered?.TrySetResult(true);
                             if (releaseRewriteResponse is not null)
                             {
@@ -326,8 +355,8 @@ public partial class App
                         window.FindResource(
                             "UiVideoH3StatusSourceUnavailable") as string ?? "";
                     int rewriteCallsBeforeMissingSource = rewritePostCalls;
-                    bool missingSourceButtonActionable =
-                        window.VideoH3PromptRewriteButtonEnabledForSmoke;
+                    bool missingSourceButtonDisabled =
+                        !window.VideoH3PromptRewriteButtonEnabledForSmoke;
                     bool missingSourceRejectedLocally =
                         !await window.RewriteVideoPromptForH3ForSmokeAsync()
                         && rewritePostCalls == rewriteCallsBeforeMissingSource
@@ -357,7 +386,18 @@ public partial class App
                     bool surface = selected
                         && boardOpened
                         && surfaceIssues.Length == 0
-                        && window.VideoH3PromptRewritePanelVisibleForSmoke;
+                        && window.VideoH3PromptRewritePanelVisibleForSmoke
+                        && window.VideoH3PromptRewriteButtonEnabledForSmoke;
+                    bool statusToastCopyable =
+                        window.StatusNotificationCopyableForSmoke;
+
+                    bool presentationLabelVaried =
+                        window.OverrideVideoSourceLabelForSmoke(
+                            "Original（高画質化表示は入力対象外）")
+                        && string.Equals(
+                            window.VideoSourceForSmoke?.Label,
+                            "Original（高画質化表示は入力対象外）",
+                            StringComparison.Ordinal);
 
                     bool rewriteAccepted =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
@@ -563,6 +603,98 @@ public partial class App
                             StringComparison.Ordinal)
                         && !window.VideoH3PromptUndoEnabledForSmoke;
 
+                    string cancelInputBefore =
+                        window.AuthoritativeVideoPromptForSmoke;
+                    string cancelCandidateBefore =
+                        window.VideoH3PromptCandidateForSmoke;
+                    string cancelJobsBefore = FileFingerprint(environment[
+                        "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"]!);
+                    int cancelRewritePostsBefore = rewritePostCalls;
+                    int cancelQueueMutationsBefore = queueMutationCalls;
+                    int cancelJobsPostsBefore = jobsPostCalls;
+                    int cancelStarterCallsBefore = companionStarterCalls;
+                    string expectedCancelButton =
+                        window.FindResource(
+                            "UiVideoH3RewriteCancelButton") as string ?? "";
+                    string expectedCancelAutomation =
+                        window.FindResource(
+                            "UiVideoH3RewriteCancelButtonAutomation") as string
+                            ?? "";
+                    string expectedCancelHelp =
+                        window.FindResource(
+                            "UiVideoH3RewriteCancelButtonHelp") as string ?? "";
+                    string expectedCanceledStatus =
+                        window.FindResource(
+                            "UiVideoH3StatusCanceled") as string ?? "";
+                    cancellationAwareRewriteEntered =
+                        new TaskCompletionSource<bool>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
+                    rewriteCancellationObserved =
+                        new TaskCompletionSource<bool>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
+                    rewriteRequestTokenCanceled = false;
+                    cancellationAwareRewrite = true;
+                    Task<bool> explicitlyCanceledRewrite =
+                        window.RewriteVideoPromptForH3ForSmokeAsync();
+                    bool cancellationRequestEntered =
+                        await cancellationAwareRewriteEntered.Task.WaitAsync(
+                            TimeSpan.FromSeconds(5));
+                    bool cancelSurface =
+                        window.VideoH3PromptRewritePendingForSmoke
+                        && window.VideoH3PromptRewriteButtonEnabledForSmoke
+                        && string.Equals(
+                            window.VideoH3PromptRewriteButtonContentForSmoke,
+                            expectedCancelButton,
+                            StringComparison.Ordinal)
+                        && string.Equals(
+                            window.VideoH3PromptRewriteButtonAutomationForSmoke,
+                            expectedCancelAutomation,
+                            StringComparison.Ordinal)
+                        && string.Equals(
+                            window.VideoH3PromptRewriteButtonHelpForSmoke,
+                            expectedCancelHelp,
+                            StringComparison.Ordinal);
+                    bool explicitCancelActivated =
+                        window.CancelVideoH3PromptRewriteForSmoke();
+                    bool cancellationReachedTransport =
+                        await rewriteCancellationObserved.Task.WaitAsync(
+                            TimeSpan.FromSeconds(5));
+                    bool canceledRewriteAccepted =
+                        await explicitlyCanceledRewrite;
+                    cancellationAwareRewrite = false;
+                    cancellationAwareRewriteEntered = null;
+                    rewriteCancellationObserved = null;
+                    bool explicitCancelContract =
+                        cancellationRequestEntered
+                        && cancelSurface
+                        && explicitCancelActivated
+                        && cancellationReachedTransport
+                        && rewriteRequestTokenCanceled
+                        && !canceledRewriteAccepted
+                        && !window.VideoH3PromptRewritePendingForSmoke
+                        && activeCancellationAwareRewriteRequests == 0
+                        && string.Equals(
+                            window.AuthoritativeVideoPromptForSmoke,
+                            cancelInputBefore,
+                            StringComparison.Ordinal)
+                        && string.Equals(
+                            window.VideoH3PromptCandidateForSmoke,
+                            cancelCandidateBefore,
+                            StringComparison.Ordinal)
+                        && string.Equals(
+                            window.VideoH3PromptRewriteStatusForSmoke,
+                            expectedCanceledStatus,
+                            StringComparison.Ordinal)
+                        && string.Equals(
+                            FileFingerprint(environment[
+                                "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"]!),
+                            cancelJobsBefore,
+                            StringComparison.Ordinal)
+                        && rewritePostCalls == cancelRewritePostsBefore + 1
+                        && queueMutationCalls == cancelQueueMutationsBefore
+                        && jobsPostCalls == cancelJobsPostsBefore
+                        && companionStarterCalls == cancelStarterCallsBefore;
+
                     responseCandidate = candidateA;
                     rewriteResponseEntered = new TaskCompletionSource<bool>(
                         TaskCreationOptions.RunContinuationsAsynchronously);
@@ -608,7 +740,8 @@ public partial class App
                     window.SetAuthoritativeVideoPromptForSmoke(basePrompt);
 
                     async Task<bool> DelayedRewriteRejectsChangeAsync(
-                        Action changeContext)
+                        Action changeContext,
+                        bool expectApplyEnabled = true)
                     {
                         string retainedCandidate =
                             window.VideoH3PromptCandidateForSmoke;
@@ -631,7 +764,8 @@ public partial class App
                                 window.VideoH3PromptCandidateForSmoke,
                                 retainedCandidate,
                                 StringComparison.Ordinal)
-                            && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
+                            && window.VideoH3PromptCandidateApplyEnabledForSmoke
+                                == expectApplyEnabled;
                     }
 
                     responseCandidate = candidateB;
@@ -648,7 +782,8 @@ public partial class App
 
                     bool delayedModelResponseStale =
                         await DelayedRewriteRejectsChangeAsync(() =>
-                            window.SelectVideoModelForSmoke("wan22-ti2v-5b"));
+                            window.SelectVideoModelForSmoke("wan22-ti2v-5b"),
+                            expectApplyEnabled: false);
                     window.SelectVideoModelForSmoke("minimax-h3");
 
                     bool delayedSourceResponseStale =
@@ -671,14 +806,15 @@ public partial class App
                         basePrompt + " Changed after rewrite.");
                     bool inputStale = rewrittenForInputStale
                         && !window.VideoH3PromptCandidateFreshForSmoke
-                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke
+                        && window.VideoH3PromptCandidateApplyEnabledForSmoke
                         && string.Equals(
                             window.VideoH3PromptCandidateForSmoke,
                             candidateA,
                             StringComparison.Ordinal);
                     window.SetAuthoritativeVideoPromptForSmoke(basePrompt);
                     bool revertedInputStillStale =
-                        !window.VideoH3PromptCandidateFreshForSmoke;
+                        !window.VideoH3PromptCandidateFreshForSmoke
+                        && window.VideoH3PromptCandidateApplyEnabledForSmoke;
 
                     bool rewrittenForStyleStale =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
@@ -687,7 +823,7 @@ public partial class App
                     bool styleStale = rewrittenForStyleStale
                         && styleSaved
                         && !window.VideoH3PromptCandidateFreshForSmoke
-                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
+                        && window.VideoH3PromptCandidateApplyEnabledForSmoke;
 
                     bool rewrittenForModelStale =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
@@ -699,7 +835,7 @@ public partial class App
                         && panelHiddenForWan
                         && window.VideoH3PromptRewritePanelVisibleForSmoke
                         && !window.VideoH3PromptCandidateFreshForSmoke
-                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
+                        && window.VideoH3PromptCandidateApplyEnabledForSmoke;
 
                     bool rewrittenForSourceStale =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
@@ -713,14 +849,18 @@ public partial class App
                     }
                     bool freshAfterSourceChange =
                         window.VideoH3PromptCandidateFreshForSmoke;
-                    bool sourceApplyRejected =
-                        !window.ApplyVideoH3PromptCandidateForSmoke();
+                    bool sourceApplyAccepted =
+                        window.ApplyVideoH3PromptCandidateForSmoke();
                     bool applyAfterSourceChange =
                         window.VideoH3PromptCandidateApplyEnabledForSmoke;
                     bool sourceStale = rewrittenForSourceStale
                         && !freshAfterSourceChange
-                        && sourceApplyRejected
-                        && !applyAfterSourceChange;
+                        && sourceApplyAccepted
+                        && !applyAfterSourceChange
+                        && string.Equals(
+                            window.AuthoritativeVideoPromptForSmoke,
+                            candidateA,
+                            StringComparison.Ordinal);
 
                     string retainedBeforeInvalid =
                         window.VideoH3PromptCandidateForSmoke;
@@ -753,8 +893,8 @@ public partial class App
                         window.VideoH3PromptCandidateForSmoke;
                     window.SetAuthoritativeVideoPromptForSmoke(
                         basePrompt + " Manual edit invalidates the candidate.");
-                    bool manualEditInvalidatesUndoAndApply = rewrittenAfterInvalid
-                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke
+                    bool manualEditInvalidatesUndoButKeepsApply = rewrittenAfterInvalid
+                        && window.VideoH3PromptCandidateApplyEnabledForSmoke
                         && !window.VideoH3PromptUndoEnabledForSmoke
                         && string.Equals(
                             window.VideoH3PromptCandidateForSmoke,
@@ -903,9 +1043,11 @@ public partial class App
                         && timeoutContractExact
                         && sourceFixtureExact
                         && contractUnchanged
-                        && missingSourceButtonActionable
+                        && missingSourceButtonDisabled
                         && missingSourceRejectedLocally
                         && surface
+                        && statusToastCopyable
+                        && presentationLabelVaried
                         && requestExact
                         && responseFixtureAccepted
                         && revisionFixturesExact
@@ -922,6 +1064,7 @@ public partial class App
                         && queueReadsOnlyInput
                         && applied
                         && undone
+                        && explicitCancelContract
                         && latestRewriteWins
                         && delayedInputResponseStale
                         && delayedStyleResponseStale
@@ -934,7 +1077,7 @@ public partial class App
                         && sourceStale
                         && oversizeRejected
                         && hashMismatchRejected
-                        && manualEditInvalidatesUndoAndApply
+                    && manualEditInvalidatesUndoButKeepsApply
                         && modeOverflowRejectedExplicitly
                         && responseTransportBounded
                         && sourceChangedBeforePublishNoReservation
@@ -948,10 +1091,12 @@ public partial class App
                         timeoutContract,
                         sourceFixtureExact,
                         contractUnchanged,
-                        missingSourceButtonActionable,
+                        missingSourceButtonDisabled,
                         missingSourceRejectedLocally,
                         surface,
                         surfaceIssues,
+                        statusToastCopyable,
+                        presentationLabelVaried,
                         requestExact,
                         responseFixtureAccepted,
                         revisionFixturesExact,
@@ -968,6 +1113,13 @@ public partial class App
                         queueReadsOnlyInput,
                         applied,
                         undone,
+                        explicitCancelContract,
+                        cancellationRequestEntered,
+                        cancelSurface,
+                        explicitCancelActivated,
+                        cancellationReachedTransport,
+                        rewriteRequestTokenCanceled,
+                        activeCancellationAwareRewriteRequests,
                         latestRewriteWins,
                         supersededRewriteEntered,
                         latestRewriteAccepted,
@@ -983,12 +1135,12 @@ public partial class App
                         sourceStale,
                         rewrittenForSourceStale,
                         freshAfterSourceChange,
-                        sourceApplyRejected,
+                    sourceApplyAccepted,
                         applyAfterSourceChange,
                         sourceLengthAfterChange = new FileInfo(sourcePath).Length,
                         oversizeRejected,
                         hashMismatchRejected,
-                        manualEditInvalidatesUndoAndApply,
+                    manualEditInvalidatesUndoButKeepsApply,
                         modeOverflowRejectedExplicitly,
                         responseTransportBounded,
                         unavailableCompilerFailedClosed,

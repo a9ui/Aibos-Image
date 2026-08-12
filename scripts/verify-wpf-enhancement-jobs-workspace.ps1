@@ -356,7 +356,15 @@ try {
     $process.Dispose()
     $process = $null
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
-    $result | ConvertTo-Json -Depth 10
+    [pscustomobject]@{
+        ok = $result.ok
+        passiveOpen = $result.passiveOpen
+        stableJobViews = $result.stableJobViews
+        completedElapsedVisible = $result.completedElapsedVisible
+        queueInventoryOrdered = $result.queueInventoryOrdered
+        sourceUnchanged = $result.sourceUnchanged
+        storesUnchanged = $result.storesUnchanged
+    } | ConvertTo-Json -Depth 3
     $required = @(
         'passiveOpen',
         'healthVisible',
@@ -391,6 +399,7 @@ try {
         'legacyMissingOperation',
         'legacyPhotorealPromptUpdateSafe',
         'photorealTerminalCurrentSettingsActions',
+        'completedElapsedVisible',
         'unsupportedNoMutation',
         'imageVersionsExcludeVideo',
         'stableJobViews',

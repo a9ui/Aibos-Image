@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace PhotoViewer.Wpf;
 
@@ -12,7 +13,7 @@ public partial class MainWindow
 {
     private const string VideoH3PromptRewriteRevision =
         "aibos-h3-i2va-local-v1";
-    private const int VideoH3PromptRewriteTimeoutMilliseconds = 90_000;
+    private const int VideoH3PromptRewriteTimeoutMilliseconds = 360_000;
     private const int MaxVideoH3PromptRewriteResponseBytes = 32 * 1024;
     // Keep one over-limit code unit so an editor paste is rejected as
     // oversized instead of being silently clipped into a valid 2,000-unit
@@ -72,7 +73,15 @@ public partial class MainWindow
     private async void RewriteVideoPromptForH3_Click(
         object sender,
         RoutedEventArgs e)
-        => await RewriteVideoPromptForH3Async();
+    {
+        if (_videoH3RewritePending)
+        {
+            CancelVideoH3PromptRewrite(userInitiated: true);
+            return;
+        }
+
+        await RewriteVideoPromptForH3Async();
+    }
 
     private void VideoH3RewriteMode_SelectionChanged(
         object sender,
@@ -146,7 +155,7 @@ public partial class MainWindow
         if (_videoH3RewritePending || !IsMiniMaxH3VideoModel(_videoModelId))
             return false;
 
-        if (!TryCaptureVideoH3SourceStamp(
+        if (!TryCaptureVideoH3RewriteSourceStamp(
                 out VideoSourceChoice source,
                 out VideoH3SourceStamp sourceStamp,
                 out string sourceError))
@@ -211,7 +220,8 @@ public partial class MainWindow
             {
                 ["sourceId"] = source.SourceIdentity,
                 ["prompt"] = requestPrompt,
-                ["frameCount"] = MiniMaxH3VideoFrameCount,
+                ["frameCount"] = MiniMaxH3FrameCountForDuration(
+                    _videoDurationSeconds),
                 ["playbackFps"] = MiniMaxH3VideoPlaybackFps,
             };
             if (!string.IsNullOrWhiteSpace(source.ProducerJobId))
@@ -226,7 +236,7 @@ public partial class MainWindow
                 maxResponseBytes: MaxVideoH3PromptRewriteResponseBytes,
                 timeoutError: VideoH3Localized(
                     "UiVideoH3StatusTimedOut",
-                    "H3語化が90秒以内に完了しませんでした。入力プロンプトは変更していません。もう一度試してください。"));
+                    "H3語化が6分以内に完了しませんでした。入力プロンプトは変更していません。もう一度試してください。"));
             if (cts.IsCancellationRequested)
             {
                 SetStatusIfCurrent(VideoH3Localized(
@@ -236,12 +246,7 @@ public partial class MainWindow
             }
             if (!response.Ok || response.Payload is not JsonElement payload)
             {
-                SetStatusIfCurrent(
-                    string.IsNullOrWhiteSpace(response.Error)
-                        ? VideoH3Localized(
-                            "UiVideoH3StatusInvalidResponse",
-                            "H3語化の応答を確認できません。入力プロンプトは変更していません。")
-                        : response.Error);
+                SetStatusIfCurrent(DescribeVideoH3PromptRewriteFailure(response));
                 return false;
             }
             if (!TryParseVideoH3PromptRewriteResponse(
@@ -302,7 +307,7 @@ public partial class MainWindow
         {
             SetStatusIfCurrent(VideoH3Localized(
                 "UiVideoH3StatusSourceUnavailable",
-                "H3語化する画像が見つかりません。入力を選び直してください。"));
+                "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。"));
             return false;
         }
         finally
@@ -354,6 +359,9 @@ public partial class MainWindow
         try
         {
             ModalVideoPromptTextBox.Text = after;
+            ModalVideoPromptTextBox.CaretIndex = ModalVideoPromptTextBox.Text.Length;
+            ModalVideoPromptTextBox.ScrollToEnd();
+            Keyboard.Focus(ModalVideoPromptTextBox);
         }
         finally
         {
@@ -428,7 +436,7 @@ public partial class MainWindow
         _videoPromptAfterH3Apply = null;
     }
 
-    private void CancelVideoH3PromptRewrite()
+    private void CancelVideoH3PromptRewrite(bool userInitiated = false)
     {
         if (!_videoH3RewritePending)
             return;
@@ -439,6 +447,12 @@ public partial class MainWindow
         _videoH3RewritePending = false;
         active?.Cancel();
         RefreshVideoH3PromptRewriteControls(updateStatus: false);
+        if (userInitiated)
+        {
+            SetVideoH3PromptRewriteStatus(VideoH3Localized(
+                "UiVideoH3StatusCanceled",
+                "H3語化を中止しました。候補・入力・動画ジョブは変更していません。"));
+        }
     }
 
     private void RefreshVideoH3PromptRewriteControls(bool updateStatus = true)
@@ -485,14 +499,39 @@ public partial class MainWindow
                 out sourceError);
         }
         ModalVideoH3RewritePromptButton.IsEnabled = h3Selected
-            && !_videoH3RewritePending;
-        ModalVideoH3RewritePromptButton.Content = VideoH3Localized(
-            string.IsNullOrEmpty(_videoH3PromptCandidate)
-                ? "UiVideoH3RewriteButton"
-                : "UiVideoH3RewriteAgainButton",
-            string.IsNullOrEmpty(_videoH3PromptCandidate)
-                ? "MiniMax語に変換"
-                : "もう一度変換");
+            && (_videoH3RewritePending || sourceReady);
+        ModalVideoH3RewritePromptButton.Content = _videoH3RewritePending
+            ? VideoH3Localized(
+                "UiVideoH3RewriteCancelButton",
+                "キャンセル")
+            : VideoH3Localized(
+                string.IsNullOrEmpty(_videoH3PromptCandidate)
+                    ? "UiVideoH3RewriteButton"
+                    : "UiVideoH3RewriteAgainButton",
+                string.IsNullOrEmpty(_videoH3PromptCandidate)
+                    ? "MiniMax語に変換"
+                    : "もう一度変換");
+        string rewriteButtonAutomation = _videoH3RewritePending
+            ? VideoH3Localized(
+                "UiVideoH3RewriteCancelButtonAutomation",
+                "MiniMax H3語変換をキャンセル")
+            : VideoH3Localized(
+                "UiVideoH3RewriteButtonAutomation",
+                "画像と入力からMiniMax H3向け候補を作成");
+        string rewriteButtonHelp = _videoH3RewritePending
+            ? VideoH3Localized(
+                "UiVideoH3RewriteCancelButtonHelp",
+                "待機中のHTTP要求をすぐ中止します。候補・入力・動画ジョブは変更しません。")
+            : VideoH3Localized(
+                "UiVideoH3RewriteButtonHelp",
+                "起動済みのlocal Qwen変換器を使います。worker起動や動画ジョブ追加はしません。");
+        AutomationProperties.SetName(
+            ModalVideoH3RewritePromptButton,
+            rewriteButtonAutomation);
+        AutomationProperties.SetHelpText(
+            ModalVideoH3RewritePromptButton,
+            rewriteButtonHelp);
+        ModalVideoH3RewritePromptButton.ToolTip = rewriteButtonHelp;
         ModalVideoH3RewriteModeComboBox.IsEnabled = h3Selected
             && !_videoH3RewritePending;
         ModalVideoH3PromptCandidateTextBox.IsEnabled = h3Selected
@@ -515,7 +554,7 @@ public partial class MainWindow
             SetVideoH3PromptRewriteStatus(string.IsNullOrWhiteSpace(sourceError)
                 ? VideoH3Localized(
                     "UiVideoH3StatusSourceUnavailable",
-                    "H3語化する画像が見つかりません。入力を選び直してください。")
+                    "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。")
                 : sourceError);
         }
         else if (string.IsNullOrEmpty(_videoH3PromptCandidate))
@@ -528,7 +567,7 @@ public partial class MainWindow
         {
             SetVideoH3PromptRewriteStatus(VideoH3Localized(
                 "UiVideoH3StatusStale",
-                "入力・画像・Model・Styleが変わりました。もう一度H3語化してください。"));
+                "入力・画像・Model・Styleが変わりました。表示中の候補は反映できますが、必要ならもう一度H3語化してください。"));
         }
         else if (!TryNormalizeAndValidateVideoH3Prompt(
                      _videoH3PromptCandidate,
@@ -550,7 +589,6 @@ public partial class MainWindow
     {
         if (!IsMiniMaxH3VideoModel(_videoModelId)
             || _videoH3RewritePending
-            || !IsVideoH3PromptCandidateFresh()
             || !TryNormalizeAndValidateVideoH3Prompt(
                 _videoH3PromptCandidate,
                 out string normalizedCandidate))
@@ -624,6 +662,38 @@ public partial class MainWindow
         return VideoH3SourceStampsEqual(sourceStamp, current);
     }
 
+    private bool TryCaptureVideoH3RewriteSourceStamp(
+        out VideoSourceChoice source,
+        out VideoH3SourceStamp stamp,
+        out string error)
+    {
+        if (_videoSourceChoice is null)
+        {
+            if (!TryGetVideoGenerationSourceTile(out Tile tile))
+            {
+                source = null!;
+                stamp = default;
+                error = VideoH3Localized(
+                    "UiVideoH3StatusSourceUnavailable",
+                    "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。");
+                return false;
+            }
+            if (!TryCaptureVideoSource(
+                    tile,
+                    requestedSource: null,
+                    out VideoSourceChoice recovered,
+                    out error))
+            {
+                source = null!;
+                stamp = default;
+                return false;
+            }
+            _videoSourceChoice = recovered;
+        }
+
+        return TryCaptureVideoH3SourceStamp(out source, out stamp, out error);
+    }
+
     private bool TryCaptureVideoH3SourceStamp(
         out VideoSourceChoice source,
         out VideoH3SourceStamp stamp,
@@ -632,9 +702,12 @@ public partial class MainWindow
         stamp = default;
         if (!TryRevalidateCapturedVideoSource(out source, out error))
         {
-            error = VideoH3Localized(
-                "UiVideoH3StatusSourceUnavailable",
-                "H3語化する画像が見つかりません。入力を選び直してください。");
+            if (string.IsNullOrWhiteSpace(error))
+            {
+                error = VideoH3Localized(
+                    "UiVideoH3StatusSourceUnavailable",
+                    "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。");
+            }
             return false;
         }
 
@@ -646,7 +719,7 @@ public partial class MainWindow
             {
                 error = VideoH3Localized(
                     "UiVideoH3StatusSourceUnavailable",
-                    "H3語化する画像が見つかりません。入力を選び直してください。");
+                    "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。");
                 return false;
             }
 
@@ -667,7 +740,7 @@ public partial class MainWindow
         {
             error = VideoH3Localized(
                 "UiVideoH3StatusSourceUnavailable",
-                "H3語化する画像が見つかりません。入力を選び直してください。");
+                "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。");
             source = null!;
             return false;
         }
@@ -877,6 +950,40 @@ public partial class MainWindow
     private string VideoH3Localized(string key, string fallback)
         => TryFindResource(key) as string ?? fallback;
 
+    private string DescribeVideoH3PromptRewriteFailure(
+        EnhancementApiResponse response)
+    {
+        string code = response.Payload is JsonElement payload
+            && TryGetStringProperty(payload, "code", out string? parsedCode)
+            ? parsedCode ?? ""
+            : "";
+        return code switch
+        {
+            "H3_PROMPT_REWRITE_BUSY" => VideoH3Localized(
+                "UiVideoH3StatusBusy",
+                "別のMiniMax語変換を処理中です。完了してからもう一度試してください。"),
+            "H3_PROMPT_REWRITE_TIMEOUT" => VideoH3Localized(
+                "UiVideoH3StatusTimedOut",
+                "H3語化が6分以内に完了しませんでした。入力プロンプトは変更していません。もう一度試してください。"),
+            "H3_PROMPT_REWRITE_INVALID_SOURCE" => VideoH3Localized(
+                "UiVideoH3StatusSourceUnavailable",
+                "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。"),
+            "H3_PROMPT_REWRITE_INVALID_MODEL_OUTPUT" => VideoH3Localized(
+                "UiVideoH3StatusInvalidResponse",
+                "H3語化の応答を確認できません。入力プロンプトは変更していません。"),
+            "H3_PROMPT_REWRITE_UNAVAILABLE" => VideoH3Localized(
+                "UiVideoH3StatusUnavailable",
+                "ローカルのH3語化を利用できません。動画ジョブは追加していません。"),
+            _ when response.StatusCode == 0 => VideoH3Localized(
+                "UiVideoH3StatusUnavailable",
+                "ローカルのH3語化を利用できません。動画ジョブは追加していません。"),
+            _ when !string.IsNullOrWhiteSpace(response.Error) => response.Error,
+            _ => VideoH3Localized(
+                "UiVideoH3StatusInvalidResponse",
+                "H3語化の応答を確認できません。入力プロンプトは変更していません。"),
+        };
+    }
+
     private void SetVideoH3PromptRewriteStatus(string message)
     {
         if (ModalVideoH3PromptRewriteStatusText is not null)
@@ -910,6 +1017,23 @@ public partial class MainWindow
         _videoH3RewritePending;
     public bool VideoH3PromptRewriteButtonEnabledForSmoke =>
         ModalVideoH3RewritePromptButton.IsEnabled;
+    public string VideoH3PromptRewriteButtonContentForSmoke =>
+        ModalVideoH3RewritePromptButton.Content?.ToString() ?? "";
+    public string VideoH3PromptRewriteButtonAutomationForSmoke =>
+        AutomationProperties.GetName(ModalVideoH3RewritePromptButton);
+    public string VideoH3PromptRewriteButtonHelpForSmoke =>
+        AutomationProperties.GetHelpText(ModalVideoH3RewritePromptButton);
+    public bool CancelVideoH3PromptRewriteForSmoke()
+    {
+        if (!_videoH3RewritePending)
+            return false;
+
+        ModalVideoH3RewritePromptButton.RaiseEvent(
+            new RoutedEventArgs(
+                Button.ClickEvent,
+                ModalVideoH3RewritePromptButton));
+        return !_videoH3RewritePending;
+    }
     public bool VideoH3PromptUndoEnabledForSmoke =>
         ModalVideoH3UndoPromptButton.IsEnabled;
     public string VideoH3PromptRewriteStatusForSmoke =>

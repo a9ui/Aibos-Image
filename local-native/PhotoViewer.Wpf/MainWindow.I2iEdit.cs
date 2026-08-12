@@ -603,7 +603,8 @@ public partial class MainWindow
             error = "拡大表示の画像を確認できません。";
             return false;
         }
-        if (SelectedTile() is not Tile { IsRealFile: true } tile)
+        if (!TryGetModalSourceTile(out Tile tile)
+            || !tile.IsRealFile)
         {
             error = "拡大表示中のOriginal画像を確認できません。";
             return false;
@@ -662,7 +663,8 @@ public partial class MainWindow
     {
         tile = null!;
         error = "AI編集の入力が変わりました。ボードを開き直してください。";
-        if (SelectedTile() is not Tile { IsRealFile: true } selected)
+        if (!TryGetModalSourceTile(out Tile selected)
+            || !selected.IsRealFile)
             return false;
         if (!File.Exists(selected.Path)
             || !TryResolveEnhancementSourceIdentity(selected.Path, out string sourceIdentity)
@@ -1084,7 +1086,9 @@ public partial class MainWindow
 
     private void UpdateModalI2iEditActionAvailability()
     {
-        if (ModalI2iEditButton is null || ModalContextI2iEdit is null)
+        if (ModalI2iEditButton is null
+            || ModalI2iEditSettingsButton is null
+            || ModalContextI2iEdit is null)
             return;
         bool available = TryResolveCurrentModalI2iEditSource(
             out _,
@@ -1098,7 +1102,11 @@ public partial class MainWindow
             : error;
         ModalI2iEditButton.IsEnabled = enabled;
         ModalI2iEditButton.ToolTip = available
-            ? "表示中のOriginalまたは実写化版からAI編集の種類を選択"
+            ? "表示中のOriginalまたは実写化版を実写編集"
+            : error;
+        ModalI2iEditSettingsButton.IsEnabled = enabled;
+        ModalI2iEditSettingsButton.ToolTip = available
+            ? "実写編集の種類を選択"
             : error;
         ModalI2iHairEditMenuItem.IsEnabled = enabled;
         ModalI2iHairEditMenuItem.ToolTip = hairToolTip;
@@ -1136,14 +1144,16 @@ public partial class MainWindow
 
     public bool ExerciseUnifiedI2iEditEntryForSmoke()
     {
-        if (ModalI2iEditButton.Content is not TextBlock { Text: "AI編集 ▾" }
-            || ModalI2iEditButton.ContextMenu is not ContextMenu picker
+        if (ModalI2iEditButton.Content is not TextBlock { Text: "実写編集" }
+            || ModalI2iEditSettingsButton.ContextMenu is not ContextMenu picker
             || picker.Items.Count != 2
             || !ReferenceEquals(picker.Items[0], ModalI2iHairEditMenuItem)
             || !ReferenceEquals(picker.Items[1], ModalI2iMultiTargetEditMenuItem)
             || ModalI2iHairEditMenuItem.IsEnabled
                 != ModalI2iEditButton.IsEnabled
             || ModalI2iMultiTargetEditMenuItem.IsEnabled
+                != ModalI2iEditButton.IsEnabled
+            || ModalI2iEditSettingsButton.IsEnabled
                 != ModalI2iEditButton.IsEnabled
             || ModalI2iV2EditButton.Visibility != Visibility.Collapsed
             || ModalContextI2iEditMenu.IsEnabled
@@ -1156,8 +1166,8 @@ public partial class MainWindow
         }
 
         OpenModalI2iEditPicker_Click(
-            ModalI2iEditButton,
-            new RoutedEventArgs(Button.ClickEvent, ModalI2iEditButton));
+            ModalI2iEditSettingsButton,
+            new RoutedEventArgs(Button.ClickEvent, ModalI2iEditSettingsButton));
         bool opened = picker.IsOpen;
         picker.IsOpen = false;
         return opened;
