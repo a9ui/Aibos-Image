@@ -149,6 +149,13 @@ try {
     Assert-True ($result.boundedLargeNulTextPath.passed -eq $true) '32 MiB SQLite TEXT path with embedded NUL was not rejected within the memory bound.'
     Assert-True ($result.boundedLargeNulTextPath.loadState -eq 'Invalid') 'Large NUL-bearing SQLite TEXT path was not classified as Invalid.'
     Assert-True ($result.boundedLargeNulTextPath.privateGrowthBytes -le $result.boundedLargeNulTextPath.privateGrowthBudgetBytes) 'Large SQLite TEXT path materialized beyond the bounded memory allowance.'
+    Assert-True ($result.noncanonicalRecursiveView.passed -eq $true) 'Recursive SQLite metadata VIEW was not rejected before execution.'
+    Assert-True ($result.noncanonicalRecursiveView.loadState -eq 'Invalid') 'Recursive SQLite metadata VIEW was not classified as Invalid.'
+    Assert-True ($result.noncanonicalRecursiveView.familyHashUnchanged -eq $true -and $result.noncanonicalRecursiveView.mtimeUnchanged -eq $true) 'Recursive SQLite metadata VIEW rejection changed the database family.'
+    Assert-True ($result.noncanonicalTriggerProtection.passed -eq $true) 'SQLite store_meta trigger was not rejected before ApplyChanges.'
+    Assert-True ($result.noncanonicalTriggerProtection.written -eq $false) 'SQLite trigger fixture reached the mutation path.'
+    Assert-True ($result.noncanonicalTriggerProtection.revisionBefore -eq $result.noncanonicalTriggerProtection.revisionAfter) 'Rejected SQLite trigger fixture changed the durable revision.'
+    Assert-True ($result.noncanonicalTriggerProtection.familyHashUnchanged -eq $true -and $result.noncanonicalTriggerProtection.mtimeUnchanged -eq $true) 'Rejected SQLite trigger fixture changed the database family.'
     Assert-True ($result.sqliteBudgetProtection.passed -eq $true) 'SQLite family/aggregate load and write budget scenario failed.'
     Assert-True ($result.sqliteBudgetProtection.aggregateLoadState -eq 'Invalid') 'Aggregate SQLite payload was not rejected before materialization.'
     Assert-True ($result.sqliteBudgetProtection.familyLoadState -eq 'Invalid') 'Oversized SQLite WAL family was not rejected before open.'
@@ -321,6 +328,10 @@ try {
         boundedMalformedRejected = $result.boundedMalformed.passed
         oversizedPromptRejected = $result.boundedOversizedPrompt.passed
         largeNulTextPathRejected = $result.boundedLargeNulTextPath.passed
+        recursiveViewRejectedBeforeExecution = $result.noncanonicalRecursiveView.passed
+        recursiveViewRejectMs = $result.noncanonicalRecursiveView.elapsedMs
+        triggerRejectedBeforeMutation = $result.noncanonicalTriggerProtection.passed
+        triggerFamilyHashUnchanged = $result.noncanonicalTriggerProtection.familyHashUnchanged
         orphanFamilyProtected = $result.orphanFamilyProtection.passed
         sqliteBudgetsEnforced = $result.sqliteBudgetProtection.passed
         oneRowApplyScaling = $result.oneRowApplyScaling.samples

@@ -25539,6 +25539,12 @@ public partial class App : Application
                         File.Delete(path);
                 }
 
+                static string MetadataIndexFamilyFingerprint(string path)
+                    => string.Join(
+                        "|",
+                        new[] { "", "-wal", "-shm", "-journal" }
+                            .Select(suffix => $"{suffix}:{FileFingerprint(path + suffix)}"));
+
                 static void RestoreMetadataIndexBytes(string path, byte[] bytes)
                 {
                     DeleteMetadataIndexSidecars(path);
@@ -25592,20 +25598,20 @@ public partial class App : Application
                     {
                         schema.CommandText = """
                             CREATE TABLE store_meta (
-                                singleton INTEGER NOT NULL PRIMARY KEY,
+                                singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
                                 schema_version INTEGER NOT NULL,
-                                entry_revision INTEGER NOT NULL
-                            );
+                                entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0)
+                            ) WITHOUT ROWID;
                             INSERT INTO store_meta(singleton, schema_version, entry_revision) VALUES (1, 1, 0);
                             CREATE TABLE metadata (
                                 path TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
-                                source_length INTEGER NOT NULL,
+                                source_length INTEGER NOT NULL CHECK (source_length >= 0),
                                 source_mtime_ticks INTEGER NOT NULL,
                                 source_ctime_ticks INTEGER NOT NULL,
-                                width INTEGER NOT NULL,
-                                height INTEGER NOT NULL,
+                                width INTEGER NOT NULL CHECK (width > 0),
+                                height INTEGER NOT NULL CHECK (height > 0),
                                 prompt_utf8 BLOB NOT NULL
-                            );
+                            ) WITHOUT ROWID;
                             """;
                         _ = schema.ExecuteNonQuery();
                     }
@@ -25712,11 +25718,11 @@ public partial class App : Application
                         VALUES (1, 2, 0, 1, 0, 0);
                         CREATE TABLE metadata (
                             path TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
-                            source_length INTEGER NOT NULL,
+                            source_length INTEGER NOT NULL CHECK (source_length >= 0),
                             source_mtime_ticks INTEGER NOT NULL,
                             source_ctime_ticks INTEGER NOT NULL,
-                            width INTEGER NOT NULL,
-                            height INTEGER NOT NULL,
+                            width INTEGER NOT NULL CHECK (width > 0),
+                            height INTEGER NOT NULL CHECK (height > 0),
                             prompt_utf8 BLOB NOT NULL
                         ) WITHOUT ROWID;
                         INSERT INTO metadata(
@@ -25733,6 +25739,66 @@ public partial class App : Application
                     command.Parameters.AddWithValue("$mtime", DateTime.UnixEpoch.Ticks);
                     command.Parameters.AddWithValue("$ctime", DateTime.UnixEpoch.Ticks);
                     _ = command.ExecuteNonQuery();
+                }
+
+                static void WriteRecursiveViewMetadataIndex(string path)
+                {
+                    using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWriteCreate);
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = """
+                        CREATE TABLE store_meta (
+                            singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+                            schema_version INTEGER NOT NULL,
+                            entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0),
+                            entry_count INTEGER NOT NULL CHECK (entry_count >= 0),
+                            total_path_bytes INTEGER NOT NULL CHECK (total_path_bytes >= 0),
+                            total_prompt_bytes INTEGER NOT NULL CHECK (total_prompt_bytes >= 0)
+                        ) WITHOUT ROWID;
+                        INSERT INTO store_meta(
+                            singleton, schema_version, entry_revision,
+                            entry_count, total_path_bytes, total_prompt_bytes)
+                        VALUES (1, 2, 0, 0, 0, 0);
+                        CREATE VIEW metadata(
+                            path, source_length, source_mtime_ticks, source_ctime_ticks,
+                            width, height, prompt_utf8)
+                        AS
+                        WITH RECURSIVE generated(value) AS (
+                            SELECT 1
+                            UNION ALL
+                            SELECT value + 1 FROM generated WHERE value < 1000000000
+                        )
+                        SELECT CASE
+                                   WHEN value = 1 THEN metadata_schema_must_not_execute(value)
+                                   ELSE 'C:\\generated-' || value || '.png'
+                               END,
+                               1, 621355968000000000, 621355968000000000, 1, 1, X''
+                        FROM generated;
+                        """;
+                    _ = command.ExecuteNonQuery();
+                }
+
+                static void AddStoreMetaMutationTrigger(string path)
+                {
+                    using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWrite);
+                    using (SqliteCommand command = connection.CreateCommand())
+                    {
+                        command.CommandText = """
+                            CREATE TRIGGER mutate_metadata_after_store_meta_update
+                            AFTER UPDATE ON store_meta
+                            BEGIN
+                                DELETE FROM metadata;
+                            END;
+                            """;
+                        _ = command.ExecuteNonQuery();
+                    }
+                    using (SqliteCommand checkpoint = connection.CreateCommand())
+                    {
+                        checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                        _ = checkpoint.ExecuteNonQuery();
+                    }
+                    using SqliteCommand journal = connection.CreateCommand();
+                    journal.CommandText = "PRAGMA journal_mode = DELETE;";
+                    _ = journal.ExecuteScalar();
                 }
 
                 var coldWindow = CreateSmokeWindow();
@@ -26299,6 +26365,105 @@ public partial class App : Application
                     ["fixtureRemoved"] = !File.Exists(largeNulPath),
                 };
 
+                string recursiveViewPath = Path.Combine(indexDirectory, "recursive-view.sqlite3");
+                MetadataIndexLoadResult? recursiveViewProbe = null;
+                string? recursiveViewEscapedException = null;
+                string recursiveViewFamilyBefore = "not-captured";
+                string recursiveViewFamilyAfter = "not-captured";
+                long recursiveViewWriteTicksBefore = 0;
+                long recursiveViewWriteTicksAfter = 0;
+                long recursiveViewElapsedMs = long.MaxValue;
+                try
+                {
+                    WriteRecursiveViewMetadataIndex(recursiveViewPath);
+                    recursiveViewFamilyBefore = MetadataIndexFamilyFingerprint(recursiveViewPath);
+                    recursiveViewWriteTicksBefore = File.GetLastWriteTimeUtc(recursiveViewPath).Ticks;
+                    var recursiveViewWatch = Stopwatch.StartNew();
+                    try
+                    {
+                        recursiveViewProbe = MetadataIndexStore.Load(recursiveViewPath, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        recursiveViewEscapedException = ex.ToString();
+                    }
+                    finally
+                    {
+                        recursiveViewWatch.Stop();
+                        recursiveViewElapsedMs = recursiveViewWatch.ElapsedMilliseconds;
+                    }
+                    recursiveViewFamilyAfter = MetadataIndexFamilyFingerprint(recursiveViewPath);
+                    recursiveViewWriteTicksAfter = File.GetLastWriteTimeUtc(recursiveViewPath).Ticks;
+                }
+                finally
+                {
+                    DeleteMetadataIndexFamily(recursiveViewPath);
+                }
+                bool recursiveViewPassed = recursiveViewEscapedException is null
+                    && recursiveViewProbe?.State == MetadataIndexLoadState.Invalid
+                    && (recursiveViewProbe.Error?.Contains("canonical schema", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && recursiveViewElapsedMs < 2000
+                    && string.Equals(recursiveViewFamilyBefore, recursiveViewFamilyAfter, StringComparison.Ordinal)
+                    && recursiveViewWriteTicksBefore == recursiveViewWriteTicksAfter
+                    && !File.Exists(recursiveViewPath);
+                var noncanonicalRecursiveView = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = recursiveViewPassed,
+                    ["loadState"] = recursiveViewProbe?.State.ToString(),
+                    ["error"] = recursiveViewProbe?.Error,
+                    ["escapedException"] = recursiveViewEscapedException,
+                    ["elapsedMs"] = recursiveViewElapsedMs,
+                    ["familyHashUnchanged"] = string.Equals(recursiveViewFamilyBefore, recursiveViewFamilyAfter, StringComparison.Ordinal),
+                    ["mtimeUnchanged"] = recursiveViewWriteTicksBefore == recursiveViewWriteTicksAfter,
+                    ["fixtureRemoved"] = !File.Exists(recursiveViewPath),
+                };
+
+                string triggerPath = Path.Combine(indexDirectory, "trigger-protection.sqlite3");
+                MetadataIndexSaveResult triggerSeedSave = MetadataIndexStore.Save(
+                    triggerPath,
+                    [rollbackProbeEntry],
+                    CancellationToken.None);
+                if (!triggerSeedSave.Ok || !triggerSeedSave.Written)
+                    throw new InvalidDataException($"trigger-protection seed failed: {triggerSeedSave.Error}");
+                AddStoreMetaMutationTrigger(triggerPath);
+                long triggerRevisionBefore = ReadMetadataIndexRevision(triggerPath);
+                string triggerFamilyBefore = MetadataIndexFamilyFingerprint(triggerPath);
+                long triggerWriteTicksBefore = File.GetLastWriteTimeUtc(triggerPath).Ticks;
+                MetadataIndexEntry triggerMutation = rollbackProbeEntry with
+                {
+                    PromptUtf8 = MetadataIndexStore.EncodePrompt("trigger-must-not-fire"),
+                };
+                MetadataIndexSaveResult triggerApply = MetadataIndexStore.ApplyChanges(
+                    triggerPath,
+                    [triggerMutation],
+                    Array.Empty<string>(),
+                    1,
+                    triggerRevisionBefore,
+                    CancellationToken.None);
+                long triggerRevisionAfter = ReadMetadataIndexRevision(triggerPath);
+                string triggerFamilyAfter = MetadataIndexFamilyFingerprint(triggerPath);
+                long triggerWriteTicksAfter = File.GetLastWriteTimeUtc(triggerPath).Ticks;
+                DeleteMetadataIndexFamily(triggerPath);
+                bool triggerProtectionPassed = !triggerApply.Ok
+                    && !triggerApply.Written
+                    && (triggerApply.Error?.Contains("canonical schema", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && triggerRevisionAfter == triggerRevisionBefore
+                    && string.Equals(triggerFamilyBefore, triggerFamilyAfter, StringComparison.Ordinal)
+                    && triggerWriteTicksBefore == triggerWriteTicksAfter
+                    && !File.Exists(triggerPath);
+                var noncanonicalTriggerProtection = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = triggerProtectionPassed,
+                    ["applyOk"] = triggerApply.Ok,
+                    ["written"] = triggerApply.Written,
+                    ["error"] = triggerApply.Error,
+                    ["revisionBefore"] = triggerRevisionBefore,
+                    ["revisionAfter"] = triggerRevisionAfter,
+                    ["familyHashUnchanged"] = string.Equals(triggerFamilyBefore, triggerFamilyAfter, StringComparison.Ordinal),
+                    ["mtimeUnchanged"] = triggerWriteTicksBefore == triggerWriteTicksAfter,
+                    ["fixtureRemoved"] = !File.Exists(triggerPath),
+                };
+
                 const long smokeFamilyBudget = 16L * 1024 * 1024;
                 const long smokeAggregateBudget = 32L * 1024;
                 MetadataIndexEntry[] aggregateEntries =
@@ -26700,6 +26865,8 @@ public partial class App : Application
                 result["boundedMalformed"] = boundedMalformed;
                 result["boundedOversizedPrompt"] = boundedOversizedPrompt;
                 result["boundedLargeNulTextPath"] = boundedLargeNulTextPath;
+                result["noncanonicalRecursiveView"] = noncanonicalRecursiveView;
+                result["noncanonicalTriggerProtection"] = noncanonicalTriggerProtection;
                 result["sqliteBudgetProtection"] = sqliteBudgetProtection;
                 result["oneRowApplyScaling"] = oneRowApplyScaling;
                 result["decodeFailurePreservation"] = failurePreservation;
@@ -26720,6 +26887,8 @@ public partial class App : Application
                     && malformedPassed
                     && oversizedPromptPassed
                     && largeNulPathPassed
+                    && recursiveViewPassed
+                    && triggerProtectionPassed
                     && sqliteBudgetProtectionPassed
                     && oneRowScalingPassed
                     && failurePreservationPassed
@@ -26793,7 +26962,7 @@ public partial class App : Application
                 result["environmentRestored"] = environmentRestored;
                 result["ok"] = allPassed;
                 result["message"] = allPassed
-                    ? "Persistent SQLite metadata index cold, legacy migration, live-reader-safe full rebuild, orphan-sidecar protection, bounded SQLite family and aggregate payloads, warm, row-delta invalidation, unreadable-target preservation, bounded malformed input, future-version commit guard, decode failure preservation, stale-entry pruning, cancellation, progress, and isolation contracts passed."
+                    ? "Persistent SQLite metadata index cold, legacy migration, canonical-schema rejection, live-reader-safe full rebuild, orphan-sidecar protection, bounded SQLite family and aggregate payloads, warm, row-delta invalidation, unreadable-target preservation, bounded malformed input, future-version commit guard, decode failure preservation, stale-entry pruning, cancellation, progress, and isolation contracts passed."
                     : result["message"] is string message && !string.Equals(message, "metadata index smoke did not complete", StringComparison.Ordinal)
                         ? message
                         : "one or more metadata index contracts failed";
