@@ -12,7 +12,8 @@ namespace PhotoViewer.Wpf;
 /// </summary>
 internal static class MetadataIndexStore
 {
-    private const int SchemaVersion = 1;
+    private const int LegacySqliteSchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private const int LegacyMagic = 0x494D5650; // "PVMI" in little-endian byte order.
     private const int LegacyVersion = 1;
     private const int MaximumEntryCount = 1_000_000;
@@ -30,10 +31,15 @@ internal static class MetadataIndexStore
         CREATE TABLE store_meta (
             singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
             schema_version INTEGER NOT NULL,
-            entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0)
+            entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0),
+            entry_count INTEGER NOT NULL CHECK (entry_count >= 0),
+            total_path_bytes INTEGER NOT NULL CHECK (total_path_bytes >= 0),
+            total_prompt_bytes INTEGER NOT NULL CHECK (total_prompt_bytes >= 0)
         ) WITHOUT ROWID;
-        INSERT INTO store_meta(singleton, schema_version, entry_revision)
-        VALUES (1, 1, 0);
+        INSERT INTO store_meta(
+            singleton, schema_version, entry_revision,
+            entry_count, total_path_bytes, total_prompt_bytes)
+        VALUES (1, 2, 0, 0, 0, 0);
         CREATE TABLE metadata (
             path TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
             source_length INTEGER NOT NULL CHECK (source_length >= 0),
@@ -138,16 +144,28 @@ internal static class MetadataIndexStore
                     fullPath,
                     $"metadata cache schema version {schemaVersion} is unsupported");
             }
-            if (schemaVersion != SchemaVersion)
+            if (schemaVersion < LegacySqliteSchemaVersion)
             {
                 return MetadataIndexLoadResult.Invalid(
                     fullPath,
                     $"metadata cache schema version {schemaVersion} was invalid");
             }
 
-            int count = ValidateStoredPayloadBudget(connection, transaction, maximumAggregateBytes);
+            StoreMetadata storeMetadata = ReadStoreMetadata(
+                connection,
+                transaction,
+                schemaVersion,
+                maximumAggregateBytes);
+            StoredPayloadBudget payloadBudget = ValidateStoredPayloadBudget(
+                connection,
+                transaction,
+                maximumAggregateBytes);
+            if (schemaVersion == SchemaVersion)
+                ValidateStoredMetadataMatchesPayload(storeMetadata, payloadBudget);
 
-            var entries = new Dictionary<string, MetadataIndexEntry>(count, StringComparer.OrdinalIgnoreCase);
+            var entries = new Dictionary<string, MetadataIndexEntry>(
+                payloadBudget.EntryCount,
+                StringComparer.OrdinalIgnoreCase);
             using SqliteCommand command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
@@ -203,10 +221,15 @@ internal static class MetadataIndexStore
                 }
             }
 
-            if (index != count)
+            if (index != payloadBudget.EntryCount)
                 return MetadataIndexLoadResult.Invalid(fullPath, "metadata cache row count changed during the read");
             transaction.Commit();
-            return MetadataIndexLoadResult.Loaded(fullPath, entries);
+            return MetadataIndexLoadResult.Loaded(
+                fullPath,
+                entries,
+                requiresMigration: schemaVersion < SchemaVersion,
+                sourcePath: schemaVersion < SchemaVersion ? fullPath : null,
+                entryRevision: storeMetadata.EntryRevision);
         }
         catch (OperationCanceledException)
         {
@@ -282,7 +305,7 @@ internal static class MetadataIndexStore
                         $"newer metadata cache schema version {existingVersion} was preserved at commit time",
                         MetadataIndexSaveDisposition.Protected);
                 }
-                if (existingVersion != SchemaVersion)
+                if (existingVersion < LegacySqliteSchemaVersion)
                 {
                     return MetadataIndexSaveResult.Failed(
                         fullPath,
@@ -296,6 +319,7 @@ internal static class MetadataIndexStore
                 using SqliteConnection connection = OpenConnection(fullPath, SqliteOpenMode.ReadWrite);
                 ConfigureWriter(connection);
                 using SqliteTransaction transaction = connection.BeginTransaction();
+                UpgradeSchemaForFullSave(connection, transaction, existingVersion);
                 using (SqliteCommand clear = connection.CreateCommand())
                 {
                     clear.Transaction = transaction;
@@ -305,31 +329,31 @@ internal static class MetadataIndexStore
                 using (SqliteCommand insert = CreateInsertCommand(connection, transaction, updateExisting: false))
                 {
                     int index = 0;
-                    long aggregateBytes = 0;
+                    StoredPayloadBudget payloadBudget = StoredPayloadBudget.Empty;
                     foreach (MetadataIndexEntry entry in entries)
                     {
                         if ((index & 255) == 0)
                             token.ThrowIfCancellationRequested();
-                        aggregateBytes = AccumulateEntryBudget(
+                        payloadBudget = AccumulateEntryBudget(
                             entry,
                             index,
-                            aggregateBytes,
+                            payloadBudget,
                             maximumAggregateBytes);
                         BindEntry(insert, entry);
                         if (insert.ExecuteNonQuery() != 1)
                             throw new InvalidDataException($"metadata cache entry {index} was not inserted exactly once");
                         index++;
                     }
+                    WriteFullStoreMetadata(connection, transaction, payloadBudget);
+                    StoredPayloadBudget verified = ValidateStoredPayloadBudget(
+                        connection,
+                        transaction,
+                        maximumAggregateBytes);
+                    ValidateStoredMetadataMatchesPayload(
+                        ReadStoreMetadata(connection, transaction, SchemaVersion, maximumAggregateBytes),
+                        verified);
                 }
-                using (SqliteCommand revision = connection.CreateCommand())
-                {
-                    revision.Transaction = transaction;
-                    revision.CommandText = "UPDATE store_meta SET entry_revision = entry_revision + 1 WHERE singleton = 1;";
-                    if (revision.ExecuteNonQuery() != 1)
-                        throw new InvalidDataException("metadata cache revision row was unavailable");
-                }
-                CheckExpectedEntryCount(connection, entries.Count, transaction);
-                _ = ValidateStoredPayloadBudget(connection, transaction, maximumAggregateBytes);
+                token.ThrowIfCancellationRequested();
                 transaction.Commit();
                 Checkpoint(connection, required: false);
                 return MetadataIndexSaveResult.Saved(fullPath, entries.Count);
@@ -352,23 +376,30 @@ internal static class MetadataIndexStore
                 using SqliteTransaction transaction = connection.BeginTransaction();
                 using SqliteCommand insert = CreateInsertCommand(connection, transaction, updateExisting: false);
                 int index = 0;
-                long aggregateBytes = 0;
+                StoredPayloadBudget payloadBudget = StoredPayloadBudget.Empty;
                 foreach (MetadataIndexEntry entry in entries)
                 {
                     if ((index & 255) == 0)
                         token.ThrowIfCancellationRequested();
-                    aggregateBytes = AccumulateEntryBudget(
+                    payloadBudget = AccumulateEntryBudget(
                         entry,
                         index,
-                        aggregateBytes,
+                        payloadBudget,
                         maximumAggregateBytes);
                     BindEntry(insert, entry);
                     if (insert.ExecuteNonQuery() != 1)
                         throw new InvalidDataException($"metadata cache entry {index} was not inserted exactly once");
                     index++;
                 }
-                CheckExpectedEntryCount(connection, entries.Count, transaction);
-                _ = ValidateStoredPayloadBudget(connection, transaction, maximumAggregateBytes);
+                WriteFullStoreMetadata(connection, transaction, payloadBudget);
+                StoredPayloadBudget verified = ValidateStoredPayloadBudget(
+                    connection,
+                    transaction,
+                    maximumAggregateBytes);
+                ValidateStoredMetadataMatchesPayload(
+                    ReadStoreMetadata(connection, transaction, SchemaVersion, maximumAggregateBytes),
+                    verified);
+                token.ThrowIfCancellationRequested();
                 transaction.Commit();
                 Checkpoint(connection, required: true);
             }
@@ -413,46 +444,82 @@ internal static class MetadataIndexStore
         IReadOnlyCollection<MetadataIndexEntry> upserts,
         IReadOnlyCollection<string> removedPaths,
         int expectedEntryCount,
+        long expectedRevision,
         CancellationToken token)
-        => ApplyChangesCore(
+    {
+        return ApplyChangesCore(
             path,
             upserts,
             removedPaths,
             expectedEntryCount,
+            expectedRevision,
             token,
             MaximumSqliteFamilyBytes,
-            MaximumSqliteAggregateBytes);
+            MaximumSqliteAggregateBytes,
+            out _);
+    }
 
     internal static MetadataIndexSaveResult ApplyChangesWithBudgetForSmoke(
         string path,
         IReadOnlyCollection<MetadataIndexEntry> upserts,
         IReadOnlyCollection<string> removedPaths,
         int expectedEntryCount,
+        long expectedRevision,
         CancellationToken token,
         long maximumFamilyBytes,
         long maximumAggregateBytes)
-        => ApplyChangesCore(
+    {
+        return ApplyChangesCore(
             path,
             upserts,
             removedPaths,
             expectedEntryCount,
+            expectedRevision,
             token,
             maximumFamilyBytes,
-            maximumAggregateBytes);
+            maximumAggregateBytes,
+            out _);
+    }
+
+    internal static MetadataIndexApplySmokeResult ApplyChangesWithDiagnosticsForSmoke(
+        string path,
+        IReadOnlyCollection<MetadataIndexEntry> upserts,
+        IReadOnlyCollection<string> removedPaths,
+        int expectedEntryCount,
+        long expectedRevision,
+        CancellationToken token)
+    {
+        MetadataIndexSaveResult result = ApplyChangesCore(
+            path,
+            upserts,
+            removedPaths,
+            expectedEntryCount,
+            expectedRevision,
+            token,
+            MaximumSqliteFamilyBytes,
+            MaximumSqliteAggregateBytes,
+            out MetadataIndexApplyDiagnostics diagnostics);
+        return new MetadataIndexApplySmokeResult(result, diagnostics);
+    }
 
     private static MetadataIndexSaveResult ApplyChangesCore(
         string path,
         IReadOnlyCollection<MetadataIndexEntry> upserts,
         IReadOnlyCollection<string> removedPaths,
         int expectedEntryCount,
+        long expectedRevision,
         CancellationToken token,
         long maximumFamilyBytes,
-        long maximumAggregateBytes)
+        long maximumAggregateBytes,
+        out MetadataIndexApplyDiagnostics diagnostics)
     {
+        diagnostics = MetadataIndexApplyDiagnostics.Empty;
         string fullPath = Path.GetFullPath(path);
         ValidateBudgets(maximumFamilyBytes, maximumAggregateBytes);
         if (expectedEntryCount < 0 || expectedEntryCount > MaximumEntryCount)
             return MetadataIndexSaveResult.Failed(fullPath, $"entry count {expectedEntryCount} exceeds the safe bound");
+        if (expectedRevision < 0 || expectedRevision == long.MaxValue)
+            return MetadataIndexSaveResult.Failed(fullPath, $"entry revision {expectedRevision} is outside the safe bound");
         if (upserts.Count == 0 && removedPaths.Count == 0)
             return MetadataIndexSaveResult.Preserved(fullPath, expectedEntryCount, "metadata cache required no row changes");
 
@@ -479,25 +546,62 @@ internal static class MetadataIndexStore
                     MetadataIndexSaveDisposition.Protected);
             }
             if (existingVersion != SchemaVersion)
-                return MetadataIndexSaveResult.Failed(fullPath, $"metadata cache schema version {existingVersion} was invalid");
+            {
+                return MetadataIndexSaveResult.Failed(
+                    fullPath,
+                    $"metadata cache schema version {existingVersion} requires a full rebuild");
+            }
 
             using SqliteConnection connection = OpenConnection(fullPath, SqliteOpenMode.ReadWrite);
             ConfigureWriter(connection);
             using SqliteTransaction transaction = connection.BeginTransaction();
+            EnsureOctetLengthAvailable(connection, transaction);
+            StoreMetadata initialMetadata = ReadStoreMetadata(
+                connection,
+                transaction,
+                SchemaVersion,
+                maximumAggregateBytes);
+            if (initialMetadata.EntryRevision != expectedRevision)
+            {
+                throw new InvalidDataException(
+                    $"metadata cache revision changed from expected {expectedRevision} to {initialMetadata.EntryRevision}");
+            }
+
             using SqliteCommand upsert = CreateInsertCommand(connection, transaction, updateExisting: true);
             int index = 0;
-            long aggregateBytes = 0;
+            int rowProbeCount = 0;
+            int entryCount = initialMetadata.EntryCount;
+            long totalPathBytes = initialMetadata.TotalPathBytes;
+            long totalPromptBytes = initialMetadata.TotalPromptBytes;
+            var changedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (MetadataIndexEntry entry in upserts)
             {
                 if ((index & 255) == 0)
                     token.ThrowIfCancellationRequested();
-                aggregateBytes = AccumulateEntryBudget(
-                    entry,
-                    index,
-                    aggregateBytes,
-                    maximumAggregateBytes);
+                if (!changedPaths.Add(entry.Path))
+                    throw new InvalidDataException($"metadata cache delta duplicated path {entry.Path}");
+                MetadataRowPayload newPayload = MeasureEntryPayload(entry, index);
+                bool existed = TryReadStoredRowPayload(
+                    connection,
+                    transaction,
+                    entry.Path,
+                    out MetadataRowPayload oldPayload);
+                rowProbeCount++;
+                if (existed)
+                {
+                    totalPathBytes = ReplacePayloadComponent(totalPathBytes, oldPayload.PathBytes, newPayload.PathBytes);
+                    totalPromptBytes = ReplacePayloadComponent(totalPromptBytes, oldPayload.PromptBytes, newPayload.PromptBytes);
+                }
+                else
+                {
+                    entryCount = checked(entryCount + 1);
+                    totalPathBytes = checked(totalPathBytes + newPayload.PathBytes);
+                    totalPromptBytes = checked(totalPromptBytes + newPayload.PromptBytes);
+                }
+                ValidatePayloadTotals(entryCount, totalPathBytes, totalPromptBytes, maximumAggregateBytes);
                 BindEntry(upsert, entry);
-                _ = upsert.ExecuteNonQuery();
+                if (upsert.ExecuteNonQuery() != 1)
+                    throw new InvalidDataException($"metadata cache entry {index} was not upserted exactly once");
                 index++;
             }
 
@@ -508,21 +612,49 @@ internal static class MetadataIndexStore
             foreach (string pathToRemove in removedPaths)
             {
                 token.ThrowIfCancellationRequested();
+                ValidateRemovalPath(pathToRemove);
+                if (!changedPaths.Add(pathToRemove))
+                    throw new InvalidDataException($"metadata cache delta duplicated path {pathToRemove}");
+                bool existed = TryReadStoredRowPayload(
+                    connection,
+                    transaction,
+                    pathToRemove,
+                    out MetadataRowPayload oldPayload);
+                rowProbeCount++;
+                if (!existed)
+                    continue;
+                entryCount = checked(entryCount - 1);
+                totalPathBytes = checked(totalPathBytes - oldPayload.PathBytes);
+                totalPromptBytes = checked(totalPromptBytes - oldPayload.PromptBytes);
+                ValidatePayloadTotals(entryCount, totalPathBytes, totalPromptBytes, maximumAggregateBytes);
                 removePath.Value = pathToRemove;
-                _ = remove.ExecuteNonQuery();
+                if (remove.ExecuteNonQuery() != 1)
+                    throw new InvalidDataException($"metadata cache path {pathToRemove} was not removed exactly once");
             }
 
-            using (SqliteCommand revision = connection.CreateCommand())
+            if (entryCount != expectedEntryCount)
             {
-                revision.Transaction = transaction;
-                revision.CommandText = "UPDATE store_meta SET entry_revision = entry_revision + 1 WHERE singleton = 1;";
-                if (revision.ExecuteNonQuery() != 1)
-                    throw new InvalidDataException("metadata cache revision row was unavailable");
+                throw new InvalidDataException(
+                    $"metadata cache delta produced {entryCount:N0} rows; expected {expectedEntryCount:N0}");
             }
-            CheckExpectedEntryCount(connection, expectedEntryCount, transaction);
-            _ = ValidateStoredPayloadBudget(connection, transaction, maximumAggregateBytes);
+
+            token.ThrowIfCancellationRequested();
+            UpdateStoreMetadataWithCas(
+                connection,
+                transaction,
+                initialMetadata,
+                entryCount,
+                totalPathBytes,
+                totalPromptBytes,
+                expectedRevision);
+            token.ThrowIfCancellationRequested();
             transaction.Commit();
             Checkpoint(connection, required: false);
+            diagnostics = new MetadataIndexApplyDiagnostics(
+                RowProbeCount: rowProbeCount,
+                FullTableValidationCount: 0,
+                InitialEntryCount: initialMetadata.EntryCount,
+                FinalEntryCount: entryCount);
             return MetadataIndexSaveResult.Saved(fullPath, expectedEntryCount);
         }
         catch (OperationCanceledException)
@@ -596,24 +728,114 @@ internal static class MetadataIndexStore
         return (int)raw;
     }
 
-    private static int ValidateStoredPayloadBudget(
+    private static void UpgradeSchemaForFullSave(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        int existingVersion)
+    {
+        if (existingVersion == SchemaVersion)
+            return;
+        if (existingVersion != LegacySqliteSchemaVersion)
+            throw new InvalidDataException($"metadata cache schema version {existingVersion} cannot be upgraded");
+
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            ALTER TABLE store_meta
+                ADD COLUMN entry_count INTEGER NOT NULL DEFAULT 0 CHECK (entry_count >= 0);
+            ALTER TABLE store_meta
+                ADD COLUMN total_path_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_path_bytes >= 0);
+            ALTER TABLE store_meta
+                ADD COLUMN total_prompt_bytes INTEGER NOT NULL DEFAULT 0 CHECK (total_prompt_bytes >= 0);
+            UPDATE store_meta SET schema_version = 2 WHERE singleton = 1;
+            """;
+        _ = command.ExecuteNonQuery();
+    }
+
+    private static void WriteFullStoreMetadata(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        StoredPayloadBudget payloadBudget)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE store_meta
+            SET schema_version = $schemaVersion,
+                entry_revision = entry_revision + 1,
+                entry_count = $entryCount,
+                total_path_bytes = $totalPathBytes,
+                total_prompt_bytes = $totalPromptBytes
+            WHERE singleton = 1
+              AND typeof(entry_revision) = 'integer'
+              AND entry_revision >= 0
+              AND entry_revision < $maximumRevision;
+            """;
+        command.Parameters.AddWithValue("$schemaVersion", SchemaVersion);
+        command.Parameters.AddWithValue("$entryCount", payloadBudget.EntryCount);
+        command.Parameters.AddWithValue("$totalPathBytes", payloadBudget.TotalPathBytes);
+        command.Parameters.AddWithValue("$totalPromptBytes", payloadBudget.TotalPromptBytes);
+        command.Parameters.AddWithValue("$maximumRevision", long.MaxValue);
+        if (command.ExecuteNonQuery() != 1)
+            throw new InvalidDataException("metadata cache revision row was unavailable or exhausted");
+    }
+
+    private static StoreMetadata ReadStoreMetadata(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        int schemaVersion,
+        long maximumAggregateBytes)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = schemaVersion >= SchemaVersion
+            ? """
+                SELECT entry_revision,
+                       entry_count,
+                       total_path_bytes,
+                       total_prompt_bytes
+                FROM store_meta
+                WHERE singleton = 1;
+                """
+            : "SELECT entry_revision FROM store_meta WHERE singleton = 1;";
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
+            throw new InvalidDataException("metadata cache metadata row was unavailable");
+
+        long revision = ReadNonnegativeInt64(reader, 0, "entry revision");
+        if (revision == long.MaxValue)
+            throw new InvalidDataException("metadata cache entry revision was exhausted");
+        if (schemaVersion < SchemaVersion)
+            return new StoreMetadata(revision, 0, 0, 0);
+
+        long entryCountRaw = ReadNonnegativeInt64(reader, 1, "stored entry count");
+        if (entryCountRaw > MaximumEntryCount)
+            throw new InvalidDataException($"metadata cache stored entry count {entryCountRaw} is outside the safe bound");
+        long totalPathBytes = ReadNonnegativeInt64(reader, 2, "stored aggregate path length");
+        long totalPromptBytes = ReadNonnegativeInt64(reader, 3, "stored aggregate prompt length");
+        ValidatePayloadTotals((int)entryCountRaw, totalPathBytes, totalPromptBytes, maximumAggregateBytes);
+        return new StoreMetadata(revision, (int)entryCountRaw, totalPathBytes, totalPromptBytes);
+    }
+
+    private static StoredPayloadBudget ValidateStoredPayloadBudget(
         SqliteConnection connection,
         SqliteTransaction transaction,
         long maximumAggregateBytes)
     {
+        EnsureOctetLengthAvailable(connection, transaction);
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             SELECT COUNT(*),
                    COALESCE(MAX(CASE
-                       WHEN typeof(path) = 'text' AND length(path) <= $maximumPathBytes
-                       THEN length(CAST(path AS BLOB)) ELSE $rejectedPathBytes END), 0),
+                       WHEN typeof(path) = 'text'
+                       THEN octet_length(path) ELSE $rejectedPathBytes END), 0),
                    COALESCE(MAX(CASE
                        WHEN typeof(prompt_utf8) = 'blob'
                        THEN length(prompt_utf8) ELSE $rejectedPromptBytes END), 0),
                    COALESCE(SUM(CASE
-                       WHEN typeof(path) = 'text' AND length(path) <= $maximumPathBytes
-                       THEN length(CAST(path AS BLOB)) ELSE $rejectedPathBytes END), 0),
+                       WHEN typeof(path) = 'text'
+                       THEN octet_length(path) ELSE $rejectedPathBytes END), 0),
                    COALESCE(SUM(CASE
                        WHEN typeof(prompt_utf8) = 'blob'
                        THEN length(prompt_utf8) ELSE $rejectedPromptBytes END), 0),
@@ -628,7 +850,6 @@ internal static class MetadataIndexStore
                        THEN 0 ELSE 1 END), 0)
             FROM metadata;
             """;
-        command.Parameters.AddWithValue("$maximumPathBytes", MaximumPathBytes);
         command.Parameters.AddWithValue("$rejectedPathBytes", (long)MaximumPathBytes + 1);
         command.Parameters.AddWithValue("$rejectedPromptBytes", (long)MaximumPromptBytes + 1);
         using SqliteDataReader reader = command.ExecuteReader();
@@ -650,14 +871,125 @@ internal static class MetadataIndexStore
             throw new InvalidDataException($"metadata cache prompt length {maximumPromptBytes} is outside the safe bound");
         if (invalidTypeCount != 0)
             throw new InvalidDataException($"metadata cache contained {invalidTypeCount} row(s) with invalid SQLite value types");
-        if (totalPathBytes > maximumAggregateBytes
+        ValidatePayloadTotals((int)countRaw, totalPathBytes, totalPromptBytes, maximumAggregateBytes);
+        return new StoredPayloadBudget((int)countRaw, totalPathBytes, totalPromptBytes);
+    }
+
+    private static void EnsureOctetLengthAvailable(
+        SqliteConnection connection,
+        SqliteTransaction transaction)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT octet_length(CAST(X'780079' AS TEXT));";
+        object? value = command.ExecuteScalar();
+        if (value is not long length || length != 3)
+            throw new InvalidDataException("metadata cache requires SQLite octet_length(TEXT) support");
+    }
+
+    private static void ValidateStoredMetadataMatchesPayload(
+        StoreMetadata metadata,
+        StoredPayloadBudget payload)
+    {
+        if (metadata.EntryCount != payload.EntryCount
+            || metadata.TotalPathBytes != payload.TotalPathBytes
+            || metadata.TotalPromptBytes != payload.TotalPromptBytes)
+        {
+            throw new InvalidDataException(
+                "metadata cache aggregate counters did not match the stored rows");
+        }
+    }
+
+    private static bool TryReadStoredRowPayload(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string path,
+        out MetadataRowPayload payload)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT CASE
+                       WHEN typeof(path) = 'text' THEN octet_length(path)
+                       ELSE -1
+                   END,
+                   CASE
+                       WHEN typeof(prompt_utf8) = 'blob' THEN length(prompt_utf8)
+                       ELSE -1
+                   END
+            FROM metadata
+            WHERE path = $path COLLATE NOCASE;
+            """;
+        command.Parameters.AddWithValue("$path", path);
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            payload = default;
+            return false;
+        }
+
+        long pathBytes = ReadNonnegativeInt64(reader, 0, "row path length");
+        long promptBytes = ReadNonnegativeInt64(reader, 1, "row prompt length");
+        if (pathBytes > MaximumPathBytes || promptBytes > MaximumPromptBytes)
+            throw new InvalidDataException("metadata cache changed row was outside the safe bound");
+        payload = new MetadataRowPayload(pathBytes, promptBytes);
+        return true;
+    }
+
+    private static void UpdateStoreMetadataWithCas(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        StoreMetadata initial,
+        int entryCount,
+        long totalPathBytes,
+        long totalPromptBytes,
+        long expectedRevision)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE store_meta
+            SET entry_revision = entry_revision + 1,
+                entry_count = $entryCount,
+                total_path_bytes = $totalPathBytes,
+                total_prompt_bytes = $totalPromptBytes
+            WHERE singleton = 1
+              AND schema_version = $schemaVersion
+              AND entry_revision = $expectedRevision
+              AND entry_count = $initialEntryCount
+              AND total_path_bytes = $initialPathBytes
+              AND total_prompt_bytes = $initialPromptBytes;
+            """;
+        command.Parameters.AddWithValue("$entryCount", entryCount);
+        command.Parameters.AddWithValue("$totalPathBytes", totalPathBytes);
+        command.Parameters.AddWithValue("$totalPromptBytes", totalPromptBytes);
+        command.Parameters.AddWithValue("$schemaVersion", SchemaVersion);
+        command.Parameters.AddWithValue("$expectedRevision", expectedRevision);
+        command.Parameters.AddWithValue("$initialEntryCount", initial.EntryCount);
+        command.Parameters.AddWithValue("$initialPathBytes", initial.TotalPathBytes);
+        command.Parameters.AddWithValue("$initialPromptBytes", initial.TotalPromptBytes);
+        if (command.ExecuteNonQuery() != 1)
+            throw new InvalidDataException("metadata cache aggregate metadata changed before commit");
+    }
+
+    private static long ReplacePayloadComponent(long total, long oldValue, long newValue)
+        => checked(checked(total - oldValue) + newValue);
+
+    private static void ValidatePayloadTotals(
+        int entryCount,
+        long totalPathBytes,
+        long totalPromptBytes,
+        long maximumAggregateBytes)
+    {
+        if (entryCount < 0 || entryCount > MaximumEntryCount)
+            throw new InvalidDataException($"metadata cache entry count {entryCount} is outside the safe bound");
+        if (totalPathBytes < 0 || totalPromptBytes < 0
+            || totalPathBytes > maximumAggregateBytes
             || totalPromptBytes > maximumAggregateBytes - totalPathBytes)
         {
             throw new InvalidDataException(
                 $"metadata cache aggregate path/prompt payload is outside the {maximumAggregateBytes:N0}-byte safe bound");
         }
-
-        return (int)countRaw;
     }
 
     private static long ReadNonnegativeInt64(SqliteDataReader reader, int ordinal, string name)
@@ -665,29 +997,6 @@ internal static class MetadataIndexStore
         if (reader.GetValue(ordinal) is not long value || value < 0)
             throw new InvalidDataException($"metadata cache {name} was invalid");
         return value;
-    }
-
-    private static int ReadEntryCount(
-        SqliteConnection connection,
-        SqliteTransaction? transaction = null)
-    {
-        using SqliteCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT COUNT(*) FROM metadata;";
-        object? value = command.ExecuteScalar();
-        if (value is not long raw || raw < 0 || raw > int.MaxValue)
-            throw new InvalidDataException("metadata cache entry count was invalid");
-        return (int)raw;
-    }
-
-    private static void CheckExpectedEntryCount(
-        SqliteConnection connection,
-        int expectedEntryCount,
-        SqliteTransaction? transaction = null)
-    {
-        int actual = ReadEntryCount(connection, transaction);
-        if (actual != expectedEntryCount)
-            throw new InvalidDataException($"metadata cache contained {actual:N0} rows; expected {expectedEntryCount:N0}");
     }
 
     private static SqliteCommand CreateInsertCommand(
@@ -704,6 +1013,7 @@ internal static class MetadataIndexStore
                     width, height, prompt_utf8)
                 VALUES ($path, $length, $mtime, $ctime, $width, $height, $prompt)
                 ON CONFLICT(path) DO UPDATE SET
+                    path = excluded.path,
                     source_length = excluded.source_length,
                     source_mtime_ticks = excluded.source_mtime_ticks,
                     source_ctime_ticks = excluded.source_ctime_ticks,
@@ -738,21 +1048,37 @@ internal static class MetadataIndexStore
         command.Parameters["$prompt"].Value = entry.PromptUtf8;
     }
 
-    private static long AccumulateEntryBudget(
+    private static StoredPayloadBudget AccumulateEntryBudget(
         MetadataIndexEntry entry,
         int index,
-        long aggregateBytes,
+        StoredPayloadBudget payloadBudget,
         long maximumAggregateBytes)
     {
+        MetadataRowPayload row = MeasureEntryPayload(entry, index);
+        var next = new StoredPayloadBudget(
+            checked(payloadBudget.EntryCount + 1),
+            checked(payloadBudget.TotalPathBytes + row.PathBytes),
+            checked(payloadBudget.TotalPromptBytes + row.PromptBytes));
+        ValidatePayloadTotals(
+            next.EntryCount,
+            next.TotalPathBytes,
+            next.TotalPromptBytes,
+            maximumAggregateBytes);
+        return next;
+    }
+
+    private static MetadataRowPayload MeasureEntryPayload(MetadataIndexEntry entry, int index)
+    {
         ValidateEntry(entry, index);
-        long rowBytes = StrictUtf8.GetByteCount(entry.Path) + (long)entry.PromptUtf8.Length;
-        if (rowBytes > maximumAggregateBytes
-            || aggregateBytes > maximumAggregateBytes - rowBytes)
-        {
-            throw new InvalidDataException(
-                $"metadata cache aggregate path/prompt payload is outside the {maximumAggregateBytes:N0}-byte safe bound");
-        }
-        return aggregateBytes + rowBytes;
+        return new MetadataRowPayload(
+            StrictUtf8.GetByteCount(entry.Path),
+            entry.PromptUtf8.Length);
+    }
+
+    private static void ValidateRemovalPath(string path)
+    {
+        if (!Path.IsPathFullyQualified(path) || StrictUtf8.GetByteCount(path) > MaximumPathBytes)
+            throw new InvalidDataException("metadata cache removal path was invalid or outside the safe bound");
     }
 
     private static void ValidateEntry(MetadataIndexEntry entry, int index)
@@ -1085,6 +1411,22 @@ internal static class MetadataIndexStore
             // A failed cleanup does not justify touching the last valid cache.
         }
     }
+
+    private readonly record struct MetadataRowPayload(long PathBytes, long PromptBytes);
+
+    private readonly record struct StoredPayloadBudget(
+        int EntryCount,
+        long TotalPathBytes,
+        long TotalPromptBytes)
+    {
+        public static StoredPayloadBudget Empty => new(0, 0, 0);
+    }
+
+    private readonly record struct StoreMetadata(
+        long EntryRevision,
+        int EntryCount,
+        long TotalPathBytes,
+        long TotalPromptBytes);
 }
 
 internal sealed record MetadataIndexEntry(
@@ -1108,26 +1450,41 @@ internal sealed record MetadataIndexLoadResult(
     IReadOnlyDictionary<string, MetadataIndexEntry> Entries,
     string? Error,
     bool RequiresMigration,
-    string? SourcePath)
+    string? SourcePath,
+    long EntryRevision)
 {
     public static MetadataIndexLoadResult Missing(string path)
-        => new(path, MetadataIndexLoadState.Missing, EmptyEntries(), null, false, null);
+        => new(path, MetadataIndexLoadState.Missing, EmptyEntries(), null, false, null, -1);
 
     public static MetadataIndexLoadResult Loaded(
         string path,
         IReadOnlyDictionary<string, MetadataIndexEntry> entries,
         bool requiresMigration = false,
-        string? sourcePath = null)
-        => new(path, MetadataIndexLoadState.Loaded, entries, null, requiresMigration, sourcePath);
+        string? sourcePath = null,
+        long entryRevision = -1)
+        => new(path, MetadataIndexLoadState.Loaded, entries, null, requiresMigration, sourcePath, entryRevision);
 
     public static MetadataIndexLoadResult Invalid(string path, string error, string? sourcePath = null)
-        => new(path, MetadataIndexLoadState.Invalid, EmptyEntries(), error, false, sourcePath);
+        => new(path, MetadataIndexLoadState.Invalid, EmptyEntries(), error, false, sourcePath, -1);
 
     public static MetadataIndexLoadResult Unsupported(string path, string error, string? sourcePath = null)
-        => new(path, MetadataIndexLoadState.Unsupported, EmptyEntries(), error, false, sourcePath);
+        => new(path, MetadataIndexLoadState.Unsupported, EmptyEntries(), error, false, sourcePath, -1);
 
     private static IReadOnlyDictionary<string, MetadataIndexEntry> EmptyEntries()
         => new Dictionary<string, MetadataIndexEntry>(StringComparer.OrdinalIgnoreCase);
+}
+
+internal sealed record MetadataIndexApplySmokeResult(
+    MetadataIndexSaveResult Result,
+    MetadataIndexApplyDiagnostics Diagnostics);
+
+internal sealed record MetadataIndexApplyDiagnostics(
+    int RowProbeCount,
+    int FullTableValidationCount,
+    int InitialEntryCount,
+    int FinalEntryCount)
+{
+    public static MetadataIndexApplyDiagnostics Empty => new(0, 0, 0, 0);
 }
 
 internal enum MetadataIndexLoadState

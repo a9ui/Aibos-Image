@@ -100,9 +100,12 @@ try {
     Assert-True ($result.legacyMigration.legacyDetected -eq $true) 'Legacy metadata index was not detected as requiring migration.'
     Assert-True ($result.legacyMigration.sqliteCreated -eq $true) 'Legacy metadata index was not migrated to SQLite.'
     Assert-True ($result.legacyMigration.legacyPreserved -eq $true) 'Legacy metadata evidence was unexpectedly removed during migration.'
+    Assert-True ($result.sqliteV1Migration.passed -eq $true) 'SQLite schema v1-to-v2 aggregate-counter migration scenario failed.'
+    Assert-True ($result.sqliteV1Migration.beforeRevision -eq 7 -and $result.sqliteV1Migration.afterRevision -eq 8) 'SQLite schema migration did not preserve and advance the durable revision exactly once.'
     Assert-True ($result.rowDeltaRollback.passed -eq $true) 'Rejected SQLite row delta did not roll back atomically.'
     Assert-True ($result.rowDeltaRollback.revisionBefore -eq $result.rowDeltaRollback.revisionAfter) 'Rejected SQLite row delta changed the durable revision.'
     Assert-True ($result.concurrentReaderRebuild.passed -eq $true) 'Live-reader SQLite full rebuild scenario failed.'
+    Assert-True ($result.concurrentReaderRebuild.staleRevisionRejected -eq $true) 'Stale cross-process metadata revision was not rejected by CAS.'
     Assert-True ($result.concurrentReaderRebuild.walPresentAfterDelta -eq $true) 'Concurrent metadata fixture did not retain committed WAL frames behind the live reader.'
     Assert-True ($result.concurrentReaderRebuild.walPreservedDuringFullSave -eq $true) 'Full rebuild detached or deleted the live SQLite WAL family.'
     Assert-True ($result.concurrentReaderRebuild.readerSnapshotCount -eq $Count -and $result.concurrentReaderRebuild.durableEntryCount -eq $Count) 'Concurrent reader/full rebuild did not preserve both snapshots.'
@@ -143,6 +146,9 @@ try {
     Assert-True ($result.boundedOversizedPrompt.passed -eq $true) 'Oversized SQLite prompt was not rejected before materialization.'
     Assert-True ($result.boundedOversizedPrompt.loadState -eq 'Invalid') 'Oversized SQLite prompt was not classified as Invalid.'
     Assert-True ($null -eq $result.boundedOversizedPrompt.escapedException) 'Oversized SQLite prompt escaped MetadataIndexStore.Load as an exception.'
+    Assert-True ($result.boundedLargeNulTextPath.passed -eq $true) '32 MiB SQLite TEXT path with embedded NUL was not rejected within the memory bound.'
+    Assert-True ($result.boundedLargeNulTextPath.loadState -eq 'Invalid') 'Large NUL-bearing SQLite TEXT path was not classified as Invalid.'
+    Assert-True ($result.boundedLargeNulTextPath.privateGrowthBytes -le $result.boundedLargeNulTextPath.privateGrowthBudgetBytes) 'Large SQLite TEXT path materialized beyond the bounded memory allowance.'
     Assert-True ($result.sqliteBudgetProtection.passed -eq $true) 'SQLite family/aggregate load and write budget scenario failed.'
     Assert-True ($result.sqliteBudgetProtection.aggregateLoadState -eq 'Invalid') 'Aggregate SQLite payload was not rejected before materialization.'
     Assert-True ($result.sqliteBudgetProtection.familyLoadState -eq 'Invalid') 'Oversized SQLite WAL family was not rejected before open.'
@@ -151,6 +157,9 @@ try {
     Assert-True ($result.sqliteBudgetProtection.applyRevisionBefore -eq $result.sqliteBudgetProtection.applyRevisionAfter) 'Rejected oversized ApplyChanges changed the durable revision.'
     Assert-True ($null -eq $result.sqliteBudgetProtection.escapedException) 'SQLite budget enforcement escaped as an exception.'
     Assert-True ($result.sqliteBudgetProtection.residueFree -eq $true) 'SQLite budget enforcement left temp/lock residue.'
+    Assert-True ($result.oneRowApplyScaling.passed -eq $true) '10k/50k/140k one-row ApplyChanges scaling gate failed.'
+    Assert-True (($result.oneRowApplyScaling.samples | Where-Object { @($_.rowProbeCounts | Where-Object { $_ -ne 1 }).Count -gt 0 }).Count -eq 0) 'One-row ApplyChanges probed more than the changed row.'
+    Assert-True (($result.oneRowApplyScaling.samples | Where-Object { @($_.fullTableValidationCounts | Where-Object { $_ -ne 0 }).Count -gt 0 }).Count -eq 0) 'One-row ApplyChanges performed a full-table validation pass.'
 
     Assert-True ($result.decodeFailurePreservation.passed -eq $true) 'Decode-failure last-complete-index preservation scenario failed.'
     Assert-True ($result.decodeFailurePreservation.cacheHits -eq ($Count - 1) -and $result.decodeFailurePreservation.cacheMisses -eq 1) 'Decode-failure scenario did not produce N-1 hits and one miss.'
@@ -311,8 +320,10 @@ try {
         commitTimeFutureGuard = $result.commitTimeFutureGuard.passed
         boundedMalformedRejected = $result.boundedMalformed.passed
         oversizedPromptRejected = $result.boundedOversizedPrompt.passed
+        largeNulTextPathRejected = $result.boundedLargeNulTextPath.passed
         orphanFamilyProtected = $result.orphanFamilyProtection.passed
         sqliteBudgetsEnforced = $result.sqliteBudgetProtection.passed
+        oneRowApplyScaling = $result.oneRowApplyScaling.samples
         decodeFailurePreserved = $result.decodeFailurePreservation.indexHashUnchanged
         staleEntryPruned = $result.staleEntryPrune.deletedEntryPruned
         cancellationPreserved = $result.cancellation.indexHashUnchanged
