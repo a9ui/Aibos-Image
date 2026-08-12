@@ -19,6 +19,8 @@ internal static class MetadataIndexStore
     private const int MaximumEntryCount = 1_000_000;
     private const int MaximumPathBytes = 128 * 1024;
     private const int MaximumPromptBytes = 4 * 1024 * 1024;
+    private const int MaximumSchemaSqlBytes = 64 * 1024;
+    private const int MaximumSqliteValueBytes = 8 * 1024 * 1024;
     private const long MaximumLegacyIndexBytes = 1024L * 1024 * 1024;
     private const long MaximumSqliteFamilyBytes = MaximumLegacyIndexBytes;
     private const long MaximumSqliteAggregateBytes = MaximumLegacyIndexBytes;
@@ -802,6 +804,28 @@ internal static class MetadataIndexStore
         connection.Open();
         try
         {
+            _ = SQLitePCL.raw.sqlite3_limit(
+                connection.Handle,
+                SQLitePCL.raw.SQLITE_LIMIT_LENGTH,
+                MaximumSqliteValueBytes);
+            int valueLengthLimit = SQLitePCL.raw.sqlite3_limit(
+                connection.Handle,
+                SQLitePCL.raw.SQLITE_LIMIT_LENGTH,
+                -1);
+            if (valueLengthLimit <= 0 || valueLengthLimit > MaximumSqliteValueBytes)
+                throw new InvalidDataException("metadata cache could not bound SQLite value length");
+
+            _ = SQLitePCL.raw.sqlite3_limit(
+                connection.Handle,
+                SQLitePCL.raw.SQLITE_LIMIT_SQL_LENGTH,
+                MaximumSchemaSqlBytes);
+            int sqlLengthLimit = SQLitePCL.raw.sqlite3_limit(
+                connection.Handle,
+                SQLitePCL.raw.SQLITE_LIMIT_SQL_LENGTH,
+                -1);
+            if (sqlLengthLimit <= 0 || sqlLengthLimit > MaximumSchemaSqlBytes)
+                throw new InvalidDataException("metadata cache could not bound SQLite SQL statement length");
+
             ExecuteNonQuery(connection, "PRAGMA trusted_schema = OFF;");
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText = "PRAGMA trusted_schema;";
@@ -864,6 +888,8 @@ internal static class MetadataIndexStore
         SqliteConnection connection,
         SqliteTransaction? transaction = null)
     {
+        ValidateSchemaSqlBudget(connection, transaction);
+
         string? storeMetaSql = null;
         string? metadataSql = null;
         int objectCount = 0;
@@ -907,6 +933,59 @@ internal static class MetadataIndexStore
         }
 
         throw new InvalidDataException("metadata cache canonical schema did not match the store metadata table contract");
+    }
+
+    private static void ValidateSchemaSqlBudget(
+        SqliteConnection connection,
+        SqliteTransaction? transaction)
+    {
+        int objectCount = 0;
+        long totalSqlBytes = 0;
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT type,
+                   name,
+                   tbl_name,
+                   CASE WHEN typeof(sql) = 'text' THEN octet_length(sql) ELSE -1 END
+            FROM sqlite_schema
+            ORDER BY name COLLATE BINARY;
+            """;
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            objectCount++;
+            if (reader.GetValue(0) is not string type
+                || reader.GetValue(1) is not string name
+                || reader.GetValue(2) is not string tableName
+                || reader.GetValue(3) is not long sqlBytes
+                || !string.Equals(type, "table", StringComparison.Ordinal)
+                || !string.Equals(name, tableName, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("metadata cache canonical schema contained a non-table or executable object");
+            }
+
+            if (sqlBytes < 0 || sqlBytes > MaximumSchemaSqlBytes)
+            {
+                throw new InvalidDataException(
+                    $"metadata cache schema SQL for {name} exceeded the {MaximumSchemaSqlBytes:N0}-byte safe bound");
+            }
+            totalSqlBytes = checked(totalSqlBytes + sqlBytes);
+            if (totalSqlBytes > MaximumSchemaSqlBytes)
+            {
+                throw new InvalidDataException(
+                    $"metadata cache aggregate schema SQL exceeded the {MaximumSchemaSqlBytes:N0}-byte safe bound");
+            }
+
+            if (!string.Equals(name, "store_meta", StringComparison.Ordinal)
+                && !string.Equals(name, "metadata", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException($"metadata cache canonical schema contained unexpected object {name}");
+            }
+        }
+
+        if (objectCount != 2)
+            throw new InvalidDataException("metadata cache canonical schema required exactly store_meta and metadata tables");
     }
 
     private static string NormalizeSchemaSql(string sql)

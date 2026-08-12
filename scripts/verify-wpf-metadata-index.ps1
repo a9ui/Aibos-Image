@@ -152,6 +152,11 @@ try {
     Assert-True ($result.noncanonicalRecursiveView.passed -eq $true) 'Recursive SQLite metadata VIEW was not rejected before execution.'
     Assert-True ($result.noncanonicalRecursiveView.loadState -eq 'Invalid') 'Recursive SQLite metadata VIEW was not classified as Invalid.'
     Assert-True ($result.noncanonicalRecursiveView.familyHashUnchanged -eq $true -and $result.noncanonicalRecursiveView.mtimeUnchanged -eq $true) 'Recursive SQLite metadata VIEW rejection changed the database family.'
+    Assert-True ($result.boundedOversizedSchemaSql.passed -eq $true) 'Oversized canonical SQLite schema SQL was not rejected within resource bounds.'
+    Assert-True ($result.boundedOversizedSchemaSql.loadState -eq 'Invalid') 'Oversized SQLite schema SQL was not classified as Invalid.'
+    Assert-True ($result.boundedOversizedSchemaSql.privateGrowthBytes -le $result.boundedOversizedSchemaSql.privateGrowthBudgetBytes) 'Oversized SQLite schema SQL exceeded the private-memory growth allowance.'
+    Assert-True ($result.boundedOversizedSchemaSql.saveWritten -eq $false -and $result.boundedOversizedSchemaSql.applyWritten -eq $false) 'Oversized SQLite schema SQL reached a mutation path.'
+    Assert-True ($result.boundedOversizedSchemaSql.familyHashUnchanged -eq $true -and $result.boundedOversizedSchemaSql.mtimeUnchanged -eq $true) 'Oversized SQLite schema SQL rejection changed the database family.'
     Assert-True ($result.noncanonicalTriggerProtection.passed -eq $true) 'SQLite store_meta trigger was not rejected before ApplyChanges.'
     Assert-True ($result.noncanonicalTriggerProtection.written -eq $false) 'SQLite trigger fixture reached the mutation path.'
     Assert-True ($result.noncanonicalTriggerProtection.revisionBefore -eq $result.noncanonicalTriggerProtection.revisionAfter) 'Rejected SQLite trigger fixture changed the durable revision.'
@@ -330,6 +335,9 @@ try {
         largeNulTextPathRejected = $result.boundedLargeNulTextPath.passed
         recursiveViewRejectedBeforeExecution = $result.noncanonicalRecursiveView.passed
         recursiveViewRejectMs = $result.noncanonicalRecursiveView.elapsedMs
+        oversizedSchemaSqlRejected = $result.boundedOversizedSchemaSql.passed
+        oversizedSchemaSqlRejectMs = $result.boundedOversizedSchemaSql.elapsedMs
+        oversizedSchemaSqlPrivateGrowthBytes = $result.boundedOversizedSchemaSql.privateGrowthBytes
         triggerRejectedBeforeMutation = $result.noncanonicalTriggerProtection.passed
         triggerFamilyHashUnchanged = $result.noncanonicalTriggerProtection.familyHashUnchanged
         orphanFamilyProtected = $result.orphanFamilyProtection.passed

@@ -25777,6 +25777,42 @@ public partial class App : Application
                     _ = command.ExecuteNonQuery();
                 }
 
+                static void WriteOversizedWhitespaceSchemaMetadataIndex(string path, int whitespaceBytes)
+                {
+                    string whitespace = new(' ', whitespaceBytes);
+                    using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWriteCreate);
+                    using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText = string.Concat(
+                        """
+                        CREATE TABLE store_meta (
+                            singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+                            schema_version INTEGER NOT NULL,
+                            entry_revision INTEGER NOT NULL CHECK (entry_revision >= 0),
+                            entry_count INTEGER NOT NULL CHECK (entry_count >= 0),
+                            total_path_bytes INTEGER NOT NULL CHECK (total_path_bytes >= 0),
+                            total_prompt_bytes INTEGER NOT NULL CHECK (total_prompt_bytes >= 0)
+                        ) WITHOUT ROWID;
+                        INSERT INTO store_meta(
+                            singleton, schema_version, entry_revision,
+                            entry_count, total_path_bytes, total_prompt_bytes)
+                        VALUES (1, 2, 0, 0, 0, 0);
+                        CREATE TABLE metadata (
+                            path
+                        """,
+                        whitespace,
+                        """
+                        TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+                            source_length INTEGER NOT NULL CHECK (source_length >= 0),
+                            source_mtime_ticks INTEGER NOT NULL,
+                            source_ctime_ticks INTEGER NOT NULL,
+                            width INTEGER NOT NULL CHECK (width > 0),
+                            height INTEGER NOT NULL CHECK (height > 0),
+                            prompt_utf8 BLOB NOT NULL
+                        ) WITHOUT ROWID;
+                        """);
+                    _ = command.ExecuteNonQuery();
+                }
+
                 static void AddStoreMetaMutationTrigger(string path)
                 {
                     using SqliteConnection connection = OpenMetadataIndexForSmoke(path, SqliteOpenMode.ReadWrite);
@@ -26350,7 +26386,8 @@ public partial class App : Application
                     largeNulPathPeakPrivateBytes - largeNulPathBaselinePrivateBytes);
                 bool largeNulPathPassed = largeNulPathEscapedException is null
                     && largeNulPathProbe?.State == MetadataIndexLoadState.Invalid
-                    && (largeNulPathProbe.Error?.Contains("path length", StringComparison.OrdinalIgnoreCase) ?? false)
+                    && ((largeNulPathProbe.Error?.Contains("path length", StringComparison.OrdinalIgnoreCase) ?? false)
+                        || (largeNulPathProbe.Error?.Contains("too big", StringComparison.OrdinalIgnoreCase) ?? false))
                     && largeNulPathPrivateGrowthBytes <= largeNulPathPrivateGrowthBudgetBytes
                     && !File.Exists(largeNulPath);
                 var boundedLargeNulTextPath = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -26416,6 +26453,123 @@ public partial class App : Application
                     ["familyHashUnchanged"] = string.Equals(recursiveViewFamilyBefore, recursiveViewFamilyAfter, StringComparison.Ordinal),
                     ["mtimeUnchanged"] = recursiveViewWriteTicksBefore == recursiveViewWriteTicksAfter,
                     ["fixtureRemoved"] = !File.Exists(recursiveViewPath),
+                };
+
+                const int oversizedSchemaWhitespaceBytes = 32 * 1024 * 1024;
+                const long oversizedSchemaPrivateGrowthBudgetBytes = 24L * 1024 * 1024;
+                string oversizedSchemaPath = Path.Combine(indexDirectory, "oversized-schema-sql.sqlite3");
+                MetadataIndexLoadResult? oversizedSchemaProbe = null;
+                MetadataIndexSaveResult? oversizedSchemaSave = null;
+                MetadataIndexSaveResult? oversizedSchemaApply = null;
+                string? oversizedSchemaEscapedException = null;
+                string oversizedSchemaFamilyBefore = "not-captured";
+                string oversizedSchemaFamilyAfter = "not-captured";
+                long oversizedSchemaWriteTicksBefore = 0;
+                long oversizedSchemaWriteTicksAfter = 0;
+                long oversizedSchemaBaselinePrivateBytes = 0;
+                long oversizedSchemaPeakPrivateBytes = 0;
+                long oversizedSchemaElapsedMs = long.MaxValue;
+                try
+                {
+                    WriteOversizedWhitespaceSchemaMetadataIndex(
+                        oversizedSchemaPath,
+                        oversizedSchemaWhitespaceBytes);
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect();
+                    using (Process current = Process.GetCurrentProcess())
+                    {
+                        current.Refresh();
+                        oversizedSchemaBaselinePrivateBytes = current.PrivateMemorySize64;
+                    }
+                    oversizedSchemaPeakPrivateBytes = oversizedSchemaBaselinePrivateBytes;
+                    oversizedSchemaFamilyBefore = MetadataIndexFamilyFingerprint(oversizedSchemaPath);
+                    oversizedSchemaWriteTicksBefore = File.GetLastWriteTimeUtc(oversizedSchemaPath).Ticks;
+                    using var sampleCancellation = new CancellationTokenSource();
+                    object sampleLock = new();
+                    Task sampler = Task.Run(() =>
+                    {
+                        using Process sampled = Process.GetProcessById(Environment.ProcessId);
+                        while (!sampleCancellation.IsCancellationRequested)
+                        {
+                            sampled.Refresh();
+                            lock (sampleLock)
+                            {
+                                oversizedSchemaPeakPrivateBytes = Math.Max(
+                                    oversizedSchemaPeakPrivateBytes,
+                                    sampled.PrivateMemorySize64);
+                            }
+                            Thread.Sleep(1);
+                        }
+                    });
+                    var oversizedSchemaWatch = Stopwatch.StartNew();
+                    try
+                    {
+                        oversizedSchemaProbe = MetadataIndexStore.Load(
+                            oversizedSchemaPath,
+                            CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        oversizedSchemaEscapedException = ex.ToString();
+                    }
+                    finally
+                    {
+                        oversizedSchemaWatch.Stop();
+                        oversizedSchemaElapsedMs = oversizedSchemaWatch.ElapsedMilliseconds;
+                        sampleCancellation.Cancel();
+                        await sampler;
+                    }
+
+                    oversizedSchemaSave = MetadataIndexStore.Save(
+                        oversizedSchemaPath,
+                        [rollbackProbeEntry],
+                        CancellationToken.None);
+                    oversizedSchemaApply = MetadataIndexStore.ApplyChanges(
+                        oversizedSchemaPath,
+                        [rollbackProbeEntry],
+                        Array.Empty<string>(),
+                        1,
+                        0,
+                        CancellationToken.None);
+                    oversizedSchemaFamilyAfter = MetadataIndexFamilyFingerprint(oversizedSchemaPath);
+                    oversizedSchemaWriteTicksAfter = File.GetLastWriteTimeUtc(oversizedSchemaPath).Ticks;
+                }
+                finally
+                {
+                    DeleteMetadataIndexFamily(oversizedSchemaPath);
+                }
+                long oversizedSchemaPrivateGrowthBytes = Math.Max(
+                    0,
+                    oversizedSchemaPeakPrivateBytes - oversizedSchemaBaselinePrivateBytes);
+                bool oversizedSchemaPassed = oversizedSchemaEscapedException is null
+                    && oversizedSchemaProbe?.State == MetadataIndexLoadState.Invalid
+                    && ((oversizedSchemaProbe.Error?.Contains("schema", StringComparison.OrdinalIgnoreCase) ?? false)
+                        || (oversizedSchemaProbe.Error?.Contains("too big", StringComparison.OrdinalIgnoreCase) ?? false))
+                    && oversizedSchemaElapsedMs < 2000
+                    && oversizedSchemaPrivateGrowthBytes <= oversizedSchemaPrivateGrowthBudgetBytes
+                    && oversizedSchemaSave is { Written: false }
+                    && oversizedSchemaApply is { Written: false }
+                    && string.Equals(oversizedSchemaFamilyBefore, oversizedSchemaFamilyAfter, StringComparison.Ordinal)
+                    && oversizedSchemaWriteTicksBefore == oversizedSchemaWriteTicksAfter
+                    && !File.Exists(oversizedSchemaPath);
+                var boundedOversizedSchemaSql = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["passed"] = oversizedSchemaPassed,
+                    ["whitespaceBytes"] = oversizedSchemaWhitespaceBytes,
+                    ["loadState"] = oversizedSchemaProbe?.State.ToString(),
+                    ["loadError"] = oversizedSchemaProbe?.Error,
+                    ["escapedException"] = oversizedSchemaEscapedException,
+                    ["elapsedMs"] = oversizedSchemaElapsedMs,
+                    ["privateGrowthBytes"] = oversizedSchemaPrivateGrowthBytes,
+                    ["privateGrowthBudgetBytes"] = oversizedSchemaPrivateGrowthBudgetBytes,
+                    ["saveWritten"] = oversizedSchemaSave?.Written,
+                    ["saveError"] = oversizedSchemaSave?.Error,
+                    ["applyWritten"] = oversizedSchemaApply?.Written,
+                    ["applyError"] = oversizedSchemaApply?.Error,
+                    ["familyHashUnchanged"] = string.Equals(oversizedSchemaFamilyBefore, oversizedSchemaFamilyAfter, StringComparison.Ordinal),
+                    ["mtimeUnchanged"] = oversizedSchemaWriteTicksBefore == oversizedSchemaWriteTicksAfter,
+                    ["fixtureRemoved"] = !File.Exists(oversizedSchemaPath),
                 };
 
                 string triggerPath = Path.Combine(indexDirectory, "trigger-protection.sqlite3");
@@ -26866,6 +27020,7 @@ public partial class App : Application
                 result["boundedOversizedPrompt"] = boundedOversizedPrompt;
                 result["boundedLargeNulTextPath"] = boundedLargeNulTextPath;
                 result["noncanonicalRecursiveView"] = noncanonicalRecursiveView;
+                result["boundedOversizedSchemaSql"] = boundedOversizedSchemaSql;
                 result["noncanonicalTriggerProtection"] = noncanonicalTriggerProtection;
                 result["sqliteBudgetProtection"] = sqliteBudgetProtection;
                 result["oneRowApplyScaling"] = oneRowApplyScaling;
@@ -26888,6 +27043,7 @@ public partial class App : Application
                     && oversizedPromptPassed
                     && largeNulPathPassed
                     && recursiveViewPassed
+                    && oversizedSchemaPassed
                     && triggerProtectionPassed
                     && sqliteBudgetProtectionPassed
                     && oneRowScalingPassed
