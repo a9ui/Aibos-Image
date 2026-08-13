@@ -22871,6 +22871,9 @@ public partial class App : Application
                 if (win.DeleteConfirmationVisibleForSmoke)
                     win.CancelDeleteForSmoke();
 
+                bool favoritePresentationStateSettledForFilmstrip =
+                    await win.WaitForFavoritePresentationStateForSmokeAsync(
+                        TimeSpan.FromSeconds(10));
                 bool filmstripPinnedBeforeKey = win.ModalFilmstripPinnedForSmoke;
                 focusedButton = win.FocusModalFavoriteIncreaseForSmoke() && focusedButton;
                 bool buttonFilmstrip = win.InvokePreviewKeyForSmoke(Key.T)
@@ -22896,7 +22899,9 @@ public partial class App : Application
                     filmstripOpenPersisted = persisted.RootElement.TryGetProperty("ModalFilmstripOpen", out JsonElement openElement)
                         && openElement.ValueKind == JsonValueKind.True;
                 }
-                bool filmstripPersistence = filmstripClosedPersisted && filmstripOpenPersisted;
+                bool filmstripPersistence = favoritePresentationStateSettledForFilmstrip
+                    && filmstripClosedPersisted
+                    && filmstripOpenPersisted;
                 focusedButton = win.FocusModalFavoriteIncreaseForSmoke() && focusedButton;
                 bool nativeButtonKeys = !win.InvokePreviewKeyForSmoke(Key.Enter)
                     && !win.InvokePreviewKeyForSmoke(Key.Space);
