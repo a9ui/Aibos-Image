@@ -1435,7 +1435,7 @@ public partial class MainWindow
             return false;
         }
 
-        string revision = "H25 revision unavailable";
+        string revision = "Local AI revision unavailable";
         if (runtimeElement.TryGetProperty("sourceRevision", out JsonElement revisionElement))
         {
             if (revisionElement.ValueKind == JsonValueKind.String)
@@ -1446,7 +1446,7 @@ public partial class MainWindow
                     string prefix = sourceRevision.Length > 8
                         ? sourceRevision[..8]
                         : sourceRevision;
-                    revision = $"H25 {prefix}";
+                    revision = $"Local AI {prefix}";
                 }
             }
             else if (revisionElement.ValueKind != JsonValueKind.Null)
@@ -2848,7 +2848,7 @@ public partial class MainWindow
                     out I2iV2CapabilityState capability)
                 && capability.IsReadyFor(target)
                     ? null
-                    : "The running H25 companion is not ready for this AI edit Retry. No reservation was saved.";
+                    : "The Aibos Image local AI service is not ready for this AI edit Retry. No reservation was saved.";
         }
 
         return payload => TryParseI2iCapability(
@@ -2857,7 +2857,7 @@ public partial class MainWindow
                 out _)
             && ready
                 ? null
-                : "The running H25 companion is not ready for this AI edit Retry. No reservation was saved.";
+                : "The Aibos Image local AI service is not ready for this AI edit Retry. No reservation was saved.";
     }
 
     private void OpenEnhancementOutput_Click(object sender, RoutedEventArgs e)

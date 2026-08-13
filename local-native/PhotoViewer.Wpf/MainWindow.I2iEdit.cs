@@ -953,7 +953,7 @@ public partial class MainWindow
                 _i2iCapabilityUnknown = false;
                 return supported
                     ? null
-                    : $"The running H25 companion is not ready for AI editing ({issueCode}). No job was added.";
+                    : $"The Aibos Image local AI service is not ready for AI editing ({issueCode}). No job was added.";
             }
 
             if (!RevalidateI2iEditSource(source, out tile, out sourceError))

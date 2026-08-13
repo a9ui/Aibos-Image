@@ -437,17 +437,20 @@ public partial class MainWindow
 
     private string MiniMaxH3ReadinessSuffix()
         => !_miniMaxH3HealthChecked
-            ? " 生成環境はまだ確認していません。ジョブ登録はでき、実行は準備完了後です。"
+            ? " 生成環境はまだ確認していません。正確な契約を確認できるまでジョブは登録しません。"
             : _miniMaxH3Ready
                 ? " ローカルruntimeの準備を確認済みです。"
-                : " " + DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode)
-                    + " ジョブ登録はでき、実行は準備完了後です。";
+                : _miniMaxH3ReasonCode is "HEALTH_UNAVAILABLE" or "MINIMAX_H3_PROFILES_UNAVAILABLE"
+                    ? " " + DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode)
+                        + " 正確な契約を確認できるまでジョブは登録しません。"
+                    : " " + DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode)
+                        + " 待機ジョブを登録でき、runtime準備後に実行します。";
 
     private static string DescribeMiniMaxH3VideoReasonCode(string? reasonCode)
         => reasonCode switch
         {
             "MINIMAX_H3_WRITER_DISABLED" =>
-                "MiniMax H3の実行runtimeは現在無効です。待機ジョブの登録はできます。",
+                "MiniMax H3の実行runtimeは現在無効です。",
             "MINIMAX_H3_RUNTIME_SEAL_INVALID" =>
                 "MiniMax H3の読取専用runtime sealを検証できません。",
             "MINIMAX_H3_RUNTIME_MANIFEST_INVALID" =>
@@ -463,9 +466,9 @@ public partial class MainWindow
             "MINIMAX_H3_BACKEND_CONFIG_INVALID" =>
                 "MiniMax H3のloopback backend設定を検証できません。",
             "MINIMAX_H3_PROFILES_UNAVAILABLE" =>
-                "H25 companionが実測済みの5・10・12・15秒プロファイルを公開していません。再起動してください。",
+                "Aibos ImageのローカルAIサービスが実測済みの5・10・12・15秒プロファイルを公開していません。再起動してください。",
             "HEALTH_UNAVAILABLE" =>
-                "H25 companionからMiniMax H3の準備状態を取得できません。",
+                "Aibos ImageのローカルAIサービスからMiniMax H3の準備状態を取得できません。",
             _ =>
                 "MiniMax H3の正確な準備状態を確認できません。",
         };
@@ -2086,10 +2089,30 @@ public partial class MainWindow
             string suffix = string.IsNullOrWhiteSpace(jobId)
                 ? ""
                 : $" ({jobId})";
-            SetVideoGenerationSettingsStatus(
-                $"動画ジョブを共有GPUキューへ追加しました{suffix}。");
-            SetTransientStatusToast(
-                $"{Path.GetFileName(source.SourceIdentity)}: {source.Label}から動画化をJobsキューへ追加しました。");
+            bool executionDeferred = payload.TryGetProperty(
+                    "executionDeferred",
+                    out JsonElement deferredElement)
+                && deferredElement.ValueKind == JsonValueKind.True;
+            if (executionDeferred)
+            {
+                TryGetStringProperty(
+                    payload,
+                    "executionReasonCode",
+                    out string? executionReasonCode);
+                string reason = DescribeMiniMaxH3VideoReasonCode(
+                    executionReasonCode);
+                SetVideoGenerationSettingsStatus(
+                    $"MiniMax H3待機ジョブを登録しました{suffix}。{reason} runtime準備後に実行します。");
+                SetTransientStatusToast(
+                    $"{Path.GetFileName(source.SourceIdentity)}: MiniMax H3待機ジョブをJobsへ登録しました。");
+            }
+            else
+            {
+                SetVideoGenerationSettingsStatus(
+                    $"動画ジョブを共有GPUキューへ追加しました{suffix}。");
+                SetTransientStatusToast(
+                    $"{Path.GetFileName(source.SourceIdentity)}: {source.Label}から動画化をJobsキューへ追加しました。");
+            }
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
             QueueEnhancedStateRefreshIfChanged();
             return true;
@@ -2429,8 +2452,7 @@ public partial class MainWindow
                     StringComparison.Ordinal));
 
     public string MiniMaxH3ReadinessTextForSmoke
-        => DescribeMiniMaxH3VideoReasonCode(
-            _miniMaxH3HealthChecked ? _miniMaxH3ReasonCode : null);
+        => MiniMaxH3ReadinessSuffix();
 
     public void SelectVideoQualityForSmoke(string presetId)
     {

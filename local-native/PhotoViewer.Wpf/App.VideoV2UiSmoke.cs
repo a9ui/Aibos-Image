@@ -116,7 +116,7 @@ public partial class App
             bool h3UnavailableSafe = !window.VideoModelRunnableForSmoke
                 && window.MiniMaxH3SurfaceForSmoke
                 && window.MiniMaxH3ReadinessTextForSmoke.Contains(
-                    "待機ジョブの登録はできます",
+                    "待機ジョブを登録でき",
                     StringComparison.Ordinal);
             bool h3UnavailableRunnable = window.VideoModelRunnableForSmoke;
             string[] h3UnavailableSurfaceIssues =
@@ -451,26 +451,26 @@ public partial class App
             var readyRetry = await window.RetryMiniMaxH3JobForSmokeAsync(
                 "h3-ready-retry");
             int afterReady = PendingReservationCount();
-            bool h3RetryExactHealth = !disabledRetry.Ok
-                && !disabledRetry.SavedForDelivery
-                && !invalidSealRetry.Ok
-                && !invalidSealRetry.SavedForDelivery
+            bool h3RetryExactHealth = disabledRetry.Ok
+                && disabledRetry.SavedForDelivery
+                && invalidSealRetry.Ok
+                && invalidSealRetry.SavedForDelivery
                 && !malformedRetry.Ok
                 && !malformedRetry.SavedForDelivery
                 && !unavailableRetry.Ok
                 && !unavailableRetry.SavedForDelivery
                 && !legacyReadyRetry.Ok
                 && !legacyReadyRetry.SavedForDelivery
-                && afterDisabled == 0
-                && afterInvalidSeal == 0
-                && afterMalformed == 0
-                && afterUnavailable == 0
-                && afterLegacyReady == 0
+                && afterDisabled == 1
+                && afterInvalidSeal == 2
+                && afterMalformed == 2
+                && afterUnavailable == 2
+                && afterLegacyReady == 2
                 && readyRetry.Ok
                 && readyRetry.SavedForDelivery
-                && afterReady == 1
+                && afterReady == 3
                 && retryHealthGetCalls == 6
-                && retryPostCalls == 1;
+                && retryPostCalls == 3;
 
             ok = h3DefaultOnly
                 && templateExact
