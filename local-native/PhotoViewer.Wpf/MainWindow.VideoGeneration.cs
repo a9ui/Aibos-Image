@@ -509,11 +509,11 @@ public partial class MainWindow
             bool profilesReady =
                 TryParseMiniMaxH3VideoProfilesCapability(payload);
             _miniMaxH3Ready = capability.Ready && profilesReady;
-            _miniMaxH3ReasonCode = !capability.Ready
-                ? capability.ReasonCode
-                : profilesReady
+            _miniMaxH3ReasonCode = !profilesReady
+                ? "MINIMAX_H3_PROFILES_UNAVAILABLE"
+                : capability.Ready
                     ? null
-                    : "MINIMAX_H3_PROFILES_UNAVAILABLE";
+                    : capability.ReasonCode;
         }
         else
         {
@@ -2286,6 +2286,12 @@ public partial class MainWindow
         _miniMaxH3Ready = checkedHealth && ready;
         _miniMaxH3ReasonCode = checkedHealth ? reasonCode : null;
         SyncVideoGenerationSettingsControls();
+    }
+
+    public async Task<string> RefreshMiniMaxH3VideoCapabilityForSmokeAsync()
+    {
+        await RefreshMiniMaxH3VideoCapabilityAsync();
+        return MiniMaxH3ReservationReadinessStatus();
     }
 
     public string BuildMiniMaxH3EnqueueRequestJsonForSmoke(
