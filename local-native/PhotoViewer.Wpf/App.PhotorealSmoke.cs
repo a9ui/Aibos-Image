@@ -2307,34 +2307,73 @@ public partial class App
                         + $"retryStatuses={string.Join(',', retriedFavoriteStatuses)}; "
                         + $"resetStatuses={string.Join(',', retryFavoriteResetStatuses)}";
                 }
-                bool selectedPhotorealLevelZero =
-                    window.SetPhotorealFavoriteFilterLevelsForSmoke(0);
-                window.SetFavoriteOnlyFilterForSmoke(true);
-                bool levelZeroIncludes = zeroFavoriteApplied
-                    && window.PhotorealFavoriteLevelForFileForSmoke(
+                bool originalClearedForGlobalUnrated =
+                    window.SetFileFavoriteLevelForSmoke(
+                        sourceFileNameForFavorite,
+                        0);
+                bool photorealRestoredForGlobalUnrated =
+                    window.SetIndependentFavoriteLevelForSmoke(
+                        photorealOutputPath,
+                        2);
+                SharedWriteStatus[] globalUnratedFixtureStatuses =
+                    await window.DrainSharedStoreWritersForSmokeAsync();
+                bool globalUnratedFixture = zeroFavoriteApplied
+                    && originalClearedForGlobalUnrated
+                    && photorealRestoredForGlobalUnrated
+                    && globalUnratedFixtureStatuses.All(static status =>
+                        status == SharedWriteStatus.Succeeded)
+                    && ReadFavoriteLevel(favoritesPath, sourcePath) == 0
+                    && ReadFavoriteLevel(favoritesPath, photorealOutputPath) == 2
+                    && window.FavoriteLevelForFileForSmoke(
                         sourceFileNameForFavorite) == 0
-                    && !window.PhotorealFavoriteBadgeForFileForSmoke(
-                        sourceFileNameForFavorite)
-                    && selectedPhotorealLevelZero
+                    && window.PhotorealFavoriteLevelForFileForSmoke(
+                        sourceFileNameForFavorite) == 2
+                    && window.PhotorealFavoriteBadgeForFileForSmoke(
+                        sourceFileNameForFavorite);
+                bool hiddenPhotorealLevelZeroRejected =
+                    !window.SetPhotorealFavoriteFilterLevelsForSmoke(0);
+                window.SetUnfavoriteOnlyFilterForSmoke(true);
+                _ = await window.WaitForFavoritePresentationStateForSmokeAsync(
+                    TimeSpan.FromSeconds(10));
+                bool originalUnratedIncludes = globalUnratedFixture
+                    && hiddenPhotorealLevelZeroRejected
+                    && window.ShowUnfavoriteOnlyForSmoke
                     && window.FilteredFileNamesForSmoke().Contains(
                         sourceFileNameForFavorite,
                         StringComparer.OrdinalIgnoreCase);
-                _ = await window.WaitForFavoritePresentationStateForSmokeAsync(
-                    TimeSpan.FromSeconds(10));
                 ViewerState? persistedPhotorealFavoriteFilter =
                     JsonSerializer.Deserialize<ViewerState>(File.ReadAllText(
                         environment["PHOTOVIEWER_WPF_STATE_PATH"]));
                 bool filterPersisted = persistedPhotorealFavoriteFilter
-                    ?.PhotorealFavoriteFilterLevels?.SequenceEqual([0]) == true
-                    && persistedPhotorealFavoriteFilter.ShowFavoritesOnly;
+                    ?.ShowUnfavoriteOnly == true
+                    && !persistedPhotorealFavoriteFilter.ShowFavoritesOnly
+                    && (persistedPhotorealFavoriteFilter
+                            .PhotorealFavoriteFilterLevels is null
+                        || !persistedPhotorealFavoriteFilter
+                            .PhotorealFavoriteFilterLevels.Contains(0));
                 photorealFavoriteBadgeFilterContract = badgeShowsMaximum
                     && photorealFavoriteLayoutContract
                     && photorealFavoriteRetryContract
                     && levelTwoIncludes
                     && levelOneExcludes
-                    && levelZeroIncludes
+                    && originalUnratedIncludes
                     && filterPersisted;
-                window.SetFavoriteOnlyFilterForSmoke(false);
+                if (!photorealFavoriteBadgeFilterContract)
+                {
+                    failure =
+                        $"Photoreal Favorite filter: badgeMax={badgeShowsMaximum}; "
+                        + $"layout={photorealFavoriteLayoutContract}; "
+                        + $"retry={photorealFavoriteRetryContract}; "
+                        + $"levelTwo={levelTwoIncludes}; "
+                        + $"levelOneExcluded={levelOneExcludes}; "
+                        + $"globalFixture={globalUnratedFixture}; "
+                        + $"hiddenZeroRejected={hiddenPhotorealLevelZeroRejected}; "
+                        + $"showUnrated={window.ShowUnfavoriteOnlyForSmoke}; "
+                        + $"originalUnratedIncludes={originalUnratedIncludes}; "
+                        + $"persisted={filterPersisted}; "
+                        + $"fixtureStatuses={string.Join(',', globalUnratedFixtureStatuses)}";
+                }
+                window.SetUnfavoriteOnlyFilterForSmoke(false);
                 _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
                 sourceUntouched = sourceHashBefore == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sourcePath)));
                 Dictionary<string, string> recoveredFixtureHashesAfter =

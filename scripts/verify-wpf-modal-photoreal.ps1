@@ -54,6 +54,7 @@ try {
     )
     if ($falseInvariants.Count -gt 0) {
         Write-Output ("False photoreal invariants: " + ($falseInvariants -join ', '))
+        Write-Output ("Message: " + [string]$result.message)
         if ($null -ne $result.displayedVersionMetadataDiagnostic) {
             Write-Output ($result.displayedVersionMetadataDiagnostic | ConvertTo-Json -Depth 6)
         }
