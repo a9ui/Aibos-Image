@@ -1,5 +1,19 @@
 {
   "contract": "enhancement-companion-auth-v2",
+  "capabilityProvisioning": {
+    "trustBoundary": "current Windows user",
+    "atRest": "CurrentUser DPAPI blob",
+    "directory": "%LOCALAPPDATA%/PhotoViewer.Wpf/companion-auth-v1",
+    "directoryAndFileOwner": "current Windows user",
+    "protectedDaclAllow": [
+      "current Windows user",
+      "LOCAL SYSTEM"
+    ],
+    "reparsePointsAllowed": false,
+    "read": "exclusive handle with final-path, owner, protected-DACL, regular-file, and bounded-length verification before reading from that same handle",
+    "unknownExistingState": "preserve and fail closed",
+    "plaintextDelivery": "inherited only by the WPF-owned child; the launcher has no plaintext file fallback"
+  },
   "identity": {
     "route": "GET /api/enhance/identity",
     "requestHeader": "X-Aibos-Companion-Challenge",
@@ -46,7 +60,8 @@
     "wakeRoute": "POST /api/enhance/inbox/wake",
     "jobBodyAllowed": false,
     "ordering": "publish the durable inbox item only after ownership proof, then send an encrypted bodyless wake carrying only its idempotency key",
-    "receipt": "the companion drains the durable inbox before returning the matching job receipt"
+    "receipt": "the companion drains the durable inbox before returning the matching job receipt",
+    "postPublishUnauthenticatedFailure": "return SavedForDelivery and recover using the same request id; only an authenticated inner 4xx is authoritative"
   },
   "server": {
     "bind": "127.0.0.1",
@@ -57,6 +72,7 @@
     "maximumHeaderBytes": 16384,
     "maximumHeaders": 64,
     "maximumPlaintextResponseBytes": 33554432,
+    "responseLimitEnforcement": "reject oversized Content-Length before reading and cancel an unknown-length stream as soon as the running total exceeds the limit or the client disconnects",
     "unauthenticatedRoutes": [
       "GET /api/enhance/identity"
     ]

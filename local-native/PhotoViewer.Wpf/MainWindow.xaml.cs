@@ -1786,7 +1786,8 @@ public partial class MainWindow : Window
         JsonElement? Payload,
         string Error,
         bool SavedForDelivery = false,
-        string? DeliveryRequestId = null);
+        string? DeliveryRequestId = null,
+        bool InnerStatusAuthoritative = false);
     private sealed record EnhancedStateSnapshot(
         Dictionary<string, ManagedEnhancedOutput> Outputs,
         Dictionary<string, ManagedEnhancedOutput> CatalogOutputsByPath,
@@ -18584,6 +18585,7 @@ public partial class MainWindow : Window
             }
             int statusCode = (int)response.StatusCode;
             byte[] responseBytes;
+            bool innerStatusAuthoritative = !_usingDefaultModalEnhancementSender;
             if (_usingDefaultModalEnhancementSender)
             {
                 int outerResponseLimit = maxResponseBytes is int requested
@@ -18611,6 +18613,7 @@ public partial class MainWindow : Window
                         null,
                         "The local AI companion response was not authenticated. No response data was accepted.");
                 }
+                innerStatusAuthoritative = true;
                 if (maxResponseBytes is int securePlaintextLimit
                     && responseBytes.Length > Math.Max(1, securePlaintextLimit))
                 {
@@ -18668,7 +18671,8 @@ public partial class MainWindow : Window
                 innerSuccess,
                 statusCode,
                 payload,
-                error);
+                error,
+                InnerStatusAuthoritative: innerStatusAuthoritative);
         }
         catch (OperationCanceledException) when (
             !token.IsCancellationRequested

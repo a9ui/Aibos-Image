@@ -21038,6 +21038,8 @@ public partial class App : Application
             bool companionIdentityFieldTamperRejected = false;
             bool companionListenerHandoffEncrypted = false;
             bool companionListenerHandoffResponseRejected = false;
+            bool durableListenerHandoffSavedForDelivery = false;
+            bool companionAuthAclProvenanceContract = false;
             bool companionConfiguredRootExact = false;
             bool companionAppBaseAncestor = false;
             bool companionConfiguredAncestorRejected = false;
@@ -21384,6 +21386,90 @@ public partial class App : Application
                         prompt = "handoff-private-prompt",
                     });
                 simulateListenerHandoff = false;
+                bool durableListenerSwapped = false;
+                bool durableListenerSawOnlyCiphertext = true;
+                string pendingDirectory = EnhancementEnqueueInboxStore
+                    .GetPendingDirectory(jobsPath);
+                int pendingBeforeListenerSwap = Directory.Exists(pendingDirectory)
+                    ? Directory.GetFiles(pendingDirectory, "*.json").Length
+                    : 0;
+                win.ConfigureEnhancementCompanionAutoStartForSmoke(
+                    async (request, token) =>
+                    {
+                        string route = request.RequestUri?.AbsolutePath ?? "";
+                        if (route.EndsWith(
+                                "/api/enhance/identity",
+                                StringComparison.Ordinal))
+                        {
+                            string challenge = request.Headers
+                                .GetValues("X-Aibos-Companion-Challenge")
+                                .Single();
+                            return JsonResponse(
+                                HttpStatusCode.OK,
+                                win.EnhancementCompanionIdentityPayloadForSmoke(
+                                    challenge));
+                        }
+                        if (durableListenerSwapped)
+                        {
+                            string outer = request.Content is null
+                                ? ""
+                                : await request.Content.ReadAsStringAsync(token);
+                            durableListenerSawOnlyCiphertext &=
+                                route.EndsWith(
+                                    "/api/enhance/secure",
+                                    StringComparison.Ordinal)
+                                && !outer.Contains(
+                                    canonicalSourcePath,
+                                    StringComparison.Ordinal)
+                                && !outer.Contains(
+                                    "durable-handoff-private-prompt",
+                                    StringComparison.Ordinal);
+                            return JsonResponse(
+                                HttpStatusCode.Forbidden,
+                                new { error = "unsigned listener response" });
+                        }
+                        EnhancementCompanionSecureRequestSmokeSnapshot? inner =
+                            await win.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
+                                request,
+                                token);
+                        object payload = inner?.PathAndQuery switch
+                        {
+                            "/api/enhance/health" => new
+                            {
+                                capabilities = new
+                                {
+                                    durableEnqueueInboxV1 = new
+                                    {
+                                        ready = true,
+                                        protocolVersion = 1,
+                                        backendGeneration = "json-v1",
+                                    },
+                                },
+                            },
+                            _ => new { jobs = Array.Empty<object>() },
+                        };
+                        return win.EnhancementCompanionSecureResponseForSmoke(
+                            request,
+                            (int)HttpStatusCode.OK,
+                            payload);
+                    },
+                    endpoint => (endpoint.IsLoopback, endpoint.IsLoopback ? "" : "not loopback"));
+                bool durableSaved = await win
+                    .SendEnhancementEnqueueWithListenerHandoffForSmokeAsync(
+                        new
+                        {
+                            sourceId = canonicalSourcePath,
+                            prompt = "durable-handoff-private-prompt",
+                        },
+                        () => durableListenerSwapped = true);
+                int pendingAfterListenerSwap = Directory.Exists(pendingDirectory)
+                    ? Directory.GetFiles(pendingDirectory, "*.json").Length
+                    : 0;
+                durableListenerHandoffSavedForDelivery =
+                    durableSaved
+                    && durableListenerSwapped
+                    && durableListenerSawOnlyCiphertext
+                    && pendingAfterListenerSwap == pendingBeforeListenerSwap + 1;
                 bool tamperStarterCalled = false;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
                     (request, _) =>
@@ -21711,6 +21797,13 @@ public partial class App : Application
                         rapidExpectedSource,
                         StringComparison.OrdinalIgnoreCase);
 
+                EnhancementCompanionAuthAclSmokeSnapshot authAcl =
+                    PhotoViewer.Wpf.MainWindow
+                        .EnhancementCompanionAuthAclContractForSmoke();
+                companionAuthAclProvenanceContract =
+                    authAcl.CanonicalCurrentUserAclAccepted
+                    && authAcl.ForeignOwnerRejected
+                    && authAcl.ForeignAllowRejected;
                 functionalOk = selected && opened && refreshedEmpty && started && queuedUi && canceled && canceledUi
                     && refreshedSucceeded && outputAvailable && toggledEnhanced && deletedOutput
                     && originalPreserved && outputRemoved && createContract && routesOk
@@ -21730,6 +21823,8 @@ public partial class App : Application
                     && companionAuthenticatedRequestHeaders
                     && companionListenerHandoffEncrypted
                     && companionListenerHandoffResponseRejected
+                    && durableListenerHandoffSavedForDelivery
+                    && companionAuthAclProvenanceContract
                     && companionIdentityFieldTamperRejected
                     && companionConfiguredRootExact && companionAppBaseAncestor
                     && companionConfiguredAncestorRejected && companionIdentityRejected
@@ -21869,6 +21964,8 @@ public partial class App : Application
                 companionAuthenticatedRequestHeaders,
                 companionListenerHandoffEncrypted,
                 companionListenerHandoffResponseRejected,
+                durableListenerHandoffSavedForDelivery,
+                companionAuthAclProvenanceContract,
                 companionIdentityFieldTamperRejected,
                 companionConfiguredRootExact,
                 companionAppBaseAncestor,

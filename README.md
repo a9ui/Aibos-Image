@@ -50,7 +50,11 @@ Before any API request or durable reservation, Aibos proves the companion's
 per-user identity with a nonce challenge. Every later loopback request and
 response is encrypted, authenticated, and bound to that exact companion
 instance and start epoch. A replacement listener receives no source identity,
-prompt, settings, credential, job body, or accepted response data.
+prompt, settings, credential, job body, or accepted response data. The
+per-user capability is stored as a CurrentUser DPAPI blob in a protected,
+owner-checked directory and is passed in plaintext only to the WPF-owned child.
+After durable publish, an unauthenticated wake response is reported as saved
+for delivery rather than as a permanent failure.
 
 ## Cross-repository durable state
 

@@ -65,6 +65,9 @@ public partial class MainWindow
     private static readonly string EnhancementCompanionSmokeAuthToken =
         Base64UrlEncode(SHA256.HashData(Encoding.UTF8.GetBytes(
             "aibos-companion-smoke-token-v1")));
+    private static readonly byte[] EnhancementCompanionAuthEntropy =
+        SHA256.HashData(Encoding.UTF8.GetBytes(
+            "aibos-companion-capability-dpapi/v1"));
 
     private readonly SemaphoreSlim _enhancementCompanionLaunchGate = new(1, 1);
     private readonly CancellationTokenSource _enhancementCompanionLifetimeCts = new();
@@ -1176,7 +1179,8 @@ public partial class MainWindow
         {
             return response;
         }
-        if (response.StatusCode is >= 400 and < 500
+        if (response.InnerStatusAuthoritative
+            && response.StatusCode is >= 400 and < 500
             && response.StatusCode is not (408 or 425 or 429))
         {
             return response;
@@ -1197,6 +1201,7 @@ public partial class MainWindow
     private static string EnhancementCompanionAuthPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "PhotoViewer.Wpf",
+        "companion-auth-v1",
         EnhancementCompanionAuthFileName);
 
     private bool TryGetOrCreateEnhancementCompanionAuthToken(
@@ -1212,11 +1217,15 @@ public partial class MainWindow
         }
 
         string path = EnhancementCompanionAuthPath;
+        string directory = Path.GetDirectoryName(path)!;
+        bool createdFile = false;
         try
         {
-            string directory = Path.GetDirectoryName(path)!;
+            bool directoryExisted = Directory.Exists(directory);
             Directory.CreateDirectory(directory);
-            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+            if (!TryValidateEnhancementCompanionAuthDirectory(
+                    directory,
+                    allowAclInitialization: !directoryExisted))
             {
                 error = "The local AI companion authentication directory is not trusted.";
                 return false;
@@ -1230,11 +1239,16 @@ public partial class MainWindow
                     using var stream = new FileStream(
                         path,
                         FileMode.CreateNew,
-                        FileAccess.Write,
+                        FileAccess.ReadWrite,
                         FileShare.None,
                         4096,
                         FileOptions.WriteThrough);
-                    byte[] bytes = Encoding.ASCII.GetBytes(generated);
+                    createdFile = true;
+                    byte[] bytes = Encoding.ASCII.GetBytes(Convert.ToBase64String(
+                        ProtectedData.Protect(
+                            Encoding.ASCII.GetBytes(generated),
+                            EnhancementCompanionAuthEntropy,
+                            DataProtectionScope.CurrentUser)));
                     stream.Write(bytes);
                     stream.Flush(flushToDisk: true);
                     ApplyCurrentUserOnlyAuthFileAcl(path);
@@ -1246,16 +1260,20 @@ public partial class MainWindow
                 }
             }
 
-            FileAttributes attributes = File.GetAttributes(path);
-            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0
-                || !HasCurrentUserOnlyAuthFileAcl(path))
+            if (!TryReadTrustedEnhancementCompanionAuthToken(
+                    path,
+                    directory,
+                    out string candidate))
             {
+                if (createdFile)
+                    TryDeleteFailedEnhancementCompanionAuthFile(path, directory);
                 error = "The local AI companion authentication file is not user-only.";
                 return false;
             }
-            string candidate = File.ReadAllText(path, Encoding.ASCII).Trim();
             if (!IsValidEnhancementCompanionAuthToken(candidate))
             {
+                if (createdFile)
+                    TryDeleteFailedEnhancementCompanionAuthFile(path, directory);
                 error = "The local AI companion authentication file is invalid.";
                 return false;
             }
@@ -1267,12 +1285,78 @@ public partial class MainWindow
             IOException or
             UnauthorizedAccessException or
             System.Security.SecurityException or
+            CryptographicException or
             ArgumentException or
             NotSupportedException)
         {
+            if (createdFile)
+                TryDeleteFailedEnhancementCompanionAuthFile(path, directory);
             error = $"Aibos could not establish user-only local AI authentication: {ex.Message}";
             return false;
         }
+    }
+
+    private static bool TryValidateEnhancementCompanionAuthDirectory(
+        string directory,
+        bool allowAclInitialization)
+    {
+        SecurityIdentifier? currentUser = WindowsIdentity.GetCurrent().User;
+        if (currentUser is null)
+            return false;
+        string localAppData = Path.GetFullPath(Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData));
+        string expected = Path.GetFullPath(directory);
+        if (!WindowsPathIdentity.TryResolveExistingDirectory(
+                localAppData,
+                out string canonicalLocalAppData)
+            || !WindowsPathIdentity.TryResolveExistingDirectory(
+                expected,
+                out string canonicalDirectory)
+            || !string.Equals(expected, canonicalDirectory, StringComparison.OrdinalIgnoreCase)
+            || !canonicalDirectory.StartsWith(
+                canonicalLocalAppData + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase)
+            || (File.GetAttributes(canonicalDirectory) & FileAttributes.ReparsePoint) != 0)
+        {
+            return false;
+        }
+
+        DirectoryInfo info = new(canonicalDirectory);
+        DirectorySecurity security = info.GetAccessControl(
+            AccessControlSections.Owner | AccessControlSections.Access);
+        if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner
+            || !owner.Equals(currentUser))
+            return false;
+        if (allowAclInitialization)
+        {
+            ApplyCurrentUserOnlyAuthDirectoryAcl(canonicalDirectory);
+            security = info.GetAccessControl(
+                AccessControlSections.Owner | AccessControlSections.Access);
+        }
+        return HasCurrentUserOnlyAuthAcl(security, currentUser);
+    }
+
+    private static void ApplyCurrentUserOnlyAuthDirectoryAcl(string path)
+    {
+        SecurityIdentifier currentUser = WindowsIdentity.GetCurrent().User
+            ?? throw new System.Security.SecurityException(
+                "The current Windows user identity is unavailable.");
+        var security = new DirectorySecurity();
+        security.SetOwner(currentUser);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            currentUser,
+            FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        new DirectoryInfo(path).SetAccessControl(security);
     }
 
     private static void ApplyCurrentUserOnlyAuthFileAcl(string path)
@@ -1294,40 +1378,122 @@ public partial class MainWindow
         new FileInfo(path).SetAccessControl(security);
     }
 
-    private static bool HasCurrentUserOnlyAuthFileAcl(string path)
+    private static bool TryReadTrustedEnhancementCompanionAuthToken(
+        string path,
+        string trustedDirectory,
+        out string candidate)
     {
+        candidate = "";
         SecurityIdentifier? currentUser = WindowsIdentity.GetCurrent().User;
         if (currentUser is null)
             return false;
-        SecurityIdentifier localSystem = new(
-            WellKnownSidType.LocalSystemSid,
-            null);
-        AuthorizationRuleCollection rules = new FileInfo(path)
-            .GetAccessControl(AccessControlSections.Access)
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None,
+            1024,
+            FileOptions.SequentialScan);
+        string expectedPath = Path.GetFullPath(path);
+        string expectedDirectory = Path.GetFullPath(trustedDirectory);
+        if (!WindowsPathIdentity.TryGetFinalPath(
+                stream.SafeFileHandle,
+                out string finalPath)
+            || !string.Equals(expectedPath, finalPath, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                Path.GetDirectoryName(finalPath),
+                expectedDirectory,
+                StringComparison.OrdinalIgnoreCase)
+            || stream.Length is <= 0 or > 1024)
+        {
+            return false;
+        }
+        FileAttributes attributes = File.GetAttributes(finalPath);
+        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+            return false;
+        FileSecurity security = new FileInfo(finalPath).GetAccessControl(
+            AccessControlSections.Owner | AccessControlSections.Access);
+        if (!HasCurrentUserOnlyAuthAcl(security, currentUser))
+            return false;
+
+        using var reader = new StreamReader(
+            stream,
+            Encoding.ASCII,
+            detectEncodingFromByteOrderMarks: false,
+            bufferSize: 1024,
+            leaveOpen: true);
+        string protectedToken = reader.ReadToEnd().Trim();
+        byte[] plaintext = ProtectedData.Unprotect(
+            Convert.FromBase64String(protectedToken),
+            EnhancementCompanionAuthEntropy,
+            DataProtectionScope.CurrentUser);
+        candidate = Encoding.ASCII.GetString(plaintext);
+        CryptographicOperations.ZeroMemory(plaintext);
+        return stream.Length is > 0 and <= 1024;
+    }
+
+    private static bool HasCurrentUserOnlyAuthAcl(
+        FileSystemSecurity security,
+        SecurityIdentifier currentUser)
+    {
+        if (!security.AreAccessRulesProtected
+            || security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner
+            || !owner.Equals(currentUser))
+        {
+            return false;
+        }
+        SecurityIdentifier localSystem = new(WellKnownSidType.LocalSystemSid, null);
+        bool currentUserFullControl = false;
+        bool localSystemFullControl = false;
+        AuthorizationRuleCollection rules = security
             .GetAccessRules(
                 includeExplicit: true,
                 includeInherited: true,
                 targetType: typeof(SecurityIdentifier));
         foreach (FileSystemAccessRule rule in rules)
         {
+            if (rule.IsInherited)
+                return false;
             if (rule.AccessControlType != AccessControlType.Allow)
                 continue;
-            if (rule.IdentityReference.Equals(currentUser)
-                || rule.IdentityReference.Equals(localSystem))
+            if (rule.IdentityReference.Equals(currentUser))
             {
+                currentUserFullControl |=
+                    (rule.FileSystemRights & FileSystemRights.FullControl)
+                        == FileSystemRights.FullControl;
                 continue;
             }
-            if ((rule.FileSystemRights & (
-                    FileSystemRights.ReadData
-                    | FileSystemRights.ReadAttributes
-                    | FileSystemRights.ReadExtendedAttributes
-                    | FileSystemRights.ReadPermissions
-                    | FileSystemRights.FullControl)) != 0)
+            if (rule.IdentityReference.Equals(localSystem))
             {
-                return false;
+                localSystemFullControl |=
+                    (rule.FileSystemRights & FileSystemRights.FullControl)
+                        == FileSystemRights.FullControl;
+                continue;
+            }
+            return false;
+        }
+        return currentUserFullControl && localSystemFullControl;
+    }
+
+    private static void TryDeleteFailedEnhancementCompanionAuthFile(
+        string path,
+        string trustedDirectory)
+    {
+        try
+        {
+            string fullPath = Path.GetFullPath(path);
+            if (string.Equals(
+                    Path.GetDirectoryName(fullPath),
+                    Path.GetFullPath(trustedDirectory),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(fullPath);
             }
         }
-        return true;
+        catch
+        {
+            // Fail closed. A failed newly-created token is never accepted.
+        }
     }
 
     private async Task<EnhancementCompanionOwnershipProbe>
@@ -2458,6 +2624,19 @@ public partial class MainWindow
         EnhancementApiResponse response = await SendEnhancementEnqueueAsync(body);
         return response.SavedForDelivery;
     }
+    public async Task<bool> SendEnhancementEnqueueWithListenerHandoffForSmokeAsync(
+        object body,
+        Action onBeforePublish)
+    {
+        EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+            body,
+            prePublishValidator: () =>
+            {
+                onBeforePublish();
+                return null;
+            });
+        return response.SavedForDelivery;
+    }
     public async Task<bool> SendEnhancementSecureRequestForSmokeAsync(
         object body)
     {
@@ -2486,6 +2665,41 @@ public partial class MainWindow
         => HasEnhancementCapability(
             payload,
             RecoveredPhotorealSourceUpscaleCapability);
+    public static EnhancementCompanionAuthAclSmokeSnapshot
+        EnhancementCompanionAuthAclContractForSmoke()
+    {
+        SecurityIdentifier currentUser = WindowsIdentity.GetCurrent().User
+            ?? throw new System.Security.SecurityException(
+                "The current Windows user identity is unavailable.");
+        SecurityIdentifier localSystem = new(WellKnownSidType.LocalSystemSid, null);
+        SecurityIdentifier foreign = new(WellKnownSidType.WorldSid, null);
+        FileSecurity Build(SecurityIdentifier owner, bool foreignAllow)
+        {
+            var security = new FileSecurity();
+            security.SetOwner(owner);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(
+                currentUser,
+                FileSystemRights.FullControl,
+                AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                localSystem,
+                FileSystemRights.FullControl,
+                AccessControlType.Allow));
+            if (foreignAllow)
+            {
+                security.AddAccessRule(new FileSystemAccessRule(
+                    foreign,
+                    FileSystemRights.ReadData,
+                    AccessControlType.Allow));
+            }
+            return security;
+        }
+        return new EnhancementCompanionAuthAclSmokeSnapshot(
+            HasCurrentUserOnlyAuthAcl(Build(currentUser, foreignAllow: false), currentUser),
+            !HasCurrentUserOnlyAuthAcl(Build(foreign, foreignAllow: false), currentUser),
+            !HasCurrentUserOnlyAuthAcl(Build(currentUser, foreignAllow: true), currentUser));
+    }
 }
 
 public sealed record EnhancementCompanionSecureRequestSmokeSnapshot(
@@ -2494,6 +2708,11 @@ public sealed record EnhancementCompanionSecureRequestSmokeSnapshot(
     string? BodyJson,
     string? IdempotencyKey,
     string OuterEnvelopeJson);
+
+public sealed record EnhancementCompanionAuthAclSmokeSnapshot(
+    bool CanonicalCurrentUserAclAccepted,
+    bool ForeignOwnerRejected,
+    bool ForeignAllowRejected);
 
 internal sealed record ValidatedEnhancementCompanionRoot(
     string RootPath,
