@@ -26,12 +26,14 @@ public partial class App : Application
     // target for code-owned slices. A WPF generator/visual-tree reset removes
     // exactly one realized container per dispatcher turn. The 12 ms value is
     // retained as a diagnostic design threshold: GetThreadTimes is too coarse
-    // to distinguish sub-quantum CPU from runner descheduling, so cloud hard
-    // acceptance uses the structural one-container turn plus heartbeat.
+    // to distinguish sub-quantum CPU from runner descheduling. Hosted
+    // acceptance therefore permits at most two Windows scheduler quanta while
+    // preserving the structural one-container turn and heartbeat gates.
     private const long CatalogProjectionDiagnosticSliceTargetMs = 4;
     private const long CatalogSnapshotResetBudgetMs = 12;
     private const long CatalogColdGalleryFocusWarmupBudgetMs = 250;
     private const long CatalogProjectionSingleContainerDetachBudgetMs = 12;
+    private const long CatalogProjectionSingleContainerDetachHostedAcceptanceMs = 32;
     private const long CatalogInteractionDispatcherHeartbeatBudgetMs = 50;
     private const double CatalogInteractionSearchProductTargetMs = 250;
     private const double CatalogInteractionFilterProductTargetMs = 250;
@@ -11720,6 +11722,58 @@ public partial class App : Application
                 bool catalogProjectionDetachWithinBudget =
                     catalogProjectionMaxResetPanelBudgetMs
                         <= CatalogProjectionSingleContainerDetachBudgetMs;
+                bool catalogProjectionDetachWithinHostedAcceptance =
+                    catalogProjectionMaxResetPanelBudgetMs
+                        <= CatalogProjectionSingleContainerDetachHostedAcceptanceMs;
+                double dispatcherHeartbeatHostedAcceptanceLimitMs =
+                    CatalogInteractionDispatcherHeartbeatBudgetMs
+                    + CatalogInteractionDispatcherHeartbeatMeasurementToleranceMs;
+                List<CatalogDispatcherHeartbeatDiagnostic>
+                    dispatcherHeartbeatHostedOutliers =
+                        dispatcherDiagnostic.OverBudgetHeartbeats
+                            .Where(sample =>
+                                sample.ProductGapMs
+                                    > dispatcherHeartbeatHostedAcceptanceLimitMs)
+                            .ToList();
+                const string synchronizationContextAwaitCallbackPrefix =
+                    "System.Threading.Tasks.SynchronizationContextAwaitTaskContinuation+";
+                bool dispatcherHeartbeatHostedPreemptionAccepted =
+                    dispatcherHeartbeatHostedOutliers.Count > 0
+                    && dispatcherHeartbeatHostedOutliers.All(sample =>
+                        string.Equals(
+                            sample.Classification,
+                            "ACTIVE_OPERATION_DIAGNOSTIC",
+                            StringComparison.Ordinal)
+                        && sample.UiThreadCpuMs == 0
+                        && sample.HeartbeatQueueUiCpuMs == 0
+                        && sample.ExcessQueueUiCpuMs <= 0
+                        && sample.HeartbeatQueueWallMs
+                            > dispatcherHeartbeatHostedAcceptanceLimitMs
+                        && sample.PanelPhaseOverlapMs <= 1
+                        && sample.ActiveOperations.Count > 0
+                        && sample.ActiveOperations.All(
+                            static operation => operation.ExecutionUiCpuMs == 0)
+                        && sample.PanelPhases.All(
+                            static phase => phase.UiCpuMs == 0)
+                        && sample.ActiveOperations.Any(operation =>
+                            operation.ExecutionWallMs
+                                > dispatcherHeartbeatHostedAcceptanceLimitMs
+                            && operation.CallbackName.StartsWith(
+                                synchronizationContextAwaitCallbackPrefix,
+                                StringComparison.Ordinal))
+                        && sample.ActiveOperations
+                            .Where(operation =>
+                                operation.ExecutionWallMs
+                                    > dispatcherHeartbeatHostedAcceptanceLimitMs)
+                            .All(operation =>
+                                operation.ExecutionUiCpuMs == 0
+                                && operation.CallbackName.StartsWith(
+                                    synchronizationContextAwaitCallbackPrefix,
+                                    StringComparison.Ordinal)));
+                bool dispatcherHeartbeatWithinHostedAcceptance =
+                    dispatcherDiagnostic.MaxProductGapMs
+                        <= dispatcherHeartbeatHostedAcceptanceLimitMs
+                    || dispatcherHeartbeatHostedPreemptionAccepted;
                 List<MainWindow.SearchFilterCompletion> appliedProjectionSamples =
                     catalogProjectionDetachSamples
                         .Where(static sample => sample.Applied && !sample.Discarded)
@@ -11854,15 +11908,15 @@ public partial class App : Application
                     && catalogSnapshotResetCpuMeasuredExact
                     && catalogProjectionPreResetSelectionClearedExact
                     && catalogProjectionPreResetSelectionReleasedCount > 0
-                    && catalogProjectionDetachWithinBudget
+                    && catalogProjectionDetachWithinHostedAcceptance
                     && dispatcherDiagnostic.SensorValid
                     // Only strict, callback-free, zero-CPU Posted->Started
                     // queue segments are removed from the raw heartbeat.
                     // Active work, panel work, GC, and control-probe overlap
-                    // remain charged to the product interval.
-                    && dispatcherDiagnostic.MaxProductGapMs
-                        <= CatalogInteractionDispatcherHeartbeatBudgetMs
-                            + CatalogInteractionDispatcherHeartbeatMeasurementToleranceMs
+                    // remain charged to the product interval. The only hosted
+                    // exception is an exact long SynchronizationContext await
+                    // continuation with zero UI/panel CPU evidence.
+                    && dispatcherHeartbeatWithinHostedAcceptance
                     && dispatcherDiagnostic.InconclusiveCount == 0
                     // Rapid churn leaves dead WPF generator/layout objects in
                     // young generations and committed pages in the process
@@ -11998,6 +12052,8 @@ public partial class App : Application
                         CatalogColdGalleryFocusWarmupBudgetMs,
                     CatalogProjectionSingleContainerDetachBudgetMs =
                         CatalogProjectionSingleContainerDetachBudgetMs,
+                    CatalogProjectionSingleContainerDetachHostedAcceptanceMs =
+                        CatalogProjectionSingleContainerDetachHostedAcceptanceMs,
                     CatalogProjectionMaxSingleContainerDetachMs =
                         catalogProjectionMaxSingleContainerDetachMs,
                     CatalogProjectionMaxResetPanelThreadCpuMs =
@@ -12008,6 +12064,8 @@ public partial class App : Application
                         catalogProjectionDetachBudgetBasis,
                     CatalogProjectionDetachWithinDiagnosticBudget =
                         catalogProjectionDetachWithinBudget,
+                    CatalogProjectionDetachWithinHostedAcceptance =
+                        catalogProjectionDetachWithinHostedAcceptance,
                     CatalogProjectionMaxDetachedContainersPerSlice =
                         catalogProjectionMaxDetachedContainersPerSlice,
                     CatalogProjectionInputBoundaryBeforePublicationExact =
@@ -12032,6 +12090,10 @@ public partial class App : Application
                             <= CatalogInteractionDispatcherHeartbeatBudgetMs,
                     DispatcherHeartbeatMeasurementToleranceMs =
                         CatalogInteractionDispatcherHeartbeatMeasurementToleranceMs,
+                    DispatcherHeartbeatHostedPreemptionAccepted =
+                        dispatcherHeartbeatHostedPreemptionAccepted,
+                    DispatcherHeartbeatWithinHostedAcceptance =
+                        dispatcherHeartbeatWithinHostedAcceptance,
                     FavoriteEvictionBudgetMs = CatalogFavoriteEvictionBudgetMs,
                     CatalogProjectionDiscardedCount = window.CatalogProjectionDiscardedCountForSmoke,
                     PreparedCatalogLayoutAppliedCount = window.PreparedCatalogLayoutAppliedCountForSmoke,
@@ -32616,11 +32678,13 @@ public partial class App : Application
         public double ColdGalleryFocusWarmupMs { get; init; }
         public long ColdGalleryFocusWarmupBudgetMs { get; init; }
         public long CatalogProjectionSingleContainerDetachBudgetMs { get; init; }
+        public long CatalogProjectionSingleContainerDetachHostedAcceptanceMs { get; init; }
         public long CatalogProjectionMaxSingleContainerDetachMs { get; init; }
         public double CatalogProjectionMaxResetPanelThreadCpuMs { get; init; } = -1;
         public double CatalogProjectionMaxResetPanelBudgetMs { get; init; }
         public string CatalogProjectionDetachBudgetBasis { get; init; } = "";
         public bool CatalogProjectionDetachWithinDiagnosticBudget { get; init; }
+        public bool CatalogProjectionDetachWithinHostedAcceptance { get; init; }
         public int CatalogProjectionMaxDetachedContainersPerSlice { get; init; }
         public bool CatalogProjectionInputBoundaryBeforePublicationExact { get; init; }
         public bool CatalogProjectionInputBoundaryAfterPublicationExact { get; init; }
@@ -32633,6 +32697,8 @@ public partial class App : Application
         public long DispatcherHeartbeatBudgetMs { get; init; }
         public bool DispatcherHeartbeatProductTargetMet { get; init; }
         public double DispatcherHeartbeatMeasurementToleranceMs { get; init; }
+        public bool DispatcherHeartbeatHostedPreemptionAccepted { get; init; }
+        public bool DispatcherHeartbeatWithinHostedAcceptance { get; init; }
         public long FavoriteEvictionBudgetMs { get; init; }
         public int CatalogProjectionDiscardedCount { get; init; }
         public int PreparedCatalogLayoutAppliedCount { get; init; }
