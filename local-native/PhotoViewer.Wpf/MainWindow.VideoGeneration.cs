@@ -436,15 +436,32 @@ public partial class MainWindow
         };
 
     private string MiniMaxH3ReadinessSuffix()
-        => !_miniMaxH3HealthChecked
-            ? " 生成環境はまだ確認していません。正確な契約を確認できるまでジョブは登録しません。"
-            : _miniMaxH3Ready
-                ? " ローカルruntimeの準備を確認済みです。"
-                : _miniMaxH3ReasonCode is "HEALTH_UNAVAILABLE" or "MINIMAX_H3_PROFILES_UNAVAILABLE"
-                    ? " " + DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode)
-                        + " 正確な契約を確認できるまでジョブは登録しません。"
-                    : " " + DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode)
-                        + " 待機ジョブを登録でき、runtime準備後に実行します。";
+        => " " + MiniMaxH3ReservationReadinessStatus();
+
+    private string MiniMaxH3ReservationReadinessStatus()
+    {
+        if (!_miniMaxH3HealthChecked)
+        {
+            return "生成環境はまだ確認していません。"
+                + "正確な契約を確認できるまでジョブは登録しません。";
+        }
+
+        if (_miniMaxH3Ready)
+        {
+            return "MiniMax H3の準備を確認しました。"
+                + "実行すると既存のAI Jobsキューへ追加します。";
+        }
+
+        string reason = DescribeMiniMaxH3VideoReasonCode(
+            _miniMaxH3ReasonCode);
+        bool exactUnreadyContract = _miniMaxH3ReasonCode is not null
+            && MiniMaxH3VideoReasonCodes.Contains(
+                _miniMaxH3ReasonCode,
+                StringComparer.Ordinal);
+        return exactUnreadyContract
+            ? reason + " 待機ジョブを登録できます。runtime準備後に実行します。"
+            : reason + " 正確な契約を確認できるまでジョブは登録しません。";
+    }
 
     private static string DescribeMiniMaxH3VideoReasonCode(string? reasonCode)
         => reasonCode switch
@@ -510,10 +527,7 @@ public partial class MainWindow
                 || _videoSourceChoice is not null))
         {
             SetVideoGenerationSettingsStatus(
-                _miniMaxH3Ready
-                    ? "MiniMax H3の準備を確認しました。実行すると既存のAI Jobsキューへ追加します。"
-                    : DescribeMiniMaxH3VideoReasonCode(_miniMaxH3ReasonCode)
-                        + " ジョブ登録はできます。実行は準備完了まで待機します。");
+                MiniMaxH3ReservationReadinessStatus());
         }
     }
 
@@ -1038,15 +1052,9 @@ public partial class MainWindow
         else
         {
             _videoSourceChoice = source;
-            status = IsVideoModelRunnable(_videoModelId)
-                ? "実行すると既存のAI Jobsキューへ追加します。画像閲覧だけでは開始しません。"
-                : IsMiniMaxH3VideoModel(_videoModelId)
-                    ? DescribeMiniMaxH3VideoReasonCode(
-                        _miniMaxH3HealthChecked
-                            ? _miniMaxH3ReasonCode
-                            : null)
-                        + " ジョブ登録はできます。実行は準備完了まで待機します。"
-                    : "旧動画モデル設定は新規生成に使いません。MiniMax H3へ切り替えてください。";
+            status = IsMiniMaxH3VideoModel(_videoModelId)
+                ? MiniMaxH3ReservationReadinessStatus()
+                : "旧動画モデル設定は新規生成に使いません。MiniMax H3へ切り替えてください。";
         }
         VideoH3PromptRewriteContextChanged(cancelPending: false);
         SyncVideoGenerationSettingsControls();
@@ -2453,6 +2461,9 @@ public partial class MainWindow
 
     public string MiniMaxH3ReadinessTextForSmoke
         => MiniMaxH3ReadinessSuffix();
+
+    public string MiniMaxH3ReservationReadinessStatusForSmoke
+        => MiniMaxH3ReservationReadinessStatus();
 
     public void SelectVideoQualityForSmoke(string presetId)
     {

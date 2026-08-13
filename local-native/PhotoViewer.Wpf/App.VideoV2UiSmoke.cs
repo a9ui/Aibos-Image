@@ -123,6 +123,73 @@ public partial class App
                 window.MiniMaxH3SurfaceIssuesForSmoke.ToArray();
             string h3UnavailableReason = window.MiniMaxH3ReadinessTextForSmoke;
 
+            static bool RegistrationBlocked(string status)
+                => status.Contains(
+                        "ジョブは登録しません",
+                        StringComparison.Ordinal)
+                    && !status.Contains(
+                        "待機ジョブを登録でき",
+                        StringComparison.Ordinal);
+            static bool WaitingRegistrationAllowed(string status)
+                => status.Contains(
+                        "待機ジョブを登録できます",
+                        StringComparison.Ordinal)
+                    && !status.Contains(
+                        "ジョブは登録しません",
+                        StringComparison.Ordinal);
+
+            window.SetMiniMaxH3CapabilityForSmoke(
+                checkedHealth: false,
+                ready: false,
+                reasonCode: null);
+            string uncheckedReservationStatus =
+                window.MiniMaxH3ReservationReadinessStatusForSmoke;
+            window.SetMiniMaxH3CapabilityForSmoke(
+                checkedHealth: true,
+                ready: false,
+                reasonCode: "HEALTH_UNAVAILABLE");
+            string unavailableReservationStatus =
+                window.MiniMaxH3ReservationReadinessStatusForSmoke;
+            window.SetMiniMaxH3CapabilityForSmoke(
+                checkedHealth: true,
+                ready: false,
+                reasonCode: "MINIMAX_H3_PROFILES_UNAVAILABLE");
+            string missingProfilesReservationStatus =
+                window.MiniMaxH3ReservationReadinessStatusForSmoke;
+            window.SetMiniMaxH3CapabilityForSmoke(
+                checkedHealth: true,
+                ready: false,
+                reasonCode: "MINIMAX_H3_WRITER_DISABLED");
+            string disabledReservationStatus =
+                window.MiniMaxH3ReservationReadinessStatusForSmoke;
+            window.SetMiniMaxH3CapabilityForSmoke(
+                checkedHealth: true,
+                ready: false,
+                reasonCode: "MINIMAX_H3_RUNTIME_SEAL_INVALID");
+            string invalidSealReservationStatus =
+                window.MiniMaxH3ReservationReadinessStatusForSmoke;
+            window.SetMiniMaxH3CapabilityForSmoke(
+                checkedHealth: true,
+                ready: true,
+                reasonCode: null);
+            string readyReservationStatus =
+                window.MiniMaxH3ReservationReadinessStatusForSmoke;
+            bool h3ReservationStatusExact =
+                RegistrationBlocked(uncheckedReservationStatus)
+                && RegistrationBlocked(unavailableReservationStatus)
+                && RegistrationBlocked(missingProfilesReservationStatus)
+                && WaitingRegistrationAllowed(disabledReservationStatus)
+                && WaitingRegistrationAllowed(invalidSealReservationStatus)
+                && readyReservationStatus.Contains(
+                    "既存のAI Jobsキューへ追加します",
+                    StringComparison.Ordinal)
+                && !readyReservationStatus.Contains(
+                    "ジョブは登録しません",
+                    StringComparison.Ordinal)
+                && !readyReservationStatus.Contains(
+                    "待機ジョブ",
+                    StringComparison.Ordinal);
+
             using JsonDocument request = JsonDocument.Parse(
                 window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
                     "  A gentle head turn in dawn light.  "));
@@ -475,6 +542,7 @@ public partial class App
             ok = h3DefaultOnly
                 && templateExact
                 && h3UnavailableSafe
+                && h3ReservationStatusExact
                 && requestExact
                 && longRequestExact
                 && healthExact
@@ -496,6 +564,13 @@ public partial class App
                 h3UnavailableRunnable,
                 h3UnavailableSurfaceIssues,
                 h3UnavailableReason,
+                h3ReservationStatusExact,
+                uncheckedReservationStatus,
+                unavailableReservationStatus,
+                missingProfilesReservationStatus,
+                disabledReservationStatus,
+                invalidSealReservationStatus,
+                readyReservationStatus,
                 requestExact,
                 longRequestExact,
                 healthExact,

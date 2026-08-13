@@ -325,18 +325,39 @@ if ($result.coldGalleryFocusWarmupBudgetMs -ne 250 `
 }
 $controlConsensus = $result.schedulerControlConsensus
 $dispatcherDiagnostic = $result.dispatcherDiagnostic
-# Keep the product heartbeat target at 50 ms while separately allowing the
-# measured hosted scheduler/GC variance. Structural slice, queue, and
-# input-boundary gates stay exact.
+# Keep the product heartbeat target at 50 ms. A hosted exception requires
+# positive independent-control consensus for the same heartbeat interval;
+# zero CPU or an await callback alone is never attribution.
 $heartbeatMeasurementToleranceMs = 25.0
+$heartbeatAbsoluteCeilingMs = 2500.0
+$heartbeatAttributionToleranceMs = 0.5
 $heartbeatAcceptanceLimitMs =
     [double]$result.dispatcherHeartbeatBudgetMs + $heartbeatMeasurementToleranceMs
 $heartbeatHostedOutliers = @(
     $dispatcherDiagnostic.overBudgetHeartbeats | Where-Object {
         [double]$_.productGapMs -gt $heartbeatAcceptanceLimitMs
     })
+$controlSamplesByHeartbeatTag = @{}
+$duplicateControlHeartbeatTags = [Collections.Generic.HashSet[string]]::new(
+    [StringComparer]::Ordinal)
+foreach ($controlSample in @($controlConsensus.heartbeatSamples)) {
+    $tagKey = [string][long]$controlSample.heartbeatTag
+    if ($controlSamplesByHeartbeatTag.ContainsKey($tagKey)) {
+        $null = $duplicateControlHeartbeatTags.Add($tagKey)
+        continue
+    }
+    $controlSamplesByHeartbeatTag[$tagKey] = $controlSample
+}
 $invalidHeartbeatHostedOutliers = @(
     $heartbeatHostedOutliers | Where-Object {
+        $heartbeat = $_
+        $tagKey = [string][long]$heartbeat.heartbeatTag
+        $control = if ($controlSamplesByHeartbeatTag.ContainsKey($tagKey) `
+                -and -not $duplicateControlHeartbeatTags.Contains($tagKey)) {
+            $controlSamplesByHeartbeatTag[$tagKey]
+        } else {
+            $null
+        }
         $activeOperations = @($_.activeOperations)
         $panelPhases = @($_.panelPhases)
         $longOperations = @($activeOperations | Where-Object {
@@ -347,6 +368,16 @@ $invalidHeartbeatHostedOutliers = @(
                 -and $_.callbackName -like `
                     'System.Threading.Tasks.SynchronizationContextAwaitTaskContinuation+*'
         })
+        $positiveControlConsensus = $null -ne $control `
+            -and $control.classification -eq 'CONTROL_CONSENSUS_OVERLAP' `
+            -and [Math]::Abs(
+                [double]$control.rawGapMs - [double]$heartbeat.rawGapMs) `
+                -le $heartbeatAttributionToleranceMs
+        $controlOverlapExplainsExcess = $positiveControlConsensus `
+            -and [double]$control.controlConsensusOverlapMs `
+                + $heartbeatAttributionToleranceMs `
+                -ge [double]$heartbeat.productGapMs `
+                    - $heartbeatAcceptanceLimitMs
         $_.classification -ne 'ACTIVE_OPERATION_DIAGNOSTIC' `
             -or [double]$_.uiThreadCpuMs -ne 0 `
             -or [double]$_.heartbeatQueueUiCpuMs -ne 0 `
@@ -361,7 +392,14 @@ $invalidHeartbeatHostedOutliers = @(
                 [double]$_.uiCpuMs -ne 0
             }).Count -gt 0 `
             -or $longOperations.Count -eq 0 `
-            -or $longAwaitOperations.Count -ne $longOperations.Count
+            -or $longAwaitOperations.Count -ne $longOperations.Count `
+            -or -not $positiveControlConsensus `
+            -or $control.gcTimingAmbiguous -eq $true `
+            -or [double]$control.unexplainedGapMs `
+                -gt $heartbeatAcceptanceLimitMs `
+            -or -not $controlOverlapExplainsExcess `
+            -or [double]$heartbeat.rawGapMs -gt $heartbeatAbsoluteCeilingMs `
+            -or [double]$heartbeat.productGapMs -gt $heartbeatAbsoluteCeilingMs
     })
 $heartbeatHostedPreemptionAccepted =
     $heartbeatHostedOutliers.Count -gt 0 `
@@ -371,6 +409,17 @@ $heartbeatWithinHostedAcceptance =
     -or $heartbeatHostedPreemptionAccepted
 if ($result.dispatcherHeartbeatBudgetMs -ne 50 `
     -or $result.dispatcherHeartbeatMeasurementToleranceMs -ne $heartbeatMeasurementToleranceMs `
+    -or $result.dispatcherHeartbeatHostedPreemptionAbsoluteCeilingMs `
+        -ne $heartbeatAbsoluteCeilingMs `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.exact -ne $true `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.zeroCpuContinuationWithoutControlRejected -ne $true `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.zeroCpuSynchronousWaitWithoutControlRejected -ne $true `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.positiveControlConsensusAccepted -ne $true `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.absoluteCeilingExceededRejected -ne $true `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.activeCpuRejected -ne $true `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.panelCpuRejected -ne $true `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.gcAmbiguityRejected -ne $true `
+    -or $result.dispatcherHeartbeatHostedPreemptionPolicySelfTest.inconclusiveRejected -ne $true `
     -or $null -eq $controlConsensus `
     -or $null -eq $dispatcherDiagnostic) {
     $failures.Add('dispatcher heartbeat diagnostic contract was missing')
@@ -413,7 +462,7 @@ elseif ($controlConsensus.sensorValid -ne $true `
 }
 if ($result.dispatcherHeartbeatProductTargetMet -ne $true) {
     if ($heartbeatHostedPreemptionAccepted) {
-        Write-Warning "Product heartbeat target exceeded only during an exact zero-CPU SynchronizationContext await preemption ($($dispatcherDiagnostic.maxProductGapMs) ms > $($result.dispatcherHeartbeatBudgetMs) ms)."
+        Write-Warning "Product heartbeat target exceeded only during positively attributed host preemption ($($dispatcherDiagnostic.maxProductGapMs) ms > $($result.dispatcherHeartbeatBudgetMs) ms)."
     }
     else {
         Write-Warning "Product heartbeat target exceeded but remained eligible for hosted acceptance ($($dispatcherDiagnostic.maxProductGapMs) ms > $($result.dispatcherHeartbeatBudgetMs) ms)."
