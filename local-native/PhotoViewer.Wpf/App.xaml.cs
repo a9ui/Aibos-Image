@@ -17783,6 +17783,13 @@ public partial class App : Application
                                 idempotencyKey = requestId,
                                 jobId = "video-smoke-job",
                             },
+                            executionDeferred = !h3WriterReady,
+                            executionState = h3WriterReady
+                                ? null
+                                : "waiting-for-backend",
+                            executionReasonCode = h3WriterReady
+                                ? null
+                                : "MINIMAX_H3_WRITER_DISABLED",
                         }),
                     };
                 });
@@ -17961,13 +17968,16 @@ public partial class App : Application
                     ready: false,
                     reasonCode: "MINIMAX_H3_WRITER_DISABLED");
                 int postsBeforeUnavailableH3 = enhancementMutationRequestCount;
-                bool unavailableH3RejectedBeforePost =
-                    !await win.QueueVideoGenerationForSmokeAsync()
+                bool unavailableH3Deferred =
+                    await win.QueueVideoGenerationForSmokeAsync()
                     && enhancementMutationRequestCount
-                        == postsBeforeUnavailableH3
+                        == postsBeforeUnavailableH3 + 1
                     && win.VideoGenerationQueueEnabledForSmoke
                     && win.MiniMaxH3ReadinessTextForSmoke.Contains(
-                        "待機ジョブの登録はできます",
+                        "待機ジョブを登録でき",
+                        StringComparison.Ordinal)
+                    && win.VideoGenerationStatusForSmoke.Contains(
+                        "待機ジョブを登録しました",
                         StringComparison.Ordinal);
                 h3WriterReady = true;
                 win.SetMiniMaxH3CapabilityForSmoke(
@@ -17981,7 +17991,7 @@ public partial class App : Application
                     && videoRequestExact
                     && fixedVideoSeedOmitted
                     && invalidLegacySeedIgnoredByH3
-                    && unavailableH3RejectedBeforePost;
+                    && unavailableH3Deferred;
                 win.ConfigureVideoGenerationForSmoke(
                     5,
                     12,
@@ -19440,7 +19450,7 @@ public partial class App : Application
                     && initial.QueuePauseLabel == "一時停止"
                     && initial.QueuePauseEnabled
                     && initial.QueuedPhotorealPromptUpdateSupported;
-                bool healthProvenance = initial.HealthRevision == "H25 69684954";
+                bool healthProvenance = initial.HealthRevision == "Local AI 69684954";
                 bool healthPassive = initial.HealthGetRequests >= 1 && passiveOpen;
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterHealthOnlyPoll =
@@ -19559,7 +19569,7 @@ public partial class App : Application
                 EnhancementJobsWorkspaceSmokeSnapshot recoveredHealth =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool healthRecovered = recoveredHealth.HealthState == "Working"
-                    && recoveredHealth.HealthRevision == "H25 69684954";
+                    && recoveredHealth.HealthRevision == "Local AI 69684954";
                 bool pauseIssued = await window.SetEnhancementQueuePausedForSmokeAsync(true);
                 EnhancementJobsWorkspaceSmokeSnapshot pausedQueue =
                     window.EnhancementJobsWorkspaceForSmoke();

@@ -954,7 +954,7 @@ public partial class MainWindow
                 {
                     _i2iV2Capability = null;
                     _i2iV2CapabilityUnknown = false;
-                    return "The running H25 companion is not ready for the selected AI edit. No job was added.";
+                    return "The Aibos Image local AI service is not ready for the selected AI edit. No job was added.";
                 }
                 validatedCapability = capability;
                 _i2iV2Capability = capability;

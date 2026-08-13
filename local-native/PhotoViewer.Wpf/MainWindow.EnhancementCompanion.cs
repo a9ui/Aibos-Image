@@ -159,7 +159,7 @@ public partial class MainWindow
             false,
             426,
             health.Payload,
-            $"The running H25 companion does not support {capabilityLabel}. Restart H25 first; no job was added.");
+            $"The Aibos Image local AI service does not support {capabilityLabel}. Restart the local AI service first; no job was added.");
     }
 
     private async Task<EnhancementApiResponse> EnsureImageEnhancementCompanionReadyForExplicitActionAsync(
@@ -243,7 +243,7 @@ public partial class MainWindow
             false,
             426,
             health.Payload,
-            $"The running H25 companion does not support {missing}. Restart H25 first; no job was added.");
+            $"The Aibos Image local AI service does not support {missing}. Restart the local AI service first; no job was added.");
     }
 
     private static bool HasPhotorealPromptControlsCapability(JsonElement payload)
@@ -308,7 +308,7 @@ public partial class MainWindow
             }
             return missingCapabilities.Count == 0
                 ? null
-                : $"The running H25 companion does not support {string.Join(", ", missingCapabilities)}. Restart H25 first; no job was added.";
+                : $"The Aibos Image local AI service does not support {string.Join(", ", missingCapabilities)}. Restart the local AI service first; no job was added.";
         };
     }
 
@@ -317,7 +317,7 @@ public partial class MainWindow
         string capabilityLabel)
         => payload => HasEnhancementCapability(payload, capability)
             ? null
-            : $"The running H25 companion does not support {capabilityLabel}. Restart H25 first; no job was added.";
+            : $"The Aibos Image local AI service does not support {capabilityLabel}. Restart the local AI service first; no job was added.";
 
     private readonly record struct MiniMaxH3VideoCapabilityState(
         bool Ready,
@@ -548,24 +548,12 @@ public partial class MainWindow
             _ => false,
         };
 
-    private static Func<JsonElement, string?> CreateMiniMaxH3VideoRuntimeHealthValidator()
-        => payload => TryParseMiniMaxH3VideoCapability(payload, out var capability)
-            ? capability.Ready
-                ? null
-                : DescribeMiniMaxH3VideoReasonCode(capability.ReasonCode)
-                    + " 動画ジョブは追加していません。"
-            : "MiniMax H3の正確な準備状態を確認できません。動画ジョブは追加していません。";
-
     private static Func<JsonElement, string?> CreateMiniMaxH3VideoHealthValidator()
-    {
-        Func<JsonElement, string?> runtimeValidator =
-            CreateMiniMaxH3VideoRuntimeHealthValidator();
-        return payload => runtimeValidator(payload) is string runtimeError
-            ? runtimeError
+        => payload => !TryParseMiniMaxH3VideoCapability(payload, out _)
+            ? "The Aibos Image local AI service cannot prove the exact MiniMax H3 protocol. No job was added."
             : !TryParseMiniMaxH3VideoProfilesCapability(payload)
-                ? "The running H25 companion does not expose the tested MiniMax H3 5, 10, 12, and 15 second profiles. Restart H25 first; no job was added."
+                ? "The Aibos Image local AI service does not expose the tested MiniMax H3 5, 10, 12, and 15 second profiles. Restart the local AI service first; no job was added."
                 : null;
-    }
 
     private static bool TryParseMiniMaxH3VideoProfilesCapability(
         JsonElement payload)
@@ -762,7 +750,7 @@ public partial class MainWindow
                     false,
                     426,
                     probe.HealthPayload,
-                    "The running H25 companion cannot prove support for this request. Restart H25 first; no job was added.")
+                    "The Aibos Image local AI service cannot prove support for this request. Restart the local AI service first; no job was added.")
                 : null;
         }
         if (probe.HealthPayload is not JsonElement healthPayload)
@@ -771,7 +759,7 @@ public partial class MainWindow
                 false,
                 426,
                 null,
-                "The running H25 companion cannot prove support for this request. Restart H25 first; no job was added.");
+                "The Aibos Image local AI service cannot prove support for this request. Restart the local AI service first; no job was added.");
         }
 
         string? error = healthValidator(healthPayload);
@@ -1090,7 +1078,7 @@ public partial class MainWindow
         ValidatedEnhancementCompanionRoot? companionRoot = ResolveEnhancementCompanionRoot();
         if (companionRoot is null)
         {
-            error = "Aibos could not find the H25 Browser companion beside this portable build. Open the H25 copy of Aibos or set AIBOS_H25_COMPANION_ROOT.";
+            error = "Aibos could not find the local AI service beside this portable build. Open a build with the local AI service available, or set the compatibility variable AIBOS_H25_COMPANION_ROOT.";
             return false;
         }
 

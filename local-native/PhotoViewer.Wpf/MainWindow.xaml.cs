@@ -9553,7 +9553,7 @@ public partial class MainWindow : Window
                 {
                     canUpscalePhotoreal = false;
                     error =
-                        "The running H25 companion does not support Recovered photoreal HQ. Restart H25 first; no job was added.";
+                        "The Aibos Image local AI service does not support Recovered photoreal HQ. Restart the local AI service first; no job was added.";
                 }
                 photorealUpscaleMenu.IsEnabled = canUpscalePhotoreal;
                 photorealUpscaleMenu.ToolTip = canUpscalePhotoreal ? null : error;
@@ -18659,7 +18659,7 @@ public partial class MainWindow : Window
                 false,
                 0,
                 null,
-                $"The optional Browser Enhancement companion is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start the H25 Browser application, then retry.");
+                $"The optional local AI service is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start the Aibos Image local AI service, then retry.");
         }
         finally
         {
@@ -18973,7 +18973,7 @@ public partial class MainWindow : Window
         {
             hasPhotorealUpscaleSource = false;
             photorealUpscaleError =
-                "The running H25 companion does not support Recovered photoreal HQ. Restart H25 first; no job was added.";
+                "The Aibos Image local AI service does not support Recovered photoreal HQ. Restart the local AI service first; no job was added.";
         }
         var currentUpscaleSource = new UpscaleRequestSource(null, null);
         bool currentUpscaleSourceResolved = hasRealSource
@@ -19022,7 +19022,7 @@ public partial class MainWindow : Window
         ModalEnhanceButton.ToolTip = displayedVersionIsPhotoreal
             && currentUpscaleSource.UsesRecoveredPhotorealSource
             && _recoveredPhotorealSourceUpscaleSupported != true
-                ? "The running H25 companion does not support Recovered photoreal HQ. Restart H25 first; no job was added."
+                ? "The Aibos Image local AI service does not support Recovered photoreal HQ. Restart the local AI service first; no job was added."
                 : displayedVersionIsPhotoreal
                     ? "表示中の実写化画像を写真向けモデルで高画質化"
                     : "表示中の画像を高画質化";
