@@ -1373,6 +1373,8 @@ public partial class App
                     && !companionLaunch.RedirectStandardError
                     && !companionLaunch.HasExplicitWorkingDirectory
                     && !companionLaunch.HasExternalOwnerPid
+                    && companionLaunch.HasInheritedAuthenticationToken
+                    && companionLaunch.HasInheritedInstanceId
                     && companionLaunch.NoOpen == "1"
                     && companionLaunch.ComfyAutostart == "0";
                 window.ConfigureModalPhotorealSettingsForSmoke(

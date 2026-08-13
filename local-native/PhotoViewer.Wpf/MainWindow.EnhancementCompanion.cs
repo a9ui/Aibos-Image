@@ -2,6 +2,10 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Security.AccessControl;
+using System.Security.Cryptography;
+using System.Security.Principal;
+using System.Text;
 using System.Text.Json;
 
 namespace PhotoViewer.Wpf;
@@ -23,6 +27,26 @@ public partial class MainWindow
         "photorealSeedControlV1";
     private const string VideoSeedControlCapability = "videoSeedControlV1";
     private const int DurableEnqueueActionDeadlineMilliseconds = 2_000;
+    private const string EnhancementCompanionAuthProtocol =
+        "aibos.companion-auth/v1";
+    private const string EnhancementCompanionRequestAuthProtocol =
+        "aibos.companion-request/v1";
+    private const string EnhancementCompanionIdentityRoute =
+        "api/enhance/identity";
+    private const string EnhancementCompanionAuthFileName =
+        "companion-auth-v1.key";
+    private const string EnhancementCompanionChallengeHeader =
+        "X-Aibos-Companion-Challenge";
+    private const string EnhancementCompanionTimestampHeader =
+        "X-Aibos-Auth-Timestamp";
+    private const string EnhancementCompanionNonceHeader =
+        "X-Aibos-Auth-Nonce";
+    private const string EnhancementCompanionSignatureHeader =
+        "X-Aibos-Auth-Signature";
+    private const int EnhancementCompanionIdentityResponseMaxBytes = 4096;
+    private static readonly string EnhancementCompanionSmokeAuthToken =
+        Base64UrlEncode(SHA256.HashData(Encoding.UTF8.GetBytes(
+            "aibos-companion-smoke-token-v1")));
 
     private readonly SemaphoreSlim _enhancementCompanionLaunchGate = new(1, 1);
     private readonly CancellationTokenSource _enhancementCompanionLifetimeCts = new();
@@ -30,6 +54,9 @@ public partial class MainWindow
     private string? _enhancementCompanionLaunchError;
     private int _enhancementCompanionLaunchAttemptCount;
     private Func<Uri, (bool Started, string Error)>? _startEnhancementCompanionForSmoke;
+    private string? _enhancementCompanionAuthToken;
+    private string? _ownedEnhancementCompanionInstanceId;
+    private bool _enhancementCompanionOwnershipVerified;
     private sealed record EnhancementEnqueueProbe(
         EnhancementEnqueueBackendMode Mode,
         JsonElement? HealthPayload,
@@ -38,24 +65,52 @@ public partial class MainWindow
         EnhancementApiResponse[] Responses,
         int NudgeCount,
         int PublishedCount);
+    private sealed record EnhancementCompanionOwnershipProbe(
+        bool Verified,
+        bool TransportUnavailable,
+        int StatusCode,
+        JsonElement? Payload,
+        string Error);
 
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionReadyForExplicitActionAsync(
         string? sourceIdentity = null,
         CancellationToken token = default)
     {
-        string readinessRoute = string.IsNullOrWhiteSpace(sourceIdentity)
-            ? "api/enhance/jobs"
-            : $"api/enhance/jobs?sourceId={Uri.EscapeDataString(sourceIdentity)}";
-        EnhancementApiResponse response = await SendEnhancementApiAsync(
-            HttpMethod.Get,
-            readinessRoute,
-            token: token);
-        // Any HTTP status proves that a loopback server already owns the
-        // endpoint. Only a transport failure may authorize a new process.
-        if (IsReadyEnhancementCompanionResponse(response)
-            || !_usingDefaultModalEnhancementSender
-            || response.StatusCode > 0)
-            return response;
+        _ = sourceIdentity;
+        const string readinessRoute = "api/enhance/jobs";
+        if (!_usingDefaultModalEnhancementSender)
+        {
+            return await SendEnhancementApiAsync(
+                HttpMethod.Get,
+                readinessRoute,
+                token: token);
+        }
+        if (!TryGetOrCreateEnhancementCompanionAuthToken(
+                out string authToken,
+                out string authError))
+        {
+            return new EnhancementApiResponse(false, 0, null, authError);
+        }
+
+        EnhancementCompanionOwnershipProbe ownership =
+            await ProbeEnhancementCompanionOwnershipAsync(authToken, token);
+        if (ownership.Verified)
+        {
+            _enhancementCompanionOwnershipVerified = true;
+            return await SendEnhancementApiAsync(
+                HttpMethod.Get,
+                readinessRoute,
+                token: token);
+        }
+        _enhancementCompanionOwnershipVerified = false;
+        if (!ownership.TransportUnavailable)
+        {
+            return new EnhancementApiResponse(
+                false,
+                ownership.StatusCode,
+                ownership.Payload,
+                ownership.Error);
+        }
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             token,
@@ -64,13 +119,25 @@ public partial class MainWindow
         await _enhancementCompanionLaunchGate.WaitAsync(linkedToken);
         try
         {
-            response = await SendEnhancementApiAsync(
-                HttpMethod.Get,
-                readinessRoute,
-                token: linkedToken);
-            if (IsReadyEnhancementCompanionResponse(response)
-                || response.StatusCode > 0)
-                return response;
+            ownership = await ProbeEnhancementCompanionOwnershipAsync(
+                authToken,
+                linkedToken);
+            if (ownership.Verified)
+            {
+                _enhancementCompanionOwnershipVerified = true;
+                return await SendEnhancementApiAsync(
+                    HttpMethod.Get,
+                    readinessRoute,
+                    token: linkedToken);
+            }
+            if (!ownership.TransportUnavailable)
+            {
+                return new EnhancementApiResponse(
+                    false,
+                    ownership.StatusCode,
+                    ownership.Payload,
+                    ownership.Error);
+            }
 
             if (_ownedEnhancementCompanion is null || _ownedEnhancementCompanion.HasExited)
             {
@@ -95,14 +162,32 @@ public partial class MainWindow
                 }
 
                 await Task.Delay(EnhancementCompanionProbeDelayMilliseconds, linkedToken);
-                response = await SendEnhancementApiAsync(
-                    HttpMethod.Get,
-                    readinessRoute,
-                    token: linkedToken);
-                if (IsReadyEnhancementCompanionResponse(response))
+                ownership = await ProbeEnhancementCompanionOwnershipAsync(
+                    authToken,
+                    linkedToken);
+                if (ownership.Verified)
                 {
-                    _enhancementCompanionLaunchError = null;
-                    return response;
+                    _enhancementCompanionOwnershipVerified = true;
+                    EnhancementApiResponse response = await SendEnhancementApiAsync(
+                        HttpMethod.Get,
+                        readinessRoute,
+                        token: linkedToken);
+                    if (IsReadyEnhancementCompanionResponse(response))
+                    {
+                        _enhancementCompanionLaunchError = null;
+                        return response;
+                    }
+                }
+                else if (!ownership.TransportUnavailable)
+                {
+                    string error = ownership.Error;
+                    _enhancementCompanionLaunchError = error;
+                    StopOwnedEnhancementCompanion();
+                    return new EnhancementApiResponse(
+                        false,
+                        ownership.StatusCode,
+                        ownership.Payload,
+                        error);
                 }
             }
 
@@ -779,6 +864,16 @@ public partial class MainWindow
         string? recoverySourceIdentity = null,
         Func<string?>? prePublishValidator = null)
     {
+        if (_usingDefaultModalEnhancementSender)
+        {
+            EnhancementApiResponse readiness =
+                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
+                    recoverySourceIdentity,
+                    token);
+            if (!readiness.Ok)
+                return readiness;
+        }
+
         string route = retryJobId is null
             ? "api/enhance/jobs"
             : $"api/enhance/jobs/{Uri.EscapeDataString(retryJobId)}/retry";
@@ -870,6 +965,25 @@ public partial class MainWindow
     {
         if (bodies.Count == 0)
             return new DurableEnhancementBatchResponse([], 0, 0);
+        if (_usingDefaultModalEnhancementSender)
+        {
+            EnhancementApiResponse readiness =
+                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
+                    token: token);
+            if (!readiness.Ok)
+            {
+                EnhancementApiResponse rejected = new(
+                    false,
+                    readiness.StatusCode,
+                    readiness.Payload,
+                    readiness.Error);
+                return new DurableEnhancementBatchResponse(
+                    Enumerable.Repeat(rejected, bodies.Count).ToArray(),
+                    0,
+                    0);
+            }
+        }
+
         EnhancementEnqueueProbe probe =
             await ProbeEnhancementEnqueueBackendAsync(token);
         EnhancementApiResponse unsavedFailure = new(
@@ -1052,6 +1166,377 @@ public partial class MainWindow
             SavedForDelivery: true,
             DeliveryRequestId: item.RequestId);
 
+    private static string EnhancementCompanionAuthPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "PhotoViewer.Wpf",
+        EnhancementCompanionAuthFileName);
+
+    private bool TryGetOrCreateEnhancementCompanionAuthToken(
+        out string authToken,
+        out string error)
+    {
+        authToken = "";
+        error = "";
+        if (IsValidEnhancementCompanionAuthToken(_enhancementCompanionAuthToken))
+        {
+            authToken = _enhancementCompanionAuthToken!;
+            return true;
+        }
+
+        string path = EnhancementCompanionAuthPath;
+        try
+        {
+            string directory = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(directory);
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+            {
+                error = "The local AI companion authentication directory is not trusted.";
+                return false;
+            }
+
+            if (!File.Exists(path))
+            {
+                string generated = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+                try
+                {
+                    using var stream = new FileStream(
+                        path,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None,
+                        4096,
+                        FileOptions.WriteThrough);
+                    byte[] bytes = Encoding.ASCII.GetBytes(generated);
+                    stream.Write(bytes);
+                    stream.Flush(flushToDisk: true);
+                    ApplyCurrentUserOnlyAuthFileAcl(path);
+                }
+                catch (IOException) when (File.Exists(path))
+                {
+                    // Another Aibos window won the CreateNew race. Read the
+                    // completed user-only file below.
+                }
+            }
+
+            FileAttributes attributes = File.GetAttributes(path);
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0
+                || !HasCurrentUserOnlyAuthFileAcl(path))
+            {
+                error = "The local AI companion authentication file is not user-only.";
+                return false;
+            }
+            string candidate = File.ReadAllText(path, Encoding.ASCII).Trim();
+            if (!IsValidEnhancementCompanionAuthToken(candidate))
+            {
+                error = "The local AI companion authentication file is invalid.";
+                return false;
+            }
+            _enhancementCompanionAuthToken = candidate;
+            authToken = candidate;
+            return true;
+        }
+        catch (Exception ex) when (ex is
+            IOException or
+            UnauthorizedAccessException or
+            System.Security.SecurityException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            error = $"Aibos could not establish user-only local AI authentication: {ex.Message}";
+            return false;
+        }
+    }
+
+    private static void ApplyCurrentUserOnlyAuthFileAcl(string path)
+    {
+        SecurityIdentifier currentUser = WindowsIdentity.GetCurrent().User
+            ?? throw new System.Security.SecurityException(
+                "The current Windows user identity is unavailable.");
+        var security = new FileSecurity();
+        security.SetOwner(currentUser);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            currentUser,
+            FileSystemRights.FullControl,
+            AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            FileSystemRights.FullControl,
+            AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(security);
+    }
+
+    private static bool HasCurrentUserOnlyAuthFileAcl(string path)
+    {
+        SecurityIdentifier? currentUser = WindowsIdentity.GetCurrent().User;
+        if (currentUser is null)
+            return false;
+        SecurityIdentifier localSystem = new(
+            WellKnownSidType.LocalSystemSid,
+            null);
+        AuthorizationRuleCollection rules = new FileInfo(path)
+            .GetAccessControl(AccessControlSections.Access)
+            .GetAccessRules(
+                includeExplicit: true,
+                includeInherited: true,
+                targetType: typeof(SecurityIdentifier));
+        foreach (FileSystemAccessRule rule in rules)
+        {
+            if (rule.AccessControlType != AccessControlType.Allow)
+                continue;
+            if (rule.IdentityReference.Equals(currentUser)
+                || rule.IdentityReference.Equals(localSystem))
+            {
+                continue;
+            }
+            if ((rule.FileSystemRights & (
+                    FileSystemRights.ReadData
+                    | FileSystemRights.ReadAttributes
+                    | FileSystemRights.ReadExtendedAttributes
+                    | FileSystemRights.ReadPermissions
+                    | FileSystemRights.FullControl)) != 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private async Task<EnhancementCompanionOwnershipProbe>
+        ProbeEnhancementCompanionOwnershipAsync(
+            string authToken,
+            CancellationToken token)
+    {
+        string challenge = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        Uri endpoint = new(
+            ResolveBrowserEnhancementBaseUri(),
+            EnhancementCompanionIdentityRoute);
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        request.Headers.TryAddWithoutValidation(
+            EnhancementCompanionChallengeHeader,
+            challenge);
+        try
+        {
+            using HttpResponseMessage response = await _modalEnhancementSender(
+                request,
+                token);
+            int statusCode = (int)response.StatusCode;
+            byte[]? responseBytes = await ReadBoundedEnhancementResponseAsync(
+                response.Content,
+                EnhancementCompanionIdentityResponseMaxBytes,
+                token);
+            if (responseBytes is null)
+            {
+                return new(
+                    false,
+                    false,
+                    statusCode,
+                    null,
+                    "The process on the local AI port returned an oversized identity response. No request was sent.");
+            }
+
+            JsonElement? payload = null;
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(responseBytes);
+                payload = document.RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+            }
+            if (!response.IsSuccessStatusCode
+                || payload is not JsonElement identity
+                || identity.ValueKind != JsonValueKind.Object
+                || !TryGetStringProperty(identity, "protocol", out string? protocol)
+                || !string.Equals(protocol, EnhancementCompanionAuthProtocol, StringComparison.Ordinal)
+                || !TryGetStringProperty(identity, "instanceId", out string? instanceId)
+                || !TryGetStringProperty(identity, "challenge", out string? echoedChallenge)
+                || !TryGetStringProperty(identity, "proof", out string? proof)
+                || instanceId is null
+                || proof is null
+                || !identity.TryGetProperty("processId", out JsonElement processIdElement)
+                || !processIdElement.TryGetInt32(out int processId)
+                || !TryGetStringProperty(identity, "serverStartedAtUtc", out string? serverStartedAtRaw)
+                || !DateTimeOffset.TryParse(serverStartedAtRaw, out DateTimeOffset serverStartedAt)
+                || !string.Equals(echoedChallenge, challenge, StringComparison.Ordinal)
+                || !IsExpectedEnhancementCompanionIdentity(
+                    authToken,
+                    challenge,
+                    proof,
+                    instanceId,
+                    processId,
+                    serverStartedAtRaw!,
+                    serverStartedAt))
+            {
+                return new(
+                    false,
+                    false,
+                    statusCode,
+                    payload,
+                    "The local AI service port is occupied by an untrusted process. No source, prompt, secret, job body, or durable reservation was sent.");
+            }
+            return new(true, false, statusCode, payload, "");
+        }
+        catch (HttpRequestException)
+        {
+            return new(
+                false,
+                true,
+                0,
+                null,
+                "No local AI companion is listening yet.");
+        }
+    }
+
+    private bool IsExpectedEnhancementCompanionIdentity(
+        string authToken,
+        string challenge,
+        string proof,
+        string instanceId,
+        int processId,
+        string serverStartedAtRaw,
+        DateTimeOffset serverStartedAt)
+    {
+        if (!TryBase64UrlDecode(authToken, out byte[] authTokenBytes)
+            || authTokenBytes.Length != 32
+            || !TryBase64UrlDecode(proof, out byte[] suppliedProof)
+            || suppliedProof.Length != 32)
+        {
+            return false;
+        }
+        using var hmac = new HMACSHA256(authTokenBytes);
+        byte[] expectedProof = hmac.ComputeHash(Encoding.UTF8.GetBytes(
+            $"{EnhancementCompanionAuthProtocol}\0{challenge}\0{instanceId}\0{processId}\0{serverStartedAtRaw}"));
+        if (!CryptographicOperations.FixedTimeEquals(
+                suppliedProof,
+                expectedProof))
+        {
+            return false;
+        }
+        if (!string.IsNullOrWhiteSpace(_ownedEnhancementCompanionInstanceId)
+            && !string.Equals(
+                instanceId,
+                _ownedEnhancementCompanionInstanceId,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+        Process actualProcess;
+        try
+        {
+            actualProcess = Process.GetProcessById(processId);
+            if (actualProcess.HasExited)
+                return false;
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException
+                or InvalidOperationException
+                or Win32Exception
+                or NotSupportedException)
+        {
+            return false;
+        }
+        using (actualProcess)
+        {
+            DateTimeOffset processStartedAt;
+            try
+            {
+                processStartedAt = actualProcess.StartTime.ToUniversalTime();
+            }
+            catch (Exception ex) when (
+                ex is InvalidOperationException
+                    or Win32Exception
+                    or NotSupportedException)
+            {
+                return false;
+            }
+            if (serverStartedAt < processStartedAt
+                || serverStartedAt - processStartedAt > TimeSpan.FromMinutes(3))
+            {
+                return false;
+            }
+        }
+        if (_ownedEnhancementCompanion is { } owned)
+        {
+            if (owned.HasExited || owned.Id != processId)
+                return false;
+        }
+        return serverStartedAt <= DateTimeOffset.UtcNow.AddSeconds(30);
+    }
+
+    private bool TryAddEnhancementCompanionRequestAuthentication(
+        HttpRequestMessage request,
+        ReadOnlySpan<byte> bodyBytes)
+    {
+        if (!_usingDefaultModalEnhancementSender)
+            return true;
+        if (!_enhancementCompanionOwnershipVerified
+            || !IsValidEnhancementCompanionAuthToken(
+                _enhancementCompanionAuthToken)
+            || request.RequestUri is null
+            || !TryBase64UrlDecode(
+                _enhancementCompanionAuthToken!,
+                out byte[] authTokenBytes))
+        {
+            return false;
+        }
+
+        string timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string nonce = Base64UrlEncode(RandomNumberGenerator.GetBytes(16));
+        string bodyHash = Base64UrlEncode(SHA256.HashData(bodyBytes));
+        string requestPath = request.RequestUri.PathAndQuery;
+        string message = $"{EnhancementCompanionRequestAuthProtocol}\0{timestamp}\0{nonce}\0{request.Method.Method.ToUpperInvariant()}\0{requestPath}\0{bodyHash}";
+        using var hmac = new HMACSHA256(authTokenBytes);
+        string signature = Base64UrlEncode(
+            hmac.ComputeHash(Encoding.UTF8.GetBytes(message)));
+        request.Headers.TryAddWithoutValidation(
+            EnhancementCompanionTimestampHeader,
+            timestamp);
+        request.Headers.TryAddWithoutValidation(
+            EnhancementCompanionNonceHeader,
+            nonce);
+        request.Headers.TryAddWithoutValidation(
+            EnhancementCompanionSignatureHeader,
+            signature);
+        return true;
+    }
+
+    private static bool IsValidEnhancementCompanionAuthToken(string? value)
+        => value is { Length: 43 }
+            && TryBase64UrlDecode(value, out byte[] decoded)
+            && decoded.Length == 32;
+
+    private static string Base64UrlEncode(ReadOnlySpan<byte> value)
+        => Convert.ToBase64String(value)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+
+    private static bool TryBase64UrlDecode(
+        string value,
+        out byte[] decoded)
+    {
+        decoded = [];
+        try
+        {
+            string padded = value.Replace('-', '+').Replace('_', '/');
+            padded += (padded.Length % 4) switch
+            {
+                2 => "==",
+                3 => "=",
+                0 => "",
+                _ => throw new FormatException(),
+            };
+            decoded = Convert.FromBase64String(padded);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
     private static bool IsReadyEnhancementCompanionResponse(EnhancementApiResponse response)
         => response.Ok
             && response.Payload is JsonElement payload
@@ -1063,6 +1548,15 @@ public partial class MainWindow
     {
         error = "";
         Uri endpoint = ResolveBrowserEnhancementBaseUri();
+        if (!TryGetOrCreateEnhancementCompanionAuthToken(
+                out string authToken,
+                out error))
+        {
+            return false;
+        }
+        _ownedEnhancementCompanionInstanceId = Base64UrlEncode(
+            RandomNumberGenerator.GetBytes(24));
+        _enhancementCompanionOwnershipVerified = false;
         if (_startEnhancementCompanionForSmoke is not null)
         {
             (bool started, string injectedError) = _startEnhancementCompanionForSmoke(endpoint);
@@ -1099,7 +1593,9 @@ public partial class MainWindow
             ProcessStartInfo startInfo = CreateEnhancementCompanionStartInfo(
                 nodeExecutable,
                 companionRoot,
-                endpoint);
+                endpoint,
+                authToken,
+                _ownedEnhancementCompanionInstanceId);
 
             var process = new Process
             {
@@ -1127,7 +1623,9 @@ public partial class MainWindow
     private static ProcessStartInfo CreateEnhancementCompanionStartInfo(
         ValidatedNodeExecutable nodeExecutable,
         ValidatedEnhancementCompanionRoot companionRoot,
-        Uri endpoint)
+        Uri endpoint,
+        string authToken,
+        string instanceId)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -1146,6 +1644,8 @@ public partial class MainWindow
             System.Globalization.CultureInfo.InvariantCulture));
         startInfo.Environment["PVU_NO_OPEN"] = "1";
         startInfo.Environment["PVU_COMFY_AUTOSTART"] = "0";
+        startInfo.Environment["AIBOS_COMPANION_AUTH_TOKEN"] = authToken;
+        startInfo.Environment["AIBOS_COMPANION_INSTANCE_ID"] = instanceId;
         // Do not set PVU_OWNER_PID. The companion owns the durable FIFO worker
         // after an explicit AI action and must outlive the WPF viewer process.
         startInfo.Environment.Remove("PVU_OWNER_PID");
@@ -1352,6 +1852,8 @@ public partial class MainWindow
 
     private void StopOwnedEnhancementCompanion()
     {
+        _enhancementCompanionOwnershipVerified = false;
+        _ownedEnhancementCompanionInstanceId = null;
         Process? process = Interlocked.Exchange(ref _ownedEnhancementCompanion, null);
         if (process is null)
             return;
@@ -1427,7 +1929,9 @@ public partial class MainWindow
                     useLegacyNextLauncher
                         ? LegacyNextCompanionLauncherFileName
                         : EnhancementCompanionLauncherFileName)),
-            new Uri("http://127.0.0.1:3000"));
+            new Uri("http://127.0.0.1:3000"),
+            EnhancementCompanionSmokeAuthToken,
+            "companion-smoke-instance-v1");
         return new(
             startInfo.UseShellExecute,
             startInfo.CreateNoWindow,
@@ -1435,6 +1939,8 @@ public partial class MainWindow
             startInfo.RedirectStandardError,
             !string.IsNullOrEmpty(startInfo.WorkingDirectory),
             startInfo.Environment.ContainsKey("PVU_OWNER_PID"),
+            startInfo.Environment.ContainsKey("AIBOS_COMPANION_AUTH_TOKEN"),
+            startInfo.Environment.ContainsKey("AIBOS_COMPANION_INSTANCE_ID"),
             startInfo.Environment["PVU_NO_OPEN"],
             startInfo.Environment["PVU_COMFY_AUTOSTART"],
             Path.GetFileName(startInfo.ArgumentList[0]));
@@ -1446,6 +1952,8 @@ public partial class MainWindow
         _modalEnhancementSender = sender;
         _usingDefaultModalEnhancementSender = true;
         _startEnhancementCompanionForSmoke = starter;
+        _enhancementCompanionAuthToken = EnhancementCompanionSmokeAuthToken;
+        _enhancementCompanionOwnershipVerified = false;
     }
 
     public void EnableEnhancementCompanionAutoStartProbeForSmoke(
@@ -1453,12 +1961,60 @@ public partial class MainWindow
     {
         _usingDefaultModalEnhancementSender = true;
         _startEnhancementCompanionForSmoke = starter;
+        _enhancementCompanionAuthToken = EnhancementCompanionSmokeAuthToken;
+        _enhancementCompanionOwnershipVerified = false;
     }
+
+    public IReadOnlyDictionary<string, object>
+        EnhancementCompanionIdentityPayloadForSmoke(string challenge)
+    {
+        if (!TryBase64UrlDecode(
+                EnhancementCompanionSmokeAuthToken,
+                out byte[] authTokenBytes))
+        {
+            throw new InvalidOperationException("Smoke authentication token is invalid.");
+        }
+        string instanceId = _ownedEnhancementCompanionInstanceId
+            ?? "companion-smoke-instance-v1";
+        int processId = Environment.ProcessId;
+        string serverStartedAtUtc = DateTimeOffset.UtcNow.ToString("O");
+        using var hmac = new HMACSHA256(authTokenBytes);
+        string proof = Base64UrlEncode(hmac.ComputeHash(Encoding.UTF8.GetBytes(
+            $"{EnhancementCompanionAuthProtocol}\0{challenge}\0{instanceId}\0{processId}\0{serverStartedAtUtc}")));
+        return new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["protocol"] = EnhancementCompanionAuthProtocol,
+            ["instanceId"] = instanceId,
+            ["processId"] = processId,
+            ["serverStartedAtUtc"] = serverStartedAtUtc,
+            ["challenge"] = challenge,
+            ["proof"] = proof,
+        };
+    }
+
+    public static bool HasCompanionRequestAuthenticationForSmoke(
+        HttpRequestMessage request)
+        => request.Headers.Contains(EnhancementCompanionTimestampHeader)
+            && request.Headers.Contains(EnhancementCompanionNonceHeader)
+            && request.Headers.Contains(EnhancementCompanionSignatureHeader)
+            && request.Headers.Authorization is null;
 
     public async Task<bool> EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
     {
         EnhancementApiResponse response = await EnsureEnhancementCompanionReadyForExplicitActionAsync();
         return response.Ok;
+    }
+    public async Task<bool> SendEnhancementEnqueueForSmokeAsync(object body)
+    {
+        EnhancementApiResponse response = await SendEnhancementEnqueueAsync(body);
+        return response.SavedForDelivery;
+    }
+    public async Task<int> SendEnhancementBatchForSmokeAsync(
+        IReadOnlyList<object?> bodies)
+    {
+        DurableEnhancementBatchResponse response =
+            await TrySendDurableEnhancementBatchAsync(bodies);
+        return response.PublishedCount;
     }
     public async Task<bool> EnsurePhotorealCompanionForExplicitActionForSmokeAsync()
     {
@@ -1487,6 +2043,8 @@ public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
     bool RedirectStandardError,
     bool HasExplicitWorkingDirectory,
     bool HasExternalOwnerPid,
+    bool HasInheritedAuthenticationToken,
+    bool HasInheritedInstanceId,
     string? NoOpen,
     string? ComfyAutostart,
     string LauncherFileName);

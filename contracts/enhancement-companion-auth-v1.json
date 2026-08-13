@@ -1,0 +1,39 @@
+{
+  "contract": "enhancement-companion-auth-v1",
+  "identity": {
+    "route": "GET /api/enhance/identity",
+    "requestHeader": "X-Aibos-Companion-Challenge",
+    "protocol": "aibos.companion-auth/v1",
+    "proofMessageUtf8": "protocol\\0challenge\\0instanceId\\0processId\\0serverStartedAtUtc",
+    "proof": "base64url(HMAC-SHA256(user capability, proofMessageUtf8))",
+    "responseMaxBytes": 4096,
+    "sensitiveRequestDataAllowed": false
+  },
+  "requests": {
+    "protocol": "aibos.companion-request/v1",
+    "requiredHeaders": [
+      "X-Aibos-Auth-Timestamp",
+      "X-Aibos-Auth-Nonce",
+      "X-Aibos-Auth-Signature"
+    ],
+    "signatureMessageUtf8": "protocol\\0timestampMilliseconds\\0nonce\\0uppercaseMethod\\0pathAndQuery\\0base64urlSha256Body",
+    "signature": "base64url(HMAC-SHA256(user capability, signatureMessageUtf8))",
+    "maximumClockSkewMilliseconds": 30000,
+    "nonceBytes": 16,
+    "replay": "reject a timestamp and nonce pair after its first valid use"
+  },
+  "server": {
+    "bind": "127.0.0.1",
+    "maximumBodyBytes": 1048576,
+    "bodyTimeoutMilliseconds": 15000,
+    "maximumConcurrentRequests": 16,
+    "unauthenticatedRoutes": [
+      "GET /api/enhance/identity"
+    ]
+  },
+  "wpf": {
+    "ownership": "verify HMAC, instance id, live process id, and process start time before every explicit enqueue flow",
+    "unknownListener": "fail closed before source identity, prompt, settings, credential, job body, or durable reservation",
+    "bearerToUnknownListener": false
+  }
+}

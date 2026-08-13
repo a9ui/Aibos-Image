@@ -21031,6 +21031,11 @@ public partial class App : Application
             bool passiveCompanionStartSuppressed = false;
             bool serverErrorCompanionStartSuppressed = false;
             bool explicitCompanionAutoStart = false;
+            bool untrustedProbeContainedNoSensitiveData = true;
+            bool untrustedDurableReservationSuppressed = false;
+            int untrustedProbeCount = 0;
+            bool companionAuthenticatedRequestHeaders = false;
+            bool companionIdentityFieldTamperRejected = false;
             bool companionConfiguredRootExact = false;
             bool companionAppBaseAncestor = false;
             bool companionConfiguredAncestorRejected = false;
@@ -21225,9 +21230,23 @@ public partial class App : Application
                 int launchAttemptsBeforeServerError =
                     win.EnhancementCompanionLaunchAttemptCountForSmoke;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
-                    (_, _) => Task.FromResult(JsonResponse(
-                        HttpStatusCode.InternalServerError,
-                        new { error = "temporary server failure" })),
+                    (request, _) =>
+                    {
+                        untrustedProbeCount++;
+                        untrustedProbeContainedNoSensitiveData &=
+                            request.Method == HttpMethod.Get
+                            && request.RequestUri?.AbsolutePath.EndsWith(
+                                "/api/enhance/identity",
+                                StringComparison.Ordinal) == true
+                            && string.IsNullOrEmpty(request.RequestUri.Query)
+                            && request.Content is null
+                            && request.Headers.Authorization is null
+                            && !PhotoViewer.Wpf.MainWindow
+                                .HasCompanionRequestAuthenticationForSmoke(request);
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.InternalServerError,
+                            new { error = "temporary server failure" }));
+                    },
                     _ =>
                     {
                         serverErrorStarterCalled = true;
@@ -21238,18 +21257,65 @@ public partial class App : Application
                     && !serverErrorStarterCalled
                     && win.EnhancementCompanionLaunchAttemptCountForSmoke
                         == launchAttemptsBeforeServerError;
+                bool untrustedSinglePublished =
+                    await win.SendEnhancementEnqueueForSmokeAsync(new
+                    {
+                        sourceId = canonicalSourcePath,
+                        prompt = "must-not-leave-process",
+                    });
+                int untrustedBatchPublished =
+                    await win.SendEnhancementBatchForSmokeAsync(
+                    [
+                        new
+                        {
+                            sourceId = canonicalSourcePath,
+                            prompt = "must-not-leave-process-batch",
+                        },
+                    ]);
+                untrustedDurableReservationSuppressed =
+                    !untrustedSinglePublished
+                    && untrustedBatchPublished == 0
+                    && untrustedProbeCount == 3
+                    && untrustedProbeContainedNoSensitiveData
+                    && string.Equals(
+                        File.ReadAllText(jobsPath),
+                        jobsSeed,
+                        StringComparison.Ordinal);
 
                 int readinessProbeCount = 0;
                 bool injectedStarterCalled = false;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
                     (request, _) =>
                     {
-                        readinessProbeCount++;
-                        if (readinessProbeCount < 3)
-                            throw new HttpRequestException("simulated unavailable companion");
+                        string route = request.RequestUri?.AbsolutePath ?? "";
+                        if (route.EndsWith(
+                                "/api/enhance/identity",
+                                StringComparison.Ordinal))
+                        {
+                            readinessProbeCount++;
+                            if (readinessProbeCount < 3)
+                                throw new HttpRequestException("simulated unavailable companion");
+                            string challenge = request.Headers
+                                .GetValues("X-Aibos-Companion-Challenge")
+                                .Single();
+                            return Task.FromResult(JsonResponse(
+                                HttpStatusCode.OK,
+                                win.EnhancementCompanionIdentityPayloadForSmoke(
+                                    challenge)));
+                        }
+                        companionAuthenticatedRequestHeaders =
+                            route.EndsWith(
+                                "/api/enhance/jobs",
+                                StringComparison.Ordinal)
+                            && PhotoViewer.Wpf.MainWindow
+                                .HasCompanionRequestAuthenticationForSmoke(request);
                         return Task.FromResult(JsonResponse(
-                            HttpStatusCode.OK,
-                            new { jobs = Array.Empty<object>() }));
+                            companionAuthenticatedRequestHeaders
+                                ? HttpStatusCode.OK
+                                : HttpStatusCode.Unauthorized,
+                            companionAuthenticatedRequestHeaders
+                                ? new { jobs = Array.Empty<object>() }
+                                : new { error = "missing authentication" }));
                     },
                     endpoint =>
                     {
@@ -21259,7 +21325,34 @@ public partial class App : Application
                 passiveCompanionStartSuppressed = win.EnhancementCompanionLaunchAttemptCountForSmoke == 0;
                 explicitCompanionAutoStart = await win.EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
                     && injectedStarterCalled
-                    && win.EnhancementCompanionLaunchAttemptCountForSmoke == 1;
+                    && win.EnhancementCompanionLaunchAttemptCountForSmoke == 1
+                    && untrustedProbeContainedNoSensitiveData
+                    && companionAuthenticatedRequestHeaders;
+                bool tamperStarterCalled = false;
+                win.ConfigureEnhancementCompanionAutoStartForSmoke(
+                    (request, _) =>
+                    {
+                        string challenge = request.Headers
+                            .GetValues("X-Aibos-Companion-Challenge")
+                            .Single();
+                        Dictionary<string, object> tampered = win
+                            .EnhancementCompanionIdentityPayloadForSmoke(challenge)
+                            .ToDictionary(entry => entry.Key, entry => entry.Value);
+                        tampered["serverStartedAtUtc"] = DateTimeOffset.UtcNow
+                            .AddSeconds(-5)
+                            .ToString("O");
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.OK,
+                            tampered));
+                    },
+                    _ =>
+                    {
+                        tamperStarterCalled = true;
+                        return (true, "");
+                    });
+                companionIdentityFieldTamperRejected =
+                    !await win.EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
+                    && !tamperStarterCalled;
                 string ResolveSmokeIdentity(string path)
                 {
                     string fullPath = Path.GetFullPath(path);
@@ -21575,7 +21668,9 @@ public partial class App : Application
                     && rapidNavigationFinalSelection
                     && passiveCompanionStartSuppressed
                     && serverErrorCompanionStartSuppressed
+                    && untrustedDurableReservationSuppressed
                     && explicitCompanionAutoStart
+                    && companionIdentityFieldTamperRejected
                     && companionConfiguredRootExact && companionAppBaseAncestor
                     && companionConfiguredAncestorRejected && companionIdentityRejected
                     && companionDedicatedLauncherSelected

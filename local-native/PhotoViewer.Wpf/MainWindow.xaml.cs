@@ -18538,24 +18538,37 @@ public partial class MainWindow : Window
 
             Uri endpoint = new(ResolveBrowserEnhancementBaseUri(), relativePath.TrimStart('/'));
             using var request = new HttpRequestMessage(method, endpoint);
+            string? requestBodyJson = exactBodyJson
+                ?? (body is null ? null : JsonSerializer.Serialize(body));
+            byte[] requestBodyBytes = requestBodyJson is null
+                ? []
+                : Encoding.UTF8.GetBytes(requestBodyJson);
+            if (!TryAddEnhancementCompanionRequestAuthentication(
+                    request,
+                    requestBodyBytes))
+            {
+                return new EnhancementApiResponse(
+                    false,
+                    403,
+                    null,
+                    "The local AI companion has not proved ownership. No request was sent.");
+            }
             if (!string.IsNullOrWhiteSpace(idempotencyKey))
                 request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
-            if (exactBodyJson is not null)
+            if (requestBodyJson is not null)
             {
                 request.Content = new StringContent(
-                    exactBodyJson,
-                    Encoding.UTF8,
-                    "application/json");
-            }
-            else if (body is not null)
-            {
-                request.Content = new StringContent(
-                    JsonSerializer.Serialize(body),
+                    requestBodyJson,
                     Encoding.UTF8,
                     "application/json");
             }
 
             using HttpResponseMessage response = await _modalEnhancementSender(request, requestToken);
+            if (_usingDefaultModalEnhancementSender
+                && (int)response.StatusCode is 401 or 403)
+            {
+                _enhancementCompanionOwnershipVerified = false;
+            }
             JsonElement? payload = null;
             if (maxResponseBytes is int requestedResponseLimit)
             {

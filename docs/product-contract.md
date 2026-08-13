@@ -43,6 +43,14 @@ vectors. It is test input and evidence mapping, not a second specification.
   because WPF closes.
 - The companion endpoint is loopback-only and must bind to `127.0.0.1`. LAN,
   tunnel, reverse-proxy, hosted, and Internet exposure are unsupported.
+- Loopback reachability or an arbitrary HTTP response is not companion
+  ownership. Before health, jobs, output, queue control, or durable enqueue,
+  WPF verifies a nonce-HMAC identity response bound to the companion instance,
+  process ID, and process start time. Every later request is nonce-HMAC signed.
+  An unknown listener fails closed before WPF sends source identity, prompt,
+  settings, credentials, or a job body and before it writes a reservation.
+  The exact additive wire contract is
+  [`contracts/enhancement-companion-auth-v1.json`](../contracts/enhancement-companion-auth-v1.json).
 - An unavailable companion must not affect ordinary viewing or source images.
   An explicit enqueue either publishes a bounded durable reservation or reports
   that nothing was saved; it must never report success for a failed local save.

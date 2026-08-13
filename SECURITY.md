@@ -22,6 +22,11 @@ Browser Viewer or its gallery data. It must remain bound to `127.0.0.1`; do not
 expose it through a LAN listener, reverse proxy, tunnel, hosted deployment, or
 the Internet.
 
+Loopback is not an ownership proof. WPF must authenticate the companion before
+sending a source identity, prompt, settings, credential, or job body, and the
+companion must authenticate every non-identity API request. An unknown process
+on the configured port fails closed before a durable reservation is written.
+
 The WPF and Browser applications will share a versioned durable-state contract.
 Malformed or unsupported future state must fail non-destructively. Never reset,
 truncate, replace, migrate, or merge a user's store merely to recover from a
