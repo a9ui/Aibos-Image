@@ -26,6 +26,9 @@ Loopback is not an ownership proof. WPF must authenticate the companion before
 sending a source identity, prompt, settings, credential, or job body, and the
 companion must authenticate every non-identity API request. An unknown process
 on the configured port fails closed before a durable reservation is written.
+After identity proof, request and response envelopes remain encrypted and bound
+to the verified process epoch so a replacement listener cannot read or forge
+API traffic. Durable enqueue wakes are bodyless and never resend the job body.
 
 The WPF and Browser applications will share a versioned durable-state contract.
 Malformed or unsupported future state must fail non-destructively. Never reset,

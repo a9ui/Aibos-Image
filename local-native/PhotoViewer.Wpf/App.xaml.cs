@@ -21036,6 +21036,8 @@ public partial class App : Application
             int untrustedProbeCount = 0;
             bool companionAuthenticatedRequestHeaders = false;
             bool companionIdentityFieldTamperRejected = false;
+            bool companionListenerHandoffEncrypted = false;
+            bool companionListenerHandoffResponseRejected = false;
             bool companionConfiguredRootExact = false;
             bool companionAppBaseAncestor = false;
             bool companionConfiguredAncestorRejected = false;
@@ -21284,8 +21286,9 @@ public partial class App : Application
 
                 int readinessProbeCount = 0;
                 bool injectedStarterCalled = false;
+                bool simulateListenerHandoff = false;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
-                    (request, _) =>
+                    async (request, token) =>
                     {
                         string route = request.RequestUri?.AbsolutePath ?? "";
                         if (route.EndsWith(
@@ -21298,24 +21301,69 @@ public partial class App : Application
                             string challenge = request.Headers
                                 .GetValues("X-Aibos-Companion-Challenge")
                                 .Single();
-                            return Task.FromResult(JsonResponse(
+                            return JsonResponse(
                                 HttpStatusCode.OK,
                                 win.EnhancementCompanionIdentityPayloadForSmoke(
-                                    challenge)));
+                                    challenge));
                         }
+                        if (simulateListenerHandoff)
+                        {
+                            string outer = request.Content is null
+                                ? ""
+                                : await request.Content.ReadAsStringAsync(token);
+                            companionListenerHandoffEncrypted =
+                                route.EndsWith(
+                                    "/api/enhance/secure",
+                                    StringComparison.Ordinal)
+                                && request.Method == HttpMethod.Post
+                                && !outer.Contains(
+                                    canonicalSourcePath,
+                                    StringComparison.Ordinal)
+                                && !outer.Contains(
+                                    "handoff-private-prompt",
+                                    StringComparison.Ordinal)
+                                && !route.Contains(
+                                    "sourceId",
+                                    StringComparison.OrdinalIgnoreCase);
+                            return JsonResponse(
+                                HttpStatusCode.Accepted,
+                                new
+                                {
+                                    jobs = Array.Empty<object>(),
+                                    forged = true,
+                                });
+                        }
+                        EnhancementCompanionSecureRequestSmokeSnapshot? inner =
+                            await win.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
+                                request,
+                                token);
                         companionAuthenticatedRequestHeaders =
                             route.EndsWith(
+                                "/api/enhance/secure",
+                                StringComparison.Ordinal)
+                            && inner is not null
+                            && string.Equals(
+                                inner.Method,
+                                "GET",
+                                StringComparison.Ordinal)
+                            && string.Equals(
+                                inner.PathAndQuery,
                                 "/api/enhance/jobs",
+                                StringComparison.Ordinal)
+                            && inner.BodyJson is null
+                            && !inner.OuterEnvelopeJson.Contains(
+                                canonicalSourcePath,
                                 StringComparison.Ordinal)
                             && PhotoViewer.Wpf.MainWindow
                                 .HasCompanionRequestAuthenticationForSmoke(request);
-                        return Task.FromResult(JsonResponse(
-                            companionAuthenticatedRequestHeaders
-                                ? HttpStatusCode.OK
-                                : HttpStatusCode.Unauthorized,
-                            companionAuthenticatedRequestHeaders
-                                ? new { jobs = Array.Empty<object>() }
-                                : new { error = "missing authentication" }));
+                        return companionAuthenticatedRequestHeaders
+                            ? win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new { jobs = Array.Empty<object>() })
+                            : JsonResponse(
+                                HttpStatusCode.Unauthorized,
+                                new { error = "missing authentication" });
                     },
                     endpoint =>
                     {
@@ -21328,6 +21376,14 @@ public partial class App : Application
                     && win.EnhancementCompanionLaunchAttemptCountForSmoke == 1
                     && untrustedProbeContainedNoSensitiveData
                     && companionAuthenticatedRequestHeaders;
+                simulateListenerHandoff = true;
+                companionListenerHandoffResponseRejected =
+                    !await win.SendEnhancementSecureRequestForSmokeAsync(new
+                    {
+                        sourceId = canonicalSourcePath,
+                        prompt = "handoff-private-prompt",
+                    });
+                simulateListenerHandoff = false;
                 bool tamperStarterCalled = false;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
                     (request, _) =>
@@ -21571,7 +21627,8 @@ public partial class App : Application
                 catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
                 {
                 }
-                routesOk = requests.Any(static route => route == "POST /api/enhance/jobs")
+                routesOk = requests.Any(static route =>
+                        route == "POST /api/enhance/jobs")
                     && requests.Any(static route => route.EndsWith("/cancel", StringComparison.Ordinal))
                     && requests.Any(static route => route.StartsWith("DELETE ", StringComparison.Ordinal) && route.EndsWith("/output", StringComparison.Ordinal));
 
@@ -21670,6 +21727,9 @@ public partial class App : Application
                     && serverErrorCompanionStartSuppressed
                     && untrustedDurableReservationSuppressed
                     && explicitCompanionAutoStart
+                    && companionAuthenticatedRequestHeaders
+                    && companionListenerHandoffEncrypted
+                    && companionListenerHandoffResponseRejected
                     && companionIdentityFieldTamperRejected
                     && companionConfiguredRootExact && companionAppBaseAncestor
                     && companionConfiguredAncestorRejected && companionIdentityRejected
@@ -21806,6 +21866,10 @@ public partial class App : Application
                 passiveCompanionStartSuppressed,
                 serverErrorCompanionStartSuppressed,
                 explicitCompanionAutoStart,
+                companionAuthenticatedRequestHeaders,
+                companionListenerHandoffEncrypted,
+                companionListenerHandoffResponseRejected,
+                companionIdentityFieldTamperRejected,
                 companionConfiguredRootExact,
                 companionAppBaseAncestor,
                 companionConfiguredAncestorRejected,

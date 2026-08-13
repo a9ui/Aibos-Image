@@ -47,9 +47,10 @@ reservation is durably saved, the companion can register and process it after
 Aibos closes or the companion restarts. Reopening Aibos reads the persisted
 queue, operation type, status, and latest saved progress from the companion.
 Before any API request or durable reservation, Aibos proves the companion's
-per-user identity with a nonce challenge. Every later loopback request is
-signed; a listener that cannot prove ownership receives no source identity,
-prompt, settings, credential, or job body.
+per-user identity with a nonce challenge. Every later loopback request and
+response is encrypted, authenticated, and bound to that exact companion
+instance and start epoch. A replacement listener receives no source identity,
+prompt, settings, credential, job body, or accepted response data.
 
 ## Cross-repository durable state
 

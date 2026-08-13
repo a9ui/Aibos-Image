@@ -30,9 +30,19 @@ public partial class MainWindow
     private const string EnhancementCompanionAuthProtocol =
         "aibos.companion-auth/v1";
     private const string EnhancementCompanionRequestAuthProtocol =
-        "aibos.companion-request/v1";
+        "aibos.companion-request/v2";
+    private const string EnhancementCompanionTunnelProtocol =
+        "aibos.companion-tunnel/v1";
+    private const string EnhancementCompanionTunnelKeyProtocol =
+        "aibos.companion-tunnel-key/v1";
+    private const string EnhancementCompanionResponseAuthProtocol =
+        "aibos.companion-response/v1";
     private const string EnhancementCompanionIdentityRoute =
         "api/enhance/identity";
+    private const string EnhancementCompanionSecureRoute =
+        "api/enhance/secure";
+    private const string EnhancementCompanionWakeRoute =
+        "api/enhance/inbox/wake";
     private const string EnhancementCompanionAuthFileName =
         "companion-auth-v1.key";
     private const string EnhancementCompanionChallengeHeader =
@@ -43,7 +53,15 @@ public partial class MainWindow
         "X-Aibos-Auth-Nonce";
     private const string EnhancementCompanionSignatureHeader =
         "X-Aibos-Auth-Signature";
+    private const string EnhancementCompanionInstanceHeader =
+        "X-Aibos-Companion-Instance";
+    private const string EnhancementCompanionEpochHeader =
+        "X-Aibos-Companion-Epoch";
+    private const string EnhancementCompanionResponseSignatureHeader =
+        "X-Aibos-Response-Signature";
     private const int EnhancementCompanionIdentityResponseMaxBytes = 4096;
+    private const int EnhancementCompanionMaximumSecureResponseBytes =
+        48 * 1024 * 1024;
     private static readonly string EnhancementCompanionSmokeAuthToken =
         Base64UrlEncode(SHA256.HashData(Encoding.UTF8.GetBytes(
             "aibos-companion-smoke-token-v1")));
@@ -57,6 +75,8 @@ public partial class MainWindow
     private string? _enhancementCompanionAuthToken;
     private string? _ownedEnhancementCompanionInstanceId;
     private bool _enhancementCompanionOwnershipVerified;
+    private string? _verifiedEnhancementCompanionInstanceId;
+    private string? _verifiedEnhancementCompanionServerStartedAtUtc;
     private sealed record EnhancementEnqueueProbe(
         EnhancementEnqueueBackendMode Mode,
         JsonElement? HealthPayload,
@@ -874,9 +894,6 @@ public partial class MainWindow
                 return readiness;
         }
 
-        string route = retryJobId is null
-            ? "api/enhance/jobs"
-            : $"api/enhance/jobs/{Uri.EscapeDataString(retryJobId)}/retry";
         EnhancementEnqueueProbe probe =
             await ProbeEnhancementEnqueueBackendAsync(token);
         EnhancementApiResponse? validationFailure =
@@ -938,11 +955,18 @@ public partial class MainWindow
                 recoverySourceIdentity);
             return SavedForDeliveryResponse(item);
         }
+        string nudgeRoute = _usingDefaultModalEnhancementSender
+            ? EnhancementCompanionWakeRoute
+            : retryJobId is null
+                ? "api/enhance/jobs"
+                : $"api/enhance/jobs/{Uri.EscapeDataString(retryJobId)}/retry";
         EnhancementApiResponse nudge = await SendEnhancementApiAsync(
             HttpMethod.Post,
-            route,
+            nudgeRoute,
             token: token,
-            exactBodyJson: item.BodyJson,
+            exactBodyJson: _usingDefaultModalEnhancementSender
+                ? null
+                : item.BodyJson,
             idempotencyKey: item.RequestId,
             timeoutMilliseconds: remaining);
         EnhancementApiResponse normalized =
@@ -1093,9 +1117,13 @@ public partial class MainWindow
                 nudgeCount++;
                 EnhancementApiResponse nudge = await SendEnhancementApiAsync(
                     HttpMethod.Post,
-                    "api/enhance/jobs",
+                    _usingDefaultModalEnhancementSender
+                        ? EnhancementCompanionWakeRoute
+                        : "api/enhance/jobs",
                     token: token,
-                    exactBodyJson: item.BodyJson,
+                    exactBodyJson: _usingDefaultModalEnhancementSender
+                        ? null
+                        : item.BodyJson,
                     idempotencyKey: item.RequestId,
                     timeoutMilliseconds: remaining);
                 responses[globalIndex] = NormalizeDurableEnqueueResponse(nudge, item);
@@ -1375,6 +1403,8 @@ public partial class MainWindow
                     payload,
                     "The local AI service port is occupied by an untrusted process. No source, prompt, secret, job body, or durable reservation was sent.");
             }
+            _verifiedEnhancementCompanionInstanceId = instanceId;
+            _verifiedEnhancementCompanionServerStartedAtUtc = serverStartedAtRaw;
             return new(true, false, statusCode, payload, "");
         }
         catch (HttpRequestException)
@@ -1464,16 +1494,23 @@ public partial class MainWindow
         return serverStartedAt <= DateTimeOffset.UtcNow.AddSeconds(30);
     }
 
-    private bool TryAddEnhancementCompanionRequestAuthentication(
-        HttpRequestMessage request,
-        ReadOnlySpan<byte> bodyBytes)
+    private bool TryCreateEnhancementCompanionSecureRequest(
+        HttpMethod innerMethod,
+        string relativePath,
+        ReadOnlySpan<byte> innerBodyBytes,
+        string? idempotencyKey,
+        out HttpRequestMessage request,
+        out string requestNonce)
     {
-        if (!_usingDefaultModalEnhancementSender)
-            return true;
+        request = new HttpRequestMessage();
+        requestNonce = "";
         if (!_enhancementCompanionOwnershipVerified
             || !IsValidEnhancementCompanionAuthToken(
                 _enhancementCompanionAuthToken)
-            || request.RequestUri is null
+            || string.IsNullOrWhiteSpace(
+                _verifiedEnhancementCompanionInstanceId)
+            || string.IsNullOrWhiteSpace(
+                _verifiedEnhancementCompanionServerStartedAtUtc)
             || !TryBase64UrlDecode(
                 _enhancementCompanionAuthToken!,
                 out byte[] authTokenBytes))
@@ -1481,12 +1518,58 @@ public partial class MainWindow
             return false;
         }
 
+        string instanceId = _verifiedEnhancementCompanionInstanceId!;
+        string serverStartedAtUtc =
+            _verifiedEnhancementCompanionServerStartedAtUtc!;
+        Uri innerEndpoint = new(
+            ResolveBrowserEnhancementBaseUri(),
+            relativePath.TrimStart('/'));
+        byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            method = innerMethod.Method.ToUpperInvariant(),
+            pathAndQuery = innerEndpoint.PathAndQuery,
+            bodyBase64Url = innerBodyBytes.Length == 0
+                ? null
+                : Base64UrlEncode(innerBodyBytes),
+            idempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey)
+                ? null
+                : idempotencyKey,
+        });
         string timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             .ToString(System.Globalization.CultureInfo.InvariantCulture);
-        string nonce = Base64UrlEncode(RandomNumberGenerator.GetBytes(16));
-        string bodyHash = Base64UrlEncode(SHA256.HashData(bodyBytes));
-        string requestPath = request.RequestUri.PathAndQuery;
-        string message = $"{EnhancementCompanionRequestAuthProtocol}\0{timestamp}\0{nonce}\0{request.Method.Method.ToUpperInvariant()}\0{requestPath}\0{bodyHash}";
+        requestNonce = Base64UrlEncode(RandomNumberGenerator.GetBytes(16));
+        byte[] iv = RandomNumberGenerator.GetBytes(12);
+        byte[] tunnelKey = DeriveEnhancementCompanionTunnelKey(
+            authTokenBytes,
+            instanceId,
+            serverStartedAtUtc);
+        byte[] ciphertext = new byte[plaintext.Length];
+        byte[] tag = new byte[16];
+        byte[] aad = Encoding.UTF8.GetBytes(
+            $"{EnhancementCompanionTunnelProtocol}\0{timestamp}\0{requestNonce}\0{instanceId}\0{serverStartedAtUtc}");
+        using (var aes = new AesGcm(tunnelKey, tag.Length))
+            aes.Encrypt(iv, plaintext, ciphertext, tag, aad);
+        byte[] envelopeBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            protocol = EnhancementCompanionTunnelProtocol,
+            iv = Base64UrlEncode(iv),
+            ciphertext = Base64UrlEncode(ciphertext),
+            tag = Base64UrlEncode(tag),
+        });
+
+        request = new HttpRequestMessage(
+            HttpMethod.Post,
+            new Uri(
+                ResolveBrowserEnhancementBaseUri(),
+                EnhancementCompanionSecureRoute));
+        Uri secureEndpoint = request.RequestUri!;
+        request.Content = new ByteArrayContent(envelopeBytes);
+        request.Content.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue(
+                "application/json");
+        string bodyHash = Base64UrlEncode(SHA256.HashData(envelopeBytes));
+        string message =
+            $"{EnhancementCompanionRequestAuthProtocol}\0{timestamp}\0{requestNonce}\0{instanceId}\0{serverStartedAtUtc}\0POST\0{secureEndpoint.PathAndQuery}\0{bodyHash}";
         using var hmac = new HMACSHA256(authTokenBytes);
         string signature = Base64UrlEncode(
             hmac.ComputeHash(Encoding.UTF8.GetBytes(message)));
@@ -1495,11 +1578,164 @@ public partial class MainWindow
             timestamp);
         request.Headers.TryAddWithoutValidation(
             EnhancementCompanionNonceHeader,
-            nonce);
+            requestNonce);
         request.Headers.TryAddWithoutValidation(
             EnhancementCompanionSignatureHeader,
             signature);
+        request.Headers.TryAddWithoutValidation(
+            EnhancementCompanionInstanceHeader,
+            instanceId);
+        request.Headers.TryAddWithoutValidation(
+            EnhancementCompanionEpochHeader,
+            serverStartedAtUtc);
         return true;
+    }
+
+    private byte[] DeriveEnhancementCompanionTunnelKey(
+        ReadOnlySpan<byte> authTokenBytes,
+        string instanceId,
+        string serverStartedAtUtc)
+    {
+        using var hmac = new HMACSHA256(authTokenBytes.ToArray());
+        return hmac.ComputeHash(Encoding.UTF8.GetBytes(
+            $"{EnhancementCompanionTunnelKeyProtocol}\0{instanceId}\0{serverStartedAtUtc}"));
+    }
+
+    private bool TryDecryptEnhancementCompanionSecureResponse(
+        HttpResponseMessage response,
+        ReadOnlySpan<byte> envelopeBytes,
+        string requestNonce,
+        out int innerStatusCode,
+        out byte[] plaintext)
+    {
+        innerStatusCode = 0;
+        plaintext = [];
+        if (!IsValidEnhancementCompanionAuthToken(
+                _enhancementCompanionAuthToken)
+            || string.IsNullOrWhiteSpace(
+                _verifiedEnhancementCompanionInstanceId)
+            || string.IsNullOrWhiteSpace(
+                _verifiedEnhancementCompanionServerStartedAtUtc)
+            || !TryBase64UrlDecode(
+                _enhancementCompanionAuthToken!,
+                out byte[] authTokenBytes)
+            || !response.Headers.TryGetValues(
+                EnhancementCompanionResponseSignatureHeader,
+                out IEnumerable<string>? signatures))
+        {
+            return false;
+        }
+        string? suppliedSignature = signatures.SingleOrDefault();
+        if (suppliedSignature is null
+            || !TryBase64UrlDecode(
+                suppliedSignature,
+                out byte[] suppliedSignatureBytes)
+            || suppliedSignatureBytes.Length != 32)
+        {
+            return false;
+        }
+
+        string instanceId = _verifiedEnhancementCompanionInstanceId!;
+        string serverStartedAtUtc =
+            _verifiedEnhancementCompanionServerStartedAtUtc!;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(
+                envelopeBytes.ToArray());
+            JsonElement envelope = document.RootElement;
+            if (envelope.ValueKind != JsonValueKind.Object
+                || !TryGetStringProperty(
+                    envelope,
+                    "protocol",
+                    out string? protocol)
+                || !string.Equals(
+                    protocol,
+                    EnhancementCompanionResponseAuthProtocol,
+                    StringComparison.Ordinal)
+                || !TryGetStringProperty(
+                    envelope,
+                    "requestNonce",
+                    out string? echoedNonce)
+                || !string.Equals(
+                    echoedNonce,
+                    requestNonce,
+                    StringComparison.Ordinal)
+                || !TryGetStringProperty(
+                    envelope,
+                    "instanceId",
+                    out string? echoedInstance)
+                || !string.Equals(
+                    echoedInstance,
+                    instanceId,
+                    StringComparison.Ordinal)
+                || !TryGetStringProperty(
+                    envelope,
+                    "serverStartedAtUtc",
+                    out string? echoedEpoch)
+                || !string.Equals(
+                    echoedEpoch,
+                    serverStartedAtUtc,
+                    StringComparison.Ordinal)
+                || !envelope.TryGetProperty(
+                    "status",
+                    out JsonElement statusElement)
+                || !statusElement.TryGetInt32(out innerStatusCode)
+                || innerStatusCode is < 100 or > 599
+                || !TryGetStringProperty(envelope, "iv", out string? ivRaw)
+                || !TryGetStringProperty(
+                    envelope,
+                    "ciphertext",
+                    out string? ciphertextRaw)
+                || !TryGetStringProperty(envelope, "tag", out string? tagRaw)
+                || ivRaw is null
+                || ciphertextRaw is null
+                || tagRaw is null
+                || !TryBase64UrlDecode(ivRaw, out byte[] iv)
+                || iv.Length != 12
+                || !TryBase64UrlDecode(
+                    ciphertextRaw,
+                    out byte[] ciphertext)
+                || !TryBase64UrlDecode(tagRaw, out byte[] tag)
+                || tag.Length != 16)
+            {
+                return false;
+            }
+
+            string bodyHash = Base64UrlEncode(
+                SHA256.HashData(envelopeBytes));
+            string responseMessage =
+                $"{EnhancementCompanionResponseAuthProtocol}\0{requestNonce}\0{instanceId}\0{serverStartedAtUtc}\0{innerStatusCode}\0{bodyHash}";
+            using var hmac = new HMACSHA256(authTokenBytes);
+            byte[] expectedSignature = hmac.ComputeHash(
+                Encoding.UTF8.GetBytes(responseMessage));
+            if (!CryptographicOperations.FixedTimeEquals(
+                    suppliedSignatureBytes,
+                    expectedSignature))
+            {
+                return false;
+            }
+
+            byte[] tunnelKey = DeriveEnhancementCompanionTunnelKey(
+                authTokenBytes,
+                instanceId,
+                serverStartedAtUtc);
+            plaintext = new byte[ciphertext.Length];
+            byte[] aad = Encoding.UTF8.GetBytes(
+                $"{EnhancementCompanionResponseAuthProtocol}\0{requestNonce}\0{instanceId}\0{serverStartedAtUtc}\0{innerStatusCode}");
+            using var aes = new AesGcm(tunnelKey, tag.Length);
+            aes.Decrypt(iv, ciphertext, tag, plaintext, aad);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is JsonException
+                or CryptographicException
+                or FormatException
+                or InvalidOperationException)
+        {
+            innerStatusCode = 0;
+            plaintext = [];
+            return false;
+        }
     }
 
     private static bool IsValidEnhancementCompanionAuthToken(string? value)
@@ -1997,7 +2233,220 @@ public partial class MainWindow
         => request.Headers.Contains(EnhancementCompanionTimestampHeader)
             && request.Headers.Contains(EnhancementCompanionNonceHeader)
             && request.Headers.Contains(EnhancementCompanionSignatureHeader)
+            && request.Headers.Contains(EnhancementCompanionInstanceHeader)
+            && request.Headers.Contains(EnhancementCompanionEpochHeader)
             && request.Headers.Authorization is null;
+
+    public async Task<EnhancementCompanionSecureRequestSmokeSnapshot?>
+        DecodeEnhancementCompanionSecureRequestForSmokeAsync(
+            HttpRequestMessage request,
+            CancellationToken token)
+    {
+        try
+        {
+            if (request.Method != HttpMethod.Post
+                || request.RequestUri?.AbsolutePath.EndsWith(
+                    "/api/enhance/secure",
+                    StringComparison.Ordinal) != true
+                || request.Content is null
+                || !HasCompanionRequestAuthenticationForSmoke(request)
+                || !IsValidEnhancementCompanionAuthToken(
+                    _enhancementCompanionAuthToken)
+                || !TryBase64UrlDecode(
+                    _enhancementCompanionAuthToken!,
+                    out byte[] authTokenBytes)
+                || !request.Headers.TryGetValues(
+                    EnhancementCompanionTimestampHeader,
+                    out IEnumerable<string>? timestamps)
+                || !request.Headers.TryGetValues(
+                    EnhancementCompanionNonceHeader,
+                    out IEnumerable<string>? nonces)
+                || !request.Headers.TryGetValues(
+                    EnhancementCompanionSignatureHeader,
+                    out IEnumerable<string>? signatures)
+                || !request.Headers.TryGetValues(
+                    EnhancementCompanionInstanceHeader,
+                    out IEnumerable<string>? instances)
+                || !request.Headers.TryGetValues(
+                    EnhancementCompanionEpochHeader,
+                    out IEnumerable<string>? epochs))
+            {
+                return null;
+            }
+            string timestamp = timestamps.Single();
+            string nonce = nonces.Single();
+            string suppliedSignature = signatures.Single();
+            string instanceId = instances.Single();
+            string serverStartedAtUtc = epochs.Single();
+            if (!string.Equals(
+                    instanceId,
+                    _verifiedEnhancementCompanionInstanceId,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    serverStartedAtUtc,
+                    _verifiedEnhancementCompanionServerStartedAtUtc,
+                    StringComparison.Ordinal))
+            {
+                return null;
+            }
+            byte[] envelopeBytes = await request.Content.ReadAsByteArrayAsync(
+                token);
+            string bodyHash = Base64UrlEncode(SHA256.HashData(envelopeBytes));
+            string message =
+                $"{EnhancementCompanionRequestAuthProtocol}\0{timestamp}\0{nonce}\0{instanceId}\0{serverStartedAtUtc}\0POST\0{request.RequestUri.PathAndQuery}\0{bodyHash}";
+            using var hmac = new HMACSHA256(authTokenBytes);
+            string expectedSignature = Base64UrlEncode(hmac.ComputeHash(
+                Encoding.UTF8.GetBytes(message)));
+            if (!string.Equals(
+                    suppliedSignature,
+                    expectedSignature,
+                    StringComparison.Ordinal))
+            {
+                return null;
+            }
+            using JsonDocument envelopeDocument = JsonDocument.Parse(
+                envelopeBytes);
+            JsonElement envelope = envelopeDocument.RootElement;
+            if (!TryGetStringProperty(envelope, "protocol", out string? protocol)
+                || !string.Equals(
+                    protocol,
+                    EnhancementCompanionTunnelProtocol,
+                    StringComparison.Ordinal)
+                || !TryGetStringProperty(envelope, "iv", out string? ivRaw)
+                || !TryGetStringProperty(
+                    envelope,
+                    "ciphertext",
+                    out string? ciphertextRaw)
+                || !TryGetStringProperty(envelope, "tag", out string? tagRaw)
+                || ivRaw is null
+                || ciphertextRaw is null
+                || tagRaw is null
+                || !TryBase64UrlDecode(ivRaw, out byte[] iv)
+                || !TryBase64UrlDecode(
+                    ciphertextRaw,
+                    out byte[] ciphertext)
+                || !TryBase64UrlDecode(tagRaw, out byte[] tag))
+            {
+                return null;
+            }
+            byte[] plaintext = new byte[ciphertext.Length];
+            byte[] aad = Encoding.UTF8.GetBytes(
+                $"{EnhancementCompanionTunnelProtocol}\0{timestamp}\0{nonce}\0{instanceId}\0{serverStartedAtUtc}");
+            using (var aes = new AesGcm(
+                DeriveEnhancementCompanionTunnelKey(
+                    authTokenBytes,
+                    instanceId,
+                    serverStartedAtUtc),
+                tag.Length))
+            {
+                aes.Decrypt(iv, ciphertext, tag, plaintext, aad);
+            }
+            using JsonDocument plaintextDocument = JsonDocument.Parse(
+                plaintext);
+            JsonElement inner = plaintextDocument.RootElement;
+            string method = inner.GetProperty("method").GetString() ?? "";
+            string pathAndQuery =
+                inner.GetProperty("pathAndQuery").GetString() ?? "";
+            string? bodyBase64Url = inner.TryGetProperty(
+                    "bodyBase64Url",
+                    out JsonElement bodyElement)
+                && bodyElement.ValueKind == JsonValueKind.String
+                ? bodyElement.GetString()
+                : null;
+            string? idempotencyKey = inner.TryGetProperty(
+                    "idempotencyKey",
+                    out JsonElement idempotencyElement)
+                && idempotencyElement.ValueKind == JsonValueKind.String
+                ? idempotencyElement.GetString()
+                : null;
+            string? bodyJson = bodyBase64Url is not null
+                && TryBase64UrlDecode(bodyBase64Url, out byte[] bodyBytes)
+                ? Encoding.UTF8.GetString(bodyBytes)
+                : null;
+            return new(
+                method,
+                pathAndQuery,
+                bodyJson,
+                idempotencyKey,
+                Encoding.UTF8.GetString(envelopeBytes));
+        }
+        catch (Exception ex) when (
+            ex is JsonException
+                or CryptographicException
+                or FormatException
+                or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    public HttpResponseMessage EnhancementCompanionSecureResponseForSmoke(
+        HttpRequestMessage request,
+        int innerStatusCode,
+        object payload)
+    {
+        string requestNonce = request.Headers
+            .GetValues(EnhancementCompanionNonceHeader)
+            .Single();
+        string instanceId = _verifiedEnhancementCompanionInstanceId
+            ?? throw new InvalidOperationException(
+                "Companion identity was not verified.");
+        string serverStartedAtUtc =
+            _verifiedEnhancementCompanionServerStartedAtUtc
+            ?? throw new InvalidOperationException(
+                "Companion epoch was not verified.");
+        if (!TryBase64UrlDecode(
+                _enhancementCompanionAuthToken!,
+                out byte[] authTokenBytes))
+        {
+            throw new InvalidOperationException(
+                "Companion authentication token was invalid.");
+        }
+        byte[] responseBody = JsonSerializer.SerializeToUtf8Bytes(payload);
+        byte[] iv = RandomNumberGenerator.GetBytes(12);
+        byte[] ciphertext = new byte[responseBody.Length];
+        byte[] tag = new byte[16];
+        byte[] aad = Encoding.UTF8.GetBytes(
+            $"{EnhancementCompanionResponseAuthProtocol}\0{requestNonce}\0{instanceId}\0{serverStartedAtUtc}\0{innerStatusCode}");
+        using (var aes = new AesGcm(
+            DeriveEnhancementCompanionTunnelKey(
+                authTokenBytes,
+                instanceId,
+                serverStartedAtUtc),
+            tag.Length))
+        {
+            aes.Encrypt(iv, responseBody, ciphertext, tag, aad);
+        }
+        byte[] envelopeBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            protocol = EnhancementCompanionResponseAuthProtocol,
+            requestNonce,
+            instanceId,
+            serverStartedAtUtc,
+            status = innerStatusCode,
+            iv = Base64UrlEncode(iv),
+            ciphertext = Base64UrlEncode(ciphertext),
+            tag = Base64UrlEncode(tag),
+        });
+        string bodyHash = Base64UrlEncode(SHA256.HashData(envelopeBytes));
+        string message =
+            $"{EnhancementCompanionResponseAuthProtocol}\0{requestNonce}\0{instanceId}\0{serverStartedAtUtc}\0{innerStatusCode}\0{bodyHash}";
+        using var hmac = new HMACSHA256(authTokenBytes);
+        string signature = Base64UrlEncode(hmac.ComputeHash(
+            Encoding.UTF8.GetBytes(message)));
+        var response = new HttpResponseMessage(
+            System.Net.HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(envelopeBytes),
+        };
+        response.Headers.TryAddWithoutValidation(
+            EnhancementCompanionResponseSignatureHeader,
+            signature);
+        response.Content.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue(
+                "application/json");
+        return response;
+    }
 
     public async Task<bool> EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
     {
@@ -2008,6 +2457,15 @@ public partial class MainWindow
     {
         EnhancementApiResponse response = await SendEnhancementEnqueueAsync(body);
         return response.SavedForDelivery;
+    }
+    public async Task<bool> SendEnhancementSecureRequestForSmokeAsync(
+        object body)
+    {
+        EnhancementApiResponse response = await SendEnhancementApiAsync(
+            HttpMethod.Post,
+            "api/enhance/jobs",
+            body);
+        return response.Ok;
     }
     public async Task<int> SendEnhancementBatchForSmokeAsync(
         IReadOnlyList<object?> bodies)
@@ -2029,6 +2487,13 @@ public partial class MainWindow
             payload,
             RecoveredPhotorealSourceUpscaleCapability);
 }
+
+public sealed record EnhancementCompanionSecureRequestSmokeSnapshot(
+    string Method,
+    string PathAndQuery,
+    string? BodyJson,
+    string? IdempotencyKey,
+    string OuterEnvelopeJson);
 
 internal sealed record ValidatedEnhancementCompanionRoot(
     string RootPath,

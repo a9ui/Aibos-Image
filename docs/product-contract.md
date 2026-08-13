@@ -46,11 +46,13 @@ vectors. It is test input and evidence mapping, not a second specification.
 - Loopback reachability or an arbitrary HTTP response is not companion
   ownership. Before health, jobs, output, queue control, or durable enqueue,
   WPF verifies a nonce-HMAC identity response bound to the companion instance,
-  process ID, and process start time. Every later request is nonce-HMAC signed.
+  process ID, and process start time. Every later request and response is
+  encrypted, authenticated, and bound to that exact instance/start epoch.
+  Listener replacement after proof exposes only an opaque fixed-route envelope.
   An unknown listener fails closed before WPF sends source identity, prompt,
   settings, credentials, or a job body and before it writes a reservation.
   The exact additive wire contract is
-  [`contracts/enhancement-companion-auth-v1.json`](../contracts/enhancement-companion-auth-v1.json).
+  [`contracts/enhancement-companion-auth-v2.json`](../contracts/enhancement-companion-auth-v2.json).
 - An unavailable companion must not affect ordinary viewing or source images.
   An explicit enqueue either publishes a bounded durable reservation or reports
   that nothing was saved; it must never report success for a failed local save.
@@ -746,10 +748,12 @@ or stores.
   Jobs store directly and never starts a worker from ordinary browsing.
 - `PV-ENHANCE-ENQUEUE-INBOX-001` defines durable registration of explicit
   create and Retry actions. WPF performs one bounded health probe. An exact v1
-  capability publishes the request before any immediate POST nudge. A timeout,
+  capability publishes the request before any immediate bodyless wake. A timeout,
   transport error, retryable status, malformed/ambiguous health response, or
   companion without the v1 capability also publishes first and sends no
-  ambiguous POST. Only the exact v1 capability permits an immediate nudge.
+  ambiguous job POST. Only the exact v1 capability permits an immediate
+  encrypted, bodyless inbox wake after publication; the job body is never
+  resent over HTTP.
   Feature-gated I2I create actions use this unknown-probe fallback only after
   the open edit board has already observed the exact ready I2I capability.
   I2I Retry requires an exact ready health response for the Retry action and

@@ -18537,15 +18537,21 @@ public partial class MainWindow : Window
             CancellationToken requestToken = requestTimeoutCts.Token;
 
             Uri endpoint = new(ResolveBrowserEnhancementBaseUri(), relativePath.TrimStart('/'));
-            using var request = new HttpRequestMessage(method, endpoint);
             string? requestBodyJson = exactBodyJson
                 ?? (body is null ? null : JsonSerializer.Serialize(body));
             byte[] requestBodyBytes = requestBodyJson is null
                 ? []
                 : Encoding.UTF8.GetBytes(requestBodyJson);
-            if (!TryAddEnhancementCompanionRequestAuthentication(
-                    request,
-                    requestBodyBytes))
+            HttpRequestMessage? securedRequest = null;
+            string secureRequestNonce = "";
+            if (_usingDefaultModalEnhancementSender
+                && !TryCreateEnhancementCompanionSecureRequest(
+                    method,
+                    relativePath,
+                    requestBodyBytes,
+                    idempotencyKey,
+                    out securedRequest,
+                    out secureRequestNonce))
             {
                 return new EnhancementApiResponse(
                     false,
@@ -18553,14 +18559,21 @@ public partial class MainWindow : Window
                     null,
                     "The local AI companion has not proved ownership. No request was sent.");
             }
-            if (!string.IsNullOrWhiteSpace(idempotencyKey))
-                request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
-            if (requestBodyJson is not null)
+            using var request = securedRequest
+                ?? new HttpRequestMessage(method, endpoint);
+            if (!_usingDefaultModalEnhancementSender)
             {
-                request.Content = new StringContent(
-                    requestBodyJson,
-                    Encoding.UTF8,
-                    "application/json");
+                if (!string.IsNullOrWhiteSpace(idempotencyKey))
+                    request.Headers.TryAddWithoutValidation(
+                        "Idempotency-Key",
+                        idempotencyKey);
+                if (requestBodyJson is not null)
+                {
+                    request.Content = new StringContent(
+                        requestBodyJson,
+                        Encoding.UTF8,
+                        "application/json");
+                }
             }
 
             using HttpResponseMessage response = await _modalEnhancementSender(request, requestToken);
@@ -18569,62 +18582,93 @@ public partial class MainWindow : Window
             {
                 _enhancementCompanionOwnershipVerified = false;
             }
-            JsonElement? payload = null;
-            if (maxResponseBytes is int requestedResponseLimit)
+            int statusCode = (int)response.StatusCode;
+            byte[] responseBytes;
+            if (_usingDefaultModalEnhancementSender)
             {
-                int responseLimit = Math.Max(1, requestedResponseLimit);
-                byte[]? responseBytes = await ReadBoundedEnhancementResponseAsync(
-                    response.Content,
-                    responseLimit,
-                    requestToken);
-                if (responseBytes is null)
+                int outerResponseLimit = maxResponseBytes is int requested
+                    ? (int)Math.Min(
+                        EnhancementCompanionMaximumSecureResponseBytes,
+                        Math.Max(65_536L, (long)requested * 2 + 65_536))
+                    : EnhancementCompanionMaximumSecureResponseBytes;
+                byte[]? secureEnvelopeBytes =
+                    await ReadBoundedEnhancementResponseAsync(
+                        response.Content,
+                        outerResponseLimit,
+                        requestToken);
+                if (secureEnvelopeBytes is null
+                    || !TryDecryptEnhancementCompanionSecureResponse(
+                        response,
+                        secureEnvelopeBytes,
+                        secureRequestNonce,
+                        out statusCode,
+                        out responseBytes))
+                {
+                    _enhancementCompanionOwnershipVerified = false;
+                    return new EnhancementApiResponse(
+                        false,
+                        403,
+                        null,
+                        "The local AI companion response was not authenticated. No response data was accepted.");
+                }
+                if (maxResponseBytes is int securePlaintextLimit
+                    && responseBytes.Length > Math.Max(1, securePlaintextLimit))
                 {
                     return new EnhancementApiResponse(
                         false,
-                        (int)response.StatusCode,
+                        statusCode,
                         null,
                         "The local AI companion response exceeded the safe size limit.");
-                }
-
-                if (responseBytes.Length > 0)
-                {
-                    try
-                    {
-                        using JsonDocument document = JsonDocument.Parse(
-                            responseBytes);
-                        payload = document.RootElement.Clone();
-                    }
-                    catch (JsonException)
-                    {
-                    }
                 }
             }
             else
             {
-                string text = await response.Content.ReadAsStringAsync(
+                int responseLimit = maxResponseBytes is int requestedResponseLimit
+                    ? Math.Max(1, requestedResponseLimit)
+                    : EnhancementCompanionMaximumSecureResponseBytes;
+                byte[]? boundedResponseBytes = await ReadBoundedEnhancementResponseAsync(
+                    response.Content,
+                    responseLimit,
                     requestToken);
-                if (!string.IsNullOrWhiteSpace(text))
+                if (boundedResponseBytes is null)
                 {
-                    try
-                    {
-                        using JsonDocument document = JsonDocument.Parse(text);
-                        payload = document.RootElement.Clone();
-                    }
-                    catch (JsonException)
-                    {
-                    }
+                    return new EnhancementApiResponse(
+                        false,
+                        statusCode,
+                        null,
+                        "The local AI companion response exceeded the safe size limit.");
+                }
+                responseBytes = boundedResponseBytes;
+            }
+
+            JsonElement? payload = null;
+            if (responseBytes.Length > 0)
+            {
+                try
+                {
+                    using JsonDocument document = JsonDocument.Parse(
+                        responseBytes);
+                    payload = document.RootElement.Clone();
+                }
+                catch (JsonException)
+                {
                 }
             }
 
             string error = "";
-            if (!response.IsSuccessStatusCode)
+            bool innerSuccess = statusCode is >= 200 and < 300;
+            if (!innerSuccess)
             {
                 error = payload is JsonElement root
                     && TryGetStringProperty(root, "error", out string? apiError)
                     ? apiError ?? "Enhancement request failed."
-                    : $"Enhancement request failed ({(int)response.StatusCode}).";
+                    : $"Enhancement request failed ({statusCode}).";
             }
-            return new EnhancementApiResponse(response.IsSuccessStatusCode, (int)response.StatusCode, payload, error);
+            return new EnhancementApiResponse(
+                innerSuccess,
+                statusCode,
+                payload,
+                error);
         }
         catch (OperationCanceledException) when (
             !token.IsCancellationRequested
