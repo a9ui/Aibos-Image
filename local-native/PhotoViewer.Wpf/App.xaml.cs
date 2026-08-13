@@ -41,12 +41,130 @@ public partial class App : Application
     private const double CatalogInteractionSearchHostedAcceptanceMs = 350;
     private const double CatalogInteractionFilterHostedAcceptanceMs = 350;
     private const double CatalogInteractionSortHostedAcceptanceMs = 650;
-    // Hosted runs have shown low-tens-of-milliseconds scheduler/GC overlap
-    // around otherwise bounded zero/one-slice operations. Keep the 50 ms
-    // product target separately visible and retain exact structural, queue,
-    // and input-boundary gates while allowing that measured host variance.
+    // Keep the 50 ms product target separately visible. The hosted exception
+    // below is allowed only when both independent scheduler probes positively
+    // attribute the same heartbeat interval to host preemption. GC ambiguity
+    // and unexplained product time remain charged to the product.
     private const double CatalogInteractionDispatcherHeartbeatMeasurementToleranceMs = 25;
+    private const double CatalogInteractionDispatcherHeartbeatHostedAbsoluteCeilingMs = 2500;
+    private const double CatalogInteractionDispatcherHeartbeatAttributionToleranceMs = 0.5;
     private const long CatalogFavoriteEvictionBudgetMs = 125;
+
+    private readonly record struct HostedDispatcherPreemptionEvidence(
+        double RawGapMs,
+        double ProductGapMs,
+        bool DispatcherClassificationExact,
+        bool QueueDiagnosticExact,
+        bool UiCpuExact,
+        bool PanelCpuExact,
+        bool LongAwaitContinuationExact,
+        bool PositiveControlConsensus,
+        double ControlConsensusOverlapMs,
+        double UnexplainedGapMs,
+        bool GcTimingAmbiguous);
+
+    private sealed record HostedDispatcherPreemptionPolicySelfTest(
+        bool ZeroCpuContinuationWithoutControlRejected,
+        bool ZeroCpuSynchronousWaitWithoutControlRejected,
+        bool PositiveControlConsensusAccepted,
+        bool AbsoluteCeilingExceededRejected,
+        bool ActiveCpuRejected,
+        bool PanelCpuRejected,
+        bool GcAmbiguityRejected,
+        bool InconclusiveRejected)
+    {
+        public bool Exact =>
+            ZeroCpuContinuationWithoutControlRejected
+            && ZeroCpuSynchronousWaitWithoutControlRejected
+            && PositiveControlConsensusAccepted
+            && AbsoluteCeilingExceededRejected
+            && ActiveCpuRejected
+            && PanelCpuRejected
+            && GcAmbiguityRejected
+            && InconclusiveRejected;
+    }
+
+    private static bool IsHostedDispatcherPreemptionAcceptable(
+        HostedDispatcherPreemptionEvidence evidence,
+        double acceptanceLimitMs,
+        double absoluteCeilingMs)
+        => double.IsFinite(evidence.RawGapMs)
+            && double.IsFinite(evidence.ProductGapMs)
+            && double.IsFinite(evidence.ControlConsensusOverlapMs)
+            && double.IsFinite(evidence.UnexplainedGapMs)
+            && double.IsFinite(acceptanceLimitMs)
+            && double.IsFinite(absoluteCeilingMs)
+            && acceptanceLimitMs > 0
+            && absoluteCeilingMs > acceptanceLimitMs
+            && evidence.RawGapMs > acceptanceLimitMs
+            && evidence.ProductGapMs > acceptanceLimitMs
+            && evidence.RawGapMs <= absoluteCeilingMs
+            && evidence.ProductGapMs <= absoluteCeilingMs
+            && evidence.DispatcherClassificationExact
+            && evidence.QueueDiagnosticExact
+            && evidence.UiCpuExact
+            && evidence.PanelCpuExact
+            && evidence.LongAwaitContinuationExact
+            && evidence.PositiveControlConsensus
+            && !evidence.GcTimingAmbiguous
+            && evidence.UnexplainedGapMs <= acceptanceLimitMs
+            && evidence.ControlConsensusOverlapMs
+                + CatalogInteractionDispatcherHeartbeatAttributionToleranceMs
+                >= evidence.ProductGapMs - acceptanceLimitMs;
+
+    private static HostedDispatcherPreemptionPolicySelfTest
+        VerifyHostedDispatcherPreemptionPolicy(
+            double acceptanceLimitMs,
+            double absoluteCeilingMs)
+    {
+        var valid = new HostedDispatcherPreemptionEvidence(
+            RawGapMs: acceptanceLimitMs + 125,
+            ProductGapMs: acceptanceLimitMs + 100,
+            DispatcherClassificationExact: true,
+            QueueDiagnosticExact: true,
+            UiCpuExact: true,
+            PanelCpuExact: true,
+            LongAwaitContinuationExact: true,
+            PositiveControlConsensus: true,
+            ControlConsensusOverlapMs: 100,
+            UnexplainedGapMs: acceptanceLimitMs,
+            GcTimingAmbiguous: false);
+        bool Accept(HostedDispatcherPreemptionEvidence evidence)
+            => IsHostedDispatcherPreemptionAcceptable(
+                evidence,
+                acceptanceLimitMs,
+                absoluteCeilingMs);
+
+        return new(
+            ZeroCpuContinuationWithoutControlRejected: !Accept(valid with
+            {
+                PositiveControlConsensus = false,
+                ControlConsensusOverlapMs = 0,
+                UnexplainedGapMs = valid.ProductGapMs,
+            }),
+            ZeroCpuSynchronousWaitWithoutControlRejected: !Accept(valid with
+            {
+                LongAwaitContinuationExact = false,
+                PositiveControlConsensus = false,
+                ControlConsensusOverlapMs = 0,
+                UnexplainedGapMs = valid.ProductGapMs,
+            }),
+            PositiveControlConsensusAccepted: Accept(valid),
+            AbsoluteCeilingExceededRejected: !Accept(valid with
+            {
+                RawGapMs = absoluteCeilingMs + 1,
+            }),
+            ActiveCpuRejected: !Accept(valid with { UiCpuExact = false }),
+            PanelCpuRejected: !Accept(valid with { PanelCpuExact = false }),
+            GcAmbiguityRejected: !Accept(valid with
+            {
+                GcTimingAmbiguous = true,
+            }),
+            InconclusiveRejected: !Accept(valid with
+            {
+                DispatcherClassificationExact = false,
+            }));
+    }
 
     private static readonly string[] ThemeColorResourceKeys =
     [
@@ -11737,39 +11855,89 @@ public partial class App : Application
                             .ToList();
                 const string synchronizationContextAwaitCallbackPrefix =
                     "System.Threading.Tasks.SynchronizationContextAwaitTaskContinuation+";
-                bool dispatcherHeartbeatHostedPreemptionAccepted =
-                    dispatcherHeartbeatHostedOutliers.Count > 0
-                    && dispatcherHeartbeatHostedOutliers.All(sample =>
-                        string.Equals(
-                            sample.Classification,
-                            "ACTIVE_OPERATION_DIAGNOSTIC",
-                            StringComparison.Ordinal)
-                        && sample.UiThreadCpuMs == 0
-                        && sample.HeartbeatQueueUiCpuMs == 0
-                        && sample.ExcessQueueUiCpuMs <= 0
-                        && sample.HeartbeatQueueWallMs
-                            > dispatcherHeartbeatHostedAcceptanceLimitMs
-                        && sample.PanelPhaseOverlapMs <= 1
-                        && sample.ActiveOperations.Count > 0
-                        && sample.ActiveOperations.All(
-                            static operation => operation.ExecutionUiCpuMs == 0)
-                        && sample.PanelPhases.All(
-                            static phase => phase.UiCpuMs == 0)
-                        && sample.ActiveOperations.Any(operation =>
-                            operation.ExecutionWallMs
-                                > dispatcherHeartbeatHostedAcceptanceLimitMs
-                            && operation.CallbackName.StartsWith(
-                                synchronizationContextAwaitCallbackPrefix,
-                                StringComparison.Ordinal))
-                        && sample.ActiveOperations
+                Dictionary<long, SchedulerControlConsensusSample>
+                    schedulerControlByHeartbeatTag =
+                        schedulerHostAttribution.HeartbeatSamples
+                            .GroupBy(static sample => sample.HeartbeatTag)
+                            .Where(static group => group.Count() == 1)
+                            .ToDictionary(
+                                static group => group.Key,
+                                static group => group.Single());
+                var dispatcherHeartbeatHostedEvidence =
+                    new List<HostedDispatcherPreemptionEvidence>(
+                        dispatcherHeartbeatHostedOutliers.Count);
+                foreach (CatalogDispatcherHeartbeatDiagnostic sample
+                    in dispatcherHeartbeatHostedOutliers)
+                {
+                    bool matchedControl = schedulerControlByHeartbeatTag.TryGetValue(
+                        sample.HeartbeatTag,
+                        out SchedulerControlConsensusSample? control);
+                    List<CatalogDispatcherOperationDiagnostic> longOperations =
+                        sample.ActiveOperations
                             .Where(operation =>
                                 operation.ExecutionWallMs
                                     > dispatcherHeartbeatHostedAcceptanceLimitMs)
-                            .All(operation =>
+                            .ToList();
+                    bool positiveControlConsensus = matchedControl
+                        && schedulerHostAttribution.SensorValid
+                        && string.Equals(
+                            control!.Classification,
+                            "CONTROL_CONSENSUS_OVERLAP",
+                            StringComparison.Ordinal)
+                        && Math.Abs(control.RawGapMs - sample.RawGapMs)
+                            <= CatalogInteractionDispatcherHeartbeatAttributionToleranceMs;
+                    dispatcherHeartbeatHostedEvidence.Add(new(
+                        RawGapMs: sample.RawGapMs,
+                        ProductGapMs: sample.ProductGapMs,
+                        DispatcherClassificationExact: string.Equals(
+                            sample.Classification,
+                            "ACTIVE_OPERATION_DIAGNOSTIC",
+                            StringComparison.Ordinal),
+                        QueueDiagnosticExact:
+                            sample.HeartbeatQueueUiCpuMs == 0
+                            && sample.ExcessQueueUiCpuMs <= 0
+                            && sample.HeartbeatQueueWallMs
+                                > dispatcherHeartbeatHostedAcceptanceLimitMs,
+                        UiCpuExact:
+                            sample.UiThreadCpuMs == 0
+                            && sample.ActiveOperations.Count > 0
+                            && sample.ActiveOperations.All(
+                                static operation =>
+                                    operation.ExecutionUiCpuMs == 0),
+                        PanelCpuExact:
+                            sample.PanelPhaseOverlapMs <= 1
+                            && sample.PanelPhases.All(
+                                static phase => phase.UiCpuMs == 0),
+                        LongAwaitContinuationExact:
+                            longOperations.Count > 0
+                            && longOperations.All(operation =>
                                 operation.ExecutionUiCpuMs == 0
                                 && operation.CallbackName.StartsWith(
                                     synchronizationContextAwaitCallbackPrefix,
-                                    StringComparison.Ordinal)));
+                                    StringComparison.Ordinal)),
+                        PositiveControlConsensus: positiveControlConsensus,
+                        ControlConsensusOverlapMs: matchedControl
+                            ? control!.ControlConsensusOverlapMs
+                            : double.PositiveInfinity,
+                        UnexplainedGapMs: matchedControl
+                            ? control!.UnexplainedGapMs
+                            : double.PositiveInfinity,
+                        GcTimingAmbiguous: !matchedControl
+                            || control!.GcTimingAmbiguous));
+                }
+                HostedDispatcherPreemptionPolicySelfTest
+                    dispatcherHeartbeatHostedPreemptionPolicySelfTest =
+                        VerifyHostedDispatcherPreemptionPolicy(
+                            dispatcherHeartbeatHostedAcceptanceLimitMs,
+                            CatalogInteractionDispatcherHeartbeatHostedAbsoluteCeilingMs);
+                bool dispatcherHeartbeatHostedPreemptionAccepted =
+                    dispatcherHeartbeatHostedOutliers.Count > 0
+                    && dispatcherHeartbeatHostedPreemptionPolicySelfTest.Exact
+                    && dispatcherHeartbeatHostedEvidence.All(evidence =>
+                        IsHostedDispatcherPreemptionAcceptable(
+                            evidence,
+                            dispatcherHeartbeatHostedAcceptanceLimitMs,
+                            CatalogInteractionDispatcherHeartbeatHostedAbsoluteCeilingMs));
                 bool dispatcherHeartbeatWithinHostedAcceptance =
                     dispatcherDiagnostic.MaxProductGapMs
                         <= dispatcherHeartbeatHostedAcceptanceLimitMs
@@ -11910,12 +12078,11 @@ public partial class App : Application
                     && catalogProjectionPreResetSelectionReleasedCount > 0
                     && catalogProjectionDetachWithinHostedAcceptance
                     && dispatcherDiagnostic.SensorValid
-                    // Only strict, callback-free, zero-CPU Posted->Started
-                    // queue segments are removed from the raw heartbeat.
-                    // Active work, panel work, GC, and control-probe overlap
-                    // remain charged to the product interval. The only hosted
-                    // exception is an exact long SynchronizationContext await
-                    // continuation with zero UI/panel CPU evidence.
+                    // Hosted preemption requires the exact zero-CPU await
+                    // signature plus positive independent-control consensus
+                    // for the same heartbeat. GC ambiguity and more than
+                    // 75 ms of unexplained time are never accepted.
+                    && dispatcherHeartbeatHostedPreemptionPolicySelfTest.Exact
                     && dispatcherHeartbeatWithinHostedAcceptance
                     && dispatcherDiagnostic.InconclusiveCount == 0
                     // Rapid churn leaves dead WPF generator/layout objects in
@@ -12090,6 +12257,12 @@ public partial class App : Application
                             <= CatalogInteractionDispatcherHeartbeatBudgetMs,
                     DispatcherHeartbeatMeasurementToleranceMs =
                         CatalogInteractionDispatcherHeartbeatMeasurementToleranceMs,
+                    DispatcherHeartbeatHostedPreemptionAbsoluteCeilingMs =
+                        CatalogInteractionDispatcherHeartbeatHostedAbsoluteCeilingMs,
+                    DispatcherHeartbeatHostedPreemptionPolicySelfTest =
+                        dispatcherHeartbeatHostedPreemptionPolicySelfTest,
+                    DispatcherHeartbeatHostedEvidence =
+                        dispatcherHeartbeatHostedEvidence,
                     DispatcherHeartbeatHostedPreemptionAccepted =
                         dispatcherHeartbeatHostedPreemptionAccepted,
                     DispatcherHeartbeatWithinHostedAcceptance =
@@ -32057,6 +32230,7 @@ public partial class App : Application
                 unexplainedMaxGapMs = Math.Max(unexplainedMaxGapMs, productGapMs);
                 attributionSamples.Add(new(
                     sample.Operation,
+                    sample.HeartbeatTag,
                     rawGapMs,
                     rawAboveOverlapMs,
                     rawNormalOverlapMs,
@@ -32503,6 +32677,7 @@ public partial class App : Application
 
     private sealed record SchedulerControlConsensusSample(
         string Operation,
+        long HeartbeatTag,
         double RawGapMs,
         double RawAboveNormalOverlapMs,
         double RawNormalOverlapMs,
@@ -32697,6 +32872,11 @@ public partial class App : Application
         public long DispatcherHeartbeatBudgetMs { get; init; }
         public bool DispatcherHeartbeatProductTargetMet { get; init; }
         public double DispatcherHeartbeatMeasurementToleranceMs { get; init; }
+        public double DispatcherHeartbeatHostedPreemptionAbsoluteCeilingMs { get; init; }
+        public HostedDispatcherPreemptionPolicySelfTest?
+            DispatcherHeartbeatHostedPreemptionPolicySelfTest { get; init; }
+        public List<HostedDispatcherPreemptionEvidence>
+            DispatcherHeartbeatHostedEvidence { get; init; } = [];
         public bool DispatcherHeartbeatHostedPreemptionAccepted { get; init; }
         public bool DispatcherHeartbeatWithinHostedAcceptance { get; init; }
         public long FavoriteEvictionBudgetMs { get; init; }

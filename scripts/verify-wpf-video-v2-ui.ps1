@@ -111,6 +111,7 @@ try {
         -or -not $result.h3DefaultOnly `
         -or -not $result.templateExact `
         -or -not $result.h3UnavailableSafe `
+        -or -not $result.h3ReservationStatusExact `
         -or -not $result.requestExact `
         -or -not $result.healthExact `
         -or -not $result.invalidSealReasonVisible `
