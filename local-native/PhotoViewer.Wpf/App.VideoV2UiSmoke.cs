@@ -414,6 +414,31 @@ public partial class App
             string retryHealthMode = "disabled";
             int retryHealthGetCalls = 0;
             int retryPostCalls = 0;
+            static string CreateDisabledHealthWithProfilesFailure(string mode)
+            {
+                string healthJson = CreateVideoV2HealthJson(
+                    writerEnabled: false,
+                    ready: false,
+                    state: "disabled",
+                    reasonCode: "MINIMAX_H3_WRITER_DISABLED");
+                return mode switch
+                {
+                    "missing" => healthJson.Replace(
+                        "\"videoH3ProfilesV1\":",
+                        "\"retiredVideoProfiles\":",
+                        StringComparison.Ordinal),
+                    "duplicated" => healthJson.Replace(
+                        "\"videoH3ProfilesV1\":",
+                        "\"videoH3ProfilesV1\":null,\"videoH3ProfilesV1\":",
+                        StringComparison.Ordinal),
+                    "malformed" => healthJson.Replace(
+                        "\"defaultProfileId\":\"minimax-h3-hq-5s-v1\"",
+                        "\"defaultProfileId\":\"future-h3-profile\"",
+                        StringComparison.Ordinal),
+                    _ => throw new ArgumentOutOfRangeException(nameof(mode)),
+                };
+            }
+
             window.ConfigureModalEnhancementForSmoke((request, _) =>
             {
                 string path = request.RequestUri?.AbsolutePath ?? "";
@@ -455,6 +480,12 @@ public partial class App
                                 "\"videoH3ProfilesV1\":",
                                 "\"retiredVideoProfiles\":",
                                 StringComparison.Ordinal),
+                        "disabled-profiles-missing" =>
+                            CreateDisabledHealthWithProfilesFailure("missing"),
+                        "disabled-profiles-duplicated" =>
+                            CreateDisabledHealthWithProfilesFailure("duplicated"),
+                        "disabled-profiles-malformed" =>
+                            CreateDisabledHealthWithProfilesFailure("malformed"),
                         "seal-invalid" => CreateVideoV2HealthJson(
                             writerEnabled: true,
                             ready: false,
@@ -495,6 +526,43 @@ public partial class App
                     HttpStatusCode.NotFound));
             });
 
+            retryHealthMode = "disabled-profiles-missing";
+            string disabledMissingProfilesStatus =
+                await window.RefreshMiniMaxH3VideoCapabilityForSmokeAsync();
+            var disabledMissingProfilesRetry =
+                await window.RetryMiniMaxH3JobForSmokeAsync(
+                    "h3-disabled-missing-profiles-retry");
+            int afterDisabledMissingProfiles = PendingReservationCount();
+            retryHealthMode = "disabled-profiles-duplicated";
+            string disabledDuplicatedProfilesStatus =
+                await window.RefreshMiniMaxH3VideoCapabilityForSmokeAsync();
+            var disabledDuplicatedProfilesRetry =
+                await window.RetryMiniMaxH3JobForSmokeAsync(
+                    "h3-disabled-duplicated-profiles-retry");
+            int afterDisabledDuplicatedProfiles = PendingReservationCount();
+            retryHealthMode = "disabled-profiles-malformed";
+            string disabledMalformedProfilesStatus =
+                await window.RefreshMiniMaxH3VideoCapabilityForSmokeAsync();
+            var disabledMalformedProfilesRetry =
+                await window.RetryMiniMaxH3JobForSmokeAsync(
+                    "h3-disabled-malformed-profiles-retry");
+            int afterDisabledMalformedProfiles = PendingReservationCount();
+            bool h3ExactUnreadyProfilesFailClosed =
+                RegistrationBlocked(disabledMissingProfilesStatus)
+                && RegistrationBlocked(disabledDuplicatedProfilesStatus)
+                && RegistrationBlocked(disabledMalformedProfilesStatus)
+                && !disabledMissingProfilesRetry.Ok
+                && !disabledMissingProfilesRetry.SavedForDelivery
+                && !disabledDuplicatedProfilesRetry.Ok
+                && !disabledDuplicatedProfilesRetry.SavedForDelivery
+                && !disabledMalformedProfilesRetry.Ok
+                && !disabledMalformedProfilesRetry.SavedForDelivery
+                && afterDisabledMissingProfiles == 0
+                && afterDisabledDuplicatedProfiles == 0
+                && afterDisabledMalformedProfiles == 0
+                && retryPostCalls == 0;
+
+            retryHealthMode = "disabled";
             var disabledRetry = await window.RetryMiniMaxH3JobForSmokeAsync(
                 "h3-disabled-retry");
             int afterDisabled = PendingReservationCount();
@@ -536,7 +604,7 @@ public partial class App
                 && readyRetry.Ok
                 && readyRetry.SavedForDelivery
                 && afterReady == 3
-                && retryHealthGetCalls == 6
+                && retryHealthGetCalls == 12
                 && retryPostCalls == 3;
 
             ok = h3DefaultOnly
@@ -551,6 +619,7 @@ public partial class App
                 && legacyWanMigratedToH3
                 && durationExact
                 && canvasPolicyExact
+                && h3ExactUnreadyProfilesFailClosed
                 && h3RetryExactHealth;
             result = new
             {
@@ -585,6 +654,13 @@ public partial class App
                 legacyWanMigratedToH3,
                 durationExact,
                 canvasPolicyExact,
+                h3ExactUnreadyProfilesFailClosed,
+                disabledMissingProfilesStatus,
+                disabledDuplicatedProfilesStatus,
+                disabledMalformedProfilesStatus,
+                afterDisabledMissingProfiles,
+                afterDisabledDuplicatedProfiles,
+                afterDisabledMalformedProfiles,
                 h3RetryExactHealth,
                 afterDisabled,
                 afterInvalidSeal,

@@ -121,6 +121,7 @@ try {
         -or -not $result.legacyWanMigratedToH3 `
         -or -not $result.durationExact `
         -or -not $result.canvasPolicyExact `
+        -or -not $result.h3ExactUnreadyProfilesFailClosed `
         -or -not $result.h3RetryExactHealth) {
         throw ('Video v2 UI smoke failed: ' + ($result | ConvertTo-Json -Compress))
     }
