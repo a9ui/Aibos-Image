@@ -401,6 +401,16 @@ public partial class App
 
                     bool rewriteAccepted =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
+                    if (string.IsNullOrWhiteSpace(latestRewriteBody))
+                    {
+                        throw new InvalidOperationException(
+                            "H3 rewrite request was not sent. "
+                            + $"accepted={rewriteAccepted}; "
+                            + $"selected={selected}; "
+                            + $"boardOpened={boardOpened}; "
+                            + $"buttonEnabled={window.VideoH3PromptRewriteButtonEnabledForSmoke}; "
+                            + $"status={window.VideoH3PromptRewriteStatusForSmoke}");
+                    }
                     using JsonDocument requestDocument = JsonDocument.Parse(
                         latestRewriteBody);
                     JsonElement requestRoot = requestDocument.RootElement;

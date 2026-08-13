@@ -226,13 +226,13 @@ public partial class App
                     "A gentle head turn in dawn light.");
             using JsonDocument longRequest = JsonDocument.Parse(
                 window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
-                    "three connected phases",
-                    durationSeconds: 12));
+                    "two connected phases",
+                    durationSeconds: 10));
             bool longRequestExact = longRequest.RootElement
                     .GetProperty("video")
                     .GetProperty("requested")
                     .GetProperty("profileId")
-                    .GetString() == "minimax-h3-hq-12s-v1";
+                    .GetString() == "minimax-h3-hq-10s-v1";
 
             string readyHealthJson = CreateVideoV2HealthJson(
                 writerEnabled: true,

@@ -100,7 +100,17 @@ try {
         } else {
             'no stderr'
         }
-        throw "Video v2 UI smoke exited $($process.ExitCode): $stderr"
+        $stdout = if (Test-Path -LiteralPath $stdoutPath) {
+            Get-Content -Raw -LiteralPath $stdoutPath
+        } else {
+            'no stdout'
+        }
+        $resultText = if (Test-Path -LiteralPath $resultPath) {
+            Get-Content -Raw -LiteralPath $resultPath
+        } else {
+            'no result'
+        }
+        throw "Video v2 UI smoke exited $($process.ExitCode): stderr=$stderr stdout=$stdout result=$resultText"
     }
     if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
         throw 'Video v2 UI smoke did not produce its result.'

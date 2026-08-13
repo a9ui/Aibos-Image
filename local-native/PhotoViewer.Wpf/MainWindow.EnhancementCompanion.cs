@@ -259,11 +259,50 @@ public partial class MainWindow
             return;
         }
 
+        long startedAt = Stopwatch.GetTimestamp();
+        AibosOperationLog.Write("companion.startup", "started");
         EnhancementApiResponse response =
             await EnsureEnhancementCompanionApiReadyAsync(
                 token: _enhancementCompanionLifetimeCts.Token);
-        if (!response.Ok)
+        long elapsedMilliseconds = (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+        if (response.Ok)
+        {
+            AibosOperationLog.Write(
+                "companion.startup",
+                "ready",
+                elapsedMilliseconds,
+                response.StatusCode);
+        }
+        else
+        {
             _enhancementCompanionLaunchError = response.Error;
+            AibosOperationLog.Write(
+                "companion.startup",
+                "failed",
+                elapsedMilliseconds,
+                response.StatusCode,
+                ClassifyEnhancementCompanionStartupError(response.Error));
+        }
+    }
+
+    private static string ClassifyEnhancementCompanionStartupError(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+            return "request_failed";
+        if (error.Contains("untrusted process", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("proved ownership", StringComparison.OrdinalIgnoreCase))
+            return "ownership_rejected";
+        if (error.Contains("could not find", StringComparison.OrdinalIgnoreCase))
+            return "root_not_found";
+        if (error.Contains("authentication", StringComparison.OrdinalIgnoreCase))
+            return "authentication_failed";
+        if (error.Contains("stopped before", StringComparison.OrdinalIgnoreCase))
+            return "process_stopped";
+        if (error.Contains("within two minutes", StringComparison.OrdinalIgnoreCase))
+            return "startup_timeout";
+        if (error.Contains("canceled", StringComparison.OrdinalIgnoreCase))
+            return "canceled";
+        return "request_failed";
     }
 
     private async Task<EnhancementApiResponse> EnsurePhotorealCompanionReadyForExplicitActionAsync(
@@ -2010,7 +2049,7 @@ public partial class MainWindow
         ValidatedEnhancementCompanionRoot? companionRoot = ResolveEnhancementCompanionRoot();
         if (companionRoot is null)
         {
-            error = "Aibos could not find the local AI service beside this portable build. Open a build with the local AI service available, or set the compatibility variable AIBOS_H25_COMPANION_ROOT.";
+            error = "Aibos could not find the local AI companion. Set AIBOS_COMPANION_ROOT when it is stored separately from this build.";
             return false;
         }
 
@@ -2093,9 +2132,18 @@ public partial class MainWindow
 
     private static ValidatedEnhancementCompanionRoot? ResolveEnhancementCompanionRoot()
         => ResolveEnhancementCompanionRoot(
-            Environment.GetEnvironmentVariable("AIBOS_H25_COMPANION_ROOT"),
+            FirstConfiguredEnhancementCompanionRoot(
+                Environment.GetEnvironmentVariable("AIBOS_COMPANION_ROOT"),
+                Environment.GetEnvironmentVariable("AIBOS_H25_COMPANION_ROOT")),
             AppContext.BaseDirectory,
             UseLegacyNextCompanionLauncher());
+
+    private static string? FirstConfiguredEnhancementCompanionRoot(
+        string? configuredRoot,
+        string? compatibilityRoot)
+        => !string.IsNullOrWhiteSpace(configuredRoot)
+            ? configuredRoot
+            : compatibilityRoot;
 
     private static bool UseLegacyNextCompanionLauncher()
         => string.Equals(
@@ -2335,6 +2383,12 @@ public partial class MainWindow
     public string? EnhancementCompanionLaunchErrorForSmoke => _enhancementCompanionLaunchError;
     public static string? ResolveEnhancementCompanionRootForSmoke()
         => ResolveEnhancementCompanionRoot()?.RootPath;
+    public static string? SelectEnhancementCompanionRootSettingForSmoke(
+        string? configuredRoot,
+        string? compatibilityRoot)
+        => FirstConfiguredEnhancementCompanionRoot(
+            configuredRoot,
+            compatibilityRoot);
     public static string? ResolveEnhancementCompanionRootForSmoke(
         string? configuredRoot,
         string appBaseDirectory)
@@ -2399,10 +2453,9 @@ public partial class MainWindow
     public void EnableEnhancementCompanionAutoStartProbeForSmoke(
         Func<Uri, (bool Started, string Error)> starter)
     {
-        _usingDefaultModalEnhancementSender = true;
+        // This helper observes launch attempts only. It must not replace a
+        // smoke-provided HTTP sender with the production authenticated path.
         _startEnhancementCompanionForSmoke = starter;
-        _enhancementCompanionAuthToken = EnhancementCompanionSmokeAuthToken;
-        _enhancementCompanionOwnershipVerified = false;
     }
 
     public IReadOnlyDictionary<string, object>

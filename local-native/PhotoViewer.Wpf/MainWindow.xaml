@@ -1515,6 +1515,14 @@
                         Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
                         AutomationProperties.Name="Cancel all queued enhancement jobs"
                         ToolTip="実行中のジョブは変えず、待機中だけをキャンセルします"/>
+                <Button x:Name="EnhancementJobsRetryFailedButton" Style="{StaticResource GhostButton}" Content="失敗を全部リトライ"
+                        Click="RetryAllFailedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
+                        AutomationProperties.Name="Retry all failed enhancement jobs"
+                        ToolTip="再試行できる失敗ジョブを元設定で順に追加し、追加できた元の失敗履歴を消します"/>
+                <Button x:Name="EnhancementJobsClearFailedButton" Style="{StaticResource DangerButton}" Content="失敗を全部消す"
+                        Click="ClearAllFailedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
+                        AutomationProperties.Name="Remove all failed enhancement jobs"
+                        ToolTip="失敗履歴だけを消します。元画像と出力ファイルは変更しません"/>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="9" Margin="0,16,0,0">
                   <StackPanel>
                     <TextBlock Text="Local companion" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold"/>
@@ -2121,29 +2129,26 @@
                         Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0" Visibility="Collapsed"
                         SelectionChanged="VideoGenerationModel_SelectionChanged"
                         AutomationProperties.Name="Default video generation model">
-                <ComboBoxItem Content="MiniMax H3 — 高画質・5〜15秒・音声あり" Tag="minimax-h3"/>
+                <ComboBoxItem Content="MiniMax H3 — 5秒・10秒・音声あり" Tag="minimax-h3"/>
               </ComboBox>
               <TextBlock x:Name="AppVideoModelDescriptionText"
-                         Text="MiniMax H3の高画質5〜15秒・24fps。元画像比率・20 step・AAC音声あり。"
+                         Text="MiniMax H3の5秒・10秒動画。24fps・元画像比率・20 step・AAC音声あり。"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,5,0,9"/>
               <StackPanel x:Name="AppVideoH3ControlsPanel">
-                <TextBlock Text="画質 · 高画質固定" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                <TextBlock Text="長さ" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
                 <TextBlock Text="最大414,720px・24fps・20 step。未検証のFPSやstepは選択肢に加えていません。"
                            Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                            TextWrapping="Wrap" Margin="0,0,0,7"/>
-                <TextBlock Text="長さ" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
                 <ComboBox x:Name="AppVideoH3DurationComboBox"
                           Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
                           SelectionChanged="MiniMaxH3Duration_SelectionChanged"
                           AutomationProperties.Name="Default MiniMax H3 video duration"
                           AutomationProperties.HelpText="Selects one measured fixed MiniMax H3 profile. Frame rate and steps remain fixed.">
-                  <ComboBoxItem Content="高画質 · 5.167秒（124f・推奨）" Tag="5"/>
-                  <ComboBoxItem Content="高画質 · 10.125秒（243f）" Tag="10"/>
-                  <ComboBoxItem Content="高画質 · 12.250秒（294f）" Tag="12"/>
-                  <ComboBoxItem Content="高画質 · 15.083秒（362f）" Tag="15"/>
+                  <ComboBoxItem Content="5秒（推奨）" Tag="5"/>
+                  <ComboBoxItem Content="10秒" Tag="10"/>
                 </ComboBox>
-                <TextBlock Text="10〜15秒はRAM負荷が大きいため、他の重い作業を閉じた就寝・外出中の実行を推奨します。"
+                <TextBlock Text="10秒はRAM負荷が大きいため、他の重い作業を閉じて実行してください。"
                            Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                            TextWrapping="Wrap" Margin="0,5,0,9"/>
               </StackPanel>
@@ -3195,25 +3200,23 @@
                       Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0" Visibility="Collapsed"
                       SelectionChanged="VideoGenerationModel_SelectionChanged"
                       AutomationProperties.Name="Video generation model">
-              <ComboBoxItem Content="MiniMax H3 — 高画質・5〜15秒・音声あり" Tag="minimax-h3"/>
+              <ComboBoxItem Content="MiniMax H3 — 5秒・10秒・音声あり" Tag="minimax-h3"/>
             </ComboBox>
             <TextBlock x:Name="ModalVideoModelDescriptionText"
-                       Text="MiniMax H3の高画質5〜15秒・24fps。元画像比率・20 step・AAC音声あり。"
+                       Text="MiniMax H3の5秒・10秒動画。24fps・元画像比率・20 step・AAC音声あり。"
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,5,0,10"/>
             <StackPanel x:Name="ModalVideoH3ControlsPanel" Margin="0,0,0,10">
-              <TextBlock Text="長さ · 高画質固定" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+              <TextBlock Text="長さ" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
               <ComboBox x:Name="ModalVideoH3DurationComboBox"
                         Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
                         SelectionChanged="MiniMaxH3Duration_SelectionChanged"
                         AutomationProperties.Name="MiniMax H3 video duration"
                         AutomationProperties.HelpText="Selects one measured fixed MiniMax H3 profile. Frame rate and steps remain fixed.">
-                <ComboBoxItem Content="高画質 · 5.167秒（124f・推奨）" Tag="5"/>
-                <ComboBoxItem Content="高画質 · 10.125秒（243f）" Tag="10"/>
-                <ComboBoxItem Content="高画質 · 12.250秒（294f）" Tag="12"/>
-                <ComboBoxItem Content="高画質 · 15.083秒（362f）" Tag="15"/>
+                <ComboBoxItem Content="5秒（推奨）" Tag="5"/>
+                <ComboBoxItem Content="10秒" Tag="10"/>
               </ComboBox>
-              <TextBlock Text="最大414,720px・24fps・20 step固定。10〜15秒は他の重い作業を閉じて実行してください。"
+              <TextBlock Text="最大414,720px・24fps・20 step固定。10秒は他の重い作業を閉じて実行してください。"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,5,0,0"/>
             </StackPanel>

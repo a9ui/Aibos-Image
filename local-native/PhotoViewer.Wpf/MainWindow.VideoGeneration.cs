@@ -76,6 +76,8 @@ public partial class MainWindow
     private static readonly int[] SupportedVideoDurationSeconds = [4, 6];
     private static readonly int[] SupportedMiniMaxH3VideoDurationSeconds =
         [5, 10, 12, 15];
+    private static readonly int[] SelectableMiniMaxH3VideoDurationSeconds =
+        [5, 10];
     private static readonly int[] SupportedVideoPlaybackFps = [12, 16];
     private static readonly int[] SupportedVideoMaximumPixelAreas = [230_400, 307_200, 409_600];
 
@@ -206,6 +208,11 @@ public partial class MainWindow
 
     private static int NormalizeMiniMaxH3DurationSeconds(int value)
         => SupportedMiniMaxH3VideoDurationSeconds.Contains(value)
+            ? value
+            : MiniMaxH3VideoDefaultNominalDurationSeconds;
+
+    private static int NormalizeSelectableMiniMaxH3DurationSeconds(int value)
+        => SelectableMiniMaxH3VideoDurationSeconds.Contains(value)
             ? value
             : MiniMaxH3VideoDefaultNominalDurationSeconds;
 
@@ -428,8 +435,8 @@ public partial class MainWindow
             HunyuanVideoModelId =>
                 "実写・人物の顔や手を重視する候補。12GBの隔離ランタイム実測前なので、現在は選択内容の確認だけできます。",
             MiniMaxH3VideoModelId =>
-                "MiniMax H3の実測済み高画質プロファイル。元画像比率・32px単位・最大414,720px・24fps・20 step・H.264 / yuv420p・AAC音声あり。"
-                + " RTX 4070 SUPER 12GBで5.167秒、10.125秒、12.250秒、15.083秒を選べます。長尺はRAMを大きく使うため、他の重い作業を閉じた就寝・外出中の実行を推奨します。"
+                "RTX 4070 SUPER 12GBで実測済みのMiniMax H3 5秒・10秒プロファイル。元画像比率・32px単位・最大414,720px・24fps・20 step・H.264 / yuv420p・AAC音声あり。"
+                + " 10秒はRAMを大きく使うため、他の重い作業を閉じて実行してください。"
                 + MiniMaxH3ReadinessSuffix(),
             _ =>
                 "RTX 4070 SUPER 12GBで検証済みのモデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。",
@@ -1726,7 +1733,7 @@ public partial class MainWindow
         string? modelId = null,
         string? qualityId = null)
     {
-        _videoDurationSeconds = NormalizeMiniMaxH3DurationSeconds(
+        _videoDurationSeconds = NormalizeSelectableMiniMaxH3DurationSeconds(
             durationSeconds ?? MiniMaxH3VideoDefaultNominalDurationSeconds);
         _videoPlaybackFps = playbackFps is int fps
             && SupportedVideoPlaybackFps.Contains(fps)
@@ -2374,7 +2381,7 @@ public partial class MainWindow
                 issues.Add("modal-wan-tuning");
             if (AppVideoWanControlsPanel.Visibility != Visibility.Collapsed)
                 issues.Add("app-wan-controls");
-            int[] expectedDurations = [5, 10, 12, 15];
+            int[] expectedDurations = [5, 10];
             if (ModalVideoH3ControlsPanel.Visibility != Visibility.Visible
                 || !ModalVideoH3DurationComboBox.Items
                     .OfType<ComboBoxItem>()

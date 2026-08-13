@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
@@ -155,6 +156,11 @@ public partial class MainWindow
         if (_videoH3RewritePending || !IsMiniMaxH3VideoModel(_videoModelId))
             return false;
 
+        var operationWatch = Stopwatch.StartNew();
+        string operationMode = VideoH3PromptRewriteModeId(_videoH3RewriteMode);
+        int operationDurationSeconds = NormalizeMiniMaxH3DurationSeconds(
+            _videoDurationSeconds);
+
         if (!TryCaptureVideoH3RewriteSourceStamp(
                 out VideoSourceChoice source,
                 out VideoH3SourceStamp sourceStamp,
@@ -162,6 +168,13 @@ public partial class MainWindow
         {
             SetVideoH3PromptRewriteStatus(sourceError);
             RefreshVideoH3PromptRewriteControls(updateStatus: false);
+            AibosOperationLog.Write(
+                "h3_prompt_rewrite",
+                "rejected",
+                operationWatch.ElapsedMilliseconds,
+                errorCode: "SOURCE_UNAVAILABLE",
+                mode: operationMode,
+                durationSeconds: operationDurationSeconds);
             return false;
         }
 
@@ -178,8 +191,24 @@ public partial class MainWindow
                 "UiVideoH3StatusInputTooLong",
                 "選んだ変換方法の指示を含めると2000文字を超えます。入力を少し短くしてください。動画ジョブやworkerは変更していません。"));
             RefreshVideoH3PromptRewriteControls(updateStatus: false);
+            AibosOperationLog.Write(
+                "h3_prompt_rewrite",
+                "rejected",
+                operationWatch.ElapsedMilliseconds,
+                errorCode: "INPUT_TOO_LONG",
+                mode: operationMode,
+                durationSeconds: operationDurationSeconds);
             return false;
         }
+        AibosOperationLog.Write(
+            "h3_prompt_rewrite",
+            "started",
+            mode: operationMode,
+            durationSeconds: operationDurationSeconds);
+        string operationOutcome = "failed";
+        string? operationErrorCode = "UNKNOWN_FAILURE";
+        int? operationStatusCode = null;
+        double? operationInferenceMilliseconds = null;
         long generation = ++_videoH3RewriteGeneration;
         var cts = new CancellationTokenSource();
         CancellationTokenSource? prior = Interlocked.Exchange(
@@ -213,6 +242,7 @@ public partial class MainWindow
                 SetStatusIfCurrent(VideoH3Localized(
                     "UiVideoH3StatusStaleResponse",
                     "作成中に入力・画像・Model・Styleが変わったため、結果を採用しませんでした。"));
+                operationErrorCode = "CONTEXT_CHANGED";
                 return false;
             }
 
@@ -237,23 +267,44 @@ public partial class MainWindow
                 timeoutError: VideoH3Localized(
                     "UiVideoH3StatusTimedOut",
                     "H3語化が6分以内に完了しませんでした。入力プロンプトは変更していません。もう一度試してください。"));
+            operationStatusCode = response.StatusCode;
+            if (response.Payload is JsonElement responsePayload
+                && responsePayload.TryGetProperty(
+                    "inferenceMilliseconds",
+                    out JsonElement inferenceElement)
+                && inferenceElement.TryGetDouble(out double inferenceMilliseconds))
+            {
+                operationInferenceMilliseconds = inferenceMilliseconds;
+            }
             if (cts.IsCancellationRequested)
             {
                 SetStatusIfCurrent(VideoH3Localized(
                     "UiVideoH3StatusCanceled",
                     "H3語化を中止しました。動画ジョブは追加していません。"));
+                operationOutcome = "canceled";
+                operationErrorCode = "USER_CANCELED";
                 return false;
             }
             if (!response.Ok || response.Payload is not JsonElement payload)
             {
                 SetStatusIfCurrent(DescribeVideoH3PromptRewriteFailure(response));
+                operationErrorCode = response.Payload is JsonElement errorPayload
+                    && TryGetStringProperty(
+                        errorPayload,
+                        "code",
+                        out string? responseCode)
+                        ? responseCode ?? "API_ERROR"
+                        : response.StatusCode == 0
+                            ? "COMPANION_UNAVAILABLE"
+                            : "API_ERROR";
                 return false;
             }
-            if (!TryParseVideoH3PromptRewriteResponse(
+            bool parsed = TryParseVideoH3PromptRewriteResponse(
                     payload,
                     out string candidate,
                     out string rewriteRevision,
-                    out string sourceSha256)
+                    out string sourceSha256);
+            if (!parsed
                 || !string.Equals(
                     sourceSha256,
                     expectedSourceSha256,
@@ -262,6 +313,9 @@ public partial class MainWindow
                 SetStatusIfCurrent(VideoH3Localized(
                     "UiVideoH3StatusInvalidResponse",
                     "H3語化の応答を確認できません。入力プロンプトは変更していません。"));
+                operationErrorCode = parsed
+                    ? "SOURCE_HASH_MISMATCH"
+                    : "RESPONSE_CONTRACT_INVALID";
                 return false;
             }
             if (generation != _videoH3RewriteGeneration
@@ -275,6 +329,7 @@ public partial class MainWindow
                 SetStatusIfCurrent(VideoH3Localized(
                     "UiVideoH3StatusStaleResponse",
                     "作成中に入力・画像・Model・Styleが変わったため、結果を採用しませんでした。"));
+                operationErrorCode = "CONTEXT_CHANGED";
                 return false;
             }
 
@@ -290,6 +345,8 @@ public partial class MainWindow
             SetStatusIfCurrent(VideoH3Localized(
                 "UiVideoH3StatusReady",
                 "候補を編集できます。動画生成にはまだ使われていません。"));
+            operationOutcome = "completed";
+            operationErrorCode = null;
             return true;
         }
         catch (OperationCanceledException)
@@ -297,6 +354,8 @@ public partial class MainWindow
             SetStatusIfCurrent(VideoH3Localized(
                 "UiVideoH3StatusCanceled",
                 "H3語化を中止しました。動画ジョブは追加していません。"));
+            operationOutcome = "canceled";
+            operationErrorCode = "CANCELED";
             return false;
         }
         catch (Exception ex) when (
@@ -308,10 +367,20 @@ public partial class MainWindow
             SetStatusIfCurrent(VideoH3Localized(
                 "UiVideoH3StatusSourceUnavailable",
                 "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。"));
+            operationErrorCode = "SOURCE_READ_FAILED";
             return false;
         }
         finally
         {
+            AibosOperationLog.Write(
+                "h3_prompt_rewrite",
+                operationOutcome,
+                operationWatch.ElapsedMilliseconds,
+                operationStatusCode,
+                operationErrorCode,
+                operationMode,
+                operationDurationSeconds,
+                operationInferenceMilliseconds);
             if (generation == _videoH3RewriteGeneration)
             {
                 _videoH3RewritePending = false;

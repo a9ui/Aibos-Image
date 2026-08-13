@@ -895,6 +895,14 @@ public partial class MainWindow
             && _enhancementWorkspaceJobs.Any(static job =>
                 job.CanUpdatePhotorealPrompts);
 
+    private bool CanRetryAllFailedEnhancementJobs()
+        => _enhancementWorkspaceJobs.Any(static job =>
+            job.Status == "failed" && job.CanRetry && job.CanDismiss);
+
+    private bool CanClearAllFailedEnhancementJobs()
+        => _enhancementWorkspaceJobs.Any(static job =>
+            job.Status == "failed");
+
     private void RefreshEnhancementQueueBulkControls()
     {
         if (EnhancementJobsClearQueuedButton is not null)
@@ -909,6 +917,20 @@ public partial class MainWindow
             EnhancementJobsUpdateQueuedPromptsButton.IsEnabled =
                 !_enhancementWorkspaceMutationPending
                 && CanUpdateAllQueuedPhotorealPrompts();
+        }
+
+        if (EnhancementJobsRetryFailedButton is not null)
+        {
+            EnhancementJobsRetryFailedButton.IsEnabled =
+                !_enhancementWorkspaceMutationPending
+                && CanRetryAllFailedEnhancementJobs();
+        }
+
+        if (EnhancementJobsClearFailedButton is not null)
+        {
+            EnhancementJobsClearFailedButton.IsEnabled =
+                !_enhancementWorkspaceMutationPending
+                && CanClearAllFailedEnhancementJobs();
         }
     }
 
@@ -933,44 +955,67 @@ public partial class MainWindow
         if (EnhancementJobsDialog.Visibility == Visibility.Visible)
             return;
 
-        StopGalleryAutoScroll();
-        SearchHistoryPopup.IsOpen = false;
-        _enhancementWorkspaceFocusBeforeDialog = focusToRestore ?? Keyboard.FocusedElement;
-        _enhancementWorkspaceFilter = initialFilter is "queued" or "running" or "failed" or "canceled" or "completed" or "video"
-            ? initialFilter
-            : "all";
-        EnhancementJobsAllFilter.IsChecked = _enhancementWorkspaceFilter == "all";
-        EnhancementJobsQueuedFilter.IsChecked = _enhancementWorkspaceFilter == "queued";
-        EnhancementJobsRunningFilter.IsChecked = _enhancementWorkspaceFilter == "running";
-        EnhancementJobsFailedFilter.IsChecked = _enhancementWorkspaceFilter == "failed";
-        EnhancementJobsCanceledFilter.IsChecked = _enhancementWorkspaceFilter == "canceled";
-        EnhancementJobsCompletedFilter.IsChecked = _enhancementWorkspaceFilter == "completed";
-        EnhancementJobsVideoFilter.IsChecked = _enhancementWorkspaceFilter == "video";
-        _enhancementWorkspaceHighlightedJobIds.Clear();
-        if (highlightedJobIds is not null)
+        var operationWatch = Stopwatch.StartNew();
+        string operationOutcome = "failed";
+
+        try
         {
-            _enhancementWorkspaceHighlightedJobIds.UnionWith(highlightedJobIds.Where(static id => !string.IsNullOrWhiteSpace(id)));
-            _enhancementWorkspaceHighlightExpiresAt = DateTimeOffset.UtcNow.AddSeconds(20);
+            StopGalleryAutoScroll();
+            SearchHistoryPopup.IsOpen = false;
+            _enhancementWorkspaceFocusBeforeDialog = focusToRestore ?? Keyboard.FocusedElement;
+            _enhancementWorkspaceFilter = initialFilter is "queued" or "running" or "failed" or "canceled" or "completed" or "video"
+                ? initialFilter
+                : "all";
+            EnhancementJobsAllFilter.IsChecked = _enhancementWorkspaceFilter == "all";
+            EnhancementJobsQueuedFilter.IsChecked = _enhancementWorkspaceFilter == "queued";
+            EnhancementJobsRunningFilter.IsChecked = _enhancementWorkspaceFilter == "running";
+            EnhancementJobsFailedFilter.IsChecked = _enhancementWorkspaceFilter == "failed";
+            EnhancementJobsCanceledFilter.IsChecked = _enhancementWorkspaceFilter == "canceled";
+            EnhancementJobsCompletedFilter.IsChecked = _enhancementWorkspaceFilter == "completed";
+            EnhancementJobsVideoFilter.IsChecked = _enhancementWorkspaceFilter == "video";
+            _enhancementWorkspaceHighlightedJobIds.Clear();
+            if (highlightedJobIds is not null)
+            {
+                _enhancementWorkspaceHighlightedJobIds.UnionWith(
+                    highlightedJobIds.Where(static id =>
+                        !string.IsNullOrWhiteSpace(id)));
+                _enhancementWorkspaceHighlightExpiresAt =
+                    DateTimeOffset.UtcNow.AddSeconds(20);
+            }
+            else
+            {
+                _enhancementWorkspaceHighlightExpiresAt = default;
+            }
+            EnhancementJobsDialog.Visibility = Visibility.Visible;
+            EnhancementJobsStatusText.Text = "Loading jobs from the local companion...";
+            _enhancementWorkspaceHealthEndpointSupported = null;
+            _enhancementWorkspaceHealthInventorySignature = null;
+            _enhancementWorkspaceQueuePaused = null;
+            RefreshEnhancementQueuePauseControl();
+            ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
+            EnhancementJobsEmptyText.Visibility = Visibility.Collapsed;
+            if (!restoreReturnViewport)
+                EnhancementJobsList.ItemsSource = null;
+            long generation = ++_enhancementWorkspaceGeneration;
+            _ = Dispatcher.BeginInvoke(
+                EnhancementJobsRefreshButton.Focus,
+                DispatcherPriority.Input);
+            await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
+            if (restoreReturnViewport)
+                await RestoreEnhancementJobsReturnViewportAsync();
+            operationOutcome = EnhancementJobsDialog.Visibility == Visibility.Visible
+                ? "completed"
+                : "canceled";
         }
-        else
+        finally
         {
-            _enhancementWorkspaceHighlightExpiresAt = default;
+            AibosOperationLog.Write(
+                "jobs_workspace_open",
+                operationOutcome,
+                operationWatch.ElapsedMilliseconds,
+                mode: _enhancementWorkspaceFilter,
+                itemCount: _enhancementWorkspaceJobs.Count);
         }
-        EnhancementJobsDialog.Visibility = Visibility.Visible;
-        EnhancementJobsStatusText.Text = "Loading jobs from the local companion...";
-        _enhancementWorkspaceHealthEndpointSupported = null;
-        _enhancementWorkspaceHealthInventorySignature = null;
-        _enhancementWorkspaceQueuePaused = null;
-        RefreshEnhancementQueuePauseControl();
-        ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
-        EnhancementJobsEmptyText.Visibility = Visibility.Collapsed;
-        if (!restoreReturnViewport)
-            EnhancementJobsList.ItemsSource = null;
-        long generation = ++_enhancementWorkspaceGeneration;
-        _ = Dispatcher.BeginInvoke(EnhancementJobsRefreshButton.Focus, DispatcherPriority.Input);
-        await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
-        if (restoreReturnViewport)
-            await RestoreEnhancementJobsReturnViewportAsync();
     }
 
     private void CloseEnhancementJobs_Click(object sender, RoutedEventArgs e)
@@ -1004,7 +1049,26 @@ public partial class MainWindow
         if (_enhancementWorkspaceMutationPending
             || _enhancementWorkspaceHealthPollPending)
             return;
-        await RefreshEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration, isPoll: false);
+        var operationWatch = Stopwatch.StartNew();
+        string operationOutcome = "failed";
+        try
+        {
+            await RefreshEnhancementJobsWorkspaceAsync(
+                _enhancementWorkspaceGeneration,
+                isPoll: false);
+            operationOutcome = EnhancementJobsDialog.Visibility == Visibility.Visible
+                ? "completed"
+                : "canceled";
+        }
+        finally
+        {
+            AibosOperationLog.Write(
+                "jobs_workspace_refresh",
+                operationOutcome,
+                operationWatch.ElapsedMilliseconds,
+                mode: _enhancementWorkspaceFilter,
+                itemCount: _enhancementWorkspaceJobs.Count);
+        }
     }
 
     private async void ToggleEnhancementQueuePaused_Click(object sender, RoutedEventArgs e)
@@ -1025,6 +1089,7 @@ public partial class MainWindow
         if (current == paused)
             return true;
 
+        var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
         EnhancementJobsRefreshButton.IsEnabled = false;
         RefreshEnhancementQueuePauseControl();
@@ -1049,6 +1114,15 @@ public partial class MainWindow
                 EnhancementJobsStatusText.Text = response.Ok
                     ? "The companion returned an invalid queue pause response."
                     : response.Error;
+                AibosOperationLog.Write(
+                    "queue_pause_change",
+                    "failed",
+                    operationWatch.ElapsedMilliseconds,
+                    response.StatusCode,
+                    response.Ok
+                        ? "RESPONSE_CONTRACT_INVALID"
+                        : EnhancementApiErrorCode(response),
+                    mode: paused ? "pause" : "resume");
                 return false;
             }
 
@@ -1071,6 +1145,12 @@ public partial class MainWindow
             EnhancementJobsStatusText.Text = persistedPaused
                 ? "キューを一時停止しました。処理中の1件は完了し、次の待機ジョブから止まります。"
                 : "キューを再開しました。待機順を維持したまま処理を続けます。";
+            AibosOperationLog.Write(
+                "queue_pause_change",
+                "completed",
+                operationWatch.ElapsedMilliseconds,
+                response.StatusCode,
+                mode: persistedPaused ? "pause" : "resume");
             return true;
         }
         finally
@@ -2263,7 +2343,17 @@ public partial class MainWindow
     private async void RetryEnhancementJob_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: EnhancementWorkspaceJobView job } && job.CanRetry)
-            await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry", "Retry queued as a new job.");
+        {
+            await RunEnhancementWorkspaceMutationAsync(
+                job,
+                HttpMethod.Post,
+                $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
+                job.Status == "failed"
+                    ? "Retry queued. The original failure was removed."
+                    : "Retry queued as a new job.",
+                removeFailedOriginalAfterSuccess: job.Status == "failed",
+                operationLogName: "job_retry");
+        }
     }
 
     private async void DismissEnhancementJob_Click(object sender, RoutedEventArgs e)
@@ -2657,6 +2747,161 @@ public partial class MainWindow
         }
     }
 
+    private async void RetryAllFailedEnhancementJobs_Click(
+        object sender,
+        RoutedEventArgs e)
+        => await RetryAllFailedEnhancementJobsAsync();
+
+    private async Task<int> RetryAllFailedEnhancementJobsAsync()
+    {
+        EnhancementWorkspaceJobView[] failed = _enhancementWorkspaceJobs
+            .Where(static job =>
+                job.Status == "failed" && job.CanRetry && job.CanDismiss)
+            .OrderBy(static job => job.CreatedAt)
+            .ThenBy(static job => job.ApiOrdinal)
+            .ToArray();
+        if (_enhancementWorkspaceMutationPending
+            || EnhancementJobsDialog.Visibility != Visibility.Visible
+            || failed.Length == 0)
+        {
+            return 0;
+        }
+
+        var operationWatch = Stopwatch.StartNew();
+        _enhancementWorkspaceMutationPending = true;
+        RefreshEnhancementQueueBulkControls();
+        long generation = _enhancementWorkspaceGeneration;
+        int retriedCount = 0;
+        string? failure = null;
+        int? failureStatus = null;
+        try
+        {
+            foreach (EnhancementWorkspaceJobView job in failed)
+            {
+                EnhancementApiResponse retry =
+                    await SendEnhancementWorkspaceRetryAsync(job);
+                if (retry.SavedForDelivery)
+                {
+                    failure = "RETRY_SAVED_FOR_DELIVERY";
+                    failureStatus = retry.StatusCode;
+                    break;
+                }
+                if (!retry.Ok)
+                {
+                    failure = EnhancementApiErrorCode(retry);
+                    failureStatus = retry.StatusCode;
+                    break;
+                }
+
+                EnhancementApiResponse remove = await SendEnhancementApiAsync(
+                    HttpMethod.Delete,
+                    $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}");
+                if (!remove.Ok)
+                {
+                    failure = EnhancementApiErrorCode(remove);
+                    failureStatus = remove.StatusCode;
+                    break;
+                }
+                retriedCount++;
+            }
+
+            if (generation == _enhancementWorkspaceGeneration
+                && EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                await RefreshEnhancementJobsWorkspaceAsync(
+                    generation,
+                    isPoll: false);
+                EnhancementJobsStatusText.Text = failure is null
+                    ? $"失敗 {retriedCount:N0}件を元設定で再試行し、元の失敗履歴を消しました。"
+                    : $"{retriedCount:N0}件を再試行しました。残りは停止しました（{failure}）。";
+            }
+            AibosOperationLog.Write(
+                "failed_jobs_retry_all",
+                failure is null ? "completed" : "partial",
+                operationWatch.ElapsedMilliseconds,
+                failureStatus,
+                failure,
+                itemCount: retriedCount);
+            return retriedCount;
+        }
+        finally
+        {
+            _enhancementWorkspaceMutationPending = false;
+            RefreshEnhancementQueueBulkControls();
+            RefreshEnhancementQueuePauseControl();
+        }
+    }
+
+    private async void ClearAllFailedEnhancementJobs_Click(
+        object sender,
+        RoutedEventArgs e)
+        => await ClearAllFailedEnhancementJobsAsync();
+
+    private async Task<int> ClearAllFailedEnhancementJobsAsync()
+    {
+        string[] failedIds = _enhancementWorkspaceJobs
+            .Where(static job => job.Status == "failed")
+            .OrderBy(static job => job.CreatedAt)
+            .ThenBy(static job => job.ApiOrdinal)
+            .Select(static job => job.Id)
+            .ToArray();
+        if (_enhancementWorkspaceMutationPending
+            || EnhancementJobsDialog.Visibility != Visibility.Visible
+            || failedIds.Length == 0)
+        {
+            return 0;
+        }
+
+        var operationWatch = Stopwatch.StartNew();
+        _enhancementWorkspaceMutationPending = true;
+        RefreshEnhancementQueueBulkControls();
+        long generation = _enhancementWorkspaceGeneration;
+        int clearedCount = 0;
+        string? failure = null;
+        int? failureStatus = null;
+        try
+        {
+            foreach (string id in failedIds)
+            {
+                EnhancementApiResponse remove = await SendEnhancementApiAsync(
+                    HttpMethod.Delete,
+                    $"api/enhance/jobs/{Uri.EscapeDataString(id)}");
+                if (!remove.Ok)
+                {
+                    failure = EnhancementApiErrorCode(remove);
+                    failureStatus = remove.StatusCode;
+                    break;
+                }
+                clearedCount++;
+            }
+
+            if (generation == _enhancementWorkspaceGeneration
+                && EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                await RefreshEnhancementJobsWorkspaceAsync(
+                    generation,
+                    isPoll: false);
+                EnhancementJobsStatusText.Text = failure is null
+                    ? $"失敗履歴 {clearedCount:N0}件を消しました。元画像と出力ファイルは変更していません。"
+                    : $"{clearedCount:N0}件を消しました。残りは停止しました（{failure}）。";
+            }
+            AibosOperationLog.Write(
+                "failed_jobs_clear_all",
+                failure is null ? "completed" : "partial",
+                operationWatch.ElapsedMilliseconds,
+                failureStatus,
+                failure,
+                itemCount: clearedCount);
+            return clearedCount;
+        }
+        finally
+        {
+            _enhancementWorkspaceMutationPending = false;
+            RefreshEnhancementQueueBulkControls();
+            RefreshEnhancementQueuePauseControl();
+        }
+    }
+
     private async void RerunPhotorealJob_Click(object sender, RoutedEventArgs e)
         => await RerunPhotorealJobAsync(sender, enqueueNext: false);
 
@@ -2746,16 +2991,42 @@ public partial class MainWindow
         }
     }
 
-    private async Task RunEnhancementWorkspaceMutationAsync(
+    private async Task<EnhancementApiResponse> SendEnhancementWorkspaceRetryAsync(
+        EnhancementWorkspaceJobView job)
+    {
+        Func<JsonElement, string?>? retryHealthValidator =
+            CreateEnhancementRetryHealthValidator(job);
+        return await SendEnhancementEnqueueAsync(
+            body: null,
+            queuePlacement: "last",
+            retryJobId: job.Id,
+            healthValidator: retryHealthValidator,
+            requireExactHealthValidation: retryHealthValidator is not null);
+    }
+
+    private static string EnhancementApiErrorCode(
+        EnhancementApiResponse response)
+        => response.Payload is JsonElement payload
+            && TryGetStringProperty(payload, "code", out string? code)
+            && !string.IsNullOrWhiteSpace(code)
+                ? code!
+                : response.StatusCode == 0
+                    ? "COMPANION_UNAVAILABLE"
+                    : "API_ERROR";
+
+    private async Task<bool> RunEnhancementWorkspaceMutationAsync(
         EnhancementWorkspaceJobView job,
         HttpMethod method,
         string route,
         string successMessage,
-        object? body = null)
+        object? body = null,
+        bool removeFailedOriginalAfterSuccess = false,
+        string operationLogName = "job_mutation")
     {
         if (_enhancementWorkspaceMutationPending || job.IsBusy || EnhancementJobsDialog.Visibility != Visibility.Visible)
-            return;
+            return false;
 
+        var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
         job.IsBusy = true;
         long generation = _enhancementWorkspaceGeneration;
@@ -2767,35 +3038,75 @@ public partial class MainWindow
                     route,
                     $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
                     StringComparison.Ordinal);
-            Func<JsonElement, string?>? retryHealthValidator =
-                isRetryEnqueue
-                    ? CreateEnhancementRetryHealthValidator(job)
-                    : null;
             EnhancementApiResponse response = isRetryEnqueue
-                ? await SendEnhancementEnqueueAsync(
-                    body: null,
-                    queuePlacement: "last",
-                    retryJobId: job.Id,
-                    healthValidator: retryHealthValidator,
-                    requireExactHealthValidation:
-                        retryHealthValidator is not null)
+                ? await SendEnhancementWorkspaceRetryAsync(job)
                 : await SendEnhancementApiAsync(method, route, body);
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
-                return;
+            {
+                AibosOperationLog.Write(
+                    operationLogName,
+                    "stale",
+                    operationWatch.ElapsedMilliseconds,
+                    response.StatusCode,
+                    "WORKSPACE_CHANGED");
+                return false;
+            }
             if (response.SavedForDelivery)
             {
                 EnhancementJobsStatusText.Text =
-                    "再試行の予約を保存しました。Jobsへの登録を継続しています。";
-                return;
+                    removeFailedOriginalAfterSuccess
+                        ? "再試行の予約を保存しました。登録確認前なので元の失敗履歴は残しています。"
+                        : "再試行の予約を保存しました。Jobsへの登録を継続しています。";
+                AibosOperationLog.Write(
+                    operationLogName,
+                    "saved_for_delivery",
+                    operationWatch.ElapsedMilliseconds,
+                    response.StatusCode);
+                return true;
             }
             if (!response.Ok)
             {
                 EnhancementJobsStatusText.Text = response.Error;
-                return;
+                AibosOperationLog.Write(
+                    operationLogName,
+                    "failed",
+                    operationWatch.ElapsedMilliseconds,
+                    response.StatusCode,
+                    EnhancementApiErrorCode(response));
+                return false;
+            }
+
+            if (removeFailedOriginalAfterSuccess)
+            {
+                EnhancementApiResponse removeResponse =
+                    await SendEnhancementApiAsync(
+                        HttpMethod.Delete,
+                        $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}");
+                if (!removeResponse.Ok)
+                {
+                    EnhancementJobsStatusText.Text =
+                        $"Retry was queued, but the original failure could not be removed. {removeResponse.Error}";
+                    AibosOperationLog.Write(
+                        operationLogName,
+                        "partial",
+                        operationWatch.ElapsedMilliseconds,
+                        removeResponse.StatusCode,
+                        EnhancementApiErrorCode(removeResponse));
+                    await RefreshEnhancementJobsWorkspaceAsync(
+                        generation,
+                        isPoll: false);
+                    return false;
+                }
             }
 
             EnhancementJobsStatusText.Text = successMessage;
             await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
+            AibosOperationLog.Write(
+                operationLogName,
+                "completed",
+                operationWatch.ElapsedMilliseconds,
+                response.StatusCode);
+            return true;
         }
         finally
         {
@@ -3673,10 +3984,38 @@ public partial class MainWindow
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
         if (job is null || !job.CanRetry)
             return false;
-        await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry", "Retry queued as a new job.");
+        bool completed = await RunEnhancementWorkspaceMutationAsync(
+            job,
+            HttpMethod.Post,
+            $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
+            job.Status == "failed"
+                ? "Retry queued. The original failure was removed."
+                : "Retry queued as a new job.",
+            removeFailedOriginalAfterSuccess: job.Status == "failed",
+            operationLogName: "job_retry");
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
-        return true;
+        return completed;
     }
+
+    public async Task<int> RetryAllFailedEnhancementJobsForSmokeAsync()
+    {
+        int count = await RetryAllFailedEnhancementJobsAsync();
+        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+        return count;
+    }
+
+    public async Task<int> ClearAllFailedEnhancementJobsForSmokeAsync()
+    {
+        int count = await ClearAllFailedEnhancementJobsAsync();
+        await WaitForEnhancementWorkspaceIdleForSmokeAsync();
+        return count;
+    }
+
+    public bool RetryAllFailedEnhancementJobsControlForSmoke =>
+        EnhancementJobsRetryFailedButton.IsEnabled;
+
+    public bool ClearAllFailedEnhancementJobsControlForSmoke =>
+        EnhancementJobsClearFailedButton.IsEnabled;
 
     public async Task<(bool Ok, bool SavedForDelivery, int StatusCode, string Error)>
         RetryMiniMaxH3JobForSmokeAsync(string id)
