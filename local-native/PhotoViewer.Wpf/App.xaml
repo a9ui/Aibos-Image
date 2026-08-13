@@ -492,7 +492,7 @@
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Height" Value="32"/>
       <Setter Property="Margin" Value="0,1"/>
-      <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource CommonButtonFocusVisual}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
