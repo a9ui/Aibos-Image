@@ -63,7 +63,6 @@ try {
         -or $japaneseResources -notmatch 'x:Key="UiVideoFavoriteFilterTitle"') {
         throw 'The Favorite group does not use the required short Japanese row labels.'
     }
-    $unratedGlyphPattern = [regex]::Escape([string][char]0x2212)
     $pillChecks = [ordered]@{
         style = $mainXaml -match '<Style x:Key="FavoriteLevelPill"[^>]*BasedOn="\{StaticResource Pill\}"'
         retiredSwatchAbsent = $mainXaml -notmatch 'FavoriteLevelSwatch'
@@ -72,25 +71,26 @@ try {
         originalRow = $mainXaml -match '<Grid x:Name="OriginalFavoriteFilterRow"'
         photorealRow = $mainXaml -match '<Grid x:Name="PhotorealFavoriteFilterRow"'
         videoRow = $mainXaml -match '<Grid x:Name="VideoFavoriteFilterRow"'
-        originalPanel = $mainXaml -match 'x:Name="FavoriteLevelFilterPanel" Grid.Column="1" Columns="6"'
-        photorealPanel = $mainXaml -match 'x:Name="PhotorealFavoriteLevelFilterPanel" Grid.Column="1" Columns="6"'
-        videoPanel = $mainXaml -match 'x:Name="VideoFavoriteLevelFilterPanel" Grid.Column="1" Columns="6"'
-        originalUnrated = $mainXaml -match ('x:Name="FavoriteLevel0Filter"[^>]*Content="' + $unratedGlyphPattern + '"[^>]*Tag="0"')
-        photorealUnrated = $mainXaml -match ('x:Name="PhotorealFavoriteLevel0Filter"[^>]*Content="' + $unratedGlyphPattern + '"[^>]*Tag="0"')
-        videoUnrated = $mainXaml -match ('x:Name="VideoFavoriteLevel0Filter"[^>]*Content="' + $unratedGlyphPattern + '"[^>]*Tag="0"')
+        originalPanel = $mainXaml -match 'x:Name="FavoriteLevelFilterPanel" Grid.Row="1" Columns="3"'
+        photorealPanel = $mainXaml -match 'x:Name="PhotorealFavoriteLevelFilterPanel" Grid.Row="1" Columns="3"'
+        videoPanel = $mainXaml -match 'x:Name="VideoFavoriteLevelFilterPanel" Grid.Row="1" Columns="3"'
+        globalUnrated = $mainXaml -match 'x:Name="UnfavoriteOnlyFilter"[^>]*Content="\{DynamicResource UiUnratedOnly\}"'
+        originalUnratedCompatibilityHidden = $mainXaml -match 'x:Name="FavoriteLevel0Filter"[^>]*Visibility="Collapsed"[^>]*IsTabStop="False"'
+        photorealUnratedCompatibilityHidden = $mainXaml -match 'x:Name="PhotorealFavoriteLevel0Filter"[^>]*Visibility="Collapsed"[^>]*IsTabStop="False"'
+        videoUnratedCompatibilityHidden = $mainXaml -match 'x:Name="VideoFavoriteLevel0Filter"[^>]*Visibility="Collapsed"[^>]*IsTabStop="False"'
         videoChangeHandler = $mainXaml -match 'Checked="VideoFavoriteLevelFilter_Changed"'
     }
     $failedPillChecks = @($pillChecks.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object Key)
     if ($failedPillChecks.Count -gt 0) {
-        throw ('The one-row neutral Favorite level surface is incomplete: ' `
+        throw ('The neutral Favorite level surface is incomplete: ' `
             + ($failedPillChecks -join ','))
     }
     foreach ($prefix in @('Favorite', 'PhotorealFavorite', 'VideoFavorite')) {
         foreach ($level in 1..5) {
-            $numericLevelPattern = 'x:Name="' + $prefix + 'Level' + $level `
-                + 'Filter"[^>]*Content="' + $level + '"[^>]*Tag="' + $level + '"'
-            if ($mainXaml -notmatch $numericLevelPattern) {
-                throw "Favorite filter $prefix level $level must show its numeric level."
+            $levelLabelPattern = 'x:Name="' + $prefix + 'Level' + $level `
+                + 'Filter"[^>]*Content="Lv ' + $level + '"[^>]*Tag="' + $level + '"'
+            if ($mainXaml -notmatch $levelLabelPattern) {
+                throw "Favorite filter $prefix level $level must show its Lv label."
             }
             $levelTag = [regex]::Match(
                 $mainXaml,
@@ -189,7 +189,7 @@ try {
     $required = @(
         'missingStateUnselected',
         'maximumAndInvalidExclusion',
-        'zeroAndUnion',
+        'originalUnratedFilter',
         'categoryOr',
         'modalOutputFavorite',
         'modalPinnedFavoriteSource',

@@ -127,7 +127,9 @@ public partial class MainWindow : Window
     private const double CardWidthStep = 20;
     private const double DesignWindowMinWidth = 900;
     private const double DesignWindowMinHeight = 560;
-    private const double WideSidebarWidth = 232;
+    private const double DefaultSidebarWidth = 300;
+    private const double MinSidebarWidth = 272;
+    private const double MaxSidebarWidth = 480;
     private const double CompactSidebarRailWidth = 48;
     private const double DefaultRightPanelWidth = 340;
     private const double MinRightPanelWidth = 320;
@@ -186,10 +188,10 @@ public partial class MainWindow : Window
     private const string ModalMetadataPromptTab = "prompt";
     private const string ModalMetadataNegativeTab = "negative";
     private const string ModalMetadataSettingsTab = "settings";
-    private const int MinFavoriteFilterLevel = 0;
+    private const int MinFavoriteFilterLevel = 1;
     private const int MaxFavoriteFilterLevel = 5;
-    private const int MinPhotorealFavoriteFilterLevel = 0;
-    private const int MinVideoFavoriteFilterLevel = 0;
+    private const int MinPhotorealFavoriteFilterLevel = 1;
+    private const int MinVideoFavoriteFilterLevel = 1;
     private const int MaxPersistedPreviewTabs = 30;
     private static readonly JsonSerializerOptions SharedRecentJsonOptions = new()
     {
@@ -375,6 +377,7 @@ public partial class MainWindow : Window
     private long _maxFavoriteWriteApplyMilliseconds;
     private int _lastDerivedFavoriteVisitedTileCount;
     private int _maxDerivedFavoriteVisitedTileCount;
+    private double _sidebarWidth = DefaultSidebarWidth;
     private double _rightPanelWidth = DefaultRightPanelWidth;
     private bool _adaptiveWorkbench;
     private bool _sidebarVisibleBeforeAdaptive = true;
@@ -617,6 +620,7 @@ public partial class MainWindow : Window
     private long _gridAnchorRememberPostCount;
     private long _gridAnchorRememberCoalescedCount;
     private long _gridAnchorRememberExecuteCount;
+    private GridZoomAnchor? _sidebarResizeAnchor;
     private GridZoomAnchor? _rightPanelResizeAnchor;
     private bool _cardWidthMigrationPending;
     private double _modalZoom = 1;
@@ -779,7 +783,7 @@ public partial class MainWindow : Window
         RowsList.AddHandler(Button.ClickEvent, new RoutedEventHandler(CardFavoriteButton_Click));
         ApplyFilters(selectFirst: false);
 
-        Loaded += (_, _) =>
+        Loaded += async (_, _) =>
         {
             ApplyAdaptiveWorkbenchLayout(ActualWidth);
             AttachGalleryVirtualizationPanel();
@@ -787,6 +791,7 @@ public partial class MainWindow : Window
                 CardsList.SelectedIndex = 0;
             ScheduleRememberCurrentGridViewportAnchor();
             UpdateWindowMaximizePresentation();
+            await StartEnhancementCompanionApiForApplicationLaunchAsync();
         };
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
@@ -12596,7 +12601,7 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
-            SetCheckBoxState(FavoriteLevel0Filter, _favoriteFilterLevels.Contains(0));
+            SetCheckBoxState(FavoriteLevel0Filter, false);
             SetCheckBoxState(FavoriteLevel1Filter, _favoriteFilterLevels.Contains(1));
             SetCheckBoxState(FavoriteLevel2Filter, _favoriteFilterLevels.Contains(2));
             SetCheckBoxState(FavoriteLevel3Filter, _favoriteFilterLevels.Contains(3));
@@ -12660,7 +12665,6 @@ public partial class MainWindow : Window
     private void SyncFavoriteFilterLevelsFromControls()
     {
         _favoriteFilterLevels.Clear();
-        if (FavoriteLevel0Filter?.IsChecked == true) _favoriteFilterLevels.Add(0);
         if (FavoriteLevel1Filter?.IsChecked == true) _favoriteFilterLevels.Add(1);
         if (FavoriteLevel2Filter?.IsChecked == true) _favoriteFilterLevels.Add(2);
         if (FavoriteLevel3Filter?.IsChecked == true) _favoriteFilterLevels.Add(3);
@@ -12684,7 +12688,7 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
-            SetCheckBoxState(PhotorealFavoriteLevel0Filter, _photorealFavoriteFilterLevels.Contains(0));
+            SetCheckBoxState(PhotorealFavoriteLevel0Filter, false);
             SetCheckBoxState(PhotorealFavoriteLevel1Filter, _photorealFavoriteFilterLevels.Contains(1));
             SetCheckBoxState(PhotorealFavoriteLevel2Filter, _photorealFavoriteFilterLevels.Contains(2));
             SetCheckBoxState(PhotorealFavoriteLevel3Filter, _photorealFavoriteFilterLevels.Contains(3));
@@ -12734,7 +12738,6 @@ public partial class MainWindow : Window
     private void SyncPhotorealFavoriteFilterLevelsFromControls()
     {
         _photorealFavoriteFilterLevels.Clear();
-        if (PhotorealFavoriteLevel0Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(0);
         if (PhotorealFavoriteLevel1Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(1);
         if (PhotorealFavoriteLevel2Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(2);
         if (PhotorealFavoriteLevel3Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(3);
@@ -12758,7 +12761,7 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
-            SetCheckBoxState(VideoFavoriteLevel0Filter, _videoFavoriteFilterLevels.Contains(0));
+            SetCheckBoxState(VideoFavoriteLevel0Filter, false);
             SetCheckBoxState(VideoFavoriteLevel1Filter, _videoFavoriteFilterLevels.Contains(1));
             SetCheckBoxState(VideoFavoriteLevel2Filter, _videoFavoriteFilterLevels.Contains(2));
             SetCheckBoxState(VideoFavoriteLevel3Filter, _videoFavoriteFilterLevels.Contains(3));
@@ -12808,7 +12811,6 @@ public partial class MainWindow : Window
     private void SyncVideoFavoriteFilterLevelsFromControls()
     {
         _videoFavoriteFilterLevels.Clear();
-        if (VideoFavoriteLevel0Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(0);
         if (VideoFavoriteLevel1Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(1);
         if (VideoFavoriteLevel2Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(2);
         if (VideoFavoriteLevel3Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(3);
@@ -16923,12 +16925,22 @@ public partial class MainWindow : Window
         if (_adaptiveWorkbench)
         {
             NarrowSidebarRail.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
-            SidebarCol.Width = show ? new GridLength(WideSidebarWidth) : new GridLength(CompactSidebarRailWidth);
+            SetSidebarColumnConstraints(show);
+            SidebarCol.Width = show
+                ? new GridLength(_sidebarWidth)
+                : new GridLength(CompactSidebarRailWidth);
+            SidebarSplitter.Visibility = Visibility.Collapsed;
             _sidebarVisibleBeforeAdaptive = show;
         }
         else
         {
-            SidebarCol.Width = show ? new GridLength(WideSidebarWidth) : new GridLength(0);
+            SetSidebarColumnConstraints(show);
+            SidebarCol.Width = show
+                ? new GridLength(_sidebarWidth)
+                : new GridLength(0);
+            SidebarSplitter.Visibility = show
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
         ToggleSidebar.Style = (Style)FindResource(show ? "IconButtonActive" : "IconButton");
         ToggleSidebar.ToolTip = show ? "Hide sidebar" : "Show sidebar";
@@ -17039,7 +17051,9 @@ public partial class MainWindow : Window
             _adaptiveWorkbench = true;
             Sidebar.Visibility = Visibility.Collapsed;
             NarrowSidebarRail.Visibility = Visibility.Visible;
+            SetSidebarColumnConstraints(visible: false);
             SidebarCol.Width = new GridLength(CompactSidebarRailWidth);
+            SidebarSplitter.Visibility = Visibility.Collapsed;
             SearchBoxContainer.MinWidth = 140;
             SearchBoxContainer.MaxWidth = 360;
             ViewerShortcutsButton.Visibility = Visibility.Collapsed;
@@ -17050,7 +17064,13 @@ public partial class MainWindow : Window
             _adaptiveWorkbench = false;
             NarrowSidebarRail.Visibility = Visibility.Collapsed;
             Sidebar.Visibility = _sidebarVisibleBeforeAdaptive ? Visibility.Visible : Visibility.Collapsed;
-            SidebarCol.Width = _sidebarVisibleBeforeAdaptive ? new GridLength(WideSidebarWidth) : new GridLength(0);
+            SetSidebarColumnConstraints(_sidebarVisibleBeforeAdaptive);
+            SidebarCol.Width = _sidebarVisibleBeforeAdaptive
+                ? new GridLength(_sidebarWidth)
+                : new GridLength(0);
+            SidebarSplitter.Visibility = _sidebarVisibleBeforeAdaptive
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             SearchBoxContainer.MinWidth = 240;
             SearchBoxContainer.MaxWidth = 480;
             ViewerShortcutsButton.Visibility = Visibility.Visible;
@@ -17130,6 +17150,57 @@ public partial class MainWindow : Window
             CurrentAdaptivePreviewHeight() - 124,
             72,
             112);
+
+    private static double NormalizeSidebarWidth(double width)
+        => double.IsFinite(width)
+            ? Math.Clamp(width, MinSidebarWidth, MaxSidebarWidth)
+            : DefaultSidebarWidth;
+
+    private void SetSidebarColumnConstraints(bool visible)
+    {
+        SidebarCol.MinWidth = visible ? MinSidebarWidth : 0;
+        SidebarCol.MaxWidth = visible ? MaxSidebarWidth : double.PositiveInfinity;
+    }
+
+    private bool SetSidebarWidth(double width)
+    {
+        double normalized = NormalizeSidebarWidth(width);
+        bool changed = Math.Abs(normalized - _sidebarWidth) >= 0.5;
+        _sidebarWidth = normalized;
+        if (!_adaptiveWorkbench && Sidebar.Visibility == Visibility.Visible)
+            SidebarCol.Width = new GridLength(_sidebarWidth);
+        return changed;
+    }
+
+    private void SidebarSplitter_DragStarted(object sender, DragStartedEventArgs e)
+        => _sidebarResizeAnchor = CaptureGridZoomAnchor();
+
+    private void SidebarSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (_adaptiveWorkbench || Sidebar.Visibility != Visibility.Visible)
+            return;
+
+        SetSidebarWidth(SidebarCol.ActualWidth);
+        ScheduleGridGeometryAnchorRestore(_sidebarResizeAnchor);
+        _sidebarResizeAnchor = null;
+        SaveState();
+    }
+
+    private void SidebarSplitter_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Left or Key.Right))
+            return;
+
+        GridZoomAnchor? anchor = CaptureGridZoomAnchor();
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_adaptiveWorkbench || Sidebar.Visibility != Visibility.Visible)
+                return;
+            SetSidebarWidth(SidebarCol.ActualWidth);
+            ScheduleGridGeometryAnchorRestore(anchor);
+            SaveState();
+        }, DispatcherPriority.Render);
+    }
 
     private static double NormalizeRightPanelWidth(double width)
         => double.IsFinite(width) ? Math.Clamp(width, MinRightPanelWidth, MaxRightPanelWidth) : DefaultRightPanelWidth;
@@ -23060,6 +23131,9 @@ public partial class MainWindow : Window
         _cardWidthMigrationPending = Math.Abs(normalizedCardWidth - state.CardWidth) >= 0.01;
         SizeSlider.Value = normalizedCardWidth;
 
+        _sidebarWidth = NormalizeSidebarWidth(state.SidebarWidth);
+        SetSidebarColumnConstraints(visible: true);
+        SidebarCol.Width = new GridLength(_sidebarWidth);
         _rightPanelWidth = NormalizeRightPanelWidth(state.RightPanelWidth);
         ApplyRightPanelState(state.RightPanelOpen ?? true);
 
@@ -23071,6 +23145,9 @@ public partial class MainWindow : Window
         _randomSortSeed = string.IsNullOrWhiteSpace(state.RandomSortSeed) ? "default" : state.RandomSortSeed;
         SyncSortButtons();
         RestoreDateFilter(state);
+        bool legacyOriginalUnratedSelection =
+            state.FavoriteFilterLevels?.Contains(0) == true
+            || state.FavoriteFilterLevel == 0;
         _favoriteFilterLevels.Clear();
         if (state.FavoriteFilterLevels is { Count: > 0 })
             _favoriteFilterLevels.UnionWith(state.FavoriteFilterLevels.Where(level => level is >= MinFavoriteFilterLevel and <= MaxFavoriteFilterLevel));
@@ -23128,17 +23205,18 @@ public partial class MainWindow : Window
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
-        bool restoredFavoritesOnly = state.ShowFavoritesOnly;
-        if (!restoredFavoritesOnly && state.ShowUnfavoriteOnly)
-        {
-            // The separate legacy "unrated only" switch is now the original
-            // category's level 0 selection under the single master switch.
-            _favoriteFilterLevels.Add(0);
-            restoredFavoritesOnly = true;
-        }
+        bool hasPositiveFavoriteLevelSelection =
+            _favoriteFilterLevels.Count > 0
+            || _photorealFavoriteFilterLevels.Count > 0
+            || _videoFavoriteFilterLevels.Count > 0;
+        bool restoredUnfavoriteOnly = state.ShowUnfavoriteOnly
+            || (legacyOriginalUnratedSelection
+                && !hasPositiveFavoriteLevelSelection);
+        bool restoredFavoritesOnly = state.ShowFavoritesOnly
+            && !restoredUnfavoriteOnly;
         SetFavoriteFilterState(
             restoredFavoritesOnly,
-            unfavoriteOnly: false,
+            unfavoriteOnly: restoredUnfavoriteOnly,
             apply: false,
             persist: false);
         _hiddenFolderBuckets.Clear();
@@ -23250,6 +23328,7 @@ public partial class MainWindow : Window
                 LastFolderSet = _currentFolderSet.Count > 0 ? _currentFolderSet : null,
                 SearchQuery = SearchInput.Text,
                 CardWidth = SizeSlider.Value,
+                SidebarWidth = _sidebarWidth,
                 RightPanelOpen = RightPanel.Visibility == Visibility.Visible,
                 RightPanelWidth = _rightPanelWidth,
                 DisplayStyle = _displayStyle,
@@ -27310,6 +27389,9 @@ public partial class MainWindow : Window
         return new ListVirtualizationProbe(listMode, ListUsesRecyclingVirtualizationForSmoke, bounded, first, middle, last);
     }
     public double SidebarWidthForSmoke => Sidebar.ActualWidth;
+    public double SidebarStoredWidthForSmoke => _sidebarWidth;
+    public bool SidebarSplitterVisibleForSmoke =>
+        SidebarSplitter.Visibility == Visibility.Visible;
     public bool SidebarVisibleForSmoke => Sidebar.Visibility == Visibility.Visible;
     public bool AdaptiveWorkbenchForSmoke => _adaptiveWorkbench;
     public bool NarrowSidebarRailVisibleForSmoke => NarrowSidebarRail.Visibility == Visibility.Visible;
@@ -27380,6 +27462,12 @@ public partial class MainWindow : Window
     public bool SetRightPanelWidthForSmoke(double width)
     {
         bool changed = SetRightPanelWidth(width);
+        SaveState();
+        return changed;
+    }
+    public bool SetSidebarWidthForSmoke(double width)
+    {
+        bool changed = SetSidebarWidth(width);
         SaveState();
         return changed;
     }
@@ -27548,7 +27636,6 @@ public partial class MainWindow : Window
         {
             CheckBox[] original =
             [
-                FavoriteLevel0Filter,
                 FavoriteLevel1Filter,
                 FavoriteLevel2Filter,
                 FavoriteLevel3Filter,
@@ -27557,7 +27644,6 @@ public partial class MainWindow : Window
             ];
             CheckBox[] photoreal =
             [
-                PhotorealFavoriteLevel0Filter,
                 PhotorealFavoriteLevel1Filter,
                 PhotorealFavoriteLevel2Filter,
                 PhotorealFavoriteLevel3Filter,
@@ -27566,52 +27652,43 @@ public partial class MainWindow : Window
             ];
             CheckBox[] video =
             [
-                VideoFavoriteLevel0Filter,
                 VideoFavoriteLevel1Filter,
                 VideoFavoriteLevel2Filter,
                 VideoFavoriteLevel3Filter,
                 VideoFavoriteLevel4Filter,
                 VideoFavoriteLevel5Filter,
             ];
-            return FavoriteLevelFilterPanel.Columns == 6
-                && PhotorealFavoriteLevelFilterPanel.Columns == 6
-                && VideoFavoriteLevelFilterPanel.Columns == 6
-                && OriginalFavoriteFilterRow.ColumnDefinitions.Count == 2
-                && PhotorealFavoriteFilterRow.ColumnDefinitions.Count == 2
-                && VideoFavoriteFilterRow.ColumnDefinitions.Count == 2
-                && Math.Abs(
-                    OriginalFavoriteFilterRow.ColumnDefinitions[0].Width.Value
-                        - 52) < 0.01
-                && Math.Abs(
-                    PhotorealFavoriteFilterRow.ColumnDefinitions[0].Width.Value
-                        - 52) < 0.01
-                && Math.Abs(
-                    VideoFavoriteFilterRow.ColumnDefinitions[0].Width.Value
-                        - 52) < 0.01
+            return FavoriteLevelFilterPanel.Columns == 3
+                && PhotorealFavoriteLevelFilterPanel.Columns == 3
+                && VideoFavoriteLevelFilterPanel.Columns == 3
+                && OriginalFavoriteFilterRow.RowDefinitions.Count == 2
+                && PhotorealFavoriteFilterRow.RowDefinitions.Count == 2
+                && VideoFavoriteFilterRow.RowDefinitions.Count == 2
+                && FavoriteLevel0Filter.Visibility == Visibility.Collapsed
+                && PhotorealFavoriteLevel0Filter.Visibility == Visibility.Collapsed
+                && VideoFavoriteLevel0Filter.Visibility == Visibility.Collapsed
                 && original.Select((control, index) =>
                         string.Equals(
                             control.Tag?.ToString(),
-                            index.ToString(CultureInfo.InvariantCulture),
+                            (index + 1).ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && photoreal.Select((control, index) =>
                         string.Equals(
                             control.Tag?.ToString(),
-                            index.ToString(CultureInfo.InvariantCulture),
+                            (index + 1).ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && video.Select((control, index) =>
                         string.Equals(
                             control.Tag?.ToString(),
-                            index.ToString(CultureInfo.InvariantCulture),
+                            (index + 1).ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && original.Concat(photoreal).Concat(video).All(static control =>
                     string.Equals(
                         control.Content?.ToString(),
-                        control.Tag?.ToString() == "0"
-                            ? "−"
-                            : control.Tag?.ToString(),
+                        $"Lv {control.Tag}",
                         StringComparison.Ordinal))
                 && original.Concat(photoreal).Concat(video).All(static control =>
                     Math.Abs(control.Height - 30) < 0.01
@@ -27625,7 +27702,8 @@ public partial class MainWindow : Window
                 && FavoriteFilterSummary.Visibility == Visibility.Collapsed
                 && PhotorealFavoriteFilterSummary.Visibility == Visibility.Collapsed
                 && VideoFavoriteFilterSummary.Visibility == Visibility.Collapsed
-                && UnfavoriteOnlyFilter.Visibility == Visibility.Collapsed
+                && UnfavoriteOnlyFilter.Visibility == Visibility.Visible
+                && UnfavoriteOnlyFilter.IsTabStop
                 && original.Concat(photoreal).Concat(video).All(static control =>
                     !string.IsNullOrWhiteSpace(
                         AutomationProperties.GetName(control))
@@ -27635,7 +27713,7 @@ public partial class MainWindow : Window
     }
     public bool ToggleFavoriteLevelFilterForSmoke(string category, int level)
     {
-        if (level is < 0 or > 5)
+        if (level is < 1 or > 5)
             return false;
         CheckBox control = category switch
         {
@@ -30114,6 +30192,7 @@ public sealed class ViewerState
     public string? SearchQuery { get; set; }
     public string? SelectedPath { get; set; }
     public double CardWidth { get; set; } = 200;
+    public double SidebarWidth { get; set; } = 300;
     public bool? RightPanelOpen { get; set; }
     public double RightPanelWidth { get; set; } = 340;
     public string? DisplayStyle { get; set; }

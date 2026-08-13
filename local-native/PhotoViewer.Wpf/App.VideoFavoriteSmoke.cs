@@ -27,7 +27,7 @@ public partial class App
             string failure = "";
             bool missingStateUnselected = false;
             bool maximumAndInvalidExclusion = false;
-            bool zeroAndUnion = false;
+            bool originalUnratedFilter = false;
             bool categoryOr = false;
             bool modalOutputFavorite = false;
             bool modalPinnedFavoriteSource = false;
@@ -203,6 +203,7 @@ public partial class App
                 {
                     [sourceA] = 1,
                     [photorealA] = 2,
+                    [photorealB] = 4,
                     [videoAOlder] = 1,
                     [videoANewest] = 3,
                     [missingVideo] = 5,
@@ -254,27 +255,20 @@ public partial class App
                     && FavoriteFileContainsPath(favoritesPath, missingVideo)
                     && FavoriteFileContainsPath(favoritesPath, invalidVideo);
 
-                bool selectedVideoZero =
-                    window.SetVideoFavoriteFilterLevelsForSmoke(0);
-                window.SetFavoriteOnlyFilterForSmoke(true);
-                bool zeroOnly = selectedVideoZero
-                    && window.FilteredFileNamesForSmoke().SequenceEqual(
-                        [fileB],
-                        StringComparer.OrdinalIgnoreCase);
-                bool union = window.SetVideoFavoriteFilterLevelsForSmoke(0, 3)
-                    && window.FilteredFileNamesForSmoke().ToHashSet(
+                window.SetUnfavoriteOnlyFilterForSmoke(true);
+                originalUnratedFilter =
+                    window.FilteredFileNamesForSmoke().ToHashSet(
                             StringComparer.OrdinalIgnoreCase)
-                        .SetEquals([fileA, fileB]);
-                bool noVideoExcluded = !window.FilteredFileNamesForSmoke().Contains(
-                    fileWithoutVideo,
-                    StringComparer.OrdinalIgnoreCase);
-                zeroAndUnion = zeroOnly && union && noVideoExcluded;
+                        .SetEquals([fileB, fileWithoutVideo, Path.GetFileName(invalidSource)])
+                    && window.PhotorealFavoriteLevelForFileForSmoke(fileB) == 4;
+                window.SetUnfavoriteOnlyFilterForSmoke(false);
+                window.SetFavoriteOnlyFilterForSmoke(true);
                 bool originalOneSelected =
                     window.SetFavoriteFilterLevelsForSmoke(1);
-                bool videoZeroSelected =
-                    window.SetVideoFavoriteFilterLevelsForSmoke(0);
+                bool photorealFourSelected =
+                    window.SetPhotorealFavoriteFilterLevelsForSmoke(4);
                 categoryOr = originalOneSelected
-                    && videoZeroSelected
+                    && photorealFourSelected
                     && window.FilteredFileNamesForSmoke().ToHashSet(
                             StringComparer.OrdinalIgnoreCase)
                         .SetEquals([fileA, fileB])
@@ -283,6 +277,7 @@ public partial class App
                         StringComparer.OrdinalIgnoreCase);
                 window.SetFavoriteOnlyFilterForSmoke(false);
                 _ = window.SetFavoriteFilterLevelsForSmoke();
+                _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
                 _ = window.SetVideoFavoriteFilterLevelsForSmoke();
 
                 bool japaneseApplied = window.SetUiLanguageForSmoke(
@@ -589,7 +584,7 @@ public partial class App
 
                 ok = missingStateUnselected
                     && maximumAndInvalidExclusion
-                    && zeroAndUnion
+                    && originalUnratedFilter
                     && categoryOr
                     && modalOutputFavorite
                     && modalPinnedFavoriteSource
@@ -632,7 +627,7 @@ public partial class App
                         message = ok ? "Video Favorite badge and filter contract passed." : failure,
                         missingStateUnselected,
                         maximumAndInvalidExclusion,
-                        zeroAndUnion,
+                        originalUnratedFilter,
                         categoryOr,
                         modalOutputFavorite,
                         modalPinnedFavoriteSource,

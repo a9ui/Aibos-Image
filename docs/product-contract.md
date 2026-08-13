@@ -26,8 +26,11 @@ vectors. It is test input and evidence mapping, not a second specification.
 
 - Ordinary WPF viewing is local and remains usable without a Browser or Node.js
   runtime.
-- Enhancement may call the separately installed, API-only H25 Enhancement
-  companion, only after an explicit user action. The companion opens no Browser
+- WPF may start the separately installed, API-only H25 Enhancement companion
+  with the application so persisted Jobs are immediately readable. This startup
+  mode exposes the authenticated API only: it does not recover or pump the
+  queue, drain the durable enqueue inbox, start ComfyUI, or perform GPU work.
+  The companion opens no Browser
   window and does not load the Browser Viewer, Album, Search, thumbnail, or
   Favorite surfaces.
 - The API-only guarantees above apply to the default Enhancement companion
@@ -35,9 +38,10 @@ vectors. It is test input and evidence mapping, not a second specification.
   selects the unchanged legacy Next runtime instead. That switch is outside
   normal companion mode and is retained only for a controlled rollback; while
   it is enabled, the API-only and no-Viewer-loading guarantees do not apply.
-- An explicit AI Start or Retry may start that local companion when it is not
-  already available. Passive browsing, preview, navigation, job inspection,
-  and state hydration never start it. Before readiness, WPF may stop only the
+- An explicit AI Start or Retry first sends an authenticated, bodyless queue
+  recovery request and may start the API if it is not already available.
+  Passive browsing, preview, navigation, job inspection, and state hydration
+  never recover or pump the queue. Before readiness, WPF may stop only the
   exact failed or canceled launch attempt it created. After readiness, the
   companion is an independent durable worker and must not be stopped merely
   because WPF closes.
@@ -382,6 +386,11 @@ or stores.
   text remains visible because it does not overlap the thumbnail.
 - Presentation geometry and gestures not stated here remain WPF implementation
   details.
+- The left filters/folders sidebar is 300 pixels by default and has a keyboard-
+  accessible draggable edge. Wide layout clamps the persisted width to 272–480
+  pixels; compact layout keeps its separate fixed rail. Resizing must preserve
+  the gallery viewport anchor and must not alter Favorite, folder, or queue
+  state.
 
 ## Favorite safety
 
@@ -396,12 +405,11 @@ or stores.
   `Fav touched` sort retain Original/source semantics even when its thumbnail
   displays a managed Photoreal image. In addition, one blue heart shows the
   highest Favorite level among currently validated managed `photoreal`
-  outputs for that Original. Its `実写` internal levels 0 through 5 are
-  selectors for the unified rule below. The UI represents level 0 with one
-  independent unrated (`−`) selector and levels 1 through 5 with five visibly
-  numbered neutral controls. Level 0 requires at least one valid Photoreal output
-  and a maximum level of 0; an Original with no Photoreal output does not
-  match. This is a
+  outputs for that Original. Its `実写` internal levels 1 through 5 are
+  selectors for the unified rule below. The UI uses five visibly labeled
+  neutral controls. The one top-level localized `Unrated only` switch means
+  the Original/source Favorite is level 0, including when a managed Photoreal
+  or Video version has its own positive Favorite. This is a
   presentation over existing job and path-keyed Favorite state, not a shared
   schema change. Individual version editing remains in the modal.
   Every supported writer must merge only its changed path keys into the latest
@@ -410,12 +418,10 @@ or stores.
   keeps the red heart, managed Photoreal uses the blue heart, and managed Video
   uses the purple heart. These rows are separate views over the same retained
   path-keyed Favorite data; they do not merge the three version meanings. Each
-  row exposes the same internal 0 through 5 selector shape, where 0 means
-  unrated. Each category uses the earlier neutral numbered-button layout: its
-  short label and all six controls share one row, level 0 is the separate `−`
-  unrated control, and levels 1 through 5 are visibly labeled `1` through `5`.
-  Each button has a 30-pixel hit surface; the buttons do not collapse into tiny
-  color swatches.
+  row exposes neutral `Lv 1` through `Lv 5` controls. The five controls use a stable three-column,
+  two-row layout below the category label so the buttons neither overlap nor
+  truncate at the minimum sidebar width. Each button has at least a 30-pixel
+  hit surface and does not collapse into a tiny color swatch.
   Filter controls do not use category color or intensity to encode levels, and
   their checked and unchecked states must remain visibly distinct. Gallery
   hearts retain their red, blue, and purple category meanings.
@@ -427,9 +433,7 @@ or stores.
   Original in the gallery. If no level is selected in any row, the master
   switch means any positive Favorite in any available category. The
   gallery purple heart is the maximum Favorite level among currently validated
-  managed Video outputs for that Original. Video level 0 requires at least one valid managed Video
-  output whose maximum level is 0; an Original without a valid Video output
-  does not match. Temporarily missing output paths retain their keys under the
+  managed Video outputs for that Original. Temporarily missing output paths retain their keys under the
   removal rule below.
 - Removing or temporarily losing a managed output does not delete its Favorite
   entry. The entry is invisible while that exact path is unavailable and is
@@ -652,17 +656,23 @@ or stores.
 - The dedicated H25 Enhancement companion owns the local Enhancement API,
   durable inbox consumer, and worker. WPF owns its loopback client and the
   explicit enqueue publisher; ordinary viewing must keep the API optional.
-- Modal and batch Start/Retry first reuse an already-ready loopback companion.
-  If none is ready, that same explicit action may launch the separately
+- Aibos application startup may launch the separately installed API-only H25
+  companion in deferred-recovery mode so Jobs history is available immediately.
+  This mode does not drain the enqueue inbox or start the queue worker. Modal and
+  batch Start/Retry first reuse that authenticated loopback companion. If none
+  is ready, the same explicit action may launch the separately
   installed API-only H25 companion through the default launcher. It must not
   start or load the Browser
   Viewer, React, Albums, Search, thumbnails, or Favorites, and ComfyUI autostart
   remains disabled.
-  A successful ready companion continues the durable ordered queue after WPF
-  closes. Reopening WPF passively reads the persisted queue, operation type,
-  status, and latest saved integer progress. On companion startup, the worker
-  first recovers an interrupted running job as Failed and then immediately
-  pumps the remaining queued work without requiring a new enqueue or Retry.
+  After an explicit Start/Retry, WPF sends a bodyless encrypted queue-recovery
+  request before reserving new work. That request first recovers an interrupted
+  running job as Failed and then pumps the remaining queued work. Recovery is
+  idempotent per companion process: concurrent or repeated authenticated
+  requests do not reclassify a job that began running after recovery. A successful
+  active companion continues the durable ordered queue after WPF closes.
+  Reopening WPF starts only the passive API and reads the persisted queue,
+  operation type, status, and latest saved integer progress.
   Queued jobs remain queued across interruption; the interrupted running job
   requires an explicit Retry rather than pretending to resume an in-memory
   model pass.

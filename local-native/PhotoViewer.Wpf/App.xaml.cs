@@ -17246,6 +17246,9 @@ public partial class App : Application
                 await first.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 bool defaultOpen = first.RightPanelOpenForSmoke;
                 double defaultWidth = first.RightPanelStoredWidthForSmoke;
+                double defaultSidebarWidth = first.SidebarStoredWidthForSmoke;
+                bool sidebarResized = first.SetSidebarWidthForSmoke(360);
+                double resizedSidebarWidth = first.SidebarStoredWidthForSmoke;
                 bool resized = first.SetRightPanelWidthForSmoke(400);
                 await first.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 double resizedWidth = first.RightPanelStoredWidthForSmoke;
@@ -17257,6 +17260,7 @@ public partial class App : Application
                 await second.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 bool restoredOpen = second.RightPanelOpenForSmoke;
                 double restoredWidth = second.RightPanelStoredWidthForSmoke;
+                double restoredSidebarWidth = second.SidebarStoredWidthForSmoke;
                 second.ToggleRightPanelForSmoke();
                 bool closed = !second.RightPanelOpenForSmoke;
                 double storedWhileClosed = second.RightPanelStoredWidthForSmoke;
@@ -17284,13 +17288,18 @@ public partial class App : Application
                 bool maxClamped = third.SetRightPanelWidthForSmoke(1200);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 double maxWidth = third.RightPanelStoredWidthForSmoke;
+                bool sidebarMinClamped = third.SetSidebarWidthForSmoke(100);
+                double sidebarMinWidth = third.SidebarStoredWidthForSmoke;
+                bool sidebarMaxClamped = third.SetSidebarWidthForSmoke(1200);
+                double sidebarMaxWidth = third.SidebarStoredWidthForSmoke;
                 third.ApplyWorkbenchLayoutWidthForSmoke(900);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 GridSelectionVisualSmokeSnapshot narrowSelection = await third.WaitForGridSelectionVisualForSmokeAsync(selectedFileName);
                 bool adaptiveLayout = third.AdaptiveWorkbenchForSmoke
                     && third.NarrowSidebarRailVisibleForSmoke
-                    && third.RightPanelDockedBelowForSmoke;
+                    && third.RightPanelDockedBelowForSmoke
+                    && !third.SidebarSplitterVisibleForSmoke;
                 bool listMode = third.SetListModeForSmoke();
                 await third.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
                 ListSelectionVisualSmokeSnapshot listSelection = await third.WaitForListSelectionVisualForSmokeAsync(selectedFileName);
@@ -17302,7 +17311,9 @@ public partial class App : Application
                 GridSelectionVisualSmokeSnapshot restoredSelection = await third.WaitForGridSelectionVisualForSmokeAsync(selectedFileName);
                 bool wideLayoutRestored = !third.AdaptiveWorkbenchForSmoke
                     && !third.NarrowSidebarRailVisibleForSmoke
-                    && !third.RightPanelDockedBelowForSmoke;
+                    && !third.RightPanelDockedBelowForSmoke
+                    && third.SidebarSplitterVisibleForSmoke
+                    && Nearly(third.SidebarStoredWidthForSmoke, 480);
                 RightPreviewActionLayoutSmokeSnapshot narrowActions = third.MeasureRightPreviewActionLayoutForSmoke(240);
                 RightPreviewActionLayoutSmokeSnapshot wideActions = third.MeasureRightPreviewActionLayoutForSmoke(380);
                 bool responsiveActions = narrowActions.Fits
@@ -17331,10 +17342,14 @@ public partial class App : Application
 
                 bool ok = defaultOpen
                     && Nearly(defaultWidth, 340)
+                    && Nearly(defaultSidebarWidth, 300)
+                    && sidebarResized
+                    && Nearly(resizedSidebarWidth, 360)
                     && resized
                     && Nearly(resizedWidth, 400)
                     && restoredOpen
                     && Nearly(restoredWidth, 400)
+                    && Nearly(restoredSidebarWidth, 360)
                     && closed
                     && Nearly(storedWhileClosed, 400)
                     && restoredClosed
@@ -17345,6 +17360,10 @@ public partial class App : Application
                     && Nearly(minWidth, 320)
                     && maxClamped
                     && Nearly(maxWidth, 420)
+                    && sidebarMinClamped
+                    && Nearly(sidebarMinWidth, 272)
+                    && sidebarMaxClamped
+                    && Nearly(sidebarMaxWidth, 480)
                     && adaptiveLayout
                     && wideLayoutRestored
                     && responsiveActions
@@ -17359,6 +17378,9 @@ public partial class App : Application
                         : "right preview or durable selection projection state did not match expectations",
                     DefaultOpen = defaultOpen,
                     DefaultWidth = defaultWidth,
+                    DefaultSidebarWidth = defaultSidebarWidth,
+                    ResizedSidebarWidth = resizedSidebarWidth,
+                    RestoredSidebarWidth = restoredSidebarWidth,
                     ResizedWidth = resizedWidth,
                     RestoredOpen = restoredOpen,
                     RestoredWidth = restoredWidth,
@@ -17370,6 +17392,8 @@ public partial class App : Application
                     ReopenedWidth = reopenedWidth,
                     MinWidth = minWidth,
                     MaxWidth = maxWidth,
+                    SidebarMinWidth = sidebarMinWidth,
+                    SidebarMaxWidth = sidebarMaxWidth,
                     AdaptiveLayout = adaptiveLayout,
                     WideLayoutRestored = wideLayoutRestored,
                     ResponsiveActions = responsiveActions,
@@ -21029,12 +21053,14 @@ public partial class App : Application
             int rapidNavigationMetadataStarts = 0;
             int rapidNavigationMetadataApplies = 0;
             bool passiveCompanionStartSuppressed = false;
+            bool startupCompanionAutoStart = false;
             bool serverErrorCompanionStartSuppressed = false;
             bool explicitCompanionAutoStart = false;
             bool untrustedProbeContainedNoSensitiveData = true;
             bool untrustedDurableReservationSuppressed = false;
             int untrustedProbeCount = 0;
             bool companionAuthenticatedRequestHeaders = false;
+            bool companionQueueRecoveryAuthenticated = false;
             bool companionIdentityFieldTamperRejected = false;
             bool companionListenerHandoffEncrypted = false;
             bool companionListenerHandoffResponseRejected = false;
@@ -21339,13 +21365,16 @@ public partial class App : Application
                             await win.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
                                 request,
                                 token);
-                        companionAuthenticatedRequestHeaders =
+                        bool authenticatedEnvelope =
                             route.EndsWith(
                                 "/api/enhance/secure",
                                 StringComparison.Ordinal)
                             && inner is not null
+                            && PhotoViewer.Wpf.MainWindow
+                                .HasCompanionRequestAuthenticationForSmoke(request);
+                        bool jobsRequest = authenticatedEnvelope
                             && string.Equals(
-                                inner.Method,
+                                inner!.Method,
                                 "GET",
                                 StringComparison.Ordinal)
                             && string.Equals(
@@ -21355,14 +21384,30 @@ public partial class App : Application
                             && inner.BodyJson is null
                             && !inner.OuterEnvelopeJson.Contains(
                                 canonicalSourcePath,
+                                StringComparison.Ordinal);
+                        bool queueRecoveryRequest = authenticatedEnvelope
+                            && string.Equals(
+                                inner!.Method,
+                                "POST",
                                 StringComparison.Ordinal)
-                            && PhotoViewer.Wpf.MainWindow
-                                .HasCompanionRequestAuthenticationForSmoke(request);
-                        return companionAuthenticatedRequestHeaders
+                            && string.Equals(
+                                inner.PathAndQuery,
+                                "/api/enhance/queue/recover",
+                                StringComparison.Ordinal)
+                            && inner.BodyJson is null;
+                        companionAuthenticatedRequestHeaders |= jobsRequest;
+                        companionQueueRecoveryAuthenticated |=
+                            queueRecoveryRequest;
+                        return jobsRequest
                             ? win.EnhancementCompanionSecureResponseForSmoke(
                                 request,
                                 (int)HttpStatusCode.OK,
                                 new { jobs = Array.Empty<object>() })
+                            : queueRecoveryRequest
+                                ? win.EnhancementCompanionSecureResponseForSmoke(
+                                    request,
+                                    (int)HttpStatusCode.OK,
+                                    new { recovered = true })
                             : JsonResponse(
                                 HttpStatusCode.Unauthorized,
                                 new { error = "missing authentication" });
@@ -21373,11 +21418,18 @@ public partial class App : Application
                         return (injectedStarterCalled, injectedStarterCalled ? "" : "endpoint was not loopback");
                     });
                 passiveCompanionStartSuppressed = win.EnhancementCompanionLaunchAttemptCountForSmoke == 0;
+                startupCompanionAutoStart =
+                    await win.StartEnhancementCompanionApiForApplicationLaunchForSmokeAsync()
+                    && injectedStarterCalled
+                    && win.EnhancementCompanionLaunchAttemptCountForSmoke == 1
+                    && companionAuthenticatedRequestHeaders
+                    && !companionQueueRecoveryAuthenticated;
                 explicitCompanionAutoStart = await win.EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
                     && injectedStarterCalled
                     && win.EnhancementCompanionLaunchAttemptCountForSmoke == 1
                     && untrustedProbeContainedNoSensitiveData
-                    && companionAuthenticatedRequestHeaders;
+                    && companionAuthenticatedRequestHeaders
+                    && companionQueueRecoveryAuthenticated;
                 simulateListenerHandoff = true;
                 companionListenerHandoffResponseRejected =
                     !await win.SendEnhancementSecureRequestForSmokeAsync(new
@@ -21817,6 +21869,7 @@ public partial class App : Application
                     && rapidNavigationMetadataCoalesced
                     && rapidNavigationFinalSelection
                     && passiveCompanionStartSuppressed
+                    && startupCompanionAutoStart
                     && serverErrorCompanionStartSuppressed
                     && untrustedDurableReservationSuppressed
                     && explicitCompanionAutoStart
@@ -21959,9 +22012,11 @@ public partial class App : Application
                 rapidNavigationMetadataStarts,
                 rapidNavigationMetadataApplies,
                 passiveCompanionStartSuppressed,
+                startupCompanionAutoStart,
                 serverErrorCompanionStartSuppressed,
                 explicitCompanionAutoStart,
                 companionAuthenticatedRequestHeaders,
+                companionQueueRecoveryAuthenticated,
                 companionListenerHandoffEncrypted,
                 companionListenerHandoffResponseRejected,
                 durableListenerHandoffSavedForDelivery,
@@ -33762,6 +33817,9 @@ public partial class App : Application
         public string Message { get; init; } = "";
         public bool DefaultOpen { get; init; }
         public double DefaultWidth { get; init; }
+        public double DefaultSidebarWidth { get; init; }
+        public double ResizedSidebarWidth { get; init; }
+        public double RestoredSidebarWidth { get; init; }
         public double ResizedWidth { get; init; }
         public bool RestoredOpen { get; init; }
         public double RestoredWidth { get; init; }
@@ -33773,6 +33831,8 @@ public partial class App : Application
         public double ReopenedWidth { get; init; }
         public double MinWidth { get; init; }
         public double MaxWidth { get; init; }
+        public double SidebarMinWidth { get; init; }
+        public double SidebarMaxWidth { get; init; }
         public bool AdaptiveLayout { get; init; }
         public bool WideLayoutRestored { get; init; }
         public bool ResponsiveActions { get; init; }

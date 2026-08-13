@@ -454,7 +454,7 @@
         <RowDefinition x:Name="WorkbenchPreviewRow" Height="0"/>
       </Grid.RowDefinitions>
       <Grid.ColumnDefinitions>
-        <ColumnDefinition x:Name="SidebarCol" Width="232"/>
+        <ColumnDefinition x:Name="SidebarCol" Width="300" MinWidth="272" MaxWidth="480"/>
         <ColumnDefinition Width="*" MinWidth="320"/>
         <ColumnDefinition x:Name="RightSplitterCol" Width="6"/>
         <ColumnDefinition x:Name="RightCol" Width="340" MinWidth="320" MaxWidth="420"/>
@@ -493,52 +493,52 @@
                 <TextBlock Text="FILTERS" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
                 <TextBlock x:Name="FavoriteFilterGroupTitle" Text="{DynamicResource UiFavoriteFilterGroupTitle}" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold" Margin="0,0,0,7"/>
                 <CheckBox x:Name="FavoriteOnlyFilter" Content="{DynamicResource UiFavoritesOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,9" Checked="FavoriteFilter_Changed" Unchecked="FavoriteFilter_Changed"/>
-                <CheckBox x:Name="UnfavoriteOnlyFilter" Content="{DynamicResource UiUnratedOnly}" Visibility="Collapsed" IsTabStop="False" Checked="FavoriteFilter_Changed" Unchecked="FavoriteFilter_Changed"/>
+                <CheckBox x:Name="UnfavoriteOnlyFilter" Content="{DynamicResource UiUnratedOnly}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" Margin="0,0,0,9" Checked="FavoriteFilter_Changed" Unchecked="FavoriteFilter_Changed"/>
                 <Grid x:Name="OriginalFavoriteFilterRow" Margin="0,0,0,5">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="52"/>
-                    <ColumnDefinition Width="*"/>
-                  </Grid.ColumnDefinitions>
-                  <TextBlock x:Name="OriginalFavoriteFilterTitle" Grid.Column="0" Text="{DynamicResource UiOriginalFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                  <UniformGrid x:Name="FavoriteLevelFilterPanel" Grid.Column="1" Columns="6">
-                    <CheckBox x:Name="FavoriteLevel0Filter" Style="{StaticResource FavoriteLevelPill}" Content="−" Tag="0" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                    <CheckBox x:Name="FavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="1" Tag="1" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                    <CheckBox x:Name="FavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="2" Tag="2" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                    <CheckBox x:Name="FavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="3" Tag="3" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                    <CheckBox x:Name="FavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="4" Tag="4" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
-                    <CheckBox x:Name="FavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="5" Tag="5" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock x:Name="OriginalFavoriteFilterTitle" Grid.Row="0" Text="{DynamicResource UiOriginalFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                  <UniformGrid x:Name="FavoriteLevelFilterPanel" Grid.Row="1" Columns="3">
+                    <CheckBox x:Name="FavoriteLevel0Filter" Style="{StaticResource FavoriteLevelPill}" Content="{DynamicResource UiUnratedOnly}" Tag="0" Visibility="Collapsed" IsTabStop="False" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                    <CheckBox x:Name="FavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 1" Tag="1" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                    <CheckBox x:Name="FavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 2" Tag="2" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                    <CheckBox x:Name="FavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 3" Tag="3" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                    <CheckBox x:Name="FavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 4" Tag="4" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
+                    <CheckBox x:Name="FavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 5" Tag="5" Checked="FavoriteLevelFilter_Changed" Unchecked="FavoriteLevelFilter_Changed"/>
                   </UniformGrid>
                 </Grid>
                 <TextBlock x:Name="FavoriteFilterSummary" Visibility="Collapsed"/>
                 <Grid x:Name="PhotorealFavoriteFilterRow" Margin="0,0,0,5">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="52"/>
-                    <ColumnDefinition Width="*"/>
-                  </Grid.ColumnDefinitions>
-                  <TextBlock x:Name="PhotorealFavoriteFilterTitle" Grid.Column="0" Text="{DynamicResource UiPhotorealFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                  <UniformGrid x:Name="PhotorealFavoriteLevelFilterPanel" Grid.Column="1" Columns="6">
-                    <CheckBox x:Name="PhotorealFavoriteLevel0Filter" Style="{StaticResource FavoriteLevelPill}" Content="−" Tag="0" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteLevelZeroHelp}"/>
-                    <CheckBox x:Name="PhotorealFavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="1" Tag="1" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
-                    <CheckBox x:Name="PhotorealFavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="2" Tag="2" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
-                    <CheckBox x:Name="PhotorealFavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="3" Tag="3" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
-                    <CheckBox x:Name="PhotorealFavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="4" Tag="4" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
-                    <CheckBox x:Name="PhotorealFavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="5" Tag="5" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock x:Name="PhotorealFavoriteFilterTitle" Grid.Row="0" Text="{DynamicResource UiPhotorealFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                  <UniformGrid x:Name="PhotorealFavoriteLevelFilterPanel" Grid.Row="1" Columns="3">
+                    <CheckBox x:Name="PhotorealFavoriteLevel0Filter" Style="{StaticResource FavoriteLevelPill}" Content="{DynamicResource UiUnratedOnly}" Tag="0" Visibility="Collapsed" IsTabStop="False" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteLevelZeroHelp}"/>
+                    <CheckBox x:Name="PhotorealFavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 1" Tag="1" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                    <CheckBox x:Name="PhotorealFavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 2" Tag="2" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                    <CheckBox x:Name="PhotorealFavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 3" Tag="3" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                    <CheckBox x:Name="PhotorealFavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 4" Tag="4" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
+                    <CheckBox x:Name="PhotorealFavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 5" Tag="5" Checked="PhotorealFavoriteLevelFilter_Changed" Unchecked="PhotorealFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiPhotorealFavoriteFilterHelp}"/>
                   </UniformGrid>
                 </Grid>
                 <TextBlock x:Name="PhotorealFavoriteFilterSummary" Visibility="Collapsed"/>
                 <Grid x:Name="VideoFavoriteFilterRow" Margin="0,0,0,6">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="52"/>
-                    <ColumnDefinition Width="*"/>
-                  </Grid.ColumnDefinitions>
-                  <TextBlock x:Name="VideoFavoriteFilterTitle" Grid.Column="0" Text="{DynamicResource UiVideoFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
-                  <UniformGrid x:Name="VideoFavoriteLevelFilterPanel" Grid.Column="1" Columns="6">
-                    <CheckBox x:Name="VideoFavoriteLevel0Filter" Style="{StaticResource FavoriteLevelPill}" Content="−" Tag="0" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteLevelZeroHelp}"/>
-                    <CheckBox x:Name="VideoFavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="1" Tag="1" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
-                    <CheckBox x:Name="VideoFavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="2" Tag="2" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
-                    <CheckBox x:Name="VideoFavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="3" Tag="3" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
-                    <CheckBox x:Name="VideoFavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="4" Tag="4" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
-                    <CheckBox x:Name="VideoFavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="5" Tag="5" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                  </Grid.RowDefinitions>
+                  <TextBlock x:Name="VideoFavoriteFilterTitle" Grid.Row="0" Text="{DynamicResource UiVideoFavoriteFilterTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,4" ToolTip="{DynamicResource UiVideoFavoriteFilterHelp}" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                  <UniformGrid x:Name="VideoFavoriteLevelFilterPanel" Grid.Row="1" Columns="3">
+                    <CheckBox x:Name="VideoFavoriteLevel0Filter" Style="{StaticResource FavoriteLevelPill}" Content="{DynamicResource UiUnratedOnly}" Tag="0" Visibility="Collapsed" IsTabStop="False" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteLevelZeroHelp}"/>
+                    <CheckBox x:Name="VideoFavoriteLevel1Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 1" Tag="1" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                    <CheckBox x:Name="VideoFavoriteLevel2Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 2" Tag="2" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                    <CheckBox x:Name="VideoFavoriteLevel3Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 3" Tag="3" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                    <CheckBox x:Name="VideoFavoriteLevel4Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 4" Tag="4" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
+                    <CheckBox x:Name="VideoFavoriteLevel5Filter" Style="{StaticResource FavoriteLevelPill}" Content="Lv 5" Tag="5" Checked="VideoFavoriteLevelFilter_Changed" Unchecked="VideoFavoriteLevelFilter_Changed" AutomationProperties.HelpText="{DynamicResource UiVideoFavoriteFilterHelp}"/>
                   </UniformGrid>
                 </Grid>
                 <TextBlock x:Name="VideoFavoriteFilterSummary" Visibility="Collapsed"/>
@@ -715,6 +715,16 @@
         </Border>
         </Grid>
       </Border>
+
+      <GridSplitter Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" x:Name="SidebarSplitter"
+                    Width="6" HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                    Background="Transparent" Focusable="True" ResizeDirection="Columns"
+                    ResizeBehavior="CurrentAndNext" KeyboardIncrement="20" ShowsPreview="True"
+                    PreviewKeyDown="SidebarSplitter_PreviewKeyDown"
+                    DragStarted="SidebarSplitter_DragStarted" DragCompleted="SidebarSplitter_DragCompleted"
+                    ToolTip="Resize filters and folders sidebar"
+                    AutomationProperties.Name="Resize filters and folders sidebar"
+                    Panel.ZIndex="10"/>
 
       <!-- The narrow layout keeps core navigation available without duplicating viewer state. -->
       <Border x:Name="NarrowSidebarRail" Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" Visibility="Collapsed"

@@ -31,9 +31,11 @@ rewrite source images. Source deletion is a separate explicit action and uses
 the operating system Recycle Bin.
 
 Ordinary viewing is fully local and does not require a Browser or Node.js
-runtime. Optional Enhancement begins only after an explicit user action and
-uses the separately installed, API-only H25 Enhancement companion over
-loopback. That companion binds to `127.0.0.1`, opens no Browser window, and
+runtime. When installed, the API-only H25 Enhancement companion starts with
+Aibos so persisted Jobs history is immediately available. Startup defers queue
+recovery, durable-inbox draining, worker pumping, ComfyUI startup, and GPU work;
+those remain behind an explicit AI Start/Retry. The companion binds to
+`127.0.0.1`, opens no Browser window, and
 does not load the Browser Viewer, Albums, Search, thumbnails, or Favorites.
 These guarantees apply to the default Enhancement companion launcher. The
 explicit `AIBOS_H25_LEGACY_NEXT_COMPANION=1` rollback switch selects the
@@ -41,8 +43,9 @@ unchanged legacy Next runtime instead; it is outside the API-only companion
 mode and is retained only for a controlled rollback.
 LAN, tunnel, reverse-proxy, hosted, and Internet exposure are outside the
 product boundary. If the companion is not already running, an explicit AI
-Start/Retry action may start it. Aibos never starts it during browsing,
-preview, search, navigation, or passive job inspection. After a queue
+Start/Retry action may start it and sends a bodyless authenticated recovery
+request before new work is reserved. Browsing, preview, search, navigation,
+and passive job inspection never recover or pump the queue. After a queue
 reservation is durably saved, the companion can register and process it after
 Aibos closes or the companion restarts. Reopening Aibos reads the persisted
 queue, operation type, status, and latest saved progress from the companion.

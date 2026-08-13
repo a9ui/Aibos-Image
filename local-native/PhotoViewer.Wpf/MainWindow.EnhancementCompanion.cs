@@ -43,6 +43,8 @@ public partial class MainWindow
         "api/enhance/secure";
     private const string EnhancementCompanionWakeRoute =
         "api/enhance/inbox/wake";
+    private const string EnhancementCompanionQueueRecoveryRoute =
+        "api/enhance/queue/recover";
     private const string EnhancementCompanionAuthFileName =
         "companion-auth-v1.key";
     private const string EnhancementCompanionChallengeHeader =
@@ -96,6 +98,24 @@ public partial class MainWindow
         string Error);
 
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionReadyForExplicitActionAsync(
+        string? sourceIdentity = null,
+        CancellationToken token = default)
+    {
+        EnhancementApiResponse readiness =
+            await EnsureEnhancementCompanionApiReadyAsync(
+                sourceIdentity,
+                token);
+        if (!readiness.Ok)
+            return readiness;
+
+        EnhancementApiResponse recovery = await SendEnhancementApiAsync(
+            HttpMethod.Post,
+            EnhancementCompanionQueueRecoveryRoute,
+            token: token);
+        return recovery.Ok ? readiness : recovery;
+    }
+
+    private async Task<EnhancementApiResponse> EnsureEnhancementCompanionApiReadyAsync(
         string? sourceIdentity = null,
         CancellationToken token = default)
     {
@@ -228,6 +248,22 @@ public partial class MainWindow
         {
             _enhancementCompanionLaunchGate.Release();
         }
+    }
+
+    private async Task StartEnhancementCompanionApiForApplicationLaunchAsync()
+    {
+        if (Environment.GetCommandLineArgs().Any(static argument =>
+                argument.StartsWith("--", StringComparison.Ordinal)
+                && argument.Contains("smoke", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        EnhancementApiResponse response =
+            await EnsureEnhancementCompanionApiReadyAsync(
+                token: _enhancementCompanionLifetimeCts.Token);
+        if (!response.Ok)
+            _enhancementCompanionLaunchError = response.Error;
     }
 
     private async Task<EnhancementApiResponse> EnsurePhotorealCompanionReadyForExplicitActionAsync(
@@ -2044,6 +2080,7 @@ public partial class MainWindow
         startInfo.ArgumentList.Add("--port");
         startInfo.ArgumentList.Add(endpoint.Port.ToString(
             System.Globalization.CultureInfo.InvariantCulture));
+        startInfo.ArgumentList.Add("--defer-queue-recovery");
         startInfo.Environment["PVU_NO_OPEN"] = "1";
         startInfo.Environment["PVU_COMFY_AUTOSTART"] = "0";
         startInfo.Environment["AIBOS_COMPANION_AUTH_TOKEN"] = authToken;
@@ -2345,6 +2382,7 @@ public partial class MainWindow
             startInfo.Environment.ContainsKey("AIBOS_COMPANION_INSTANCE_ID"),
             startInfo.Environment["PVU_NO_OPEN"],
             startInfo.Environment["PVU_COMFY_AUTOSTART"],
+            startInfo.ArgumentList.Contains("--defer-queue-recovery"),
             Path.GetFileName(startInfo.ArgumentList[0]));
     }
     public void ConfigureEnhancementCompanionAutoStartForSmoke(
@@ -2619,6 +2657,12 @@ public partial class MainWindow
         EnhancementApiResponse response = await EnsureEnhancementCompanionReadyForExplicitActionAsync();
         return response.Ok;
     }
+    public async Task<bool> StartEnhancementCompanionApiForApplicationLaunchForSmokeAsync()
+    {
+        EnhancementApiResponse response =
+            await EnsureEnhancementCompanionApiReadyAsync();
+        return response.Ok;
+    }
     public async Task<bool> SendEnhancementEnqueueForSmokeAsync(object body)
     {
         EnhancementApiResponse response = await SendEnhancementEnqueueAsync(body);
@@ -2731,4 +2775,5 @@ public sealed record EnhancementCompanionLaunchContractSmokeSnapshot(
     bool HasInheritedInstanceId,
     string? NoOpen,
     string? ComfyAutostart,
+    bool DefersQueueRecovery,
     string LauncherFileName);

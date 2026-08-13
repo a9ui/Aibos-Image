@@ -1376,7 +1376,8 @@ public partial class App
                     && companionLaunch.HasInheritedAuthenticationToken
                     && companionLaunch.HasInheritedInstanceId
                     && companionLaunch.NoOpen == "1"
-                    && companionLaunch.ComfyAutostart == "0";
+                    && companionLaunch.ComfyAutostart == "0"
+                    && companionLaunch.DefersQueueRecovery;
                 window.ConfigureModalPhotorealSettingsForSmoke(
                     0.55,
                     8,

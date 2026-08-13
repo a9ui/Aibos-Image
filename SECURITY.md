@@ -16,8 +16,10 @@ not sufficient when a branch still contains private ancestors or an
 unredacted local-development history.
 
 Ordinary WPF viewing does not require a network service. The optional,
-dedicated H25 Enhancement API companion is contacted only over loopback after
-an explicit user action. It opens no Browser window and does not load the
+dedicated H25 Enhancement API companion may start with Aibos so authenticated
+Jobs history is available. This launch is API-only and explicitly defers queue
+recovery, inbox draining, worker pumping, ComfyUI startup, and GPU work until
+an explicit AI action. It opens no Browser window and does not load the
 Browser Viewer or its gallery data. It must remain bound to `127.0.0.1`; do not
 expose it through a LAN listener, reverse proxy, tunnel, hosted deployment, or
 the Internet.
