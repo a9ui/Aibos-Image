@@ -17679,7 +17679,7 @@ public partial class App : Application
                     ready: true,
                     reasonCode: null);
                 win.ConfigureVideoGenerationForSmoke(
-                    4,
+                    5,
                     12,
                     307200,
                     "pan left slowly",
@@ -17699,7 +17699,7 @@ public partial class App : Application
                     && persistedVideoStyle.Name == videoStyleName
                     && persistedVideoStyle.ModelId == "minimax-h3"
                     && persistedVideoStyle.QualityId == "wan22-ti2v-5b-high-v1"
-                    && persistedVideoStyle.DurationSeconds == 4
+                    && persistedVideoStyle.DurationSeconds == 5
                     && persistedVideoStyle.PlaybackFps == 12
                     && persistedVideoStyle.MaximumPixelArea == 307200
                     && persistedVideoStyle.Prompt == "pan left slowly"
@@ -17708,7 +17708,7 @@ public partial class App : Application
                     && persistedVideoStyleState.VideoSeedMode == "random"
                     && persistedVideoStyleState.VideoSeedValue == 0;
                 win.ConfigureVideoGenerationForSmoke(
-                    6,
+                    10,
                     16,
                     409600,
                     "temporary custom motion",
@@ -17718,7 +17718,7 @@ public partial class App : Application
                 bool videoStyleSelected =
                     win.SelectVideoStyleForSmoke(videoStyleName);
                 bool videoStyleApplied = win.VideoGenerationSettingsForSmoke
-                        is (4, 12, 307200, "pan left slowly")
+                        is (5, 12, 307200, "pan left slowly")
                     && win.VideoModelIdForSmoke == "minimax-h3"
                     && win.VideoQualityIdForSmoke
                         == "wan22-ti2v-5b-high-v1";
@@ -17834,7 +17834,7 @@ public partial class App : Application
                 const string japaneseVideoPrompt =
                     "手を伸ばしながら、ゆっくりカメラへ近づく";
                 win.ConfigureVideoGenerationForSmoke(
-                    4,
+                    5,
                     12,
                     307200,
                     japaneseVideoPrompt,
@@ -17900,7 +17900,12 @@ public partial class App : Application
                         && videoAdapterId.GetString() == "minimax-h3-local-v1"
                         && videoRequest.TryGetProperty("video", out JsonElement videoRequestMedia)
                         && videoRequestMedia.TryGetProperty("requested", out JsonElement requestedVideo)
-                        && HasExactNames(requestedVideo, "prompt")
+                        && HasExactNames(
+                            requestedVideo,
+                            "profileId",
+                            "prompt")
+                        && requestedVideo.GetProperty("profileId").GetString()
+                            == "minimax-h3-hq-5s-v1"
                         && requestedVideo.GetProperty("prompt").GetString()
                             == japaneseVideoPrompt;
                 }
@@ -17956,13 +17961,13 @@ public partial class App : Application
                     ready: false,
                     reasonCode: "MINIMAX_H3_WRITER_DISABLED");
                 int postsBeforeUnavailableH3 = enhancementMutationRequestCount;
-                bool unavailableH3Blocked =
+                bool unavailableH3RejectedBeforePost =
                     !await win.QueueVideoGenerationForSmokeAsync()
                     && enhancementMutationRequestCount
                         == postsBeforeUnavailableH3
-                    && !win.VideoGenerationQueueEnabledForSmoke
+                    && win.VideoGenerationQueueEnabledForSmoke
                     && win.MiniMaxH3ReadinessTextForSmoke.Contains(
-                        "ジョブ登録は現在無効",
+                        "待機ジョブの登録はできます",
                         StringComparison.Ordinal);
                 h3WriterReady = true;
                 win.SetMiniMaxH3CapabilityForSmoke(
@@ -17976,9 +17981,9 @@ public partial class App : Application
                     && videoRequestExact
                     && fixedVideoSeedOmitted
                     && invalidLegacySeedIgnoredByH3
-                    && unavailableH3Blocked;
+                    && unavailableH3RejectedBeforePost;
                 win.ConfigureVideoGenerationForSmoke(
-                    4,
+                    5,
                     12,
                     307200,
                     "pan left slowly",
@@ -18147,7 +18152,7 @@ public partial class App : Application
                     second.SelectFileNameForSmoke(
                         Path.GetFileName(photorealSource));
                 bool reloadVideoSettings = second.VideoGenerationSettingsForSmoke
-                        is (4, 12, 307200, "pan left slowly")
+                        is (5, 12, 307200, "pan left slowly")
                     && second.VideoModelIdForSmoke == "minimax-h3"
                     && second.VideoQualityIdForSmoke
                         == "wan22-ti2v-5b-high-v1"
