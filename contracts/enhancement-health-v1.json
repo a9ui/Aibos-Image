@@ -65,6 +65,15 @@
     "unknownFields": "ignore",
     "unknownStatus": "treat the health payload as unavailable",
     "unknownIssue": "preserve the needs-attention status and show a generic attention message",
+    "missingWorkerPaused": "keep health and jobs readable but disable pause and resume controls",
+    "missingQueuedPhotorealPromptUpdate": "keep health and jobs readable but hide the queued prompt-update action",
+    "missingPhotorealPromptControlsV2": "keep health and jobs readable but block new photoreal submissions so an older companion cannot silently ignore Negative, LoRA OFF, or the removal of legacy hidden prompt text",
+    "missingAtomicImageEnqueueNext": "keep health and jobs readable but hide or block enqueue-next actions so an older companion cannot silently append the job to the tail",
+    "missingStoreBackendGeneration": "treat the store as a compatible legacy backend and keep the existing jobs API behavior",
+    "missingStoreRevisions": "keep health and jobs readable; readers must not invent revision values",
+    "inventoryRevision": "an optional monotonic commit revision; it may advance for progress or heartbeat writes and is not by itself a signal to reload the full jobs inventory",
+    "catalogRevision": "an optional monotonic revision for WPF-visible managed-media changes; it stays stable for heartbeat and progress-only writes",
+    "pausedDisplay": "show Paused as an intentional state; if one job is running, explain that it may finish while no next job starts",
     "polling": "request health only while the Jobs workspace performs its existing passive refresh",
     "timeoutPolicy": "do not infer a stall from elapsed time alone until a measured threshold is adopted"
   },
@@ -84,7 +93,10 @@
         "processId": 1234
       },
       "store": {
-        "version": 1
+        "version": 1,
+        "backendGeneration": "sqlite-v1",
+        "inventoryRevision": 42,
+        "catalogRevision": 7
       },
       "jobs": {
         "counts": {
@@ -113,11 +125,17 @@
       },
       "worker": {
         "pumpRunning": true,
+        "paused": false,
         "processWorkerInstanceId": "fixture-worker",
         "consecutiveWorkerFailures": 0,
         "lastWorkerError": null,
         "lastWorkerErrorAt": null,
         "lastLeaseContentionAt": null
+      },
+      "capabilities": {
+        "queuedPhotorealPromptUpdate": true,
+        "photorealPromptControlsV2": true,
+        "atomicImageEnqueueNext": true
       },
       "comfyUi": {
         "endpoint": "http://127.0.0.1:8190",

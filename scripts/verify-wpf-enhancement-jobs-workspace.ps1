@@ -38,6 +38,17 @@ try {
         ($queueContract.queueOrder.type -eq "non-negative integer")
         ($queueContract.workerRules.singleWorker -eq $true)
         ($queueContract.workerRules.runningJobIsNeverPreemptedByReorder -eq $true)
+        ($queueContract.pauseControl.field -eq "queuePaused")
+        ($queueContract.pauseControl.missingValue -eq $false)
+        ($queueContract.workerRules.pauseAndClaimShareOneLock -eq $true)
+        ($queueContract.workerRules.currentJobFinishesWhenPaused -eq $true)
+        ($queueContract.workerRules.resumePreservesFifo -eq $true)
+        ($queueContract.queuedPhotorealPromptUpdate.route -eq
+            "POST /api/enhance/jobs/:id/prompts")
+        ($queueContract.queuedPhotorealPromptUpdate.appliesTo -eq
+            "queued photoreal jobs using comfyui-flux2-photoreal only")
+        ($queueContract.queuedPhotorealPromptUpdate.sharesClaimLock -eq $true)
+        ($queueContract.queuedPhotorealPromptUpdate.wakesWorker -eq $false)
         ($queueContract.workerRules.pumpAfterRunningCancel -eq $true)
         ($queueContract.workerRules.pumpAfterStartupRecovery -eq $true)
         (($queueContract.readerFixture.expectedVisibleOrder -join ",") -eq
@@ -69,6 +80,10 @@ try {
         ($healthContract.workingFixture.expectedDisplay.state -eq "Working")
         ($healthContract.workingFixture.expectedDisplay.detail -eq "1 running / 4 queued")
         ($healthContract.workingFixture.expectedDisplay.sourceRevisionPrefix -eq "69684954")
+        ($healthContract.workingFixture.payload.worker.paused -eq $false)
+        ($healthContract.workingFixture.payload.capabilities.queuedPhotorealPromptUpdate -eq $true)
+        ($healthContract.readerRules.missingQueuedPhotorealPromptUpdate -eq
+            "keep health and jobs readable but hide the queued prompt-update action")
     )
     if ($healthContractChecks -contains $false) {
         throw "Enhancement health contract fields are invalid."
@@ -341,16 +356,27 @@ try {
     $process.Dispose()
     $process = $null
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
-    $result | ConvertTo-Json -Depth 10
+    [pscustomobject]@{
+        ok = $result.ok
+        passiveOpen = $result.passiveOpen
+        stableJobViews = $result.stableJobViews
+        completedElapsedVisible = $result.completedElapsedVisible
+        queueInventoryOrdered = $result.queueInventoryOrdered
+        sourceUnchanged = $result.sourceUnchanged
+        storesUnchanged = $result.storesUnchanged
+    } | ConvertTo-Json -Depth 3
     $required = @(
         'passiveOpen',
         'healthVisible',
         'healthProvenance',
         'healthPassive',
+        'legacyPromptUpdateCapabilitySafe',
+        'legacyPauseCapabilitySafe',
         'legacyHealthFallback',
         'futureHealthFallback',
         'unknownIssueSafe',
         'healthRecovered',
+        'queuePauseContract',
         'routesOk',
         'outputOpened',
         'sourceOpenedInViewer',
@@ -371,13 +397,23 @@ try {
         'videoSiblingPreserved',
         'unknownOperationSafe',
         'legacyMissingOperation',
+        'legacyPhotorealPromptUpdateSafe',
+        'photorealTerminalCurrentSettingsActions',
+        'completedElapsedVisible',
         'unsupportedNoMutation',
         'imageVersionsExcludeVideo',
         'stableJobViews',
         'failedCancelIssued',
         'moveNextIssued',
+        'moveReflectedImmediately',
+        'moveAvoidedFullInventoryReload',
+        'healthOnlyPollAvoidedFullInventory',
+        'staleQueueRefreshSuppressed',
         'canceledRetryIssued',
         'rerunSettingsContract',
+        'rerunSeedContract',
+        'queuedPromptUpdateContract',
+        'bulkQueuedPromptUpdateContract',
         'clearQueuedIssued',
         'jobsRestoredAfterViewerClose',
         'jobsViewportRestoredAfterViewerClose',

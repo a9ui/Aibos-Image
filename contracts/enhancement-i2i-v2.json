@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 2,
+  "contractId": "PV-ENHANCE-I2I-002",
+  "protocol": "aibos.enhancement-i2i/v2",
+  "jobStoreVersion": 1,
+  "operation": "i2i",
+  "mediaKind": "image",
+  "adapterId": "comfyui-flux2-i2i-v2",
+  "presetId": "flux2-i2i-edit-v2",
+  "presetLabel": "FLUX.2 guided edit v2",
+  "outputFolder": "Edited",
+  "compatibility": {
+    "v1Contract": "PV-ENHANCE-I2I-001 remains byte-compatible and retains target=hair-color",
+    "operationEnvelope": "schema v2 uses the existing operation=i2i envelope and durable queue",
+    "malformedOrFuture": "reader-only unsupported row; never coerce, execute, retry, reorder, open, or delete as a managed image enhancement",
+    "storeVersionChange": false
+  },
+  "sourceSelectionV2": {
+    "requestField": "sourceProducerJobId",
+    "absent": "use sourceId as the indexed Original source",
+    "present": "resolve exactly one succeeded photoreal job for the same indexed Original; the client never supplies its managed output path",
+    "persistedIdentity": "sourceId, sourcePath, and sourceSignature remain the Original catalog identity; sourceProducerJobId records the optional photoreal input provenance",
+    "retry": "preserve sourceProducerJobId and revalidate the producer immediately before execution",
+    "sourceImagePathField": "forbidden"
+  },
+  "requestV2": {
+    "fields": {
+      "target": {
+        "type": "string",
+        "acceptedValues": [
+          "outfit",
+          "expression",
+          "background",
+          "pose"
+        ]
+      },
+      "instruction": {
+        "type": "string",
+        "maximumCharacters": 2000,
+        "blankAllowed": false
+      },
+      "details": {
+        "type": "string",
+        "maximumCharacters": 2000,
+        "blankMeaning": "no additional requested detail"
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647,
+        "missing": "choose once at enqueue and persist the resolved integer"
+      }
+    },
+    "normalization": "trim each string without rewriting its wording",
+    "legacyTarget": "target=hair-color is handled only by enhancement-i2i-v1",
+    "sourceImagePathField": "forbidden"
+  },
+  "promptPolicyV1": {
+    "pathEnvironmentVariable": "AIBOS_I2I_PROMPT_POLICY_PATH",
+    "defaultIgnoredPath": "config/i2i-prompts.local.json",
+    "trackedExample": "no backend policy example is tracked in this WPF repository; local-native/PhotoViewer.Wpf/config/wpf-prompts.example.json documents the separate WPF-local policy schema with synthetic placeholders only",
+    "schemaVersion": 1,
+    "requiredTargets": [
+      "outfit",
+      "expression",
+      "background",
+      "pose"
+    ],
+    "requiredSubstitution": "each private target template contains {{instruction}}; {{details}} is optional",
+    "missingOrInvalid": "v2 writer not ready; v1 hair writer and all readers remain unaffected",
+    "snapshot": "persist only the derived prompt, policy revision, raw-file SHA-256, and prompt UTF-8 SHA-256 needed for durable retry",
+    "healthDisclosure": "report revision and hashes only; never return template text"
+  },
+  "snapshotV2": {
+    "container": "preset.options",
+    "requiredFields": [
+      "i2iSchemaVersion",
+      "target",
+      "instruction",
+      "details",
+      "preserveIdentity",
+      "preserveComposition",
+      "prompt",
+      "negativePrompt",
+      "steps",
+      "cfgScale",
+      "maxDimension",
+      "seed",
+      "workflowRevision",
+      "maskRevision",
+      "promptPolicyRevision",
+      "promptPolicySha256",
+      "promptSnapshotSha256",
+      "loraEnabled"
+    ],
+    "fixedValues": {
+      "i2iSchemaVersion": 2,
+      "preserveIdentity": true,
+      "preserveComposition": true,
+      "negativePrompt": "",
+      "steps": 8,
+      "cfgScale": 1,
+      "maxDimension": 1280,
+      "workflowRevision": "i2i-flux2-klein9b-multitarget-v2",
+      "maskRevision": "sam31-mediapipe-target-v2",
+      "loraEnabled": false
+    },
+    "promptMaximumCharacters": 8000,
+    "promptSnapshotSha256": "lowercase SHA-256 of the exact prompt UTF-8 bytes",
+    "unknownFields": "preserve when a compatible writer rewrites the row",
+    "retry": "reuse the complete persisted preset, prompt, policy receipts, seed, and source provenance without loading the current prompt policy"
+  },
+  "executionV2": {
+    "modelFamily": "FLUX.2 Klein reference editing",
+    "installedModel": "flux-2-klein-9b-Q4_K_M.gguf",
+    "referenceConditioning": "ReferenceLatent",
+    "singleDurableQueue": true,
+    "singleWorker": true,
+    "parallelInference": false,
+    "manualMaskRequired": false,
+    "identityProtectionRequired": true,
+    "compositionProtectionRequired": true,
+    "failClosed": "no output is published when the target-specific invariant or exact selected source cannot be established"
+  },
+  "capabilityV2": {
+    "healthPath": "capabilities.i2iV2",
+    "additiveTo": "capabilities.i2i remains the v1 hair-color capability",
+    "writerEnvironmentVariable": "PVU_I2I_V2_WRITER_ENABLED",
+    "shape": {
+      "contractId": "PV-ENHANCE-I2I-002",
+      "operation": "i2i",
+      "schemaVersion": 2,
+      "readerReady": true,
+      "writerEnabled": false,
+      "backendConfigured": false,
+      "promptPolicyConfigured": false,
+      "ready": false,
+      "supportedTargets": [
+        "outfit",
+        "expression",
+        "background",
+        "pose"
+      ],
+      "backendId": "comfyui-flux2-i2i-v2",
+      "workflowRevision": "i2i-flux2-klein9b-multitarget-v2",
+      "maskRevision": "sam31-mediapipe-target-v2",
+      "promptPolicyRevision": null,
+      "promptPolicySha256": null,
+      "issueCode": "WORKFLOW_UNVERIFIED"
+    },
+    "enqueueGate": "POST operation=i2i schema v2 requires readerReady, writerEnabled, backendConfigured, promptPolicyConfigured, and ready to all be exactly true and target to be listed in supportedTargets",
+    "notReady": "validate request and source envelope, then return 503 I2I_BACKEND_NOT_READY without writing a job or waking the queue",
+    "passiveRead": "health and Jobs readers never load models or start the worker"
+  },
+  "vectors": [
+    {
+      "id": "v2-outfit-placeholder",
+      "request": {
+        "target": "outfit",
+        "instruction": "TEST_INSTRUCTION_OUTFIT",
+        "details": "TEST_DETAILS"
+      },
+      "expectedAcceptedWithReadyLocalPolicy": true
+    },
+    {
+      "id": "v2-expression-placeholder",
+      "request": {
+        "target": "expression",
+        "instruction": "TEST_INSTRUCTION_EXPRESSION"
+      },
+      "expectedAcceptedWithReadyLocalPolicy": true
+    },
+    {
+      "id": "v2-background-placeholder",
+      "request": {
+        "target": "background",
+        "instruction": "TEST_INSTRUCTION_BACKGROUND"
+      },
+      "expectedAcceptedWithReadyLocalPolicy": true
+    },
+    {
+      "id": "v2-pose-placeholder",
+      "request": {
+        "target": "pose",
+        "instruction": "TEST_INSTRUCTION_POSE"
+      },
+      "expectedAcceptedWithReadyLocalPolicy": true
+    },
+    {
+      "id": "v1-hair-remains-v1",
+      "request": {
+        "target": "hair-color",
+        "instruction": "TEST_INSTRUCTION"
+      },
+      "expectedAcceptedByV2": false,
+      "expectedCode": "I2I_TARGET_UNSUPPORTED"
+    },
+    {
+      "id": "missing-policy",
+      "request": {
+        "target": "outfit",
+        "instruction": "TEST_INSTRUCTION_OUTFIT"
+      },
+      "expectedAccepted": false,
+      "expectedStatus": 503,
+      "expectedCode": "I2I_BACKEND_NOT_READY"
+    }
+  ]
+}

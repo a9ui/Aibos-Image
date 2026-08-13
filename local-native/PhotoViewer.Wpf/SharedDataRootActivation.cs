@@ -190,6 +190,8 @@ internal static class SharedDataRootActivation
                     "The shared durable-store paths could not be fixed for this process.");
             }
 
+            PreferEnhancementSqliteStore(paths, explicitOverrides);
+
             if (!TryPublishFixedPaths(paths))
             {
                 readerLease?.Dispose();
@@ -216,6 +218,26 @@ internal static class SharedDataRootActivation
 
     internal static IReadOnlyList<string> StoreEnvironmentVariables
         => Stores.Select(static store => store.EnvironmentVariable).ToArray();
+
+    private static void PreferEnhancementSqliteStore(
+        IDictionary<string, string> paths,
+        IReadOnlySet<string> explicitOverrides)
+    {
+        if (explicitOverrides.Contains(EnhancementJobsEnvironmentVariable)
+            || !paths.TryGetValue(
+                EnhancementJobsEnvironmentVariable,
+                out string? jsonPath))
+        {
+            return;
+        }
+
+        string? directory = Path.GetDirectoryName(Path.GetFullPath(jsonPath));
+        if (string.IsNullOrWhiteSpace(directory))
+            return;
+        string sqlitePath = Path.Combine(directory, "jobs.sqlite3");
+        if (File.Exists(sqlitePath))
+            paths[EnhancementJobsEnvironmentVariable] = sqlitePath;
+    }
 
     internal static SharedDataRootActivationResult? Current
     {

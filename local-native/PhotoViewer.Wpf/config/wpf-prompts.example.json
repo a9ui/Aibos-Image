@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "revision": 0,
+  "photoreal": {
+    "prompt": "DUMMY_WPF_PHOTOREAL_PROMPT",
+    "emptyPrompt": "DUMMY_WPF_PHOTOREAL_FALLBACK",
+    "negativePrompt": ""
+  },
+  "video": {
+    "preservationPreamble": "DUMMY_WPF_VIDEO_PRESERVATION_PREAMBLE",
+    "blankPromptMotion": "DUMMY_WPF_VIDEO_BLANK_MOTION",
+    "negativePrompt": ""
+  },
+  "mappings": [
+    {
+      "enabled": true,
+      "category": "DUMMY_CATEGORY",
+      "sourceTag": "DUMMY_SOURCE_TAG",
+      "outputPrompt": "DUMMY_OUTPUT_FRAGMENT",
+      "matchTokens": ["DUMMY_MATCH_TOKEN"],
+      "excludeTokens": ["DUMMY_EXCLUDE_TOKEN"]
+    }
+  ]
+}

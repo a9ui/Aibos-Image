@@ -73,6 +73,8 @@ public partial class App
                 Directory.CreateDirectory(metadataIndexDirectory);
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
                 var sourcePaths = new List<string>(100);
+                var expectedOriginalPrompts = new Dictionary<string, string>(
+                    StringComparer.OrdinalIgnoreCase);
                 for (int index = 0; index < 100; index++)
                 {
                     string path = Path.Combine(folder, $"image-{index:000}.png");
@@ -84,7 +86,13 @@ public partial class App
                             (byte)(40 + (index % 8) * 16),
                             (byte)(70 + (index % 7) * 17),
                             (byte)(110 + (index % 6) * 18)));
+                    string embeddedPrompt = $"batch original prompt {index:000}";
+                    InsertPngTextFixture(
+                        path,
+                        "parameters",
+                        $"{embeddedPrompt}\nNegative prompt: batch negative\nSteps: 8, CFG scale: 1, Seed: {index}");
                     sourcePaths.Add(path);
+                    expectedOriginalPrompts[path] = embeddedPrompt;
                 }
 
                 File.WriteAllText(statePath, "{\"version\":2,\"smokeMarker\":\"keep-state\"}");
@@ -112,6 +120,13 @@ public partial class App
 
                 var createdJobs = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 var postAttempts = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var receivedPrompts = new ConcurrentDictionary<string, string?>(
+                    StringComparer.OrdinalIgnoreCase);
+                var receivedUpscaleSettings = new ConcurrentBag<(
+                    string PresetId,
+                    string AdapterId,
+                    double Scale,
+                    string OutputFormat)>();
                 int nextJobId = 0;
                 int inFlight = 0;
                 int maxInFlight = 0;
@@ -155,6 +170,15 @@ public partial class App
                 await window.LoadFolderAsync(folder);
                 Stage("loaded");
                 window.UpdateLayout();
+                const string currentSettingsPromptSentinel =
+                    "current settings must not enter Original HQ";
+                window.ConfigureModalPhotorealSettingsForSmoke(
+                    0.4,
+                    8,
+                    1280,
+                    currentSettingsPromptSentinel,
+                    emptyPrompt: "current fallback must not enter Original HQ",
+                    negativePrompt: "dummy negative");
                 failOnceSource = window.EnhancementWorkspaceCatalogPathsForSmoke[4];
                 responseLostAfterCreateSource = window.EnhancementWorkspaceCatalogPathsForSmoke[5];
                 outcomeUnknownSource = window.EnhancementWorkspaceCatalogPathsForSmoke[6];
@@ -162,6 +186,22 @@ public partial class App
                 {
                     string route = request.RequestUri?.AbsolutePath ?? "";
                     requests.Add($"{request.Method.Method} {route}");
+                    if (request.Method == HttpMethod.Get
+                        && route.EndsWith("/api/enhance/health", StringComparison.Ordinal))
+                    {
+                        return JsonResponse(HttpStatusCode.OK, new
+                        {
+                            capabilities = new
+                            {
+                                durableEnqueueInboxV1 = new
+                                {
+                                    ready = true,
+                                    protocolVersion = 1,
+                                    backendGeneration = "json-v1",
+                                },
+                            },
+                        });
+                    }
                     if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/jobs", StringComparison.Ordinal))
                     {
                         object[] jobs = createdJobs
@@ -178,11 +218,28 @@ public partial class App
                         Interlocked.CompareExchange(ref maxInFlight, currentInFlight, observed);
                     try
                     {
+                        string idempotencyKey = request.Headers.TryGetValues(
+                                "Idempotency-Key",
+                                out IEnumerable<string>? values)
+                            ? values.Single()
+                            : throw new InvalidOperationException(
+                                "Durable batch POST omitted Idempotency-Key.");
                         string body = request.Content is null
                             ? "{}"
                             : await request.Content.ReadAsStringAsync(token);
                         using JsonDocument document = JsonDocument.Parse(body);
                         string source = document.RootElement.GetProperty("sourceId").GetString() ?? "";
+                        receivedUpscaleSettings.Add((
+                            document.RootElement.GetProperty("presetId").GetString() ?? "",
+                            document.RootElement.GetProperty("adapterId").GetString() ?? "",
+                            document.RootElement.GetProperty("scale").GetDouble(),
+                            document.RootElement.GetProperty("outputFormat").GetString() ?? ""));
+                        string? receivedPrompt = document.RootElement.TryGetProperty(
+                                "prompt",
+                                out JsonElement promptElement)
+                            ? promptElement.GetString()
+                            : null;
+                        receivedPrompts.TryAdd(source, receivedPrompt);
                         int attempt = postAttempts.AddOrUpdate(source, 1, static (_, previous) => previous + 1);
                         await Task.Delay(35, token);
                         if (string.Equals(source, failOnceSource, StringComparison.OrdinalIgnoreCase) && attempt == 1)
@@ -203,7 +260,15 @@ public partial class App
                             _ => $"batch-job-{Interlocked.Increment(ref nextJobId):000}");
                         if (string.Equals(source, responseLostAfterCreateSource, StringComparison.OrdinalIgnoreCase) && attempt == 1)
                             throw new HttpRequestException("synthetic transport loss after durable create");
-                        return JsonResponse(HttpStatusCode.Accepted, new { job = JobPayload(source, id) });
+                        return JsonResponse(HttpStatusCode.Accepted, new
+                        {
+                            receipt = new
+                            {
+                                idempotencyKey,
+                                jobId = id,
+                            },
+                            job = JobPayload(source, id),
+                        });
                     }
                     finally
                     {
@@ -216,6 +281,11 @@ public partial class App
                     string? executable,
                     string? modelDirectory)
                 {
+                    window.ConfigureUpscaleSettingsForSmoke(
+                        "anime-sharp-x2",
+                        "realesrgan-ncnn",
+                        2d,
+                        "webp");
                     SetAdapterOverrides(root, executable, modelDirectory);
                     window.SelectRangeForSmoke(0, 0);
                     await window.OpenBatchEnhancementForSmokeAsync();
@@ -256,9 +326,19 @@ public partial class App
                     @"\\127.0.0.1\aibos-security-smoke\root",
                     @"\\127.0.0.1\aibos-security-smoke\adapter.exe",
                     @"\\127.0.0.1\aibos-security-smoke\models");
+                window.ConfigureUpscaleSettingsForSmoke(
+                    "anime-sharp-x2",
+                    "comfyui",
+                    2d,
+                    "webp");
+                var restoredUpscaleSettings = window.UpscaleSettingsForSmoke;
                 Stage("adapter-security");
 
                 window.SelectRangeForSmoke(0, 9);
+                string[] batchDoubleClickSources = window
+                    .EnhancementWorkspaceCatalogPathsForSmoke
+                    .Take(10)
+                    .ToArray();
                 await window.OpenBatchEnhancementForSmokeAsync();
                 BatchEnhancementSmokeSnapshot ten = window.BatchEnhancementForSmoke();
                 window.CloseBatchEnhancementForSmoke();
@@ -294,11 +374,19 @@ public partial class App
                         string.Equals(pair.Key, failOnceSource, StringComparison.OrdinalIgnoreCase)
                             ? pair.Value == 2
                             : pair.Value == 1);
-                bool ambiguousPostSafe = postAttempts.TryGetValue(responseLostAfterCreateSource!, out int lostAfterCreateAttempts)
+                static int CountBatchState(
+                    BatchEnhancementSmokeSnapshot snapshot,
+                    string state)
+                    => snapshot.Items.Count(item => string.Equals(
+                        item.State,
+                        state,
+                        StringComparison.Ordinal));
+                bool transientReceiptsSaved = postAttempts.TryGetValue(responseLostAfterCreateSource!, out int lostAfterCreateAttempts)
                     && lostAfterCreateAttempts == 1
                     && postAttempts.TryGetValue(outcomeUnknownSource!, out int unknownAttempts)
                     && unknownAttempts == 1
-                    && afterRetry.OutcomeUnknown == 1;
+                    && afterRetry.OutcomeUnknown == 0
+                    && CountBatchState(afterRetry, "SavedForDelivery") == 2;
 
                 await window.ViewBatchEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot handoff = window.EnhancementJobsWorkspaceForSmoke();
@@ -342,19 +430,39 @@ public partial class App
                     && firstRun.MaxInFlight <= 4
                     && afterStop.MaxInFlight <= 4;
                 bool doubleClickSuppressed = firstRun.PostRequests == 10
-                    && firstRun.Queued == 8
+                    && firstRun.Queued == 7
                     && firstRun.Failed == 1
-                    && firstRun.OutcomeUnknown == 1;
+                    && firstRun.OutcomeUnknown == 0
+                    && CountBatchState(firstRun, "SavedForDelivery") == 2;
+                bool doubleClickPromptProvenance = batchDoubleClickSources
+                    .All(path => receivedPrompts.TryGetValue(
+                            Path.GetFullPath(path),
+                            out string? receivedPrompt)
+                        && expectedOriginalPrompts.TryGetValue(
+                            path,
+                            out string? expectedPrompt)
+                        && string.Equals(
+                            receivedPrompt,
+                            expectedPrompt,
+                            StringComparison.Ordinal)
+                        && !string.Equals(
+                            receivedPrompt,
+                            currentSettingsPromptSentinel,
+                            StringComparison.Ordinal));
                 bool failedOnlyRetry = afterRetry.PostRequests == 11
-                    && afterRetry.Queued == 9
+                    && afterRetry.Queued == 8
                     && afterRetry.Failed == 0
-                    && afterRetry.OutcomeUnknown == 1
+                    && afterRetry.OutcomeUnknown == 0
+                    && CountBatchState(afterRetry, "SavedForDelivery") == 2
                     && oneCreatedJobPerAcceptedSource;
                 bool handoffOk = handoff.Visible
                     && handoff.Filtered == 9
                     && handoff.Active == 9
-                    && handoff.Highlighted == 9;
-                bool stopUnsentOnly = afterStop.Stopped > 0
+                    && handoff.Highlighted == 8;
+                bool durableReservationsNotStoppable = afterStop.Stopped == 0
+                    && CountBatchState(afterStop, "Queued")
+                        + CountBatchState(afterStop, "SavedForDelivery")
+                        == cancelPreflight.Eligible
                     && createdJobs.Count > 10
                     && requests.All(static request => !request.Contains("/cancel", StringComparison.Ordinal));
                 bool sizesOk = one.Selected == 1
@@ -378,6 +486,19 @@ public partial class App
                     && customExecutable.PostRequests == 0
                     && customModelDirectory.PostRequests == 0
                     && whitespaceOverride.PostRequests == 0;
+                bool legacyComfySettingsNormalized =
+                    restoredUpscaleSettings.PresetId == "anime-sharp-x2"
+                    && restoredUpscaleSettings.AdapterId == "realesrgan-ncnn"
+                    && restoredUpscaleSettings.Scale == 2d
+                    && restoredUpscaleSettings.OutputFormat == "webp";
+                int expectedBatchPostCount = postAttempts.Values.Sum();
+                bool batchPostSettingsMatch = expectedBatchPostCount > 0
+                    && receivedUpscaleSettings.Count == expectedBatchPostCount
+                    && receivedUpscaleSettings.All(static settings =>
+                        settings.PresetId == "anime-sharp-x2"
+                        && settings.AdapterId == "realesrgan-ncnn"
+                        && settings.Scale == 2d
+                        && settings.OutputFormat == "webp");
 
                 ok = ordinaryBrowsingPassive
                     && sizesOk
@@ -388,14 +509,17 @@ public partial class App
                     && narrowLayoutFits
                     && responsiveOpen
                     && customAdapterPathDeferred
+                    && legacyComfySettingsNormalized
+                    && batchPostSettingsMatch
                     && boundedConcurrency
                     && doubleClickSuppressed
+                    && doubleClickPromptProvenance
                     && failedOnlyRetry
-                    && ambiguousPostSafe
+                    && transientReceiptsSaved
                     && handoffOk
                     && cancelPreflight.Selected == 100
                     && cancelPreflight.Eligible == 91
-                    && stopUnsentOnly
+                    && durableReservationsNotStoppable
                     && sourceUnchanged
                     && storesUnchanged
                     && managedOutputsEmpty;
@@ -421,17 +545,39 @@ public partial class App
                         modelDirectoryStatus = customModelDirectory.AdapterStatus,
                         whitespaceStatus = whitespaceOverride.AdapterStatus,
                     },
+                    legacyComfySettingsNormalized,
+                    restoredUpscaleSettings = new
+                    {
+                        restoredUpscaleSettings.PresetId,
+                        restoredUpscaleSettings.AdapterId,
+                        restoredUpscaleSettings.Scale,
+                        restoredUpscaleSettings.OutputFormat,
+                    },
+                    batchPostSettingsMatch,
+                    batchPostSettingsCount = receivedUpscaleSettings.Count,
+                    batchPostSettingVariants = receivedUpscaleSettings
+                        .GroupBy(static settings => settings)
+                        .Select(static group => new
+                        {
+                            group.Key.PresetId,
+                            group.Key.AdapterId,
+                            group.Key.Scale,
+                            group.Key.OutputFormat,
+                            RequestCount = group.Count(),
+                        })
+                        .ToArray(),
                     boundedConcurrency,
                     maxInFlight,
                     doubleClickSuppressed,
+                    doubleClickPromptProvenance,
                     firstRun,
                     failedOnlyRetry,
-                    ambiguousPostSafe,
+                    transientReceiptsSaved,
                     afterRetry,
                     oneCreatedJobPerAcceptedSource,
                     handoff,
                     cancelPreflight,
-                    stopUnsentOnly,
+                    durableReservationsNotStoppable,
                     afterStop,
                     sourceUnchanged,
                     storesUnchanged,

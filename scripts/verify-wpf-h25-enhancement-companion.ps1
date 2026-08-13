@@ -38,7 +38,7 @@ function Wait-CompanionReady {
             throw "H25 companion exited before readiness with code $($Process.ExitCode)."
         }
         try {
-            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/api/runtime" -TimeoutSec 2
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/api/enhance/health" -TimeoutSec 2
             if ($response.StatusCode -eq 200) { return }
         }
         catch {
@@ -276,9 +276,8 @@ try {
     try {
         & pnpm install --offline --frozen-lockfile --virtual-store-dir .p
         Assert-True ($LASTEXITCODE -eq 0) 'Exact H25 dependency materialization failed.'
-        $nextCli = Join-Path $h25Source 'node_modules\next\dist\bin\next'
-        & node $nextCli build
-        Assert-True ($LASTEXITCODE -eq 0) 'Exact H25 production build failed.'
+        & pnpm companion:build
+        Assert-True ($LASTEXITCODE -eq 0) 'Exact H25 companion build failed.'
     }
     finally {
         Pop-Location
@@ -287,10 +286,10 @@ try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --no-incremental --nologo -v:minimal
     }
     else {
-        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+        & $DotnetPath msbuild $project -restore -target:Rebuild "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
     }
     Assert-True ($LASTEXITCODE -eq 0) 'Exact Aibos WPF build failed.'
     $wpfDll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
@@ -299,9 +298,8 @@ try {
     function Start-H25Companion {
         if (Test-Path -LiteralPath $serverOut) { Remove-Item -LiteralPath $serverOut -Force }
         if (Test-Path -LiteralPath $serverErr) { Remove-Item -LiteralPath $serverErr -Force }
-        $nextCli = Join-Path $h25Source 'node_modules\next\dist\bin\next'
         $process = Start-Process -FilePath 'node.exe' `
-            -ArgumentList @($nextCli, 'start', '--hostname', '127.0.0.1', '--port', [string]$port) `
+            -ArgumentList @('scripts/enhancement_companion.js', '--port', [string]$port) `
             -WorkingDirectory $h25Source `
             -RedirectStandardOutput $serverOut `
             -RedirectStandardError $serverErr `
@@ -311,6 +309,14 @@ try {
         $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop)
         Assert-True ($listeners.Count -ge 1) 'No H25 listener was found.'
         Assert-True (@($listeners | Where-Object { $_.LocalAddress -ne '127.0.0.1' }).Count -eq 0) 'H25 opened a non-127.0.0.1 listener.'
+        $listenerProcesses = @($listeners | ForEach-Object {
+            Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)"
+        })
+        $unexpectedListenerProcesses = @($listenerProcesses | Where-Object {
+            ($_.CommandLine -notmatch 'scripts[\\/]enhancement_companion\.js') -or
+            ($_.CommandLine -match 'next(?:\.cmd|\.js)?\s+start')
+        })
+        Assert-True ($listenerProcesses.Count -ge 1 -and $unexpectedListenerProcesses.Count -eq 0) 'The H25 listener was not the dedicated Enhancement companion.'
         return $process
     }
 

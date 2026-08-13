@@ -53,9 +53,11 @@ try {
 
     $required = @(
         'englishLoaded',
+        'englishFavoriteFilterSurface',
         'japaneseSaved',
         'japanesePersisted',
         'japaneseReloaded',
+        'japaneseFavoriteFilterSurface',
         'englishSaved',
         'englishReloaded',
         'unknownLocalPreserved',

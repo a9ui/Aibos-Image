@@ -19,9 +19,19 @@ Assert-True $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCa
 
 $buildRoot = Join-Path $runRoot 'build'
 $resultPath = Join-Path $runRoot 'result.json'
+$previousPromptPolicyPath = [Environment]::GetEnvironmentVariable(
+    'AIBOS_WPF_PROMPT_POLICY_PATH',
+    'Process')
 
 try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+    # The public smoke must never depend on or expose a developer's ignored
+    # local prompt policy. A missing bounded path deterministically selects the
+    # tracked synthetic fallback.
+    [Environment]::SetEnvironmentVariable(
+        'AIBOS_WPF_PROMPT_POLICY_PATH',
+        (Join-Path $runRoot 'missing-wpf-prompts.local.json'),
+        'Process')
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
         & $DotnetPath build $project -c $Configuration --nologo -v:minimal "-p:OutputPath=$buildOutput"
@@ -37,6 +47,18 @@ try {
     $childExitCode = $LASTEXITCODE
     Assert-True (Test-Path -LiteralPath $resultPath -PathType Leaf) 'Photoreal smoke did not produce JSON.'
     $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+    $falseInvariants = @(
+        $result.PSObject.Properties |
+            Where-Object { $_.Value -is [bool] -and -not $_.Value } |
+            ForEach-Object { $_.Name }
+    )
+    if ($falseInvariants.Count -gt 0) {
+        Write-Output ("False photoreal invariants: " + ($falseInvariants -join ', '))
+        Write-Output ("Message: " + [string]$result.message)
+        if ($null -ne $result.displayedVersionMetadataDiagnostic) {
+            Write-Output ($result.displayedVersionMetadataDiagnostic | ConvertTo-Json -Depth 6)
+        }
+    }
     Assert-True ($childExitCode -eq 0) "Photoreal smoke exited with $childExitCode."
     foreach ($propertyName in @(
         'ok',
@@ -45,7 +67,16 @@ try {
         'passive',
         'started',
         'toolbarContract',
+        'loadTimingContract',
         'versionCycleContract',
+        'versionSpecificFavoriteContract',
+        'photorealFavoriteBadgeFilterContract',
+        'photorealFavoriteLayoutContract',
+        'photorealFavoriteRetryContract',
+        'thumbnailVersionPreferenceContract',
+        'thumbnailVariantCountContract',
+        'upscaleSettingsContract',
+        'persistedNcnnUpscaleChoiceContract',
         'requestContract',
         'resetPromptContract',
         'appSettingsPromptContract',
@@ -54,9 +85,29 @@ try {
         'stylePersistenceContract',
         'styleReloadContract',
         'defaultPromptContract',
+        'promptMappingContract',
+        'promptMappingDirectToggleContract',
+        'promptMappingDefaultsMigrationContract',
+        'promptMappingButtonContrastContract',
+        'displayedVersionMetadataContract',
+        'photoUpscaleProfileContract',
+        'fallbackPromptContract',
+        'negativePromptContract',
+        'loraToggleContract',
+        'structureRemovedContract',
+        'explicitBlankPersistenceContract',
+        'legacyPromptMigrationContract',
         'independentCompanionContract',
         'galleryContextNoModal',
         'galleryContextDirectContract',
+        'galleryEnqueueNextContract',
+        'modalEnqueueNextDisplayedPhotorealContract',
+        'hqPromptProvenanceContract',
+        'recoveredHqButtonContract',
+        'recoveredHqCapabilityGateContract',
+        'photorealSeedContract',
+        'gallerySingleFlightContract',
+        'legacyPhotorealCapabilitySafe',
         'modalPhotorealOperation',
         'sharedQueueRoute',
         'sourceUntouched'
@@ -66,6 +117,10 @@ try {
     $result | ConvertTo-Json -Depth 5
 }
 finally {
+    [Environment]::SetEnvironmentVariable(
+        'AIBOS_WPF_PROMPT_POLICY_PATH',
+        $previousPromptPolicyPath,
+        'Process')
     if (Test-Path -LiteralPath $runRoot) {
         $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
         Assert-True $resolvedRunRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) 'Refusing cleanup outside TEMP.'

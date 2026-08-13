@@ -15,6 +15,12 @@
     <Color x:Key="AccentFillColor">#FF4E57CF</Color>
     <Color x:Key="AccentFillHoverColor">#FF5962D9</Color>
     <Color x:Key="FavoriteColor">#FFFF4D73</Color>
+    <Color x:Key="PhotorealFavoriteColor">#FF60A5FA</Color>
+    <Color x:Key="PhotorealFavoriteTextColor">#FFDBEAFE</Color>
+    <Color x:Key="PhotorealFavoriteBackgroundColor">#FF172554</Color>
+    <Color x:Key="VideoFavoriteColor">#FFC084FC</Color>
+    <Color x:Key="VideoFavoriteTextColor">#FFF3E8FF</Color>
+    <Color x:Key="VideoFavoriteBackgroundColor">#FF3B0764</Color>
     <Color x:Key="HeaderBgColor">#EB0B0F16</Color>
     <Color x:Key="GlassChromeTopColor">#D9181F2C</Color>
     <Color x:Key="GlassChromeBottomColor">#B8090E17</Color>
@@ -61,7 +67,7 @@
     <Color x:Key="ScrollThumbHoverColor">#78FFFFFF</Color>
 
     <!-- Shared vector badge marks avoid per-container symbol-font resolution.
-         Tile AutomationHelpText already exposes all three AI states. -->
+         Tile AutomationHelpText exposes completed and queued AI states. -->
     <Geometry x:Key="UpscaleBadgeIconGeometry">M9,3 L3,3 3,9 M15,3 L21,3 21,9 M9,21 L3,21 3,15 M15,21 L21,21 21,15</Geometry>
     <Geometry x:Key="PhotorealBadgeIconGeometry">M12,3 A4,4 0 1 1 12,11 A4,4 0 1 1 12,3 M5,21 C5,16.8 8.1,14.5 12,14.5 C15.9,14.5 19,16.8 19,21</Geometry>
     <Geometry x:Key="VideoBadgeIconGeometry">M3,4 L21,4 21,20 3,20 Z M7,4 L7,20 M17,4 L17,20 M3,8 L7,8 M3,12 L7,12 M3,16 L7,16 M17,8 L21,8 M17,12 L21,12 M17,16 L21,16</Geometry>
@@ -92,6 +98,12 @@
     <SolidColorBrush x:Key="Focus" Color="{DynamicResource FocusColor}"/>
     <SolidColorBrush x:Key="Favorite" Color="{DynamicResource FavoriteColor}"/>
     <SolidColorBrush x:Key="FavoriteText" Color="{DynamicResource FavoriteTextColor}"/>
+    <SolidColorBrush x:Key="PhotorealFavorite" Color="{DynamicResource PhotorealFavoriteColor}"/>
+    <SolidColorBrush x:Key="PhotorealFavoriteText" Color="{DynamicResource PhotorealFavoriteTextColor}"/>
+    <SolidColorBrush x:Key="PhotorealFavoriteBackground" Color="{DynamicResource PhotorealFavoriteBackgroundColor}"/>
+    <SolidColorBrush x:Key="VideoFavorite" Color="{DynamicResource VideoFavoriteColor}"/>
+    <SolidColorBrush x:Key="VideoFavoriteText" Color="{DynamicResource VideoFavoriteTextColor}"/>
+    <SolidColorBrush x:Key="VideoFavoriteBackground" Color="{DynamicResource VideoFavoriteBackgroundColor}"/>
     <SolidColorBrush x:Key="FavoriteThumbnailStatusBorderBrush" Color="{DynamicResource FavoriteThumbnailStatusBorderColor}"/>
     <SolidColorBrush x:Key="EnhancedThumbnailStatusBorderBrush" Color="{DynamicResource EnhancedThumbnailStatusBorderColor}"/>
     <SolidColorBrush x:Key="Success" Color="{DynamicResource SuccessColor}"/>
@@ -480,7 +492,7 @@
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Height" Value="32"/>
       <Setter Property="Margin" Value="0,1"/>
-      <Setter Property="FocusVisualStyle" Value="{StaticResource FocusVisual}"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource CommonButtonFocusVisual}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
@@ -512,10 +524,11 @@
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Height" Value="32"/>
+      <Setter Property="Padding" Value="10,0"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="4" Padding="10,0"
+            <Border x:Name="bd" CornerRadius="4" Padding="{TemplateBinding Padding}"
                     Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -538,7 +551,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="bd" CornerRadius="4" Padding="10,0"
+            <Border x:Name="bd" CornerRadius="4" Padding="{TemplateBinding Padding}"
                     Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource GlassBorder}" BorderThickness="1">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -770,8 +783,29 @@
                   IsHitTestVisible="False" Visibility="{Binding Enhanced, Converter={StaticResource BoolToVis}}"/>
           <Border CornerRadius="2" Margin="2" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                   IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
-          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3"
+          <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="3"
                       IsHitTestVisible="False">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Border x:Name="compactPhotorealFavoriteBadge" MinWidth="22" Height="13" Padding="2,0" CornerRadius="3" Margin="0,0,2,0"
+                      Background="{DynamicResource PhotorealFavoriteBackground}" BorderBrush="{DynamicResource PhotorealFavorite}" BorderThickness="1"
+                      Visibility="{Binding ShowPhotorealFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                      ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写のお気に入り Lv {0}（有効版の最高Lv）}"
+                      AutomationProperties.Name="{Binding PhotorealFavoriteAutomationName}">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource PhotorealFavorite}" FontSize="9"/>
+                  <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="{DynamicResource PhotorealFavoriteText}" FontSize="8" FontWeight="SemiBold" Margin="1,0,0,0"/>
+                </StackPanel>
+              </Border>
+              <Border x:Name="compactVideoFavoriteBadge" MinWidth="22" Height="13" Padding="2,0" CornerRadius="3" Margin="0,0,2,0"
+                      Background="{DynamicResource VideoFavoriteBackground}" BorderBrush="{DynamicResource VideoFavorite}" BorderThickness="1"
+                      Visibility="{Binding ShowVideoFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                      ToolTip="{Binding VideoFavoriteLevel, StringFormat={}動画のお気に入り Lv {0}（有効版の最高Lv）}"
+                      AutomationProperties.Name="{Binding VideoFavoriteAutomationName}">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource VideoFavorite}" FontSize="9"/>
+                  <TextBlock Text="{Binding VideoFavoriteLevel}" Foreground="{DynamicResource VideoFavoriteText}" FontSize="8" FontWeight="SemiBold" Margin="1,0,0,0"/>
+                </StackPanel>
+              </Border>
             <Border Width="14" Height="13" CornerRadius="3" Margin="0,0,2,0"
                     Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
                     Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}"
@@ -796,6 +830,42 @@
                     StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
                     Width="9.5" Height="9.5" Stretch="Uniform"/>
             </Border>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,0,0">
+              <Border Width="14" Height="13" CornerRadius="3" Margin="0,0,2,0"
+                      Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AA38BDF8" BorderThickness="1"
+                      Visibility="{Binding ShowUpscaleQueueBadge, Converter={StaticResource BoolToVis}}"
+                      AutomationProperties.Name="AI-upscale queued">
+                <Grid>
+                  <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8" StrokeDashArray="1,1"
+                        StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                        Width="9.5" Height="9.5" Stretch="Uniform"/>
+                  <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                </Grid>
+              </Border>
+              <Border Width="14" Height="13" CornerRadius="3" Margin="0,0,2,0"
+                      Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAC084FC" BorderThickness="1"
+                      Visibility="{Binding ShowPhotorealQueueBadge, Converter={StaticResource BoolToVis}}"
+                      AutomationProperties.Name="AI-photoreal queued">
+                <Grid>
+                  <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8" StrokeDashArray="1,1"
+                        StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                        Width="9.5" Height="9.5" Stretch="Uniform"/>
+                  <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                </Grid>
+              </Border>
+              <Border Width="14" Height="13" CornerRadius="3"
+                      Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAF59E0B" BorderThickness="1"
+                      Visibility="{Binding ShowVideoQueueBadge, Converter={StaticResource BoolToVis}}"
+                      AutomationProperties.Name="Video generation queued">
+                <Grid>
+                  <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8" StrokeDashArray="1,1"
+                        StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                        Width="9.5" Height="9.5" Stretch="Uniform"/>
+                  <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                </Grid>
+              </Border>
+            </StackPanel>
           </StackPanel>
           <Grid x:Name="compactFavoriteControls" VerticalAlignment="Bottom"
                 Height="{Binding CompactFavoriteControlHeight}" Opacity="0" IsHitTestVisible="False">
@@ -840,22 +910,56 @@
                     <Image Source="{Binding Thumbnail}" Stretch="{Binding CardThumbnailStretch}" RenderOptions.BitmapScalingMode="HighQuality"/>
 
                     <!-- unseen dot -->
-                    <Ellipse Width="8" Height="8" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top"
+                    <Ellipse x:Name="unseenDot" Width="8" Height="8" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top"
                              Fill="{StaticResource AccentLight}"
                              Visibility="{Binding ShowUnseenDotOnCard, Converter={StaticResource BoolToVis}}"/>
 
                     <!-- Safe direct Favorite increment. Relative decrement is intentionally absent from gallery surfaces. -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="2">
+                      <Border x:Name="photorealFavoriteBadge" MinWidth="30" Height="26" Padding="5,0" CornerRadius="5" Margin="0,0,2,0"
+                              Background="{DynamicResource PhotorealFavoriteBackground}" BorderBrush="{DynamicResource PhotorealFavorite}" BorderThickness="1"
+                              Visibility="{Binding ShowPhotorealFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                              ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写のお気に入り Lv {0}（有効版の最高Lv）}"
+                              AutomationProperties.Name="{Binding PhotorealFavoriteAutomationName}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource PhotorealFavorite}" FontSize="14"/>
+                          <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="{DynamicResource PhotorealFavoriteText}" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
+                        </StackPanel>
+                      </Border>
+                      <Border x:Name="videoFavoriteBadge" MinWidth="30" Height="26" Padding="5,0" CornerRadius="5" Margin="0,0,2,0"
+                              Background="{DynamicResource VideoFavoriteBackground}" BorderBrush="{DynamicResource VideoFavorite}" BorderThickness="1"
+                              Visibility="{Binding ShowVideoFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                              ToolTip="{Binding VideoFavoriteLevel, StringFormat={}動画のお気に入り Lv {0}（有効版の最高Lv）}"
+                              AutomationProperties.Name="{Binding VideoFavoriteAutomationName}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                          <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource VideoFavorite}" FontSize="14"/>
+                          <TextBlock Text="{Binding VideoFavoriteLevel}" Foreground="{DynamicResource VideoFavoriteText}" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
+                        </StackPanel>
+                      </Border>
                       <Button Style="{StaticResource IconButton}" Width="{Binding CardFavoriteButtonSize}" Height="{Binding CardFavoriteButtonSize}"
                               CommandParameter="increase" Tag="{Binding}" ToolTip="Increase favorite level"
                               AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="16"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="16"/><TextBlock x:Name="favoriteLevelBadge" Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0" Visibility="{Binding ShowFavoriteBadge, Converter={StaticResource BoolToVis}}"/></StackPanel>
                       </Button>
                     </StackPanel>
 
-                    <!-- Stable concise identity: filename and dimensions stay
+                    <!-- Stable concise identity: filename and file size stay
                          readable without adding prompt text or changing card geometry. -->
-                    <Border x:Name="overlay" VerticalAlignment="Bottom" Height="58" Opacity="1" Padding="10,0,10,8" Visibility="{Binding ShowCardDetails, Converter={StaticResource BoolToVis}}">
+                    <Border x:Name="overlay" VerticalAlignment="Bottom" Height="58" Opacity="1" Padding="10,0,10,8">
+                      <Border.Style>
+                        <Style TargetType="{x:Type Border}">
+                          <Setter Property="Visibility" Value="Collapsed"/>
+                          <Style.Triggers>
+                            <MultiDataTrigger>
+                              <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding ShowCardDetails}" Value="True"/>
+                                <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType={x:Type ListBox}}, Path=Tag}" Value="True"/>
+                              </MultiDataTrigger.Conditions>
+                              <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Border.Style>
                       <Border.Background>
                         <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
                           <GradientStop Color="{DynamicResource ThumbnailCaptionStartColor}" Offset="0"/>
@@ -875,32 +979,84 @@
                             IsHitTestVisible="False" Visibility="{Binding Enhanced, Converter={StaticResource BoolToVis}}"/>
                     <Border CornerRadius="2" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="5"
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="5"
                                 IsHitTestVisible="False">
-                      <Border Width="18" Height="16" CornerRadius="4" Margin="0,0,3,0"
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                      <Border MinWidth="18" Height="16" Padding="3,0" CornerRadius="4" Margin="0,0,3,0"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
                               Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}"
                               AutomationProperties.Name="AI-upscaled">
-                        <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="11" Height="11" Stretch="Uniform"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                          <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8"
+                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                Width="11" Height="11" Stretch="Uniform"/>
+                          <TextBlock Text="{Binding UpscaleVersionCount}" Foreground="#FFBAE6FD" FontSize="9" FontWeight="SemiBold"
+                                     VerticalAlignment="Center" Margin="2,0,0,0"
+                                     Visibility="{Binding ShowUpscaleVariantCount, Converter={StaticResource BoolToVis}}"/>
+                        </StackPanel>
                       </Border>
-                      <Border Width="18" Height="16" CornerRadius="4" Margin="0,0,3,0"
+                      <Border MinWidth="18" Height="16" Padding="3,0" CornerRadius="4" Margin="0,0,3,0"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFC084FC" BorderThickness="1"
                               Visibility="{Binding ShowPhotorealBadge, Converter={StaticResource BoolToVis}}"
                               AutomationProperties.Name="AI-photorealized">
-                        <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="11" Height="11" Stretch="Uniform"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                          <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8"
+                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                Width="11" Height="11" Stretch="Uniform"/>
+                          <TextBlock Text="{Binding PhotorealVersionCount}" Foreground="#FFE9D5FF" FontSize="9" FontWeight="SemiBold"
+                                     VerticalAlignment="Center" Margin="2,0,0,0"
+                                     Visibility="{Binding ShowPhotorealVariantCount, Converter={StaticResource BoolToVis}}"/>
+                        </StackPanel>
                       </Border>
-                      <Border Width="18" Height="16" CornerRadius="4"
+                      <Border MinWidth="18" Height="16" Padding="3,0" CornerRadius="4"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FFF59E0B" BorderThickness="1"
                               Visibility="{Binding ShowVideoBadge, Converter={StaticResource BoolToVis}}"
                               AutomationProperties.Name="Generated video available">
-                        <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                              Width="11" Height="11" Stretch="Uniform"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                          <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8"
+                                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                Width="11" Height="11" Stretch="Uniform"/>
+                          <TextBlock Text="{Binding VideoVersionCount}" Foreground="#FFFFE7B0" FontSize="9" FontWeight="SemiBold"
+                                     VerticalAlignment="Center" Margin="2,0,0,0"
+                                     Visibility="{Binding ShowVideoVariantCount, Converter={StaticResource BoolToVis}}"/>
+                        </StackPanel>
                       </Border>
+                      </StackPanel>
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,3,0,0">
+                        <Border Width="18" Height="16" CornerRadius="4" Margin="0,0,3,0"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AA38BDF8" BorderThickness="1"
+                                Visibility="{Binding ShowUpscaleQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="AI-upscale queued">
+                          <Grid>
+                            <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="11" Height="11" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="8" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                        <Border Width="18" Height="16" CornerRadius="4" Margin="0,0,3,0"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAC084FC" BorderThickness="1"
+                                Visibility="{Binding ShowPhotorealQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="AI-photoreal queued">
+                          <Grid>
+                            <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="11" Height="11" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="8" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                        <Border Width="18" Height="16" CornerRadius="4"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAF59E0B" BorderThickness="1"
+                                Visibility="{Binding ShowVideoQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="Video generation queued">
+                          <Grid>
+                            <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="11" Height="11" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="8" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                      </StackPanel>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -955,8 +1111,9 @@
                     <Border CornerRadius="4" Margin="4" BorderBrush="{DynamicResource FavoriteThumbnailStatusBorderBrush}" BorderThickness="2"
                             IsHitTestVisible="False" Visibility="{Binding Fav, Converter={StaticResource CountToVis}}"/>
                     <Ellipse Width="8" Height="8" Margin="7" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="{StaticResource AccentLight}" Visibility="{Binding ShowUnseenDot, Converter={StaticResource BoolToVis}}"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4"
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="4"
                                 IsHitTestVisible="False">
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                       <Border Width="16" Height="14" CornerRadius="3" Margin="0,0,2,0"
                               Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#FF38BDF8" BorderThickness="1"
                               Visibility="{Binding ShowUpscaleBadge, Converter={StaticResource BoolToVis}}"
@@ -981,6 +1138,42 @@
                               StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
                               Width="10" Height="10" Stretch="Uniform"/>
                       </Border>
+                      </StackPanel>
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,0,0">
+                        <Border Width="16" Height="14" CornerRadius="3" Margin="0,0,2,0"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AA38BDF8" BorderThickness="1"
+                                Visibility="{Binding ShowUpscaleQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="AI-upscale queued">
+                          <Grid>
+                            <Path Data="{StaticResource UpscaleBadgeIconGeometry}" Stroke="#FFBAE6FD" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="10" Height="10" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                        <Border Width="16" Height="14" CornerRadius="3" Margin="0,0,2,0"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAC084FC" BorderThickness="1"
+                                Visibility="{Binding ShowPhotorealQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="AI-photoreal queued">
+                          <Grid>
+                            <Path Data="{StaticResource PhotorealBadgeIconGeometry}" Stroke="#FFE9D5FF" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="10" Height="10" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                        <Border Width="16" Height="14" CornerRadius="3"
+                                Background="{DynamicResource AiBadgeBackgroundBrush}" BorderBrush="#AAF59E0B" BorderThickness="1"
+                                Visibility="{Binding ShowVideoQueueBadge, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="Video generation queued">
+                          <Grid>
+                            <Path Data="{StaticResource VideoBadgeIconGeometry}" Stroke="#FFFFE7B0" StrokeThickness="1.8" StrokeDashArray="1,1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="10" Height="10" Stretch="Uniform"/>
+                            <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-1,0"/>
+                          </Grid>
+                        </Border>
+                      </StackPanel>
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -989,6 +1182,26 @@
                   <TextBlock Text="{Binding Path}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontFamily="{StaticResource MonoFont}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                  <Border x:Name="listPhotorealFavoriteBadge" MinWidth="34" Height="28" Padding="5,0" CornerRadius="5" Margin="0,0,4,0"
+                          Background="{DynamicResource PhotorealFavoriteBackground}" BorderBrush="{DynamicResource PhotorealFavorite}" BorderThickness="1"
+                          Visibility="{Binding ShowPhotorealFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                          ToolTip="{Binding PhotorealFavoriteLevel, StringFormat={}実写のお気に入り Lv {0}（有効版の最高Lv）}"
+                          AutomationProperties.Name="{Binding PhotorealFavoriteAutomationName}">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                      <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource PhotorealFavorite}" FontSize="15"/>
+                      <TextBlock Text="{Binding PhotorealFavoriteLevel}" Foreground="{DynamicResource PhotorealFavoriteText}" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
+                    </StackPanel>
+                  </Border>
+                  <Border x:Name="listVideoFavoriteBadge" MinWidth="34" Height="28" Padding="5,0" CornerRadius="5" Margin="0,0,4,0"
+                          Background="{DynamicResource VideoFavoriteBackground}" BorderBrush="{DynamicResource VideoFavorite}" BorderThickness="1"
+                          Visibility="{Binding ShowVideoFavoriteBadge, Converter={StaticResource BoolToVis}}"
+                          ToolTip="{Binding VideoFavoriteLevel, StringFormat={}動画のお気に入り Lv {0}（有効版の最高Lv）}"
+                          AutomationProperties.Name="{Binding VideoFavoriteAutomationName}">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                      <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xEB52;" Foreground="{DynamicResource VideoFavorite}" FontSize="15"/>
+                      <TextBlock Text="{Binding VideoFavoriteLevel}" Foreground="{DynamicResource VideoFavoriteText}" FontSize="10" FontWeight="SemiBold" Margin="2,0,0,0"/>
+                    </StackPanel>
+                  </Border>
                   <Button Style="{StaticResource IconButton}" MinWidth="34" Width="Auto" Height="28" Padding="5,0" CommandParameter="increase" Tag="{Binding}"
                           ToolTip="Increase favorite level" AutomationProperties.Name="{Binding FileName, StringFormat={}Increase favorite level for {0}}">
                     <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="{Binding FavoriteGlyph}" Foreground="{StaticResource Favorite}" FontSize="16"/><TextBlock Text="{Binding Fav}" Foreground="{StaticResource Favorite}" FontSize="10" FontWeight="SemiBold" Margin="3,0,0,0"/></StackPanel>

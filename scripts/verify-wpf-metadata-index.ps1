@@ -3,7 +3,8 @@ param(
     [ValidateRange(32, 2048)]
     [int]$Count = 256,
     [ValidateRange(2, 8)]
-    [int]$FolderCount = 4
+    [int]$FolderCount = 4,
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +17,19 @@ function Assert-True {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+$dotnet = 'dotnet.exe'
+$localDotnet10 = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+if (Test-Path -LiteralPath $localDotnet10 -PathType Leaf) {
+    $dotnet = $localDotnet10
+}
+$dotnetRootBefore = [Environment]::GetEnvironmentVariable('DOTNET_ROOT')
+$dotnetRootX64Before = [Environment]::GetEnvironmentVariable('DOTNET_ROOT_X64')
+$dotnetRoot = if ([IO.Path]::IsPathRooted($dotnet)) {
+    Split-Path -Parent $dotnet
+}
+else {
+    $null
+}
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('photoviewer-wpf-metadata-index-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -36,9 +50,15 @@ foreach ($name in $environmentNames) {
 $currentDirectoryBefore = [Environment]::CurrentDirectory
 
 try {
+    if ($dotnetRoot) {
+        [Environment]::SetEnvironmentVariable('DOTNET_ROOT', $dotnetRoot)
+        [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $dotnetRoot)
+    }
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
-    & dotnet build $project -c $Configuration --nologo -v:minimal
-    if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
+    if (-not $SkipBuild) {
+        & $dotnet build $project -c $Configuration --nologo -v:minimal
+        if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
+    }
 
     $process = Start-Process -FilePath $exe `
         -ArgumentList @(
@@ -76,6 +96,25 @@ try {
     Assert-True ($result.cold.progressMonotonic -eq $true) 'Metadata progress regressed during the cold load.'
     Assert-True ($result.cold.progress -eq 100 -and $result.cold.status -eq 'ready') 'Metadata progress did not settle at ready/100%.'
 
+    Assert-True ($result.legacyMigration.passed -eq $true) 'Legacy PVMI-to-SQLite migration scenario failed.'
+    Assert-True ($result.legacyMigration.legacyDetected -eq $true) 'Legacy metadata index was not detected as requiring migration.'
+    Assert-True ($result.legacyMigration.sqliteCreated -eq $true) 'Legacy metadata index was not migrated to SQLite.'
+    Assert-True ($result.legacyMigration.legacyPreserved -eq $true) 'Legacy metadata evidence was unexpectedly removed during migration.'
+    Assert-True ($result.sqliteV1Migration.passed -eq $true) 'SQLite schema v1-to-v2 aggregate-counter migration scenario failed.'
+    Assert-True ($result.sqliteV1Migration.beforeRevision -eq 7 -and $result.sqliteV1Migration.afterRevision -eq 8) 'SQLite schema migration did not preserve and advance the durable revision exactly once.'
+    Assert-True ($result.rowDeltaRollback.passed -eq $true) 'Rejected SQLite row delta did not roll back atomically.'
+    Assert-True ($result.rowDeltaRollback.revisionBefore -eq $result.rowDeltaRollback.revisionAfter) 'Rejected SQLite row delta changed the durable revision.'
+    Assert-True ($result.concurrentReaderRebuild.passed -eq $true) 'Live-reader SQLite full rebuild scenario failed.'
+    Assert-True ($result.concurrentReaderRebuild.staleRevisionRejected -eq $true) 'Stale cross-process metadata revision was not rejected by CAS.'
+    Assert-True ($result.concurrentReaderRebuild.walPresentAfterDelta -eq $true) 'Concurrent metadata fixture did not retain committed WAL frames behind the live reader.'
+    Assert-True ($result.concurrentReaderRebuild.walPreservedDuringFullSave -eq $true) 'Full rebuild detached or deleted the live SQLite WAL family.'
+    Assert-True ($result.concurrentReaderRebuild.readerSnapshotCount -eq $Count -and $result.concurrentReaderRebuild.durableEntryCount -eq $Count) 'Concurrent reader/full rebuild did not preserve both snapshots.'
+    Assert-True ($result.orphanFamilyProtection.passed -eq $true) 'Absent-main orphan SQLite family protection scenario failed.'
+    Assert-True ($result.orphanFamilyProtection.wal.passed -eq $true) 'Committed orphan WAL was not preserved fail-closed.'
+    Assert-True ($result.orphanFamilyProtection.shm.passed -eq $true) 'Orphan SHM namespace was not preserved fail-closed.'
+    Assert-True ($result.orphanFamilyProtection.journal.passed -eq $true) 'Orphan rollback journal was not preserved fail-closed.'
+    Assert-True ($result.orphanFamilyProtection.residueFree -eq $true) 'Orphan SQLite family rejection left temp/lock residue.'
+
     Assert-True ($result.warm.passed -eq $true) 'Separate-window warm metadata scenario failed.'
     Assert-True ($result.warm.cacheHits -eq $Count -and $result.warm.cacheMisses -eq 0) 'Warm metadata load was not an all-hit reuse.'
     Assert-True ($result.warm.indexHashUnchanged -eq $true -and $result.warm.indexMtimeUnchanged -eq $true) 'Warm metadata reuse rewrote the durable index.'
@@ -83,11 +122,13 @@ try {
     Assert-True ($result.partialInvalidation.passed -eq $true) 'Single-file metadata invalidation scenario failed.'
     Assert-True ($result.partialInvalidation.cacheHits -eq ($Count - 1) -and $result.partialInvalidation.cacheMisses -eq 1) 'Single-file mutation did not produce N-1 hits and one miss.'
     Assert-True ($result.partialInvalidation.refreshedPromptReady -eq $true) 'Single-file mutation did not expose the refreshed prompt.'
+    Assert-True ($result.partialInvalidation.rowDeltaCommitted -eq $true) 'Single-file mutation did not commit exactly one SQLite row-delta revision.'
 
-    Assert-True ($result.corruptionRecovery.passed -eq $true) 'Checksum corruption recovery scenario failed.'
-    Assert-True ($result.corruptionRecovery.checksumDetected -eq $true) 'Payload bit flip was not identified as a checksum failure.'
-    Assert-True ($result.corruptionRecovery.cacheHits -eq 0 -and $result.corruptionRecovery.cacheMisses -eq $Count) 'Corrupt metadata index did not safely fall back for every source.'
-    Assert-True ($result.corruptionRecovery.rebuiltEntryCount -eq $Count) 'Corrupt metadata index was not rebuilt completely.'
+    Assert-True ($result.corruptionRecovery.passed -eq $true) 'Unreadable SQLite target preservation scenario failed.'
+    Assert-True ($result.corruptionRecovery.corruptionDetected -eq $true) 'Malformed SQLite metadata cache was not rejected.'
+    Assert-True ($result.corruptionRecovery.cacheHits -eq 0 -and $result.corruptionRecovery.cacheMisses -eq $Count) 'Corrupt metadata index did not safely fall back to source metadata.'
+    Assert-True ($result.corruptionRecovery.bytesUnchanged -eq $true -and $result.corruptionRecovery.mtimeUnchanged -eq $true) 'Unreadable SQLite target was overwritten or modified.'
+    Assert-True ($result.corruptionRecovery.preservedLoadState -eq 'Invalid') 'Unreadable SQLite target was not preserved fail-closed.'
 
     Assert-True ($result.futureVersionProtection.passed -eq $true) 'Future metadata index protection scenario failed.'
     Assert-True ($result.futureVersionProtection.loadState -eq 'Unsupported') 'Future metadata index was not classified as Unsupported.'
@@ -98,10 +139,39 @@ try {
     Assert-True ($result.commitTimeFutureGuard.bytesUnchanged -eq $true -and $result.commitTimeFutureGuard.mtimeUnchanged -eq $true) 'Commit-time future guard changed the protected index.'
     Assert-True ($result.commitTimeFutureGuard.residueFree -eq $true) 'Commit-time future guard left temp/lock residue.'
 
-    Assert-True ($result.checksumValidMalformed.passed -eq $true) 'Checksum-valid bounded-length corruption scenario failed.'
-    Assert-True ($result.checksumValidMalformed.loadState -eq 'Invalid') 'Checksum-valid malformed index was not classified as Invalid.'
-    Assert-True ($null -eq $result.checksumValidMalformed.escapedException) 'Checksum-valid malformed index escaped MetadataIndexStore.Load as an exception.'
-    Assert-True ($result.checksumValidMalformed.fixtureRemoved -eq $true) 'Checksum-valid malformed fixture was not removed.'
+    Assert-True ($result.boundedMalformed.passed -eq $true) 'Bounded malformed SQLite scenario failed.'
+    Assert-True ($result.boundedMalformed.loadState -eq 'Invalid') 'Bounded malformed SQLite index was not classified as Invalid.'
+    Assert-True ($null -eq $result.boundedMalformed.escapedException) 'Bounded malformed SQLite index escaped MetadataIndexStore.Load as an exception.'
+    Assert-True ($result.boundedMalformed.fixtureRemoved -eq $true) 'Bounded malformed SQLite fixture was not removed.'
+    Assert-True ($result.boundedOversizedPrompt.passed -eq $true) 'Oversized SQLite prompt was not rejected before materialization.'
+    Assert-True ($result.boundedOversizedPrompt.loadState -eq 'Invalid') 'Oversized SQLite prompt was not classified as Invalid.'
+    Assert-True ($null -eq $result.boundedOversizedPrompt.escapedException) 'Oversized SQLite prompt escaped MetadataIndexStore.Load as an exception.'
+    Assert-True ($result.boundedLargeNulTextPath.passed -eq $true) '32 MiB SQLite TEXT path with embedded NUL was not rejected within the memory bound.'
+    Assert-True ($result.boundedLargeNulTextPath.loadState -eq 'Invalid') 'Large NUL-bearing SQLite TEXT path was not classified as Invalid.'
+    Assert-True ($result.boundedLargeNulTextPath.privateGrowthBytes -le $result.boundedLargeNulTextPath.privateGrowthBudgetBytes) 'Large SQLite TEXT path materialized beyond the bounded memory allowance.'
+    Assert-True ($result.noncanonicalRecursiveView.passed -eq $true) 'Recursive SQLite metadata VIEW was not rejected before execution.'
+    Assert-True ($result.noncanonicalRecursiveView.loadState -eq 'Invalid') 'Recursive SQLite metadata VIEW was not classified as Invalid.'
+    Assert-True ($result.noncanonicalRecursiveView.familyHashUnchanged -eq $true -and $result.noncanonicalRecursiveView.mtimeUnchanged -eq $true) 'Recursive SQLite metadata VIEW rejection changed the database family.'
+    Assert-True ($result.boundedOversizedSchemaSql.passed -eq $true) 'Oversized canonical SQLite schema SQL was not rejected within resource bounds.'
+    Assert-True ($result.boundedOversizedSchemaSql.loadState -eq 'Invalid') 'Oversized SQLite schema SQL was not classified as Invalid.'
+    Assert-True ($result.boundedOversizedSchemaSql.privateGrowthBytes -le $result.boundedOversizedSchemaSql.privateGrowthBudgetBytes) 'Oversized SQLite schema SQL exceeded the private-memory growth allowance.'
+    Assert-True ($result.boundedOversizedSchemaSql.saveWritten -eq $false -and $result.boundedOversizedSchemaSql.applyWritten -eq $false) 'Oversized SQLite schema SQL reached a mutation path.'
+    Assert-True ($result.boundedOversizedSchemaSql.familyHashUnchanged -eq $true -and $result.boundedOversizedSchemaSql.mtimeUnchanged -eq $true) 'Oversized SQLite schema SQL rejection changed the database family.'
+    Assert-True ($result.noncanonicalTriggerProtection.passed -eq $true) 'SQLite store_meta trigger was not rejected before ApplyChanges.'
+    Assert-True ($result.noncanonicalTriggerProtection.written -eq $false) 'SQLite trigger fixture reached the mutation path.'
+    Assert-True ($result.noncanonicalTriggerProtection.revisionBefore -eq $result.noncanonicalTriggerProtection.revisionAfter) 'Rejected SQLite trigger fixture changed the durable revision.'
+    Assert-True ($result.noncanonicalTriggerProtection.familyHashUnchanged -eq $true -and $result.noncanonicalTriggerProtection.mtimeUnchanged -eq $true) 'Rejected SQLite trigger fixture changed the database family.'
+    Assert-True ($result.sqliteBudgetProtection.passed -eq $true) 'SQLite family/aggregate load and write budget scenario failed.'
+    Assert-True ($result.sqliteBudgetProtection.aggregateLoadState -eq 'Invalid') 'Aggregate SQLite payload was not rejected before materialization.'
+    Assert-True ($result.sqliteBudgetProtection.familyLoadState -eq 'Invalid') 'Oversized SQLite WAL family was not rejected before open.'
+    Assert-True ($result.sqliteBudgetProtection.saveTargetAbsent -eq $true) 'Rejected oversized Save published a target or sidecar.'
+    Assert-True ($result.sqliteBudgetProtection.applyHashUnchanged -eq $true) 'Rejected oversized ApplyChanges modified the durable main database.'
+    Assert-True ($result.sqliteBudgetProtection.applyRevisionBefore -eq $result.sqliteBudgetProtection.applyRevisionAfter) 'Rejected oversized ApplyChanges changed the durable revision.'
+    Assert-True ($null -eq $result.sqliteBudgetProtection.escapedException) 'SQLite budget enforcement escaped as an exception.'
+    Assert-True ($result.sqliteBudgetProtection.residueFree -eq $true) 'SQLite budget enforcement left temp/lock residue.'
+    Assert-True ($result.oneRowApplyScaling.passed -eq $true) '10k/50k/140k one-row ApplyChanges scaling gate failed.'
+    Assert-True (($result.oneRowApplyScaling.samples | Where-Object { @($_.rowProbeCounts | Where-Object { $_ -ne 1 }).Count -gt 0 }).Count -eq 0) 'One-row ApplyChanges probed more than the changed row.'
+    Assert-True (($result.oneRowApplyScaling.samples | Where-Object { @($_.fullTableValidationCounts | Where-Object { $_ -ne 0 }).Count -gt 0 }).Count -eq 0) 'One-row ApplyChanges performed a full-table validation pass.'
 
     Assert-True ($result.decodeFailurePreservation.passed -eq $true) 'Decode-failure last-complete-index preservation scenario failed.'
     Assert-True ($result.decodeFailurePreservation.cacheHits -eq ($Count - 1) -and $result.decodeFailurePreservation.cacheMisses -eq 1) 'Decode-failure scenario did not produce N-1 hits and one miss.'
@@ -133,7 +203,7 @@ try {
     $indexPath = [IO.Path]::GetFullPath([string]$result.indexPath)
     $runPrefix = $runRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     Assert-True $indexPath.StartsWith($runPrefix, [StringComparison]::OrdinalIgnoreCase) "Metadata index escaped the verifier root: $indexPath"
-    Assert-True (-not (Get-ChildItem -LiteralPath $runRoot -Recurse -File -ErrorAction Stop | Where-Object { $_.Name -like '*.tmp' -or $_.Name -like '*.lock' })) 'Verifier root contains temp/lock residue.'
+    Assert-True (-not (Get-ChildItem -LiteralPath $runRoot -Recurse -File -ErrorAction Stop | Where-Object { $_.Name -like '.mi-*' -or $_.Name -like '*.tmp' -or $_.Name -like '*.lock' })) 'Verifier root contains metadata temp/lock residue.'
 
     foreach ($name in $environmentNames) {
         Assert-True ([string]::Equals([Environment]::GetEnvironmentVariable($name), $environmentBefore[$name], [StringComparison]::Ordinal)) "Parent environment variable changed: $name"
@@ -145,7 +215,7 @@ try {
     # Keep the process TEMP short enough that Windows PowerShell can hash and
     # stat the 64-character index filename without crossing MAX_PATH.
     $crossProcessTemp = Join-Path $runRoot 't'
-    $crossAutomationRoot = Join-Path $crossProcessTemp 'photoviewer-wpf-automation-metadata-index-cross-process-v1'
+    $crossAutomationRoot = Join-Path $crossProcessTemp 'pv-mi-x1'
     $crossIndexDirectory = Join-Path $crossAutomationRoot 'metadata-index'
     $crossFolder = Join-Path $runRoot 'fixture\images-00'
     $coldShotPath = Join-Path $crossProjectRoot 'cold.png'
@@ -210,10 +280,11 @@ try {
 
         & $invokeShot $coldShotPath $coldPerfPath
         $coldPerf = Get-Content -Raw -LiteralPath $coldPerfPath | ConvertFrom-Json
+        $coldPerfJson = $coldPerf | ConvertTo-Json -Compress -Depth 5
         Assert-True ($coldPerf.MetadataIndexLoadState -eq 'Missing') "First process metadata state was $($coldPerf.MetadataIndexLoadState), expected Missing."
         Assert-True ($coldPerf.MetadataCacheHits -eq 0 -and $coldPerf.MetadataCacheMisses -eq $crossCount) 'First process was not a complete cold metadata pass.'
-        Assert-True ($coldPerf.MetadataIndexSaveSucceeded -eq $true) 'First process did not save its complete metadata index.'
-        $crossIndexFiles = @(Get-ChildItem -LiteralPath $crossIndexDirectory -Filter '*.pvmi' -File)
+        Assert-True ($coldPerf.MetadataIndexSaveSucceeded -eq $true) "First process did not save its complete metadata index: $coldPerfJson"
+        $crossIndexFiles = @(Get-ChildItem -LiteralPath $crossIndexDirectory -Filter '*.sqlite3' -File)
         Assert-True ($crossIndexFiles.Count -eq 1) "First process produced $($crossIndexFiles.Count) metadata indexes, expected one."
         $crossIndexPath = $crossIndexFiles[0].FullName
         $crossIndexHashBeforeWarm = (Get-FileHash -LiteralPath $crossIndexPath -Algorithm SHA256).Hash
@@ -231,7 +302,7 @@ try {
         Assert-True ([string]::Equals($crossIndexHashBeforeWarm, $crossIndexHashAfterWarm, [StringComparison]::Ordinal)) 'Second process rewrote metadata index bytes.'
         Assert-True ($crossIndexMtimeBeforeWarm -eq $crossIndexMtimeAfterWarm) 'Second process rewrote metadata index mtime.'
         Assert-True ([string]::Equals($sourceManifestBefore, $sourceManifestAfter, [StringComparison]::Ordinal)) 'Cross-process metadata loads changed source bytes.'
-        Assert-True (-not (Get-ChildItem -LiteralPath $crossIndexDirectory -Recurse -File | Where-Object { $_.Name -like '*.tmp' -or $_.Name -like '*.lock' })) 'Cross-process metadata loads left temp/lock residue.'
+        Assert-True (-not (Get-ChildItem -LiteralPath $crossIndexDirectory -Recurse -File | Where-Object { $_.Name -like '.mi-*' -or $_.Name -like '*.tmp' -or $_.Name -like '*.lock' })) 'Cross-process metadata loads left metadata temp/lock residue.'
     }
     finally {
         foreach ($name in $crossEnvironmentNames) {
@@ -259,7 +330,19 @@ try {
         corruptionFallbacks = $result.corruptionRecovery.cacheMisses
         futureVersionPreserved = $result.futureVersionProtection.bytesUnchanged
         commitTimeFutureGuard = $result.commitTimeFutureGuard.passed
-        checksumValidMalformedRejected = $result.checksumValidMalformed.passed
+        boundedMalformedRejected = $result.boundedMalformed.passed
+        oversizedPromptRejected = $result.boundedOversizedPrompt.passed
+        largeNulTextPathRejected = $result.boundedLargeNulTextPath.passed
+        recursiveViewRejectedBeforeExecution = $result.noncanonicalRecursiveView.passed
+        recursiveViewRejectMs = $result.noncanonicalRecursiveView.elapsedMs
+        oversizedSchemaSqlRejected = $result.boundedOversizedSchemaSql.passed
+        oversizedSchemaSqlRejectMs = $result.boundedOversizedSchemaSql.elapsedMs
+        oversizedSchemaSqlPrivateGrowthBytes = $result.boundedOversizedSchemaSql.privateGrowthBytes
+        triggerRejectedBeforeMutation = $result.noncanonicalTriggerProtection.passed
+        triggerFamilyHashUnchanged = $result.noncanonicalTriggerProtection.familyHashUnchanged
+        orphanFamilyProtected = $result.orphanFamilyProtection.passed
+        sqliteBudgetsEnforced = $result.sqliteBudgetProtection.passed
+        oneRowApplyScaling = $result.oneRowApplyScaling.samples
         decodeFailurePreserved = $result.decodeFailurePreservation.indexHashUnchanged
         staleEntryPruned = $result.staleEntryPrune.deletedEntryPruned
         cancellationPreserved = $result.cancellation.indexHashUnchanged
@@ -275,6 +358,8 @@ try {
     } | ConvertTo-Json -Depth 5
 }
 finally {
+    [Environment]::SetEnvironmentVariable('DOTNET_ROOT', $dotnetRootBefore)
+    [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $dotnetRootX64Before)
     if (Test-Path -LiteralPath $runRoot) {
         $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
         if (-not $resolvedRunRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {

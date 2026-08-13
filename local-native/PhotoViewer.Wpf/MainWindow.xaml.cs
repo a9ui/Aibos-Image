@@ -13,6 +13,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Automation;
@@ -32,6 +33,23 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow : Window
 {
+    private static string ResolveProductVersionLabel()
+    {
+        Assembly assembly = typeof(MainWindow).Assembly;
+        string? informational = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        string version = informational?.Split('+', 2)[0].Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            Version? assemblyVersion = assembly.GetName().Version;
+            version = assemblyVersion is null
+                ? "0.0.0"
+                : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{Math.Max(0, assemblyVersion.Build)}";
+        }
+        return version.StartsWith('v') ? version : $"v{version}";
+    }
+
     private enum ModalPointerState
     {
         Visible,
@@ -48,10 +66,14 @@ public partial class MainWindow : Window
         Next,
     }
 
+    private const int DefaultEnhancementApiTimeoutMilliseconds = 30_000;
     private static readonly StringComparer EnhancementSourceIdentityComparer = StringComparer.OrdinalIgnoreCase;
     private static readonly HttpClient ModalEnhancementHttpClient = new()
     {
-        Timeout = TimeSpan.FromSeconds(5),
+        // Every request owns its deadline through a linked token below. A
+        // transport-wide timeout would silently cap the H3 rewrite's explicit
+        // 90-second local-inference budget at 30 seconds.
+        Timeout = System.Threading.Timeout.InfiniteTimeSpan,
     };
     private static readonly HashSet<string> SupportedImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -64,16 +86,18 @@ public partial class MainWindow : Window
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
 
     private const int MinParallelThumbnailCount = 32;
-    private const int MaxThumbnailDecodeWorkers = 12;
+    private const int MaxThumbnailDecodeWorkers = 4;
     private const int InitialThumbnailPrefetchCount = 16;
+    private const int MinThumbnailDecodePixelWidth = 64;
+    private const int MaxThumbnailDecodePixelWidth = 520;
     private const int MaxThumbnailDecodeAttempts = 4;
     private const int FirstThumbnailDecodeRetryDelayMilliseconds = 120;
     private const int SecondThumbnailDecodeRetryDelayMilliseconds = 300;
     private const int ThirdThumbnailDecodeRetryDelayMilliseconds = 750;
-    private const int LegacyResidentThumbnailCountHint = 128;
-    private const long MinResidentThumbnailBudgetBytes = 192L * 1024 * 1024;
-    private const long MaxResidentThumbnailBudgetBytes = 512L * 1024 * 1024;
-    private const long FallbackResidentThumbnailBudgetBytes = 256L * 1024 * 1024;
+    private const int MaxResidentThumbnailEntryCount = 256;
+    private const long MinResidentThumbnailBudgetBytes = 128L * 1024 * 1024;
+    private const long MaxResidentThumbnailBudgetBytes = 256L * 1024 * 1024;
+    private const long FallbackResidentThumbnailBudgetBytes = 192L * 1024 * 1024;
     private const int TransientStatusToastMilliseconds = 850;
     private const int MinParallelCatalogPreparationCount = 512;
     private const int MaxCatalogPreparationWorkers = 4;
@@ -88,6 +112,7 @@ public partial class MainWindow : Window
     private const int DecodeLongEdgeMultiplier = 8;
     private const int SearchFilterDebounceMilliseconds = 50;
     private const int SearchStateSaveDebounceMilliseconds = 300;
+    private const int GalleryWheelZoomDebounceMilliseconds = 80;
     private const int MaxVirtualizedContainerSmokeCount = 512;
     private const int MaxMaterializedSelectionVisualItems = 2_048;
     private const int MaxRecentFolderSets = 12;
@@ -102,7 +127,9 @@ public partial class MainWindow : Window
     private const double CardWidthStep = 20;
     private const double DesignWindowMinWidth = 900;
     private const double DesignWindowMinHeight = 560;
-    private const double WideSidebarWidth = 232;
+    private const double DefaultSidebarWidth = 300;
+    private const double MinSidebarWidth = 272;
+    private const double MaxSidebarWidth = 480;
     private const double CompactSidebarRailWidth = 48;
     private const double DefaultRightPanelWidth = 340;
     private const double MinRightPanelWidth = 320;
@@ -122,6 +149,7 @@ public partial class MainWindow : Window
     private const double ModalZoomWheelStep = 1.08;
     private const int ModalTransformAnimationMilliseconds = 110;
     private const int ModalTransformQualitySettleMilliseconds = 140;
+    private const int ModalNavigationSettleMilliseconds = 80;
     private const int ModalChromeRevealAnimationMilliseconds = 90;
     private const int ModalChromeTransientMilliseconds = 800;
     private const int ModalFavoritePulseMilliseconds = 620;
@@ -144,6 +172,14 @@ public partial class MainWindow : Window
     private const string SortModifiedOldestValue = "modified-oldest";
     private const string SortCreatedNewestValue = "created-newest";
     private const string SortCreatedOldestValue = "created-oldest";
+    private const string SortUpscaleNewestValue = "upscale-completed-newest";
+    private const string SortUpscaleQueuedNewestValue = "upscale-queued-newest";
+    private const string SortPhotorealNewestValue = "photoreal-completed-newest";
+    private const string SortPhotorealQueuedNewestValue = "photoreal-queued-newest";
+    private const string SortVideoNewestValue = "video-completed-newest";
+    private const string SortVideoQueuedNewestValue = "video-queued-newest";
+    private const string SortFavoriteChangedNewestValue = "favorite-changed-newest";
+    private const int MaxPersistedFavoriteActivityEntries = 20_000;
     private const string SortNameValue = "name";
     private const string SortRandomValue = "random";
     // Runtime state is manual From/To only. These names are accepted only while migrating old files.
@@ -154,6 +190,8 @@ public partial class MainWindow : Window
     private const string ModalMetadataSettingsTab = "settings";
     private const int MinFavoriteFilterLevel = 1;
     private const int MaxFavoriteFilterLevel = 5;
+    private const int MinPhotorealFavoriteFilterLevel = 1;
+    private const int MinVideoFavoriteFilterLevel = 1;
     private const int MaxPersistedPreviewTabs = 30;
     private static readonly JsonSerializerOptions SharedRecentJsonOptions = new()
     {
@@ -175,6 +213,14 @@ public partial class MainWindow : Window
     private readonly List<Tile> _closedPreviewTabs = new();
     private readonly HashSet<string> _pinnedPreviewPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _favorites = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _favoriteChangedAtUtcByPath =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<Tile>> _catalogTilesByFavoritePath =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HashSet<string>> _photorealSourcePathsByFavoritePath =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, HashSet<string>> _videoSourcePathsByFavoritePath =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _favoriteDirtyPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _seenDirtyPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -210,7 +256,11 @@ public partial class MainWindow : Window
         new(EnhancementSourceIdentityComparer);
     private readonly Dictionary<string, List<ManagedEnhancementVersion>> _catalogEnhancementVersionsByPath =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ManagedEnhancementQueueActivity> _catalogEnhancementQueueActivityByPath =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _ambiguousEnhancementJobIds =
+        new(StringComparer.Ordinal);
+    private readonly HashSet<string> _activeI2iSourceProducerJobIds =
         new(StringComparer.Ordinal);
     private readonly List<string> _restoredPreviewTabPaths = [];
     private readonly SemaphoreSlim _thumbnailDecodeGate = new(MaxThumbnailDecodeWorkers, MaxThumbnailDecodeWorkers);
@@ -232,6 +282,18 @@ public partial class MainWindow : Window
     private int _thumbnailViewportScheduleCount;
     private int _thumbnailViewportCancelCount;
     private int _thumbnailViewportDuplicateSuppressedCount;
+    private long _thumbnailDisplayModeRevision;
+    private DispatcherOperation? _thumbnailPreferenceRefreshOperation;
+    private int _thumbnailDecodeDelayForSmokeMilliseconds;
+    private int _thumbnailWicReadBlockForSmoke;
+    private int _thumbnailWicReadSmokeEnabled;
+    private readonly ManualResetEventSlim _thumbnailWicReadReleaseForSmoke = new(initialState: true);
+    private readonly ConcurrentDictionary<string, int> _thumbnailDecodeStartsForSmoke =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _thumbnailAppliesForSmoke =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _thumbnailWicReadStartsForSmoke =
+        new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _thumbnailViewportCts;
     private string? _thumbnailViewportSignature;
     private long _thumbnailViewportRevision;
@@ -256,14 +318,16 @@ public partial class MainWindow : Window
     private string? _enhancementReadError;
     private DateTime _enhancementJobsLastWriteTimeUtc;
     private long _enhancementJobsLength = -1;
+    private long _enhancementCatalogRevision = -1;
     private CancellationTokenSource? _enhancedStateRefreshCts;
     private Task _enhancedStateRefreshTask = Task.CompletedTask;
     private long _enhancedStateRefreshGeneration;
     private DateTime _enhancedStateQueuedWriteTimeUtc;
     private long _enhancedStateQueuedLength = -1;
+    private long _enhancedStateQueuedCatalogRevision = -1;
     private Rect _restoreBounds;
     private bool _fakeMaximized;
-    private bool _normalizingNativeMaximize;
+    private System.Windows.Interop.HwndSource? _windowChromeSource;
     private Func<Rect> _currentMonitorWorkArea = null!;
     private Func<Rect> _currentMonitorBounds = null!;
     private bool _modalFullScreen;
@@ -301,6 +365,19 @@ public partial class MainWindow : Window
     private int _failNextFavoriteWriterForSmoke;
     private int _failNextSeenWriterForSmoke;
     private bool _stateWriteBlocked;
+    private readonly object _favoritePresentationStateQueueGate = new();
+    private readonly Dictionary<string, DateTimeOffset> _pendingFavoritePresentationActivity =
+        new(StringComparer.OrdinalIgnoreCase);
+    private FavoriteFilterStateSnapshot? _pendingFavoriteFilterState;
+    private FavoritePresentationStateBatch? _failedFavoritePresentationStateBatch;
+    private Task _favoritePresentationStateWriteTask = Task.CompletedTask;
+    private int _favoritePresentationStatePumpRunning;
+    private int _favoritePresentationStateWriteCount;
+    private long _lastFavoriteWriteApplyMilliseconds;
+    private long _maxFavoriteWriteApplyMilliseconds;
+    private int _lastDerivedFavoriteVisitedTileCount;
+    private int _maxDerivedFavoriteVisitedTileCount;
+    private double _sidebarWidth = DefaultSidebarWidth;
     private double _rightPanelWidth = DefaultRightPanelWidth;
     private bool _adaptiveWorkbench;
     private bool _sidebarVisibleBeforeAdaptive = true;
@@ -319,6 +396,8 @@ public partial class MainWindow : Window
     private bool _suppressPreviewClickAfterFileDrag;
     private Button? _pendingCardFavoriteButton;
     private readonly DispatcherTimer _galleryAutoScrollTimer;
+    private readonly DispatcherTimer _galleryWheelZoomTimer;
+    private double? _pendingGalleryWheelCardWidth;
     private ListBox? _galleryAutoScrollSurface;
     private ScrollViewer? _galleryAutoScrollViewer;
     private Point _galleryAutoScrollAnchor;
@@ -341,6 +420,7 @@ public partial class MainWindow : Window
     private int _pendingGalleryFocusRetryCount;
     private const int MaxPendingGalleryFocusRetryCount = 3;
     private const int CatalogResetSelectionScanReleaseThreshold = 24_000;
+    private const int BackgroundFilterSnapshotClearThreshold = 4_096;
     private string? _activePreviewTabPath;
     private string? _restoredActivePreviewTabPath;
     private bool _previewTabsPersistenceReady = true;
@@ -358,10 +438,13 @@ public partial class MainWindow : Window
     private string? _modalTransformPath;
     private string? _modalSourceTilePath;
     private string? _modalDisplayPath;
+    private int _modalDisplayedImagePixelWidth;
+    private int _modalDisplayedImagePixelHeight;
     private Point? _modalPanStartPoint;
     private Vector _modalPanStartOffset;
     private Point? _modalPointerStartPoint;
     private bool _modalPointerMoved;
+    private bool _modalPointerStartedOnImage;
     private ModalPointerState _modalPointerState = ModalPointerState.Visible;
     private ModalEdgeTarget _modalPressedEdgeTarget;
     private Point _modalLastPointerPosition;
@@ -381,21 +464,27 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _modalChromeTransientTimer;
     private readonly DispatcherTimer _modalTransformQualityTimer;
     private readonly DispatcherTimer _modalEnhancementPollTimer;
+    private readonly DispatcherTimer _activeEnhancementStateRefreshTimer;
     private DispatcherTimer? _statusToastDismissTimer;
     private bool _modalEnhancementPolling;
     private bool _modalEnhancementRequestPending;
+    private bool _galleryContextEnhancementRequestPending;
     private string? _modalEnhancementJobId;
     private string? _modalEnhancementJobStatus;
     private int _modalEnhancementProgress;
     private string? _modalEnhancementError;
     private bool _modalEnhancementCancelRequested;
     private long _modalEnhancementGeneration;
+    private CancellationTokenSource? _modalEnhancementRefreshCts;
     private Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _modalEnhancementSender
-        = static (request, token) => ModalEnhancementHttpClient.SendAsync(request, token);
+        = static (request, token) => ModalEnhancementHttpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            token);
     private bool _usingDefaultModalEnhancementSender = true;
     private string _modalEnhancementPresetId = "anime-sharp-x2";
     private string _modalEnhancementAdapterId = "realesrgan-ncnn";
-    private int _modalEnhancementScale = 2;
+    private double _modalEnhancementScale = 2d;
     private Func<bool>? _confirmLargeEnhancementForSmoke;
     private Func<bool>? _confirmEnhancedOutputDeleteForSmoke;
     private CancellationTokenSource? _loadCts;
@@ -416,6 +505,8 @@ public partial class MainWindow : Window
     private Action? _beforeMaterializeFilesForSmoke;
     private int _previewDecodeDelayForSmokeMs;
     private int _modalDecodeDelayForSmokeMs;
+    private int _modalDecodeStartCountForSmoke;
+    private int _modalDecodeApplyCountForSmoke;
     private int _loadCtsCreatedCount;
     private int _loadCtsRetiredCount;
     private CancellationTokenSource? _modalCts;
@@ -462,8 +553,11 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _searchFilterTimer;
     private readonly DispatcherTimer _searchStateSaveTimer;
     private CancellationTokenSource? _catalogProjectionCts;
+    private DispatcherOperation? _catalogProjectionStartOperation;
     private readonly SemaphoreSlim _catalogProjectionApplyGate = new(1, 1);
     private long _catalogProjectionGeneration;
+    private long _cardLayoutRevision;
+    private long _unseenFilterReconcileGeneration;
     private CatalogProjectionRequest? _scheduledCatalogProjection;
     private long _lastAppliedCatalogProjectionGeneration;
     private long _catalogContentRevision;
@@ -475,19 +569,35 @@ public partial class MainWindow : Window
     private long _maxCatalogProjectionApplySliceMilliseconds;
     private int _catalogSnapshotResetDepth;
     private int _catalogProjectionDiscardedCount;
+    private long _catalogProjectionStartPostCount;
+    private long _catalogProjectionStartCoalescedCount;
+    private long _catalogProjectionCaptureCount;
+    private ManualResetEventSlim? _catalogProjectionComputeEnteredForSmoke;
+    private ManualResetEventSlim? _catalogProjectionComputeGateForSmoke;
     private long _catalogStatsPresentationGeneration;
     private string _displayStyle = DisplayStyleStandard;
     private string _aspectMode = AspectOriginalValue;
+    private bool _metadataOriginalAspectLayoutBindingsPending;
+    private int _metadataOriginalAspectLayoutPublishCount;
+    private int _metadataOriginalAspectLayoutFallbackCount;
     private string _sortBy = SortModifiedNewestValue;
     private string _randomSortSeed = "default";
     private string _datePreset = DatePresetNoneValue;
     private DateTime? _dateFromLocal;
     private DateTime? _dateToLocal;
     private readonly HashSet<int> _favoriteFilterLevels = [];
+    private readonly HashSet<int> _photorealFavoriteFilterLevels = [];
+    private readonly HashSet<int> _videoFavoriteFilterLevels = [];
     private bool _showUnseenDots;
     private bool _syncingUnseenDotsControls;
+    private bool _showGridFileInfoOverlay = true;
+    private bool _syncingGridFileInfoOverlayControls;
+    private bool _showLoadTiming;
+    private bool _syncingLoadTimingControl;
     private bool _showFavoriteChangeNotifications = true;
     private bool _syncingFavoriteChangeNotifications;
+    private bool _useLastDisplayedImageVersionForThumbnails = true;
+    private bool _syncingThumbnailVersionPreference;
     private ThumbnailStatusBorderSettings _thumbnailStatusBorderSettings = ThumbnailStatusBorderSettings.Default;
     private ThumbnailStatusBorderSettings _draftThumbnailStatusBorderSettings = ThumbnailStatusBorderSettings.Default;
     private bool _thumbnailStatusBorderSettingsProtected;
@@ -505,10 +615,17 @@ public partial class MainWindow : Window
     private GridZoomAnchor? _lastStableGridViewportAnchor;
     private GridZoomAnchor? _lastRequestedGridGeometryAnchor;
     private long _gridAnchorRememberGeneration;
+    private long _queuedGridAnchorRememberGeneration = -1;
+    private DispatcherOperation? _gridAnchorRememberOperation;
+    private long _gridAnchorRememberPostCount;
+    private long _gridAnchorRememberCoalescedCount;
+    private long _gridAnchorRememberExecuteCount;
+    private GridZoomAnchor? _sidebarResizeAnchor;
     private GridZoomAnchor? _rightPanelResizeAnchor;
     private bool _cardWidthMigrationPending;
     private double _modalZoom = 1;
     private double _modalFitScale = 1;
+    private string? _modalFitPath;
     private bool _modalFitUpdateQueued;
     private bool _modalFlipped;
     private double _modalPanX;
@@ -562,6 +679,9 @@ public partial class MainWindow : Window
     {
         _tilesView = new SnapshotCollectionView<Tile>(_tiles);
         InitializeComponent();
+        string productVersionLabel = ResolveProductVersionLabel();
+        HeaderProductVersionText.Text = productVersionLabel;
+        Title = $"Aibos Image {productVersionLabel}";
         InitializeFavoriteHistory();
         if (Application.Current is App app)
             app.AccessibilityPaletteChanged += App_AccessibilityPaletteChanged;
@@ -585,6 +705,11 @@ public partial class MainWindow : Window
             Interval = TimeSpan.FromMilliseconds(16),
         };
         _galleryAutoScrollTimer.Tick += (_, _) => ApplyGalleryAutoScrollTick();
+        _galleryWheelZoomTimer = new DispatcherTimer(DispatcherPriority.Input)
+        {
+            Interval = TimeSpan.FromMilliseconds(GalleryWheelZoomDebounceMilliseconds),
+        };
+        _galleryWheelZoomTimer.Tick += (_, _) => CommitPendingGalleryWheelZoom();
         _modalFeedbackTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(650),
@@ -625,6 +750,12 @@ public partial class MainWindow : Window
             Interval = TimeSpan.FromSeconds(1),
         };
         _modalEnhancementPollTimer.Tick += ModalEnhancementPollTimer_Tick;
+        _activeEnhancementStateRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(3),
+        };
+        _activeEnhancementStateRefreshTimer.Tick += (_, _) =>
+            QueueEnhancedStateRefreshIfChanged();
         LandingFolderSetList.ItemsSource = _landingFolderSet;
         SidebarFolderSetList.ItemsSource = _folderBucketViews;
         RecentFolderSetList.ItemsSource = _recentFolderSetViews;
@@ -638,6 +769,7 @@ public partial class MainWindow : Window
         LoadThumbnailStatusBorderSettings();
         BuildSampleTiles();
         _allTiles.AddRange(_tiles);
+        RebuildCatalogTileFavoritePathIndex();
         _tiles.Clear();
         ReorderFullCatalogForSort();
         ApplyCardLayoutToAllTiles();
@@ -651,7 +783,7 @@ public partial class MainWindow : Window
         RowsList.AddHandler(Button.ClickEvent, new RoutedEventHandler(CardFavoriteButton_Click));
         ApplyFilters(selectFirst: false);
 
-        Loaded += (_, _) =>
+        Loaded += async (_, _) =>
         {
             ApplyAdaptiveWorkbenchLayout(ActualWidth);
             AttachGalleryVirtualizationPanel();
@@ -659,10 +791,16 @@ public partial class MainWindow : Window
                 CardsList.SelectedIndex = 0;
             ScheduleRememberCurrentGridViewportAnchor();
             UpdateWindowMaximizePresentation();
+            await StartEnhancementCompanionApiForApplicationLaunchAsync();
         };
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
+            if (_windowChromeSource is not null)
+            {
+                _windowChromeSource.RemoveHook(WindowChromeMessageHook);
+                _windowChromeSource = null;
+            }
             _catalogProjectionGeneration++;
             CancelPendingCatalogProjection(completePending: true);
             CancelPendingGalleryFocus();
@@ -682,8 +820,10 @@ public partial class MainWindow : Window
             CancelThumbnailViewportLoading();
             _favoriteWriterPumpTimer?.Stop();
             _seenWriterPumpTimer?.Stop();
+            _galleryWheelZoomTimer.Stop();
             _modalChromeTransientTimer.Stop();
             _modalEnhancementPollTimer.Stop();
+            _activeEnhancementStateRefreshTimer.Stop();
             _modalEnhancementGeneration++;
             _enhancementWorkspacePollTimer.Stop();
             _enhancementWorkspaceGeneration++;
@@ -841,7 +981,10 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        if (!NormalizeNativeMaximizeToWorkArea())
+        _windowChromeSource = PresentationSource.FromVisual(this)
+            as System.Windows.Interop.HwndSource;
+        _windowChromeSource?.AddHook(WindowChromeMessageHook);
+        if (WindowState == WindowState.Normal)
             ConstrainWindowToCurrentWorkArea();
     }
 
@@ -897,6 +1040,7 @@ public partial class MainWindow : Window
     {
         if (_tiles.Count == 0)
         {
+            CancelThumbnailViewportLoading();
             ClearProtectedResidentThumbnails();
             return;
         }
@@ -910,54 +1054,92 @@ public partial class MainWindow : Window
             firstVisible = firstRealized;
             lastVisible = lastRealized;
         }
-        SetProtectedResidentThumbnailRanges(firstVisible, lastVisible, firstRealized, lastRealized);
+        SetProtectedResidentThumbnailRange(firstVisible, lastVisible);
 
         var candidates = new List<Tile>(Math.Max(0, lastRealized - firstRealized + 1));
         var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int index = firstVisible; index <= lastVisible; index++)
         {
             Tile tile = _tiles[index];
+            ThumbnailLoadRequest request = CreateThumbnailLoadRequest(tile);
             if (tile.Thumbnail is not null)
                 TouchResidentThumbnail(tile);
-            else if (tile.IsRealFile && added.Add(tile.Path))
+            if (tile.IsRealFile
+                && ThumbnailNeedsLoad(tile, request)
+                && added.Add(tile.Path))
                 candidates.Add(tile);
         }
-        for (int index = firstRealized; index <= lastRealized; index++)
+        int visibleCandidateCount = candidates.Count;
+        void AddRealizedPrefetchCandidate(int index)
         {
             Tile tile = _tiles[index];
+            ThumbnailLoadRequest request = CreateThumbnailLoadRequest(tile);
             if (tile.Thumbnail is not null)
                 TouchResidentThumbnail(tile);
-            else if (tile.IsRealFile && added.Add(tile.Path))
+            if (tile.IsRealFile
+                && ThumbnailNeedsLoad(tile, request)
+                && added.Add(tile.Path))
                 candidates.Add(tile);
         }
 
-        if (candidates.Count == 0)
-            return;
+        // Walk outwards from both viewport edges so a bounded prefetch budget
+        // benefits the next item in either scroll direction.
+        int beforeVisible = firstVisible - 1;
+        int afterVisible = lastVisible + 1;
+        int realizedPrefetchRemaining = InitialThumbnailPrefetchCount;
+        while (realizedPrefetchRemaining > 0
+            && (beforeVisible >= firstRealized || afterVisible <= lastRealized))
+        {
+            if (afterVisible <= lastRealized && realizedPrefetchRemaining > 0)
+            {
+                AddRealizedPrefetchCandidate(afterVisible++);
+                realizedPrefetchRemaining--;
+            }
+            if (beforeVisible >= firstRealized && realizedPrefetchRemaining > 0)
+            {
+                AddRealizedPrefetchCandidate(beforeVisible--);
+                realizedPrefetchRemaining--;
+            }
+        }
 
-        string signature = $"grid|{_loadGeneration}|{_thumbnailViewportRevision}|{firstVisible}|{lastVisible}";
-        ScheduleThumbnailCandidates(candidates, signature);
+        string signature =
+            $"grid|{_loadGeneration}|{_thumbnailViewportRevision}|{firstVisible}|{lastVisible}|{firstRealized}|{lastRealized}|{visibleCandidateCount}|{candidates.Count}";
+        ScheduleThumbnailCandidates(
+            candidates,
+            signature,
+            Math.Min(
+                candidates.Count,
+                Math.Max(ImmediateViewportThumbnailCount, visibleCandidateCount)));
     }
 
-    private void ScheduleThumbnailCandidates(IReadOnlyList<Tile> candidates, string signature)
+    private void ScheduleThumbnailCandidates(
+        IReadOnlyList<Tile> candidates,
+        string signature,
+        int priorityCandidateCount)
     {
-        if (candidates.Count == 0)
-            return;
-
-        if (_thumbnailViewportCts is not null
-            && string.Equals(_thumbnailViewportSignature, signature, StringComparison.Ordinal))
+        bool sameViewport = _thumbnailViewportCts is not null
+            && string.Equals(_thumbnailViewportSignature, signature, StringComparison.Ordinal);
+        if (sameViewport)
         {
             _thumbnailViewportDuplicateSuppressedCount++;
             return;
         }
 
         CancelThumbnailViewportLoading();
+        if (candidates.Count == 0)
+            return;
+
         CancellationTokenSource cts = _loadCts is { } loadCts
             ? CancellationTokenSource.CreateLinkedTokenSource(loadCts.Token)
             : new CancellationTokenSource();
         _thumbnailViewportCts = cts;
         _thumbnailViewportSignature = signature;
         _thumbnailViewportScheduleCount++;
-        _ = LoadThumbnailViewportAsync(candidates, _loadGeneration, cts);
+        _ = LoadThumbnailViewportAsync(
+            candidates,
+            Math.Clamp(priorityCandidateCount, 1, candidates.Count),
+            _loadGeneration,
+            cts);
     }
 
     private void RowsList_ScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -982,24 +1164,25 @@ public partial class MainWindow : Window
         bool movingDown = currentOffset >= _lastListThumbnailVerticalOffset;
         _lastListThumbnailVerticalOffset = currentOffset;
         var candidates = new List<(Tile Tile, bool Visible, double Distance, double Top)>();
+        var visiblePaths = new List<(string Path, double Top)>();
         var protectedTiles = new List<Tile>();
         foreach (ListBoxItem item in FindVisualDescendants<ListBoxItem>(RowsList))
         {
             if (item.DataContext is not Tile { IsRealFile: true } tile)
                 continue;
             protectedTiles.Add(tile);
-            if (tile.Thumbnail is not null)
-            {
-                TouchResidentThumbnail(tile);
-                continue;
-            }
             try
             {
                 double top = item.TransformToAncestor(viewer).Transform(new Point(0, 0)).Y;
                 double bottom = top + item.ActualHeight;
                 bool visible = bottom >= 0 && top <= viewer.ViewportHeight;
                 double distance = Math.Abs(((top + bottom) / 2) - (viewer.ViewportHeight / 2));
-                candidates.Add((tile, visible, distance, top));
+                if (visible)
+                    visiblePaths.Add((tile.Path, top));
+                if (tile.Thumbnail is not null)
+                    TouchResidentThumbnail(tile);
+                if (ThumbnailNeedsLoad(tile, CreateThumbnailLoadRequest(tile)))
+                    candidates.Add((tile, visible, distance, top));
             }
             catch (InvalidOperationException)
             {
@@ -1027,15 +1210,22 @@ public partial class MainWindow : Window
             .ToList();
         string visibleSignature = string.Join(
             '\u001f',
-            candidates.Where(static candidate => candidate.Visible)
+            visiblePaths
                 .OrderBy(static candidate => candidate.Top)
-                .Select(static candidate => candidate.Tile.Path));
+                .Select(static candidate => candidate.Path));
         string signature = $"list|{_loadGeneration}|{_thumbnailViewportRevision}|{visibleSignature}";
-        ScheduleThumbnailCandidates(orderedCandidates, signature);
+        int visibleCandidateCount = visibleCandidates
+            .DistinctBy(static tile => tile.Path, StringComparer.OrdinalIgnoreCase)
+            .Count();
+        ScheduleThumbnailCandidates(
+            orderedCandidates,
+            signature,
+            Math.Min(orderedCandidates.Count, visibleCandidateCount + 1));
     }
 
     private async Task LoadThumbnailViewportAsync(
         IReadOnlyList<Tile> candidates,
+        int priorityCandidateCount,
         long generation,
         CancellationTokenSource cts)
     {
@@ -1045,12 +1235,14 @@ public partial class MainWindow : Window
             List<Tile> ordered = candidates
                 .OrderByDescending(tile => ReferenceEquals(tile, selected))
                 .ToList();
-            int immediateCount = Math.Min(ImmediateViewportThumbnailCount, ordered.Count);
-            CancellationToken priorityToken = _loadCts?.Token ?? CancellationToken.None;
+            int immediateCount = Math.Clamp(
+                priorityCandidateCount,
+                ImmediateViewportThumbnailCount,
+                ordered.Count);
             await LoadThumbnailCandidatesAsync(
                 ordered.Take(immediateCount).ToArray(),
                 generation,
-                priorityToken,
+                cts.Token,
                 maxBatchConcurrency: 4);
             cts.Token.ThrowIfCancellationRequested();
 
@@ -1206,13 +1398,21 @@ public partial class MainWindow : Window
         _previewMetadataCts?.Cancel();
         _previewMetadataCompletion?.TrySetResult(null);
         _modalCts?.Cancel();
+        _modalCts?.Dispose();
+        _modalCts = null;
         _modalDecodeCompletion?.TrySetResult(false);
+        CancelModalEnhancementRefreshRequest();
+        CancelModalMetadataRefresh(clearCurrent: true);
         _modalSingleClickGeneration++;
         _modalFeedbackTimer.Stop();
         _modalFavoritePulseTimer.Stop();
         _modalChromeTransientTimer.Stop();
         _modalTransformQualityTimer.Stop();
         CancelPreviewTabHoverDecode();
+
+        // Never serialize a presentation-only FileDrop source as the current
+        // catalog selection during the forced shutdown save.
+        RestoreExternalFileDropSession();
 
         // Closing flushes only the viewer state. Folder recents, favorites,
         // seen data, enhancement jobs, and source files are separate stores
@@ -1243,6 +1443,7 @@ public partial class MainWindow : Window
         int TileCount,
         long CatalogRevision,
         long SelectionGeneration,
+        long CardLayoutRevision,
         string[] SelectedPaths,
         string? PrimarySelectedPath,
         string? PreviousSelectedPath,
@@ -1265,10 +1466,14 @@ public partial class MainWindow : Window
         bool FavoritesOnly,
         bool UnfavoriteOnly,
         bool EnhancedOnly,
+        bool UnenhancedOnly,
         bool PhotorealOnly,
+        bool UnphotorealOnly,
         bool VideoOnly,
         bool UnseenOnly,
-        FrozenSet<int> FavoriteLevels,
+        int FavoriteLevelMask,
+        int PhotorealFavoriteLevelMask,
+        int VideoFavoriteLevelMask,
         FrozenSet<string> HiddenFolderBuckets,
         DateTime? DateFromLocal,
         DateTime? DateToLocal);
@@ -1281,15 +1486,27 @@ public partial class MainWindow : Window
         string FolderBucketKey,
         string Group,
         double CardHeight,
-        string Prompt,
+        byte[] PromptUtf8,
         int FavoriteLevel,
+        int PhotorealFavoriteLevel,
+        int VideoFavoriteLevel,
         bool Enhanced,
         bool Upscaled,
         bool Photorealized,
         bool VideoGenerated,
         bool Unseen,
         DateTime ModifiedUtc,
-        DateTime CreatedUtc);
+        DateTime CreatedUtc,
+        DateTimeOffset? UpscaleCompletedAtUtc,
+        DateTimeOffset? PhotorealCompletedAtUtc,
+        DateTimeOffset? VideoCompletedAtUtc,
+        bool UpscaleQueueActive,
+        DateTimeOffset? UpscaleQueueAddedAtUtc,
+        bool PhotorealQueueActive,
+        DateTimeOffset? PhotorealQueueAddedAtUtc,
+        bool VideoQueueActive,
+        DateTimeOffset? VideoQueueAddedAtUtc,
+        DateTimeOffset? FavoriteChangedAtUtc);
 
     private sealed record FilterResult(
         Tile[] Tiles,
@@ -1302,7 +1519,7 @@ public partial class MainWindow : Window
         bool ActivePreviewIncluded,
         GridZoomAnchor? ViewportAnchor,
         PreparedVirtualizingLayout? PreparedLayout,
-        GalleryAutomationProjectionIndex AutomationProjection,
+        GalleryAutomationProjectionIndex? AutomationProjection,
         int? ExactSingleRemovalIndex);
 
     private sealed record CatalogProjectionRequest(
@@ -1343,7 +1560,8 @@ public partial class MainWindow : Window
         double CatalogSnapshotResetThreadCpuMs = -1,
         int CatalogSnapshotResetCount = 0,
         int CatalogSnapshotResetNestedCount = 0,
-        bool PublishedSingleRemoval = false);
+        bool PublishedSingleRemoval = false,
+        bool Published = false);
 
     private sealed class CatalogLayoutCache
     {
@@ -1403,6 +1621,21 @@ public partial class MainWindow : Window
         int AttemptCount,
         long RetryAfterTickCount,
         bool Terminal);
+
+    private readonly record struct ThumbnailLoadRequest(
+        string OwnerPath,
+        string AssetPath,
+        bool UseBrowserCache,
+        long DisplayModeRevision,
+        long TileRevision)
+    {
+        public string InFlightKey => string.Join(
+            '\u001f',
+            OwnerPath,
+            DisplayModeRevision.ToString(CultureInfo.InvariantCulture),
+            TileRevision.ToString(CultureInfo.InvariantCulture),
+            AssetPath);
+    }
 
     private sealed record FileDragSession(FrameworkElement Surface, Tile Origin, Point Start, bool OriginWasSelected);
 
@@ -1485,18 +1718,81 @@ public partial class MainWindow : Window
     private sealed record ManagedEnhancementVersion(
         string JobId,
         string Operation,
-        ManagedEnhancedOutput Output);
+        ManagedEnhancedOutput Output,
+        DateTimeOffset? CompletedAtUtc = null,
+        bool Recovered = false);
+
+    private readonly record struct ManagedEnhancementQueueActivity(
+        bool UpscaleActive = false,
+        DateTimeOffset? UpscaleAddedAtUtc = null,
+        bool PhotorealActive = false,
+        DateTimeOffset? PhotorealAddedAtUtc = null,
+        bool I2iActive = false,
+        DateTimeOffset? I2iAddedAtUtc = null,
+        bool VideoActive = false,
+        DateTimeOffset? VideoAddedAtUtc = null)
+    {
+        public ManagedEnhancementQueueActivity Record(
+            string operation,
+            DateTimeOffset? addedAtUtc)
+        {
+            return operation switch
+            {
+                "upscale" => this with
+                {
+                    UpscaleActive = true,
+                    UpscaleAddedAtUtc = Latest(UpscaleAddedAtUtc, addedAtUtc),
+                },
+                "photoreal" => this with
+                {
+                    PhotorealActive = true,
+                    PhotorealAddedAtUtc = Latest(PhotorealAddedAtUtc, addedAtUtc),
+                },
+                "i2i" => this with
+                {
+                    I2iActive = true,
+                    I2iAddedAtUtc = Latest(I2iAddedAtUtc, addedAtUtc),
+                },
+                "video" => this with
+                {
+                    VideoActive = true,
+                    VideoAddedAtUtc = Latest(VideoAddedAtUtc, addedAtUtc),
+                },
+                _ => this,
+            };
+        }
+
+        private static DateTimeOffset? Latest(DateTimeOffset? current, DateTimeOffset? candidate)
+        {
+            if (!candidate.HasValue)
+                return current;
+            return !current.HasValue || candidate.Value > current.Value
+                ? candidate
+                : current;
+        }
+    }
 
     private readonly record struct EnhancementAvailability(
-        bool Upscaled,
-        bool Photorealized)
+        int UpscaleCount,
+        int PhotorealCount,
+        int I2iCount)
     {
-        public bool Any => Upscaled || Photorealized;
+        public bool Upscaled => UpscaleCount > 0;
+        public bool Photorealized => PhotorealCount > 0;
+        public bool I2iEdited => I2iCount > 0;
+        public bool Any => Upscaled || Photorealized || I2iEdited;
     }
 
     private sealed record DisplayedAssetResolution(string Path, long SizeBytes, bool Enhanced, string? FallbackReason);
 
-    private sealed record EnhancementApiResponse(bool Ok, int StatusCode, JsonElement? Payload, string Error);
+    private sealed record EnhancementApiResponse(
+        bool Ok,
+        int StatusCode,
+        JsonElement? Payload,
+        string Error,
+        bool SavedForDelivery = false,
+        string? DeliveryRequestId = null,
+        bool InnerStatusAuthoritative = false);
     private sealed record EnhancedStateSnapshot(
         Dictionary<string, ManagedEnhancedOutput> Outputs,
         Dictionary<string, ManagedEnhancedOutput> CatalogOutputsByPath,
@@ -1504,13 +1800,20 @@ public partial class MainWindow : Window
         Dictionary<string, List<ManagedEnhancementVersion>> CatalogVersionsByPath,
         Dictionary<string, List<ManagedVideoVersion>> VideoVersions,
         Dictionary<string, List<ManagedVideoVersion>> CatalogVideoVersionsByPath,
+        Dictionary<string, ManagedEnhancementQueueActivity> CatalogQueueActivityByPath,
         HashSet<string> AmbiguousJobIds,
+        HashSet<string> ActiveI2iSourceProducerJobIds,
         int JobsRead,
         int CandidateCount,
         int VideoCandidateCount,
         DateTime LastWriteTimeUtc,
-        long Length);
+        long Length,
+        long CatalogRevision);
     private sealed record EnhancedStateReadResult(EnhancedStateSnapshot? Snapshot, string? Error);
+    private sealed record EnhancementStoreProbe(
+        DateTime LastWriteTimeUtc,
+        long Length,
+        long CatalogRevision);
 
     private async void OpenFolder_Click(object sender, RoutedEventArgs e) => await ChooseAndLoadFolderAsync();
 
@@ -1756,8 +2059,13 @@ public partial class MainWindow : Window
 
     public async Task LoadFolderSetAsync(IEnumerable<string> folders, bool commitRecent = true)
     {
+        // A FileDrop viewer cohort is presentation-only. A real folder load
+        // retires it first and restores the catalog selection before the new
+        // load transaction captures any UI state.
+        CloseExternalFileDropSessionForReplacement();
         var totalWatch = Stopwatch.StartNew();
         LastLoadMetrics = null;
+        UpdateLoadTimingPresentation();
         _previewUpdateCount = 0;
         _previewMs = 0;
         _previewDeferredDecodeCount = 0;
@@ -1947,35 +2255,64 @@ public partial class MainWindow : Window
                 LoadFavorites();
             if (seenReady)
                 LoadSeenState();
-            LoadEnhancedState();
+            LoadEnhancedState(files
+                .Select(static file => file.FullName)
+                .ToArray(),
+                _catalogContentRevision + 1);
             // Tile preparation can move to worker threads for large catalogs.
             // Keep those workers off UI-owned mutable stores: modal polling,
             // Enhance completion, and deletion may update the live enhancement
             // map while a reload is preparing the replacement catalog.
+            Dictionary<string, List<ManagedVideoVersion>> validCatalogVideoVersionsByPath =
+                _catalogVideoVersionsByPath
+                    .Select(static item => new KeyValuePair<string, List<ManagedVideoVersion>>(
+                        item.Key,
+                        item.Value.ToList()))
+                    .ToDictionary(
+                        static item => item.Key,
+                        item => item.Value
+                            .Where(version => !_ambiguousEnhancementJobIds.Contains(version.JobId))
+                            .ToList(),
+                        StringComparer.OrdinalIgnoreCase);
             var catalogSharedState = new CatalogSharedStateSnapshot(
                 new Dictionary<string, int>(_favorites, StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, DateTimeOffset>(
+                    _favoriteChangedAtUtcByPath,
+                    StringComparer.OrdinalIgnoreCase),
                 _seenPaths.ToHashSet(StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, ManagedEnhancedOutput>(
                     _catalogEnhancedOutputsByPath,
                     StringComparer.OrdinalIgnoreCase),
-                _catalogEnhancementVersionsByPath
-                    .Where(static item => item.Value.Any(static version => version.Operation == "upscale"))
-                    .Select(static item => item.Key)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
-                _catalogEnhancementVersionsByPath
-                    .Where(static item => item.Value.Any(static version => version.Operation == "photoreal"))
-                    .Select(static item => item.Key)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
-                _catalogVideoVersionsByPath
+                BuildEnhancementAvailabilityByPath(
+                    _catalogEnhancementVersionsByPath),
+                BuildPhotorealFavoriteLevelsByPath(
+                    _catalogEnhancementVersionsByPath,
+                    _favorites),
+                BuildVideoFavoriteLevelsByPath(
+                    validCatalogVideoVersionsByPath,
+                    _favorites),
+                validCatalogVideoVersionsByPath
                     .Where(static item => item.Value.Count > 0)
-                    .Select(static item => item.Key)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
-                _catalogVideoVersionsByPath
+                    .ToDictionary(
+                        static item => item.Key,
+                        static item => item.Value.Count,
+                        StringComparer.OrdinalIgnoreCase),
+                validCatalogVideoVersionsByPath
                     .Where(static item => item.Value.Count > 0)
                     .ToDictionary(
                         static item => item.Key,
                         static item => item.Value[0].Output.OutputPath,
-                        StringComparer.OrdinalIgnoreCase));
+                        StringComparer.OrdinalIgnoreCase),
+                BuildLatestEnhancementActivityByPath(
+                    _catalogEnhancementVersionsByPath,
+                    "upscale"),
+                BuildLatestEnhancementActivityByPath(
+                    _catalogEnhancementVersionsByPath,
+                    "photoreal"),
+                BuildLatestVideoActivityByPath(validCatalogVideoVersionsByPath),
+                new Dictionary<string, ManagedEnhancementQueueActivity>(
+                    _catalogEnhancementQueueActivityByPath,
+                    StringComparer.OrdinalIgnoreCase));
             CatalogCardLayoutContext cardLayout = CaptureCardLayoutContext();
             bool showUnseenDots = _showUnseenDots;
             IReadOnlyDictionary<string, ImageDimensions> emptyDimensions =
@@ -2064,11 +2401,19 @@ public partial class MainWindow : Window
                     scanAccessFailures.Enqueue(tile.Path);
                     continue;
                 }
+                // Revalidate managed video outputs on the UI thread at the
+                // publication boundary. Files can disappear after the worker
+                // snapshot; stale or ambiguous outputs must not contribute to
+                // the count, maximum Favorite badge, or Lv 0 filter meaning.
+                ApplyTileVideoAvailability(
+                    tile,
+                    GetCatalogManagedVideoVersionsForPath(tile.Path));
                 publishableTiles.Add(tile);
             }
             if (publishableTiles.Count > 1
                 && (!string.Equals(preparedSortBy, _sortBy, StringComparison.Ordinal)
-                    || !string.Equals(preparedRandomSortSeed, _randomSortSeed, StringComparison.Ordinal)))
+                    || !string.Equals(preparedRandomSortSeed, _randomSortSeed, StringComparison.Ordinal)
+                    || string.Equals(_sortBy, SortVideoNewestValue, StringComparison.Ordinal)))
             {
                 publishableTiles.Sort(
                     (left, right) => CompareTilesForSort(left, right, _sortBy, _randomSortSeed));
@@ -2078,6 +2423,7 @@ public partial class MainWindow : Window
             SetLandingFolderSet(_currentFolderSet);
             _allTiles.Clear();
             _allTiles.AddRange(publishableTiles);
+            RebuildCatalogTileFavoritePathIndex();
             // A reload replaces Tile identities even for an empty or
             // single-item catalog. Invalidate the cached unfiltered projection
             // on every publication, not only when sorting can change order.
@@ -2158,6 +2504,7 @@ public partial class MainWindow : Window
             LastLoadMetrics.InitialFilterMs = initialFilterMs;
             LastLoadMetrics.CatalogStatsMs = catalogStatsMs;
             UpdateGridMetrics(LastLoadMetrics);
+            UpdateLoadTimingPresentation();
             LandingPanel.IsEnabled = true;
             ScanBar.Value = 0;
             ScanPercent.Text = "0%";
@@ -2279,6 +2626,7 @@ public partial class MainWindow : Window
         LastLoadMetrics.MetadataIndexWritten = metadata.IndexWritten;
         LastLoadMetrics.MetadataIndexSaveError = metadata.IndexSaveError;
         UpdateGridMetrics(LastLoadMetrics);
+        UpdateLoadTimingPresentation();
         FinishCurrentLoad(generation, cts);
         }
         finally
@@ -2627,6 +2975,50 @@ public partial class MainWindow : Window
         };
     }
 
+    private ThumbnailLoadRequest CreateThumbnailLoadRequest(Tile tile)
+    {
+        string assetPath = ResolveGalleryThumbnailAssetPath(tile);
+        return new ThumbnailLoadRequest(
+            tile.Path,
+            assetPath,
+            string.Equals(assetPath, tile.Path, StringComparison.OrdinalIgnoreCase),
+            _thumbnailDisplayModeRevision,
+            tile.ThumbnailDisplayRevision);
+    }
+
+    private static bool ThumbnailNeedsLoad(
+        Tile tile,
+        ThumbnailLoadRequest request)
+        => tile.Thumbnail is null
+            || !string.Equals(
+                tile.ThumbnailAssetPath,
+                request.AssetPath,
+                StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasOriginalResidentThumbnail(Tile tile)
+        => tile.Thumbnail is not null
+            && string.Equals(
+                tile.ThumbnailAssetPath,
+                tile.Path,
+                StringComparison.OrdinalIgnoreCase);
+
+    private bool IsThumbnailLoadRequestCurrent(
+        Tile tile,
+        ThumbnailLoadRequest request)
+    {
+        if (request.DisplayModeRevision != _thumbnailDisplayModeRevision
+            || request.TileRevision != tile.ThumbnailDisplayRevision)
+        {
+            return false;
+        }
+
+        ThumbnailLoadRequest current = CreateThumbnailLoadRequest(tile);
+        return string.Equals(
+            current.AssetPath,
+            request.AssetPath,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<ThumbnailLoadMetrics> LoadThumbnailsAsync(CancellationToken token)
     {
         List<Tile> snapshot;
@@ -2642,7 +3034,8 @@ public partial class MainWindow : Window
                 0,
                 Math.Max(0, _tiles.Count - InitialThumbnailPrefetchCount));
             snapshot = _tiles.Skip(start).Take(InitialThumbnailPrefetchCount)
-                .Where(static tile => tile.IsRealFile && tile.Thumbnail is null)
+                .Where(tile => tile.IsRealFile
+                    && ThumbnailNeedsLoad(tile, CreateThumbnailLoadRequest(tile)))
                 .ToList();
         }
         else if (_galleryVirtualizingPanel is { FirstRealizedIndex: >= 0 } panel)
@@ -2650,7 +3043,8 @@ public partial class MainWindow : Window
             int first = Math.Clamp(panel.FirstRealizedIndex, 0, Math.Max(0, _tiles.Count - 1));
             int last = Math.Clamp(panel.LastRealizedIndex, first, Math.Max(first, _tiles.Count - 1));
             snapshot = _tiles.Skip(first).Take(last - first + 1)
-                .Where(static tile => tile.IsRealFile && tile.Thumbnail is null)
+                .Where(tile => tile.IsRealFile
+                    && ThumbnailNeedsLoad(tile, CreateThumbnailLoadRequest(tile)))
                 .ToList();
         }
         else
@@ -2659,7 +3053,8 @@ public partial class MainWindow : Window
             // viewport-sized slice; the range event immediately supersedes it
             // if the user jumps elsewhere.
             snapshot = _tiles.Take(InitialThumbnailPrefetchCount)
-                .Where(static tile => tile.IsRealFile && tile.Thumbnail is null)
+                .Where(tile => tile.IsRealFile
+                    && ThumbnailNeedsLoad(tile, CreateThumbnailLoadRequest(tile)))
                 .ToList();
         }
 
@@ -2709,32 +3104,67 @@ public partial class MainWindow : Window
         int workers = Math.Max(1, Math.Min(batchWorkerLimit, requested));
         if (requested == 0)
             return new ThumbnailLoadMetrics(0, 0, 0, 0);
-        using var batchGate = new SemaphoreSlim(batchWorkerLimit, batchWorkerLimit);
+        int nextCandidateIndex = -1;
 
         try
         {
-            Task[] loads = candidates.Select(async tile =>
+            async Task LoadWorkerAsync()
             {
-                if (tile.Thumbnail is not null
-                    || !ShouldAttemptThumbnailDecode(tile.Path)
-                    || !_thumbnailLoadsInFlight.TryAdd(tile.Path, 0))
+                while (true)
                 {
-                    return;
-                }
-                Interlocked.Increment(ref scheduled);
-                try
-                {
-                    await batchGate.WaitAsync(token);
+                    token.ThrowIfCancellationRequested();
+                    int candidateIndex = Interlocked.Increment(ref nextCandidateIndex);
+                    if (candidateIndex >= requested)
+                        return;
+
+                    Tile tile = candidates[candidateIndex];
+                    ThumbnailLoadRequest request =
+                        CreateThumbnailLoadRequest(tile);
+                    if (!ThumbnailNeedsLoad(tile, request)
+                        || !ShouldAttemptThumbnailDecode(tile.Path)
+                        || !_thumbnailLoadsInFlight.TryAdd(
+                            request.InFlightKey,
+                            0))
+                    {
+                        continue;
+                    }
+
+                    Interlocked.Increment(ref scheduled);
+                    int smokeDelayMilliseconds = Volatile.Read(
+                        ref _thumbnailDecodeDelayForSmokeMilliseconds);
+                    bool recordForSmoke = smokeDelayMilliseconds > 0;
                     try
                     {
+                        if (recordForSmoke)
+                        {
+                            await Task.Delay(smokeDelayMilliseconds, token);
+                            _thumbnailDecodeStartsForSmoke.AddOrUpdate(
+                                tile.Path,
+                                1,
+                                static (_, count) => count + 1);
+                        }
+
                         await _thumbnailDecodeGate.WaitAsync(token);
                         int activeWorkers = Interlocked.Increment(ref _activeThumbnailDecodeWorkers);
                         UpdateMaximumCounter(ref _maxActiveThumbnailDecodeWorkers, activeWorkers);
                         BitmapSource? thumbnail;
                         try
                         {
-                            int decodeWidth = (int)Math.Clamp(tile.CardWidth * 1.4, 180, 520);
-                            thumbnail = await Task.Run(() => LoadThumbnailBitmap(tile, decodeWidth), token);
+                            int decodeWidth = ResolveThumbnailDecodePixelWidth(tile.CardWidth);
+                            bool recordWicReadForSmoke =
+                                Volatile.Read(ref _thumbnailWicReadSmokeEnabled) != 0;
+                            bool blockWicReadForSmoke =
+                                Volatile.Read(ref _thumbnailWicReadBlockForSmoke) != 0;
+                            thumbnail = await Task.Run(
+                                () => LoadThumbnailBitmap(
+                                    tile,
+                                    request.AssetPath,
+                                    request.UseBrowserCache,
+                                    decodeWidth,
+                                    token,
+                                    recordWicReadForSmoke,
+                                    blockWicReadForSmoke),
+                                token);
                         }
                         finally
                         {
@@ -2745,36 +3175,50 @@ public partial class MainWindow : Window
                         token.ThrowIfCancellationRequested();
                         if (generation != _loadGeneration)
                             return;
+                        if (!IsThumbnailLoadRequestCurrent(tile, request))
+                            continue;
 
                         if (thumbnail is null)
                             RecordThumbnailDecodeFailure(tile.Path);
                         else
                         {
                             _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
-                            StoreResidentThumbnail(tile, thumbnail);
+                            StoreResidentThumbnail(
+                                tile,
+                                thumbnail,
+                                request.AssetPath);
+                            if (recordForSmoke)
+                            {
+                                _thumbnailAppliesForSmoke.AddOrUpdate(
+                                    tile.Path,
+                                    1,
+                                    static (_, count) => count + 1);
+                            }
                         }
+                        Interlocked.Increment(ref completed);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        if (IsThumbnailLoadRequestCurrent(tile, request))
+                            RecordThumbnailDecodeFailure(tile.Path);
                         Interlocked.Increment(ref completed);
                     }
                     finally
                     {
-                        batchGate.Release();
+                        _thumbnailLoadsInFlight.TryRemove(
+                            request.InFlightKey,
+                            out _);
                     }
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    RecordThumbnailDecodeFailure(tile.Path);
-                    Interlocked.Increment(ref completed);
-                }
-                finally
-                {
-                    _thumbnailLoadsInFlight.TryRemove(tile.Path, out _);
-                }
-            }).ToArray();
+            }
 
+            Task[] loads = Enumerable.Range(0, workers)
+                .Select(_ => LoadWorkerAsync())
+                .ToArray();
             await Task.WhenAll(loads);
         }
         catch (OperationCanceledException)
@@ -2828,7 +3272,10 @@ public partial class MainWindow : Window
         long nearestDelay = long.MaxValue;
         foreach (Tile tile in candidates)
         {
-            if (tile.Thumbnail is not null || !tile.IsRealFile)
+            if (!tile.IsRealFile
+                || !ThumbnailNeedsLoad(
+                    tile,
+                    CreateThumbnailLoadRequest(tile)))
                 continue;
 
             if (!_thumbnailDecodeFailures.TryGetValue(tile.Path, out ThumbnailDecodeFailure failure))
@@ -2851,29 +3298,35 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private void StoreResidentThumbnail(Tile tile, BitmapSource thumbnail)
+    private void StoreResidentThumbnail(
+        Tile tile,
+        BitmapSource thumbnail,
+        string assetPath)
     {
         long bytes = EstimateBitmapBytes(thumbnail);
         if (_residentThumbnailByteSizes.TryGetValue(tile.Path, out long previousBytes))
             _residentThumbnailBytes = Math.Max(0, _residentThumbnailBytes - previousBytes);
         _residentThumbnailByteSizes[tile.Path] = bytes;
         _residentThumbnailBytes += bytes;
-        tile.Thumbnail = thumbnail;
+        tile.SetThumbnailAsset(thumbnail, assetPath);
         TouchResidentThumbnail(tile);
         TrimResidentThumbnails();
     }
 
-    private void SetProtectedResidentThumbnailRanges(
+    private void SetProtectedResidentThumbnailRange(
         int firstVisibleIndex,
-        int lastVisibleIndex,
-        int firstRealizedIndex,
-        int lastRealizedIndex)
+        int lastVisibleIndex)
     {
         _protectedResidentThumbnailPaths.Clear();
         AddProtectedResidentThumbnailRange(firstVisibleIndex, lastVisibleIndex);
-        AddProtectedResidentThumbnailRange(firstRealizedIndex, lastRealizedIndex);
         FinishProtectedResidentThumbnailUpdate();
     }
+
+    private static int ResolveThumbnailDecodePixelWidth(double cardWidth)
+        => (int)Math.Clamp(
+            cardWidth * 1.4,
+            MinThumbnailDecodePixelWidth,
+            MaxThumbnailDecodePixelWidth);
 
     private void AddProtectedResidentThumbnailRange(int firstIndex, int lastIndex)
     {
@@ -2918,13 +3371,17 @@ public partial class MainWindow : Window
 
     private void TrimResidentThumbnails()
     {
-        long protectedBytes = ProtectedResidentThumbnailBytes();
+        (long protectedBytes, int protectedResidentCount) = ProtectedResidentThumbnailMetrics();
         long effectiveBudget = Math.Max(_residentThumbnailBudgetBytes, protectedBytes);
+        int effectiveEntryLimit = Math.Max(
+            MaxResidentThumbnailEntryCount,
+            protectedResidentCount);
         _maxProtectedResidentThumbnailBytes = Math.Max(_maxProtectedResidentThumbnailBytes, protectedBytes);
         _maxEffectiveResidentThumbnailBudgetBytes = Math.Max(
             _maxEffectiveResidentThumbnailBudgetBytes,
             effectiveBudget);
-        while (_residentThumbnailBytes > effectiveBudget)
+        while (_residentThumbnailBytes > effectiveBudget
+            || _residentThumbnailLru.Count > effectiveEntryLimit)
         {
             LinkedListNode<Tile>? oldestUnprotected = _residentThumbnailLru.First;
             while (oldestUnprotected is not null
@@ -2940,15 +3397,19 @@ public partial class MainWindow : Window
         _maxResidentThumbnailBytes = Math.Max(_maxResidentThumbnailBytes, _residentThumbnailBytes);
     }
 
-    private long ProtectedResidentThumbnailBytes()
+    private (long Bytes, int Count) ProtectedResidentThumbnailMetrics()
     {
         long total = 0;
+        int count = 0;
         foreach (string path in _protectedResidentThumbnailPaths)
         {
             if (_residentThumbnailByteSizes.TryGetValue(path, out long bytes))
+            {
                 total = total > long.MaxValue - bytes ? long.MaxValue : total + bytes;
+                count++;
+            }
         }
-        return total;
+        return (total, count);
     }
 
     private void EvictResidentThumbnail(LinkedListNode<Tile> node)
@@ -2980,7 +3441,7 @@ public partial class MainWindow : Window
     {
         long available = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
         long candidate = available > 0
-            ? available / 32
+            ? available / 64
             : FallbackResidentThumbnailBudgetBytes;
         return Math.Clamp(
             candidate,
@@ -3026,23 +3487,58 @@ public partial class MainWindow : Window
         _visibleThumbnailEvictionCount = 0;
     }
 
-    private BitmapSource? LoadThumbnailBitmap(Tile tile, int decodePixelWidth)
+    private BitmapSource? LoadThumbnailBitmap(
+        Tile tile,
+        string assetPath,
+        bool useBrowserCache,
+        int decodePixelWidth,
+        CancellationToken token,
+        bool recordWicReadForSmoke,
+        bool blockWicReadForSmoke)
     {
+        int firstWicReadRecorded = 0;
+        Action? onFirstWicRead = !recordWicReadForSmoke
+            ? null
+            : () =>
+            {
+                if (Interlocked.Exchange(ref firstWicReadRecorded, 1) != 0)
+                    return;
+                _thumbnailWicReadStartsForSmoke.AddOrUpdate(
+                    tile.Path,
+                    1,
+                    static (_, count) => count + 1);
+                if (blockWicReadForSmoke)
+                    _thumbnailWicReadReleaseForSmoke.Wait();
+                token.ThrowIfCancellationRequested();
+            };
         try
         {
-            foreach (string cachePath in GetBrowserThumbnailCachePaths(tile))
+            token.ThrowIfCancellationRequested();
+            if (useBrowserCache)
             {
-                if (!File.Exists(cachePath))
-                    continue;
-                BitmapSource? cached = LoadBitmap(cachePath, decodePixelWidth);
-                if (cached is not null)
+                foreach (string cachePath in GetBrowserThumbnailCachePaths(tile))
                 {
-                    Interlocked.Increment(ref _thumbnailBrowserCacheHits);
-                    // The shared browser cache is immutable/versioned by source
-                    // mtime, so reading it never mutates user cache or source.
-                    return cached;
+                    token.ThrowIfCancellationRequested();
+                    if (!File.Exists(cachePath))
+                        continue;
+                    BitmapSource? cached = LoadBitmap(
+                        cachePath,
+                        decodePixelWidth,
+                        cancellationToken: token,
+                        onFirstRead: onFirstWicRead);
+                    if (cached is not null)
+                    {
+                        Interlocked.Increment(ref _thumbnailBrowserCacheHits);
+                        // The shared browser cache is immutable/versioned by source
+                        // mtime, so reading it never mutates user cache or source.
+                        return cached;
+                    }
                 }
             }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -3050,7 +3546,12 @@ public partial class MainWindow : Window
             // fall back to the source without deleting the browser cache.
         }
 
-        return LoadBitmap(tile.Path, decodePixelWidth);
+        return LoadBitmap(
+            assetPath,
+            decodePixelWidth,
+            explicitManagedOutput: !useBrowserCache,
+            cancellationToken: token,
+            onFirstRead: onFirstWicRead);
     }
 
     private static IReadOnlyList<string> GetBrowserThumbnailCachePaths(Tile tile)
@@ -3364,12 +3865,35 @@ public partial class MainWindow : Window
         int paletteIndex = path.GetHashCode(StringComparison.OrdinalIgnoreCase) & int.MaxValue;
         bool enhanced = TryGetEnhancedOutputForPath(path, sharedState, out string? enhancedOutputPath);
         string? enhancementAlias = NormalizeCatalogEnhancementPath(path);
-        bool upscaled = enhancementAlias is not null
-            && sharedState.UpscaledPaths.Contains(enhancementAlias);
-        bool photorealized = enhancementAlias is not null
-            && sharedState.PhotorealizedPaths.Contains(enhancementAlias);
-        bool videoGenerated = enhancementAlias is not null
-            && sharedState.VideoPaths.Contains(enhancementAlias);
+        EnhancementAvailability enhancementAvailability =
+            enhancementAlias is not null
+            && sharedState.EnhancementAvailabilityByPath.TryGetValue(
+                enhancementAlias,
+                out EnhancementAvailability knownEnhancementAvailability)
+                ? knownEnhancementAvailability
+                : default;
+        int photorealFavoriteLevel = enhancementAlias is not null
+            && sharedState.PhotorealFavoriteLevelsByPath.TryGetValue(
+                enhancementAlias,
+                out int knownPhotorealFavoriteLevel)
+                ? Math.Clamp(knownPhotorealFavoriteLevel, 0, 5)
+                : 0;
+        int videoFavoriteLevel = enhancementAlias is not null
+            && sharedState.VideoFavoriteLevelsByPath.TryGetValue(
+                enhancementAlias,
+                out int knownVideoFavoriteLevel)
+                ? Math.Clamp(knownVideoFavoriteLevel, 0, 5)
+                : 0;
+        int videoVersionCount = enhancementAlias is not null
+            && sharedState.VideoVersionCountsByPath.TryGetValue(
+                enhancementAlias,
+                out int knownVideoVersionCount)
+                ? knownVideoVersionCount
+                : 0;
+        bool upscaled = enhancementAvailability.Upscaled;
+        bool photorealized = enhancementAvailability.Photorealized;
+        bool i2iEdited = enhancementAvailability.I2iEdited;
+        bool videoGenerated = videoVersionCount > 0;
         string? videoOutputPath = videoGenerated
             && enhancementAlias is not null
             && sharedState.VideoOutputs.TryGetValue(enhancementAlias, out string? knownVideoOutput)
@@ -3385,6 +3909,36 @@ public partial class MainWindow : Window
         }
         string normalizedPath = NormalizeFavoritePath(path);
         bool seen = sharedState.SeenPaths.Contains(normalizedPath);
+        DateTimeOffset? favoriteChangedAtUtc =
+            sharedState.FavoriteChangedAtUtcByPath.TryGetValue(
+                normalizedPath,
+                out DateTimeOffset favoriteActivity)
+                ? favoriteActivity
+                : null;
+        DateTimeOffset? upscaleCompletedAtUtc = enhancementAlias is not null
+            && sharedState.UpscaleCompletedAtUtcByPath.TryGetValue(
+                enhancementAlias,
+                out DateTimeOffset upscaleActivity)
+                ? upscaleActivity
+                : null;
+        DateTimeOffset? photorealCompletedAtUtc = enhancementAlias is not null
+            && sharedState.PhotorealCompletedAtUtcByPath.TryGetValue(
+                enhancementAlias,
+                out DateTimeOffset photorealActivity)
+                ? photorealActivity
+                : null;
+        DateTimeOffset? videoCompletedAtUtc = enhancementAlias is not null
+            && sharedState.VideoCompletedAtUtcByPath.TryGetValue(
+                enhancementAlias,
+                out DateTimeOffset videoActivity)
+                ? videoActivity
+                : null;
+        ManagedEnhancementQueueActivity? queueActivity = enhancementAlias is not null
+            && sharedState.QueueActivityByPath.TryGetValue(
+                enhancementAlias,
+                out ManagedEnhancementQueueActivity knownQueueActivity)
+                ? knownQueueActivity
+                : null;
         var tile = new Tile
         {
             ArtBase = MakeBaseBrush(paletteIndex),
@@ -3401,6 +3955,18 @@ public partial class MainWindow : Window
             CardWidth = cardLayout.BaseWidth,
             ModifiedUtc = file.LastWriteTimeUtc,
             CreatedUtc = file.CreationTimeUtc,
+            UpscaleCompletedAtUtc = upscaleCompletedAtUtc,
+            PhotorealCompletedAtUtc = photorealCompletedAtUtc,
+            VideoCompletedAtUtc = videoCompletedAtUtc,
+            UpscaleQueueActive = queueActivity?.UpscaleActive == true,
+            UpscaleQueueAddedAtUtc = queueActivity?.UpscaleAddedAtUtc,
+            PhotorealQueueActive = queueActivity?.PhotorealActive == true,
+            PhotorealQueueAddedAtUtc = queueActivity?.PhotorealAddedAtUtc,
+            I2iQueueActive = queueActivity?.I2iActive == true,
+            I2iQueueAddedAtUtc = queueActivity?.I2iAddedAtUtc,
+            VideoQueueActive = queueActivity?.VideoActive == true,
+            VideoQueueAddedAtUtc = queueActivity?.VideoAddedAtUtc,
+            FavoriteChangedAtUtc = favoriteChangedAtUtc,
             SourceLength = file.Length,
             SourceLastWriteUtcTicks = file.LastWriteTimeUtc.Ticks,
             SourceCreationUtcTicks = file.CreationTimeUtc.Ticks,
@@ -3413,8 +3979,15 @@ public partial class MainWindow : Window
             ImagePixelHeight = imageSize.Height,
             Enhanced = enhanced,
             Upscaled = upscaled,
+            UpscaleVersionCount = enhancementAvailability.UpscaleCount,
             Photorealized = photorealized,
+            PhotorealVersionCount = enhancementAvailability.PhotorealCount,
+            PhotorealFavoriteLevel = photorealFavoriteLevel,
+            I2iEdited = i2iEdited,
+            I2iVersionCount = enhancementAvailability.I2iCount,
             VideoGenerated = videoGenerated,
+            VideoVersionCount = videoVersionCount,
+            VideoFavoriteLevel = videoFavoriteLevel,
             VideoOutputPath = videoOutputPath,
             EnhancedOutputPath = enhancedOutputPath,
             SizeText = FormatBytes(file.Length),
@@ -3706,18 +4279,700 @@ public partial class MainWindow : Window
     private int FavoriteLevelForPath(string path)
         => _favorites.TryGetValue(NormalizeFavoritePath(path), out int level) ? Math.Clamp(level, 0, 5) : 0;
 
+    private void CommitFavoriteActivity(
+        IEnumerable<(string Path, DateTimeOffset ChangedAtUtc)> activity)
+    {
+        var committed = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, DateTimeOffset changedAtUtc) in activity)
+        {
+            if (string.IsNullOrWhiteSpace(path) || changedAtUtc == default)
+                continue;
+            string normalizedPath = NormalizeFavoritePath(path);
+            DateTimeOffset normalizedTime = changedAtUtc.ToUniversalTime();
+            if (!committed.TryGetValue(normalizedPath, out DateTimeOffset current)
+                || normalizedTime > current)
+            {
+                committed[normalizedPath] = normalizedTime;
+            }
+        }
+        if (committed.Count == 0)
+            return;
+
+        foreach ((string path, DateTimeOffset changedAtUtc) in committed)
+            _favoriteChangedAtUtcByPath[path] = changedAtUtc;
+        var affectedTiles = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        Tile? selectedTile = SelectedTile();
+        foreach (string path in committed.Keys)
+            CollectLiveTilesForFavoritePath(path, selectedTile, affectedTiles);
+        foreach (Tile tile in affectedTiles)
+        {
+            tile.FavoriteChangedAtUtc =
+                _favoriteChangedAtUtcByPath.TryGetValue(
+                    NormalizeFavoritePath(tile.Path),
+                    out DateTimeOffset changedAtUtc)
+                    ? changedAtUtc
+                    : null;
+        }
+
+        ScheduleFavoritePresentationStateSave(
+            committed,
+            includeFilterState: false);
+        if (!ExternalFileDropSessionActive
+            && _sortBy == SortFavoriteChangedNewestValue)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: true,
+                selectFirst: false);
+        }
+    }
+
+    private static void TrimFavoriteActivity(
+        Dictionary<string, DateTimeOffset> activity,
+        ISet<string>? affectedPaths = null)
+    {
+        if (activity.Count <= MaxPersistedFavoriteActivityEntries)
+            return;
+
+        KeyValuePair<string, DateTimeOffset>[] retained = activity
+            .OrderByDescending(static item => item.Value)
+            .ThenBy(static item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxPersistedFavoriteActivityEntries)
+            .ToArray();
+        if (affectedPaths is not null)
+        {
+            var retainedPaths = retained
+                .Select(static item => item.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (string path in activity.Keys)
+            {
+                if (!retainedPaths.Contains(path))
+                    affectedPaths.Add(path);
+            }
+        }
+        activity.Clear();
+        foreach ((string path, DateTimeOffset changedAtUtc) in retained)
+            activity[path] = changedAtUtc;
+    }
+
+    private FavoriteFilterStateSnapshot CaptureFavoriteFilterStateSnapshot()
+        => new(
+            FavoriteOnlyFilter?.IsChecked == true,
+            UnfavoriteOnlyFilter?.IsChecked == true,
+            _favoriteFilterLevels.OrderBy(static level => level).ToArray(),
+            _photorealFavoriteFilterLevels.OrderBy(static level => level).ToArray(),
+            _videoFavoriteFilterLevels.OrderBy(static level => level).ToArray());
+
+    private void ScheduleFavoritePresentationStateSave(
+        IReadOnlyDictionary<string, DateTimeOffset> activity,
+        bool includeFilterState)
+    {
+        if (_initializing || _suppressStateSave)
+            return;
+        if (_stateWriteBlocked)
+        {
+            ReportPersistenceRefusal(
+                "Viewer settings",
+                ResolvedStatePath,
+                protectedFile: true);
+            return;
+        }
+
+        var normalizedActivity = new Dictionary<string, DateTimeOffset>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, DateTimeOffset changedAtUtc) in activity)
+        {
+            if (string.IsNullOrWhiteSpace(path) || changedAtUtc == default)
+                continue;
+            string normalizedPath = NormalizeFavoritePath(path);
+            DateTimeOffset normalizedTime = changedAtUtc.ToUniversalTime();
+            if (!normalizedActivity.TryGetValue(normalizedPath, out DateTimeOffset current)
+                || normalizedTime > current)
+            {
+                normalizedActivity[normalizedPath] = normalizedTime;
+            }
+        }
+
+        QueueFavoritePresentationStateBatch(new FavoritePresentationStateBatch(
+            normalizedActivity,
+            includeFilterState ? CaptureFavoriteFilterStateSnapshot() : null));
+    }
+
+    private void ScheduleFavoriteFilterStateSave()
+        => ScheduleFavoritePresentationStateSave(
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
+            includeFilterState: true);
+
+    private void QueueFavoritePresentationStateBatch(
+        FavoritePresentationStateBatch batch,
+        bool retrying = false)
+    {
+        lock (_favoritePresentationStateQueueGate)
+        {
+            if (!retrying && _failedFavoritePresentationStateBatch is not null)
+            {
+                _failedFavoritePresentationStateBatch = MergeFavoritePresentationStateBatches(
+                    _failedFavoritePresentationStateBatch,
+                    batch);
+                return;
+            }
+
+            MergeFavoritePresentationStateActivity(
+                _pendingFavoritePresentationActivity,
+                batch.Activity);
+            if (batch.FilterState is not null)
+                _pendingFavoriteFilterState = batch.FilterState;
+
+            if (_favoritePresentationStatePumpRunning != 0)
+                return;
+
+            _favoritePresentationStatePumpRunning = 1;
+            _favoritePresentationStateWriteTask = Task.Run(
+                PumpFavoritePresentationStateSavesAsync);
+        }
+    }
+
+    private static FavoritePresentationStateBatch MergeFavoritePresentationStateBatches(
+        FavoritePresentationStateBatch first,
+        FavoritePresentationStateBatch second)
+    {
+        var activity = new Dictionary<string, DateTimeOffset>(
+            first.Activity,
+            StringComparer.OrdinalIgnoreCase);
+        MergeFavoritePresentationStateActivity(activity, second.Activity);
+        return new FavoritePresentationStateBatch(
+            activity,
+            second.FilterState ?? first.FilterState);
+    }
+
+    private static void MergeFavoritePresentationStateActivity(
+        Dictionary<string, DateTimeOffset> destination,
+        IReadOnlyDictionary<string, DateTimeOffset> source)
+    {
+        foreach ((string path, DateTimeOffset changedAtUtc) in source)
+        {
+            if (!destination.TryGetValue(path, out DateTimeOffset current)
+                || changedAtUtc > current)
+            {
+                destination[path] = changedAtUtc;
+            }
+        }
+    }
+
+    private async Task PumpFavoritePresentationStateSavesAsync()
+    {
+        while (true)
+        {
+            FavoritePresentationStateBatch batch;
+            lock (_favoritePresentationStateQueueGate)
+            {
+                if (_pendingFavoritePresentationActivity.Count == 0
+                    && _pendingFavoriteFilterState is null)
+                {
+                    _favoritePresentationStatePumpRunning = 0;
+                    return;
+                }
+
+                batch = new FavoritePresentationStateBatch(
+                    new Dictionary<string, DateTimeOffset>(
+                        _pendingFavoritePresentationActivity,
+                        StringComparer.OrdinalIgnoreCase),
+                    _pendingFavoriteFilterState);
+                _pendingFavoritePresentationActivity.Clear();
+                _pendingFavoriteFilterState = null;
+            }
+
+            FavoritePresentationStatePersistResult result;
+            try
+            {
+                result = PersistFavoritePresentationStateBatch(
+                    ResolvedStatePath,
+                    batch);
+            }
+            catch (Exception error)
+            {
+                result = new FavoritePresentationStatePersistResult(
+                    Saved: false,
+                    Protected: false,
+                    new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
+                    error.Message);
+            }
+
+            if (!result.Saved)
+            {
+                lock (_favoritePresentationStateQueueGate)
+                {
+                    var pending = new FavoritePresentationStateBatch(
+                        new Dictionary<string, DateTimeOffset>(
+                            _pendingFavoritePresentationActivity,
+                            StringComparer.OrdinalIgnoreCase),
+                        _pendingFavoriteFilterState);
+                    FavoritePresentationStateBatch failed =
+                        MergeFavoritePresentationStateBatches(batch, pending);
+                    _failedFavoritePresentationStateBatch =
+                        _failedFavoritePresentationStateBatch is null
+                            ? failed
+                            : MergeFavoritePresentationStateBatches(
+                                _failedFavoritePresentationStateBatch,
+                                failed);
+                    _pendingFavoritePresentationActivity.Clear();
+                    _pendingFavoriteFilterState = null;
+                    _favoritePresentationStatePumpRunning = 0;
+                }
+
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (result.Protected)
+                    {
+                        _stateWriteBlocked = true;
+                        ReportPersistenceRefusal(
+                            "Viewer settings",
+                            ResolvedStatePath,
+                            protectedFile: true);
+                    }
+                    else
+                    {
+                        ReportPersistenceRefusal(
+                            "Viewer settings",
+                            ResolvedStatePath,
+                            retryAction: RetryFailedFavoritePresentationStateSave);
+                    }
+                }, DispatcherPriority.Background);
+                return;
+            }
+
+            await Dispatcher.InvokeAsync(
+                () => ApplyFavoritePresentationStatePersistResult(result),
+                DispatcherPriority.Background);
+        }
+    }
+
+    private static FavoritePresentationStatePersistResult PersistFavoritePresentationStateBatch(
+        string path,
+        FavoritePresentationStateBatch batch)
+    {
+        bool malformed = false;
+        var evicted = new Dictionary<string, DateTimeOffset>(
+            StringComparer.OrdinalIgnoreCase);
+        bool saved = TryWithPersistenceLock(path, () =>
+        {
+            if (!TryReadViewerStateFile(path, out ViewerState? state))
+            {
+                malformed = true;
+                return false;
+            }
+
+            state ??= new ViewerState { Version = 2 };
+            if (batch.FilterState is { } filter)
+            {
+                state.ShowFavoritesOnly = filter.ShowFavoritesOnly;
+                state.ShowUnfavoriteOnly = filter.ShowUnfavoriteOnly;
+                state.FavoriteFilterLevels = filter.FavoriteLevels.Length == 0
+                    ? null
+                    : filter.FavoriteLevels.ToList();
+                state.PhotorealFavoriteFilterLevels =
+                    filter.PhotorealFavoriteLevels.Length == 0
+                        ? null
+                        : filter.PhotorealFavoriteLevels.ToList();
+                state.VideoFavoriteFilterLevels = filter.VideoFavoriteLevels.Length == 0
+                    ? null
+                    : filter.VideoFavoriteLevels.ToList();
+            }
+
+            if (batch.Activity.Count > 0)
+            {
+                state.FavoriteChangedAtUtcByPath ??=
+                    new Dictionary<string, DateTimeOffset>(
+                        StringComparer.OrdinalIgnoreCase);
+                foreach ((string activityPath, DateTimeOffset activityTime) in batch.Activity)
+                {
+                    string normalizedPath = NormalizeFavoritePath(activityPath);
+                    DateTimeOffset normalizedTime = activityTime.ToUniversalTime();
+                    if (!state.FavoriteChangedAtUtcByPath.TryGetValue(
+                            normalizedPath,
+                            out DateTimeOffset current)
+                        || normalizedTime > current)
+                    {
+                        state.FavoriteChangedAtUtcByPath[normalizedPath] = normalizedTime;
+                    }
+                }
+            }
+
+            if (state.FavoriteChangedAtUtcByPath is not null
+                && state.FavoriteChangedAtUtcByPath.Count
+                    > MaxPersistedFavoriteActivityEntries)
+            {
+                var evictedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                Dictionary<string, DateTimeOffset> beforeTrim =
+                    new(state.FavoriteChangedAtUtcByPath, StringComparer.OrdinalIgnoreCase);
+                TrimFavoriteActivity(
+                    state.FavoriteChangedAtUtcByPath,
+                    evictedPaths);
+                foreach (string evictedPath in evictedPaths)
+                {
+                    if (beforeTrim.TryGetValue(evictedPath, out DateTimeOffset evictedTime))
+                        evicted[evictedPath] = evictedTime;
+                }
+            }
+
+            string json = JsonSerializer.Serialize(
+                state,
+                new JsonSerializerOptions { WriteIndented = true });
+            return TryWriteAtomicText(path, json);
+        });
+
+        return new FavoritePresentationStatePersistResult(
+            saved,
+            Protected: malformed,
+            saved
+                ? evicted
+                : new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private void ApplyFavoritePresentationStatePersistResult(
+        FavoritePresentationStatePersistResult result)
+    {
+        Interlocked.Increment(ref _favoritePresentationStateWriteCount);
+        if (result.EvictedActivity.Count == 0)
+            return;
+
+        var affectedTiles = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        Tile? selectedTile = SelectedTile();
+        foreach ((string path, DateTimeOffset evictedTime) in result.EvictedActivity)
+        {
+            if (!_favoriteChangedAtUtcByPath.TryGetValue(path, out DateTimeOffset current)
+                || current > evictedTime)
+            {
+                continue;
+            }
+
+            _favoriteChangedAtUtcByPath.Remove(path);
+            CollectLiveTilesForFavoritePath(path, selectedTile, affectedTiles);
+        }
+
+        foreach (Tile tile in affectedTiles)
+        {
+            tile.FavoriteChangedAtUtc =
+                _favoriteChangedAtUtcByPath.TryGetValue(
+                    NormalizeFavoritePath(tile.Path),
+                    out DateTimeOffset changedAtUtc)
+                    ? changedAtUtc
+                    : null;
+        }
+
+        if (!ExternalFileDropSessionActive
+            && _sortBy == SortFavoriteChangedNewestValue)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: true,
+                selectFirst: false);
+        }
+    }
+
+    private void RetryFailedFavoritePresentationStateSave()
+    {
+        FavoritePresentationStateBatch? failed;
+        lock (_favoritePresentationStateQueueGate)
+        {
+            failed = _failedFavoritePresentationStateBatch;
+            _failedFavoritePresentationStateBatch = null;
+        }
+        if (failed is not null)
+            QueueFavoritePresentationStateBatch(failed, retrying: true);
+    }
+
     private static string ResolvedEnhancementJobsPath
     {
         get
         {
             string? overridePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH");
-            return string.IsNullOrWhiteSpace(overridePath) ? ProjectCachePath(Path.Combine("enhance", "jobs.json")) : Path.GetFullPath(overridePath);
+            if (!string.IsNullOrWhiteSpace(overridePath))
+                return Path.GetFullPath(overridePath);
+
+            string sqlitePath = ProjectCachePath(Path.Combine("enhance", "jobs.sqlite3"));
+            return File.Exists(sqlitePath)
+                ? sqlitePath
+                : ProjectCachePath(Path.Combine("enhance", "jobs.json"));
         }
     }
 
-    private bool LoadEnhancedState()
+    private static bool IsEnhancementSqliteStore(string path)
+        => string.Equals(
+            Path.GetExtension(path),
+            ".sqlite3",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static SqliteConnection OpenEnhancementSqliteReadConnection(string path)
     {
-        EnhancedStateReadResult result = ReadEnhancedStateSnapshot(ResolvedEnhancementJobsPath);
+        var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadOnly,
+                Cache = SqliteCacheMode.Shared,
+                Pooling = false,
+                DefaultTimeout = 5,
+            }.ToString());
+        connection.Open();
+        using var queryOnly = connection.CreateCommand();
+        queryOnly.CommandText = "PRAGMA query_only = ON;";
+        queryOnly.ExecuteNonQuery();
+        using var version = connection.CreateCommand();
+        version.CommandText = "SELECT sqlite_version();";
+        string? versionText = version.ExecuteScalar() as string;
+        if (!Version.TryParse(versionText, out Version? sqliteVersion)
+            || sqliteVersion < new Version(3, 50, 2))
+        {
+            connection.Dispose();
+            throw new InvalidDataException(
+                $"Windows SQLite 3.50.2 or newer is required; found {versionText ?? "unknown"}.");
+        }
+        return connection;
+    }
+
+    private static long ReadRequiredSqliteInteger(
+        SqliteDataReader reader,
+        int ordinal,
+        string fieldName)
+    {
+        if (reader.IsDBNull(ordinal)
+            || reader.GetFieldType(ordinal) != typeof(long))
+        {
+            throw new InvalidDataException(
+                $"Enhancement SQLite {fieldName} must be an integer.");
+        }
+        return reader.GetInt64(ordinal);
+    }
+
+    private static string ReadRequiredSqliteText(
+        SqliteDataReader reader,
+        int ordinal,
+        string fieldName)
+    {
+        if (reader.IsDBNull(ordinal)
+            || reader.GetFieldType(ordinal) != typeof(string))
+        {
+            throw new InvalidDataException(
+                $"Enhancement SQLite {fieldName} must be text.");
+        }
+        return reader.GetString(ordinal);
+    }
+
+    private static bool IsSupportedEnhancementSqliteStatus(string? status)
+        => status is null
+            or "queued"
+            or "running"
+            or "succeeded"
+            or "failed"
+            or "canceled"
+            or "deleted"
+            or "unknown";
+
+    private static long ReadEnhancementCatalogRevision(
+        SqliteConnection connection,
+        SqliteTransaction? transaction = null)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT singleton, store_version, catalog_revision
+            FROM enhancement_store_metadata
+            WHERE singleton = 1
+            """;
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            throw new InvalidDataException(
+                "Enhancement SQLite metadata row is missing.");
+        }
+
+        long singleton = ReadRequiredSqliteInteger(reader, 0, "metadata singleton");
+        long storeVersion = ReadRequiredSqliteInteger(reader, 1, "store version");
+        long catalogRevision = ReadRequiredSqliteInteger(reader, 2, "catalog revision");
+        if (singleton != 1 || storeVersion != 1 || catalogRevision < 0)
+        {
+            throw new InvalidDataException(
+                "Enhancement SQLite metadata is unsupported.");
+        }
+        if (reader.Read())
+        {
+            throw new InvalidDataException(
+                "Enhancement SQLite metadata must contain exactly one singleton row.");
+        }
+        return catalogRevision;
+    }
+
+    private static EnhancementStoreProbe ProbeEnhancementStore(string path)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists)
+            return new EnhancementStoreProbe(default, -1, -1);
+
+        long catalogRevision = -1;
+        if (IsEnhancementSqliteStore(path))
+        {
+            using SqliteConnection connection = OpenEnhancementSqliteReadConnection(path);
+            catalogRevision = ReadEnhancementCatalogRevision(connection);
+        }
+        return new EnhancementStoreProbe(
+            info.LastWriteTimeUtc,
+            info.Length,
+            catalogRevision);
+    }
+
+    private static JsonDocument OpenEnhancementJobsDocument(
+        string path,
+        out long catalogRevision)
+    {
+        catalogRevision = -1;
+        if (!IsEnhancementSqliteStore(path))
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            return JsonDocument.Parse(stream);
+        }
+
+        using SqliteConnection connection = OpenEnhancementSqliteReadConnection(path);
+        using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
+        catalogRevision = ReadEnhancementCatalogRevision(connection, transaction);
+
+        using var output = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(output))
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                SELECT position, id, status, reader_payload_json
+                FROM enhancement_jobs
+                ORDER BY position ASC
+                """;
+            using SqliteDataReader reader = command.ExecuteReader();
+            var jobIds = new HashSet<string>(StringComparer.Ordinal);
+            long? previousPosition = null;
+            writer.WriteStartObject();
+            writer.WriteNumber("version", 1);
+            writer.WritePropertyName("jobs");
+            writer.WriteStartArray();
+            while (reader.Read())
+            {
+                long position = ReadRequiredSqliteInteger(reader, 0, "job position");
+                if (position < 0
+                    || previousPosition.HasValue && position <= previousPosition.Value)
+                {
+                    throw new InvalidDataException(
+                        "Enhancement SQLite job positions must be unique, non-negative, and strictly increasing.");
+                }
+                previousPosition = position;
+
+                string id = ReadRequiredSqliteText(reader, 1, "job id");
+                if (string.IsNullOrWhiteSpace(id) || !jobIds.Add(id))
+                {
+                    throw new InvalidDataException(
+                        "Enhancement SQLite job ids must be non-empty and unique.");
+                }
+
+                string? status = reader.IsDBNull(2)
+                    ? null
+                    : ReadRequiredSqliteText(reader, 2, "job status");
+                if (!IsSupportedEnhancementSqliteStatus(status))
+                {
+                    throw new InvalidDataException(
+                        $"Enhancement SQLite job {id} has an unsupported status.");
+                }
+
+                string payloadText = ReadRequiredSqliteText(
+                    reader,
+                    3,
+                    "reader payload");
+                JsonDocument payload;
+                try
+                {
+                    payload = JsonDocument.Parse(payloadText);
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidDataException(
+                        $"Enhancement SQLite job {id} has malformed reader payload JSON.",
+                        ex);
+                }
+                using (payload)
+                {
+                    JsonElement root = payload.RootElement;
+                    bool idMatches = root.ValueKind == JsonValueKind.Object
+                        && root.TryGetProperty("id", out JsonElement payloadId)
+                        && payloadId.ValueKind == JsonValueKind.String
+                        && string.Equals(
+                            payloadId.GetString(),
+                            id,
+                            StringComparison.Ordinal);
+                    bool statusMatches = root.ValueKind == JsonValueKind.Object
+                        && root.TryGetProperty("status", out JsonElement payloadStatus)
+                        && (status is null
+                            ? payloadStatus.ValueKind == JsonValueKind.Null
+                            : payloadStatus.ValueKind == JsonValueKind.String
+                                && string.Equals(
+                                    payloadStatus.GetString(),
+                                    status,
+                                    StringComparison.Ordinal));
+                    if (!idMatches || !statusMatches)
+                    {
+                        throw new InvalidDataException(
+                            $"Enhancement SQLite job {id} reader payload does not match its row.");
+                    }
+
+                    if (status is "queued" or "running" or "succeeded")
+                    {
+                        root.WriteTo(writer);
+                        continue;
+                    }
+                }
+
+                // Terminal non-output rows still reserve their durable ID
+                // for orphan-output recovery without hydrating full payloads.
+                writer.WriteStartObject();
+                writer.WriteString("id", id);
+                if (status is null)
+                    writer.WriteNull("status");
+                else
+                    writer.WriteString("status", status);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+            writer.Flush();
+        }
+        transaction.Commit();
+        output.Position = 0;
+        return JsonDocument.Parse(output);
+    }
+
+    internal static void ValidateEnhancementSqliteStoreForSmoke(string path)
+    {
+        using JsonDocument document = OpenEnhancementJobsDocument(
+            Path.GetFullPath(path),
+            out long _);
+    }
+
+    private bool LoadEnhancedState(
+        IReadOnlyList<string>? activeCatalogPaths = null,
+        long? catalogRevision = null)
+    {
+        long recoveryCatalogRevision = catalogRevision ?? _catalogContentRevision;
+        if (activeCatalogPaths is null
+            && NeedsRecoveredEnhancementCatalogSnapshot(
+                ResolvedEnhancementJobsPath,
+                recoveryCatalogRevision))
+        {
+            activeCatalogPaths = SnapshotActiveEnhancementCatalogPaths();
+        }
+        EnhancedStateReadResult result = ReadEnhancedStateSnapshot(
+            ResolvedEnhancementJobsPath,
+            activeCatalogPaths,
+            recoveryCatalogRevision);
         if (result.Snapshot is null)
         {
             _enhancementReadOk = false;
@@ -3729,25 +4984,19 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private EnhancedStateReadResult ReadEnhancedStateSnapshot(string path)
+    private EnhancedStateReadResult ReadEnhancedStateSnapshot(
+        string path,
+        IReadOnlyList<string>? activeCatalogPaths,
+        long catalogRevision)
     {
         var jobsInfo = new FileInfo(path);
         if (!jobsInfo.Exists)
         {
             return new EnhancedStateReadResult(
-                new EnhancedStateSnapshot(
-                    new Dictionary<string, ManagedEnhancedOutput>(StringComparer.OrdinalIgnoreCase),
-                    new Dictionary<string, ManagedEnhancedOutput>(StringComparer.OrdinalIgnoreCase),
-                    new Dictionary<string, List<ManagedEnhancementVersion>>(EnhancementSourceIdentityComparer),
-                    new Dictionary<string, List<ManagedEnhancementVersion>>(StringComparer.OrdinalIgnoreCase),
-                    new Dictionary<string, List<ManagedVideoVersion>>(EnhancementSourceIdentityComparer),
-                    new Dictionary<string, List<ManagedVideoVersion>>(StringComparer.OrdinalIgnoreCase),
-                    new HashSet<string>(StringComparer.Ordinal),
-                    0,
-                    0,
-                    0,
-                    default,
-                    -1),
+                CreateRecoveredOnlyEnhancedStateSnapshot(
+                    path,
+                    activeCatalogPaths,
+                    catalogRevision),
                 null);
         }
 
@@ -3765,7 +5014,13 @@ public partial class MainWindow : Window
             EnhancementSourceIdentityComparer);
         var nextCatalogVideoVersionsByPath = new Dictionary<string, List<ManagedVideoVersion>>(
             StringComparer.OrdinalIgnoreCase);
+        var nextCatalogQueueActivityByPath =
+            new Dictionary<string, ManagedEnhancementQueueActivity>(
+                StringComparer.OrdinalIgnoreCase);
         var pendingVideoJobs = new List<JsonElement>();
+        var pendingI2iJobs = new List<JsonElement>();
+        var activeI2iSourceProducerJobIds = new HashSet<string>(
+            StringComparer.Ordinal);
         var photorealVideoSources =
             new Dictionary<string, ManagedPhotorealVideoSource>(
                 StringComparer.Ordinal);
@@ -3774,12 +5029,9 @@ public partial class MainWindow : Window
         int nextVideoCandidateCount = 0;
         try
         {
-            using var stream = new FileStream(
+            using var document = OpenEnhancementJobsDocument(
                 path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
-            using var document = JsonDocument.Parse(stream);
+                out long observedCatalogRevision);
             if (document.RootElement.ValueKind != JsonValueKind.Object ||
                 !document.RootElement.TryGetProperty("jobs", out var jobsElement) ||
                 jobsElement.ValueKind != JsonValueKind.Array)
@@ -3806,13 +5058,36 @@ public partial class MainWindow : Window
                 if (job.ValueKind != JsonValueKind.Object)
                     continue;
                 nextJobsRead++;
-                if (!TryGetStringProperty(job, "status", out string? status) ||
-                    !string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
+                if (!TryGetStringProperty(job, "status", out string? status))
                     continue;
                 string operation = ReadEnhancementOperation(job);
+                if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(status, "running", StringComparison.OrdinalIgnoreCase))
+                {
+                    TryRecordActiveEnhancementQueueActivity(
+                        job,
+                        operation,
+                        nextCatalogQueueActivityByPath);
+                    if (operation == "i2i"
+                        && TryReadOptionalI2iSourceProducerJobId(
+                            job,
+                            out string? activeProducerJobId)
+                        && !string.IsNullOrWhiteSpace(activeProducerJobId))
+                    {
+                        activeI2iSourceProducerJobIds.Add(activeProducerJobId);
+                    }
+                    continue;
+                }
+                if (!string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
+                    continue;
                 if (operation == "video")
                 {
                     pendingVideoJobs.Add(job);
+                    continue;
+                }
+                if (operation == "i2i")
+                {
+                    pendingI2iJobs.Add(job);
                     continue;
                 }
                 if (!IsImageEnhancementOperation(operation))
@@ -3830,7 +5105,8 @@ public partial class MainWindow : Window
                 var version = new ManagedEnhancementVersion(
                     jobId ?? "",
                     operation,
-                    output);
+                    output,
+                    ReadEnhancementActivityAtUtc(job));
                 if (operation == "photoreal"
                     && !string.IsNullOrWhiteSpace(jobId)
                     && !ambiguousJobIds.Contains(jobId))
@@ -3840,7 +5116,9 @@ public partial class MainWindow : Window
                         new ManagedPhotorealVideoSource(
                             resolvedSource,
                             output.OutputPath,
-                            catalogAliases));
+                            catalogAliases,
+                            output.SourceSize,
+                            output.SourceMtimeMs));
                 }
                 if (!nextVersions.TryGetValue(resolvedSource, out List<ManagedEnhancementVersion>? versions))
                 {
@@ -3863,6 +5141,52 @@ public partial class MainWindow : Window
                             StringComparison.OrdinalIgnoreCase)))
                 {
                     versions.Add(version);
+                }
+            }
+
+            // I2I rows may precede their photoreal producer in the reversed
+            // append-only store. Resolve them only after every succeeded
+            // photoreal producer has passed source and managed-output checks.
+            foreach (JsonElement job in pendingI2iJobs)
+            {
+                if (!TryBuildManagedI2iVersion(
+                        job,
+                        photorealVideoSources,
+                        out string resolvedI2iSource,
+                        out ManagedEnhancedOutput i2iOutput,
+                        out IReadOnlyList<string> i2iCatalogAliases))
+                {
+                    continue;
+                }
+
+                TryGetStringProperty(job, "id", out string? i2iJobId);
+                var i2iVersion = new ManagedEnhancementVersion(
+                    i2iJobId ?? "",
+                    "i2i",
+                    i2iOutput,
+                    ReadEnhancementActivityAtUtc(job));
+                if (!nextVersions.TryGetValue(
+                        resolvedI2iSource,
+                        out List<ManagedEnhancementVersion>? i2iVersions))
+                {
+                    i2iVersions = [];
+                    nextVersions[resolvedI2iSource] = i2iVersions;
+                    nextEnhancedOutputs[resolvedI2iSource] = i2iOutput;
+                    nextCandidateCount++;
+                }
+                foreach (string alias in i2iCatalogAliases)
+                {
+                    nextCatalogOutputsByPath.TryAdd(
+                        alias,
+                        nextEnhancedOutputs[resolvedI2iSource]);
+                    nextCatalogVersionsByPath.TryAdd(alias, i2iVersions);
+                }
+                if (!i2iVersions.Any(candidate => string.Equals(
+                        candidate.Output.OutputPath,
+                        i2iOutput.OutputPath,
+                        StringComparison.OrdinalIgnoreCase)))
+                {
+                    i2iVersions.Add(i2iVersion);
                 }
             }
 
@@ -3901,6 +5225,23 @@ public partial class MainWindow : Window
                 }
             }
 
+            RecoverOrphanedEnhancementReferences(
+                path,
+                catalogRevision,
+                activeCatalogPaths,
+                seenJobIds,
+                nextEnhancedOutputs,
+                nextCatalogOutputsByPath,
+                nextVersions,
+                nextCatalogVersionsByPath,
+                ref nextCandidateCount);
+
+            NormalizeManagedEnhancementVersionOrder(
+                nextEnhancedOutputs,
+                nextCatalogOutputsByPath,
+                nextVersions,
+                nextCatalogVersionsByPath);
+
             return new EnhancedStateReadResult(
                 new EnhancedStateSnapshot(
                     nextEnhancedOutputs,
@@ -3909,17 +5250,153 @@ public partial class MainWindow : Window
                     nextCatalogVersionsByPath,
                     nextVideoVersions,
                     nextCatalogVideoVersionsByPath,
+                    nextCatalogQueueActivityByPath,
                     ambiguousJobIds,
+                    activeI2iSourceProducerJobIds,
                     nextJobsRead,
                     nextCandidateCount,
                     nextVideoCandidateCount,
                     observedWriteTimeUtc,
-                    observedLength),
+                    observedLength,
+                    observedCatalogRevision),
                 null);
         }
         catch (Exception ex)
         {
             return new EnhancedStateReadResult(null, ex.Message);
+        }
+    }
+
+    private static DateTimeOffset? ReadEnhancementActivityAtUtc(JsonElement job)
+    {
+        foreach (string propertyName in new[] { "completedAt", "updatedAt", "createdAt" })
+        {
+            if (!TryGetStringProperty(job, propertyName, out string? timestampText)
+                || !DateTimeOffset.TryParse(
+                    timestampText,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out DateTimeOffset parsed))
+            {
+                continue;
+            }
+            return parsed.ToUniversalTime();
+        }
+        return null;
+    }
+
+    private static void NormalizeManagedEnhancementVersionOrder(
+        Dictionary<string, ManagedEnhancedOutput> outputsBySource,
+        Dictionary<string, ManagedEnhancedOutput> catalogOutputsByPath,
+        Dictionary<string, List<ManagedEnhancementVersion>> versionsBySource,
+        Dictionary<string, List<ManagedEnhancementVersion>> catalogVersionsByPath)
+    {
+        var normalizedLists = new HashSet<List<ManagedEnhancementVersion>>(
+            ReferenceEqualityComparer.Instance);
+        foreach ((string source, List<ManagedEnhancementVersion> versions) in
+                 versionsBySource)
+        {
+            if (normalizedLists.Add(versions) && versions.Count > 1)
+            {
+                ManagedEnhancementVersion[] ordered = versions
+                    .Select(static (version, index) => (version, index))
+                    .OrderByDescending(static item =>
+                        item.version.CompletedAtUtc ?? DateTimeOffset.MinValue)
+                    .ThenBy(static item => item.index)
+                    .Select(static item => item.version)
+                    .ToArray();
+                versions.Clear();
+                versions.AddRange(ordered);
+            }
+            if (versions.Count > 0)
+                outputsBySource[source] = versions[0].Output;
+        }
+
+        foreach ((string alias, List<ManagedEnhancementVersion> versions) in
+                 catalogVersionsByPath)
+        {
+            if (versions.Count > 0)
+                catalogOutputsByPath[alias] = versions[0].Output;
+        }
+    }
+
+    private void TryRecordActiveEnhancementQueueActivity(
+        JsonElement job,
+        string operation,
+        Dictionary<string, ManagedEnhancementQueueActivity> activityByPath)
+    {
+        if (operation is not ("upscale" or "photoreal" or "i2i" or "video")
+            || !TryGetStringProperty(job, "sourceId", out string? sourceId))
+        {
+            return;
+        }
+
+        string? lexicalAlias = NormalizeCatalogEnhancementPath(sourceId);
+        if (lexicalAlias is null
+            || !SupportedImageExtensions.Contains(Path.GetExtension(lexicalAlias)))
+        {
+            return;
+        }
+
+        string? canonicalAlias = TryResolveEnhancementSourceIdentity(
+            sourceId,
+            out string resolvedSource)
+                ? NormalizeCatalogEnhancementPath(resolvedSource)
+                : null;
+        ManagedEnhancementQueueActivity activity =
+            activityByPath.TryGetValue(lexicalAlias, out ManagedEnhancementQueueActivity existing)
+                ? existing
+                : canonicalAlias is not null
+                    && activityByPath.TryGetValue(canonicalAlias, out existing)
+                        ? existing
+                        : default;
+        activity = activity.Record(operation, ReadEnhancementCreatedAtUtc(job));
+        activityByPath[lexicalAlias] = activity;
+        if (canonicalAlias is not null)
+            activityByPath[canonicalAlias] = activity;
+    }
+
+    private static DateTimeOffset? ReadEnhancementCreatedAtUtc(JsonElement job)
+    {
+        if (!TryGetStringProperty(job, "createdAt", out string? timestampText)
+            || !DateTimeOffset.TryParse(
+                timestampText,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out DateTimeOffset parsed))
+        {
+            return null;
+        }
+        return parsed.ToUniversalTime();
+    }
+
+    private void ApplyActiveEnhancementQueueJobToVisibleCatalog(
+        JsonElement job,
+        Tile? targetTile)
+    {
+        if (!TryGetStringProperty(job, "status", out string? status)
+            || (!string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(status, "running", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        TryRecordActiveEnhancementQueueActivity(
+            job,
+            ReadEnhancementOperation(job),
+            _catalogEnhancementQueueActivityByPath);
+        if (targetTile is not null)
+            ApplyTileEnhancementQueueActivity(targetTile);
+        UpdateActiveEnhancementStateRefreshTimer();
+        if (!ExternalFileDropSessionActive
+            && _sortBy is SortUpscaleQueuedNewestValue
+            or SortPhotorealQueuedNewestValue
+            or SortVideoQueuedNewestValue)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: true,
+                selectFirst: false);
         }
     }
 
@@ -3943,8 +5420,16 @@ public partial class MainWindow : Window
         _catalogVideoVersionsByPath.Clear();
         foreach ((string alias, List<ManagedVideoVersion> versions) in snapshot.CatalogVideoVersionsByPath)
             _catalogVideoVersionsByPath[alias] = versions;
+        RebuildManagedFavoriteSourcePathIndexes();
+        _catalogEnhancementQueueActivityByPath.Clear();
+        foreach ((string alias, ManagedEnhancementQueueActivity activity) in snapshot.CatalogQueueActivityByPath)
+            _catalogEnhancementQueueActivityByPath[alias] = activity;
+        UpdateActiveEnhancementStateRefreshTimer();
         _ambiguousEnhancementJobIds.Clear();
         _ambiguousEnhancementJobIds.UnionWith(snapshot.AmbiguousJobIds);
+        _activeI2iSourceProducerJobIds.Clear();
+        _activeI2iSourceProducerJobIds.UnionWith(
+            snapshot.ActiveI2iSourceProducerJobIds);
         _enhancementJobsRead = snapshot.JobsRead;
         _enhancedCandidateCount = snapshot.CandidateCount;
         _videoCandidateCount = snapshot.VideoCandidateCount;
@@ -3952,16 +5437,69 @@ public partial class MainWindow : Window
         _enhancementReadError = null;
         _enhancementJobsLastWriteTimeUtc = snapshot.LastWriteTimeUtc;
         _enhancementJobsLength = snapshot.Length;
+        _enhancementCatalogRevision = snapshot.CatalogRevision;
+    }
+
+    private void RebuildManagedFavoriteSourcePathIndexes()
+    {
+        _photorealSourcePathsByFavoritePath.Clear();
+        foreach ((string sourcePath, List<ManagedEnhancementVersion> versions) in
+                 _catalogEnhancementVersionsByPath)
+        {
+            foreach (ManagedEnhancementVersion version in versions)
+            {
+                if (version.Operation == "photoreal")
+                {
+                    IndexManagedFavoriteSource(
+                        _photorealSourcePathsByFavoritePath,
+                        version.Output.OutputPath,
+                        sourcePath);
+                }
+            }
+        }
+
+        _videoSourcePathsByFavoritePath.Clear();
+        foreach ((string sourcePath, List<ManagedVideoVersion> versions) in
+                 _catalogVideoVersionsByPath)
+        {
+            foreach (ManagedVideoVersion version in versions)
+            {
+                IndexManagedFavoriteSource(
+                    _videoSourcePathsByFavoritePath,
+                    version.Output.OutputPath,
+                    sourcePath);
+            }
+        }
+    }
+
+    private static void IndexManagedFavoriteSource(
+        IDictionary<string, HashSet<string>> index,
+        string favoritePath,
+        string sourcePath)
+    {
+        string normalizedFavoritePath = NormalizeFavoritePath(favoritePath);
+        string normalizedSourcePath = NormalizeFavoritePath(sourcePath);
+        if (!index.TryGetValue(
+                normalizedFavoritePath,
+                out HashSet<string>? sourcePaths))
+        {
+            sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            index[normalizedFavoritePath] = sourcePaths;
+        }
+        sourcePaths.Add(normalizedSourcePath);
     }
 
     private bool RefreshEnhancedStateIfChanged()
     {
         try
         {
-            var jobsInfo = new FileInfo(ResolvedEnhancementJobsPath);
-            bool changed = jobsInfo.Exists
-                ? jobsInfo.LastWriteTimeUtc != _enhancementJobsLastWriteTimeUtc
-                    || jobsInfo.Length != _enhancementJobsLength
+            string path = ResolvedEnhancementJobsPath;
+            EnhancementStoreProbe probe = ProbeEnhancementStore(path);
+            bool changed = probe.Length >= 0
+                ? probe.CatalogRevision >= 0
+                    ? probe.CatalogRevision != _enhancementCatalogRevision
+                    : probe.LastWriteTimeUtc != _enhancementJobsLastWriteTimeUtc
+                        || probe.Length != _enhancementJobsLength
                 : _enhancementJobsLength >= 0;
             if (!changed)
                 return false;
@@ -3982,25 +5520,44 @@ public partial class MainWindow : Window
     {
         try
         {
-            var jobsInfo = new FileInfo(ResolvedEnhancementJobsPath);
-            DateTime writeTimeUtc = jobsInfo.Exists ? jobsInfo.LastWriteTimeUtc : default;
-            long length = jobsInfo.Exists ? jobsInfo.Length : -1;
-            bool changed = writeTimeUtc != _enhancementJobsLastWriteTimeUtc
-                || length != _enhancementJobsLength;
-            bool alreadyQueued = writeTimeUtc == _enhancedStateQueuedWriteTimeUtc
-                && length == _enhancedStateQueuedLength;
+            // Parsing a long durable history is intentionally single-flight.
+            // If the store changes again during a read, the active-only timer
+            // observes it on the next tick after the current snapshot applies.
+            if (!_enhancedStateRefreshTask.IsCompleted)
+                return;
+
+            string path = ResolvedEnhancementJobsPath;
+            EnhancementStoreProbe probe = ProbeEnhancementStore(path);
+            DateTime writeTimeUtc = probe.LastWriteTimeUtc;
+            long length = probe.Length;
+            bool changed = probe.CatalogRevision >= 0
+                ? probe.CatalogRevision != _enhancementCatalogRevision
+                : writeTimeUtc != _enhancementJobsLastWriteTimeUtc
+                    || length != _enhancementJobsLength;
+            bool alreadyQueued = probe.CatalogRevision >= 0
+                ? probe.CatalogRevision == _enhancedStateQueuedCatalogRevision
+                : writeTimeUtc == _enhancedStateQueuedWriteTimeUtc
+                    && length == _enhancedStateQueuedLength;
             if (!changed || alreadyQueued)
                 return;
 
             _enhancedStateQueuedWriteTimeUtc = writeTimeUtc;
             _enhancedStateQueuedLength = length;
+            _enhancedStateQueuedCatalogRevision = probe.CatalogRevision;
             _enhancedStateRefreshCts?.Cancel();
             _enhancedStateRefreshCts?.Dispose();
             var cts = new CancellationTokenSource();
             _enhancedStateRefreshCts = cts;
             long generation = ++_enhancedStateRefreshGeneration;
+            long catalogRevision = _catalogContentRevision;
+            IReadOnlyList<string>? activeCatalogPaths =
+                NeedsRecoveredEnhancementCatalogSnapshot(path, catalogRevision)
+                    ? SnapshotActiveEnhancementCatalogPaths()
+                    : null;
             _enhancedStateRefreshTask = RefreshEnhancedStateInBackgroundAsync(
-                ResolvedEnhancementJobsPath,
+                path,
+                activeCatalogPaths,
+                catalogRevision,
                 generation,
                 cts.Token);
         }
@@ -4011,18 +5568,37 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateActiveEnhancementStateRefreshTimer()
+    {
+        bool hasActive = _catalogEnhancementQueueActivityByPath.Values.Any(
+            static activity => activity.UpscaleActive
+                || activity.PhotorealActive
+                || activity.I2iActive
+                || activity.VideoActive);
+        if (hasActive)
+            _activeEnhancementStateRefreshTimer.Start();
+        else
+            _activeEnhancementStateRefreshTimer.Stop();
+    }
+
     private async Task RefreshEnhancedStateInBackgroundAsync(
         string path,
+        IReadOnlyList<string>? activeCatalogPaths,
+        long catalogRevision,
         long generation,
         CancellationToken token)
     {
         try
         {
             EnhancedStateReadResult result = await Task.Run(
-                () => ReadEnhancedStateSnapshot(path),
+                () => ReadEnhancedStateSnapshot(
+                    path,
+                    activeCatalogPaths,
+                    catalogRevision),
                 token);
             token.ThrowIfCancellationRequested();
-            if (generation != _enhancedStateRefreshGeneration)
+            if (generation != _enhancedStateRefreshGeneration
+                || catalogRevision != _catalogContentRevision)
                 return;
 
             if (result.Snapshot is null)
@@ -4034,7 +5610,8 @@ public partial class MainWindow : Window
 
             ApplyEnhancedStateSnapshot(result.Snapshot);
             ApplyEnhancedOutputsToVisibleCatalog();
-            if (Modal.Visibility == Visibility.Visible && SelectedTile() is Tile selected)
+            if (Modal.Visibility == Visibility.Visible
+                && TryGetModalSourceTile(out Tile selected))
             {
                 string? activeVideoJobId = _modalShowingVideo
                     && _modalVideoVersionIndex >= 0
@@ -4076,6 +5653,7 @@ public partial class MainWindow : Window
             {
                 _enhancedStateQueuedWriteTimeUtc = default;
                 _enhancedStateQueuedLength = -1;
+                _enhancedStateQueuedCatalogRevision = -1;
             }
         }
     }
@@ -4094,11 +5672,89 @@ public partial class MainWindow : Window
         => SharedDataRootActivation.ResolveManagedOutputsRoot(
             ResolvedEnhancementJobsPath);
 
+    private const string LegacyPhotorealOutputDirectoryName = "Photoreal";
+    private const string CurrentPhotorealOutputDirectoryName = "Photorealized";
+
+    private bool TryResolveManagedEnhancementOutputPath(
+        string outputPath,
+        out string canonicalOutput)
+    {
+        canonicalOutput = "";
+        try
+        {
+            string lexicalRoot = Path.GetFullPath(ResolvedManagedEnhancementOutputsRoot);
+            string canonicalRoot = _resolveFinalPath(lexicalRoot);
+            string lexicalOutput = Path.GetFullPath(outputPath);
+            if (!IsPathInside(lexicalOutput, lexicalRoot))
+                return false;
+
+            if (TryAcceptManagedEnhancementOutputPath(
+                    lexicalOutput,
+                    canonicalRoot,
+                    out canonicalOutput))
+            {
+                return true;
+            }
+
+            string? legacyParent = Path.GetDirectoryName(lexicalOutput);
+            string expectedLegacyParent = Path.Combine(
+                lexicalRoot,
+                LegacyPhotorealOutputDirectoryName);
+            if (string.IsNullOrWhiteSpace(legacyParent)
+                || !string.Equals(
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(legacyParent)),
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(expectedLegacyParent)),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string fileName = Path.GetFileName(lexicalOutput);
+            if (string.IsNullOrWhiteSpace(fileName))
+                return false;
+
+            string migratedOutput = Path.GetFullPath(Path.Combine(
+                lexicalRoot,
+                CurrentPhotorealOutputDirectoryName,
+                fileName));
+            return IsPathInside(migratedOutput, lexicalRoot)
+                && TryAcceptManagedEnhancementOutputPath(
+                    migratedOutput,
+                    canonicalRoot,
+                    out canonicalOutput);
+        }
+        catch
+        {
+            canonicalOutput = "";
+            return false;
+        }
+    }
+
+    private bool TryAcceptManagedEnhancementOutputPath(
+        string lexicalOutput,
+        string canonicalRoot,
+        out string canonicalOutput)
+    {
+        canonicalOutput = _resolveFinalPath(lexicalOutput);
+        return IsPathInside(canonicalOutput, canonicalRoot)
+            && File.Exists(canonicalOutput)
+            && SupportedImageExtensions.Contains(Path.GetExtension(canonicalOutput));
+    }
+
     private bool TryResolveEnhancementSourceIdentity(string? path, out string identity)
     {
         identity = "";
         if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
             return false;
+
+        // External FileDrop sources remain usable only while their captured
+        // source signature is unchanged. Explicit AI, I2I, and video actions
+        // all resolve their source here before they can enqueue anything.
+        if (TryGetExternalFileDropSessionTile(path, out Tile externalTile))
+            return TryValidateExternalFileDropTile(
+                externalTile,
+                out identity,
+                out _);
 
         try
         {
@@ -4153,14 +5809,9 @@ public partial class MainWindow : Window
             if (sourceInfo.Length != sourceSize || Math.Abs(currentMtimeMs - sourceMtimeMs) > 1)
                 return false;
 
-            string lexicalOutput = Path.GetFullPath(outputPath!);
-            string canonicalOutput = _resolveFinalPath(lexicalOutput);
-            string lexicalRoot = Path.GetFullPath(ResolvedManagedEnhancementOutputsRoot);
-            string canonicalRoot = _resolveFinalPath(lexicalRoot);
-            if (!IsPathInside(lexicalOutput, lexicalRoot)
-                || !IsPathInside(canonicalOutput, canonicalRoot)
-                || !File.Exists(canonicalOutput)
-                || !SupportedImageExtensions.Contains(Path.GetExtension(canonicalOutput)))
+            if (!TryResolveManagedEnhancementOutputPath(
+                    outputPath!,
+                    out string canonicalOutput))
             {
                 return false;
             }
@@ -4295,10 +5946,16 @@ public partial class MainWindow : Window
         int occurrences = 0;
         foreach (List<ManagedEnhancementVersion> versions in _enhancementVersions.Values)
         {
-            occurrences += versions.Count(version =>
-                string.Equals(version.JobId, jobId, StringComparison.Ordinal));
-            if (occurrences > 1)
-                return false;
+            foreach (ManagedEnhancementVersion version in versions)
+            {
+                if (!string.Equals(version.JobId, jobId, StringComparison.Ordinal))
+                    continue;
+                if (version.Recovered)
+                    return false;
+                occurrences++;
+                if (occurrences > 1)
+                    return false;
+            }
         }
         foreach (List<ManagedVideoVersion> versions in _videoVersions.Values)
         {
@@ -4325,28 +5982,64 @@ public partial class MainWindow : Window
     private static EnhancementAvailability GetEnhancementAvailability(
         IEnumerable<ManagedEnhancementVersion> versions)
     {
-        bool upscaled = false;
-        bool photorealized = false;
+        int upscaleCount = 0;
+        int photorealCount = 0;
+        int i2iCount = 0;
         foreach (ManagedEnhancementVersion version in versions)
         {
             if (version.Operation == "photoreal")
-                photorealized = true;
+                photorealCount++;
             else if (version.Operation == "upscale")
-                upscaled = true;
-            if (upscaled && photorealized)
-                break;
+                upscaleCount++;
+            else if (version.Operation == "i2i")
+                i2iCount++;
         }
-        return new EnhancementAvailability(upscaled, photorealized);
+        return new EnhancementAvailability(upscaleCount, photorealCount, i2iCount);
     }
 
-    private static void ApplyTileEnhancementAvailability(
+    private void ApplyTileEnhancementAvailability(
         Tile tile,
         IEnumerable<ManagedEnhancementVersion> versions)
     {
-        EnhancementAvailability availability = GetEnhancementAvailability(versions);
+        ManagedEnhancementVersion[] versionSnapshot = versions.ToArray();
+        EnhancementAvailability availability = GetEnhancementAvailability(versionSnapshot);
+        tile.UpscaleVersionCount = availability.UpscaleCount;
+        tile.PhotorealVersionCount = availability.PhotorealCount;
+        tile.I2iVersionCount = availability.I2iCount;
         tile.Upscaled = availability.Upscaled;
         tile.Photorealized = availability.Photorealized;
+        tile.I2iEdited = availability.I2iEdited;
         tile.Enhanced = availability.Any;
+        tile.UpscaleCompletedAtUtc = LatestEnhancementActivityUtc(
+            versions,
+            "upscale");
+        tile.PhotorealCompletedAtUtc = LatestEnhancementActivityUtc(
+            versionSnapshot,
+            "photoreal");
+        tile.PhotorealFavoriteLevel = versionSnapshot
+            .Where(static version => version.Operation == "photoreal")
+            .Select(version => FavoriteLevelForPath(version.Output.OutputPath))
+            .DefaultIfEmpty(0)
+            .Max();
+    }
+
+    private void ApplyTileEnhancementQueueActivity(Tile tile)
+    {
+        string? alias = NormalizeCatalogEnhancementPath(tile.Path);
+        ManagedEnhancementQueueActivity? activity = alias is not null
+            && _catalogEnhancementQueueActivityByPath.TryGetValue(
+                alias,
+                out ManagedEnhancementQueueActivity knownActivity)
+                ? knownActivity
+                : null;
+        tile.UpscaleQueueAddedAtUtc = activity?.UpscaleAddedAtUtc;
+        tile.PhotorealQueueAddedAtUtc = activity?.PhotorealAddedAtUtc;
+        tile.I2iQueueAddedAtUtc = activity?.I2iAddedAtUtc;
+        tile.VideoQueueAddedAtUtc = activity?.VideoAddedAtUtc;
+        tile.UpscaleQueueActive = activity?.UpscaleActive == true;
+        tile.PhotorealQueueActive = activity?.PhotorealActive == true;
+        tile.I2iQueueActive = activity?.I2iActive == true;
+        tile.VideoQueueActive = activity?.VideoActive == true;
     }
 
     private static bool TryWriteAtomicText(string path, string text)
@@ -4555,7 +6248,25 @@ public partial class MainWindow : Window
         SetStatusToast(message, retryAction);
     }
 
-    private sealed record FavoritePendingMutation(int DurableLevel, int DesiredLevel, long Generation);
+    private sealed record FavoritePendingMutation(
+        int DurableLevel,
+        int DesiredLevel,
+        long Generation,
+        DateTimeOffset ChangedAtUtc);
+    private sealed record FavoriteFilterStateSnapshot(
+        bool ShowFavoritesOnly,
+        bool ShowUnfavoriteOnly,
+        int[] FavoriteLevels,
+        int[] PhotorealFavoriteLevels,
+        int[] VideoFavoriteLevels);
+    private sealed record FavoritePresentationStateBatch(
+        Dictionary<string, DateTimeOffset> Activity,
+        FavoriteFilterStateSnapshot? FilterState);
+    private sealed record FavoritePresentationStatePersistResult(
+        bool Saved,
+        bool Protected,
+        Dictionary<string, DateTimeOffset> EvictedActivity,
+        string? Error = null);
     private sealed record SeenPendingMutation(bool DurableSeen, bool WasUnseen, bool ShowedUnseenDot, long Generation);
     private enum SharedStoreKind { Favorite, Seen }
 
@@ -4799,9 +6510,27 @@ public partial class MainWindow : Window
 
     private void ApplyFavoriteWriteResult(SharedWriteResult<FavoriteDelta> result)
     {
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            ApplyFavoriteWriteResultCore(result);
+        }
+        finally
+        {
+            watch.Stop();
+            _lastFavoriteWriteApplyMilliseconds = watch.ElapsedMilliseconds;
+            _maxFavoriteWriteApplyMilliseconds = Math.Max(
+                _maxFavoriteWriteApplyMilliseconds,
+                watch.ElapsedMilliseconds);
+        }
+    }
+
+    private void ApplyFavoriteWriteResultCore(SharedWriteResult<FavoriteDelta> result)
+    {
         if (result.Status == SharedWriteStatus.Succeeded)
         {
             bool committedCurrent = false;
+            var committedActivity = new List<(string Path, DateTimeOffset ChangedAtUtc)>();
             foreach (FavoriteDelta delta in result.Batch)
             {
                 if (!_pendingFavoriteMutations.TryGetValue(delta.Path, out FavoritePendingMutation? current))
@@ -4810,10 +6539,12 @@ public partial class MainWindow : Window
                 {
                     _pendingFavoriteMutations.Remove(delta.Path);
                     committedCurrent = true;
+                    committedActivity.Add((delta.Path, current.ChangedAtUtc));
                 }
                 else if (current.Generation > delta.Generation)
                     _pendingFavoriteMutations[delta.Path] = current with { DurableLevel = delta.DesiredLevel };
             }
+            CommitFavoriteActivity(committedActivity);
             if (committedCurrent && _pendingFavoriteMutations.Count == 0)
                 ShowFavoriteChangeStatus("Favorites saved.");
             return;
@@ -4832,7 +6563,9 @@ public partial class MainWindow : Window
                 _favorites[delta.Path] = current.DurableLevel;
             else
                 _favorites.Remove(delta.Path);
-            SetTileFavoriteLevel(delta.Path, current.DurableLevel);
+            Tile? selectedTile = SelectedTile();
+            RefreshDerivedFavoritePresentationForPath(delta.Path, selectedTile);
+            SetTileFavoriteLevel(delta.Path, current.DurableLevel, selectedTile);
             _pendingFavoriteMutations.Remove(delta.Path);
             failed.Add(delta with { DurableBefore = current.DurableLevel });
         }
@@ -4873,12 +6606,12 @@ public partial class MainWindow : Window
                 }
             }
 
-            if (applyUnseenFilter && UnseenOnlyFilter?.IsChecked == true)
+            if (applyUnseenFilter
+                && UnseenOnlyFilter?.IsChecked == true
+                && !ExternalFileDropSessionActive)
             {
                 Tile? selected = SelectedTile();
-                ApplyFilters(selectFirst: false);
-                if (selected is not null && !_tiles.Contains(selected))
-                    SelectTile(null);
+                _ = ReconcileUnseenFilterProjectionAsync(selected);
             }
             else if (applyUnseenFilter)
             {
@@ -4938,16 +6671,25 @@ public partial class MainWindow : Window
         }
 
         SharedStoreWriter<FavoriteDelta> writer = EnsureFavoriteWriter();
+        DateTimeOffset changedAtUtc = DateTimeOffset.UtcNow;
+        Tile? selectedTile = SelectedTile();
         foreach (FavoriteDelta previous in failed)
         {
             int durable = FavoriteLevelForPath(previous.Path);
             long generation = ++_favoriteMutationGeneration;
-            _pendingFavoriteMutations[previous.Path] = new FavoritePendingMutation(durable, previous.DesiredLevel, generation);
+            _pendingFavoriteMutations[previous.Path] = new FavoritePendingMutation(
+                durable,
+                previous.DesiredLevel,
+                generation,
+                changedAtUtc);
             if (previous.DesiredLevel > 0)
                 _favorites[previous.Path] = previous.DesiredLevel;
             else
                 _favorites.Remove(previous.Path);
-            SetTileFavoriteLevel(previous.Path, previous.DesiredLevel);
+            RefreshDerivedFavoritePresentationForPath(
+                previous.Path,
+                selectedTile);
+            SetTileFavoriteLevel(previous.Path, previous.DesiredLevel, selectedTile);
             writer.Enqueue(new FavoriteDelta(previous.Path, durable, previous.DesiredLevel, generation));
         }
         RefreshFavoriteMutationSurface();
@@ -5000,18 +6742,86 @@ public partial class MainWindow : Window
             RetryFailedSeenBatch();
     }
 
-    private void SetTileFavoriteLevel(string path, int level)
+    private void SetTileFavoriteLevel(
+        string path,
+        int level,
+        Tile? preferredTile = null)
     {
-        foreach (Tile tile in _allTiles)
+        var affected = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        CollectLiveTilesForFavoritePath(path, preferredTile, affected);
+        foreach (Tile tile in affected)
+            tile.Fav = Math.Clamp(level, 0, 5);
+    }
+
+    private void RefreshDerivedFavoritePresentationForPath(
+        string favoritePath,
+        Tile? preferredTile = null)
+    {
+        string normalizedFavoritePath = NormalizeFavoritePath(favoritePath);
+        var photorealTiles = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        var videoTiles = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        if (_photorealSourcePathsByFavoritePath.TryGetValue(
+                normalizedFavoritePath,
+                out HashSet<string>? photorealSourcePaths))
         {
-            if (string.Equals(tile.Path, path, StringComparison.OrdinalIgnoreCase))
-                tile.Fav = Math.Clamp(level, 0, 5);
+            foreach (string sourcePath in photorealSourcePaths)
+            {
+                CollectLiveTilesForFavoritePath(
+                    sourcePath,
+                    preferredTile,
+                    photorealTiles);
+            }
+        }
+        if (_videoSourcePathsByFavoritePath.TryGetValue(
+                normalizedFavoritePath,
+                out HashSet<string>? videoSourcePaths))
+        {
+            foreach (string sourcePath in videoSourcePaths)
+            {
+                CollectLiveTilesForFavoritePath(
+                    sourcePath,
+                    preferredTile,
+                    videoTiles);
+            }
+        }
+
+        foreach (Tile tile in photorealTiles)
+        {
+            ApplyTileEnhancementAvailability(
+                tile,
+                GetManagedEnhancementVersionsForPath(tile.Path));
+        }
+        foreach (Tile tile in videoTiles)
+        {
+            ApplyTileVideoAvailability(
+                tile,
+                GetManagedVideoVersionsForPath(tile.Path));
+        }
+
+        int visitedCount = photorealTiles
+            .Concat(videoTiles)
+            .Distinct(ReferenceEqualityComparer.Instance)
+            .Count();
+        _lastDerivedFavoriteVisitedTileCount = visitedCount;
+        _maxDerivedFavoriteVisitedTileCount = Math.Max(
+            _maxDerivedFavoriteVisitedTileCount,
+            visitedCount);
+        bool catalogAffected = photorealTiles.Any(IsIndexedCatalogTile)
+            || videoTiles.Any(IsIndexedCatalogTile);
+        if (catalogAffected
+            && (FavoriteOnlyFilter?.IsChecked == true
+                || UnfavoriteOnlyFilter?.IsChecked == true))
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
         }
     }
 
     private void RestoreTileSeenState(string path, bool unseen, bool showDot)
     {
-        foreach (Tile tile in _allTiles)
+        foreach (Tile tile in EnumerateLiveTiles())
         {
             if (!string.Equals(tile.Path, path, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -5054,7 +6864,9 @@ public partial class MainWindow : Window
 
     private void RefreshFavoriteMutationSurface()
     {
-        if (FavoriteOnlyFilter?.IsChecked == true || UnfavoriteOnlyFilter?.IsChecked == true)
+        if (!ExternalFileDropSessionActive
+            && (FavoriteOnlyFilter?.IsChecked == true
+                || UnfavoriteOnlyFilter?.IsChecked == true))
         {
             int selectedIndex = _primarySelectedIndex >= 0
                 ? _primarySelectedIndex
@@ -5073,7 +6885,8 @@ public partial class MainWindow : Window
     {
         bool favoriteFilterActive = FavoriteOnlyFilter?.IsChecked == true
             || UnfavoriteOnlyFilter?.IsChecked == true;
-        if (favoriteFilterActive)
+        bool catalogPresentationChanged = changedTiles.Any(_allTiles.Contains);
+        if (favoriteFilterActive && catalogPresentationChanged)
             ReconcileFavoriteFilterProjection(changedTiles);
 
         SyncSelectionActionSurface();
@@ -5084,7 +6897,7 @@ public partial class MainWindow : Window
                 StringComparison.OrdinalIgnoreCase))
             : null;
         RefreshModalFavoriteSurface(knownPrimary);
-        return favoriteFilterActive;
+        return favoriteFilterActive && catalogPresentationChanged;
     }
 
     private Task<SearchFilterCompletion>? RemoveChangedTilesExcludedByFavoriteFilter(
@@ -5140,9 +6953,15 @@ public partial class MainWindow : Window
         if (!favoritesOnly && !unfavoriteOnly)
             return false;
         bool remainsIncluded = favoritesOnly
-            ? desiredLevel > 0
-                && (_favoriteFilterLevels.Count == 0
-                    || _favoriteFilterLevels.Contains(desiredLevel))
+            ? MatchesSelectedFavoriteLevels(
+                desiredLevel,
+                tile.Photorealized,
+                tile.PhotorealFavoriteLevel,
+                tile.VideoGenerated,
+                tile.VideoFavoriteLevel,
+                _favoriteFilterLevels,
+                _photorealFavoriteFilterLevels,
+                _videoFavoriteFilterLevels)
             : desiredLevel <= 0;
         return !remainsIncluded
             && CardsList.TryResolveAutomationItem(tile, out _);
@@ -5170,10 +6989,10 @@ public partial class MainWindow : Window
             return null;
         }
 
+        bool reorderCatalog = _scheduledCatalogProjection?.ReorderCatalog == true;
         int selectedIndex = _primarySelectedIndex >= 0
             ? _primarySelectedIndex
             : Math.Max(CardsList.SelectedIndex, RowsList.SelectedIndex);
-        bool reorderCatalog = _scheduledCatalogProjection?.ReorderCatalog == true;
         // A later inclusion must supersede any in-flight exclusion snapshot.
         // Recompute from the full catalog so the old generation cannot remove
         // an image that has already become eligible again. Preserve an
@@ -5246,20 +7065,90 @@ public partial class MainWindow : Window
     private void RefreshModalFavoriteSurface(Tile? knownSelected = null)
     {
         Tile? selected = knownSelected ?? SelectedTile();
-        if (selected is null)
+        SyncFavoriteLevelReadouts(selected?.Fav ?? 0);
+        if (Modal.Visibility != Visibility.Visible)
+            return;
+
+        // The modal is a pinned viewing surface. A Favorite filter refresh can
+        // legitimately move the gallery selection to a different tile while
+        // the displayed image remains open. Never reopen the modal from that
+        // background selection: it changes the image and starts another full
+        // decode on an unrelated Favorite click.
+        if (!TryGetModalSourceTile(out Tile modalTile))
         {
-            if (Modal.Visibility == Visibility.Visible)
-                Modal.Visibility = Visibility.Collapsed;
+            bool modalHadFocus = Modal.IsKeyboardFocusWithin;
+            CloseModal();
+            if (modalHadFocus)
+                Dispatcher.BeginInvoke(SearchInput.Focus, DispatcherPriority.Input);
             return;
         }
 
-        SyncFavoriteLevelReadouts(selected.Fav);
+        SyncDisplayedModalFavoriteLevel(modalTile);
+        SyncModalFilmstripSelection(modalTile);
+    }
+
+    private bool TryGetModalSourceTile(out Tile tile)
+    {
+        tile = null!;
+        if (Modal.Visibility != Visibility.Visible
+            || string.IsNullOrWhiteSpace(_modalSourceTilePath))
+        {
+            return false;
+        }
+
+        if (TryGetExternalFileDropSessionTile(_modalSourceTilePath, out tile))
+            return true;
+
+        string normalizedPath = NormalizeFavoritePath(_modalSourceTilePath);
+        if (_catalogTilesByFavoritePath.TryGetValue(
+                normalizedPath,
+                out List<Tile>? indexedTiles)
+            && indexedTiles.Count > 0)
+        {
+            tile = indexedTiles[0];
+            return true;
+        }
+
+        // A Jobs/external projection can contain a transient real tile that is
+        // deliberately not part of the catalog index.
+        tile = _tiles.FirstOrDefault(candidate => string.Equals(
+                candidate.Path,
+                _modalSourceTilePath,
+                StringComparison.OrdinalIgnoreCase))!;
+        return tile is not null;
+    }
+
+    private void SyncDisplayedModalFavoriteLevel(Tile selected)
+    {
         if (Modal.Visibility != Visibility.Visible)
+        {
+            ModalFavoriteDecreaseButton.IsEnabled = true;
+            ModalFavoriteIncreaseButton.IsEnabled = true;
+            SyncModalFavoriteLevelReadout(selected.Fav);
             return;
-        if (!string.Equals(_modalSourceTilePath, selected.Path, StringComparison.OrdinalIgnoreCase))
-            OpenModal();
-        else
-            SyncModalFilmstripSelection(selected);
+        }
+
+        Tile favoriteTile = TryGetModalSourceTile(out Tile modalTile)
+            ? modalTile
+            : selected;
+        bool resolved = TryResolveDisplayedModalFavoriteTarget(
+            out string targetPath,
+            out _,
+            out bool independentTarget);
+        int modalLevel = resolved && independentTarget
+            ? FavoriteLevelForPath(targetPath)
+            : resolved
+                ? favoriteTile.Fav
+                : 0;
+        ModalFavoriteDecreaseButton.IsEnabled = resolved;
+        ModalFavoriteIncreaseButton.IsEnabled = resolved;
+        SyncModalFavoriteLevelReadout(modalLevel);
+        if (!resolved)
+        {
+            AutomationProperties.SetName(
+                ModalFavoriteLevelText,
+                "Favorite target unavailable");
+        }
     }
 
     private void SyncFavoriteLevelReadouts(int level)
@@ -5267,17 +7156,39 @@ public partial class MainWindow : Window
         int normalized = Math.Clamp(level, 0, 5);
         string text = normalized.ToString(CultureInfo.InvariantCulture);
         FavoriteLevelText.Text = text;
+        SyncModalFavoriteLevelReadout(normalized);
+    }
+
+    private void SyncModalFavoriteLevelReadout(int level)
+    {
+        int normalized = Math.Clamp(level, 0, 5);
+        string text = normalized.ToString(CultureInfo.InvariantCulture);
         ModalFavoriteLevelText.Text = text;
         AutomationProperties.SetName(ModalFavoriteLevelText, $"Favorite level {text}");
 
         bool favorite = normalized > 0;
+        string activeBackground = "FavoriteSoft";
+        string activeBorder = "Favorite";
+        string activeForeground = "FavoriteText";
+        if (_modalShowingVideo)
+        {
+            activeBackground = "VideoFavoriteBackground";
+            activeBorder = "VideoFavorite";
+            activeForeground = "VideoFavoriteText";
+        }
+        else if (CurrentModalEnhancementVersionIsPhotoreal())
+        {
+            activeBackground = "PhotorealFavoriteBackground";
+            activeBorder = "PhotorealFavorite";
+            activeForeground = "PhotorealFavoriteText";
+        }
         ModalFavoriteControlBorder.SetResourceReference(
             Border.BackgroundProperty,
-            favorite ? "FavoriteSoft" : "BgTertiary");
+            favorite ? activeBackground : "BgTertiary");
         ModalFavoriteControlBorder.SetResourceReference(
             Border.BorderBrushProperty,
-            favorite ? "Favorite" : "GlassBorder");
-        string foregroundResource = favorite ? "FavoriteText" : "TextSecondary";
+            favorite ? activeBorder : "GlassBorder");
+        string foregroundResource = favorite ? activeForeground : "TextSecondary";
         ModalFavoriteLevelText.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
         ModalFavoriteDecreaseGlyph.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
         ModalFavoriteIncreaseGlyph.SetResourceReference(TextBlock.ForegroundProperty, foregroundResource);
@@ -5509,9 +7420,7 @@ public partial class MainWindow : Window
 
         if (UnseenOnlyFilter?.IsChecked == true)
         {
-            ApplyFilters(selectFirst: false);
-            if (!_tiles.Contains(tile))
-                SelectTile(null);
+            _ = ReconcileUnseenFilterProjectionAsync(tile);
         }
         else
         {
@@ -5519,6 +7428,51 @@ public partial class MainWindow : Window
         }
 
         return true;
+    }
+
+    private async Task ReconcileUnseenFilterProjectionAsync(Tile? selected)
+    {
+        long reconcileGeneration = ++_unseenFilterReconcileGeneration;
+        while (reconcileGeneration == _unseenFilterReconcileGeneration
+            && UnseenOnlyFilter?.IsChecked == true
+            && _tiles.Any(static tile => tile.IsRealFile && !tile.Unseen))
+        {
+            Task<SearchFilterCompletion>? pendingProjection =
+                _pendingSearchFilterCompletion?.Task;
+            SearchFilterCompletion completion;
+            if (pendingProjection is not null && !pendingProjection.IsCompleted)
+            {
+                // Let a newer user-driven query/filter publish first. Its
+                // snapshot may already include this seen-state change.
+                completion = await pendingProjection;
+            }
+            else
+            {
+                bool reorderCatalog = _scheduledCatalogProjection?.ReorderCatalog == true;
+                bool projectionIsStable = _scheduledCatalogProjection is null
+                    && _pendingSearchFilterCompletion is null
+                    && _catalogProjectionCts is null;
+                completion = await QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: reorderCatalog,
+                    selectFirst: false,
+                    restrictToCurrentProjection: projectionIsStable);
+            }
+
+            if (!string.IsNullOrWhiteSpace(completion.Error))
+                return;
+        }
+
+        if (reconcileGeneration == _unseenFilterReconcileGeneration
+            && selected is not null
+            && !_tiles.Contains(selected)
+            && string.Equals(
+                _primarySelectedPath,
+                selected.Path,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            SelectTile(null);
+        }
     }
 
     private bool QueueTileSeen(Tile tile)
@@ -5557,7 +7511,7 @@ public partial class MainWindow : Window
 
     private void RefreshUnseenDots()
     {
-        foreach (var tile in _allTiles)
+        foreach (Tile tile in EnumerateLiveTiles())
             tile.ShowUnseenDot = _showUnseenDots && tile.Unseen;
     }
 
@@ -5948,7 +7902,7 @@ public partial class MainWindow : Window
         if (imported > 0)
         {
             if (UnseenOnlyFilter?.IsChecked == true)
-                ApplyFilters(selectFirst: false);
+                _ = ReconcileUnseenFilterProjectionAsync(SelectedTile());
             else
                 UpdateHeaderStats();
         }
@@ -6148,21 +8102,304 @@ public partial class MainWindow : Window
     private Tile? ResolvePvuSeenImportTile(string rawKey)
         => ResolvePvuFavoriteImportTile(rawKey);
 
+    private static Stream OpenBitmapReadStream(
+        string path,
+        CancellationToken cancellationToken,
+        Action? onFirstRead)
+    {
+        // `path` is a canonical catalog image selected for a read-only decode.
+        // This helper never writes through the path or passes it to a shell.
+        // codeql[cs/path-injection]
+        var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 4_096,
+            FileOptions.Asynchronous);
+        return cancellationToken.CanBeCanceled || onFirstRead is not null
+            ? new CancellationAwareReadStream(stream, cancellationToken, onFirstRead)
+            : stream;
+    }
+
+    private sealed class CancellationAwareReadStream : Stream
+    {
+        private Stream? _inner;
+        private readonly CancellationToken _cancellationToken;
+        private readonly Action? _onFirstRead;
+        private readonly CancellationTokenRegistration _cancellationRegistration;
+        private int _firstReadObserved;
+
+        internal CancellationAwareReadStream(
+            Stream inner,
+            CancellationToken cancellationToken,
+            Action? onFirstRead)
+        {
+            _inner = inner;
+            _cancellationToken = cancellationToken;
+            _onFirstRead = onFirstRead;
+            _cancellationRegistration = cancellationToken.CanBeCanceled
+                ? cancellationToken.Register(
+                    static state => ThreadPool.UnsafeQueueUserWorkItem(
+                        static target => target.DisposeInnerForCancellation(),
+                        (CancellationAwareReadStream)state!,
+                        preferLocal: false),
+                    this)
+                : default;
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => true;
+        public override bool CanWrite => false;
+        public override long Length => WithCancellation(static stream => stream.Length);
+        public override long Position
+        {
+            get => WithCancellation(static stream => stream.Position);
+            set => WithCancellation(stream => stream.Position = value);
+        }
+
+        public override void Flush()
+            => WithCancellation(static stream => stream.Flush());
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            ObserveFirstRead();
+            return WithCancellation(stream => stream
+                .ReadAsync(buffer.AsMemory(offset, count), _cancellationToken)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult());
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            byte[] rented = ArrayPool<byte>.Shared.Rent(Math.Max(1, buffer.Length));
+            try
+            {
+                int bytesRead = Read(rented, 0, buffer.Length);
+                rented.AsSpan(0, bytesRead).CopyTo(buffer);
+                return bytesRead;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+
+        public override int ReadByte()
+        {
+            byte[] buffer = new byte[1];
+            return Read(buffer, 0, 1) == 0 ? -1 : buffer[0];
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+            => WithCancellation(stream => stream.Seek(offset, origin));
+
+        public override void SetLength(long value)
+            => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _cancellationRegistration.Dispose();
+                Interlocked.Exchange(ref _inner, null)?.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        private void ObserveFirstRead()
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (Interlocked.Exchange(ref _firstReadObserved, 1) == 0)
+                _onFirstRead?.Invoke();
+            _cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        private void DisposeInnerForCancellation()
+        {
+            Stream? stream = Interlocked.Exchange(ref _inner, null);
+            if (stream is null)
+                return;
+            try
+            {
+                stream.Dispose();
+            }
+            catch
+            {
+                // The close runs on the thread pool and must not surface a
+                // failure outside cancellation. The worker normalizes the
+                // resulting read failure to OperationCanceledException.
+            }
+        }
+
+        private Stream GetInner()
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            return Volatile.Read(ref _inner)
+                ?? throw new ObjectDisposedException(nameof(CancellationAwareReadStream));
+        }
+
+        private T WithCancellation<T>(Func<Stream, T> action)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            Stream stream = GetInner();
+            try
+            {
+                T result = action(stream);
+                _cancellationToken.ThrowIfCancellationRequested();
+                return result;
+            }
+            catch (Exception ex) when (_cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(
+                    "Bitmap stream operation was canceled.",
+                    ex,
+                    _cancellationToken);
+            }
+        }
+
+        private void WithCancellation(Action<Stream> action)
+            => WithCancellation(
+                stream =>
+                {
+                    action(stream);
+                    return true;
+                });
+    }
+
+    private sealed class DisposeReleasedReadStream : Stream
+    {
+        private readonly TaskCompletionSource<bool> _readEntered = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _disposed = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _disposeCount;
+
+        internal Task ReadEntered => _readEntered.Task;
+        internal int DisposeCount => Volatile.Read(ref _disposeCount);
+
+        public override bool CanRead => true;
+        public override bool CanSeek => true;
+        public override bool CanWrite => false;
+        public override long Length => 1;
+        public override long Position { get; set; }
+        public override void Flush()
+        {
+        }
+        public override int Read(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            _readEntered.TrySetResult(true);
+            return new ValueTask<int>(WaitForDisposeAsync());
+        }
+        public override long Seek(long offset, SeekOrigin origin)
+            => Position;
+        public override void SetLength(long value)
+            => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && Interlocked.Increment(ref _disposeCount) == 1)
+                _disposed.TrySetResult(true);
+            base.Dispose(disposing);
+        }
+
+        private async Task<int> WaitForDisposeAsync()
+        {
+            await _disposed.Task;
+            throw new ObjectDisposedException(nameof(DisposeReleasedReadStream));
+        }
+    }
+
+    internal static async Task<CancellationAwareReadSmokeSnapshot>
+        RunCancellationAwareReadStreamForSmokeAsync()
+    {
+        using var cts = new CancellationTokenSource();
+        var inner = new DisposeReleasedReadStream();
+        var stream = new CancellationAwareReadStream(inner, cts.Token, onFirstRead: null);
+        Task<int> readTask = Task.Run(() => stream.Read(new byte[1], 0, 1));
+        bool readEntered = await Task.WhenAny(
+            inner.ReadEntered,
+            Task.Delay(TimeSpan.FromSeconds(2))) == inner.ReadEntered;
+        bool cancelReturned = false;
+        bool readCanceled = false;
+        bool readCompleted = false;
+        bool innerDisposedBeforeCleanup = false;
+        try
+        {
+            if (readEntered)
+            {
+                cts.Cancel();
+                cancelReturned = true;
+                readCompleted = await Task.WhenAny(
+                    readTask,
+                    Task.Delay(TimeSpan.FromSeconds(2))) == readTask;
+                if (readCompleted)
+                {
+                    try
+                    {
+                        _ = await readTask;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        readCanceled = true;
+                    }
+                }
+                innerDisposedBeforeCleanup = inner.DisposeCount > 0;
+            }
+        }
+        finally
+        {
+            stream.Dispose();
+            if (!readTask.IsCompleted)
+            {
+                _ = await Task.WhenAny(
+                    readTask,
+                    Task.Delay(TimeSpan.FromSeconds(2)));
+            }
+        }
+
+        return new CancellationAwareReadSmokeSnapshot(
+            readEntered,
+            cancelReturned,
+            readCompleted,
+            readCanceled,
+            innerDisposedBeforeCleanup);
+    }
+
     private static BitmapSource? LoadBitmap(
         string path,
         int decodePixelWidth,
-        bool explicitManagedOutput = false)
+        bool explicitManagedOutput = false,
+        CancellationToken cancellationToken = default,
+        Action? onFirstRead = null,
+        Action<BitmapDecodePlan>? onDecodePlan = null)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             BitmapDecodePlan? decodePlan = BuildBitmapDecodePlan(
                 path,
                 decodePixelWidth,
-                explicitManagedOutput);
+                explicitManagedOutput,
+                cancellationToken);
             if (decodePlan is null)
                 return null;
+            onDecodePlan?.Invoke(decodePlan.Value);
 
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using Stream stream = OpenBitmapReadStream(
+                path,
+                cancellationToken,
+                onFirstRead);
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
@@ -6173,8 +8410,16 @@ public partial class MainWindow : Window
                 image.DecodePixelHeight = decodePlan.Value.PixelHeight;
             image.StreamSource = stream;
             image.EndInit();
+            cancellationToken.ThrowIfCancellationRequested();
             image.Freeze();
             return image;
+        }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(
+                "Bitmap decode was canceled.",
+                ex,
+                cancellationToken);
         }
         catch
         {
@@ -6186,13 +8431,19 @@ public partial class MainWindow : Window
         string path,
         int decodePixelWidth,
         CancellationToken token,
-        bool explicitManagedOutput = false)
+        bool explicitManagedOutput = false,
+        Action<BitmapDecodePlan>? onDecodePlan = null)
     {
         for (int attempt = 0; attempt < MaxThumbnailDecodeAttempts; attempt++)
         {
             token.ThrowIfCancellationRequested();
             BitmapSource? bitmap = await Task.Run(
-                () => LoadBitmap(path, decodePixelWidth, explicitManagedOutput),
+                () => LoadBitmap(
+                    path,
+                    decodePixelWidth,
+                    explicitManagedOutput,
+                    token,
+                    onDecodePlan: onDecodePlan),
                 token);
             if (bitmap is not null)
                 return bitmap;
@@ -6214,10 +8465,19 @@ public partial class MainWindow : Window
     private static BitmapDecodePlan? BuildBitmapDecodePlan(
         string path,
         int requestedPixelWidth,
-        bool explicitManagedOutput = false)
+        bool explicitManagedOutput = false,
+        CancellationToken cancellationToken = default)
     {
-        if (requestedPixelWidth <= 0 || !TryReadBitmapSize(path, out int sourceWidth, out int sourceHeight))
+        cancellationToken.ThrowIfCancellationRequested();
+        if (requestedPixelWidth <= 0
+            || !TryReadBitmapSize(
+                path,
+                out int sourceWidth,
+                out int sourceHeight,
+                cancellationToken))
+        {
             return null;
+        }
 
         return BuildBitmapDecodePlanForDimensions(
             Path.GetExtension(path),
@@ -6303,23 +8563,47 @@ public partial class MainWindow : Window
         // pixel. In that case DecodePixelHeight is the only way to keep WIC
         // from decoding the full unbounded long edge.
         if (targetWidth < 1d)
-            return new BitmapDecodePlan(0, Math.Max(1, (int)Math.Floor(targetHeight)));
+            return new BitmapDecodePlan(
+                0,
+                Math.Max(1, (int)Math.Floor(targetHeight)),
+                sourceWidth,
+                sourceHeight);
 
-        return new BitmapDecodePlan(Math.Max(1, (int)Math.Floor(targetWidth)), 0);
+        return new BitmapDecodePlan(
+            Math.Max(1, (int)Math.Floor(targetWidth)),
+            0,
+            sourceWidth,
+            sourceHeight);
     }
 
-    private static bool TryReadBitmapSize(string path, out int width, out int height)
+    private static bool TryReadBitmapSize(
+        string path,
+        out int width,
+        out int height,
+        CancellationToken cancellationToken = default)
     {
         width = 0;
         height = 0;
         try
         {
-            using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            cancellationToken.ThrowIfCancellationRequested();
+            using Stream stream = OpenBitmapReadStream(
+                path,
+                cancellationToken,
+                onFirstRead: null);
             var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
             var frame = decoder.Frames[0];
             width = frame.PixelWidth;
             height = frame.PixelHeight;
+            cancellationToken.ThrowIfCancellationRequested();
             return width > 0 && height > 0;
+        }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(
+                "Bitmap dimension read was canceled.",
+                ex,
+                cancellationToken);
         }
         catch
         {
@@ -6361,6 +8645,10 @@ public partial class MainWindow : Window
             workers,
             tiles.Count,
             StringComparer.OrdinalIgnoreCase);
+        var changedEntries = new ConcurrentDictionary<string, MetadataIndexEntry>(
+            workers,
+            Math.Min(tiles.Count, 4096),
+            StringComparer.OrdinalIgnoreCase);
         int completed = 0;
         int decodeFailures = 0;
         int cacheHits = 0;
@@ -6384,12 +8672,12 @@ public partial class MainWindow : Window
                     && cached.Matches(tile);
                 int width;
                 int height;
-                string prompt;
+                byte[] promptUtf8 = [];
                 if (cacheHit)
                 {
                     width = cached!.Width;
                     height = cached.Height;
-                    prompt = cached.Prompt;
+                    promptUtf8 = cached.PromptUtf8;
                     refreshedEntries[tile.Path] = cached;
                     Interlocked.Increment(ref cacheHits);
                 }
@@ -6415,19 +8703,25 @@ public partial class MainWindow : Window
                     }
                     else
                     {
-                        refreshedEntries[tile.Path] = new MetadataIndexEntry(
+                        promptUtf8 = MetadataIndexStore.EncodePrompt(
+                            pngMetadata?.Prompt);
+                        MetadataIndexEntry refreshed = new(
                             tile.Path,
                             tile.SourceLength,
                             tile.SourceLastWriteUtcTicks,
                             tile.SourceCreationUtcTicks,
                             width,
                             height,
-                            pngMetadata?.Prompt ?? "");
+                            promptUtf8);
+                        refreshedEntries[tile.Path] = refreshed;
+                        changedEntries[tile.Path] = refreshed;
                     }
-                    prompt = pngMetadata?.Prompt ?? "";
                 }
 
-                decoded.Enqueue(new DecodedImageMetadata(tile, new ImageDimensions(width, height), prompt));
+                decoded.Enqueue(new DecodedImageMetadata(
+                    tile,
+                    new ImageDimensions(width, height),
+                    promptUtf8));
                 int done = Interlocked.Increment(ref completed);
                 if (done % uiBatchSize == 0 || done == tiles.Count)
                 {
@@ -6459,8 +8753,23 @@ public partial class MainWindow : Window
                 // Prompt-only matches become available after the background
                 // index is complete. Filename/date/favorite filtering was
                 // already usable from the first published catalog frame.
-                if (!string.IsNullOrWhiteSpace(SearchInput.Text))
-                    ApplyFilters(selectFirst: false);
+                if (string.Equals(_aspectMode, AspectOriginalValue, StringComparison.Ordinal))
+                {
+                    GridZoomAnchor? viewportAnchor = PreferredGridGeometryAnchor();
+                    ApplyCardLayoutToAllTiles(
+                        invalidateItemLayout: false,
+                        refreshRealizedBindings: false);
+                    _metadataOriginalAspectLayoutBindingsPending = true;
+                    _metadataOriginalAspectLayoutPublishCount++;
+                    _ = PublishCompletedMetadataLayoutAsync(viewportAnchor, _cardLayoutRevision);
+                }
+                else if (!string.IsNullOrWhiteSpace(SearchInput.Text))
+                {
+                    _ = QueueCatalogProjection(
+                        debounce: false,
+                        reorderCatalog: false,
+                        selectFirst: false);
+                }
             },
             DispatcherPriority.Background,
             cts.Token);
@@ -6475,6 +8784,7 @@ public partial class MainWindow : Window
             && refreshedEntries.Count == tiles.Count;
         bool exactLoadedWarmSnapshot = completeMetadataSet
             && index.State == MetadataIndexLoadState.Loaded
+            && !index.RequiresMigration
             && cacheMisses == 0
             && unavailableFolderSet.Count == 0
             && index.Entries.Count == tiles.Count;
@@ -6487,6 +8797,7 @@ public partial class MainWindow : Window
                     unavailableFolderSet,
                     index.Entries,
                     refreshedEntries,
+                    changedEntries,
                     cts.Token),
                 cts.Token);
         }
@@ -6515,6 +8826,7 @@ public partial class MainWindow : Window
                 MetadataIndexSaveDisposition.Incomplete);
         }
         else if (index.State == MetadataIndexLoadState.Loaded
+            && !index.RequiresMigration
             && cacheMisses == 0
             && decodeFailures == 0
             && refreshedEntries.Count == tiles.Count
@@ -6527,6 +8839,21 @@ public partial class MainWindow : Window
                 metadataIndexPath,
                 refreshedEntries.Count,
                 "the complete index was reused byte-for-byte");
+        }
+        else if (index.State == MetadataIndexLoadState.Loaded
+            && !index.RequiresMigration)
+        {
+            MetadataIndexSnapshotPlan plan = snapshotPlan
+                ?? throw new InvalidOperationException("metadata index change plan was unavailable");
+            save = await Task.Run(
+                () => MetadataIndexStore.ApplyChanges(
+                    metadataIndexPath,
+                    plan.Upserts,
+                    plan.RemovedPaths,
+                    plan.Entries.Length,
+                    index.EntryRevision,
+                    cts.Token),
+                cts.Token);
         }
         else
         {
@@ -6569,6 +8896,7 @@ public partial class MainWindow : Window
         IReadOnlyList<string> unavailableFolderSet,
         IReadOnlyDictionary<string, MetadataIndexEntry> priorEntries,
         ConcurrentDictionary<string, MetadataIndexEntry> refreshedEntries,
+        ConcurrentDictionary<string, MetadataIndexEntry> changedEntries,
         CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -6577,6 +8905,7 @@ public partial class MainWindow : Window
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
             .ToArray();
         var unavailablePriorEntries = new List<MetadataIndexEntry>();
+        var removedPaths = new List<string>();
         int checkedEntries = 0;
         foreach (MetadataIndexEntry entry in priorEntries.Values)
         {
@@ -6595,6 +8924,7 @@ public partial class MainWindow : Window
                 continue;
             }
 
+            bool unavailable = false;
             foreach (string root in normalizedUnavailableRoots)
             {
                 if (string.Equals(normalizedPath, root, StringComparison.OrdinalIgnoreCase)
@@ -6602,12 +8932,16 @@ public partial class MainWindow : Window
                     || normalizedPath.StartsWith(root + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 {
                     unavailablePriorEntries.Add(entry);
+                    unavailable = true;
                     break;
                 }
             }
+            if (!unavailable)
+                removedPaths.Add(entry.Path);
         }
         token.ThrowIfCancellationRequested();
-        bool durableEntrySetExact = priorEntries.Count == refreshedEntries.Count + unavailablePriorEntries.Count;
+        bool durableEntrySetExact = removedPaths.Count == 0
+            && priorEntries.Count == refreshedEntries.Count + unavailablePriorEntries.Count;
         var snapshotByPath = new Dictionary<string, MetadataIndexEntry>(
             refreshedEntries,
             StringComparer.OrdinalIgnoreCase);
@@ -6618,11 +8952,18 @@ public partial class MainWindow : Window
         foreach (MetadataIndexEntry prior in unavailablePriorEntries)
             snapshotByPath.TryAdd(prior.Path, prior);
         token.ThrowIfCancellationRequested();
-        return new MetadataIndexSnapshotPlan(snapshotByPath.Values.ToArray(), durableEntrySetExact);
+        return new MetadataIndexSnapshotPlan(
+            snapshotByPath.Values.ToArray(),
+            changedEntries.Values.ToArray(),
+            removedPaths.ToArray(),
+            durableEntrySetExact);
     }
 
     private void BeginMetadataIndexProgress(int total)
     {
+        _metadataOriginalAspectLayoutBindingsPending = false;
+        _metadataOriginalAspectLayoutPublishCount = 0;
+        _metadataOriginalAspectLayoutFallbackCount = 0;
         _metadataIndexStatus = "loading";
         _metadataIndexProgress = 0;
         _metadataIndexCompleted = 0;
@@ -6732,6 +9073,8 @@ public partial class MainWindow : Window
         height = 0;
         metadata = null;
         bool parametersChunkSeen = false;
+        bool comfyPromptChunkSeen = false;
+        PngParametersMetadata? comfyPromptFallback = null;
 
         try
         {
@@ -6782,30 +9125,50 @@ public partial class MainWindow : Window
                     && chunkHeader[6] == (byte)'A'
                     && chunkHeader[7] == (byte)'T';
                 if (isImageData)
+                {
+                    if (!parametersChunkSeen)
+                        metadata = comfyPromptFallback;
                     return width > 0 && height > 0;
+                }
 
-                bool isText = chunkHeader[4] == (byte)'t'
-                    && chunkHeader[5] == (byte)'E'
-                    && chunkHeader[6] == (byte)'X'
-                    && chunkHeader[7] == (byte)'t';
-                if (isText)
+                string chunkType = Encoding.ASCII.GetString(chunkHeader[4..8]);
+                if (chunkType is "tEXt" or "iTXt")
                 {
                     var data = new byte[length];
                     if (!TryReadExactly(stream, data) || !TrySkip(stream, 4))
                         return false;
 
-                    int separator = Array.IndexOf(data, (byte)0);
-                    if (separator > 0
-                        && !parametersChunkSeen
-                        && string.Equals(Encoding.Latin1.GetString(data, 0, separator), "parameters", StringComparison.Ordinal))
+                    if (TryExtractPngText(
+                            chunkType,
+                            data,
+                            out string keyword,
+                            out string? raw))
                     {
-                        parametersChunkSeen = true;
-                        string raw = Encoding.UTF8.GetString(data, separator + 1, data.Length - separator - 1);
-                        // Match the established metadata reader and product
-                        // contract: the first parameters chunk owns the image.
-                        // Later duplicate chunks must not make catalog search
-                        // disagree with Preview/Modal metadata.
-                        metadata = ParsePngParameters(raw);
+                        if (!parametersChunkSeen
+                            && string.Equals(
+                                keyword,
+                                "parameters",
+                                StringComparison.Ordinal))
+                        {
+                            parametersChunkSeen = true;
+                            // The first parameters chunk owns the image, even
+                            // when empty or unsupported. A Comfy graph is only
+                            // a fallback when parameters is entirely absent.
+                            metadata = raw is null
+                                ? null
+                                : ParsePngParameters(raw);
+                        }
+                        else if (!comfyPromptChunkSeen
+                            && string.Equals(
+                                keyword,
+                                "prompt",
+                                StringComparison.Ordinal))
+                        {
+                            comfyPromptChunkSeen = true;
+                            comfyPromptFallback = raw is null
+                                ? null
+                                : ParseComfyPromptGraph(raw);
+                        }
                     }
                     continue;
                 }
@@ -6821,6 +9184,8 @@ public partial class MainWindow : Window
         {
         }
 
+        if (!parametersChunkSeen)
+            metadata = comfyPromptFallback;
         return width > 0 && height > 0;
     }
 
@@ -6828,51 +9193,13 @@ public partial class MainWindow : Window
     {
         string? selectedPath = SelectedTile()?.Path;
         bool selectedMetadataArrived = false;
-        bool reflowOriginalAspect = string.Equals(
-            _aspectMode,
-            AspectOriginalValue,
-            StringComparison.Ordinal);
-        CatalogCardLayoutContext? cardLayout = reflowOriginalAspect
-            ? CaptureCardLayoutContext()
-            : null;
-        GridZoomAnchor? viewportAnchor = reflowOriginalAspect
-            ? PreferredGridGeometryAnchor()
-            : null;
-        bool cardLayoutChanged = false;
         while (decoded.TryDequeue(out DecodedImageMetadata item))
         {
-            int previousWidth = item.Tile.ImagePixelWidth;
-            int previousHeight = item.Tile.ImagePixelHeight;
             item.Tile.ImagePixelWidth = item.Dimensions.Width;
             item.Tile.ImagePixelHeight = item.Dimensions.Height;
-            item.Tile.Prompt = item.Prompt;
-            if (cardLayout is { } resolvedLayout
-                && item.Dimensions.Width > 0
-                && item.Dimensions.Height > 0
-                && (previousWidth != item.Dimensions.Width
-                    || previousHeight != item.Dimensions.Height))
-            {
-                double previousCardHeight = item.Tile.CardHeight;
-                double previousListThumbnailHeight = item.Tile.ListThumbnailHeight;
-                ApplyCardLayout(item.Tile, resolvedLayout);
-                cardLayoutChanged |= Math.Abs(item.Tile.CardHeight - previousCardHeight) >= 0.01
-                    || Math.Abs(item.Tile.ListThumbnailHeight - previousListThumbnailHeight) >= 0.01;
-            }
+            item.Tile.PromptUtf8 = item.PromptUtf8;
             selectedMetadataArrived |= !string.IsNullOrWhiteSpace(selectedPath)
                 && string.Equals(item.Tile.Path, selectedPath, StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (cardLayoutChanged)
-        {
-            // The catalog is deliberately published before the metadata scan.
-            // Original-aspect cards therefore begin with a safe fallback height.
-            // Reflow only the decoded tiles, invalidate the prepared row map once
-            // per drain, and restore the same viewport anchor after the row
-            // geometry catches up. Without this step landscape images keep the
-            // fallback portrait cell and appear as stale black rectangles.
-            SyncGalleryColumnMode();
-            _galleryVirtualizingPanel?.InvalidateItemLayout();
-            ScheduleGridGeometryAnchorRestore(viewportAnchor);
         }
 
         if (!selectedMetadataArrived
@@ -6892,6 +9219,34 @@ public partial class MainWindow : Window
         {
             OpenModal();
         }
+    }
+
+    private async Task<SearchFilterCompletion> PublishCompletedMetadataLayoutAsync(
+        GridZoomAnchor? viewportAnchor,
+        long expectedCardLayoutRevision)
+    {
+        SearchFilterCompletion completion = await QueueCatalogProjection(
+            debounce: false,
+            reorderCatalog: false,
+            selectFirst: false,
+            viewportAnchor: viewportAnchor);
+        if (completion.Applied)
+            return completion;
+
+        // A selection-only generation change can discard the final projection
+        // without scheduling another one. Complete the already-calculated
+        // card geometry exactly once, but only while the same layout revision
+        // still owns the pending work. Zoom/aspect changes supersede it.
+        if (_metadataOriginalAspectLayoutBindingsPending
+            && _cardLayoutRevision == expectedCardLayoutRevision)
+        {
+            RefreshRealizedCardLayoutBindings();
+            _metadataOriginalAspectLayoutBindingsPending = false;
+            _metadataOriginalAspectLayoutFallbackCount++;
+            _galleryVirtualizingPanel?.InvalidateItemLayout();
+            ScheduleGridGeometryAnchorRestore(viewportAnchor);
+        }
+        return completion;
     }
 
     private static ImageMetadataLoadMetrics ReadImageMetadata(IReadOnlyList<FileInfo> files, CancellationToken token)
@@ -6999,7 +9354,7 @@ public partial class MainWindow : Window
             Group = group,
             CardWidth = width,
             Prompt = Prompts[idx % Prompts.Length],
-            Path = $@"D:\SD\outputs\txt2img\{name}",
+            Path = $@"X:\AibosSynthetic\outputs\txt2img\{name}",
             ImagePixelWidth = 832,
             ImagePixelHeight = 1216,
             SizeText = "832 x 1216",
@@ -7133,7 +9488,7 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void Gallery_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    private async void Gallery_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
         if (sender is not ListBox list)
         {
@@ -7145,9 +9500,14 @@ public partial class MainWindow : Window
         ListBoxItem? item = hit is null
             ? null
             : ItemsControl.ContainerFromElement(list, hit) as ListBoxItem;
-        item ??= list.SelectedItem is null
-            ? null
-            : list.ItemContainerGenerator.ContainerFromItem(list.SelectedItem) as ListBoxItem;
+        bool keyboardInvocation = e.CursorLeft < 0 || e.CursorTop < 0;
+        if (item is null && keyboardInvocation)
+        {
+            item = list.SelectedItem is null
+                ? null
+                : list.ItemContainerGenerator.ContainerFromItem(
+                    list.SelectedItem) as ListBoxItem;
+        }
         if (item?.DataContext is not Tile { IsRealFile: true })
         {
             e.Handled = true;
@@ -7159,6 +9519,52 @@ public partial class MainWindow : Window
         item.Focus();
         if (list.ContextMenu is ContextMenu contextMenu)
         {
+            MenuItem? photorealUpscaleMenu = contextMenu.Items
+                .OfType<MenuItem>()
+                .FirstOrDefault(candidate => string.Equals(
+                    AutomationProperties.GetName(candidate),
+                    "AI実写高画質化のみ",
+                    StringComparison.Ordinal));
+            if (photorealUpscaleMenu is not null)
+            {
+                bool canUpscalePhotoreal = TryResolveLatestPhotorealUpscaleProfile(
+                    (Tile)item.DataContext,
+                    out UpscaleRequestSource requestSource,
+                    out _,
+                    out _,
+                    out _,
+                    out string error);
+                if (canUpscalePhotoreal
+                    && requestSource.UsesRecoveredPhotorealSource
+                    && _recoveredPhotorealSourceUpscaleSupported is null)
+                {
+                    photorealUpscaleMenu.IsEnabled = false;
+                    photorealUpscaleMenu.ToolTip =
+                        "Recovered実写HQの対応状況を確認しています。";
+                    await RefreshRecoveredPhotorealSourceUpscaleCapabilityAsync();
+                    canUpscalePhotoreal = ReferenceEquals(
+                            list.SelectedItem,
+                            item.DataContext)
+                        && TryResolveLatestPhotorealUpscaleProfile(
+                            (Tile)item.DataContext,
+                            out requestSource,
+                            out _,
+                            out _,
+                            out _,
+                            out error);
+                }
+                if (canUpscalePhotoreal
+                    && requestSource.UsesRecoveredPhotorealSource
+                    && _recoveredPhotorealSourceUpscaleSupported != true)
+                {
+                    canUpscalePhotoreal = false;
+                    error =
+                        "The Aibos Image local AI service does not support Recovered photoreal HQ. Restart the local AI service first; no job was added.";
+                }
+                photorealUpscaleMenu.IsEnabled = canUpscalePhotoreal;
+                photorealUpscaleMenu.ToolTip = canUpscalePhotoreal ? null : error;
+            }
+
             MenuItem? videoMenu = contextMenu.Items
                 .OfType<MenuItem>()
                 .FirstOrDefault(candidate => string.Equals(
@@ -7178,16 +9584,62 @@ public partial class MainWindow : Window
     private async void GalleryContextPhotoreal_Click(object sender, RoutedEventArgs e)
         => await StartGalleryContextEnhancementAsync("photoreal");
 
-    private async Task StartGalleryContextEnhancementAsync(string operation)
+    private async void GalleryContextPhotorealUpscale_Click(
+        object sender,
+        RoutedEventArgs e)
+        => await StartGalleryContextEnhancementAsync(
+            "upscale",
+            requirePhotorealSource: true);
+
+    private async void GalleryContextUpscaleNext_Click(object sender, RoutedEventArgs e)
+        => await StartGalleryContextEnhancementAsync("upscale", enqueueNext: true);
+
+    private async void GalleryContextPhotorealNext_Click(object sender, RoutedEventArgs e)
+        => await StartGalleryContextEnhancementAsync("photoreal", enqueueNext: true);
+
+    private async void ModalContextUpscaleNext_Click(object sender, RoutedEventArgs e)
+        => await StartModalContextEnhancementNextAsync("upscale");
+
+    private async void ModalContextPhotorealNext_Click(object sender, RoutedEventArgs e)
+        => await StartModalContextEnhancementNextAsync("photoreal");
+
+    private Task StartModalContextEnhancementNextAsync(string operation)
+        => Modal.Visibility == Visibility.Visible
+            ? StartGalleryContextEnhancementAsync(
+                operation,
+                enqueueNext: true,
+                useModalDisplayedVersion: true)
+            : Task.CompletedTask;
+
+    private void GalleryContextOpenModal_Click(object sender, RoutedEventArgs e)
     {
-        if (!IsImageEnhancementOperation(operation))
+        if (SelectedTile() is Tile { IsRealFile: true })
+            OpenModal();
+    }
+
+    private async Task StartGalleryContextEnhancementAsync(
+        string operation,
+        bool enqueueNext = false,
+        bool requirePhotorealSource = false,
+        bool useModalDisplayedVersion = false)
+    {
+        if (operation is not ("upscale" or "photoreal"))
         {
             SetStatusToast("Unsupported Enhancement operation.");
             return;
         }
+        if (_galleryContextEnhancementRequestPending)
+            return;
+
+        _galleryContextEnhancementRequestPending = true;
+        try
+        {
         if (SelectedTile() is not Tile { IsRealFile: true } tile
             || !File.Exists(tile.Path))
             return;
+
+        Func<string?>? prePublishValidator =
+            CaptureExternalFileDropPrePublishValidator(tile);
 
         string normalizedOperation = operation;
         string sourcePath = tile.Path;
@@ -7198,40 +9650,98 @@ public partial class MainWindow : Window
             return;
         }
 
-        ModalPhotorealRequestSettings photoreal = CurrentModalPhotorealRequestSettings();
-        EnhancementApiResponse readiness = await EnsureEnhancementCompanionReadyForExplicitActionAsync(sourceIdentity);
-        if (!readiness.Ok)
+        var requestSource = new UpscaleRequestSource(null, null);
+        string upscalePresetId = _modalEnhancementPresetId;
+        string upscaleAdapterId = _modalEnhancementAdapterId;
+        double upscaleScale = _modalEnhancementScale;
+        string upscaleProfileError = "";
+        bool upscaleProfileResolved = normalizedOperation != "upscale"
+            || !requirePhotorealSource && !useModalDisplayedVersion
+            || (useModalDisplayedVersion
+                ? TryResolveModalUpscaleProfile(
+                    tile,
+                    out requestSource,
+                    out upscalePresetId,
+                    out upscaleAdapterId,
+                    out upscaleScale,
+                    out upscaleProfileError)
+                : TryResolveLatestPhotorealUpscaleProfile(
+                    tile,
+                    out requestSource,
+                    out upscalePresetId,
+                    out upscaleAdapterId,
+                    out upscaleScale,
+                    out upscaleProfileError));
+        if (!upscaleProfileResolved)
         {
-            SetStatusToast(readiness.Error);
+            SetStatusToast(upscaleProfileError);
             return;
         }
 
-        object requestBody = normalizedOperation == "photoreal"
-            ? new
+        ModalPhotorealRequestSettings photoreal = CurrentModalPhotorealRequestSettings();
+        int? photorealSeed = null;
+        if (normalizedOperation == "photoreal")
+        {
+            if (!TryResolvePhotorealSeed(
+                    out photorealSeed,
+                    out string seedError))
             {
-                sourceId = sourceIdentity,
-                operation = "photoreal",
-                presetId = "photoreal-balanced",
-                adapterId = "comfyui-flux2-photoreal",
-                strength = photoreal.Strength,
-                structureStrength = photoreal.StructureStrength,
-                steps = photoreal.Steps,
-                cfgScale = photoreal.CfgScale,
-                maxDimension = photoreal.MaxDimension,
-                prompt = photoreal.Prompt,
+                SetStatusToast(seedError);
+                SetPhotorealSeedStatus(seedError);
+                return;
             }
-            : new
+            try
             {
-                sourceId = sourceIdentity,
-                operation = "upscale",
-                presetId = _modalEnhancementPresetId,
-                adapterId = _modalEnhancementAdapterId,
-                scale = _modalEnhancementScale,
-            };
-        EnhancementApiResponse response = await SendEnhancementApiAsync(
-            HttpMethod.Post,
-            "api/enhance/jobs",
-            requestBody);
+                photoreal = await ResolvePhotorealRequestSettingsAsync(
+                    photoreal,
+                    sourceIdentity);
+            }
+            catch (InvalidOperationException ex)
+            {
+                SetStatusToast(ex.Message);
+                return;
+            }
+        }
+        Func<JsonElement, string?>? healthValidator =
+            CreateImageEnhancementHealthValidator(
+                normalizedOperation,
+                enqueueNext,
+                requiresPhotorealSourceUpscale:
+                    requestSource.UsesPhotorealSource,
+                requiresRecoveredPhotorealSourceUpscale:
+                    requestSource.UsesRecoveredPhotorealSource,
+                requiresPhotorealSeedControl: photorealSeed.HasValue);
+
+        string? originalPromptSnapshot = normalizedOperation == "upscale"
+            && !requestSource.UsesPhotorealSource
+                ? ResolveOriginalPromptSnapshot(tile, sourceIdentity)
+                : null;
+        object BuildUpscaleRequestBody(bool confirmLargeJob)
+            => CreateUpscaleRequestBody(
+                sourceIdentity,
+                requestSource,
+                upscalePresetId,
+                upscaleAdapterId,
+                upscaleScale,
+                originalPromptSnapshot,
+                confirmLargeJob,
+                queuePlacement: enqueueNext ? "next" : "last",
+                outputFormat: requestSource.UsesPhotorealSource
+                    ? null
+                    : _upscaleOutputFormat);
+        object requestBody = normalizedOperation == "photoreal"
+            ? CreatePhotorealRequestBody(
+                sourceIdentity,
+                photoreal,
+                photorealSeed,
+                enqueueNext ? "next" : "last")
+            : BuildUpscaleRequestBody(confirmLargeJob: false);
+        EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+            requestBody,
+            enqueueNext ? "next" : "last",
+            healthValidator: healthValidator,
+            recoverySourceIdentity: sourceIdentity,
+            prePublishValidator: prePublishValidator);
 
         bool needsConfirmation = normalizedOperation == "upscale"
             && response.StatusCode == 409
@@ -7250,28 +9760,48 @@ public partial class MainWindow : Window
             if (!confirmed)
                 return;
 
-            response = await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
-            {
-                sourceId = sourceIdentity,
-                operation = "upscale",
-                presetId = _modalEnhancementPresetId,
-                adapterId = _modalEnhancementAdapterId,
-                scale = _modalEnhancementScale,
-                confirmLargeJob = true,
-            });
+            response = await SendEnhancementEnqueueAsync(
+                BuildUpscaleRequestBody(confirmLargeJob: true),
+                enqueueNext ? "next" : "last",
+                healthValidator: healthValidator,
+                recoverySourceIdentity: sourceIdentity,
+                prePublishValidator: prePublishValidator);
         }
 
-        if (!response.Ok || response.Payload is not JsonElement payload
-            || !payload.TryGetProperty("job", out _))
+        if (response.SavedForDelivery)
         {
-            SetStatusToast(response.Error);
+            SetTransientStatusToast(
+                $"{tile.FileName}: 予約を保存しました。Jobsへの登録を継続しています。");
             return;
         }
 
+        if (!response.Ok || response.Payload is not JsonElement payload
+            || !payload.TryGetProperty("job", out JsonElement queuedJob))
+        {
+            SetStatusToast(response.Error);
+            if (normalizedOperation == "photoreal"
+                && photorealSeed.HasValue
+                && response.StatusCode == 426)
+            {
+                SetPhotorealSeedStatus(response.Error);
+            }
+            return;
+        }
+
+        ApplyActiveEnhancementQueueJobToVisibleCatalog(queuedJob, tile);
+        string placementLabel = enqueueNext ? "現在の処理の次" : "キュー";
         SetTransientStatusToast(
             normalizedOperation == "photoreal"
-                ? $"{tile.FileName}: AI実写化をキューに追加しました。"
-                : $"{tile.FileName}: AI高画質化をキューに追加しました。");
+                ? $"{tile.FileName}: AI実写化を{placementLabel}に追加しました。"
+                : requestSource.UsesPhotorealSource
+                    ? $"{tile.FileName}: AI実写高画質化のみを{placementLabel}に追加しました。"
+                    : $"{tile.FileName}: AI高画質化を{placementLabel}に追加しました。");
+        QueueEnhancedStateRefreshIfChanged();
+        }
+        finally
+        {
+            _galleryContextEnhancementRequestPending = false;
+        }
     }
 
     private int ResolveGalleryNavigationTarget(ListBox listBox, Key key, int currentIndex)
@@ -7939,7 +10469,9 @@ public partial class MainWindow : Window
         var completion = new TaskCompletionSource<PreviewDecodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         _previewDecodeCompletion = completion;
 
-        var immediate = hasRealFile ? t.Thumbnail : null;
+        var immediate = hasRealFile && HasOriginalResidentThumbnail(t)
+            ? t.Thumbnail
+            : null;
         PreviewBitmap.Source = immediate;
         PreviewBitmap.Visibility = immediate is null ? Visibility.Collapsed : Visibility.Visible;
         PreviewArtBase.Visibility = immediate is null ? Visibility.Visible : Visibility.Collapsed;
@@ -7979,7 +10511,6 @@ public partial class MainWindow : Window
         SyncFavoriteLevelReadouts(t.Fav);
         SyncSelectionActionSurface();
         UpdateHeaderStats();
-        ModalTitle.Text = $"{t.FileName} - {PreviewSizeText.Text}";
         watch.Stop();
         _previewUpdateCount++;
         _previewMs += watch.ElapsedMilliseconds;
@@ -8075,7 +10606,6 @@ public partial class MainWindow : Window
                     if (decoded.Width > 0 && decoded.Height > 0)
                         PreviewSizeText.Text = $"{decoded.Width} x {decoded.Height}";
 
-                    ModalTitle.Text = $"{PreviewFileName.Text} - {PreviewSizeText.Text}";
                     _previewDecodedPath = path;
                     _previewDeferredDecodeCount++;
                     _previewDeferredDecodeMs += decoded.DecodeMs;
@@ -8179,34 +10709,7 @@ public partial class MainWindow : Window
     }
 
     private void SyncModalMetadataSidebar()
-    {
-        Tile? selected = SelectedTile();
-        bool current = selected is not null
-            && _currentPreviewMetadata is not null
-            && string.Equals(selected.Path, _currentPreviewMetadataPath, StringComparison.OrdinalIgnoreCase);
-        PngParametersMetadata? metadata = current ? _currentPreviewMetadata : null;
-        bool hasPrompt = !string.IsNullOrWhiteSpace(metadata?.Prompt);
-        bool hasNegative = !string.IsNullOrWhiteSpace(metadata?.NegativePrompt);
-
-        string settingsText = metadata is not null && metadata.Settings.Count > 0
-            ? string.Join("  ·  ", metadata.Settings.Select(static pair => $"{pair.Key}: {pair.Value}"))
-            : "No settings metadata.";
-        ModalSettingsText.Text = settingsText;
-        ModalMetadataStatusText.Text = metadata is null
-            ? "No PNG metadata loaded"
-            : metadata.Settings.Count > 0
-                ? settingsText
-                : "PNG parameters loaded";
-        SyncModalPromptChips(hasPrompt ? metadata!.Prompt : "");
-        ModalPromptText.Text = hasPrompt ? string.Join(", ", _modalPromptChipTags) : "-";
-        ModalNegativeText.Text = hasNegative ? metadata!.NegativePrompt : "-";
-        CopyModalMetadataButton.IsEnabled = metadata is not null;
-        CopyModalMetadataButton.ToolTip = metadata is null ? "No PNG metadata loaded" : "Copy PNG metadata";
-        CopyModalPromptButton.IsEnabled = hasPrompt;
-        CopyModalPromptButton.ToolTip = hasPrompt ? "Copy prompt" : "No prompt metadata loaded";
-        CopyModalNegativeButton.IsEnabled = hasNegative;
-        CopyModalNegativeButton.ToolTip = hasNegative ? "Copy negative prompt" : "No negative prompt metadata loaded";
-    }
+        => SyncModalMetadataSidebarForDisplayedVersion();
 
     private static List<string> ParsePromptTags(string? prompt)
     {
@@ -8343,6 +10846,7 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetHelpText(chip, "Append this tag to search, close the modal, and focus search.");
         chip.Click += ModalPromptTag_Click;
         chip.PreviewKeyDown += ModalPromptTag_PreviewKeyDown;
+        AttachModalPromptMappingContextMenu(chip, tag);
         ModalPromptChips.Children.Add(chip);
     }
 
@@ -8525,6 +11029,10 @@ public partial class MainWindow : Window
                 return null;
 
             var chunkHeader = new byte[8];
+            bool parametersChunkSeen = false;
+            bool comfyPromptChunkSeen = false;
+            PngParametersMetadata? parametersMetadata = null;
+            PngParametersMetadata? comfyPromptFallback = null;
             while (stream.Position + 12 <= stream.Length)
             {
                 token.ThrowIfCancellationRequested();
@@ -8537,25 +11045,58 @@ public partial class MainWindow : Window
 
                 string type = Encoding.ASCII.GetString(chunkHeader, 4, 4);
                 if (string.Equals(type, "IDAT", StringComparison.Ordinal))
-                    return null;
+                {
+                    return parametersChunkSeen
+                        ? parametersMetadata
+                        : comfyPromptFallback;
+                }
 
-                if (string.Equals(type, "tEXt", StringComparison.Ordinal))
+                if (type is "tEXt" or "iTXt")
                 {
                     var data = new byte[length];
                     if (!TryReadExactly(stream, data) || !TrySkip(stream, 4))
                         return null;
 
-                    int separator = Array.IndexOf(data, (byte)0);
-                    if (separator <= 0 || !string.Equals(Encoding.Latin1.GetString(data, 0, separator), "parameters", StringComparison.Ordinal))
+                    if (!TryExtractPngText(
+                            type,
+                            data,
+                            out string keyword,
+                            out string? raw))
+                    {
                         continue;
+                    }
 
-                    string raw = Encoding.UTF8.GetString(data, separator + 1, data.Length - separator - 1);
-                    return ParsePngParameters(raw);
+                    if (!parametersChunkSeen
+                        && string.Equals(
+                            keyword,
+                            "parameters",
+                            StringComparison.Ordinal))
+                    {
+                        parametersChunkSeen = true;
+                        parametersMetadata = raw is null
+                            ? null
+                            : ParsePngParameters(raw);
+                    }
+                    else if (!comfyPromptChunkSeen
+                        && string.Equals(
+                            keyword,
+                            "prompt",
+                            StringComparison.Ordinal))
+                    {
+                        comfyPromptChunkSeen = true;
+                        comfyPromptFallback = raw is null
+                            ? null
+                            : ParseComfyPromptGraph(raw);
+                    }
+                    continue;
                 }
 
                 if (!TrySkip(stream, length + 4))
                     return null;
             }
+            return parametersChunkSeen
+                ? parametersMetadata
+                : comfyPromptFallback;
         }
         catch (IOException)
         {
@@ -8565,6 +11106,52 @@ public partial class MainWindow : Window
         }
 
         return null;
+    }
+
+    private static bool TryExtractPngText(
+        string chunkType,
+        byte[] data,
+        out string keyword,
+        out string? raw)
+    {
+        keyword = "";
+        raw = null;
+        int keywordEnd = Array.IndexOf(data, (byte)0);
+        if (keywordEnd <= 0 || keywordEnd > 79)
+            return false;
+        keyword = Encoding.Latin1.GetString(data, 0, keywordEnd);
+        if (keyword is not ("parameters" or "prompt"))
+        {
+            return true;
+        }
+        if (chunkType == "tEXt")
+        {
+            raw = Encoding.UTF8.GetString(
+                data,
+                keywordEnd + 1,
+                data.Length - keywordEnd - 1);
+            return true;
+        }
+        if (chunkType != "iTXt" || keywordEnd + 3 > data.Length)
+            return true;
+
+        int cursor = keywordEnd + 1;
+        byte compressionFlag = data[cursor++];
+        byte compressionMethod = data[cursor++];
+        int languageEnd = Array.IndexOf(data, (byte)0, cursor);
+        if (languageEnd < 0)
+            return true;
+        cursor = languageEnd + 1;
+        int translatedKeywordEnd = Array.IndexOf(data, (byte)0, cursor);
+        if (translatedKeywordEnd < 0)
+            return true;
+        cursor = translatedKeywordEnd + 1;
+        // A1111/Pillow uses uncompressed iTXt for Unicode infotext. Compressed
+        // iTXt remains first-owner but is not expanded inside the viewer.
+        if (compressionFlag != 0 || compressionMethod != 0)
+            return true;
+        raw = Encoding.UTF8.GetString(data, cursor, data.Length - cursor);
+        return true;
     }
 
     private static PngParametersMetadata? ParsePngParameters(string raw)
@@ -8929,7 +11516,7 @@ public partial class MainWindow : Window
     {
         _searchFilterTimer.Stop();
         if (_scheduledCatalogProjection is { } request)
-            _ = ApplyCatalogProjectionAsync(request);
+            ScheduleCatalogProjectionStart(request);
     }
 
     private Task<SearchFilterCompletion> QueueCatalogProjection(
@@ -8965,9 +11552,32 @@ public partial class MainWindow : Window
         }
         else
         {
-            _ = ApplyCatalogProjectionAsync(request);
+            ScheduleCatalogProjectionStart(request);
         }
         return completion.Task;
+    }
+
+    private void ScheduleCatalogProjectionStart(CatalogProjectionRequest request)
+    {
+        if (_catalogProjectionStartOperation is
+            { Status: DispatcherOperationStatus.Pending } pending)
+        {
+            pending.Abort();
+            Interlocked.Increment(ref _catalogProjectionStartCoalescedCount);
+        }
+        Interlocked.Increment(ref _catalogProjectionStartPostCount);
+        _catalogProjectionStartOperation = Dispatcher.BeginInvoke(() =>
+        {
+            _catalogProjectionStartOperation = null;
+            if (request.Generation != _catalogProjectionGeneration
+                || !ReferenceEquals(_scheduledCatalogProjection, request))
+            {
+                request.Completion?.TrySetResult(
+                    SearchFilterCompletion.DiscardedResult);
+                return;
+            }
+            _ = ApplyCatalogProjectionAsync(request);
+        }, DispatcherPriority.Background);
     }
 
     private async Task ApplyCatalogProjectionAsync(CatalogProjectionRequest request)
@@ -8999,6 +11609,7 @@ public partial class MainWindow : Window
         try
         {
             captureWatch.Start();
+            Interlocked.Increment(ref _catalogProjectionCaptureCount);
             FilterSnapshot snapshot = CaptureFilterSnapshot(request);
             snapshotForCleanup = snapshot;
             captureWatch.Stop();
@@ -9015,9 +11626,18 @@ public partial class MainWindow : Window
                 ThreadPriority previousPriority = currentThread.Priority;
                 try
                 {
+                    _catalogProjectionComputeEnteredForSmoke?.Set();
+                    if (_catalogProjectionComputeGateForSmoke is { } smokeGate
+                        && !smokeGate.Wait(TimeSpan.FromSeconds(10), cts.Token))
+                    {
+                        throw new TimeoutException("catalog projection smoke gate timed out");
+                    }
                     if (previousPriority > ThreadPriority.Lowest)
                         currentThread.Priority = ThreadPriority.Lowest;
-                    return ComputeFilterResult(snapshot, cts.Token);
+                    return ComputeFilterResult(
+                        snapshot,
+                        cts.Token,
+                        prepareAutomationProjection: true);
                 }
                 finally
                 {
@@ -9034,6 +11654,7 @@ public partial class MainWindow : Window
                 || request.Generation != _catalogProjectionGeneration
                 || snapshot.CatalogRevision != _catalogContentRevision
                 || snapshot.SelectionGeneration != _selectionVisualSyncGeneration
+                || snapshot.CardLayoutRevision != _cardLayoutRevision
                 || !string.Equals(snapshot.SortBy, _sortBy, StringComparison.Ordinal)
                 || !string.Equals(snapshot.RandomSortSeed, _randomSortSeed, StringComparison.Ordinal))
             {
@@ -9057,7 +11678,8 @@ public partial class MainWindow : Window
                 _maxCatalogProjectionApplySliceMilliseconds = Math.Max(
                     _maxCatalogProjectionApplySliceMilliseconds,
                     maxApplySliceMs);
-                if (request.Generation == _catalogProjectionGeneration)
+                if (request.Generation == _catalogProjectionGeneration
+                    && applyMetrics.Published)
                 {
                     _lastAppliedCatalogProjectionGeneration = request.Generation;
                     outcome = SearchFilterCompletion.AppliedResult;
@@ -9083,7 +11705,6 @@ public partial class MainWindow : Window
         {
             if (captureWatch.IsRunning)
                 captureWatch.Stop();
-            result?.AutomationProjection.ReleaseCreator();
             long cleanupAllocatedBefore = collectAllocationDiagnostics
                 ? GC.GetAllocatedBytesForCurrentThread()
                 : 0;
@@ -9091,7 +11712,20 @@ public partial class MainWindow : Window
             if (result is not null)
                 ReturnFilterResult(result);
             if (snapshotForCleanup is not null)
-                ReturnFilterSnapshot(snapshotForCleanup);
+            {
+                FilterSnapshot snapshotToReturn = snapshotForCleanup;
+                snapshotForCleanup = null;
+                if (snapshotToReturn.TileCount >=
+                    BackgroundFilterSnapshotClearThreshold)
+                {
+                    await Task.Run(
+                        () => ReturnFilterSnapshot(snapshotToReturn));
+                }
+                else
+                {
+                    ReturnFilterSnapshot(snapshotToReturn);
+                }
+            }
             if (ReferenceEquals(_catalogProjectionCts, cts))
                 _catalogProjectionCts = null;
             cts.Dispose();
@@ -9178,6 +11812,13 @@ public partial class MainWindow : Window
     private void CancelPendingCatalogProjection(bool completePending)
     {
         _searchFilterTimer.Stop();
+        if (_catalogProjectionStartOperation is
+            { Status: DispatcherOperationStatus.Pending } pending)
+        {
+            pending.Abort();
+            Interlocked.Increment(ref _catalogProjectionStartCoalescedCount);
+        }
+        _catalogProjectionStartOperation = null;
         _catalogProjectionCts?.Cancel();
         _catalogProjectionCts = null;
         if (completePending)
@@ -9230,11 +11871,46 @@ public partial class MainWindow : Window
     {
         if (_initializing || _syncingFavoriteFilterControls) return;
         SyncFavoriteFilterLevelsFromControls();
-        _ = QueueCatalogProjection(
-            debounce: false,
-            reorderCatalog: false,
-            selectFirst: true);
-        SaveState();
+        if (FavoriteOnlyFilter?.IsChecked == true)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
+        }
+        ScheduleFavoriteFilterStateSave();
+    }
+
+    private void PhotorealFavoriteLevelFilter_Changed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_initializing || _syncingFavoriteFilterControls) return;
+        SyncPhotorealFavoriteFilterLevelsFromControls();
+        if (FavoriteOnlyFilter?.IsChecked == true)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
+        }
+        ScheduleFavoriteFilterStateSave();
+    }
+
+    private void VideoFavoriteLevelFilter_Changed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_initializing || _syncingFavoriteFilterControls) return;
+        SyncVideoFavoriteFilterLevelsFromControls();
+        if (FavoriteOnlyFilter?.IsChecked == true)
+        {
+            _ = QueueCatalogProjection(
+                debounce: false,
+                reorderCatalog: false,
+                selectFirst: true);
+        }
+        ScheduleFavoriteFilterStateSave();
     }
 
     private void ShowUnseenDots_Changed(object sender, RoutedEventArgs e)
@@ -9242,6 +11918,20 @@ public partial class MainWindow : Window
         if (_initializing || _syncingUnseenDotsControls) return;
         bool enabled = sender is CheckBox checkBox && checkBox.IsChecked == true;
         SetShowUnseenDots(enabled, persist: true);
+    }
+
+    private void ShowGridFileInfoOverlay_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _syncingGridFileInfoOverlayControls) return;
+        bool enabled = sender is CheckBox checkBox && checkBox.IsChecked == true;
+        SetShowGridFileInfoOverlay(enabled, persist: true);
+    }
+
+    private void ShowLoadTiming_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _syncingLoadTimingControl) return;
+        bool enabled = sender is CheckBox checkBox && checkBox.IsChecked == true;
+        SetShowLoadTiming(enabled, persist: true);
     }
 
     private void FavoriteChangeNotifications_Changed(object sender, RoutedEventArgs e)
@@ -9269,6 +11959,89 @@ public partial class MainWindow : Window
 
         if (persist)
             SaveState();
+    }
+
+    private void ThumbnailVersionPreference_Changed(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_initializing || _syncingThumbnailVersionPreference)
+            return;
+        SetUseLastDisplayedImageVersionForThumbnails(
+            sender is CheckBox checkBox && checkBox.IsChecked == true,
+            persist: true);
+    }
+
+    private void SetUseLastDisplayedImageVersionForThumbnails(
+        bool enabled,
+        bool persist)
+    {
+        bool changed =
+            _useLastDisplayedImageVersionForThumbnails != enabled;
+        _useLastDisplayedImageVersionForThumbnails = enabled;
+        _syncingThumbnailVersionPreference = true;
+        try
+        {
+            if (LastDisplayedThumbnailVersionCheckBox is not null)
+                LastDisplayedThumbnailVersionCheckBox.IsChecked = enabled;
+        }
+        finally
+        {
+            _syncingThumbnailVersionPreference = false;
+        }
+
+        if (changed && !_initializing)
+        {
+            _thumbnailDisplayModeRevision++;
+            _thumbnailViewportRevision++;
+            _thumbnailDecodeFailures.Clear();
+            QueueGalleryThumbnailPreferenceRefresh();
+        }
+        if (persist)
+            SaveState();
+    }
+
+    private void InvalidateGalleryThumbnailPreference(Tile tile)
+    {
+        if (_initializing
+            || !_useLastDisplayedImageVersionForThumbnails
+            || !tile.IsRealFile)
+        {
+            return;
+        }
+
+        tile.AdvanceThumbnailDisplayRevision();
+        _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
+        _thumbnailViewportRevision++;
+        QueueGalleryThumbnailPreferenceRefresh();
+    }
+
+    private void QueueGalleryThumbnailPreferenceRefresh()
+    {
+        CancelThumbnailViewportLoading();
+        if (_thumbnailPreferenceRefreshOperation is
+            { Status: DispatcherOperationStatus.Pending })
+        {
+            return;
+        }
+
+        _thumbnailPreferenceRefreshOperation = Dispatcher.BeginInvoke(() =>
+        {
+            _thumbnailPreferenceRefreshOperation = null;
+            if (RowsList.Visibility == Visibility.Visible)
+            {
+                ScheduleListThumbnailViewport();
+                return;
+            }
+
+            if (_galleryVirtualizingPanel is not { } panel)
+                return;
+            ScheduleThumbnailViewportRange(
+                panel.FirstVisibleIndex,
+                panel.LastVisibleIndex,
+                panel.FirstRealizedIndex,
+                panel.LastRealizedIndex);
+        }, DispatcherPriority.Render);
     }
 
     private void ShowFavoriteChangeStatus(string status)
@@ -9320,6 +12093,7 @@ public partial class MainWindow : Window
             RefreshThumbnailStatusBorderIdleText();
         ApplyKeyBindingTooltips();
         SyncAccessibilityPreferenceControls();
+        UpdateLoadTimingPresentation();
         if (changed && persist)
             SaveState();
         return changed;
@@ -9478,6 +12252,76 @@ public partial class MainWindow : Window
             SaveState();
     }
 
+    private void SetShowGridFileInfoOverlay(bool enabled, bool persist)
+    {
+        bool changed = _showGridFileInfoOverlay != enabled;
+        _showGridFileInfoOverlay = enabled;
+        _syncingGridFileInfoOverlayControls = true;
+        try
+        {
+            if (ShowGridFileInfoOverlayCheckBox is not null)
+                ShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
+            if (AppSettingsShowGridFileInfoOverlayCheckBox is not null)
+                AppSettingsShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
+        }
+        finally
+        {
+            _syncingGridFileInfoOverlayControls = false;
+        }
+
+        // The card template observes the gallery ListBox once, so this toggle
+        // does not walk or notify a very large catalog merely to hide captions.
+        if (CardsList is not null && !Equals(CardsList.Tag, enabled))
+            CardsList.Tag = enabled;
+        if (changed && persist && !_initializing)
+            SaveState();
+    }
+
+    private void SetShowLoadTiming(bool enabled, bool persist)
+    {
+        bool changed = _showLoadTiming != enabled;
+        _showLoadTiming = enabled;
+        _syncingLoadTimingControl = true;
+        try
+        {
+            if (ShowLoadTimingCheckBox is not null)
+                ShowLoadTimingCheckBox.IsChecked = enabled;
+        }
+        finally
+        {
+            _syncingLoadTimingControl = false;
+        }
+        UpdateLoadTimingPresentation();
+        if (changed && persist && !_initializing)
+            SaveState();
+    }
+
+    private void UpdateLoadTimingPresentation()
+    {
+        if (LoadTimingStatusText is null)
+            return;
+        if (!_showLoadTiming || LastLoadMetrics is not LoadMetrics metrics)
+        {
+            LoadTimingStatusText.Text = "";
+            LoadTimingStatusText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        string total = FormatLoadDuration(metrics.TotalMs);
+        LoadTimingStatusText.Text = metrics.FileCount == 0
+            ? UiLanguageResources.Format("UiLoadTimingEmptyFormat", total)
+            : UiLanguageResources.Format(
+                "UiLoadTimingFormat",
+                FormatLoadDuration(Math.Max(metrics.CatalogReadyMs, metrics.FirstUsableViewportMs)),
+                total);
+        LoadTimingStatusText.Visibility = Visibility.Visible;
+    }
+
+    private static string FormatLoadDuration(long milliseconds)
+        => milliseconds < 1_000
+            ? $"{Math.Max(0, milliseconds).ToString("N0", CultureInfo.CurrentCulture)} ms"
+            : $"{(Math.Max(0, milliseconds) / 1_000d).ToString(milliseconds < 10_000 ? "0.0" : "0", CultureInfo.CurrentCulture)} s";
+
     private void ScheduleFavoriteFilterPresentationSync()
     {
         _favoriteFilterPresentationPending = true;
@@ -9610,18 +12454,82 @@ public partial class MainWindow : Window
             SyncFavoriteFilterControls();
         if (!_initializing)
         {
-            if (asynchronous)
+            if (FavoriteOnlyFilter?.IsChecked == true && asynchronous)
             {
                 _ = QueueCatalogProjection(
                     debounce: false,
                     reorderCatalog: false,
                     selectFirst: true);
             }
-            else
+            else if (FavoriteOnlyFilter?.IsChecked == true)
             {
                 ApplyFilters();
             }
-            SaveState();
+            ScheduleFavoriteFilterStateSave();
+        }
+        return true;
+    }
+
+    private bool SetPhotorealFavoriteFilterLevels(
+        IEnumerable<int> levels,
+        bool asynchronous = true)
+    {
+        var normalized = levels
+            .Where(level => level is >= MinPhotorealFavoriteFilterLevel
+                and <= MaxFavoriteFilterLevel)
+            .ToHashSet();
+        if (_photorealFavoriteFilterLevels.SetEquals(normalized))
+            return false;
+
+        _photorealFavoriteFilterLevels.Clear();
+        _photorealFavoriteFilterLevels.UnionWith(normalized);
+        SyncPhotorealFavoriteFilterControls();
+        if (!_initializing)
+        {
+            if (FavoriteOnlyFilter?.IsChecked == true && asynchronous)
+            {
+                _ = QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: false,
+                    selectFirst: true);
+            }
+            else if (FavoriteOnlyFilter?.IsChecked == true)
+            {
+                ApplyFilters();
+            }
+            ScheduleFavoriteFilterStateSave();
+        }
+        return true;
+    }
+
+    private bool SetVideoFavoriteFilterLevels(
+        IEnumerable<int> levels,
+        bool asynchronous = true)
+    {
+        var normalized = levels
+            .Where(level => level is >= MinVideoFavoriteFilterLevel
+                and <= MaxFavoriteFilterLevel)
+            .ToHashSet();
+        if (_videoFavoriteFilterLevels.SetEquals(normalized))
+            return false;
+
+        _videoFavoriteFilterLevels.Clear();
+        _videoFavoriteFilterLevels.UnionWith(normalized);
+        SyncVideoFavoriteFilterControls();
+        if (!_initializing)
+        {
+            if (FavoriteOnlyFilter?.IsChecked == true && asynchronous)
+            {
+                _ = QueueCatalogProjection(
+                    debounce: false,
+                    reorderCatalog: false,
+                    selectFirst: true);
+            }
+            else if (FavoriteOnlyFilter?.IsChecked == true)
+            {
+                ApplyFilters();
+            }
+            ScheduleFavoriteFilterStateSave();
         }
         return true;
     }
@@ -9672,12 +12580,13 @@ public partial class MainWindow : Window
             }
         }
         if (persist && !_initializing)
-            SaveState();
+            ScheduleFavoriteFilterStateSave();
     }
 
     private void SyncFavoriteFilterControls()
     {
-        if (FavoriteLevel1Filter is null
+        if (FavoriteLevel0Filter is null
+            || FavoriteLevel1Filter is null
             || FavoriteLevel2Filter is null
             || FavoriteLevel3Filter is null
             || FavoriteLevel4Filter is null
@@ -9692,11 +12601,36 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
+            SetCheckBoxState(FavoriteLevel0Filter, false);
             SetCheckBoxState(FavoriteLevel1Filter, _favoriteFilterLevels.Contains(1));
             SetCheckBoxState(FavoriteLevel2Filter, _favoriteFilterLevels.Contains(2));
             SetCheckBoxState(FavoriteLevel3Filter, _favoriteFilterLevels.Contains(3));
             SetCheckBoxState(FavoriteLevel4Filter, _favoriteFilterLevels.Contains(4));
             SetCheckBoxState(FavoriteLevel5Filter, _favoriteFilterLevels.Contains(5));
+            CheckBox[] levelControls =
+            [
+                FavoriteLevel0Filter,
+                FavoriteLevel1Filter,
+                FavoriteLevel2Filter,
+                FavoriteLevel3Filter,
+                FavoriteLevel4Filter,
+                FavoriteLevel5Filter,
+            ];
+            for (int level = 0; level < levelControls.Length; level++)
+            {
+                string accessibleName = level == 0
+                    ? UiLanguageResources.Text("UiOriginalFavoriteLevelZeroHelp")
+                    : UiLanguageResources.Format(
+                        "UiOriginalFavoriteLevelNameFormat",
+                        level);
+                AutomationProperties.SetName(
+                    levelControls[level],
+                    accessibleName);
+                AutomationProperties.SetHelpText(
+                    levelControls[level],
+                    accessibleName);
+                levelControls[level].ToolTip = accessibleName;
+            }
         }
         finally
         {
@@ -9704,8 +12638,11 @@ public partial class MainWindow : Window
         }
 
         if (FavoriteLevelFilterPanel is not null
-            && FavoriteLevelFilterPanel.IsEnabled != favoritesOnly)
-            FavoriteLevelFilterPanel.IsEnabled = favoritesOnly;
+            && !FavoriteLevelFilterPanel.IsEnabled)
+            FavoriteLevelFilterPanel.IsEnabled = true;
+
+        SyncPhotorealFavoriteFilterControls();
+        SyncVideoFavoriteFilterControls();
 
         if (FavoriteFilterSummary is null)
             return;
@@ -9734,6 +12671,152 @@ public partial class MainWindow : Window
         if (FavoriteLevel4Filter?.IsChecked == true) _favoriteFilterLevels.Add(4);
         if (FavoriteLevel5Filter?.IsChecked == true) _favoriteFilterLevels.Add(5);
         SyncFavoriteFilterControls();
+    }
+
+    private void SyncPhotorealFavoriteFilterControls()
+    {
+        if (PhotorealFavoriteLevel0Filter is null
+            || PhotorealFavoriteLevel1Filter is null
+            || PhotorealFavoriteLevel2Filter is null
+            || PhotorealFavoriteLevel3Filter is null
+            || PhotorealFavoriteLevel4Filter is null
+            || PhotorealFavoriteLevel5Filter is null)
+        {
+            return;
+        }
+
+        _syncingFavoriteFilterControls = true;
+        try
+        {
+            SetCheckBoxState(PhotorealFavoriteLevel0Filter, false);
+            SetCheckBoxState(PhotorealFavoriteLevel1Filter, _photorealFavoriteFilterLevels.Contains(1));
+            SetCheckBoxState(PhotorealFavoriteLevel2Filter, _photorealFavoriteFilterLevels.Contains(2));
+            SetCheckBoxState(PhotorealFavoriteLevel3Filter, _photorealFavoriteFilterLevels.Contains(3));
+            SetCheckBoxState(PhotorealFavoriteLevel4Filter, _photorealFavoriteFilterLevels.Contains(4));
+            SetCheckBoxState(PhotorealFavoriteLevel5Filter, _photorealFavoriteFilterLevels.Contains(5));
+            CheckBox[] levelControls =
+            [
+                PhotorealFavoriteLevel0Filter,
+                PhotorealFavoriteLevel1Filter,
+                PhotorealFavoriteLevel2Filter,
+                PhotorealFavoriteLevel3Filter,
+                PhotorealFavoriteLevel4Filter,
+                PhotorealFavoriteLevel5Filter,
+            ];
+            for (int level = 0; level < levelControls.Length; level++)
+            {
+                string accessibleName = level == 0
+                    ? UiLanguageResources.Text(
+                        "UiPhotorealFavoriteLevelZeroHelp")
+                    : UiLanguageResources.Format(
+                        "UiPhotorealFavoriteLevelNameFormat",
+                        level);
+                AutomationProperties.SetName(
+                    levelControls[level],
+                    accessibleName);
+                levelControls[level].ToolTip = accessibleName;
+            }
+        }
+        finally
+        {
+            _syncingFavoriteFilterControls = false;
+        }
+
+        if (PhotorealFavoriteFilterSummary is not null)
+        {
+            PhotorealFavoriteFilterSummary.Text =
+                _photorealFavoriteFilterLevels.Count == 0
+                    ? UiLanguageResources.Text("UiAllRatings")
+                    : string.Join(
+                        " + ",
+                        _photorealFavoriteFilterLevels
+                            .OrderBy(static level => level)
+                            .Select(static level => $"Lv {level}"));
+        }
+    }
+
+    private void SyncPhotorealFavoriteFilterLevelsFromControls()
+    {
+        _photorealFavoriteFilterLevels.Clear();
+        if (PhotorealFavoriteLevel1Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(1);
+        if (PhotorealFavoriteLevel2Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(2);
+        if (PhotorealFavoriteLevel3Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(3);
+        if (PhotorealFavoriteLevel4Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(4);
+        if (PhotorealFavoriteLevel5Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(5);
+        SyncPhotorealFavoriteFilterControls();
+    }
+
+    private void SyncVideoFavoriteFilterControls()
+    {
+        if (VideoFavoriteLevel0Filter is null
+            || VideoFavoriteLevel1Filter is null
+            || VideoFavoriteLevel2Filter is null
+            || VideoFavoriteLevel3Filter is null
+            || VideoFavoriteLevel4Filter is null
+            || VideoFavoriteLevel5Filter is null)
+        {
+            return;
+        }
+
+        _syncingFavoriteFilterControls = true;
+        try
+        {
+            SetCheckBoxState(VideoFavoriteLevel0Filter, false);
+            SetCheckBoxState(VideoFavoriteLevel1Filter, _videoFavoriteFilterLevels.Contains(1));
+            SetCheckBoxState(VideoFavoriteLevel2Filter, _videoFavoriteFilterLevels.Contains(2));
+            SetCheckBoxState(VideoFavoriteLevel3Filter, _videoFavoriteFilterLevels.Contains(3));
+            SetCheckBoxState(VideoFavoriteLevel4Filter, _videoFavoriteFilterLevels.Contains(4));
+            SetCheckBoxState(VideoFavoriteLevel5Filter, _videoFavoriteFilterLevels.Contains(5));
+            CheckBox[] levelControls =
+            [
+                VideoFavoriteLevel0Filter,
+                VideoFavoriteLevel1Filter,
+                VideoFavoriteLevel2Filter,
+                VideoFavoriteLevel3Filter,
+                VideoFavoriteLevel4Filter,
+                VideoFavoriteLevel5Filter,
+            ];
+            for (int level = 0; level < levelControls.Length; level++)
+            {
+                string accessibleName = level == 0
+                    ? UiLanguageResources.Text(
+                        "UiVideoFavoriteLevelZeroHelp")
+                    : UiLanguageResources.Format(
+                        "UiVideoFavoriteLevelNameFormat",
+                        level);
+                AutomationProperties.SetName(
+                    levelControls[level],
+                    accessibleName);
+                levelControls[level].ToolTip = accessibleName;
+            }
+        }
+        finally
+        {
+            _syncingFavoriteFilterControls = false;
+        }
+
+        if (VideoFavoriteFilterSummary is not null)
+        {
+            VideoFavoriteFilterSummary.Text =
+                _videoFavoriteFilterLevels.Count == 0
+                    ? UiLanguageResources.Text("UiAllRatings")
+                    : string.Join(
+                        " + ",
+                        _videoFavoriteFilterLevels
+                            .OrderBy(static level => level)
+                            .Select(static level => $"Lv {level}"));
+        }
+    }
+
+    private void SyncVideoFavoriteFilterLevelsFromControls()
+    {
+        _videoFavoriteFilterLevels.Clear();
+        if (VideoFavoriteLevel1Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(1);
+        if (VideoFavoriteLevel2Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(2);
+        if (VideoFavoriteLevel3Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(3);
+        if (VideoFavoriteLevel4Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(4);
+        if (VideoFavoriteLevel5Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(5);
+        SyncVideoFavoriteFilterControls();
     }
 
     private void PruneHiddenFolderBucketsToCurrentSet()
@@ -9828,7 +12911,11 @@ public partial class MainWindow : Window
 
     private bool ToggleSelectedFavorite()
     {
-        if (SelectedTile() is not { IsRealFile: true } tile)
+        Tile? tile = Modal.Visibility == Visibility.Visible
+            && TryGetModalSourceTile(out Tile modalTile)
+                ? modalTile
+                : SelectedTile();
+        if (tile is not { IsRealFile: true })
             return false;
 
         return SetFavoriteLevel(tile, tile.Fav > 0 ? 0 : 5);
@@ -9836,6 +12923,46 @@ public partial class MainWindow : Window
 
     private bool AdjustSelectedFavorite(int delta)
     {
+        if (Modal.Visibility == Visibility.Visible)
+        {
+            if (!TryResolveDisplayedModalFavoriteTarget(
+                    out string targetPath,
+                    out string targetName,
+                    out bool independentTarget))
+            {
+                ShowFavoriteChangeStatus(
+                    "The displayed Favorite target is unavailable. Select a version again.");
+                return false;
+            }
+
+            if (independentTarget)
+            {
+                int nextTargetLevel = Math.Clamp(
+                    FavoriteLevelForPath(targetPath) + delta,
+                    0,
+                    5);
+                return SetIndependentFavoriteLevel(
+                    targetPath,
+                    targetName,
+                    nextTargetLevel,
+                    $"Set favorite level {nextTargetLevel}.");
+            }
+
+            if (!TryGetModalSourceTile(out Tile modalTile)
+                || !string.Equals(
+                    NormalizeFavoritePath(modalTile.Path),
+                    targetPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                ShowFavoriteChangeStatus(
+                    "The displayed Favorite source changed. No Favorite was updated.");
+                return false;
+            }
+
+            int nextModalLevel = Math.Clamp(modalTile.Fav + delta, 0, 5);
+            return SetFavoriteLevel(modalTile, nextModalLevel);
+        }
+
         if (_selectedPaths.Count > 1)
             return MutateSelectedFavorites(tile => Math.Clamp(tile.Fav + delta, 0, 5), $"Adjusted favorite for {{0:N0}} selected images.");
 
@@ -9849,6 +12976,41 @@ public partial class MainWindow : Window
     private bool SetFavoriteLevelForSelection(int level)
     {
         int clamped = Math.Clamp(level, 0, 5);
+        if (Modal.Visibility == Visibility.Visible)
+        {
+            if (!TryResolveDisplayedModalFavoriteTarget(
+                    out string targetPath,
+                    out string targetName,
+                    out bool independentTarget))
+            {
+                ShowFavoriteChangeStatus(
+                    "The displayed Favorite target is unavailable. Select a version again.");
+                return false;
+            }
+
+            if (independentTarget)
+            {
+                return SetIndependentFavoriteLevel(
+                    targetPath,
+                    targetName,
+                    clamped,
+                    $"Set favorite level {clamped}.");
+            }
+
+            if (!TryGetModalSourceTile(out Tile modalTile)
+                || !string.Equals(
+                    NormalizeFavoritePath(modalTile.Path),
+                    targetPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                ShowFavoriteChangeStatus(
+                    "The displayed Favorite source changed. No Favorite was updated.");
+                return false;
+            }
+
+            return SetFavoriteLevel(modalTile, clamped);
+        }
+
         return MutateSelectedFavorites(_ => clamped, $"Set favorite level {clamped} for {{0:N0}} selected images.");
     }
 
@@ -9911,6 +13073,10 @@ public partial class MainWindow : Window
 
         if (RefreshFavoriteMutationSurface(selected))
             ScheduleSearchStateSave();
+        DateTimeOffset changedAtUtc = DateTimeOffset.UtcNow;
+        CommitFavoriteActivity(requestedChanges.Select(change => (
+            NormalizeFavoritePath(change.Tile.Path),
+            changedAtUtc)));
         RecordFavoriteHistory(requestedChanges);
         ShowFavoriteChangeStatus(string.Format(CultureInfo.InvariantCulture, successMessageFormat, selected.Count));
         return true;
@@ -9975,6 +13141,7 @@ public partial class MainWindow : Window
         else
             _favorites.Remove(key);
         _favoriteDirtyPaths.Add(key);
+        RefreshDerivedFavoritePresentationForPath(key, tile);
 
         if (!SaveFavorites())
         {
@@ -9989,8 +13156,238 @@ public partial class MainWindow : Window
         tile.Fav = clamped;
         if (RefreshFavoriteMutationSurface([tile]))
             ScheduleSearchStateSave();
+        CommitFavoriteActivity([
+            (NormalizeFavoritePath(tile.Path), DateTimeOffset.UtcNow),
+        ]);
         RecordFavoriteHistory([(tile, displayedBefore, clamped)]);
         ShowModalFavoriteIncreaseEffect(tile, displayedBefore, clamped);
+        return true;
+    }
+
+    private bool IsModalPhotorealFavoriteContext()
+        => Modal.Visibility == Visibility.Visible
+            && !_modalShowingVideo
+            && CurrentModalEnhancementVersionIsPhotoreal();
+
+    private bool TryGetModalPhotorealFavoriteTarget(
+        out string targetPath,
+        out string targetName)
+    {
+        targetPath = "";
+        targetName = "";
+        if (!IsModalPhotorealFavoriteContext()
+            || !TryGetModalSourceTile(out Tile tile)
+            || !TryGetCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion version)
+            || !string.Equals(
+                version.Operation,
+                "photoreal",
+                StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(version.Output.OutputPath))
+        {
+            return false;
+        }
+
+        targetPath = NormalizeFavoritePath(version.Output.OutputPath);
+        string displayedPath = NormalizeFavoritePath(_modalDisplayPath ?? "");
+        if (string.IsNullOrWhiteSpace(displayedPath)
+            || !string.Equals(
+                displayedPath,
+                targetPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            targetPath = "";
+            return false;
+        }
+        targetName = $"{tile.FileName} · {CurrentModalEnhancementVersionLabel()}";
+        return !string.IsNullOrWhiteSpace(targetPath);
+    }
+
+    private bool TryResolveDisplayedModalFavoriteTarget(
+        out string targetPath,
+        out string targetName,
+        out bool independentTarget)
+    {
+        targetPath = "";
+        targetName = "";
+        independentTarget = false;
+        if (Modal.Visibility != Visibility.Visible
+            || !TryGetModalSourceTile(out Tile tile))
+        {
+            return false;
+        }
+
+        if (CurrentModalEnhancementVersionIsPhotoreal())
+        {
+            independentTarget = true;
+            return TryGetModalPhotorealFavoriteTarget(
+                out targetPath,
+                out targetName);
+        }
+
+        if (_modalShowingVideo)
+        {
+            independentTarget = true;
+            if (!TryGetDisplayedModalVideoVersion(
+                    tile,
+                    out ManagedVideoVersion videoVersion)
+                || string.IsNullOrWhiteSpace(videoVersion.Output.OutputPath))
+            {
+                return false;
+            }
+
+            targetPath = NormalizeFavoritePath(
+                videoVersion.Output.OutputPath);
+            targetName = $"{tile.FileName} · Video {videoVersion.JobId}";
+            return !string.IsNullOrWhiteSpace(targetPath);
+        }
+        else if (_modalShowingEnhanced)
+        {
+            if (!TryGetCurrentModalEnhancementVersion(
+                    tile,
+                    out ManagedEnhancementVersion version)
+                || version.Operation is not ("upscale" or "i2i")
+                || !string.Equals(
+                    NormalizeFavoritePath(_modalDisplayPath ?? ""),
+                    NormalizeFavoritePath(version.Output.OutputPath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+        else if (!string.Equals(
+                     NormalizeFavoritePath(_modalDisplayPath ?? ""),
+                     NormalizeFavoritePath(tile.Path),
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        targetPath = NormalizeFavoritePath(tile.Path);
+        targetName = tile.FileName;
+        return !string.IsNullOrWhiteSpace(targetPath);
+    }
+
+    private bool SetIndependentFavoriteLevel(
+        string path,
+        string displayName,
+        int level,
+        string successMessage)
+    {
+        if (!CanStartSharedStateAction(SharedStoreKind.Favorite))
+            return false;
+
+        string key = NormalizeFavoritePath(path);
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        int clamped = Math.Clamp(level, 0, 5);
+        int displayedBefore = FavoriteLevelForPath(key);
+        if (ShouldUseFavoriteWriter())
+        {
+            bool queued = QueueIndependentFavoriteLevel(
+                key,
+                clamped,
+                successMessage);
+            if (queued)
+            {
+                RecordIndependentFavoriteHistory(
+                    key,
+                    displayName,
+                    displayedBefore,
+                    clamped);
+                if (SelectedTile() is Tile selected)
+                {
+                    ShowModalFavoriteIncreaseEffect(
+                        selected,
+                        displayedBefore,
+                        clamped);
+                }
+            }
+            return queued;
+        }
+
+        bool hadStoredLevel = _favorites.TryGetValue(
+            key,
+            out int previousStoredLevel);
+        if (clamped > 0)
+            _favorites[key] = clamped;
+        else
+            _favorites.Remove(key);
+        _favoriteDirtyPaths.Add(key);
+
+        if (!SaveFavorites())
+        {
+            if (hadStoredLevel)
+                _favorites[key] = previousStoredLevel;
+            else
+                _favorites.Remove(key);
+            _favoriteDirtyPaths.Remove(key);
+            RefreshDerivedFavoritePresentationForPath(key, SelectedTile());
+            RefreshModalFavoriteSurface();
+            return false;
+        }
+
+        RefreshDerivedFavoritePresentationForPath(key, SelectedTile());
+        RefreshModalFavoriteSurface();
+        RecordIndependentFavoriteHistory(
+            key,
+            displayName,
+            displayedBefore,
+            clamped);
+        if (SelectedTile() is Tile tile)
+        {
+            ShowModalFavoriteIncreaseEffect(
+                tile,
+                displayedBefore,
+                clamped);
+        }
+        ShowFavoriteChangeStatus(successMessage);
+        return true;
+    }
+
+    private bool QueueIndependentFavoriteLevel(
+        string path,
+        int level,
+        string successMessage)
+    {
+        if (_favoritesWriteBlocked)
+        {
+            ReportPersistenceRefusal(
+                "Favorites",
+                ResolvedFavoritesPath,
+                protectedFile: true);
+            return false;
+        }
+
+        _favoriteSaveAttemptCount++;
+        string key = NormalizeFavoritePath(path);
+        int desired = Math.Clamp(level, 0, 5);
+        int displayedBefore = FavoriteLevelForPath(key);
+        int durable = _pendingFavoriteMutations.TryGetValue(
+            key,
+            out FavoritePendingMutation? existing)
+                ? existing.DurableLevel
+                : displayedBefore;
+        long generation = ++_favoriteMutationGeneration;
+        _pendingFavoriteMutations[key] = new FavoritePendingMutation(
+            durable,
+            desired,
+            generation,
+            DateTimeOffset.UtcNow);
+
+        if (desired > 0)
+            _favorites[key] = desired;
+        else
+            _favorites.Remove(key);
+        RefreshDerivedFavoritePresentationForPath(key, SelectedTile());
+        EnsureFavoriteWriter().Enqueue(
+            new FavoriteDelta(key, durable, desired, generation));
+
+        RefreshModalFavoriteSurface();
+        ShowFavoriteChangeStatus($"{successMessage} Saving...");
+        ScheduleFavoriteWriterPump();
         return true;
     }
 
@@ -10007,6 +13404,7 @@ public partial class MainWindow : Window
         _favoriteSaveAttemptCount++;
         SharedStoreWriter<FavoriteDelta> writer = EnsureFavoriteWriter();
         var changedTiles = new List<Tile>(changes.Count);
+        DateTimeOffset changedAtUtc = DateTimeOffset.UtcNow;
         Tile? deferredTile = null;
         string? deferredMutationPath = null;
         long deferredMutationGeneration = 0;
@@ -10019,7 +13417,11 @@ public partial class MainWindow : Window
                 ? existing.DurableLevel
                 : displayedBefore;
             long generation = ++_favoriteMutationGeneration;
-            _pendingFavoriteMutations[key] = new FavoritePendingMutation(durable, desired, generation);
+            _pendingFavoriteMutations[key] = new FavoritePendingMutation(
+                durable,
+                desired,
+                generation,
+                changedAtUtc);
 
             if (desired > 0)
                 _favorites[key] = desired;
@@ -10325,9 +13727,9 @@ public partial class MainWindow : Window
     {
         if (modalWasVisible)
         {
-            if (SelectedTile() is not null)
+            if (TryGetModalSourceTile(out Tile modalTile))
             {
-                OpenModal();
+                OpenModal(modalTile);
                 if (modalHadFocus)
                     Dispatcher.BeginInvoke(ModalCloseBtn.Focus, DispatcherPriority.Input);
             }
@@ -10622,7 +14024,7 @@ public partial class MainWindow : Window
             PreviewTabHoverPopup.PlacementTarget = placementTarget;
         PreviewTabHoverPopup.IsOpen = true;
 
-        if (!forceDecode && tile.Thumbnail is not null)
+        if (!forceDecode && HasOriginalResidentThumbnail(tile))
         {
             PreviewTabHoverBitmap.Source = tile.Thumbnail;
             _hoverPreviewTabBitmapPath = tile.Path;
@@ -10802,6 +14204,20 @@ public partial class MainWindow : Window
 
     public long LastAppliedSearchFilterGenerationForSmoke => _lastAppliedCatalogProjectionGeneration;
     public long CatalogProjectionGenerationForSmoke => _catalogProjectionGeneration;
+    public long CatalogProjectionStartPostCountForSmoke
+        => Interlocked.Read(ref _catalogProjectionStartPostCount);
+    public long CatalogProjectionStartCoalescedCountForSmoke
+        => Interlocked.Read(ref _catalogProjectionStartCoalescedCount);
+    public long CatalogProjectionCaptureCountForSmoke
+        => Interlocked.Read(ref _catalogProjectionCaptureCount);
+    public long GridAnchorRememberPostCountForSmoke
+        => Interlocked.Read(ref _gridAnchorRememberPostCount);
+    public long GridAnchorRememberCoalescedCountForSmoke
+        => Interlocked.Read(ref _gridAnchorRememberCoalescedCount);
+    public long GridAnchorRememberExecuteCountForSmoke
+        => Interlocked.Read(ref _gridAnchorRememberExecuteCount);
+    public void ScheduleGridAnchorRememberForSmoke()
+        => ScheduleRememberCurrentGridViewportAnchor();
     public long LastCatalogProjectionApplySliceMsForSmoke => _lastCatalogProjectionApplySliceMilliseconds;
     public long MaxCatalogProjectionApplySliceMsForSmoke => _maxCatalogProjectionApplySliceMilliseconds;
     public int CatalogProjectionDiscardedCountForSmoke => _catalogProjectionDiscardedCount;
@@ -10872,7 +14288,10 @@ public partial class MainWindow : Window
         FilterResult? result = null;
         try
         {
-            result = ComputeFilterResult(snapshot, CancellationToken.None);
+            result = ComputeFilterResult(
+                snapshot,
+                CancellationToken.None,
+                prepareAutomationProjection: false);
             ApplyFilterResult(result, selectFirst, selectionFallbackIndex);
         }
         finally
@@ -10908,15 +14327,27 @@ public partial class MainWindow : Window
                     tile.FolderBucketKey,
                     tile.Group,
                     Math.Max(1, tile.CardHeight + 4),
-                    tile.Prompt,
+                    tile.PromptUtf8,
                     tile.Fav,
+                    tile.PhotorealFavoriteLevel,
+                    tile.VideoFavoriteLevel,
                     tile.Enhanced,
                     tile.Upscaled,
                     tile.Photorealized,
                     tile.VideoGenerated,
                     tile.Unseen,
                     tile.ModifiedUtc,
-                    tile.CreatedUtc);
+                    tile.CreatedUtc,
+                    tile.UpscaleCompletedAtUtc,
+                    tile.PhotorealCompletedAtUtc,
+                    tile.VideoCompletedAtUtc,
+                    tile.UpscaleQueueActive,
+                    tile.UpscaleQueueAddedAtUtc,
+                    tile.PhotorealQueueActive,
+                    tile.PhotorealQueueAddedAtUtc,
+                    tile.VideoQueueActive,
+                    tile.VideoQueueAddedAtUtc,
+                    tile.FavoriteChangedAtUtc);
             }
 
             Tile? previous = SelectedTile();
@@ -10936,10 +14367,17 @@ public partial class MainWindow : Window
             bool favoritesOnly = FavoriteOnlyFilter?.IsChecked == true;
             bool unfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true;
             bool enhancedOnly = EnhancedOnlyFilter?.IsChecked == true;
+            bool unenhancedOnly = UnenhancedOnlyFilter?.IsChecked == true;
             bool photorealOnly = PhotorealOnlyFilter?.IsChecked == true;
+            bool unphotorealOnly = UnphotorealOnlyFilter?.IsChecked == true;
             bool videoOnly = VideoOnlyFilter?.IsChecked == true;
             bool unseenOnly = UnseenOnlyFilter?.IsChecked == true;
-            FrozenSet<int> favoriteLevels = _favoriteFilterLevels.ToFrozenSet();
+            int favoriteLevelMask = BuildFavoriteLevelMask(
+                _favoriteFilterLevels);
+            int photorealFavoriteLevelMask = BuildFavoriteLevelMask(
+                _photorealFavoriteFilterLevels);
+            int videoFavoriteLevelMask = BuildFavoriteLevelMask(
+                _videoFavoriteFilterLevels);
             FrozenSet<string> hiddenFolderBuckets =
                 _hiddenFolderBuckets.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
             bool unfiltered = !albumActive
@@ -10947,7 +14385,9 @@ public partial class MainWindow : Window
                 && !favoritesOnly
                 && !unfavoriteOnly
                 && !enhancedOnly
+                && !unenhancedOnly
                 && !photorealOnly
+                && !unphotorealOnly
                 && !videoOnly
                 && !unseenOnly
                 && hiddenFolderBuckets.Count == 0
@@ -10970,6 +14410,7 @@ public partial class MainWindow : Window
                 tileCount,
                 _catalogContentRevision,
                 _selectionVisualSyncGeneration,
+                _cardLayoutRevision,
                 _selectedPaths.ToArray(),
                 _primarySelectedPath,
                 previous?.Path,
@@ -10994,10 +14435,14 @@ public partial class MainWindow : Window
                 favoritesOnly,
                 unfavoriteOnly,
                 enhancedOnly,
+                unenhancedOnly,
                 photorealOnly,
+                unphotorealOnly,
                 videoOnly,
                 unseenOnly,
-                favoriteLevels,
+                favoriteLevelMask,
+                photorealFavoriteLevelMask,
+                videoFavoriteLevelMask,
                 hiddenFolderBuckets,
                 _dateFromLocal,
                 _dateToLocal);
@@ -11022,6 +14467,7 @@ public partial class MainWindow : Window
 
     private static void ReturnFilterResult(FilterResult result)
     {
+        result.AutomationProjection?.ReleaseCreator();
         // Filter results are immutable, exactly-sized arrays. The visible
         // collection adopts them in O(1), and old snapshots remain valid for
         // any WPF enumerator that was already in flight.
@@ -11045,14 +14491,19 @@ public partial class MainWindow : Window
         }
     }
 
-    private static FilterResult ComputeFilterResult(FilterSnapshot snapshot, CancellationToken cancellationToken)
+    private static FilterResult ComputeFilterResult(
+        FilterSnapshot snapshot,
+        CancellationToken cancellationToken,
+        bool prepareAutomationProjection)
     {
         bool unfiltered = !snapshot.AlbumActive
             && snapshot.QueryTokens.Length == 0
             && !snapshot.FavoritesOnly
             && !snapshot.UnfavoriteOnly
             && !snapshot.EnhancedOnly
+            && !snapshot.UnenhancedOnly
             && !snapshot.PhotorealOnly
+            && !snapshot.UnphotorealOnly
             && !snapshot.VideoOnly
             && !snapshot.UnseenOnly
             && snapshot.HiddenFolderBuckets.Count == 0
@@ -11096,12 +14547,15 @@ public partial class MainWindow : Window
         List<int>? matchedIndices = unfiltered
             ? null
             : new List<int>(Math.Min(snapshot.TileCount, 4_096));
+        using var promptMatcher = snapshot.QueryTokens.Length == 0
+            ? null
+            : new Utf8PromptMatcher();
         for (int index = 0; index < snapshot.TileCount; index++)
         {
             CheckCatalogWorkerInputHandoff(index, snapshot.TileCount, cancellationToken);
 
             FilterTileSnapshot tile = snapshot.Tiles[index];
-            if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot))
+            if (!unfiltered && !MatchesFilterSnapshot(tile, snapshot, promptMatcher))
                 continue;
             matchedIndices?.Add(index);
             if (!hasLayoutItem)
@@ -11296,11 +14750,12 @@ public partial class MainWindow : Window
                 exactSingleRemovalIndex = removedIndex;
         }
 
-        GalleryAutomationProjectionIndex automationProjection =
-            GalleryAutomationProjectionIndex.Create(
+        GalleryAutomationProjectionIndex? automationProjection = prepareAutomationProjection
+            ? GalleryAutomationProjectionIndex.Create(
                 filtered,
                 filteredCount,
-                cancellationToken);
+                cancellationToken)
+            : null;
 
         return new FilterResult(
             filtered,
@@ -11331,6 +14786,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private void StageGalleryAutomationProjection(FilterResult filterResult)
+    {
+        GalleryAutomationProjectionIndex projection =
+            filterResult.AutomationProjection
+            ?? GalleryAutomationProjectionIndex.Create(
+                filterResult.Tiles,
+                filterResult.Count,
+                CancellationToken.None);
+        StageGalleryAutomationProjection(projection);
+    }
+
     private static int CompareFilterTilesForSort(
         FilterTileSnapshot left,
         FilterTileSnapshot right,
@@ -11342,6 +14808,33 @@ public partial class MainWindow : Window
             SortModifiedOldestValue => left.ModifiedUtc.CompareTo(right.ModifiedUtc),
             SortCreatedNewestValue => right.CreatedUtc.CompareTo(left.CreatedUtc),
             SortCreatedOldestValue => left.CreatedUtc.CompareTo(right.CreatedUtc),
+            SortUpscaleNewestValue => CompareOptionalActivityNewest(
+                left.UpscaleCompletedAtUtc,
+                right.UpscaleCompletedAtUtc),
+            SortUpscaleQueuedNewestValue => CompareQueueActivityNewest(
+                left.UpscaleQueueActive,
+                left.UpscaleQueueAddedAtUtc,
+                right.UpscaleQueueActive,
+                right.UpscaleQueueAddedAtUtc),
+            SortPhotorealNewestValue => CompareOptionalActivityNewest(
+                left.PhotorealCompletedAtUtc,
+                right.PhotorealCompletedAtUtc),
+            SortPhotorealQueuedNewestValue => CompareQueueActivityNewest(
+                left.PhotorealQueueActive,
+                left.PhotorealQueueAddedAtUtc,
+                right.PhotorealQueueActive,
+                right.PhotorealQueueAddedAtUtc),
+            SortVideoNewestValue => CompareOptionalActivityNewest(
+                left.VideoCompletedAtUtc,
+                right.VideoCompletedAtUtc),
+            SortVideoQueuedNewestValue => CompareQueueActivityNewest(
+                left.VideoQueueActive,
+                left.VideoQueueAddedAtUtc,
+                right.VideoQueueActive,
+                right.VideoQueueAddedAtUtc),
+            SortFavoriteChangedNewestValue => CompareOptionalActivityNewest(
+                left.FavoriteChangedAtUtc,
+                right.FavoriteChangedAtUtc),
             SortRandomValue => StableRandomSortKey(randomSortSeed, left.Path)
                 .CompareTo(StableRandomSortKey(randomSortSeed, right.Path)),
             SortNameValue => StringComparer.OrdinalIgnoreCase.Compare(left.FileName, right.FileName),
@@ -11366,23 +14859,44 @@ public partial class MainWindow : Window
         return StringComparer.OrdinalIgnoreCase.Compare(left.Path, right.Path);
     }
 
-    private static bool MatchesFilterSnapshot(FilterTileSnapshot tile, FilterSnapshot snapshot)
+    private static bool MatchesFilterSnapshot(
+        FilterTileSnapshot tile,
+        FilterSnapshot snapshot,
+        Utf8PromptMatcher? promptMatcher)
     {
         if (snapshot.AlbumActive && (!tile.IsRealFile || !snapshot.AlbumMemberPaths.Contains(tile.Path)))
             return false;
-        foreach (string token in snapshot.QueryTokens)
+        if (snapshot.QueryTokens.Length > 0
+            && !(promptMatcher?.MatchesAll(
+                tile.PromptUtf8,
+                tile.FileName,
+                snapshot.QueryTokens) ?? false))
         {
-            if (!ContainsText(tile.FileName, token) && !ContainsText(tile.Prompt, token))
-                return false;
+            return false;
         }
 
-        if (snapshot.FavoritesOnly && (tile.FavoriteLevel <= 0 || (snapshot.FavoriteLevels.Count > 0 && !snapshot.FavoriteLevels.Contains(tile.FavoriteLevel))))
+        if (snapshot.FavoritesOnly
+            && !MatchesSelectedFavoriteLevels(
+                tile.FavoriteLevel,
+                tile.Photorealized,
+                tile.PhotorealFavoriteLevel,
+                tile.VideoGenerated,
+                tile.VideoFavoriteLevel,
+                snapshot.FavoriteLevelMask,
+                snapshot.PhotorealFavoriteLevelMask,
+                snapshot.VideoFavoriteLevelMask))
+        {
             return false;
+        }
         if (snapshot.UnfavoriteOnly && tile.FavoriteLevel > 0)
             return false;
-        if (snapshot.EnhancedOnly && !tile.Upscaled)
-            return false;
-        if (snapshot.PhotorealOnly && !tile.Photorealized)
+        if (!MatchesEnhancementFilters(
+                tile.Upscaled,
+                tile.Photorealized,
+                snapshot.EnhancedOnly,
+                snapshot.UnenhancedOnly,
+                snapshot.PhotorealOnly,
+                snapshot.UnphotorealOnly))
             return false;
         if (snapshot.VideoOnly && !tile.VideoGenerated)
             return false;
@@ -11399,6 +14913,84 @@ public partial class MainWindow : Window
         return (!snapshot.DateFromLocal.HasValue || createdDate >= snapshot.DateFromLocal.Value.Date)
             && (!snapshot.DateToLocal.HasValue || createdDate <= snapshot.DateToLocal.Value.Date);
     }
+
+    private static bool MatchesEnhancementFilters(
+        bool upscaled,
+        bool photorealized,
+        bool enhancedOnly,
+        bool unenhancedOnly,
+        bool photorealOnly,
+        bool unphotorealOnly)
+        => (!enhancedOnly || upscaled)
+            && (!unenhancedOnly || !upscaled)
+            && (!photorealOnly || photorealized)
+            && (!unphotorealOnly || !photorealized);
+
+    private static bool MatchesSelectedFavoriteLevels(
+        int originalLevel,
+        bool photorealized,
+        int photorealLevel,
+        bool videoGenerated,
+        int videoLevel,
+        IReadOnlySet<int> originalLevels,
+        IReadOnlySet<int> photorealLevels,
+        IReadOnlySet<int> videoLevels)
+    {
+        bool hasExplicitSelection = originalLevels.Count > 0
+            || photorealLevels.Count > 0
+            || videoLevels.Count > 0;
+        if (!hasExplicitSelection)
+        {
+            return originalLevel > 0
+                || (photorealized && photorealLevel > 0)
+                || (videoGenerated && videoLevel > 0);
+        }
+
+        return originalLevels.Contains(Math.Clamp(originalLevel, 0, 5))
+            || (photorealized
+                && photorealLevels.Contains(Math.Clamp(photorealLevel, 0, 5)))
+            || (videoGenerated
+                && videoLevels.Contains(Math.Clamp(videoLevel, 0, 5)));
+    }
+
+    private static int BuildFavoriteLevelMask(IEnumerable<int> levels)
+    {
+        int mask = 0;
+        foreach (int level in levels)
+            mask |= 1 << Math.Clamp(level, 0, 5);
+        return mask;
+    }
+
+    private static bool MatchesSelectedFavoriteLevels(
+        int originalLevel,
+        bool photorealized,
+        int photorealLevel,
+        bool videoGenerated,
+        int videoLevel,
+        int originalLevelMask,
+        int photorealLevelMask,
+        int videoLevelMask)
+    {
+        bool hasExplicitSelection =
+            (originalLevelMask | photorealLevelMask | videoLevelMask) != 0;
+        if (!hasExplicitSelection)
+        {
+            return originalLevel > 0
+                || (photorealized && photorealLevel > 0)
+                || (videoGenerated && videoLevel > 0);
+        }
+
+        return MaskContainsFavoriteLevel(originalLevelMask, originalLevel)
+            || (photorealized
+                && MaskContainsFavoriteLevel(
+                    photorealLevelMask,
+                    photorealLevel))
+            || (videoGenerated
+                && MaskContainsFavoriteLevel(videoLevelMask, videoLevel));
+    }
+
+    private static bool MaskContainsFavoriteLevel(int mask, int level)
+        => (mask & (1 << Math.Clamp(level, 0, 5))) != 0;
 
     private async Task<CatalogProjectionApplyMetrics> ApplyFilterResultAsync(
         FilterResult filterResult,
@@ -11480,8 +15072,16 @@ public partial class MainWindow : Window
         if (_galleryVirtualizingPanel is null)
             AttachGalleryVirtualizationPanel();
         VirtualizingWrapPanel? preparedPanel = _galleryVirtualizingPanel;
-        CancelThumbnailViewportLoading();
-        _thumbnailViewportRevision++;
+        bool releaseWpfSelectionBeforePublication =
+            ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult);
+        bool projectionChanged =
+            !_tiles.Matches(filterResult.Tiles, filterResult.Count)
+            || releaseWpfSelectionBeforePublication;
+        if (projectionChanged)
+        {
+            CancelThumbnailViewportLoading();
+            _thumbnailViewportRevision++;
+        }
         if (!await YieldForInputAsync())
             return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
         inputBoundaryBeforePublication = true;
@@ -11489,12 +15089,14 @@ public partial class MainWindow : Window
         var phase = new Stopwatch();
         int exactSingleRemovalIndex = filterResult.ExactSingleRemovalIndex ?? -1;
         bool publishSingleRemoval =
-            exactSingleRemovalIndex >= 0
+            projectionChanged
+            && exactSingleRemovalIndex >= 0
             && _tiles.CanReplaceOneRemoved(
                 filterResult.Tiles,
                 filterResult.Count,
                 exactSingleRemovalIndex);
-        if (!publishSingleRemoval
+        if (projectionChanged
+            && !publishSingleRemoval
             && snapshot.RestoreGalleryFocus
             && Keyboard.FocusedElement is DependencyObject focusedElement)
         {
@@ -11516,7 +15118,8 @@ public partial class MainWindow : Window
                     reconcileMs);
             }
         }
-        if (ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult))
+        if (projectionChanged
+            && releaseWpfSelectionBeforePublication)
         {
             (
                 preResetSelectionReleaseMs,
@@ -11527,7 +15130,8 @@ public partial class MainWindow : Window
             // generator detachment as two independently bounded UI slices.
             _ = await YieldForInputAsync(checkGeneration: false);
         }
-        bool resetPreparationStarted = !publishSingleRemoval
+        bool resetPreparationStarted = projectionChanged
+            && !publishSingleRemoval
             && preparedPanel?.BeginItemsResetPreparation() == true;
         try
         {
@@ -11583,6 +15187,7 @@ public partial class MainWindow : Window
             if (generation != _catalogProjectionGeneration
                 || snapshot.CatalogRevision != _catalogContentRevision
                 || snapshot.SelectionGeneration != _selectionVisualSyncGeneration
+                || snapshot.CardLayoutRevision != _cardLayoutRevision
                 || !string.Equals(snapshot.SortBy, _sortBy, StringComparison.Ordinal)
                 || !string.Equals(snapshot.RandomSortSeed, _randomSortSeed, StringComparison.Ordinal))
             {
@@ -11641,7 +15246,8 @@ public partial class MainWindow : Window
                 long resetAllocatedBefore = collectResetAllocation
                     ? GC.GetAllocatedBytesForCurrentThread()
                     : 0;
-                StageGalleryAutomationProjection(filterResult.AutomationProjection);
+                if (projectionChanged)
+                    StageGalleryAutomationProjection(filterResult);
                 if (publishSingleRemoval)
                 {
                     _tiles.ReplaceOneRemovedAfterValidation(
@@ -11649,7 +15255,7 @@ public partial class MainWindow : Window
                         filterResult.Count,
                         exactSingleRemovalIndex);
                 }
-                else
+                else if (projectionChanged)
                 {
                     // The work above remains part of the app-owned
                     // cooperative slice. The synchronous WPF Reset is an
@@ -11696,6 +15302,11 @@ public partial class MainWindow : Window
                     resetPreparationStarted = false;
                 }
                 preparedPanel?.SetPreparedLayout(filterResult.PreparedLayout);
+                if (_metadataOriginalAspectLayoutBindingsPending)
+                {
+                    RefreshRealizedCardLayoutBindings();
+                    _metadataOriginalAspectLayoutBindingsPending = false;
+                }
                 _selectedPaths.Clear();
                 foreach (Tile selectedTile in filterResult.SelectedTiles)
                     _selectedPaths.Add(selectedTile.Path);
@@ -11740,7 +15351,7 @@ public partial class MainWindow : Window
             _primarySelectedTile = null;
             _primarySelectedIndex = -1;
         }
-        if (filterResult.PreparedLayout is null)
+        if (projectionChanged && filterResult.PreparedLayout is null)
             _galleryVirtualizingPanel?.InvalidateItemLayout();
         phase.Stop();
         statsMs = phase.ElapsedMilliseconds;
@@ -11849,7 +15460,8 @@ public partial class MainWindow : Window
             catalogSnapshotResetThreadCpuMs,
             catalogSnapshotResetCount,
             catalogSnapshotResetNestedCount,
-            publishSingleRemoval);
+            publishSingleRemoval,
+            Published: true);
     }
 
     private void ScheduleCatalogStatsUpdate(long generation)
@@ -11906,15 +15518,28 @@ public partial class MainWindow : Window
         }
 
         bool wasSyncingSelection = _syncingSelection;
+        bool releaseWpfSelectionBeforePublication =
+            ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult);
+        bool projectionChanged =
+            !_tiles.Matches(filtered, filteredCount)
+            || releaseWpfSelectionBeforePublication;
         _syncingSelection = true;
         try
         {
-            CancelThumbnailViewportLoading();
-            _thumbnailViewportRevision++;
-            if (ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult))
+            if (projectionChanged)
+            {
+                CancelThumbnailViewportLoading();
+                _thumbnailViewportRevision++;
+            }
+            if (projectionChanged
+                && releaseWpfSelectionBeforePublication)
+            {
                 ReleaseWpfSelectionBeforeCatalogPublication();
-            StageGalleryAutomationProjection(filterResult.AutomationProjection);
-            _tiles.ReplaceAll(filtered, filteredCount);
+            }
+            if (projectionChanged)
+                StageGalleryAutomationProjection(filterResult);
+            if (projectionChanged)
+                _tiles.ReplaceAll(filtered, filteredCount);
         }
         finally
         {
@@ -11938,7 +15563,8 @@ public partial class MainWindow : Window
         if (preferred is null && selectionFallbackIndex.HasValue && _tiles.Count > 0)
             preferred = _tiles[Math.Clamp(selectionFallbackIndex.Value, 0, _tiles.Count - 1)];
         preferred ??= selectFirst && _tiles.Count > 0 ? _tiles[0] : null;
-        _galleryVirtualizingPanel?.InvalidateItemLayout();
+        if (projectionChanged)
+            _galleryVirtualizingPanel?.InvalidateItemLayout();
         UpdateFolderStats();
 
         if (preferred is not null)
@@ -11992,7 +15618,7 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible)
             return;
 
-        if (selected is null)
+        if (!TryGetModalSourceTile(out _))
         {
             bool modalHadFocus = Modal.IsKeyboardFocusWithin;
             CloseModal();
@@ -12001,8 +15627,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!string.Equals(_modalSourceTilePath, selected.Path, StringComparison.OrdinalIgnoreCase))
-            OpenModal();
+        RefreshModalFavoriteSurface(selected);
     }
 
     private static bool MatchesSearch(Tile tile, string query)
@@ -12010,27 +15635,78 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(query)) return true;
 
         var tokens = query.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var token in tokens)
-        {
-            if (ContainsText(tile.FileName, token)
-                || ContainsText(tile.Prompt, token))
-            {
-                continue;
-            }
-
-            return false;
-        }
-
-        return true;
+        using var promptMatcher = new Utf8PromptMatcher();
+        return promptMatcher.MatchesAll(tile.PromptUtf8, tile.FileName, tokens);
     }
 
     private static bool ContainsText(string? value, string token)
         => !string.IsNullOrEmpty(value) && value.Contains(token, StringComparison.OrdinalIgnoreCase);
 
+    private sealed class Utf8PromptMatcher : IDisposable
+    {
+        private char[]? _buffer;
+
+        public bool MatchesAll(
+            byte[]? promptUtf8,
+            string fileName,
+            IReadOnlyList<string> tokens)
+        {
+            ReadOnlySpan<char> prompt = default;
+            bool decoded = false;
+            foreach (string token in tokens)
+            {
+                if (ContainsText(fileName, token))
+                    continue;
+                if (promptUtf8 is null || promptUtf8.Length == 0)
+                    return false;
+                if (!decoded)
+                {
+                    prompt = Decode(promptUtf8);
+                    decoded = true;
+                }
+                if (!prompt.Contains(token.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+            return true;
+        }
+
+        private ReadOnlySpan<char> Decode(byte[] promptUtf8)
+        {
+            int required = Encoding.UTF8.GetMaxCharCount(promptUtf8.Length);
+            if (_buffer is null || _buffer.Length < required)
+            {
+                if (_buffer is not null)
+                    ArrayPool<char>.Shared.Return(_buffer);
+                _buffer = ArrayPool<char>.Shared.Rent(required);
+            }
+
+            int written = Encoding.UTF8.GetChars(promptUtf8, _buffer);
+            return _buffer.AsSpan(0, written);
+        }
+
+        public void Dispose()
+        {
+            if (_buffer is null)
+                return;
+            ArrayPool<char>.Shared.Return(_buffer);
+            _buffer = null;
+        }
+    }
+
     private bool MatchesFavoriteFilter(Tile tile, bool favoritesOnly, bool unfavoriteOnly)
     {
         if (favoritesOnly)
-            return tile.Fav > 0 && (_favoriteFilterLevels.Count == 0 || _favoriteFilterLevels.Contains(tile.Fav));
+        {
+            return MatchesSelectedFavoriteLevels(
+                tile.Fav,
+                tile.Photorealized,
+                tile.PhotorealFavoriteLevel,
+                tile.VideoGenerated,
+                tile.VideoFavoriteLevel,
+                _favoriteFilterLevels,
+                _photorealFavoriteFilterLevels,
+                _videoFavoriteFilterLevels);
+        }
         if (unfavoriteOnly)
             return tile.Fav <= 0;
         return true;
@@ -12189,11 +15865,10 @@ public partial class MainWindow : Window
         }
 
         GridZoomAnchor? anchor = CaptureGridZoomAnchor();
-        SyncGalleryColumnMode();
         ApplyCardLayoutToAllTiles();
         RestoreGridZoomAnchorAfterLayout(anchor);
         if (!_initializing)
-            SaveState();
+            ScheduleSearchStateSave();
     }
 
     private void ZoomOut_Click(object sender, RoutedEventArgs e) => AdjustCardWidth(-1);
@@ -12202,7 +15877,8 @@ public partial class MainWindow : Window
 
     private bool AdjustCardWidth(int steps)
     {
-        double before = SizeSlider.Value;
+        double before = _pendingGalleryWheelCardWidth ?? SizeSlider.Value;
+        CancelPendingGalleryWheelZoom();
         SetCardWidth(before + (CardWidthStep * steps));
         return Math.Abs(SizeSlider.Value - before) > 0.01;
     }
@@ -12210,6 +15886,7 @@ public partial class MainWindow : Window
     private bool ResetCardWidth()
     {
         double before = SizeSlider.Value;
+        CancelPendingGalleryWheelZoom();
         SetCardWidth(DefaultCardWidth);
         return Math.Abs(SizeSlider.Value - before) > 0.01;
     }
@@ -12219,6 +15896,38 @@ public partial class MainWindow : Window
         if (RowsList?.Visibility == Visibility.Visible)
             return;
         SizeSlider.Value = NormalizeCardWidth(value);
+    }
+
+    private bool QueueGalleryWheelZoom(int steps)
+    {
+        if (RowsList?.Visibility == Visibility.Visible)
+            return false;
+
+        double before = _pendingGalleryWheelCardWidth ?? SizeSlider.Value;
+        double target = NormalizeCardWidth(before + (CardWidthStep * steps));
+        if (Math.Abs(target - before) <= 0.01)
+            return false;
+
+        _pendingGalleryWheelCardWidth = target;
+        _galleryWheelZoomTimer.Stop();
+        _galleryWheelZoomTimer.Start();
+        return true;
+    }
+
+    private void CommitPendingGalleryWheelZoom()
+    {
+        _galleryWheelZoomTimer.Stop();
+        if (_pendingGalleryWheelCardWidth is not double target)
+            return;
+
+        _pendingGalleryWheelCardWidth = null;
+        SetCardWidth(target);
+    }
+
+    private void CancelPendingGalleryWheelZoom()
+    {
+        _galleryWheelZoomTimer.Stop();
+        _pendingGalleryWheelCardWidth = null;
     }
 
     private double NormalizeCardWidth(double value)
@@ -12385,9 +16094,24 @@ public partial class MainWindow : Window
     private void ScheduleRememberCurrentGridViewportAnchor()
     {
         long generation = ++_gridAnchorRememberGeneration;
-        Dispatcher.BeginInvoke(() =>
+        _queuedGridAnchorRememberGeneration = generation;
+        if (_gridAnchorRememberOperation is
+            { Status: DispatcherOperationStatus.Pending })
         {
-            if (generation != _gridAnchorRememberGeneration || _restoringGridZoomAnchor || CardsList.Visibility != Visibility.Visible)
+            Interlocked.Increment(ref _gridAnchorRememberCoalescedCount);
+            return;
+        }
+
+        Interlocked.Increment(ref _gridAnchorRememberPostCount);
+        _gridAnchorRememberOperation = Dispatcher.BeginInvoke(() =>
+        {
+            _gridAnchorRememberOperation = null;
+            Interlocked.Increment(ref _gridAnchorRememberExecuteCount);
+            long queuedGeneration = _queuedGridAnchorRememberGeneration;
+            _queuedGridAnchorRememberGeneration = -1;
+            if (queuedGeneration != _gridAnchorRememberGeneration
+                || _restoringGridZoomAnchor
+                || CardsList.Visibility != Visibility.Visible)
                 return;
             GridZoomAnchor? anchor = CaptureGridZoomAnchor();
             if (anchor is not null)
@@ -12499,12 +16223,41 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ApplyCardLayoutToAllTiles()
+    private void RefreshRealizedCardLayoutBindings()
+    {
+        var refreshed = new HashSet<Tile>(ReferenceEqualityComparer.Instance);
+        if (CardsList is not null)
+            RefreshList(CardsList);
+        if (RowsList is not null)
+            RefreshList(RowsList);
+        return;
+
+        void RefreshList(DependencyObject root)
+        {
+            foreach (ListBoxItem container in FindVisualDescendants<ListBoxItem>(root))
+            {
+                if (container.DataContext is Tile tile && refreshed.Add(tile))
+                    tile.RefreshCardLayoutBindings();
+            }
+        }
+    }
+
+    private void ApplyCardLayoutToAllTiles(
+        bool invalidateItemLayout = true,
+        bool refreshRealizedBindings = true)
     {
         SyncGalleryColumnMode();
+        CatalogCardLayoutContext context = CaptureCardLayoutContext();
         foreach (var tile in _allTiles)
-            ApplyCardLayout(tile);
-        _galleryVirtualizingPanel?.InvalidateItemLayout();
+            ApplyCardLayout(tile, context, notify: false);
+        _cardLayoutRevision++;
+        if (refreshRealizedBindings)
+        {
+            _metadataOriginalAspectLayoutBindingsPending = false;
+            RefreshRealizedCardLayoutBindings();
+        }
+        if (invalidateItemLayout)
+            _galleryVirtualizingPanel?.InvalidateItemLayout();
     }
 
     private void ApplyCardLayout(Tile tile)
@@ -12518,7 +16271,10 @@ public partial class MainWindow : Window
             _displayStyle,
             _aspectMode);
 
-    private static void ApplyCardLayout(Tile tile, CatalogCardLayoutContext context)
+    private static void ApplyCardLayout(
+        Tile tile,
+        CatalogCardLayoutContext context,
+        bool notify = true)
     {
         (double widthFactor, double listThumbnailBase) = context.DisplayStyle switch
         {
@@ -12542,7 +16298,8 @@ public partial class MainWindow : Window
             showStatusBadge: width >= 72,
             listThumbnailBase,
             listThumbnailHeight,
-            Math.Max(listThumbnailBase, listThumbnailHeight));
+            Math.Max(listThumbnailBase, listThumbnailHeight),
+            notify);
     }
 
     private static double AspectHeightFactor(Tile tile, string aspectMode)
@@ -12565,12 +16322,128 @@ public partial class MainWindow : Window
 
     private sealed record CatalogSharedStateSnapshot(
         IReadOnlyDictionary<string, int> Favorites,
+        IReadOnlyDictionary<string, DateTimeOffset> FavoriteChangedAtUtcByPath,
         IReadOnlySet<string> SeenPaths,
         IReadOnlyDictionary<string, ManagedEnhancedOutput> EnhancedOutputs,
-        IReadOnlySet<string> UpscaledPaths,
-        IReadOnlySet<string> PhotorealizedPaths,
-        IReadOnlySet<string> VideoPaths,
-        IReadOnlyDictionary<string, string> VideoOutputs);
+        IReadOnlyDictionary<string, EnhancementAvailability> EnhancementAvailabilityByPath,
+        IReadOnlyDictionary<string, int> PhotorealFavoriteLevelsByPath,
+        IReadOnlyDictionary<string, int> VideoFavoriteLevelsByPath,
+        IReadOnlyDictionary<string, int> VideoVersionCountsByPath,
+        IReadOnlyDictionary<string, string> VideoOutputs,
+        IReadOnlyDictionary<string, DateTimeOffset> UpscaleCompletedAtUtcByPath,
+        IReadOnlyDictionary<string, DateTimeOffset> PhotorealCompletedAtUtcByPath,
+        IReadOnlyDictionary<string, DateTimeOffset> VideoCompletedAtUtcByPath,
+        IReadOnlyDictionary<string, ManagedEnhancementQueueActivity> QueueActivityByPath);
+
+    private static Dictionary<string, EnhancementAvailability>
+        BuildEnhancementAvailabilityByPath(
+            IReadOnlyDictionary<string, List<ManagedEnhancementVersion>> versionsByPath)
+    {
+        var result = new Dictionary<string, EnhancementAvailability>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, List<ManagedEnhancementVersion> versions) in versionsByPath)
+            result[path] = GetEnhancementAvailability(versions);
+        return result;
+    }
+
+    private static Dictionary<string, int> BuildPhotorealFavoriteLevelsByPath(
+        IReadOnlyDictionary<string, List<ManagedEnhancementVersion>> versionsByPath,
+        IReadOnlyDictionary<string, int> favorites)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, List<ManagedEnhancementVersion> versions) in versionsByPath)
+        {
+            int maximum = versions
+                .Where(static version => version.Operation == "photoreal")
+                .Select(version => favorites.TryGetValue(
+                        NormalizeFavoritePath(version.Output.OutputPath),
+                        out int level)
+                    ? Math.Clamp(level, 0, 5)
+                    : 0)
+                .DefaultIfEmpty(0)
+                .Max();
+            result[path] = maximum;
+        }
+        return result;
+    }
+
+    private static Dictionary<string, int> BuildVideoFavoriteLevelsByPath(
+        IReadOnlyDictionary<string, List<ManagedVideoVersion>> versionsByPath,
+        IReadOnlyDictionary<string, int> favorites)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, List<ManagedVideoVersion> versions) in versionsByPath)
+        {
+            result[path] = versions
+                .Select(version => favorites.TryGetValue(
+                        NormalizeFavoritePath(version.Output.OutputPath),
+                        out int level)
+                    ? Math.Clamp(level, 0, 5)
+                    : 0)
+                .DefaultIfEmpty(0)
+                .Max();
+        }
+        return result;
+    }
+
+    private static Dictionary<string, DateTimeOffset> BuildLatestEnhancementActivityByPath(
+        IReadOnlyDictionary<string, List<ManagedEnhancementVersion>> versionsByPath,
+        string operation)
+    {
+        var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, List<ManagedEnhancementVersion> versions) in versionsByPath)
+        {
+            DateTimeOffset? latest = LatestEnhancementActivityUtc(versions, operation);
+            if (latest.HasValue)
+                result[path] = latest.Value;
+        }
+        return result;
+    }
+
+    private static Dictionary<string, DateTimeOffset> BuildLatestVideoActivityByPath(
+        IReadOnlyDictionary<string, List<ManagedVideoVersion>> versionsByPath)
+    {
+        var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string path, List<ManagedVideoVersion> versions) in versionsByPath)
+        {
+            DateTimeOffset? latest = LatestVideoActivityUtc(versions);
+            if (latest.HasValue)
+                result[path] = latest.Value;
+        }
+        return result;
+    }
+
+    private static DateTimeOffset? LatestEnhancementActivityUtc(
+        IEnumerable<ManagedEnhancementVersion> versions,
+        string operation)
+    {
+        DateTimeOffset? latest = null;
+        foreach (ManagedEnhancementVersion version in versions)
+        {
+            if (!string.Equals(version.Operation, operation, StringComparison.Ordinal)
+                || !version.CompletedAtUtc.HasValue)
+            {
+                continue;
+            }
+            if (!latest.HasValue || version.CompletedAtUtc.Value > latest.Value)
+                latest = version.CompletedAtUtc.Value;
+        }
+        return latest;
+    }
+
+    private static DateTimeOffset? LatestVideoActivityUtc(
+        IEnumerable<ManagedVideoVersion> versions)
+    {
+        DateTimeOffset? latest = null;
+        foreach (ManagedVideoVersion version in versions)
+        {
+            if (!version.CompletedAtUtc.HasValue)
+                continue;
+            if (!latest.HasValue || version.CompletedAtUtc.Value > latest.Value)
+                latest = version.CompletedAtUtc.Value;
+        }
+        return latest;
+    }
 
     private readonly record struct CatalogTilePreparationResult(
         List<Tile> Tiles,
@@ -12649,6 +16522,13 @@ public partial class MainWindow : Window
             SortModifiedOldestValue or "oldest" => SortModifiedOldestValue,
             SortCreatedNewestValue => SortCreatedNewestValue,
             SortCreatedOldestValue => SortCreatedOldestValue,
+            SortUpscaleNewestValue => SortUpscaleNewestValue,
+            SortUpscaleQueuedNewestValue => SortUpscaleQueuedNewestValue,
+            SortPhotorealNewestValue => SortPhotorealNewestValue,
+            SortPhotorealQueuedNewestValue => SortPhotorealQueuedNewestValue,
+            SortVideoNewestValue => SortVideoNewestValue,
+            SortVideoQueuedNewestValue => SortVideoQueuedNewestValue,
+            SortFavoriteChangedNewestValue => SortFavoriteChangedNewestValue,
             SortNameValue => SortNameValue,
             SortRandomValue => SortRandomValue,
             SortModifiedNewestValue or "newest" => SortModifiedNewestValue,
@@ -12727,6 +16607,33 @@ public partial class MainWindow : Window
             SortModifiedOldestValue => left.ModifiedUtc.CompareTo(right.ModifiedUtc),
             SortCreatedNewestValue => right.CreatedUtc.CompareTo(left.CreatedUtc),
             SortCreatedOldestValue => left.CreatedUtc.CompareTo(right.CreatedUtc),
+            SortUpscaleNewestValue => CompareOptionalActivityNewest(
+                left.UpscaleCompletedAtUtc,
+                right.UpscaleCompletedAtUtc),
+            SortUpscaleQueuedNewestValue => CompareQueueActivityNewest(
+                left.UpscaleQueueActive,
+                left.UpscaleQueueAddedAtUtc,
+                right.UpscaleQueueActive,
+                right.UpscaleQueueAddedAtUtc),
+            SortPhotorealNewestValue => CompareOptionalActivityNewest(
+                left.PhotorealCompletedAtUtc,
+                right.PhotorealCompletedAtUtc),
+            SortPhotorealQueuedNewestValue => CompareQueueActivityNewest(
+                left.PhotorealQueueActive,
+                left.PhotorealQueueAddedAtUtc,
+                right.PhotorealQueueActive,
+                right.PhotorealQueueAddedAtUtc),
+            SortVideoNewestValue => CompareOptionalActivityNewest(
+                left.VideoCompletedAtUtc,
+                right.VideoCompletedAtUtc),
+            SortVideoQueuedNewestValue => CompareQueueActivityNewest(
+                left.VideoQueueActive,
+                left.VideoQueueAddedAtUtc,
+                right.VideoQueueActive,
+                right.VideoQueueAddedAtUtc),
+            SortFavoriteChangedNewestValue => CompareOptionalActivityNewest(
+                left.FavoriteChangedAtUtc,
+                right.FavoriteChangedAtUtc),
             SortRandomValue => StableRandomSortKey(randomSortSeed, left.Path)
                 .CompareTo(StableRandomSortKey(randomSortSeed, right.Path)),
             SortNameValue => StringComparer.OrdinalIgnoreCase.Compare(left.FileName, right.FileName),
@@ -12753,15 +16660,58 @@ public partial class MainWindow : Window
 
     private void SyncSortButtons()
     {
-        if (SortModifiedNewest is null || SortModifiedOldest is null || SortCreatedNewest is null || SortCreatedOldest is null || SortName is null || SortRandom is null)
+        if (SortModifiedNewest is null
+            || SortModifiedOldest is null
+            || SortCreatedNewest is null
+            || SortCreatedOldest is null
+            || SortUpscaleNewest is null
+            || SortUpscaleQueuedNewest is null
+            || SortPhotorealNewest is null
+            || SortPhotorealQueuedNewest is null
+            || SortVideoNewest is null
+            || SortVideoQueuedNewest is null
+            || SortFavoriteChangedNewest is null
+            || SortName is null
+            || SortRandom is null)
             return;
 
         SortModifiedNewest.IsChecked = _sortBy == SortModifiedNewestValue;
         SortModifiedOldest.IsChecked = _sortBy == SortModifiedOldestValue;
         SortCreatedNewest.IsChecked = _sortBy == SortCreatedNewestValue;
         SortCreatedOldest.IsChecked = _sortBy == SortCreatedOldestValue;
+        SortUpscaleNewest.IsChecked = _sortBy == SortUpscaleNewestValue;
+        SortUpscaleQueuedNewest.IsChecked = _sortBy == SortUpscaleQueuedNewestValue;
+        SortPhotorealNewest.IsChecked = _sortBy == SortPhotorealNewestValue;
+        SortPhotorealQueuedNewest.IsChecked = _sortBy == SortPhotorealQueuedNewestValue;
+        SortVideoNewest.IsChecked = _sortBy == SortVideoNewestValue;
+        SortVideoQueuedNewest.IsChecked = _sortBy == SortVideoQueuedNewestValue;
+        SortFavoriteChangedNewest.IsChecked = _sortBy == SortFavoriteChangedNewestValue;
         SortName.IsChecked = _sortBy == SortNameValue;
         SortRandom.IsChecked = _sortBy == SortRandomValue;
+    }
+
+    private static int CompareOptionalActivityNewest(
+        DateTimeOffset? left,
+        DateTimeOffset? right)
+    {
+        if (left.HasValue && right.HasValue)
+            return right.Value.CompareTo(left.Value);
+        if (left.HasValue)
+            return -1;
+        return right.HasValue ? 1 : 0;
+    }
+
+    private static int CompareQueueActivityNewest(
+        bool leftActive,
+        DateTimeOffset? leftAddedAtUtc,
+        bool rightActive,
+        DateTimeOffset? rightAddedAtUtc)
+    {
+        if (leftActive != rightActive)
+            return leftActive ? -1 : 1;
+        return leftActive
+            ? CompareOptionalActivityNewest(leftAddedAtUtc, rightAddedAtUtc)
+            : 0;
     }
 
     private static ulong StableRandomSortKey(string seed, string path)
@@ -12975,12 +16925,22 @@ public partial class MainWindow : Window
         if (_adaptiveWorkbench)
         {
             NarrowSidebarRail.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
-            SidebarCol.Width = show ? new GridLength(WideSidebarWidth) : new GridLength(CompactSidebarRailWidth);
+            SetSidebarColumnConstraints(show);
+            SidebarCol.Width = show
+                ? new GridLength(_sidebarWidth)
+                : new GridLength(CompactSidebarRailWidth);
+            SidebarSplitter.Visibility = Visibility.Collapsed;
             _sidebarVisibleBeforeAdaptive = show;
         }
         else
         {
-            SidebarCol.Width = show ? new GridLength(WideSidebarWidth) : new GridLength(0);
+            SetSidebarColumnConstraints(show);
+            SidebarCol.Width = show
+                ? new GridLength(_sidebarWidth)
+                : new GridLength(0);
+            SidebarSplitter.Visibility = show
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
         ToggleSidebar.Style = (Style)FindResource(show ? "IconButtonActive" : "IconButton");
         ToggleSidebar.ToolTip = show ? "Hide sidebar" : "Show sidebar";
@@ -13091,18 +17051,26 @@ public partial class MainWindow : Window
             _adaptiveWorkbench = true;
             Sidebar.Visibility = Visibility.Collapsed;
             NarrowSidebarRail.Visibility = Visibility.Visible;
+            SetSidebarColumnConstraints(visible: false);
             SidebarCol.Width = new GridLength(CompactSidebarRailWidth);
+            SidebarSplitter.Visibility = Visibility.Collapsed;
             SearchBoxContainer.MinWidth = 140;
             SearchBoxContainer.MaxWidth = 360;
             ViewerShortcutsButton.Visibility = Visibility.Collapsed;
-            OpenAppSettingsButton.Visibility = Visibility.Collapsed;
+            OpenAppSettingsButton.Visibility = Visibility.Visible;
         }
         else
         {
             _adaptiveWorkbench = false;
             NarrowSidebarRail.Visibility = Visibility.Collapsed;
             Sidebar.Visibility = _sidebarVisibleBeforeAdaptive ? Visibility.Visible : Visibility.Collapsed;
-            SidebarCol.Width = _sidebarVisibleBeforeAdaptive ? new GridLength(WideSidebarWidth) : new GridLength(0);
+            SetSidebarColumnConstraints(_sidebarVisibleBeforeAdaptive);
+            SidebarCol.Width = _sidebarVisibleBeforeAdaptive
+                ? new GridLength(_sidebarWidth)
+                : new GridLength(0);
+            SidebarSplitter.Visibility = _sidebarVisibleBeforeAdaptive
+                ? Visibility.Visible
+                : Visibility.Collapsed;
             SearchBoxContainer.MinWidth = 240;
             SearchBoxContainer.MaxWidth = 480;
             ViewerShortcutsButton.Visibility = Visibility.Visible;
@@ -13119,15 +17087,48 @@ public partial class MainWindow : Window
 
     private void ApplyModalToolbarLayout(double width)
     {
-        bool compact = double.IsFinite(width) && width < ModalCompactToolbarThreshold;
-        Visibility optionalVisibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        ModalSourceLabel.Visibility = optionalVisibility;
-        ModalFileSizeText.Visibility = optionalVisibility;
-        ModalShortcutsButton.Visibility = optionalVisibility;
-        ModalDeleteButton.Visibility = optionalVisibility;
-        ModalOpenExternalButton.Visibility = optionalVisibility;
-        ModalRevealButton.Visibility = optionalVisibility;
-        ModalTitle.MaxWidth = compact ? 210 : 420;
+        double height = double.IsFinite(ActualHeight) && ActualHeight > 0
+            ? ActualHeight
+            : Height;
+        bool portrait = double.IsFinite(width)
+            && double.IsFinite(height)
+            && height > width;
+        bool compact = double.IsFinite(width)
+            && (width < ModalCompactToolbarThreshold || portrait);
+        ModalSourceLabel.Visibility = Visibility.Visible;
+        ModalFileSizeText.Visibility = Visibility.Visible;
+        ModalOneToOneButton.Visibility = Visibility.Collapsed;
+        ModalFavoriteControlBorder.Visibility = Visibility.Visible;
+        ModalFullScreenButton.Visibility = Visibility.Collapsed;
+        ModalFlipButton.Visibility = Visibility.Collapsed;
+        ModalEnhancedToggleButton.Visibility = Visibility.Collapsed;
+        ModalEnhancedToggleButton.IsTabStop = false;
+        ModalPhotorealUpscaleButton.Visibility = Visibility.Collapsed;
+        ModalVideoGenerateButton.Visibility = Visibility.Visible;
+        ModalVideoSettingsButton.Visibility = Visibility.Visible;
+        ModalI2iEditButton.Visibility = Visibility.Visible;
+        ModalI2iEditSettingsButton.Visibility = Visibility.Visible;
+        ModalI2iV2EditButton.Visibility = Visibility.Collapsed;
+        ModalShortcutsButton.Visibility = Visibility.Collapsed;
+        ModalDeleteButton.Visibility = Visibility.Collapsed;
+        ModalOpenExternalButton.Visibility = Visibility.Collapsed;
+        ModalRevealButton.Visibility = Visibility.Collapsed;
+        ModalFilmstripToggleButton.Visibility = Visibility.Collapsed;
+        ModalMetadataSidebarToggleButton.Visibility = Visibility.Collapsed;
+        ModalOverflowButton.Visibility = Visibility.Visible;
+        Grid.SetRow(ModalToolbarActionsPanel, compact ? 1 : 0);
+        Grid.SetColumn(ModalToolbarActionsPanel, compact ? 0 : 2);
+        Grid.SetColumnSpan(ModalToolbarActionsPanel, compact ? 4 : 1);
+        ModalToolbarActionsRow.Height = compact ? GridLength.Auto : new GridLength(0);
+        ModalToolbarActionsPanel.Margin = compact
+            ? new Thickness(0, 4, 0, 0)
+            : new Thickness(0);
+        ModalEnhancementVersionComboBox.Width = compact ? 132 : 150;
+        double settingsBoardTop = compact ? 88 : 52;
+        ModalUpscaleSettingsBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
+        ModalPhotorealSettingsBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
+        ModalVideoGenerationBoardBorder.Margin = new Thickness(0, settingsBoardTop, 150, 12);
+        ModalTitle.MaxWidth = compact ? 240 : 360;
         ModalEnhancementStatusText.MaxWidth = compact ? 88 : 240;
     }
 
@@ -13149,6 +17150,57 @@ public partial class MainWindow : Window
             CurrentAdaptivePreviewHeight() - 124,
             72,
             112);
+
+    private static double NormalizeSidebarWidth(double width)
+        => double.IsFinite(width)
+            ? Math.Clamp(width, MinSidebarWidth, MaxSidebarWidth)
+            : DefaultSidebarWidth;
+
+    private void SetSidebarColumnConstraints(bool visible)
+    {
+        SidebarCol.MinWidth = visible ? MinSidebarWidth : 0;
+        SidebarCol.MaxWidth = visible ? MaxSidebarWidth : double.PositiveInfinity;
+    }
+
+    private bool SetSidebarWidth(double width)
+    {
+        double normalized = NormalizeSidebarWidth(width);
+        bool changed = Math.Abs(normalized - _sidebarWidth) >= 0.5;
+        _sidebarWidth = normalized;
+        if (!_adaptiveWorkbench && Sidebar.Visibility == Visibility.Visible)
+            SidebarCol.Width = new GridLength(_sidebarWidth);
+        return changed;
+    }
+
+    private void SidebarSplitter_DragStarted(object sender, DragStartedEventArgs e)
+        => _sidebarResizeAnchor = CaptureGridZoomAnchor();
+
+    private void SidebarSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (_adaptiveWorkbench || Sidebar.Visibility != Visibility.Visible)
+            return;
+
+        SetSidebarWidth(SidebarCol.ActualWidth);
+        ScheduleGridGeometryAnchorRestore(_sidebarResizeAnchor);
+        _sidebarResizeAnchor = null;
+        SaveState();
+    }
+
+    private void SidebarSplitter_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Left or Key.Right))
+            return;
+
+        GridZoomAnchor? anchor = CaptureGridZoomAnchor();
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_adaptiveWorkbench || Sidebar.Visibility != Visibility.Visible)
+                return;
+            SetSidebarWidth(SidebarCol.ActualWidth);
+            ScheduleGridGeometryAnchorRestore(anchor);
+            SaveState();
+        }, DispatcherPriority.Render);
+    }
 
     private static double NormalizeRightPanelWidth(double width)
         => double.IsFinite(width) ? Math.Clamp(width, MinRightPanelWidth, MaxRightPanelWidth) : DefaultRightPanelWidth;
@@ -13284,6 +17336,48 @@ public partial class MainWindow : Window
             await SetSortByInteractiveAsync(SortCreatedOldestValue);
     }
 
+    private async void SortUpscaleNewest_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            await SetSortByInteractiveAsync(SortUpscaleNewestValue);
+    }
+
+    private async void SortUpscaleQueuedNewest_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            await SetSortByInteractiveAsync(SortUpscaleQueuedNewestValue);
+    }
+
+    private async void SortPhotorealNewest_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            await SetSortByInteractiveAsync(SortPhotorealNewestValue);
+    }
+
+    private async void SortPhotorealQueuedNewest_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            await SetSortByInteractiveAsync(SortPhotorealQueuedNewestValue);
+    }
+
+    private async void SortVideoNewest_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            await SetSortByInteractiveAsync(SortVideoNewestValue);
+    }
+
+    private async void SortVideoQueuedNewest_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            await SetSortByInteractiveAsync(SortVideoQueuedNewestValue);
+    }
+
+    private async void SortFavoriteChangedNewest_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            await SetSortByInteractiveAsync(SortFavoriteChangedNewestValue);
+    }
+
     private async void SortRandom_Checked(object sender, RoutedEventArgs e)
     {
         if (!_initializing)
@@ -13356,24 +17450,62 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void FolderDropOverlay_MouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        DismissFolderDropOverlays();
+        e.Handled = true;
+    }
+
+    private void DismissFolderDropOverlays()
+    {
+        LandingFolderDropOverlay.Visibility = Visibility.Collapsed;
+        ViewerFolderDropOverlay.Visibility = Visibility.Collapsed;
+    }
+
     private async void FolderDropTarget_Drop(object sender, DragEventArgs e)
     {
         SetFolderDropAffordance(sender, visible: false);
-        DroppedFolderSet dropped = ReadDroppedFolders(e.Data);
         bool landing = ReferenceEquals(sender, Landing);
-        await ApplyDroppedFoldersAsync(dropped, landing);
+        if (landing)
+        {
+            await ApplyDroppedFoldersAsync(ReadDroppedFolders(e.Data), landing: true);
+        }
+        else
+        {
+            ViewerDropPayload payload = ReadViewerDropPayload(e.Data);
+            if (payload.Kind == ViewerDropPayloadKind.Folders
+                && payload.Folders is not null)
+            {
+                await ApplyDroppedFoldersAsync(payload.Folders, landing: false);
+            }
+            else if (payload.Kind == ViewerDropPayloadKind.Images)
+            {
+                await ApplyDroppedImagesAsync(payload.Paths);
+            }
+            else
+            {
+                string status = UiLanguageResources.Format(
+                    "UiExternalImageDropRejectedFormat",
+                    payload.Reason);
+                SetStatusToast(status);
+            }
+        }
         e.Handled = true;
     }
 
     private void UpdateFolderDropAffordance(object sender, DragEventArgs e)
     {
-        DroppedFolderSet dropped = ReadDroppedFolders(e.Data);
-        bool accepted = dropped.Folders.Count > 0;
+        bool landing = ReferenceEquals(sender, Landing);
+        bool accepted = landing
+            ? ReadDroppedFolders(e.Data).Folders.Count > 0
+            : ViewerDropPayloadHasAcceptableAffordance(
+                ReadViewerDropPayload(e.Data));
         SetFolderDropAffordance(sender, accepted);
 
-        // The intake surface accepts only existing folders.  Image FileDrop
-        // payloads remain Copy payloads at their source, but are explicitly not a
-        // valid drop here, so they cannot be mistaken for a folder intake action.
+        // Both accepted payloads remain references to their original paths;
+        // no drop copies or moves source files.
         e.Effects = accepted ? DragDropEffects.Link : DragDropEffects.None;
         e.Handled = true;
     }
@@ -13873,6 +18005,8 @@ public partial class MainWindow : Window
         canonical = "";
         if (!tile.IsRealFile || string.IsNullOrWhiteSpace(tile.Path))
             return Fail("not a source image", out reason);
+        if (IsExternalFileDropSessionTile(tile))
+            return TryValidateExternalFileDropTile(tile, out canonical, out reason);
         if (!_allTiles.Contains(tile))
             return Fail("not in the current catalog", out reason);
         if (!Path.IsPathFullyQualified(tile.Path))
@@ -13920,15 +18054,16 @@ public partial class MainWindow : Window
         return Fail("source is outside the active root", out reason);
     }
 
-    private void OpenModal()
+    private void OpenModal(Tile? requestedTile = null)
     {
         // jobs.json changes on every AI progress update and can contain years
         // of history. Never parse and validate it synchronously on the input
         // path; open the image immediately and hydrate fresh job state in the
         // background.
         QueueEnhancedStateRefreshIfChanged();
-        if (SelectedTile() is not Tile t) return;
-        UpdateModalPositionText(t);
+        if ((requestedTile ?? SelectedTile()) is not Tile t) return;
+        int projectedIndex = _tiles.IndexOf(t);
+        UpdateModalPositionText(t, projectedIndex);
         StopGalleryAutoScroll();
         bool opening = Modal.Visibility != Visibility.Visible;
         bool sourceChanged = !string.Equals(_modalSourceTilePath, t.Path, StringComparison.OrdinalIgnoreCase);
@@ -13936,7 +18071,7 @@ public partial class MainWindow : Window
         if (opening)
             _modalFocusBeforeOverlay = Keyboard.FocusedElement;
         if (!string.Equals(_modalTransformPath, t.Path, StringComparison.OrdinalIgnoreCase))
-            ResetModalTransform(t.Path);
+            ResetModalTransform(t.Path, preserveZoom: !opening);
         if (sourceChanged)
         {
             StopAndHideModalVideo(clearSource: true);
@@ -13950,6 +18085,7 @@ public partial class MainWindow : Window
         }
         var watch = Stopwatch.StartNew();
         _modalCts?.Cancel();
+        _modalCts?.Dispose();
         _modalDecodeCompletion?.TrySetCanceled();
         var cts = new CancellationTokenSource();
         _modalCts = cts;
@@ -13969,11 +18105,24 @@ public partial class MainWindow : Window
             SetStatusToast(displayedAsset.FallbackReason);
         string displayPath = displayedAsset.Path;
         _modalDisplayPath = displayPath;
+        bool settleExpensiveWork = opening || sourceChanged;
+        QueueModalMetadataSidebarRefresh(displayPath, settleExpensiveWork);
         ModalFileSizeText.Text = FormatFileSizeMb(displayedAsset.SizeBytes);
+        UpdateModalDisplayedImageInfo(
+            t,
+            displayedAsset.Enhanced ? 0 : t.ImagePixelWidth,
+            displayedAsset.Enhanced ? 0 : t.ImagePixelHeight);
         UpdateModalEnhancedControls(canShowEnhanced);
         UpdateVideoGenerationActionControls();
 
-        var immediate = _modalShowingEnhanced ? null : PreviewBitmap.Source as BitmapSource ?? t.Thumbnail;
+        bool selectedPreviewMatches = string.Equals(
+            SelectedTile()?.Path,
+            t.Path,
+            StringComparison.OrdinalIgnoreCase);
+        var immediate = _modalShowingEnhanced
+            ? null
+            : (selectedPreviewMatches ? PreviewBitmap.Source as BitmapSource : null)
+                ?? (HasOriginalResidentThumbnail(t) ? t.Thumbnail : null);
         ModalBitmap.Source = immediate;
         ModalBitmap.Visibility = immediate is null ? Visibility.Collapsed : Visibility.Visible;
         ModalArtBase.Visibility = immediate is null ? Visibility.Visible : Visibility.Collapsed;
@@ -13983,10 +18132,12 @@ public partial class MainWindow : Window
         if (opening)
             SetModalMetadataSidebarVisible(false);
         Modal.Visibility = Visibility.Visible;
+        UpdateModalEnhancementActionControls();
+        UpdateVideoGenerationActionControls();
+        if (opening)
+            SyncDisplayedModalFavoriteLevel(t);
         if (opening)
             Dispatcher.BeginInvoke(Modal.Focus, DispatcherPriority.Input);
-        Modal.UpdateLayout();
-        UpdateModalFit();
         ScheduleModalFitUpdate();
         if (sourceChanged && restoreVideoOnOpen)
             ShowModalVideoVersion(_modalVideoVersionIndex, autoplay: true);
@@ -13996,7 +18147,7 @@ public partial class MainWindow : Window
             _modalPressedEdgeTarget = ModalEdgeTarget.None;
             SetModalChromeVisible(true, showFeedback: false);
         }
-        SyncModalFilmstripSelection(t);
+        SyncModalFilmstripSelection(t, projectedIndex);
         SyncModalMetadataSidebar();
         watch.Stop();
 
@@ -14012,29 +18163,58 @@ public partial class MainWindow : Window
                 displayPath,
                 t.Path,
                 displayedAsset.Enhanced,
+                settleExpensiveWork,
                 cts.Token,
                 decodeCompletion);
         else
             decodeCompletion.TrySetResult(immediate is not null);
 
-        if (opening || sourceChanged)
-            BeginModalEnhancementRefresh(t.Path);
+        // A passive external FileDrop preview stays fully local. The first
+        // explicit AI action performs the normal health/start/enqueue flow.
+        if ((opening || sourceChanged)
+            && !IsExternalFileDropSessionTile(t))
+            BeginModalEnhancementRefresh(t.Path, settleForNavigation: true);
     }
 
-    private void UpdateModalPositionText(Tile tile)
+    private void UpdateModalPositionText(Tile tile, int projectedIndex = -1)
     {
-        int total = _tiles.Count;
-        int index = total > 0 ? _tiles.IndexOf(tile) : -1;
+        IReadOnlyList<Tile> navigationTiles = ModalNavigationTiles();
+        int total = navigationTiles.Count;
+        int index = projectedIndex >= 0
+            && projectedIndex < _tiles.Count
+            && ReferenceEquals(_tiles[projectedIndex], tile)
+            && !ExternalFileDropSessionActive
+                ? projectedIndex
+                : total > 0
+                    ? IndexOfTile(navigationTiles, tile)
+                    : -1;
         int position = index >= 0 ? index + 1 : 0;
-        int digits = Math.Max(3, total.ToString(CultureInfo.InvariantCulture).Length);
-        string positionText = position.ToString($"D{digits}", CultureInfo.InvariantCulture);
-        string totalText = total.ToString($"D{digits}", CultureInfo.InvariantCulture);
-        ModalPositionText.Text = $"{positionText} / {totalText}";
+        ModalPositionText.Text = $"画像 {position.ToString(CultureInfo.InvariantCulture)} / {total.ToString(CultureInfo.InvariantCulture)}";
         AutomationProperties.SetName(
             ModalPositionText,
             total > 0 && position > 0
                 ? $"Image {position} of {total}"
                 : "No image position");
+    }
+
+    private void UpdateModalDisplayedImageInfo(Tile tile, int width, int height)
+    {
+        _modalDisplayedImagePixelWidth = width;
+        _modalDisplayedImagePixelHeight = height;
+        UpdateModalDisplayedDimensionsInfo(tile, width, height);
+    }
+
+    private void UpdateModalDisplayedDimensionsInfo(Tile tile, int width, int height)
+    {
+        ModalTitle.Text = width > 0 && height > 0
+            ? $"{width.ToString(CultureInfo.InvariantCulture)} × {height.ToString(CultureInfo.InvariantCulture)}"
+            : "寸法を確認中";
+        ModalTitle.ToolTip = tile.FileName;
+        AutomationProperties.SetName(
+            ModalTitle,
+            width > 0 && height > 0
+                ? $"{tile.FileName}, {width} by {height} pixels"
+                : $"{tile.FileName}, image dimensions pending");
     }
 
     private bool TryGetModalEnhancedOutput(Tile tile, out string? outputPath)
@@ -14130,7 +18310,7 @@ public partial class MainWindow : Window
         }
 
         if (ModalEnhancedToggleLabel is not null)
-            ModalEnhancedToggleLabel.Text = currentDisplay;
+            ModalEnhancedToggleLabel.Text = "差分";
         if (ModalEnhancedToggleButton is not null)
         {
             AutomationProperties.SetName(
@@ -14144,25 +18324,35 @@ public partial class MainWindow : Window
                     ? $"{currentDisplay} output"
                     : "Original";
         UpdateModalDisplayedDeletePresentation();
+        if (TryGetModalSourceTile(out Tile selected))
+        {
+            SyncDisplayedModalFavoriteLevel(selected);
+        }
     }
 
     private async Task LoadModalBitmapAsync(
         string displayPath,
         string selectedPath,
         bool explicitManagedOutput,
+        bool settleForNavigation,
         CancellationToken token,
         TaskCompletionSource<bool> completion)
     {
         BitmapSource? bitmap;
+        BitmapDecodePlan? decodePlan = null;
         try
         {
+            if (settleForNavigation)
+                await Task.Delay(ModalNavigationSettleMilliseconds, token);
+            Interlocked.Increment(ref _modalDecodeStartCountForSmoke);
             if (_modalDecodeDelayForSmokeMs > 0)
                 await Task.Delay(_modalDecodeDelayForSmokeMs, token);
             bitmap = await LoadBitmapWithRetryAsync(
                 displayPath,
                 1400,
                 token,
-                explicitManagedOutput);
+                explicitManagedOutput,
+                plan => decodePlan = plan);
         }
         catch (OperationCanceledException)
         {
@@ -14186,12 +18376,17 @@ public partial class MainWindow : Window
             await Dispatcher.InvokeAsync(
                 () =>
                 {
-                    if (token.IsCancellationRequested || Modal.Visibility != Visibility.Visible)
+                    if (token.IsCancellationRequested
+                        || Modal.Visibility != Visibility.Visible
+                        || _modalShowingVideo)
                     {
                         completion.TrySetResult(false);
                         return;
                     }
-                    if (SelectedTile()?.Path != selectedPath)
+                    if (!string.Equals(
+                            _modalSourceTilePath,
+                            selectedPath,
+                            StringComparison.OrdinalIgnoreCase))
                     {
                         completion.TrySetResult(false);
                         return;
@@ -14200,6 +18395,16 @@ public partial class MainWindow : Window
                     {
                         completion.TrySetResult(false);
                         return;
+                    }
+
+                    if (TryGetModalSourceTile(out Tile selectedTile)
+                        && decodePlan is BitmapDecodePlan plan)
+                    {
+                        UpdateModalDisplayedImageInfo(
+                            selectedTile,
+                            plan.SourceWidth,
+                            plan.SourceHeight);
+                        ScheduleModalFitUpdate();
                     }
 
                     if (bitmap is null)
@@ -14221,6 +18426,7 @@ public partial class MainWindow : Window
                     ModalBitmap.Visibility = Visibility.Visible;
                     ModalArtBase.Visibility = Visibility.Collapsed;
                     ModalArtGlow.Visibility = Visibility.Collapsed;
+                    Interlocked.Increment(ref _modalDecodeApplyCountForSmoke);
                     completion.TrySetResult(true);
                 },
                 DispatcherPriority.Background,
@@ -14239,14 +18445,42 @@ public partial class MainWindow : Window
 
     private void Modal_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
-        UpdateModalDisplayedDeletePresentation();
-        bool enhancedAvailable = SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
+        ModalContextMenu.PlacementTarget = ModalImageArea;
+        ModalContextMenu.Placement = PlacementMode.MousePoint;
+        UpdateModalContextMenuPresentation();
+    }
+
+    private void UpdateModalContextMenuPresentation()
+    {
+        UpdateModalDisplayedDeletePresentation(validateOriginalSource: true);
+        UpdateModalI2iEditActionAvailability();
+        UpdateModalEnhancementActionControls();
+        ModalContextUpscale.IsEnabled = ModalEnhanceButton.IsEnabled;
+        ModalContextUpscale.ToolTip = ModalEnhanceButton.ToolTip;
+        ModalContextPhotoreal.IsEnabled = ModalPhotorealButton.IsEnabled;
+        ModalContextPhotoreal.ToolTip = ModalPhotorealButton.ToolTip;
+        bool canEnqueueNext = TryGetModalSourceTile(out Tile sourceTile)
+            && sourceTile.IsRealFile
+            && File.Exists(sourceTile.Path)
+            && !_galleryContextEnhancementRequestPending;
+        ModalContextUpscaleNext.IsEnabled = canEnqueueNext;
+        ModalContextPhotorealNext.IsEnabled = canEnqueueNext;
+        bool enhancedAvailable = TryGetModalSourceTile(out Tile tile)
+            && TryGetModalEnhancedOutput(tile, out _);
         ModalContextEnhancedToggle.IsEnabled = enhancedAvailable;
         string outputLabel = _modalEnhancementOperation == "photoreal" ? "Photoreal" : "Enhanced";
         ModalContextEnhancedToggle.Header = _modalShowingEnhanced ? "Show Original" : $"Show {outputLabel}";
         ModalContextFullScreen.Header = _modalFullScreen
             ? "Exit full screen (F11)"
             : "Enter full screen (F11)";
+    }
+
+    private void OpenModalOverflow_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateModalContextMenuPresentation();
+        ModalContextMenu.PlacementTarget = ModalOverflowButton;
+        ModalContextMenu.Placement = PlacementMode.Bottom;
+        ModalContextMenu.IsOpen = true;
     }
 
     private void ModalBackdrop_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -14281,9 +18515,12 @@ public partial class MainWindow : Window
     private void ModalFit_Click(object sender, RoutedEventArgs e)
         => ResetModalTransform(_modalTransformPath, showFeedback: true);
 
-    private void BeginModalEnhancementRefresh(string sourcePath)
+    private void BeginModalEnhancementRefresh(
+        string sourcePath,
+        bool settleForNavigation = false)
     {
         long generation = ++_modalEnhancementGeneration;
+        CancellationToken token = ResetModalEnhancementRefreshRequest();
         _modalEnhancementPollTimer.Stop();
         _modalEnhancementJobId = null;
         _modalEnhancementOperation = "upscale";
@@ -14292,18 +18529,44 @@ public partial class MainWindow : Window
         _modalEnhancementError = null;
         _modalEnhancementCancelRequested = false;
         UpdateModalEnhancementActionControls();
-        _ = RefreshModalEnhancementStateAsync(sourcePath, generation, showUnavailableError: false);
+        _ = RefreshModalEnhancementStateAsync(
+            sourcePath,
+            generation,
+            showUnavailableError: false,
+            token,
+            settleForNavigation);
+    }
+
+    private CancellationToken ResetModalEnhancementRefreshRequest()
+    {
+        CancelModalEnhancementRefreshRequest();
+        var cts = new CancellationTokenSource();
+        _modalEnhancementRefreshCts = cts;
+        return cts.Token;
+    }
+
+    private void CancelModalEnhancementRefreshRequest()
+    {
+        _modalEnhancementRefreshCts?.Cancel();
+        _modalEnhancementRefreshCts?.Dispose();
+        _modalEnhancementRefreshCts = null;
     }
 
     private async void ModalEnhancementPollTimer_Tick(object? sender, EventArgs e)
     {
-        if (_modalEnhancementPolling || Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile)
+        if (_modalEnhancementPolling
+            || _modalEnhancementRequestPending
+            || !TryGetModalSourceTile(out Tile tile))
             return;
 
         _modalEnhancementPolling = true;
         try
         {
-            await RefreshModalEnhancementStateAsync(tile.Path, _modalEnhancementGeneration, showUnavailableError: false);
+            await RefreshModalEnhancementStateAsync(
+                tile.Path,
+                _modalEnhancementGeneration,
+                showUnavailableError: false,
+                _modalEnhancementRefreshCts?.Token ?? CancellationToken.None);
         }
         finally
         {
@@ -14328,28 +18591,137 @@ public partial class MainWindow : Window
         HttpMethod method,
         string relativePath,
         object? body = null,
-        CancellationToken token = default)
+        CancellationToken token = default,
+        string? exactBodyJson = null,
+        string? idempotencyKey = null,
+        int? timeoutMilliseconds = null,
+        int? maxResponseBytes = null,
+        string? timeoutError = null)
     {
+        CancellationTokenSource? requestTimeoutCts = null;
         try
         {
+            int effectiveTimeoutMilliseconds = Math.Max(
+                1,
+                timeoutMilliseconds ?? DefaultEnhancementApiTimeoutMilliseconds);
+            requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            requestTimeoutCts.CancelAfter(effectiveTimeoutMilliseconds);
+            CancellationToken requestToken = requestTimeoutCts.Token;
+
             Uri endpoint = new(ResolveBrowserEnhancementBaseUri(), relativePath.TrimStart('/'));
-            using var request = new HttpRequestMessage(method, endpoint);
-            if (body is not null)
+            string? requestBodyJson = exactBodyJson
+                ?? (body is null ? null : JsonSerializer.Serialize(body));
+            byte[] requestBodyBytes = requestBodyJson is null
+                ? []
+                : Encoding.UTF8.GetBytes(requestBodyJson);
+            HttpRequestMessage? securedRequest = null;
+            string secureRequestNonce = "";
+            if (_usingDefaultModalEnhancementSender
+                && !TryCreateEnhancementCompanionSecureRequest(
+                    method,
+                    relativePath,
+                    requestBodyBytes,
+                    idempotencyKey,
+                    out securedRequest,
+                    out secureRequestNonce))
             {
-                request.Content = new StringContent(
-                    JsonSerializer.Serialize(body),
-                    Encoding.UTF8,
-                    "application/json");
+                return new EnhancementApiResponse(
+                    false,
+                    403,
+                    null,
+                    "The local AI companion has not proved ownership. No request was sent.");
+            }
+            using var request = securedRequest
+                ?? new HttpRequestMessage(method, endpoint);
+            if (!_usingDefaultModalEnhancementSender)
+            {
+                if (!string.IsNullOrWhiteSpace(idempotencyKey))
+                    request.Headers.TryAddWithoutValidation(
+                        "Idempotency-Key",
+                        idempotencyKey);
+                if (requestBodyJson is not null)
+                {
+                    request.Content = new StringContent(
+                        requestBodyJson,
+                        Encoding.UTF8,
+                        "application/json");
+                }
             }
 
-            using HttpResponseMessage response = await _modalEnhancementSender(request, token);
-            string text = await response.Content.ReadAsStringAsync(token);
+            using HttpResponseMessage response = await _modalEnhancementSender(request, requestToken);
+            if (_usingDefaultModalEnhancementSender
+                && (int)response.StatusCode is 401 or 403)
+            {
+                _enhancementCompanionOwnershipVerified = false;
+            }
+            int statusCode = (int)response.StatusCode;
+            byte[] responseBytes;
+            bool innerStatusAuthoritative = !_usingDefaultModalEnhancementSender;
+            if (_usingDefaultModalEnhancementSender)
+            {
+                int outerResponseLimit = maxResponseBytes is int requested
+                    ? (int)Math.Min(
+                        EnhancementCompanionMaximumSecureResponseBytes,
+                        Math.Max(65_536L, (long)requested * 2 + 65_536))
+                    : EnhancementCompanionMaximumSecureResponseBytes;
+                byte[]? secureEnvelopeBytes =
+                    await ReadBoundedEnhancementResponseAsync(
+                        response.Content,
+                        outerResponseLimit,
+                        requestToken);
+                if (secureEnvelopeBytes is null
+                    || !TryDecryptEnhancementCompanionSecureResponse(
+                        response,
+                        secureEnvelopeBytes,
+                        secureRequestNonce,
+                        out statusCode,
+                        out responseBytes))
+                {
+                    _enhancementCompanionOwnershipVerified = false;
+                    return new EnhancementApiResponse(
+                        false,
+                        403,
+                        null,
+                        "The local AI companion response was not authenticated. No response data was accepted.");
+                }
+                innerStatusAuthoritative = true;
+                if (maxResponseBytes is int securePlaintextLimit
+                    && responseBytes.Length > Math.Max(1, securePlaintextLimit))
+                {
+                    return new EnhancementApiResponse(
+                        false,
+                        statusCode,
+                        null,
+                        "The local AI companion response exceeded the safe size limit.");
+                }
+            }
+            else
+            {
+                int responseLimit = maxResponseBytes is int requestedResponseLimit
+                    ? Math.Max(1, requestedResponseLimit)
+                    : EnhancementCompanionMaximumSecureResponseBytes;
+                byte[]? boundedResponseBytes = await ReadBoundedEnhancementResponseAsync(
+                    response.Content,
+                    responseLimit,
+                    requestToken);
+                if (boundedResponseBytes is null)
+                {
+                    return new EnhancementApiResponse(
+                        false,
+                        statusCode,
+                        null,
+                        "The local AI companion response exceeded the safe size limit.");
+                }
+                responseBytes = boundedResponseBytes;
+            }
+
             JsonElement? payload = null;
-            if (!string.IsNullOrWhiteSpace(text))
+            if (responseBytes.Length > 0)
             {
                 try
                 {
-                    using JsonDocument document = JsonDocument.Parse(text);
+                    using JsonDocument document = JsonDocument.Parse(
+                        responseBytes);
                     payload = document.RootElement.Clone();
                 }
                 catch (JsonException)
@@ -14358,14 +18730,56 @@ public partial class MainWindow : Window
             }
 
             string error = "";
-            if (!response.IsSuccessStatusCode)
+            bool innerSuccess = statusCode is >= 200 and < 300;
+            if (!innerSuccess)
             {
                 error = payload is JsonElement root
                     && TryGetStringProperty(root, "error", out string? apiError)
                     ? apiError ?? "Enhancement request failed."
-                    : $"Enhancement request failed ({(int)response.StatusCode}).";
+                    : $"Enhancement request failed ({statusCode}).";
             }
-            return new EnhancementApiResponse(response.IsSuccessStatusCode, (int)response.StatusCode, payload, error);
+            return new EnhancementApiResponse(
+                innerSuccess,
+                statusCode,
+                payload,
+                error,
+                InnerStatusAuthoritative: innerStatusAuthoritative);
+        }
+        catch (OperationCanceledException) when (
+            !token.IsCancellationRequested
+            && requestTimeoutCts?.IsCancellationRequested == true)
+        {
+            if (!string.IsNullOrWhiteSpace(timeoutError))
+            {
+                return new EnhancementApiResponse(
+                    false,
+                    0,
+                    null,
+                    timeoutError);
+            }
+            if (timeoutMilliseconds is null)
+            {
+                string defaultTimeoutError = method == HttpMethod.Get
+                    ? "The local AI companion did not answer within 30 seconds. Try the request again."
+                    : "The local AI companion did not return a receipt within 30 seconds. The change may already have been applied; check Jobs before retrying.";
+                return new EnhancementApiResponse(
+                    false,
+                    0,
+                    null,
+                    defaultTimeoutError);
+            }
+            return new EnhancementApiResponse(
+                false,
+                0,
+                null,
+                "The local AI companion did not return an immediate receipt.");
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            string error = method == HttpMethod.Get
+                ? "The local AI companion did not answer within 30 seconds. Try the request again."
+                : "The local AI companion did not return a receipt within 30 seconds. The change may already have been applied; check Jobs before retrying.";
+            return new EnhancementApiResponse(false, 0, null, error);
         }
         catch (OperationCanceledException)
         {
@@ -14377,7 +18791,58 @@ public partial class MainWindow : Window
                 false,
                 0,
                 null,
-                $"The optional Browser Enhancement companion is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start the H25 Browser application, then retry.");
+                $"The optional local AI service is unavailable at {ResolveBrowserEnhancementBaseUri().GetLeftPart(UriPartial.Authority)}. Start the Aibos Image local AI service, then retry.");
+        }
+        finally
+        {
+            requestTimeoutCts?.Dispose();
+        }
+    }
+
+    private static async Task<byte[]?> ReadBoundedEnhancementResponseAsync(
+        HttpContent content,
+        int maximumBytes,
+        CancellationToken token)
+    {
+        if (content.Headers.ContentLength is long declaredLength
+            && declaredLength > maximumBytes)
+        {
+            return null;
+        }
+
+        int initialCapacity = content.Headers.ContentLength is long knownLength
+            ? (int)Math.Min(knownLength, maximumBytes)
+            : Math.Min(4_096, maximumBytes);
+        using var buffered = new MemoryStream(initialCapacity);
+        await using Stream responseStream = await content.ReadAsStreamAsync(token);
+        int readBufferSize = maximumBytes >= 8_192
+            ? 8_192
+            : maximumBytes + 1;
+        byte[] readBuffer = ArrayPool<byte>.Shared.Rent(
+            readBufferSize);
+        try
+        {
+            int total = 0;
+            while (true)
+            {
+                int requested = Math.Min(
+                    readBuffer.Length,
+                    (maximumBytes - total) + 1);
+                int read = await responseStream.ReadAsync(
+                    readBuffer.AsMemory(0, requested),
+                    token);
+                if (read == 0)
+                    return buffered.ToArray();
+
+                total += read;
+                if (total > maximumBytes)
+                    return null;
+                buffered.Write(readBuffer, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(readBuffer);
         }
     }
 
@@ -14452,8 +18917,27 @@ public partial class MainWindow : Window
             ?? imageJobs.FirstOrDefault();
     }
 
-    private async Task RefreshModalEnhancementStateAsync(string sourcePath, long generation, bool showUnavailableError)
+    private async Task RefreshModalEnhancementStateAsync(
+        string sourcePath,
+        long generation,
+        bool showUnavailableError,
+        CancellationToken token = default,
+        bool settleForNavigation = false)
     {
+        if (settleForNavigation)
+        {
+            try
+            {
+                await Task.Delay(ModalNavigationSettleMilliseconds, token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+        if (token.IsCancellationRequested)
+            return;
+
         if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity))
         {
             if (showUnavailableError)
@@ -14463,10 +18947,24 @@ public partial class MainWindow : Window
         }
 
         string encodedSource = Uri.EscapeDataString(sourceIdentity);
-        EnhancementApiResponse response = await SendEnhancementApiAsync(HttpMethod.Get, $"api/enhance/jobs?sourceId={encodedSource}");
-        if (generation != _modalEnhancementGeneration
-            || Modal.Visibility != Visibility.Visible
-            || SelectedTile() is not Tile tile
+        Task<EnhancementApiResponse> jobsTask = SendEnhancementApiAsync(
+            HttpMethod.Get,
+            $"api/enhance/jobs?sourceId={encodedSource}",
+            token: token);
+        Task<bool?>? recoveredCapabilityTask = TryGetModalSourceTile(out Tile currentTile)
+            && string.Equals(
+                currentTile.Path,
+                sourcePath,
+                StringComparison.OrdinalIgnoreCase)
+            && HasRecoveredPhotorealUpscaleSource(currentTile)
+                ? RefreshRecoveredPhotorealSourceUpscaleCapabilityAsync(token)
+                : null;
+        EnhancementApiResponse response = await jobsTask;
+        if (recoveredCapabilityTask is not null)
+            _ = await recoveredCapabilityTask;
+        if (token.IsCancellationRequested
+            || generation != _modalEnhancementGeneration
+            || !TryGetModalSourceTile(out Tile tile)
             || !string.Equals(tile.Path, sourcePath, StringComparison.OrdinalIgnoreCase))
         {
             return;
@@ -14487,8 +18985,7 @@ public partial class MainWindow : Window
 
     private bool IsCurrentModalEnhancementContext(Tile tile, string sourcePath, long generation)
         => generation == _modalEnhancementGeneration
-            && Modal.Visibility == Visibility.Visible
-            && SelectedTile() is Tile selected
+            && TryGetModalSourceTile(out Tile selected)
             && ReferenceEquals(selected, tile)
             && string.Equals(selected.Path, sourcePath, StringComparison.OrdinalIgnoreCase);
 
@@ -14528,7 +19025,7 @@ public partial class MainWindow : Window
                 && string.Equals(_modalSourceTilePath, tile.Path, StringComparison.OrdinalIgnoreCase)
                 && _modalShowingEnhanced)
             {
-                OpenModal();
+                OpenModal(tile);
             }
         }
         else if (job is { Status: "succeeded", OutputPath: not null })
@@ -14565,14 +19062,9 @@ public partial class MainWindow : Window
                 || Math.Abs(currentMtimeMs - sourceMtimeMs) > 1)
                 return false;
 
-            string lexicalOutput = Path.GetFullPath(outputPath);
-            string canonicalOutput = _resolveFinalPath(lexicalOutput);
-            string lexicalRoot = Path.GetFullPath(ResolvedManagedEnhancementOutputsRoot);
-            string canonicalRoot = _resolveFinalPath(lexicalRoot);
-            if (!IsPathInside(lexicalOutput, lexicalRoot)
-                || !IsPathInside(canonicalOutput, canonicalRoot)
-                || !File.Exists(canonicalOutput)
-                || !SupportedImageExtensions.Contains(Path.GetExtension(canonicalOutput)))
+            if (!TryResolveManagedEnhancementOutputPath(
+                    outputPath,
+                    out string canonicalOutput))
                 return false;
 
             managedOutput = new ManagedEnhancedOutput(canonicalOutput, sourceSize, sourceMtimeMs);
@@ -14586,29 +19078,91 @@ public partial class MainWindow : Window
 
     private void UpdateModalEnhancementActionControls()
     {
-        if (ModalEnhanceButton is null || ModalPhotorealButton is null)
+        if (ModalEnhanceButton is null
+            || ModalPhotorealButton is null
+            || ModalPhotorealUpscaleButton is null)
             return;
 
-        bool hasRealSource = SelectedTile() is { IsRealFile: true } tile && File.Exists(tile.Path);
+        Tile? selectedTile = TryGetModalSourceTile(out Tile modalTile)
+            ? modalTile
+            : null;
+        bool hasRealSource = selectedTile is { IsRealFile: true }
+            && File.Exists(selectedTile.Path);
+        string photorealUpscaleError =
+            "高画質化できる実写版が見つかりません。先にAI実写化を完了してください。";
+        var photorealUpscaleSource = new UpscaleRequestSource(null, null);
+        bool hasPhotorealUpscaleSource = hasRealSource
+            && TryResolveModalPhotorealUpscaleProfile(
+                selectedTile!,
+                out photorealUpscaleSource,
+                out _,
+                out _,
+                out _,
+                out photorealUpscaleError);
+        if (hasPhotorealUpscaleSource
+            && photorealUpscaleSource.UsesRecoveredPhotorealSource
+            && _recoveredPhotorealSourceUpscaleSupported != true)
+        {
+            hasPhotorealUpscaleSource = false;
+            photorealUpscaleError =
+                "The Aibos Image local AI service does not support Recovered photoreal HQ. Restart the local AI service first; no job was added.";
+        }
+        var currentUpscaleSource = new UpscaleRequestSource(null, null);
+        bool currentUpscaleSourceResolved = hasRealSource
+            && TryResolveModalUpscaleProfile(
+                selectedTile!,
+                out currentUpscaleSource,
+                out _,
+                out _,
+                out _,
+                out _);
+        bool currentUpscaleSourceSupported = currentUpscaleSourceResolved
+            && (!currentUpscaleSource.UsesRecoveredPhotorealSource
+                || _recoveredPhotorealSourceUpscaleSupported == true);
         bool active = _modalEnhancementJobStatus is "queued" or "running";
         bool canceling = active && _modalEnhancementCancelRequested;
-        bool retryable = _modalEnhancementJobStatus is "failed" or "canceled";
+        bool retryable = _modalEnhancementOperation is "upscale" or "photoreal"
+            && _modalEnhancementJobStatus is "failed" or "canceled";
         bool currentIsPhotoreal = _modalEnhancementOperation == "photoreal";
+        bool currentIsI2i = _modalEnhancementOperation == "i2i";
+        bool displayedVersionIsPhotoreal = CurrentModalEnhancementVersionIsPhotoreal();
 
-        ModalEnhanceButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
+        ModalEnhanceButton.IsEnabled = hasRealSource
+            && currentUpscaleSourceSupported
+            && !_modalEnhancementRequestPending
+            && !active;
         ModalPhotorealButton.IsEnabled = hasRealSource && !_modalEnhancementRequestPending && !active;
+        ModalPhotorealUpscaleButton.IsEnabled = hasPhotorealUpscaleSource
+            && !_modalEnhancementRequestPending
+            && !active;
+        ModalPhotorealUpscaleButton.ToolTip = hasPhotorealUpscaleSource
+            ? "最新または表示中の実写版だけを高画質化"
+            : photorealUpscaleError;
+        ModalContextPhotorealUpscale.IsEnabled = ModalPhotorealUpscaleButton.IsEnabled;
+        ModalContextPhotorealUpscale.ToolTip = ModalPhotorealUpscaleButton.ToolTip;
         ModalPhotorealSettingsButton.IsEnabled = !_modalEnhancementRequestPending && !active;
         ModalEnhanceButtonLabel.Text = _modalEnhancementRequestPending && !currentIsPhotoreal
             ? "開始中"
             : retryable && !currentIsPhotoreal ? "再試行"
-            : "AI高画質化";
+            : "HQ";
         ModalPhotorealButtonLabel.Text = _modalEnhancementRequestPending && currentIsPhotoreal
             ? "開始中"
             : retryable && currentIsPhotoreal ? "再試行"
-            : "AI実写化";
+            : "実写化";
+        if (!_modalEnhancementRequestPending && !retryable)
+            ModalEnhanceButtonLabel.Text = "HQ";
+        ModalEnhanceButton.ToolTip = displayedVersionIsPhotoreal
+            && currentUpscaleSource.UsesRecoveredPhotorealSource
+            && _recoveredPhotorealSourceUpscaleSupported != true
+                ? "The Aibos Image local AI service does not support Recovered photoreal HQ. Restart the local AI service first; no job was added."
+                : displayedVersionIsPhotoreal
+                    ? "表示中の実写化画像を写真向けモデルで高画質化"
+                    : "表示中の画像を高画質化";
         ModalEnhanceCancelButtonLabel.Text = currentIsPhotoreal
             ? "実写化を中止"
-            : "高画質化を中止";
+            : currentIsI2i
+                ? "AI編集を中止"
+                : "高画質化を中止";
         AutomationProperties.SetName(
             ModalEnhanceCancelButton,
             ModalEnhanceCancelButtonLabel.Text);
@@ -14618,8 +19172,13 @@ public partial class MainWindow : Window
             ? "Waiting for the local AI process to stop"
             : "Cancel the running enhancement job";
         UpdateModalDisplayedDeletePresentation();
+        UpdateModalI2iEditActionAvailability();
 
-        string operationLabel = currentIsPhotoreal ? "実写化" : "高画質化";
+        string operationLabel = currentIsPhotoreal
+            ? "実写化"
+            : currentIsI2i
+                ? "AI編集"
+                : "高画質化";
         string status = _modalEnhancementRequestPending ? $"{operationLabel}: starting..."
             : canceling ? $"{operationLabel}: canceling..."
             : _modalEnhancementJobStatus == "queued" ? $"{operationLabel}: queued"
@@ -14636,9 +19195,11 @@ public partial class MainWindow : Window
     private async void StartModalEnhancement_Click(object sender, RoutedEventArgs e)
         => await StartModalEnhancementOperationAsync("upscale");
 
-    private async Task StartModalEnhancementOperationAsync(string requestedOperation)
+    private async Task StartModalEnhancementOperationAsync(
+        string requestedOperation,
+        bool requirePhotorealSource = false)
     {
-        if (!IsImageEnhancementOperation(requestedOperation))
+        if (requestedOperation is not ("upscale" or "photoreal"))
         {
             _modalEnhancementError = "Unsupported Enhancement operation.";
             UpdateModalEnhancementActionControls();
@@ -14647,14 +19208,19 @@ public partial class MainWindow : Window
         bool active = _modalEnhancementJobStatus is "queued" or "running";
         if (_modalEnhancementRequestPending
             || active
-            || SelectedTile() is not Tile { IsRealFile: true } tile
+            || !TryGetModalSourceTile(out Tile tile)
+            || !tile.IsRealFile
             || !File.Exists(tile.Path))
         {
             return;
         }
 
+        Func<string?>? prePublishValidator =
+            CaptureExternalFileDropPrePublishValidator(tile);
+
         long requestGeneration = _modalEnhancementGeneration;
         string sourcePath = tile.Path;
+        ResetModalEnhancementRefreshRequest();
         if (!TryResolveEnhancementSourceIdentity(sourcePath, out string sourceIdentity)
             || !File.Exists(sourceIdentity))
         {
@@ -14666,51 +19232,116 @@ public partial class MainWindow : Window
         string? requestJobId = _modalEnhancementJobId;
         string previousOperation = _modalEnhancementOperation;
         string normalizedOperation = requestedOperation;
+        bool retry = !requirePhotorealSource
+            && (_modalEnhancementJobStatus is "failed" or "canceled")
+            && string.Equals(previousOperation, normalizedOperation, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(requestJobId);
+        var requestSource = new UpscaleRequestSource(null, null);
+        string upscalePresetId = _modalEnhancementPresetId;
+        string upscaleAdapterId = _modalEnhancementAdapterId;
+        double upscaleScale = _modalEnhancementScale;
+        if (normalizedOperation == "upscale"
+            && !retry
+            && !(requirePhotorealSource
+                ? TryResolveModalPhotorealUpscaleProfile(
+                    tile,
+                    out requestSource,
+                    out upscalePresetId,
+                    out upscaleAdapterId,
+                    out upscaleScale,
+                    out string upscaleProfileError)
+                : TryResolveModalUpscaleProfile(
+                    tile,
+                    out requestSource,
+                    out upscalePresetId,
+                    out upscaleAdapterId,
+                    out upscaleScale,
+                    out upscaleProfileError)))
+        {
+            _modalEnhancementError = upscaleProfileError;
+            SetStatusToast(upscaleProfileError);
+            UpdateModalEnhancementActionControls();
+            return;
+        }
+        int? photorealSeed = null;
+        if (normalizedOperation == "photoreal"
+            && !retry
+            && !TryResolvePhotorealSeed(
+                out photorealSeed,
+                out string seedError))
+        {
+            _modalEnhancementError = seedError;
+            SetStatusToast(seedError);
+            SetPhotorealSeedStatus(seedError);
+            UpdateModalEnhancementActionControls();
+            return;
+        }
         _modalEnhancementOperation = normalizedOperation;
         _modalEnhancementRequestPending = true;
         _modalEnhancementError = null;
         UpdateModalEnhancementActionControls();
         try
         {
-            EnhancementApiResponse readiness = await EnsureEnhancementCompanionReadyForExplicitActionAsync(sourceIdentity);
+            Func<JsonElement, string?>? healthValidator =
+                CreateImageEnhancementHealthValidator(
+                    normalizedOperation,
+                    enqueueNext: false,
+                    requiresPhotorealSourceUpscale:
+                        requestSource.UsesPhotorealSource,
+                    requiresRecoveredPhotorealSourceUpscale:
+                        requestSource.UsesRecoveredPhotorealSource,
+                    requiresPhotorealSeedControl:
+                        !retry && photorealSeed.HasValue);
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
-            if (!readiness.Ok)
-            {
-                _modalEnhancementError = readiness.Error;
-                SetStatusToast(readiness.Error);
-                return;
-            }
 
-            bool retry = _modalEnhancementJobStatus is "failed" or "canceled"
-                && string.Equals(previousOperation, normalizedOperation, StringComparison.Ordinal)
-                && !string.IsNullOrWhiteSpace(requestJobId);
             ModalPhotorealRequestSettings photoreal = CurrentModalPhotorealRequestSettings();
-            object requestBody = normalizedOperation == "photoreal"
-                ? new
+            if (normalizedOperation == "photoreal" && !retry)
+            {
+                try
                 {
-                    sourceId = sourceIdentity,
-                    operation = "photoreal",
-                    presetId = "photoreal-balanced",
-                    adapterId = "comfyui-flux2-photoreal",
-                    strength = photoreal.Strength,
-                    structureStrength = photoreal.StructureStrength,
-                    steps = photoreal.Steps,
-                    cfgScale = photoreal.CfgScale,
-                    maxDimension = photoreal.MaxDimension,
-                    prompt = photoreal.Prompt,
+                    photoreal = await ResolvePhotorealRequestSettingsAsync(
+                        photoreal,
+                        sourceIdentity);
                 }
-                : new
+                catch (InvalidOperationException ex)
                 {
-                    sourceId = sourceIdentity,
-                    operation = "upscale",
-                    presetId = _modalEnhancementPresetId,
-                    adapterId = _modalEnhancementAdapterId,
-                    scale = _modalEnhancementScale,
-                };
-            EnhancementApiResponse response = retry
-                ? await SendEnhancementApiAsync(HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(requestJobId!)}/retry")
-                : await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", requestBody);
+                    _modalEnhancementError = ex.Message;
+                    SetStatusToast(ex.Message);
+                    return;
+                }
+                if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
+                    return;
+            }
+            string? originalPromptSnapshot = normalizedOperation == "upscale"
+                && !requestSource.UsesPhotorealSource
+                ? ResolveOriginalPromptSnapshot(tile, sourceIdentity)
+                : null;
+            object BuildUpscaleRequestBody(bool confirmLargeJob)
+                => CreateUpscaleRequestBody(
+                    sourceIdentity,
+                    requestSource,
+                    upscalePresetId,
+                    upscaleAdapterId,
+                    upscaleScale,
+                    originalPromptSnapshot,
+                    confirmLargeJob,
+                    outputFormat: requestSource.UsesPhotorealSource
+                        ? null
+                        : _upscaleOutputFormat);
+            object requestBody = normalizedOperation == "photoreal"
+                ? CreatePhotorealRequestBody(
+                    sourceIdentity,
+                    photoreal,
+                    photorealSeed)
+                : BuildUpscaleRequestBody(confirmLargeJob: false);
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+                retry ? null : requestBody,
+                queuePlacement: "last",
+                retryJobId: retry ? requestJobId : null,
+                healthValidator: healthValidator,
+                recoverySourceIdentity: sourceIdentity,
+                prePublishValidator: prePublishValidator);
 
             if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                 return;
@@ -14731,18 +19362,23 @@ public partial class MainWindow : Window
                         MessageBoxResult.No) == MessageBoxResult.Yes;
                 if (confirmed)
                 {
-                    response = await SendEnhancementApiAsync(HttpMethod.Post, "api/enhance/jobs", new
-                    {
-                        sourceId = sourceIdentity,
-                        operation = "upscale",
-                        presetId = _modalEnhancementPresetId,
-                        adapterId = _modalEnhancementAdapterId,
-                        scale = _modalEnhancementScale,
-                        confirmLargeJob = true,
-                    });
+                    response = await SendEnhancementEnqueueAsync(
+                        BuildUpscaleRequestBody(confirmLargeJob: true),
+                        healthValidator: healthValidator,
+                        recoverySourceIdentity: sourceIdentity,
+                        prePublishValidator: prePublishValidator);
                     if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration))
                         return;
                 }
+            }
+
+            if (response.SavedForDelivery)
+            {
+                _modalEnhancementError = null;
+                SetTransientStatusToast(
+                    $"{tile.FileName}: 予約を保存しました。Jobsへの登録を継続しています。");
+                ShowModalInteractionFeedback("AI予約を保存しました");
+                return;
             }
 
             if (!response.Ok || response.Payload is not JsonElement payload
@@ -14754,9 +19390,13 @@ public partial class MainWindow : Window
             }
 
             ApplyModalEnhancementJob(tile, ParseModalEnhancementJob(jobElement));
+            ApplyActiveEnhancementQueueJobToVisibleCatalog(jobElement, tile);
+            QueueEnhancedStateRefreshIfChanged();
             ShowModalInteractionFeedback(normalizedOperation == "photoreal"
                 ? "AI実写化を開始しました"
-                : "AI高画質化を開始しました");
+                : requestSource.UsesPhotorealSource
+                    ? "実写HQを開始しました"
+                    : "AI高画質化を開始しました");
         }
         finally
         {
@@ -14769,7 +19409,7 @@ public partial class MainWindow : Window
     {
         if (_modalEnhancementRequestPending
             || string.IsNullOrWhiteSpace(_modalEnhancementJobId)
-            || SelectedTile() is not Tile tile)
+            || !TryGetModalSourceTile(out Tile tile))
         {
             return;
         }
@@ -14777,6 +19417,7 @@ public partial class MainWindow : Window
         long requestGeneration = _modalEnhancementGeneration;
         string sourcePath = tile.Path;
         string requestJobId = _modalEnhancementJobId;
+        ResetModalEnhancementRefreshRequest();
         _modalEnhancementRequestPending = true;
         UpdateModalEnhancementActionControls();
         try
@@ -14795,6 +19436,7 @@ public partial class MainWindow : Window
             }
             ModalEnhancementJobSnapshot? canceledJob = ParseModalEnhancementJob(jobElement);
             ApplyModalEnhancementJob(tile, canceledJob);
+            QueueEnhancedStateRefreshIfChanged();
             ShowModalInteractionFeedback(canceledJob is { Status: "canceled" }
                 ? "AI enhancement canceled"
                 : canceledJob is { CancelRequested: true }
@@ -14818,7 +19460,7 @@ public partial class MainWindow : Window
 
         if (_modalShowingVideo)
         {
-            if (SelectedTile() is not Tile videoTile
+            if (!TryGetModalSourceTile(out Tile videoTile)
                 || !TryGetDisplayedModalVideoVersion(videoTile, out _))
             {
                 SetStatusToast("Delete blocked: the displayed managed video could not be verified.");
@@ -14831,7 +19473,7 @@ public partial class MainWindow : Window
 
         if (_modalShowingEnhanced)
         {
-            if (SelectedTile() is not Tile enhancedTile
+            if (!TryGetModalSourceTile(out Tile enhancedTile)
                 || !TryGetDeletableCurrentModalEnhancementVersion(
                     enhancedTile,
                     out _))
@@ -14844,7 +19486,8 @@ public partial class MainWindow : Window
             return true;
         }
 
-        return RequestDeleteSelected(forceConfirmation: true);
+        return TryGetModalSourceTile(out Tile sourceTile)
+            && RequestDeleteTile(sourceTile, forceConfirmation: true);
     }
 
     private async Task<bool> DeleteDisplayedModalMediaAsync()
@@ -14853,13 +19496,14 @@ public partial class MainWindow : Window
             return await DeleteDisplayedModalVideoOutputAsync();
         if (_modalShowingEnhanced)
             return await DeleteDisplayedModalEnhancedOutputAsync();
-        return RequestDeleteSelected(forceConfirmation: true);
+        return TryGetModalSourceTile(out Tile sourceTile)
+            && RequestDeleteTile(sourceTile, forceConfirmation: true);
     }
 
     private async Task<bool> DeleteDisplayedModalEnhancedOutputAsync()
     {
         if (_modalEnhancementRequestPending
-            || SelectedTile() is not Tile tile
+            || !TryGetModalSourceTile(out Tile tile)
             || !TryGetDeletableCurrentModalEnhancementVersion(
                 tile,
                 out ManagedEnhancementVersion version))
@@ -14891,6 +19535,7 @@ public partial class MainWindow : Window
             return false;
         }
 
+        ResetModalEnhancementRefreshRequest();
         _modalEnhancementRequestPending = true;
         UpdateModalEnhancementActionControls();
         try
@@ -14914,7 +19559,7 @@ public partial class MainWindow : Window
             _modalEnhancementProgress = 0;
             _modalEnhancementError = null;
             _modalEnhancementCancelRequested = false;
-            OpenModal();
+            OpenModal(tile);
             BeginModalEnhancementRefresh(tile.Path);
             ShowModalInteractionFeedback("AI output version deleted; original and other versions kept");
             return true;
@@ -14926,7 +19571,8 @@ public partial class MainWindow : Window
         }
     }
 
-    private void UpdateModalDisplayedDeletePresentation()
+    private void UpdateModalDisplayedDeletePresentation(
+        bool validateOriginalSource = false)
     {
         if (ModalDeleteButton is null)
             return;
@@ -14936,19 +19582,28 @@ public partial class MainWindow : Window
         string toolTip;
         string automationName;
         string contextHeader;
-        if (_modalShowingVideo)
+        bool hasModalTile = TryGetModalSourceTile(out Tile modalTile);
+        if (hasModalTile
+            && IsExternalFileDropSessionTile(modalTile))
         {
-            enabled = SelectedTile() is Tile videoTile
-                && TryGetDisplayedModalVideoVersion(videoTile, out _);
+            enabled = false;
+            toolTip = "Source deletion is unavailable while this image is temporarily open. Use Explorer if you intend to remove it.";
+            automationName = "Source deletion unavailable for temporary image";
+            contextHeader = "Delete unavailable for temporary image";
+        }
+        else if (_modalShowingVideo)
+        {
+            enabled = hasModalTile
+                && TryGetDisplayedModalVideoVersion(modalTile, out _);
             toolTip = $"Delete only the displayed video output; keep the original and other AI versions ({shortcut})";
             automationName = "Delete displayed managed video output";
             contextHeader = "Delete displayed video output";
         }
         else if (_modalShowingEnhanced)
         {
-            enabled = SelectedTile() is Tile enhancedTile
+            enabled = hasModalTile
                 && TryGetDeletableCurrentModalEnhancementVersion(
-                    enhancedTile,
+                    modalTile,
                     out _);
             toolTip = CurrentModalEnhancementVersionIsPhotoreal()
                 ? $"Delete only the displayed photoreal output; keep the original and other AI versions ({shortcut})"
@@ -14958,7 +19613,12 @@ public partial class MainWindow : Window
         }
         else
         {
-            enabled = SelectedTile() is Tile source && TryValidateDelete(source, out _);
+            bool requireFullValidation = validateOriginalSource
+                || ModalContextMenu?.IsOpen == true;
+            enabled = hasModalTile
+                && modalTile.IsRealFile
+                && !string.IsNullOrWhiteSpace(modalTile.Path)
+                && (!requireFullValidation || TryValidateDelete(modalTile, out _));
             toolTip = $"Move the displayed original source to Recycle Bin after confirmation ({shortcut})";
             automationName = "Move displayed original source to Recycle Bin";
             contextHeader = "Move displayed original to Recycle Bin";
@@ -15018,19 +19678,36 @@ public partial class MainWindow : Window
 
     private void CloseModal(bool restoreFocus = false)
     {
+        // Closing the modal is also a close intent for any FileDrop validation
+        // that has not published its presentation-only cohort yet.  Retire it
+        // before doing synchronous modal cleanup so a late continuation cannot
+        // reopen the overlay.
+        CancelPendingExternalFileDropIntake();
         bool wasVisible = Modal.Visibility == Visibility.Visible;
         IInputElement? focusTarget = _modalFocusBeforeOverlay;
         _modalFocusBeforeOverlay = null;
         CancelPendingModalSingleClick();
         EndModalPointerGesture();
         _modalCts?.Cancel();
+        _modalCts?.Dispose();
+        _modalCts = null;
+        CancelModalMetadataRefresh(clearCurrent: true);
         _modalEnhancementPollTimer.Stop();
+        CancelModalEnhancementRefreshRequest();
         _modalEnhancementGeneration++;
         if (ModalPhotorealSettingsPopup is not null)
             ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
+        if (ModalUpscaleSettingsPopup is not null)
+            ModalUpscaleSettingsPopup.Visibility = Visibility.Collapsed;
         if (ModalVideoGenerationPopup is not null)
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+        if (I2iEditDialog?.Visibility == Visibility.Visible)
+            CloseI2iEditBoard(restoreFocus: false);
+        if (I2iV2EditDialog?.Visibility == Visibility.Visible)
+            CloseI2iV2EditBoard(restoreFocus: false);
         Modal.Visibility = Visibility.Collapsed;
+        ModalBitmap.Source = null;
+        ModalBitmap.Visibility = Visibility.Collapsed;
         _modalShowingEnhanced = false;
         _modalSourceTilePath = null;
         _modalDisplayPath = null;
@@ -15056,6 +19733,8 @@ public partial class MainWindow : Window
         HideModalFavoritePulse();
         CancelModalPromptChipRealization();
         ResetModalTransform();
+        if (wasVisible)
+            RestoreExternalFileDropSession();
         if (wasVisible && restoreFocus)
             RestoreOverlayFocus(focusTarget, preferPrimaryGallery: true);
         ReturnToEnhancementJobsAfterModalClose(wasVisible);
@@ -15065,7 +19744,8 @@ public partial class MainWindow : Window
 
     private bool ToggleModalEnhanced()
     {
-        if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile || !TryGetModalEnhancedOutput(tile, out _))
+        if (!TryGetModalSourceTile(out Tile tile)
+            || !TryGetModalEnhancedOutput(tile, out _))
             return false;
 
         if (_modalShowingVideo)
@@ -15089,7 +19769,7 @@ public partial class MainWindow : Window
                 ModalDisplayKindForOperation(version.Operation),
                 version.JobId);
         }
-        OpenModal();
+        OpenModal(tile);
         return true;
     }
 
@@ -15147,18 +19827,24 @@ public partial class MainWindow : Window
         return true;
     }
 
-    private bool ResetModalTransform(string? path = null, bool showFeedback = false)
+    private bool ResetModalTransform(
+        string? path = null,
+        bool showFeedback = false,
+        bool preserveZoom = false)
     {
-        bool changed = Math.Abs(_modalZoom - 1) >= 0.0001
+        double nextZoom = preserveZoom ? _modalZoom : 1;
+        bool changed = Math.Abs(_modalZoom - nextZoom) >= 0.0001
             || _modalFlipped
             || !string.Equals(_modalTransformPath, path, StringComparison.OrdinalIgnoreCase);
         CancelPendingModalPanRender();
         EndModalPan();
-        _modalZoom = 1;
+        _modalZoom = nextZoom;
         _modalFlipped = false;
         _modalPanX = 0;
         _modalPanY = 0;
         _modalTransformPath = path;
+        if (path is null)
+            _modalFitPath = null;
         UpdateModalTransform(animate: showFeedback);
         return changed;
     }
@@ -15341,12 +20027,22 @@ public partial class MainWindow : Window
 
     private void UpdateModalFit()
     {
-        if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile)
+        if (!TryGetModalSourceTile(out Tile tile))
             return;
-        double sourceWidth = tile.ImagePixelWidth > 0 ? tile.ImagePixelWidth : ModalBitmap.Source?.Width ?? 440;
-        double sourceHeight = tile.ImagePixelHeight > 0 ? tile.ImagePixelHeight : ModalBitmap.Source?.Height ?? 640;
-        double oldEffectiveScale = _modalFitScale * _modalZoom;
-        bool preserveUserZoom = Math.Abs(_modalZoom - 1) > 0.0001;
+        bool hasDisplayedSize = _modalDisplayedImagePixelWidth > 0
+            && _modalDisplayedImagePixelHeight > 0;
+        bool hasCatalogSize = tile.ImagePixelWidth > 0
+            && tile.ImagePixelHeight > 0;
+        double sourceWidth = hasDisplayedSize
+            ? _modalDisplayedImagePixelWidth
+            : hasCatalogSize
+                ? tile.ImagePixelWidth
+                : ModalBitmap.Source?.Width ?? 440;
+        double sourceHeight = hasDisplayedSize
+            ? _modalDisplayedImagePixelHeight
+            : hasCatalogSize
+                ? tile.ImagePixelHeight
+                : ModalBitmap.Source?.Height ?? 640;
         double areaWidth = ModalImageArea.ActualWidth > 0 ? ModalImageArea.ActualWidth : Modal.ActualWidth;
         double areaHeight = ModalImageArea.ActualHeight > 0 ? ModalImageArea.ActualHeight : Modal.ActualHeight;
         double availableWidth = Math.Max(1, areaWidth);
@@ -15355,8 +20051,8 @@ public partial class MainWindow : Window
         ModalImage.Width = Math.Max(1, sourceWidth * _modalFitScale);
         ModalImage.Height = Math.Max(1, sourceHeight * _modalFitScale);
         ModalMetadataSidebar.MaxHeight = Math.Max(1, areaHeight - 24);
-        if (preserveUserZoom)
-            _modalZoom = Math.Clamp(oldEffectiveScale / _modalFitScale, ModalZoomMin, ModalZoomMax);
+        if (hasDisplayedSize || hasCatalogSize)
+            _modalFitPath = tile.Path;
         ClampModalPan();
         UpdateModalTransform();
     }
@@ -15369,8 +20065,6 @@ public partial class MainWindow : Window
             return;
 
         Point start = e.GetPosition(ModalImageArea);
-        if (!IsPointInsideTransformedModalImage(start))
-            return;
 
         CancelPendingModalSingleClick();
         if (e.ClickCount == 2 && ToggleModalMetadataSidebarFromImageDoubleClick())
@@ -15383,6 +20077,7 @@ public partial class MainWindow : Window
         BeginModalPointerInteraction();
         _modalPointerStartPoint = start;
         _modalPointerMoved = false;
+        _modalPointerStartedOnImage = IsPointInsideTransformedModalImage(start);
         if (_modalZoom > 1)
         {
             _modalPanStartPoint = start;
@@ -15434,12 +20129,18 @@ public partial class MainWindow : Window
         Point end = e.GetPosition(ModalImageArea);
         Point? start = _modalPointerStartPoint;
         bool moved = _modalPointerMoved;
+        bool startedOnImage = _modalPointerStartedOnImage;
         EndModalPointerGesture();
         if (start.HasValue)
         {
             Vector delta = end - start.Value;
             if (!TryNavigateModalSwipe(delta) && !moved)
-                ActivateModalImagePrimaryClick();
+            {
+                if (startedOnImage)
+                    ActivateModalImagePrimaryClick();
+                else
+                    CloseModal(restoreFocus: true);
+            }
         }
         e.Handled = true;
     }
@@ -15468,6 +20169,7 @@ public partial class MainWindow : Window
             FlushPendingModalPanRender();
         _modalPointerStartPoint = null;
         _modalPointerMoved = false;
+        _modalPointerStartedOnImage = false;
         EndModalPan();
         if (wasPanning)
         {
@@ -15491,16 +20193,16 @@ public partial class MainWindow : Window
         if (delta.Y < 0 && absoluteY > absoluteX)
         {
             double fullScreenThreshold = Math.Clamp(
-                ModalImage.ActualHeight * 0.16,
-                72,
-                180);
+                ModalImageArea.ActualHeight * 0.10,
+                56,
+                120);
             if (absoluteY < fullScreenThreshold)
                 return false;
             return SetModalFullScreen(true);
         }
         if (delta.Y > 0 && absoluteY > absoluteX)
         {
-            double closeThreshold = Math.Clamp(ModalImage.ActualHeight * 0.16, 72, 180);
+            double closeThreshold = Math.Clamp(ModalImageArea.ActualHeight * 0.10, 56, 120);
             if (absoluteY < closeThreshold)
                 return false;
             CloseModal(restoreFocus: true);
@@ -15773,7 +20475,7 @@ public partial class MainWindow : Window
         _modalFilmstripOpen = open;
         _modalFilmstripHoverVisible = false;
         UpdateModalChromePresentation();
-        if (open && SelectedTile() is Tile selected)
+        if (open && TryGetModalSourceTile(out Tile selected))
             SyncModalFilmstripSelection(selected);
         if (changed && persist)
             SaveState();
@@ -15784,7 +20486,8 @@ public partial class MainWindow : Window
     {
         if (_syncingModalFilmstripSelection || sender is not ListBox list || list.SelectedItem is not Tile tile)
             return;
-        if (ReferenceEquals(tile, SelectedTile()))
+        if (TryGetModalSourceTile(out Tile current)
+            && ReferenceEquals(tile, current))
             return;
 
         _syncingModalFilmstripSelection = true;
@@ -15797,16 +20500,15 @@ public partial class MainWindow : Window
             _syncingModalFilmstripSelection = false;
         }
         SelectTile(tile);
-        SaveState();
         OpenModal();
     }
 
-    private void SyncModalFilmstripSelection(Tile tile)
+    private void SyncModalFilmstripSelection(Tile tile, int projectedIndex = -1)
     {
         _syncingModalFilmstripSelection = true;
         try
         {
-            RefreshModalFilmstripWindow(tile);
+            RefreshModalFilmstripWindow(tile, projectedIndex);
             ModalFilmstripOverlayList.SelectedItem = tile;
             if (ModalFilmstripOverlay.Visibility == Visibility.Visible)
                 ModalFilmstripOverlayList.ScrollIntoView(tile);
@@ -15817,30 +20519,38 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RefreshModalFilmstripWindow(Tile selected)
+    private void RefreshModalFilmstripWindow(Tile selected, int projectedIndex = -1)
     {
-        int selectedIndex = _tiles.IndexOf(selected);
+        IReadOnlyList<Tile> navigationTiles = ModalNavigationTiles();
+        int selectedIndex = projectedIndex >= 0
+            && projectedIndex < navigationTiles.Count
+            && !ExternalFileDropSessionActive
+            && ReferenceEquals(_tiles[projectedIndex], selected)
+                ? projectedIndex
+                : IndexOfTile(navigationTiles, selected);
         if (selectedIndex < 0)
         {
             _modalFilmstripTiles.ReplaceAll(Array.Empty<Tile>());
             return;
         }
 
-        int count = Math.Min(MaxModalFilmstripWindowItems, _tiles.Count);
+        int count = Math.Min(MaxModalFilmstripWindowItems, navigationTiles.Count);
         int start = Math.Clamp(
             selectedIndex - (count / 2),
             0,
-            Math.Max(0, _tiles.Count - count));
+            Math.Max(0, navigationTiles.Count - count));
 
         bool unchanged = _modalFilmstripTiles.Count == count;
         for (int index = 0; unchanged && index < count; index++)
-            unchanged = ReferenceEquals(_modalFilmstripTiles[index], _tiles[start + index]);
+            unchanged = ReferenceEquals(
+                _modalFilmstripTiles[index],
+                navigationTiles[start + index]);
         if (unchanged)
             return;
 
         var window = new Tile[count];
         for (int index = 0; index < count; index++)
-            window[index] = _tiles[start + index];
+            window[index] = navigationTiles[start + index];
         _modalFilmstripTiles.ReplaceAll(window, count);
     }
 
@@ -15866,6 +20576,7 @@ public partial class MainWindow : Window
         return IsDescendantOrSelf(target, ModalWindowCaptionControls)
             || IsDescendantOrSelf(target, ModalTopBarSurface)
             || IsDescendantOrSelf(target, ModalTopBar)
+            || IsDescendantOrSelf(target, ModalUpscaleSettingsPopup)
             || IsDescendantOrSelf(target, ModalPhotorealSettingsPopup)
             || IsDescendantOrSelf(target, ModalVideoGenerationPopup)
             || IsDescendantOrSelf(target, ModalMetadataSidebar)
@@ -16059,7 +20770,12 @@ public partial class MainWindow : Window
         bool animateReveal = visible && !_modalManualChromeVisible && _modalTransientChromeVisible;
         SetModalChromeElementVisibility(ModalTopBarSurface, visible, animateReveal);
         SetModalChromeElementVisibility(ModalTopBar, visible, animateReveal);
-        SetModalChromeElementVisibility(ModalFooter, visible, animateReveal);
+        bool footerHasVideoControls = ModalVideoPlaybackButton.Visibility == Visibility.Visible
+            || ModalVideoSeekPanel.Visibility == Visibility.Visible;
+        SetModalChromeElementVisibility(
+            ModalFooter,
+            visible && footerHasVideoControls,
+            animateReveal);
         SetModalChromeElementVisibility(ModalZoomIndicator, visible, animateReveal);
         UpdateModalEdgeNavigationPresentation();
         UpdateModalFilmstripPresentation();
@@ -16194,25 +20910,31 @@ public partial class MainWindow : Window
 
     private bool NavigateModal(int delta)
     {
-        if (delta == 0 || _tiles.Count == 0)
+        IReadOnlyList<Tile> navigationTiles = ModalNavigationTiles();
+        if (delta == 0 || navigationTiles.Count == 0)
             return false;
 
-        var selected = SelectedTile();
-        int currentIndex = selected is null ? -1 : _tiles.IndexOf(selected);
+        Tile? selected = TryGetModalSourceTile(out Tile modalTile)
+            ? modalTile
+            : SelectedTile();
+        int currentIndex = selected is null
+            ? -1
+            : IndexOfTile(navigationTiles, selected);
         int nextIndex;
         if (currentIndex < 0)
         {
-            nextIndex = delta > 0 ? 0 : _tiles.Count - 1;
+            nextIndex = delta > 0 ? 0 : navigationTiles.Count - 1;
         }
         else
         {
-            nextIndex = ((currentIndex + delta) % _tiles.Count + _tiles.Count) % _tiles.Count;
+            nextIndex = ((currentIndex + delta) % navigationTiles.Count
+                + navigationTiles.Count) % navigationTiles.Count;
         }
         if (nextIndex == currentIndex)
             return false;
 
-        SelectTile(_tiles[nextIndex]);
-        SaveState();
+        Tile next = navigationTiles[nextIndex];
+        SelectTile(next, _tiles.IndexOf(next));
 
         if (Modal.Visibility == Visibility.Visible)
         {
@@ -16301,7 +21023,10 @@ public partial class MainWindow : Window
 
     private bool TryOpenSelectedExternally()
     {
-        Tile? tile = SelectedTile();
+        Tile? tile = Modal.Visibility == Visibility.Visible
+            && TryGetModalSourceTile(out Tile modalTile)
+                ? modalTile
+                : SelectedTile();
         string reason = "select a source image";
         bool requestEnhanced = tile is not null
             && Modal.Visibility == Visibility.Visible
@@ -16316,7 +21041,7 @@ public partial class MainWindow : Window
         if (displayedAsset.FallbackReason is not null && Modal.Visibility == Visibility.Visible)
         {
             _modalShowingEnhanced = false;
-            OpenModal();
+            OpenModal(tile);
         }
 
         try
@@ -16360,7 +21085,12 @@ public partial class MainWindow : Window
     private bool ShowSelectedInFolder()
     {
         string reason = "select a source image";
-        if (SelectedTile() is not Tile tile || !TryValidateFileDropTile(tile, out string canonical, out reason))
+        Tile? tile = Modal.Visibility == Visibility.Visible
+            && TryGetModalSourceTile(out Tile modalTile)
+                ? modalTile
+                : SelectedTile();
+        if (tile is null
+            || !TryValidateFileDropTile(tile, out string canonical, out reason))
         {
             SetStatusToast($"Show in folder unavailable: {reason}.");
             return false;
@@ -16702,6 +21432,7 @@ public partial class MainWindow : Window
         UpdateModalVideoPlaybackPresentation();
         UpdateModalDisplayedDeletePresentation();
         ModalEnhanceButton.ToolTip = UiLanguageResources.Format("UiEnhanceCurrentFormat", BindingText(ViewerKeyAction.EnhanceCurrentImage));
+        ModalPhotorealButton.ToolTip = UiLanguageResources.Format("UiPhotorealizeCurrentFormat", BindingText(ViewerKeyAction.PhotorealizeCurrentImage));
         ModalZoomOutButton.ToolTip = UiLanguageResources.Format("UiZoomOutFormat", BindingText(ViewerKeyAction.ModalZoomOut));
         ModalZoomResetButton.ToolTip = UiLanguageResources.Format("UiResetFitFormat", BindingText(ViewerKeyAction.ModalZoomReset));
         ModalZoomInButton.ToolTip = UiLanguageResources.Format("UiZoomInFormat", BindingText(ViewerKeyAction.ModalZoomIn));
@@ -17124,8 +21855,14 @@ public partial class MainWindow : Window
         BeginKeyBindingEdit();
         BeginThumbnailStatusBorderEdit();
         ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
+        SetShowGridFileInfoOverlay(_showGridFileInfoOverlay, persist: false);
+        SetShowLoadTiming(_showLoadTiming, persist: false);
         SetShowUnseenDots(_showUnseenDots, persist: false);
         SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
+        SetUseLastDisplayedImageVersionForThumbnails(
+            _useLastDisplayedImageVersionForThumbnails,
+            persist: false);
+        SyncUpscaleSettingsControls();
         SyncModalPhotorealSettingsControls();
         RefreshPhotorealStyleControls(updateNameFields: false);
         RefreshEnhancementOutputRootSettings();
@@ -17162,12 +21899,15 @@ public partial class MainWindow : Window
             RefreshSharedDataSettings();
         else if (string.Equals(section, "video", StringComparison.Ordinal))
             SyncVideoGenerationSettingsControls();
+        else if (string.Equals(section, "upscale", StringComparison.Ordinal))
+            SyncUpscaleSettingsControls();
         else if (string.Equals(section, "photoreal", StringComparison.Ordinal))
             RefreshEnhancementOutputRootSettings();
 
         (FrameworkElement Target, RadioButton Navigation) selection = section switch
         {
             "video" => (AppVideoSettingsHeading, SettingsVideoNav),
+            "upscale" => (UpscaleSettingsHeading, SettingsUpscaleNav),
             "photoreal" => (PhotorealSettingsHeading, SettingsPhotorealNav),
             "display" => (DisplaySettingsHeading, SettingsDisplayNav),
             "thumbnails" => (ThumbnailSettingsHeading, SettingsThumbnailsNav),
@@ -17530,7 +22270,14 @@ public partial class MainWindow : Window
 
     private bool RequestDeleteSelected(bool forceConfirmation = false)
     {
-        if (SelectedTile() is not Tile tile)
+        return RequestDeleteTile(SelectedTile(), forceConfirmation);
+    }
+
+    private bool RequestDeleteTile(
+        Tile? tile,
+        bool forceConfirmation = false)
+    {
+        if (tile is null)
         {
             SetDeleteStatus("Select an image to move to Recycle Bin.");
             return false;
@@ -17875,8 +22622,15 @@ public partial class MainWindow : Window
         if (_hoverPreviewTabPath is not null && deletedPaths.Contains(_hoverPreviewTabPath))
             HidePreviewTabHover();
 
+        List<Tile> removedCatalogTiles = _allTiles
+            .Where(tile => deletedPaths.Contains(tile.Path))
+            .ToList();
         if (_allTiles.RemoveAll(tile => deletedPaths.Contains(tile.Path)) > 0)
+        {
+            foreach (Tile removedTile in removedCatalogTiles)
+                UnindexCatalogTileForFavoritePath(removedTile);
             _catalogContentRevision++;
+        }
         _selectedPaths.RemoveWhere(deletedPaths.Contains);
         if (_primarySelectedPath is not null && deletedPaths.Contains(_primarySelectedPath))
         {
@@ -17938,6 +22692,8 @@ public partial class MainWindow : Window
     private bool TryValidateDelete(Tile tile, out string reason)
     {
         reason = "";
+        if (IsExternalFileDropSessionTile(tile))
+            return Fail("temporary FileDrop sources stay outside the active delete root", out reason);
         if (!tile.IsRealFile || string.IsNullOrWhiteSpace(tile.Path))
             return Fail("not a source image", out reason);
         if (!_allTiles.Contains(tile))
@@ -18174,6 +22930,16 @@ public partial class MainWindow : Window
         DeleteStatusToast.Visibility = Visibility.Hidden;
     }
 
+    private void StatusToastText_PreviewMouseDown(
+        object sender,
+        MouseButtonEventArgs e)
+        => _statusToastDismissTimer?.Stop();
+
+    private void StatusToastText_GotKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+        => _statusToastDismissTimer?.Stop();
+
     private void RetryDelete_Click(object sender, RoutedEventArgs e)
     {
         Action? retryAction = _statusRetryAction;
@@ -18287,6 +23053,21 @@ public partial class MainWindow : Window
     private void RestoreState()
     {
         var state = ReadState();
+        _favoriteChangedAtUtcByPath.Clear();
+        if (state?.FavoriteChangedAtUtcByPath is { Count: > 0 } favoriteActivity)
+        {
+            foreach ((string path, DateTimeOffset changedAtUtc) in favoriteActivity)
+            {
+                if (string.IsNullOrWhiteSpace(path)
+                    || changedAtUtc == default)
+                {
+                    continue;
+                }
+                _favoriteChangedAtUtcByPath[NormalizeFavoritePath(path)] =
+                    changedAtUtc.ToUniversalTime();
+            }
+            TrimFavoriteActivity(_favoriteChangedAtUtcByPath);
+        }
         SetUiLanguage(state?.UiLanguage, persist: false);
         SetFavoriteChangeNotifications(
             state?.ShowFavoriteChangeNotifications ?? true,
@@ -18295,6 +23076,16 @@ public partial class MainWindow : Window
             state?.ReducedMotionOverride,
             state?.ReducedTransparencyOverride,
             persist: false);
+        SetUseLastDisplayedImageVersionForThumbnails(
+            state?.UseLastDisplayedImageVersionForThumbnails ?? true,
+            persist: false);
+        SetShowGridFileInfoOverlay(
+            state?.ShowGridFileInfoOverlay ?? true,
+            persist: false);
+        SetShowLoadTiming(
+            state?.ShowLoadTiming ?? false,
+            persist: false);
+        RestoreUpscaleSettings(state);
         SharedRecentReadResult sharedRecent = ReadSharedRecentFolders();
         var lastFolderSet = ResolveStartupFolderSet(
             state?.LastFolderSet ?? [],
@@ -18317,8 +23108,13 @@ public partial class MainWindow : Window
             SyncFavoriteFilterControls();
             SyncFoldersSectionControls();
             RestoreModalPhotorealSettings(null, null, null, null, null);
+            RestorePhotorealSeedSettings(null, null);
             RestorePhotorealStyles(null, null);
+            RestorePhotorealPromptMappings(
+                null,
+                CurrentPhotorealPromptMappingDefaultsRevision);
             RestoreVideoGenerationSettings(null, null, null, null);
+            RestoreVideoSeedSettings(null, null);
             RestoreVideoStyles(null, null);
             _keyBindings = KeyBindingSettings.CreateDefaults();
             _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
@@ -18335,6 +23131,9 @@ public partial class MainWindow : Window
         _cardWidthMigrationPending = Math.Abs(normalizedCardWidth - state.CardWidth) >= 0.01;
         SizeSlider.Value = normalizedCardWidth;
 
+        _sidebarWidth = NormalizeSidebarWidth(state.SidebarWidth);
+        SetSidebarColumnConstraints(visible: true);
+        SidebarCol.Width = new GridLength(_sidebarWidth);
         _rightPanelWidth = NormalizeRightPanelWidth(state.RightPanelWidth);
         ApplyRightPanelState(state.RightPanelOpen ?? true);
 
@@ -18346,11 +23145,30 @@ public partial class MainWindow : Window
         _randomSortSeed = string.IsNullOrWhiteSpace(state.RandomSortSeed) ? "default" : state.RandomSortSeed;
         SyncSortButtons();
         RestoreDateFilter(state);
+        bool legacyOriginalUnratedSelection =
+            state.FavoriteFilterLevels?.Contains(0) == true
+            || state.FavoriteFilterLevel == 0;
         _favoriteFilterLevels.Clear();
         if (state.FavoriteFilterLevels is { Count: > 0 })
             _favoriteFilterLevels.UnionWith(state.FavoriteFilterLevels.Where(level => level is >= MinFavoriteFilterLevel and <= MaxFavoriteFilterLevel));
         else if (state.FavoriteFilterLevel is >= MinFavoriteFilterLevel and <= MaxFavoriteFilterLevel)
             _favoriteFilterLevels.Add(state.FavoriteFilterLevel.Value); // additive migration from the scalar schema
+        _photorealFavoriteFilterLevels.Clear();
+        if (state.PhotorealFavoriteFilterLevels is { Count: > 0 })
+        {
+            _photorealFavoriteFilterLevels.UnionWith(
+                state.PhotorealFavoriteFilterLevels.Where(level =>
+                    level is >= MinPhotorealFavoriteFilterLevel
+                        and <= MaxFavoriteFilterLevel));
+        }
+        _videoFavoriteFilterLevels.Clear();
+        if (state.VideoFavoriteFilterLevels is { Count: > 0 })
+        {
+            _videoFavoriteFilterLevels.UnionWith(
+                state.VideoFavoriteFilterLevels.Where(level =>
+                    level is >= MinVideoFavoriteFilterLevel
+                        and <= MaxFavoriteFilterLevel));
+        }
         _showUnseenDots = state.ShowUnseenDots;
         _confirmBeforeDelete = state.ConfirmBeforeDelete;
         _foldersSectionExpanded = state.FoldersSectionExpanded ?? true;
@@ -18360,12 +23178,21 @@ public partial class MainWindow : Window
             persist: false);
         RestoreModalPhotorealSettings(
             state.PhotorealStrength,
-            state.PhotorealStructureStrength,
             state.PhotorealSteps,
             state.PhotorealMaxDimension,
             state.PhotorealPrompt,
-            state.PhotorealCfgScale);
+            state.PhotorealCfgScale,
+            state.PhotorealEmptyPrompt,
+            state.PhotorealNegativePrompt,
+            state.PhotorealLoraEnabled,
+            state.PhotorealNegativePromptEnabled);
+        RestorePhotorealSeedSettings(
+            state.PhotorealSeedMode,
+            state.PhotorealSeedValue);
         RestorePhotorealStyles(state.PhotorealStyles, state.SelectedPhotorealStyleName);
+        RestorePhotorealPromptMappings(
+            state.PhotorealPromptMappings,
+            state.PhotorealPromptMappingDefaultsRevision ?? 0);
         RestoreVideoGenerationSettings(
             state.VideoDurationSeconds,
             state.VideoPlaybackFps,
@@ -18373,11 +23200,25 @@ public partial class MainWindow : Window
             state.VideoPrompt,
             state.VideoModelId,
             state.VideoQualityId);
+        RestoreVideoSeedSettings(state.VideoSeedMode, state.VideoSeedValue);
         RestoreVideoStyles(state.VideoStyles, state.SelectedVideoStyleName);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
-        SetFavoriteFilterState(state.ShowFavoritesOnly, !state.ShowFavoritesOnly && state.ShowUnfavoriteOnly, apply: false, persist: false);
+        bool hasPositiveFavoriteLevelSelection =
+            _favoriteFilterLevels.Count > 0
+            || _photorealFavoriteFilterLevels.Count > 0
+            || _videoFavoriteFilterLevels.Count > 0;
+        bool restoredUnfavoriteOnly = state.ShowUnfavoriteOnly
+            || (legacyOriginalUnratedSelection
+                && !hasPositiveFavoriteLevelSelection);
+        bool restoredFavoritesOnly = state.ShowFavoritesOnly
+            && !restoredUnfavoriteOnly;
+        SetFavoriteFilterState(
+            restoredFavoritesOnly,
+            unfavoriteOnly: restoredUnfavoriteOnly,
+            apply: false,
+            persist: false);
         _hiddenFolderBuckets.Clear();
         foreach (string folder in NormalizeFolderSet(state.HiddenFolderBuckets ?? []))
             _hiddenFolderBuckets.Add(folder);
@@ -18487,6 +23328,7 @@ public partial class MainWindow : Window
                 LastFolderSet = _currentFolderSet.Count > 0 ? _currentFolderSet : null,
                 SearchQuery = SearchInput.Text,
                 CardWidth = SizeSlider.Value,
+                SidebarWidth = _sidebarWidth,
                 RightPanelOpen = RightPanel.Visibility == Visibility.Visible,
                 RightPanelWidth = _rightPanelWidth,
                 DisplayStyle = _displayStyle,
@@ -18499,19 +23341,57 @@ public partial class MainWindow : Window
                 ShowFavoritesOnly = FavoriteOnlyFilter?.IsChecked == true,
                 ShowUnfavoriteOnly = UnfavoriteOnlyFilter?.IsChecked == true,
                 FavoriteFilterLevels = _favoriteFilterLevels.Count > 0 ? _favoriteFilterLevels.OrderBy(static level => level).ToList() : null,
+                PhotorealFavoriteFilterLevels = _photorealFavoriteFilterLevels.Count > 0
+                    ? _photorealFavoriteFilterLevels.OrderBy(static level => level).ToList()
+                    : null,
+                VideoFavoriteFilterLevels = _videoFavoriteFilterLevels.Count > 0
+                    ? _videoFavoriteFilterLevels.OrderBy(static level => level).ToList()
+                    : null,
                 ShowUnseenDots = _showUnseenDots,
+                ShowGridFileInfoOverlay = _showGridFileInfoOverlay,
+                ShowLoadTiming = _showLoadTiming,
                 ShowFavoriteChangeNotifications = _showFavoriteChangeNotifications,
+                UseLastDisplayedImageVersionForThumbnails =
+                    _useLastDisplayedImageVersionForThumbnails,
+                UpscalePresetId = _modalEnhancementPresetId,
+                UpscaleAdapterId = _modalEnhancementAdapterId,
+                UpscaleBackendVersion = CurrentUpscaleBackendVersion,
+                UpscaleScale = _modalEnhancementScale,
+                UpscaleOutputFormat = _upscaleOutputFormat,
+                FavoriteChangedAtUtcByPath = _favoriteChangedAtUtcByPath.Count == 0
+                    ? null
+                    : _favoriteChangedAtUtcByPath
+                        .OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(
+                            static item => item.Key,
+                            static item => item.Value,
+                            StringComparer.OrdinalIgnoreCase),
                 ConfirmBeforeDelete = _confirmBeforeDelete,
                 FoldersSectionExpanded = _foldersSectionExpanded,
                 ModalFilmstripOpen = _modalFilmstripOpen,
                 ModalEdgeNavigationPercent = _modalEdgeNavigationPercent,
+                PhotorealLoraEnabled = _modalPhotorealLoraEnabled,
                 PhotorealStrength = _modalPhotorealStrength,
-                PhotorealStructureStrength = _modalPhotorealStructureStrength,
                 PhotorealCfgScale = _modalPhotorealCfgScale,
                 PhotorealSteps = _modalPhotorealSteps,
                 PhotorealMaxDimension = _modalPhotorealMaxDimension,
                 PhotorealPrompt = _modalPhotorealPrompt,
+                PhotorealEmptyPrompt = _modalPhotorealEmptyPrompt,
+                PhotorealNegativePrompt = _modalPhotorealNegativePrompt,
+                PhotorealNegativePromptEnabled =
+                    _modalPhotorealNegativePromptEnabled,
+                PhotorealSeedMode = _photorealSeedFixed
+                    ? FixedSeedMode
+                    : RandomSeedMode,
+                PhotorealSeedValue = TryParseFixedSeed(
+                    _photorealSeedValueText,
+                    out int photorealSeedValue)
+                        ? photorealSeedValue
+                        : null,
                 PhotorealStyles = SnapshotPhotorealStyles(),
+                PhotorealPromptMappings = SnapshotPhotorealPromptMappings(),
+                PhotorealPromptMappingDefaultsRevision =
+                    _photorealPromptMappingDefaultsRevision,
                 SelectedPhotorealStyleName = _selectedPhotorealStyleName,
                 VideoDurationSeconds = _videoDurationSeconds,
                 VideoPlaybackFps = _videoPlaybackFps,
@@ -18519,6 +23399,14 @@ public partial class MainWindow : Window
                 VideoPrompt = _videoPrompt,
                 VideoModelId = _videoModelId,
                 VideoQualityId = _videoQualityId,
+                VideoSeedMode = _videoSeedFixed
+                    ? FixedSeedMode
+                    : RandomSeedMode,
+                VideoSeedValue = TryParseFixedSeed(
+                    _videoSeedValueText,
+                    out int videoSeedValue)
+                        ? videoSeedValue
+                        : null,
                 VideoStyles = SnapshotVideoStyles(),
                 SelectedVideoStyleName = _selectedVideoStyleName,
                 UiLanguage = _uiLanguage,
@@ -18547,6 +23435,31 @@ public partial class MainWindow : Window
                 state.KeyBindings = KeyBindingSettings.ToPersisted(
                     _keyBindings,
                     latest is null ? _keyBindingUnknownEntries : latestUnknownKeyBindings);
+                if (latest?.FavoriteChangedAtUtcByPath is { Count: > 0 } latestFavoriteActivity)
+                {
+                    state.FavoriteChangedAtUtcByPath ??=
+                        new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+                    foreach ((string activityPath, DateTimeOffset activityTime) in latestFavoriteActivity)
+                    {
+                        string normalizedActivityPath = NormalizeFavoritePath(activityPath);
+                        if (string.IsNullOrWhiteSpace(normalizedActivityPath)
+                            || activityTime == default)
+                        {
+                            continue;
+                        }
+                        DateTimeOffset normalizedActivityTime = activityTime.ToUniversalTime();
+                        if (!state.FavoriteChangedAtUtcByPath.TryGetValue(
+                                normalizedActivityPath,
+                                out DateTimeOffset currentActivityTime)
+                            || normalizedActivityTime > currentActivityTime)
+                        {
+                            state.FavoriteChangedAtUtcByPath[normalizedActivityPath] =
+                                normalizedActivityTime;
+                        }
+                    }
+                }
+                if (state.FavoriteChangedAtUtcByPath is not null)
+                    TrimFavoriteActivity(state.FavoriteChangedAtUtcByPath);
                 string json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
                 return TryWriteAtomicText(path, json);
             });
@@ -18880,6 +23793,18 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (I2iV2EditDialog?.Visibility == Visibility.Visible)
+        {
+            CloseI2iV2EditBoard(restoreFocus: true);
+            return true;
+        }
+
+        if (ModalUpscaleSettingsPopup?.Visibility == Visibility.Visible)
+        {
+            CloseModalUpscaleSettingsBoard();
+            return true;
+        }
+
         if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible)
         {
             ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
@@ -18910,6 +23835,30 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        if (I2iV2EditDialog?.Visibility == Visibility.Visible
+            && key == Key.Escape
+            && modifiers == ModifierKeys.None)
+        {
+            CloseI2iV2EditBoard(restoreFocus: true);
+            e.Handled = true;
+            return;
+        }
+        if (I2iEditDialog?.Visibility == Visibility.Visible
+            && key == Key.Escape
+            && modifiers == ModifierKeys.None)
+        {
+            CloseI2iEditBoard(restoreFocus: true);
+            e.Handled = true;
+            return;
+        }
+        if (ModalUpscaleSettingsPopup?.Visibility == Visibility.Visible
+            && key == Key.Escape
+            && modifiers == ModifierKeys.None)
+        {
+            CloseModalUpscaleSettingsBoard();
+            e.Handled = true;
+            return;
+        }
         if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
             && key == Key.Escape
             && modifiers == ModifierKeys.None)
@@ -18927,10 +23876,16 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
+        if (ModalUpscaleSettingsPopup?.Visibility == Visibility.Visible
+            || ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
             || ModalVideoGenerationPopup?.Visibility == Visibility.Visible)
         {
-            if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
+            if (ModalUpscaleSettingsPopup?.Visibility == Visibility.Visible
+                && !ModalUpscaleSettingsPopup.IsKeyboardFocusWithin)
+            {
+                Keyboard.Focus(ModalUpscalePresetComboBox);
+            }
+            else if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
                 && !ModalPhotorealSettingsPopup.IsKeyboardFocusWithin)
             {
                 Keyboard.Focus(ModalPhotorealPromptTextBox);
@@ -18950,7 +23905,9 @@ public partial class MainWindow : Window
         if (DeleteConfirmationDialog.Visibility == Visibility.Visible
             || BatchEnhancementDialog.Visibility == Visibility.Visible
             || AppSettingsDialog.Visibility == Visibility.Visible
-            || EnhancementJobsDialog.Visibility == Visibility.Visible)
+            || EnhancementJobsDialog.Visibility == Visibility.Visible
+            || I2iV2EditDialog?.Visibility == Visibility.Visible
+            || I2iEditDialog?.Visibility == Visibility.Visible)
         {
             if (AppSettingsDialog.Visibility == Visibility.Visible
                 && _recordingKeyAction is not null
@@ -19110,6 +24067,12 @@ public partial class MainWindow : Window
                 && ModalEnhanceButton.IsEnabled)
             {
                 StartModalEnhancement_Click(this, new RoutedEventArgs());
+                return true;
+            }
+            if (MatchesBinding(ViewerKeyAction.PhotorealizeCurrentImage, key, modifiers)
+                && ModalPhotorealButton.IsEnabled)
+            {
+                StartModalPhotoreal_Click(this, new RoutedEventArgs());
                 return true;
             }
             if (MatchesBinding(ViewerKeyAction.ModalZoomIn, key, modifiers))
@@ -19313,6 +24276,17 @@ public partial class MainWindow : Window
 
         if (Modal.Visibility == Visibility.Visible)
         {
+            ModifierKeys modifiers = _shortcutModifierProvider();
+            if (modifiers == ModifierKeys.Control
+                && !IsModalNativeInputFocused(e.OriginalSource))
+            {
+                if (CycleModalEnhancementVersion(e.Delta < 0 ? 1 : -1))
+                    e.Handled = true;
+                else
+                    base.OnPreviewMouseWheel(e);
+                return;
+            }
+
             if (IsModalImageWheelSource(e.OriginalSource as DependencyObject))
             {
                 Point viewportAnchor = _modalWheelViewportAnchorForSmoke
@@ -19335,8 +24309,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (IsGlobalShortcutInputFocused(e.OriginalSource)
-            || IsGlobalShortcutInputFocused(Keyboard.FocusedElement))
+        if (IsGlobalShortcutInputFocused(e.OriginalSource))
         {
             base.OnPreviewMouseWheel(e);
             return;
@@ -19347,7 +24320,7 @@ public partial class MainWindow : Window
             // Browser parity keeps List rows at a fixed size. Only consume the
             // wheel when Grid zoom actually changes; otherwise native List
             // scrolling must keep working instead of silently swallowing input.
-            if (AdjustCardWidth(e.Delta > 0 ? 1 : -1))
+            if (QueueGalleryWheelZoom(e.Delta > 0 ? 1 : -1))
             {
                 e.Handled = true;
                 return;
@@ -19358,8 +24331,134 @@ public partial class MainWindow : Window
     }
 
     // ─────────── Window chrome buttons ───────────
+    private const int WindowMessageGetMinMaxInfo = 0x0024;
+    private const int WindowMessageNonClientLeftButtonDown = 0x00A1;
+    private const int WindowMessageNonClientLeftButtonDoubleClick = 0x00A3;
+    private const int HitTestCaption = 2;
+
+    private void WindowDragRegion_PreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left)
+            return;
+
+        e.Handled = true;
+        if (e.ClickCount >= 2)
+        {
+            Maximize_Click(sender, new RoutedEventArgs());
+            return;
+        }
+        if (_modalFullScreen)
+            return;
+
+        nint windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (windowHandle == 0)
+            return;
+        ReleaseCapture();
+        _ = SendMessage(
+            windowHandle,
+            WindowMessageNonClientLeftButtonDown,
+            (nint)HitTestCaption,
+            0);
+    }
+
+    private nint WindowChromeMessageHook(
+        nint windowHandle,
+        int message,
+        nint wParam,
+        nint lParam,
+        ref bool handled)
+    {
+        if (message == WindowMessageGetMinMaxInfo && lParam != 0)
+        {
+            if (TryApplyNativeMaximizedBounds(windowHandle, lParam))
+                handled = true;
+            return 0;
+        }
+
+        if (message != WindowMessageNonClientLeftButtonDoubleClick
+            || wParam != (nint)HitTestCaption)
+        {
+            return 0;
+        }
+
+        handled = true;
+        Dispatcher.BeginInvoke(
+            () => Maximize_Click(this, new RoutedEventArgs()),
+            DispatcherPriority.Input);
+        return 0;
+    }
+
+    private bool TryApplyNativeMaximizedBounds(
+        nint windowHandle,
+        nint minMaxInfoPointer)
+    {
+        nint monitor = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
+        if (monitor == 0)
+            return false;
+
+        var monitorInfo = new NativeMonitorInfo
+        {
+            Size = (uint)Marshal.SizeOf<NativeMonitorInfo>(),
+        };
+        if (!GetMonitorInfo(monitor, ref monitorInfo)
+            || !TryCalculateNativeMaximizedBounds(
+                monitorInfo.MonitorArea,
+                monitorInfo.WorkArea,
+                _modalFullScreen,
+                out NativePoint maxPosition,
+                out NativePoint maxSize))
+        {
+            return false;
+        }
+
+        NativeMinMaxInfo minMaxInfo =
+            Marshal.PtrToStructure<NativeMinMaxInfo>(minMaxInfoPointer);
+        minMaxInfo.MaxPosition = maxPosition;
+        minMaxInfo.MaxSize = maxSize;
+        Marshal.StructureToPtr(minMaxInfo, minMaxInfoPointer, fDeleteOld: false);
+        return true;
+    }
+
+    private static bool TryCalculateNativeMaximizedBounds(
+        NativeRect monitorArea,
+        NativeRect workArea,
+        bool fullScreen,
+        out NativePoint maxPosition,
+        out NativePoint maxSize)
+    {
+        NativeRect target = fullScreen ? monitorArea : workArea;
+        if (monitorArea.Right <= monitorArea.Left
+            || monitorArea.Bottom <= monitorArea.Top
+            || target.Right <= target.Left
+            || target.Bottom <= target.Top)
+        {
+            maxPosition = default;
+            maxSize = default;
+            return false;
+        }
+
+        maxPosition = new NativePoint
+        {
+            X = target.Left - monitorArea.Left,
+            Y = target.Top - monitorArea.Top,
+        };
+        maxSize = new NativePoint
+        {
+            X = target.Right - target.Left,
+            Y = target.Bottom - target.Top,
+        };
+        return true;
+    }
+
     private bool DismissModalSettingsBoardForWindowChrome()
     {
+        if (ModalUpscaleSettingsPopup?.Visibility == Visibility.Visible)
+        {
+            CloseModalUpscaleSettingsBoard();
+            return true;
+        }
         if (ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible)
         {
             CloseModalPhotorealSettingsBoard();
@@ -19375,8 +24474,7 @@ public partial class MainWindow : Window
 
     private void Minimize_Click(object sender, RoutedEventArgs e)
     {
-        if (DismissModalSettingsBoardForWindowChrome())
-            return;
+        DismissModalSettingsBoardForWindowChrome();
         WindowState = WindowState.Minimized;
     }
 
@@ -19458,12 +24556,8 @@ public partial class MainWindow : Window
 
     private void UpdateModalFullScreenPresentation()
     {
-        ModalWindowCaptionControls.Visibility = _modalFullScreen
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        ModalTopBar.Margin = _modalFullScreen
-            ? new Thickness(12, 7, 12, 7)
-            : new Thickness(12, 7, 150, 7);
+        ModalWindowCaptionControls.Visibility = Visibility.Visible;
+        ModalTopBar.Margin = new Thickness(12, 7, 12, 7);
         string label = _modalFullScreen ? "Exit full screen" : "Enter full screen";
         ModalFullScreenButton.ToolTip = $"{label} (F11)";
         AutomationProperties.SetName(ModalFullScreenButton, label);
@@ -19475,104 +24569,29 @@ public partial class MainWindow : Window
 
     private void Maximize_Click(object sender, RoutedEventArgs e)
     {
-        if (DismissModalSettingsBoardForWindowChrome())
+        DismissModalSettingsBoardForWindowChrome();
+        if (_modalFullScreen)
+        {
+            SetModalFullScreen(false);
             return;
+        }
 
-        // Fake-maximize to the working area so the taskbar is never covered and
-        // borderless content is not clipped by the maximized non-client frame.
-        Rect workArea = ResolveSafeCurrentMonitorWorkArea();
-        ApplyEffectiveWindowMinimums(workArea);
-        if (_fakeMaximized)
-        {
-            Rect restored = NormalizeRestoreBounds(
-                _restoreBounds,
-                workArea,
-                DesignWindowMinWidth,
-                DesignWindowMinHeight);
-            Width = restored.Width;
-            Height = restored.Height;
-            Left = restored.Left;
-            Top = restored.Top;
-            _fakeMaximized = false;
-        }
+        _fakeMaximized = false;
+        if (WindowState == WindowState.Maximized)
+            SystemCommands.RestoreWindow(this);
         else
-        {
-            _restoreBounds = new Rect(Left, Top, Width, Height);
-            Left = workArea.Left;
-            Top = workArea.Top;
-            Width = workArea.Width;
-            Height = workArea.Height;
-            _fakeMaximized = true;
-        }
-        UpdateWindowMaximizePresentation();
+            SystemCommands.MaximizeWindow(this);
     }
 
     private void MainWindow_StateChanged(object? sender, EventArgs e)
     {
-        if (_normalizingNativeMaximize)
-            return;
-
-        NormalizeNativeMaximizeToWorkArea();
-
+        _fakeMaximized = false;
         UpdateWindowMaximizePresentation();
-    }
-
-    private bool NormalizeNativeMaximizeToWorkArea()
-    {
-        if (_normalizingNativeMaximize
-            || _modalFullScreen
-            || WindowState != WindowState.Maximized)
-        {
-            return false;
-        }
-
-        Rect workArea = ResolveSafeCurrentMonitorWorkArea();
-        Rect nativeRestoreBounds = RestoreBounds;
-        bool restoreRequested = _fakeMaximized;
-        _normalizingNativeMaximize = true;
-        try
-        {
-            WindowState = WindowState.Normal;
-            ApplyEffectiveWindowMinimums(workArea);
-            if (restoreRequested)
-            {
-                Rect restored = NormalizeRestoreBounds(
-                    _restoreBounds,
-                    workArea,
-                    DesignWindowMinWidth,
-                    DesignWindowMinHeight);
-                Left = restored.Left;
-                Top = restored.Top;
-                Width = restored.Width;
-                Height = restored.Height;
-                _fakeMaximized = false;
-            }
-            else
-            {
-                _restoreBounds = NormalizeRestoreBounds(
-                    nativeRestoreBounds,
-                    workArea,
-                    DesignWindowMinWidth,
-                    DesignWindowMinHeight);
-                Left = workArea.Left;
-                Top = workArea.Top;
-                Width = workArea.Width;
-                Height = workArea.Height;
-                _fakeMaximized = true;
-            }
-        }
-        finally
-        {
-            _normalizingNativeMaximize = false;
-        }
-
-        UpdateWindowMaximizePresentation();
-        return true;
     }
 
     private void UpdateWindowMaximizePresentation()
     {
-        bool restore = _fakeMaximized || (!_modalFullScreen && WindowState == WindowState.Maximized);
+        bool restore = _modalFullScreen || _fakeMaximized || WindowState == WindowState.Maximized;
         Geometry geometry = Geometry.Parse(restore ? RestoreWindowIconGeometry : MaximizeWindowIconGeometry);
         MaximizeIcon.Data = geometry;
         LandingMaximizeIcon.Data = geometry;
@@ -19612,6 +24631,9 @@ public partial class MainWindow : Window
 
     private void ConstrainWindowToCurrentWorkArea()
     {
+        if (WindowState != WindowState.Normal)
+            return;
+
         Rect workArea = ResolveSafeCurrentMonitorWorkArea();
         ApplyEffectiveWindowMinimums(workArea);
         if (_fakeMaximized)
@@ -19739,11 +24761,26 @@ public partial class MainWindow : Window
     private const uint MonitorDefaultToNearest = 2;
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    private static extern nint SendMessage(
+        nint windowHandle,
+        int message,
+        nint wParam,
+        nint lParam);
+
+    [DllImport("user32.dll")]
     private static extern nint MonitorFromWindow(nint windowHandle, uint flags);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorInfo(nint monitor, ref NativeMonitorInfo info);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(nint windowHandle, out NativeRect rectangle);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeMonitorInfo
@@ -19763,16 +24800,33 @@ public partial class MainWindow : Window
         public int Bottom;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeMinMaxInfo
+    {
+        public NativePoint Reserved;
+        public NativePoint MaxSize;
+        public NativePoint MaxPosition;
+        public NativePoint MinTrackSize;
+        public NativePoint MaxTrackSize;
+    }
+
     private void Close_Click(object sender, RoutedEventArgs e)
     {
-        if (DismissModalSettingsBoardForWindowChrome())
-            return;
+        DismissModalSettingsBoardForWindowChrome();
         Close();
     }
 
     public Rect WindowBoundsForSmoke => new(Left, Top, Width, Height);
     public Size EffectiveWindowMinimumForSmoke => new(MinWidth, MinHeight);
     public bool FakeMaximizedForSmoke => _fakeMaximized;
+    public bool NativeMaximizedForSmoke => WindowState == WindowState.Maximized && !_fakeMaximized;
     public void SetCurrentMonitorWorkAreaForSmoke(Rect area) => _currentMonitorWorkArea = () => area;
     public void SetCurrentMonitorBoundsForSmoke(Rect bounds) => _currentMonitorBounds = () => bounds;
     public void SetThrowingMonitorWorkAreaForSmoke() => _currentMonitorWorkArea = () => throw new InvalidOperationException("injected monitor lookup failure");
@@ -19782,12 +24836,39 @@ public partial class MainWindow : Window
         ConstrainWindowToCurrentWorkArea();
         return WindowBoundsForSmoke;
     }
-    public void ToggleMaximizeForSmoke() => Maximize_Click(this, new RoutedEventArgs());
+    public void ToggleMaximizeForSmoke()
+    {
+        Rect workArea = ResolveSafeCurrentMonitorWorkArea();
+        ApplyEffectiveWindowMinimums(workArea);
+        if (_fakeMaximized)
+        {
+            Rect restored = NormalizeRestoreBounds(
+                _restoreBounds,
+                workArea,
+                DesignWindowMinWidth,
+                DesignWindowMinHeight);
+            Width = restored.Width;
+            Height = restored.Height;
+            Left = restored.Left;
+            Top = restored.Top;
+            _fakeMaximized = false;
+        }
+        else
+        {
+            _restoreBounds = new Rect(Left, Top, Width, Height);
+            Left = workArea.Left;
+            Top = workArea.Top;
+            Width = workArea.Width;
+            Height = workArea.Height;
+            _fakeMaximized = true;
+        }
+        UpdateWindowMaximizePresentation();
+    }
     public Rect RestoreFromFakeMaximizeForSmoke(Rect savedBounds)
     {
         _restoreBounds = savedBounds;
         _fakeMaximized = true;
-        Maximize_Click(this, new RoutedEventArgs());
+        ToggleMaximizeForSmoke();
         return WindowBoundsForSmoke;
     }
     public static Rect NormalizeRestoreBoundsForSmoke(Rect savedBounds, Rect workArea, double minWidth = 900, double minHeight = 560)
@@ -19856,6 +24937,29 @@ public partial class MainWindow : Window
     public int MetadataIndexCacheMissesForSmoke => _metadataIndexCacheMisses;
     public string MetadataIndexStatusTextForSmoke => MetadataIndexStatusText.Text;
     public bool MetadataIndexProgressVisibleForSmoke => MetadataIndexProgressBar.Visibility == Visibility.Visible;
+    public int MetadataOriginalAspectLayoutPublishCountForSmoke
+        => _metadataOriginalAspectLayoutPublishCount;
+    public int MetadataOriginalAspectLayoutFallbackCountForSmoke
+        => _metadataOriginalAspectLayoutFallbackCount;
+    public bool MetadataOriginalAspectLayoutPendingForSmoke
+        => _metadataOriginalAspectLayoutBindingsPending;
+    public void ConfigureCatalogProjectionComputeGateForSmoke(
+        ManualResetEventSlim? entered,
+        ManualResetEventSlim? gate)
+    {
+        _catalogProjectionComputeEnteredForSmoke = entered;
+        _catalogProjectionComputeGateForSmoke = gate;
+    }
+    public Task<SearchFilterCompletion> PublishCompletedMetadataLayoutForSmokeAsync()
+    {
+        GridZoomAnchor? viewportAnchor = PreferredGridGeometryAnchor();
+        ApplyCardLayoutToAllTiles(
+            invalidateItemLayout: false,
+            refreshRealizedBindings: false);
+        _metadataOriginalAspectLayoutBindingsPending = true;
+        _metadataOriginalAspectLayoutPublishCount++;
+        return PublishCompletedMetadataLayoutAsync(viewportAnchor, _cardLayoutRevision);
+    }
     public static string ResolveSharedProjectRootForSmoke(string start)
     {
         string fullStart = Path.GetFullPath(start);
@@ -19887,6 +24991,14 @@ public partial class MainWindow : Window
     public bool DeleteDoNotAskAgainAvailableForSmoke
         => DoNotAskAgainCheckBox.Visibility == Visibility.Visible && DoNotAskAgainCheckBox.IsEnabled;
     public bool DeleteStatusVisibleForSmoke => DeleteStatusToast.Visibility == Visibility.Visible;
+    public bool StatusNotificationCopyableForSmoke
+        => DeleteStatusText.IsReadOnly
+            && DeleteStatusText.IsReadOnlyCaretVisible
+            && DeleteStatusText.Focusable
+            && string.Equals(
+                AutomationProperties.GetName(DeleteStatusText),
+                "Selectable status notification text",
+                StringComparison.Ordinal);
     public bool DeleteStatusRetryVisibleForSmoke => DeleteStatusRetryButton.Visibility == Visibility.Visible;
     public int PendingAlbumCleanupCountForSmoke => _pendingAlbumCleanupPaths.Length;
     public bool QueueAlbumMembershipCleanupForSmoke(params string[] paths)
@@ -19904,11 +25016,22 @@ public partial class MainWindow : Window
     public void SelectAppSettingsSectionForSmoke(string section)
         => SelectAppSettingsSection(section, bringIntoView: true);
     public bool LandingCaptionControlsContractForSmoke
+        => LandingHeaderBorderContractForSmoke
+            && LandingDragRegionContractForSmoke
+            && LandingCaptionButtonsContractForSmoke;
+    public bool LandingHeaderBorderContractForSmoke
+        => LandingHeaderSurface.BorderBrush is SolidColorBrush actual
+            && TryFindResource("GlassBorderHover") is SolidColorBrush expected
+            && actual.Color == expected.Color;
+    public bool LandingDragRegionContractForSmoke
+        => LandingDragRegion.Width >= 96
+            && WindowChrome.GetIsHitTestVisibleInChrome(LandingDragRegion);
+    public bool LandingCaptionButtonsContractForSmoke
         => new[] { LandingMinimizeButton, LandingMaximizeButton, LandingCloseButton }.All(button =>
-            button.Style is not null
-            && WindowChrome.GetIsHitTestVisibleInChrome(button)
-            && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(button))
-            && !string.IsNullOrWhiteSpace(button.ToolTip?.ToString()));
+                button.Style is not null
+                && WindowChrome.GetIsHitTestVisibleInChrome(button)
+                && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(button))
+                && !string.IsNullOrWhiteSpace(button.ToolTip?.ToString()));
     public bool ActivateLandingMinimizeForSmoke()
     {
         WindowState previous = WindowState;
@@ -19956,13 +25079,26 @@ public partial class MainWindow : Window
                 {
                     SearchBoxContainer,
                     HeaderDragRegion,
+                    OpenAppSettingsButton,
                     sidebarSettings,
                 }
                 .Where(static element => element.IsVisible)
-                .All(IsInsideWindowContentForSmoke);
+                .All(IsInsideWindowContentForSmoke)
+                && OpenAppSettingsButton.Visibility == Visibility.Visible;
         }
     }
     public double HeaderDragRegionWidthForSmoke => HeaderDragRegion.ActualWidth;
+    public bool WindowDragRegionsContractForSmoke
+        => WorkbenchHeaderSurface.BorderBrush is not null
+            && WorkbenchHeaderSurface.BorderThickness.Bottom >= 1
+            && HeaderDragRegion.ActualWidth >= 95
+            && WindowChrome.GetIsHitTestVisibleInChrome(HeaderDragRegion)
+            && WindowChrome.GetIsHitTestVisibleInChrome(LandingDragRegion)
+            && WindowChrome.GetIsHitTestVisibleInChrome(ModalTitleInfoPanel)
+            && new FrameworkElement[] { HeaderDragRegion, LandingDragRegion, ModalTitleInfoPanel }.All(region =>
+                region.Cursor == Cursors.SizeAll
+                && !string.IsNullOrWhiteSpace(region.ToolTip?.ToString())
+                && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(region)));
     public double SearchMinimumWidthForSmoke => SearchBoxContainer.MinWidth;
 
     private bool IsInsideWindowContentForSmoke(FrameworkElement element)
@@ -20320,6 +25456,7 @@ public partial class MainWindow : Window
         if (includeInCatalog)
         {
             _allTiles.Add(tile);
+            IndexCatalogTileForFavoritePath(tile);
             _catalogContentRevision++;
         }
         try
@@ -20330,7 +25467,10 @@ public partial class MainWindow : Window
         finally
         {
             if (_allTiles.Remove(tile))
+            {
+                UnindexCatalogTileForFavoritePath(tile);
                 _catalogContentRevision++;
+            }
         }
     }
 
@@ -20414,6 +25554,8 @@ public partial class MainWindow : Window
     }
     public int SharedRecentCommitAttemptCountForSmoke => _sharedRecentCommitAttemptCount;
     public int SharedRecentCommitSuccessCountForSmoke => _sharedRecentCommitSuccessCount;
+    public void MarkSharedRecentFolderSetCommittedForSmoke(string folder)
+        => _lastSuccessfulSharedRecentFolderSetKey = FormatRecentFolderSet([folder]);
     public async Task RefreshActiveFolderForSmokeAsync()
     {
         if (_currentFolderSet.Any(Directory.Exists))
@@ -20459,6 +25601,7 @@ public partial class MainWindow : Window
             && ModalFlipButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.FlipHorizontal), StringComparison.Ordinal) == true
             && ModalEnhancedToggleButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.ToggleEnhancedPreview), StringComparison.Ordinal) == true
             && ModalEnhanceButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.EnhanceCurrentImage), StringComparison.Ordinal) == true
+            && ModalPhotorealButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.PhotorealizeCurrentImage), StringComparison.Ordinal) == true
             && ModalShortcutHintText.Text.Contains(BindingText(ViewerKeyAction.CloseModal), StringComparison.Ordinal);
     public bool KeyBindingRecordingForSmoke => _recordingKeyAction is not null;
     public string KeyBindingStatusForSmoke => KeyBindingsStatusText.Text;
@@ -20520,6 +25663,7 @@ public partial class MainWindow : Window
         if (includeInCatalog)
         {
             _allTiles.Add(tile);
+            IndexCatalogTileForFavoritePath(tile);
             _catalogContentRevision++;
         }
         if (includeInFiltered)
@@ -20531,7 +25675,10 @@ public partial class MainWindow : Window
         finally
         {
             if (_allTiles.Remove(tile))
+            {
+                UnindexCatalogTileForFavoritePath(tile);
                 _catalogContentRevision++;
+            }
             _tiles.Remove(tile);
         }
     }
@@ -21144,8 +26291,11 @@ public partial class MainWindow : Window
     public int ThumbnailBrowserCacheHitsForSmoke => _thumbnailBrowserCacheHits;
     public int ResidentThumbnailCountForSmoke => _residentThumbnailLru.Count;
     public int MaxResidentThumbnailCountForSmoke => _maxResidentThumbnailCount;
-    public int ResidentThumbnailLimitForSmoke => LegacyResidentThumbnailCountHint;
+    public int ResidentThumbnailLimitForSmoke => MaxResidentThumbnailEntryCount;
     public int ProtectedResidentThumbnailCountForSmoke => _protectedResidentThumbnailPaths.Count;
+    public int ProtectedLoadedThumbnailCountForSmoke => ProtectedResidentThumbnailMetrics().Count;
+    public int EffectiveResidentThumbnailEntryLimitForSmoke
+        => Math.Max(MaxResidentThumbnailEntryCount, ProtectedResidentThumbnailMetrics().Count);
     public long ResidentThumbnailBytesForSmoke => _residentThumbnailBytes;
     public long MaxResidentThumbnailBytesForSmoke => _maxResidentThumbnailBytes;
     public long ResidentThumbnailBudgetBytesForSmoke => _residentThumbnailBudgetBytes;
@@ -21156,9 +26306,243 @@ public partial class MainWindow : Window
     public int ActiveThumbnailDecodeWorkersForSmoke => Volatile.Read(ref _activeThumbnailDecodeWorkers);
     public int MaxActiveThumbnailDecodeWorkersForSmoke => Volatile.Read(ref _maxActiveThumbnailDecodeWorkers);
     public int ThumbnailDecodeWorkerLimitForSmoke => MaxThumbnailDecodeWorkers;
+    public int ThumbnailDecodeGateAvailableForSmoke => _thumbnailDecodeGate.CurrentCount;
     public int ThumbnailViewportScheduleCountForSmoke => _thumbnailViewportScheduleCount;
     public int ThumbnailViewportCancelCountForSmoke => _thumbnailViewportCancelCount;
     public int ThumbnailViewportDuplicateSuppressedCountForSmoke => _thumbnailViewportDuplicateSuppressedCount;
+    public bool UseLastDisplayedImageVersionForThumbnailsForSmoke
+        => _useLastDisplayedImageVersionForThumbnails;
+    public bool SetUseLastDisplayedImageVersionForThumbnailsForSmoke(
+        bool enabled)
+    {
+        SetUseLastDisplayedImageVersionForThumbnails(enabled, persist: true);
+        return _useLastDisplayedImageVersionForThumbnails == enabled;
+    }
+    public string? GalleryThumbnailAssetPathForSmoke(string fileName)
+    {
+        Tile? tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+            candidate.FileName,
+            fileName,
+            StringComparison.OrdinalIgnoreCase));
+        return tile is null ? null : CreateThumbnailLoadRequest(tile).AssetPath;
+    }
+    public (int Upscale, int Photoreal, int Video)
+        GalleryVariantCountsForSmoke(string fileName)
+    {
+        Tile? tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+            candidate.FileName,
+            fileName,
+            StringComparison.OrdinalIgnoreCase));
+        return tile is null
+            ? (-1, -1, -1)
+            : (tile.UpscaleVersionCount,
+                tile.PhotorealVersionCount,
+                tile.VideoVersionCount);
+    }
+    public static bool ThumbnailVariantCountVisibilityContractForSmoke()
+    {
+        var tile = new Tile
+        {
+            Upscaled = true,
+            Photorealized = true,
+            VideoGenerated = true,
+            UpscaleVersionCount = 2,
+            PhotorealVersionCount = 3,
+            VideoVersionCount = 4,
+            CardWidth = 139,
+        };
+        bool hiddenBeforeThreshold = !tile.ShowUpscaleVariantCount
+            && !tile.ShowPhotorealVariantCount
+            && !tile.ShowVideoVariantCount;
+        tile.CardWidth = 140;
+        bool visibleAtThreshold = tile.ShowUpscaleVariantCount
+            && tile.ShowPhotorealVariantCount
+            && tile.ShowVideoVariantCount;
+        tile.UpscaleVersionCount = 1;
+        return hiddenBeforeThreshold
+            && visibleAtThreshold
+            && !tile.ShowUpscaleVariantCount
+            && tile.ShowPhotorealVariantCount
+            && tile.ShowVideoVariantCount;
+    }
+    public int ThumbnailLoadsInFlightCountForSmoke => _thumbnailLoadsInFlight.Count;
+    private bool HasThumbnailLoadInFlight(string ownerPath)
+    {
+        string prefix = ownerPath + '\u001f';
+        return _thumbnailLoadsInFlight.Keys.Any(key =>
+            key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+    public int ThumbnailLoadsInFlightForSmoke(IReadOnlyList<string> fileNames)
+        => fileNames.Count(fileName =>
+        {
+            Tile? tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase));
+            return tile is not null && HasThumbnailLoadInFlight(tile.Path);
+        });
+    public void ConfigureThumbnailDecodeDelayForSmoke(int delayMilliseconds)
+    {
+        Volatile.Write(
+            ref _thumbnailDecodeDelayForSmokeMilliseconds,
+            Math.Max(0, delayMilliseconds));
+        _thumbnailDecodeStartsForSmoke.Clear();
+        _thumbnailAppliesForSmoke.Clear();
+    }
+    public void ConfigureThumbnailWicReadBarrierForSmoke(
+        bool blockFirstRead,
+        bool clearCounters = true)
+    {
+        if (clearCounters)
+            _thumbnailWicReadStartsForSmoke.Clear();
+        if (blockFirstRead)
+            _thumbnailWicReadReleaseForSmoke.Reset();
+        Volatile.Write(ref _thumbnailWicReadBlockForSmoke, blockFirstRead ? 1 : 0);
+        Volatile.Write(ref _thumbnailWicReadSmokeEnabled, 1);
+    }
+    public void ReleaseThumbnailWicReadBarrierForSmoke()
+        => _thumbnailWicReadReleaseForSmoke.Set();
+    public void DisableThumbnailWicReadSmoke()
+    {
+        Volatile.Write(ref _thumbnailWicReadSmokeEnabled, 0);
+        Volatile.Write(ref _thumbnailWicReadBlockForSmoke, 0);
+        _thumbnailWicReadReleaseForSmoke.Set();
+    }
+    public int BurstScheduleThumbnailViewportsForSmoke(IReadOnlyList<string> fileNames)
+    {
+        ArgumentNullException.ThrowIfNull(fileNames);
+        CancelThumbnailViewportLoading();
+        long burstRevision = ++_thumbnailViewportRevision;
+        int schedulesBefore = _thumbnailViewportScheduleCount;
+        for (int index = 0; index < fileNames.Count; index++)
+        {
+            Tile tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileNames[index],
+                StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Thumbnail smoke tile was not found: {fileNames[index]}");
+            tile.Thumbnail = null;
+            TouchResidentThumbnail(tile);
+            _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
+            _thumbnailDecodeStartsForSmoke.TryRemove(tile.Path, out _);
+            _thumbnailAppliesForSmoke.TryRemove(tile.Path, out _);
+            ScheduleThumbnailCandidates(
+                [tile],
+                $"smoke|{_loadGeneration}|{burstRevision}|{index}",
+                priorityCandidateCount: 1);
+        }
+        return _thumbnailViewportScheduleCount - schedulesBefore;
+    }
+    public int ScheduleThumbnailBatchForSmoke(IReadOnlyList<string> fileNames)
+    {
+        ArgumentNullException.ThrowIfNull(fileNames);
+        CancelThumbnailViewportLoading();
+        SelectTile(null);
+        ClearProtectedResidentThumbnails();
+        Interlocked.Exchange(ref _maxActiveThumbnailDecodeWorkers, 0);
+        var tiles = new List<Tile>(fileNames.Count);
+        foreach (string fileName in fileNames)
+        {
+            Tile tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Thumbnail smoke tile was not found: {fileName}");
+            tile.Thumbnail = null;
+            TouchResidentThumbnail(tile);
+            _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
+            tiles.Add(tile);
+        }
+
+        int schedulesBefore = _thumbnailViewportScheduleCount;
+        ScheduleThumbnailCandidates(
+            tiles,
+            $"smoke-batch|{_loadGeneration}|{++_thumbnailViewportRevision}",
+            priorityCandidateCount: tiles.Count);
+        return _thumbnailViewportScheduleCount - schedulesBefore;
+    }
+    public void SetNonResidentThumbnailProtectionForSmoke(int count)
+    {
+        _protectedResidentThumbnailPaths.Clear();
+        for (int index = 0; index < Math.Max(0, count); index++)
+            _protectedResidentThumbnailPaths.Add($"smoke-nonresident-{index:D4}");
+        TrimResidentThumbnails();
+    }
+    public int ScheduleMissingThumbnailBatchWithCurrentProtectionForSmoke(
+        IReadOnlyList<string> fileNames)
+    {
+        ArgumentNullException.ThrowIfNull(fileNames);
+        CancelThumbnailViewportLoading();
+        var tiles = new List<Tile>(fileNames.Count);
+        foreach (string fileName in fileNames)
+        {
+            Tile tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Thumbnail smoke tile was not found: {fileName}");
+            if (tile.Thumbnail is not null)
+                continue;
+            _thumbnailDecodeFailures.TryRemove(tile.Path, out _);
+            tiles.Add(tile);
+        }
+
+        if (tiles.Count > 0)
+        {
+            ScheduleThumbnailCandidates(
+                tiles,
+                $"smoke-protected-batch|{_loadGeneration}|{++_thumbnailViewportRevision}",
+                priorityCandidateCount: tiles.Count);
+        }
+        return tiles.Count;
+    }
+    public void ClearProtectedResidentThumbnailsForSmoke()
+        => ClearProtectedResidentThumbnails();
+    public async Task<bool> WaitForThumbnailViewportIdleForSmokeAsync(
+        int timeoutMilliseconds = 5_000)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < timeoutMilliseconds)
+        {
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            if (_thumbnailViewportCts is null
+                && _thumbnailLoadsInFlight.IsEmpty
+                && Volatile.Read(ref _activeThumbnailDecodeWorkers) == 0)
+            {
+                return true;
+            }
+            await Task.Delay(10);
+        }
+        return _thumbnailViewportCts is null
+            && _thumbnailLoadsInFlight.IsEmpty
+            && Volatile.Read(ref _activeThumbnailDecodeWorkers) == 0;
+    }
+    public int ThumbnailDecodeStartsForSmoke(IReadOnlyList<string> fileNames)
+        => SumThumbnailSmokeCounts(fileNames, _thumbnailDecodeStartsForSmoke);
+    public int ThumbnailWicReadStartsForSmoke(IReadOnlyList<string> fileNames)
+        => SumThumbnailSmokeCounts(fileNames, _thumbnailWicReadStartsForSmoke);
+    public int ThumbnailAppliesForSmoke(IReadOnlyList<string> fileNames)
+        => SumThumbnailSmokeCounts(fileNames, _thumbnailAppliesForSmoke);
+    public int LoadedThumbnailCountForSmoke(IReadOnlyList<string> fileNames)
+        => fileNames.Count(fileName => _allTiles.Any(tile =>
+            string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase)
+            && tile.Thumbnail is not null));
+    private int SumThumbnailSmokeCounts(
+        IReadOnlyList<string> fileNames,
+        ConcurrentDictionary<string, int> counts)
+    {
+        int total = 0;
+        foreach (string fileName in fileNames)
+        {
+            Tile? tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+                candidate.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase));
+            if (tile is not null && counts.TryGetValue(tile.Path, out int count))
+                total += count;
+        }
+        return total;
+    }
     public int ThumbnailDecodeAttemptCountForSmoke(string fileName)
     {
         Tile? tile = _allTiles.FirstOrDefault(candidate =>
@@ -21181,6 +26565,18 @@ public partial class MainWindow : Window
     public int GridItemsSourceCountForSmoke => CardsList.Items.Count;
     public int ProjectionResetNotificationCountForSmoke => _tiles.ResetNotificationCount;
     public int ProjectionRemoveNotificationCountForSmoke => _tiles.RemoveNotificationCount;
+    public SynchronousFilterOwnershipSmokeSnapshot RunSynchronousNoOpFilterForSmoke()
+    {
+        long createdBefore = GalleryAutomationProjectionIndex.CreatedCount;
+        long activeCreatorsBefore = GalleryAutomationProjectionIndex.ActiveCreatorCount;
+        int resetsBefore = _tiles.ResetNotificationCount;
+        ApplyFilters(selectFirst: false);
+        return new SynchronousFilterOwnershipSmokeSnapshot(
+            _tiles.Count,
+            GalleryAutomationProjectionIndex.CreatedCount - createdBefore,
+            GalleryAutomationProjectionIndex.ActiveCreatorCount - activeCreatorsBefore,
+            _tiles.ResetNotificationCount - resetsBefore);
+    }
     public bool GridUsesFullExtentVirtualizationForSmoke
         => ReferenceEquals(CardsList.ItemsSource, _tilesView)
             && FindVisualDescendant<VirtualizingWrapPanel>(CardsList) is not null;
@@ -21536,6 +26932,7 @@ public partial class MainWindow : Window
                 Source = source,
             };
             OnPreviewMouseWheel(args);
+            CommitPendingGalleryWheelZoom();
             return args.Handled;
         }
         finally
@@ -21558,6 +26955,9 @@ public partial class MainWindow : Window
             _modalWheelViewportAnchorForSmoke = null;
         }
     }
+
+    public bool InvokeModalVersionMouseWheelForSmoke(int delta)
+        => InvokePreviewMouseWheelForSmoke(delta, ModifierKeys.Control, ModalBitmap);
 
     public bool InvokeModalMetadataMouseWheelForSmoke(int delta)
         => InvokePreviewMouseWheelForSmoke(delta, ModifierKeys.None, ModalMetadataStatusText);
@@ -21731,6 +27131,7 @@ public partial class MainWindow : Window
         {
             _allTiles.Clear();
             _allTiles.AddRange(tiles);
+            RebuildCatalogTileFavoritePathIndex();
             ReorderFullCatalogForSort();
             GalleryAutomationProjectionIndex automationProjection =
                 GalleryAutomationProjectionIndex.Create(
@@ -21988,6 +27389,9 @@ public partial class MainWindow : Window
         return new ListVirtualizationProbe(listMode, ListUsesRecyclingVirtualizationForSmoke, bounded, first, middle, last);
     }
     public double SidebarWidthForSmoke => Sidebar.ActualWidth;
+    public double SidebarStoredWidthForSmoke => _sidebarWidth;
+    public bool SidebarSplitterVisibleForSmoke =>
+        SidebarSplitter.Visibility == Visibility.Visible;
     public bool SidebarVisibleForSmoke => Sidebar.Visibility == Visibility.Visible;
     public bool AdaptiveWorkbenchForSmoke => _adaptiveWorkbench;
     public bool NarrowSidebarRailVisibleForSmoke => NarrowSidebarRail.Visibility == Visibility.Visible;
@@ -22061,6 +27465,12 @@ public partial class MainWindow : Window
         SaveState();
         return changed;
     }
+    public bool SetSidebarWidthForSmoke(double width)
+    {
+        bool changed = SetSidebarWidth(width);
+        SaveState();
+        return changed;
+    }
     public bool PreviewRightPanelWidthForSmoke(double width) => SetRightPanelWidth(width);
     public void CommitRightPanelWidthForSmoke() => SaveState();
     public void ToggleRightPanelForSmoke() => ToggleRight_Click(this, new RoutedEventArgs());
@@ -22113,6 +27523,244 @@ public partial class MainWindow : Window
     public bool ShowFavoritesOnlyForSmoke => FavoriteOnlyFilter?.IsChecked == true;
     public bool ShowUnfavoriteOnlyForSmoke => UnfavoriteOnlyFilter?.IsChecked == true;
     public bool ShowUnseenDotsForSmoke => _showUnseenDots;
+    public bool ShowGridFileInfoOverlayForSmoke => _showGridFileInfoOverlay;
+    public bool ShowLoadTimingForSmoke => _showLoadTiming;
+    public bool LoadTimingVisibleForSmoke
+        => LoadTimingStatusText.Visibility == Visibility.Visible;
+    public string LoadTimingStatusForSmoke => LoadTimingStatusText.Text;
+    public bool SidebarGridFileInfoOverlayCheckedForSmoke
+        => ShowGridFileInfoOverlayCheckBox.IsChecked == true;
+    public bool AppSettingsGridFileInfoOverlayCheckedForSmoke
+        => AppSettingsShowGridFileInfoOverlayCheckBox.IsChecked == true;
+    public bool GridFileInfoOverlayVisualRealizedForSmoke
+        => RealizedGridTemplatePartsForSmoke("overlay").Count > 0;
+    public bool GridFileInfoOverlayVisibleForSmoke
+        => RealizedGridTemplatePartsForSmoke("overlay")
+            .FirstOrDefault()?.Visibility == Visibility.Visible;
+    public bool FirstGridStatusBadgeVisibleForSmoke
+        => RealizedGridTemplatePartsForSmoke("favoriteLevelBadge")
+            .Any(static part => part.Visibility == Visibility.Visible);
+    public FavoriteBadgeVisualSmokeSnapshot FavoriteBadgeVisualsForFileForSmoke(
+        string fileName)
+    {
+        CardsList.ApplyTemplate();
+        Tile? tile = CardsList.Items.OfType<Tile>().FirstOrDefault(candidate =>
+            string.Equals(candidate.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+        if (tile is null)
+            return default;
+
+        CardsList.ScrollIntoView(tile);
+        CardsList.UpdateLayout();
+        if (CardsList.ItemContainerGenerator.ContainerFromItem(tile)
+                is not ListBoxItem container)
+        {
+            return default;
+        }
+
+        container.ApplyTemplate();
+        Border? photoreal = container.Template.FindName(
+            "photorealFavoriteBadge",
+            container) as Border;
+        Border? video = container.Template.FindName(
+            "videoFavoriteBadge",
+            container) as Border;
+        static string BrushColor(Brush? brush) =>
+            brush is SolidColorBrush solid ? solid.Color.ToString() : "";
+        return new FavoriteBadgeVisualSmokeSnapshot(
+            photoreal?.Visibility == Visibility.Visible,
+            video?.Visibility == Visibility.Visible,
+            photoreal is null ? "" : AutomationProperties.GetName(photoreal),
+            video is null ? "" : AutomationProperties.GetName(video),
+            BrushColor(photoreal?.BorderBrush),
+            BrushColor(video?.BorderBrush),
+            BrushColor(photoreal?.Background),
+            BrushColor(video?.Background));
+    }
+
+    private List<FrameworkElement> RealizedGridTemplatePartsForSmoke(string partName)
+    {
+        CardsList.ApplyTemplate();
+        CardsList.UpdateLayout();
+        var parts = new List<FrameworkElement>();
+        foreach (object item in CardsList.Items)
+        {
+            if (CardsList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
+                continue;
+
+            container.ApplyTemplate();
+            if (container.Template.FindName(partName, container) is FrameworkElement part)
+                parts.Add(part);
+        }
+        return parts;
+    }
+    public bool GridFileInfoOverlaySurfaceContractForSmoke
+        => string.Equals(
+                AutomationProperties.GetName(ShowGridFileInfoOverlayCheckBox),
+                "Show filename and file size over Grid thumbnails",
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(AppSettingsShowGridFileInfoOverlayCheckBox),
+                "Show filename and file size over Grid thumbnails",
+                StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetHelpText(ShowGridFileInfoOverlayCheckBox))
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetHelpText(AppSettingsShowGridFileInfoOverlayCheckBox));
+    public string GridFileInfoOverlayLabelForSmoke
+        => ShowGridFileInfoOverlayCheckBox.Content?.ToString() ?? "";
+    public string GridFileInfoOverlayHelpForSmoke
+        => AutomationProperties.GetHelpText(ShowGridFileInfoOverlayCheckBox);
+    public string OriginalFavoriteFilterTitleForSmoke
+        => OriginalFavoriteFilterTitle.Text;
+    public string FavoriteFilterGroupTitleForSmoke
+        => FavoriteFilterGroupTitle.Text;
+    public string PhotorealFavoriteFilterTitleForSmoke
+        => PhotorealFavoriteFilterTitle.Text;
+    public string PhotorealFavoriteFilterSummaryForSmoke
+        => PhotorealFavoriteFilterSummary.Text;
+    public string PhotorealFavoriteLevelZeroHelpForSmoke
+        => AutomationProperties.GetHelpText(PhotorealFavoriteLevel0Filter);
+    public string PhotorealFavoriteLevelOneHelpForSmoke
+        => AutomationProperties.GetHelpText(PhotorealFavoriteLevel1Filter);
+    public string VideoFavoriteFilterTitleForSmoke
+        => VideoFavoriteFilterTitle.Text;
+    public string VideoFavoriteFilterSummaryForSmoke
+        => VideoFavoriteFilterSummary.Text;
+    public string VideoFavoriteLevelZeroHelpForSmoke
+        => AutomationProperties.GetHelpText(VideoFavoriteLevel0Filter);
+    public string VideoFavoriteLevelOneHelpForSmoke
+        => AutomationProperties.GetHelpText(VideoFavoriteLevel1Filter);
+    public bool FavoriteFilterSurfaceContractForSmoke
+    {
+        get
+        {
+            CheckBox[] original =
+            [
+                FavoriteLevel1Filter,
+                FavoriteLevel2Filter,
+                FavoriteLevel3Filter,
+                FavoriteLevel4Filter,
+                FavoriteLevel5Filter,
+            ];
+            CheckBox[] photoreal =
+            [
+                PhotorealFavoriteLevel1Filter,
+                PhotorealFavoriteLevel2Filter,
+                PhotorealFavoriteLevel3Filter,
+                PhotorealFavoriteLevel4Filter,
+                PhotorealFavoriteLevel5Filter,
+            ];
+            CheckBox[] video =
+            [
+                VideoFavoriteLevel1Filter,
+                VideoFavoriteLevel2Filter,
+                VideoFavoriteLevel3Filter,
+                VideoFavoriteLevel4Filter,
+                VideoFavoriteLevel5Filter,
+            ];
+            return FavoriteLevelFilterPanel.Columns == 3
+                && PhotorealFavoriteLevelFilterPanel.Columns == 3
+                && VideoFavoriteLevelFilterPanel.Columns == 3
+                && OriginalFavoriteFilterRow.RowDefinitions.Count == 2
+                && PhotorealFavoriteFilterRow.RowDefinitions.Count == 2
+                && VideoFavoriteFilterRow.RowDefinitions.Count == 2
+                && FavoriteLevel0Filter.Visibility == Visibility.Collapsed
+                && PhotorealFavoriteLevel0Filter.Visibility == Visibility.Collapsed
+                && VideoFavoriteLevel0Filter.Visibility == Visibility.Collapsed
+                && original.Select((control, index) =>
+                        string.Equals(
+                            control.Tag?.ToString(),
+                            (index + 1).ToString(CultureInfo.InvariantCulture),
+                            StringComparison.Ordinal))
+                    .All(static matched => matched)
+                && photoreal.Select((control, index) =>
+                        string.Equals(
+                            control.Tag?.ToString(),
+                            (index + 1).ToString(CultureInfo.InvariantCulture),
+                            StringComparison.Ordinal))
+                    .All(static matched => matched)
+                && video.Select((control, index) =>
+                        string.Equals(
+                            control.Tag?.ToString(),
+                            (index + 1).ToString(CultureInfo.InvariantCulture),
+                            StringComparison.Ordinal))
+                    .All(static matched => matched)
+                && original.Concat(photoreal).Concat(video).All(static control =>
+                    string.Equals(
+                        control.Content?.ToString(),
+                        $"Lv {control.Tag}",
+                        StringComparison.Ordinal))
+                && original.Concat(photoreal).Concat(video).All(static control =>
+                    Math.Abs(control.Height - 30) < 0.01
+                    && control.MinHeight >= 30
+                    && control.MinWidth >= 28
+                    && control.HorizontalAlignment == HorizontalAlignment.Stretch
+                    && control.FocusVisualStyle is not null)
+                && original.Concat(photoreal).Concat(video).All(static control =>
+                    control.ReadLocalValue(Control.ForegroundProperty)
+                        == DependencyProperty.UnsetValue)
+                && FavoriteFilterSummary.Visibility == Visibility.Collapsed
+                && PhotorealFavoriteFilterSummary.Visibility == Visibility.Collapsed
+                && VideoFavoriteFilterSummary.Visibility == Visibility.Collapsed
+                && UnfavoriteOnlyFilter.Visibility == Visibility.Visible
+                && UnfavoriteOnlyFilter.IsTabStop
+                && original.Concat(photoreal).Concat(video).All(static control =>
+                    !string.IsNullOrWhiteSpace(
+                        AutomationProperties.GetName(control))
+                    && !string.IsNullOrWhiteSpace(
+                        AutomationProperties.GetHelpText(control)));
+        }
+    }
+    public bool ToggleFavoriteLevelFilterForSmoke(string category, int level)
+    {
+        if (level is < 1 or > 5)
+            return false;
+        CheckBox control = category switch
+        {
+            "original" => new[]
+            {
+                FavoriteLevel0Filter,
+                FavoriteLevel1Filter,
+                FavoriteLevel2Filter,
+                FavoriteLevel3Filter,
+                FavoriteLevel4Filter,
+                FavoriteLevel5Filter,
+            }[level],
+            "photoreal" => new[]
+            {
+                PhotorealFavoriteLevel0Filter,
+                PhotorealFavoriteLevel1Filter,
+                PhotorealFavoriteLevel2Filter,
+                PhotorealFavoriteLevel3Filter,
+                PhotorealFavoriteLevel4Filter,
+                PhotorealFavoriteLevel5Filter,
+            }[level],
+            "video" => new[]
+            {
+                VideoFavoriteLevel0Filter,
+                VideoFavoriteLevel1Filter,
+                VideoFavoriteLevel2Filter,
+                VideoFavoriteLevel3Filter,
+                VideoFavoriteLevel4Filter,
+                VideoFavoriteLevel5Filter,
+            }[level],
+            _ => throw new ArgumentOutOfRangeException(nameof(category)),
+        };
+        bool before = control.IsChecked == true;
+        var peer = new CheckBoxAutomationPeer(control);
+        if (peer.GetPattern(PatternInterface.Toggle) is not IToggleProvider toggle)
+            return false;
+        toggle.Toggle();
+        bool after = control.IsChecked == true;
+        bool stateMatches = category switch
+        {
+            "original" => _favoriteFilterLevels.Contains(level) == after,
+            "photoreal" => _photorealFavoriteFilterLevels.Contains(level) == after,
+            "video" => _videoFavoriteFilterLevels.Contains(level) == after,
+            _ => false,
+        };
+        return after != before && stateMatches;
+    }
     public bool ShowFavoriteChangeNotificationsForSmoke => _showFavoriteChangeNotifications;
     public bool FavoriteChangeNotificationsCheckedForSmoke
         => FavoriteChangeNotificationsCheckBox.IsChecked == true;
@@ -22202,6 +27850,67 @@ public partial class MainWindow : Window
     public bool IsAppSettingsUnseenDotsFocusedForSmoke => AppSettingsUnseenDotsCheckBox.IsKeyboardFocused;
     public bool UnseenOnlyForSmoke => UnseenOnlyFilter?.IsChecked == true;
     public List<int> FavoriteFilterLevelsForSmoke => _favoriteFilterLevels.OrderBy(static level => level).ToList();
+    public List<int> PhotorealFavoriteFilterLevelsForSmoke
+        => _photorealFavoriteFilterLevels.OrderBy(static level => level).ToList();
+    public List<int> VideoFavoriteFilterLevelsForSmoke
+        => _videoFavoriteFilterLevels.OrderBy(static level => level).ToList();
+
+    public static bool FavoriteRatingFilterOrContractForSmoke()
+    {
+        HashSet<int> original = [3, 4, 5];
+        HashSet<int> photoreal = [4, 5];
+        HashSet<int> video = [5];
+        HashSet<int> none = [];
+        HashSet<int> zero = [0];
+
+        return MatchesSelectedFavoriteLevels(
+                3, false, 0, false, 0, original, photoreal, video)
+            && MatchesSelectedFavoriteLevels(
+                0, true, 4, false, 0, original, photoreal, video)
+            && MatchesSelectedFavoriteLevels(
+                0, false, 0, true, 5, original, photoreal, video)
+            && !MatchesSelectedFavoriteLevels(
+                2, true, 3, true, 4, original, photoreal, video)
+            && MatchesSelectedFavoriteLevels(
+                0, false, 0, false, 0, zero, none, none)
+            && MatchesSelectedFavoriteLevels(
+                0, true, 0, false, 0, none, zero, none)
+            && !MatchesSelectedFavoriteLevels(
+                0, false, 0, false, 0, none, zero, none)
+            && MatchesSelectedFavoriteLevels(
+                0, true, 2, false, 0, none, none, none)
+            && !MatchesSelectedFavoriteLevels(
+                0, true, 0, true, 0, none, none, none);
+    }
+    public int PhotorealFavoriteLevelForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+                tile.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            ?.PhotorealFavoriteLevel ?? -1;
+    public bool PhotorealFavoriteBadgeForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+                tile.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            ?.ShowPhotorealFavoriteBadge == true;
+    public int VideoFavoriteLevelForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+                tile.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            ?.VideoFavoriteLevel ?? -1;
+    public bool VideoFavoriteBadgeForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+                tile.FileName,
+                fileName,
+                StringComparison.OrdinalIgnoreCase))
+            ?.ShowVideoFavoriteBadge == true;
+    internal Tile? TileForFileForSmoke(string fileName)
+        => _allTiles.FirstOrDefault(tile => string.Equals(
+            tile.FileName,
+            fileName,
+            StringComparison.OrdinalIgnoreCase));
     public bool GridModeVisibleForSmoke => CardsList.Visibility == Visibility.Visible;
     public bool ListModeVisibleForSmoke => RowsList.Visibility == Visibility.Visible;
 
@@ -22287,13 +27996,58 @@ public partial class MainWindow : Window
         if (Modal.Visibility != Visibility.Visible || delta == 0)
             return false;
 
-        int before = SelectedFavoriteLevelForSmoke;
+        int before = ModalFavoriteLevelForSmoke;
         Button button = delta > 0 ? ModalFavoriteIncreaseButton : ModalFavoriteDecreaseButton;
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, button));
-        return SelectedFavoriteLevelForSmoke == Math.Clamp(before + Math.Sign(delta), 0, 5);
+        return ModalFavoriteLevelForSmoke == Math.Clamp(before + Math.Sign(delta), 0, 5);
     }
+    public bool SetIndependentFavoriteLevelForSmoke(string path, int level)
+        => SetIndependentFavoriteLevel(
+            path,
+            Path.GetFileName(path),
+            level,
+            $"Set independent Favorite level {Math.Clamp(level, 0, 5)}.");
     public int ModalFavoriteLevelForSmoke
-        => SelectedTile()?.Fav ?? -1;
+        => Modal.Visibility != Visibility.Visible
+            ? SelectedTile()?.Fav ?? -1
+            : TryResolveDisplayedModalFavoriteTarget(
+                out string targetPath,
+                out _,
+                out bool independentTarget)
+                    ? independentTarget
+                        ? FavoriteLevelForPath(targetPath)
+                        : TryGetModalSourceTile(out Tile modalTile)
+                            ? modalTile.Fav
+                            : -1
+                    : -1;
+
+    public bool RejectStaleModalFavoriteSourceFallbackForSmoke()
+    {
+        if (!TryGetModalSourceTile(out Tile tile)
+            || !TryGetModalPhotorealFavoriteTarget(
+                out string targetPath,
+                out _))
+        {
+            return false;
+        }
+
+        int sourceBefore = tile.Fav;
+        int targetBefore = FavoriteLevelForPath(targetPath);
+        bool showingEnhancedBefore = _modalShowingEnhanced;
+        try
+        {
+            _modalShowingEnhanced = false;
+            bool changed = AdjustSelectedFavorite(1);
+            return !changed
+                && tile.Fav == sourceBefore
+                && FavoriteLevelForPath(targetPath) == targetBefore;
+        }
+        finally
+        {
+            _modalShowingEnhanced = showingEnhancedBefore;
+            SyncDisplayedModalFavoriteLevel(tile);
+        }
+    }
     public bool MarkSelectedSeenForSmoke() => SelectedTile() is { IsRealFile: true } tile && MarkTileSeen(tile);
     public bool SetFileFavoriteLevelForSmoke(string fileName, int level)
         => _allTiles.FirstOrDefault(tile => string.Equals(tile.FileName, fileName, StringComparison.OrdinalIgnoreCase)) is { IsRealFile: true } tile
@@ -22365,18 +28119,41 @@ public partial class MainWindow : Window
     }
 
     public bool ModalCompactToolbarContractForSmoke
-        => ModalSourceLabel.Visibility == Visibility.Collapsed
-            && ModalFileSizeText.Visibility == Visibility.Collapsed
+        => ModalSourceLabel.Visibility == Visibility.Visible
+            && ModalFileSizeText.Visibility == Visibility.Visible
             && ModalShortcutsButton.Visibility == Visibility.Collapsed
             && ModalDeleteButton.Visibility == Visibility.Collapsed
             && ModalOpenExternalButton.Visibility == Visibility.Collapsed
             && ModalRevealButton.Visibility == Visibility.Collapsed
-            && ModalOneToOneButton.Visibility == Visibility.Visible
-            && ModalFavoriteDecreaseButton.Visibility == Visibility.Visible
-            && ModalFavoriteIncreaseButton.Visibility == Visibility.Visible
-            && ModalFilmstripToggleButton.Visibility == Visibility.Visible
-            && ModalMetadataSidebarToggleButton.Visibility == Visibility.Visible
-            && ModalTitle.MaxWidth <= 210
+            && ModalOneToOneButton.Visibility == Visibility.Collapsed
+            && ModalFavoriteControlBorder.Visibility == Visibility.Visible
+            && ModalFilmstripToggleButton.Visibility == Visibility.Collapsed
+            && ModalMetadataSidebarToggleButton.Visibility == Visibility.Collapsed
+            && ModalPhotorealUpscaleButton.Visibility == Visibility.Collapsed
+            && ModalEnhancedToggleButton.Visibility == Visibility.Collapsed
+            && !ModalEnhancedToggleButton.IsTabStop
+            && ModalVideoGenerateButton.Visibility == Visibility.Visible
+            && ModalVideoSettingsButton.Visibility == Visibility.Visible
+            && ModalI2iEditButton.Visibility == Visibility.Visible
+            && ModalI2iEditSettingsButton.Visibility == Visibility.Visible
+            && ModalUpscaleSettingsButton.Visibility == Visibility.Visible
+            && ModalPhotorealSettingsButton.Visibility == Visibility.Visible
+            && ModalOverflowButton.Visibility == Visibility.Visible
+            && ModalPhotorealSettingsButton.Content is TextBlock
+            {
+                FontFamily.Source: "Segoe MDL2 Assets",
+                Text: "\uE70D",
+            }
+            && ModalUpscaleSettingsButton.Width == 24
+            && ModalPhotorealSettingsButton.Width == 24
+            && ModalVideoSettingsButton.Width == 24
+            && ModalI2iEditSettingsButton.Width == 24
+            && Grid.GetRow(ModalToolbarActionsPanel) == 1
+            && Grid.GetColumn(ModalToolbarActionsPanel) == 0
+            && Grid.GetColumnSpan(ModalToolbarActionsPanel) == 4
+            && ModalToolbarActionsRow.Height.IsAuto
+            && ModalEnhancementVersionComboBox.Width <= 132
+            && ModalTitle.MaxWidth <= 240
             && ModalContextMenu.Items.OfType<MenuItem>().Any(item =>
                 string.Equals(
                     AutomationProperties.GetName(item),
@@ -22386,11 +28163,55 @@ public partial class MainWindow : Window
     public bool ModalWideToolbarContractForSmoke
         => ModalSourceLabel.Visibility == Visibility.Visible
             && ModalFileSizeText.Visibility == Visibility.Visible
-            && ModalShortcutsButton.Visibility == Visibility.Visible
-            && ModalDeleteButton.Visibility == Visibility.Visible
-            && ModalOpenExternalButton.Visibility == Visibility.Visible
-            && ModalRevealButton.Visibility == Visibility.Visible
-            && ModalTitle.MaxWidth >= 420;
+            && ModalShortcutsButton.Visibility == Visibility.Collapsed
+            && ModalDeleteButton.Visibility == Visibility.Collapsed
+            && ModalOpenExternalButton.Visibility == Visibility.Collapsed
+            && ModalRevealButton.Visibility == Visibility.Collapsed
+            && ModalFavoriteControlBorder.Visibility == Visibility.Visible
+            && ModalPhotorealUpscaleButton.Visibility == Visibility.Collapsed
+            && ModalEnhancedToggleButton.Visibility == Visibility.Collapsed
+            && !ModalEnhancedToggleButton.IsTabStop
+            && ModalVideoGenerateButton.Visibility == Visibility.Visible
+            && ModalVideoSettingsButton.Visibility == Visibility.Visible
+            && ModalI2iEditButton.Visibility == Visibility.Visible
+            && ModalI2iEditSettingsButton.Visibility == Visibility.Visible
+            && ModalUpscaleSettingsButton.Visibility == Visibility.Visible
+            && ModalOverflowButton.Visibility == Visibility.Visible
+            && Grid.GetRow(ModalToolbarActionsPanel) == 0
+            && Grid.GetColumn(ModalToolbarActionsPanel) == 2
+            && Grid.GetColumnSpan(ModalToolbarActionsPanel) == 1
+            && ModalToolbarActionsRow.Height.Value == 0
+            && ModalEnhancementVersionComboBox.Width >= 150
+            && ModalTitle.MaxWidth >= 360;
+
+    public bool ModalPrimaryWorkflowToolbarContractForSmoke
+        => ModalFavoriteControlBorder.Visibility == Visibility.Visible
+            && ModalEnhancedToggleButton.Visibility == Visibility.Collapsed
+            && !ModalEnhancedToggleButton.IsTabStop
+            && string.Equals(ModalEnhanceButtonLabel.Text, "HQ", StringComparison.Ordinal)
+            && ModalUpscaleSettingsButton.Visibility == Visibility.Visible
+            && string.Equals(ModalPhotorealButtonLabel.Text, "実写化", StringComparison.Ordinal)
+            && ModalPhotorealSettingsButton.Visibility == Visibility.Visible
+            && ModalVideoGenerateButton.Content is TextBlock { Text: "動画化" }
+            && ModalVideoSettingsButton.Visibility == Visibility.Visible
+            && ModalI2iEditButton.Content is TextBlock { Text: "実写編集" }
+            && ModalI2iEditSettingsButton.Visibility == Visibility.Visible
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalFavoriteControlBorder)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalEnhanceButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalEnhanceButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalUpscaleSettingsButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalUpscaleSettingsButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalPhotorealButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalPhotorealButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalPhotorealSettingsButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalPhotorealSettingsButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalVideoGenerateButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalVideoGenerateButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalVideoSettingsButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalVideoSettingsButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalI2iEditButton)
+            && ModalToolbarActionsPanel.Children.IndexOf(ModalI2iEditButton)
+                < ModalToolbarActionsPanel.Children.IndexOf(ModalI2iEditSettingsButton);
 
     public void SimulateDpiGeometryChangeForSmoke(double width, double height)
     {
@@ -22429,6 +28250,38 @@ public partial class MainWindow : Window
     public bool SetAspectModeForSmoke(string aspectMode) => SetAspectMode(aspectMode);
     public bool SetSortByForSmoke(string sortBy) => SetSortBy(sortBy);
     public Task<bool> SetSortByInteractiveForSmokeAsync(string sortBy) => SetSortByInteractiveAsync(sortBy);
+    public bool SetSortActivityForSmoke(
+        string fileName,
+        string activityKind,
+        DateTimeOffset completedAtUtc)
+    {
+        Tile? tile = _allTiles.FirstOrDefault(candidate => string.Equals(
+            candidate.FileName,
+            fileName,
+            StringComparison.OrdinalIgnoreCase));
+        if (tile is null)
+            return false;
+        DateTimeOffset normalized = completedAtUtc.ToUniversalTime();
+        switch (activityKind.Trim().ToLowerInvariant())
+        {
+            case "upscale":
+                tile.UpscaleCompletedAtUtc = normalized;
+                break;
+            case "photoreal":
+                tile.PhotorealCompletedAtUtc = normalized;
+                break;
+            case "video":
+                tile.VideoCompletedAtUtc = normalized;
+                break;
+            case "favorite":
+                tile.FavoriteChangedAtUtc = normalized;
+                _favoriteChangedAtUtcByPath[NormalizeFavoritePath(tile.Path)] = normalized;
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
     public bool ReshuffleRandomSortForSmoke() => ReshuffleRandomSort();
     public string RandomSortSeedForSmoke => _randomSortSeed;
     public bool ClearManualDateRangeForSmoke() => SetManualDateRange(null, null, asynchronous: false);
@@ -22436,8 +28289,20 @@ public partial class MainWindow : Window
         => SetManualDateRange(ParseStateDate(from), ParseStateDate(to), asynchronous: false);
     public bool SetFavoriteFilterLevelsForSmoke(params int[] levels)
         => SetFavoriteFilterLevels(levels, asynchronous: false);
+    public bool SetPhotorealFavoriteFilterLevelsForSmoke(params int[] levels)
+        => SetPhotorealFavoriteFilterLevels(levels, asynchronous: false);
+    public bool SetVideoFavoriteFilterLevelsForSmoke(params int[] levels)
+        => SetVideoFavoriteFilterLevels(levels, asynchronous: false);
     public void SetShowUnseenDotsForSmoke(bool enabled)
         => SetShowUnseenDots(enabled, persist: true);
+    public void SetShowGridFileInfoOverlayForSmoke(bool enabled)
+        => SetShowGridFileInfoOverlay(enabled, persist: true);
+    public void SetShowLoadTimingForSmoke(bool enabled)
+        => SetShowLoadTiming(enabled, persist: false);
+    public void SetSidebarGridFileInfoOverlayForSmoke(bool enabled)
+        => ShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
+    public void SetAppSettingsGridFileInfoOverlayForSmoke(bool enabled)
+        => AppSettingsShowGridFileInfoOverlayCheckBox.IsChecked = enabled;
     public void SetSidebarUnseenDotsForSmoke(bool enabled) => ShowUnseenDots.IsChecked = enabled;
     public void SetAppSettingsUnseenDotsForSmoke(bool enabled) => AppSettingsUnseenDotsCheckBox.IsChecked = enabled;
     public void SetThumbnailStatusBorderDraftForSmoke(
@@ -22623,7 +28488,11 @@ public partial class MainWindow : Window
     public bool ModalChromeVisibleForSmoke
         => ModalChromeEffectivelyVisible
             && ModalTopBar.Visibility == Visibility.Visible
-            && ModalFooter.Visibility == Visibility.Visible
+            && ModalFooter.Visibility == (
+                ModalVideoPlaybackButton.Visibility == Visibility.Visible
+                    || ModalVideoSeekPanel.Visibility == Visibility.Visible
+                    ? Visibility.Visible
+                    : Visibility.Collapsed)
             && ModalZoomIndicator.Visibility == Visibility.Visible
             && ModalPreviousButton.Visibility == Visibility.Visible
             && ModalNextButton.Visibility == Visibility.Visible;
@@ -22683,8 +28552,7 @@ public partial class MainWindow : Window
             int total = _tiles.Count;
             int index = SelectedTile() is Tile tile ? _tiles.IndexOf(tile) : -1;
             int position = index >= 0 ? index + 1 : 0;
-            int digits = Math.Max(3, total.ToString(CultureInfo.InvariantCulture).Length);
-            string expected = $"{position.ToString($"D{digits}", CultureInfo.InvariantCulture)} / {total.ToString($"D{digits}", CultureInfo.InvariantCulture)}";
+            string expected = $"画像 {position.ToString(CultureInfo.InvariantCulture)} / {total.ToString(CultureInfo.InvariantCulture)}";
             return string.Equals(ModalPositionText.Text, expected, StringComparison.Ordinal)
                 && string.Equals(
                     AutomationProperties.GetName(ModalPositionText),
@@ -22758,7 +28626,9 @@ public partial class MainWindow : Window
         => _modalFullScreen
             && WindowState == WindowState.Maximized
             && ResizeMode == ResizeMode.NoResize
-            && ModalWindowCaptionControls.Visibility == Visibility.Collapsed
+            && NativeMaximizedWindowMatchesCurrentMonitor(fullScreen: true)
+            && ModalWindowCaptionControls.Visibility == Visibility.Visible
+            && WindowMaximizePresentationMatches(restore: true)
             && ModalImageAreaCoversWindowForSmoke
             && string.Equals(
                 AutomationProperties.GetName(ModalFullScreenButton),
@@ -22791,20 +28661,43 @@ public partial class MainWindow : Window
         }
     }
     public bool ModalFavoriteNeutralSurfaceForSmoke
-        => SelectedTile()?.Fav == 0
+        => ModalFavoriteLevelForSmoke == 0
             && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("BgTertiary"))
             && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("GlassBorder"))
             && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("TextSecondary"));
     public bool ModalFavoriteActiveSurfaceForSmoke
-        => SelectedTile()?.Fav > 0
+        => ModalFavoriteLevelForSmoke > 0
             && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("FavoriteSoft"))
             && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("Favorite"))
             && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("FavoriteText"));
+    public bool ModalPhotorealFavoriteActiveSurfaceForSmoke
+        => CurrentModalEnhancementVersionIsPhotoreal()
+            && ModalFavoriteLevelForSmoke > 0
+            && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("PhotorealFavoriteBackground"))
+            && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("PhotorealFavorite"))
+            && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("PhotorealFavoriteText"));
+    public bool ModalVideoFavoriteActiveSurfaceForSmoke
+        => _modalShowingVideo
+            && ModalFavoriteLevelForSmoke > 0
+            && ReferenceEquals(ModalFavoriteControlBorder.Background, TryFindResource("VideoFavoriteBackground"))
+            && ReferenceEquals(ModalFavoriteControlBorder.BorderBrush, TryFindResource("VideoFavorite"))
+            && ReferenceEquals(ModalFavoriteLevelText.Foreground, TryFindResource("VideoFavoriteText"));
+    public bool HeaderProductVersionContractForSmoke
+        => HeaderProductVersionText.Text.StartsWith('v')
+            && Version.TryParse(HeaderProductVersionText.Text[1..], out _)
+            && string.Equals(Title, $"Aibos Image {HeaderProductVersionText.Text}", StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(HeaderProductVersionText),
+                "Aibos Image product version",
+                StringComparison.Ordinal);
     public bool ModalWindowCaptionControlsContractForSmoke
         => Modal.Visibility == Visibility.Visible
             && ModalWindowCaptionControls.Visibility == Visibility.Visible
             && ModalWindowCaptionControls.IsHitTestVisible
             && Panel.GetZIndex(ModalWindowCaptionControls) > Panel.GetZIndex(ModalTopBar)
+            && Panel.GetZIndex(ModalWindowCaptionControls) > Panel.GetZIndex(ModalUpscaleSettingsPopup)
+            && Panel.GetZIndex(ModalWindowCaptionControls) > Panel.GetZIndex(ModalPhotorealSettingsPopup)
+            && Panel.GetZIndex(ModalWindowCaptionControls) > Panel.GetZIndex(ModalVideoGenerationPopup)
             && WindowChrome.GetIsHitTestVisibleInChrome(ModalWindowCaptionControls)
             && new[] { ModalMinimizeButton, ModalMaximizeButton, ModalWindowCloseButton }.All(button =>
                 button.Visibility == Visibility.Visible
@@ -22822,74 +28715,139 @@ public partial class MainWindow : Window
         WindowState = previous == WindowState.Minimized ? WindowState.Normal : previous;
         return minimized;
     }
-    public bool ActivateModalMaximizeForSmoke()
+    public async Task<bool> ActivateModalMaximizeForSmokeAsync()
     {
-        bool before = _fakeMaximized;
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+
         ModalMaximizeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, ModalMaximizeButton));
-        bool toggled = _fakeMaximized != before;
-        bool firstPresentation = WindowMaximizePresentationMatches(_fakeMaximized);
-        Rect workArea = ResolveSafeCurrentMonitorWorkArea();
-        Rect maximized = WindowBoundsForSmoke;
-        bool insideWorkArea = !_fakeMaximized
-            || (maximized.Left >= workArea.Left - 0.5
-                && maximized.Top >= workArea.Top - 0.5
-                && maximized.Right <= workArea.Right + 0.5
-                && maximized.Bottom <= workArea.Bottom + 0.5);
+        await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
+        bool nativeMaximized = WindowState == WindowState.Maximized
+            && !_fakeMaximized
+            && WindowMaximizePresentationMatches(restore: true);
         ModalMaximizeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, ModalMaximizeButton));
-        return toggled
-            && firstPresentation
-            && insideWorkArea
-            && _fakeMaximized == before
-            && WindowMaximizePresentationMatches(before);
+        await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
+        return nativeMaximized
+            && WindowState == WindowState.Normal
+            && !_fakeMaximized
+            && WindowMaximizePresentationMatches(restore: false);
     }
-    public async Task<bool> NormalizeNativeMaximizeForSmokeAsync(Rect workArea)
+    public async Task<bool> ActivateCaptionDoubleClickForSmokeAsync()
+    {
+        if (_modalFullScreen)
+            SetModalFullScreen(false, showFeedback: false);
+        WindowState = WindowState.Normal;
+        _fakeMaximized = false;
+        UpdateWindowMaximizePresentation();
+
+        bool handled = false;
+        _ = WindowChromeMessageHook(
+            0,
+            WindowMessageNonClientLeftButtonDoubleClick,
+            (nint)HitTestCaption,
+            0,
+            ref handled);
+        await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
+        bool maximized = handled
+            && WindowState == WindowState.Maximized
+            && WindowMaximizePresentationMatches(restore: true);
+
+        handled = false;
+        _ = WindowChromeMessageHook(
+            0,
+            WindowMessageNonClientLeftButtonDoubleClick,
+            (nint)HitTestCaption,
+            0,
+            ref handled);
+        await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
+        return maximized
+            && handled
+            && WindowState == WindowState.Normal
+            && WindowMaximizePresentationMatches(restore: false);
+    }
+    public async Task<bool> PreserveNativeMaximizeForSmokeAsync()
     {
         if (_modalFullScreen || _fakeMaximized)
             return false;
 
-        Func<Rect> previousResolver = _currentMonitorWorkArea;
         Rect before = WindowBoundsForSmoke;
-        Rect expectedRestored = NormalizeRestoreBounds(
-            before,
-            workArea,
-            DesignWindowMinWidth,
-            DesignWindowMinHeight);
-        try
+        WindowState = WindowState.Maximized;
+        await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
+        bool nativeStatePreserved = WindowState == WindowState.Maximized
+            && !_fakeMaximized
+            && WindowMaximizePresentationMatches(restore: true);
+        bool nativeBoundsUseWorkArea =
+            NativeMaximizedWindowMatchesCurrentMonitor(fullScreen: false);
+        bool maximizeMathHandlesNegativeMonitor =
+            TryCalculateNativeMaximizedBounds(
+                new NativeRect
+                {
+                    Left = -1920,
+                    Top = 0,
+                    Right = 0,
+                    Bottom = 1080,
+                },
+                new NativeRect
+                {
+                    Left = -1872,
+                    Top = 0,
+                    Right = 0,
+                    Bottom = 1040,
+                },
+                fullScreen: false,
+                out NativePoint negativeMonitorPosition,
+                out NativePoint negativeMonitorSize)
+            && negativeMonitorPosition.X == 48
+            && negativeMonitorPosition.Y == 0
+            && negativeMonitorSize.X == 1872
+            && negativeMonitorSize.Y == 1040;
+        WindowState = WindowState.Normal;
+        await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
+        Rect restored = WindowBoundsForSmoke;
+        return nativeStatePreserved
+            && nativeBoundsUseWorkArea
+            && maximizeMathHandlesNegativeMonitor
+            && !_fakeMaximized
+            && WindowMaximizePresentationMatches(restore: false)
+            && Math.Abs(restored.Left - before.Left) < 1
+            && Math.Abs(restored.Top - before.Top) < 1
+            && Math.Abs(restored.Width - before.Width) < 1
+            && Math.Abs(restored.Height - before.Height) < 1;
+    }
+
+    private bool NativeMaximizedWindowMatchesCurrentMonitor(bool fullScreen)
+    {
+        nint windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (windowHandle == 0
+            || !GetWindowRect(windowHandle, out NativeRect windowRectangle))
         {
-            _currentMonitorWorkArea = () => workArea;
-            WindowState = WindowState.Maximized;
-            // Off-screen smoke windows do not consistently receive the native
-            // state callback. Exercise the same production normalizer
-            // deterministically when Windows leaves the state unchanged.
-            if (!_fakeMaximized && WindowState == WindowState.Maximized)
-                MainWindow_StateChanged(this, EventArgs.Empty);
-            await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
-            Rect normalized = WindowBoundsForSmoke;
-            bool normalizedToWorkArea = WindowState == WindowState.Normal
-                && _fakeMaximized
-                && Math.Abs(normalized.Left - workArea.Left) < 0.5
-                && Math.Abs(normalized.Top - workArea.Top) < 0.5
-                && Math.Abs(normalized.Width - workArea.Width) < 0.5
-                && Math.Abs(normalized.Height - workArea.Height) < 0.5
-                && WindowMaximizePresentationMatches(restore: true);
-            Maximize_Click(this, new RoutedEventArgs());
-            await Dispatcher.InvokeAsync(UpdateLayout, DispatcherPriority.ContextIdle);
-            Rect restored = WindowBoundsForSmoke;
-            return normalizedToWorkArea
-                && !_fakeMaximized
-                && WindowMaximizePresentationMatches(restore: false)
-                && Math.Abs(restored.Left - expectedRestored.Left) < 1
-                && Math.Abs(restored.Top - expectedRestored.Top) < 1
-                && Math.Abs(restored.Width - expectedRestored.Width) < 1
-                && Math.Abs(restored.Height - expectedRestored.Height) < 1;
+            return false;
         }
-        finally
+
+        nint monitor = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
+        if (monitor == 0)
+            return false;
+
+        var monitorInfo = new NativeMonitorInfo
         {
-            _currentMonitorWorkArea = previousResolver;
-        }
+            Size = (uint)Marshal.SizeOf<NativeMonitorInfo>(),
+        };
+        if (!GetMonitorInfo(monitor, ref monitorInfo))
+            return false;
+
+        NativeRect target = fullScreen
+            ? monitorInfo.MonitorArea
+            : monitorInfo.WorkArea;
+        const int tolerance = 1;
+        return Math.Abs(windowRectangle.Left - target.Left) <= tolerance
+            && Math.Abs(windowRectangle.Top - target.Top) <= tolerance
+            && Math.Abs(windowRectangle.Right - target.Right) <= tolerance
+            && Math.Abs(windowRectangle.Bottom - target.Bottom) <= tolerance;
     }
     public bool ModalTopBarPointerHitTestContractForSmoke
         => WindowChrome.GetIsHitTestVisibleInChrome(ModalTopBar)
+            && WindowChrome.GetIsHitTestVisibleInChrome(ModalTitleInfoPanel)
+            && ModalTitleInfoPanel.MinWidth >= 95
             && new[] { ModalCloseBtn, ModalShortcutsButton, ModalDeleteButton, ModalMetadataSidebarToggleButton,
                 ModalFilmstripToggleButton, ModalOpenExternalButton, ModalRevealButton, ModalEnhanceButton,
                 ModalVideoGenerateButton, ModalEnhancedToggleButton, ModalFlipButton,
@@ -22924,14 +28882,14 @@ public partial class MainWindow : Window
                 "one image pixel per screen pixel",
                 StringComparison.OrdinalIgnoreCase) == true;
     public bool ModalFavoriteLevelReadoutContractForSmoke
-        => SelectedTile() is Tile selected
+        => ModalFavoriteLevelForSmoke is int level && level >= 0
             && string.Equals(
                 ModalFavoriteLevelText.Text,
-                Math.Clamp(selected.Fav, 0, 5).ToString(CultureInfo.InvariantCulture),
+                Math.Clamp(level, 0, 5).ToString(CultureInfo.InvariantCulture),
                 StringComparison.Ordinal)
             && string.Equals(
                 AutomationProperties.GetName(ModalFavoriteLevelText),
-                $"Favorite level {Math.Clamp(selected.Fav, 0, 5)}",
+                $"Favorite level {Math.Clamp(level, 0, 5)}",
                 StringComparison.Ordinal);
     public bool ModalContextMenuContractForSmoke
         => Modal.ContextMenu is null
@@ -22940,16 +28898,37 @@ public partial class MainWindow : Window
             && ModalContextMenu.Items.OfType<MenuItem>().Count() >= 8
             && ModalContextMenu.Items.OfType<MenuItem>().All(item =>
                 !string.IsNullOrWhiteSpace(item.Header?.ToString())
-                && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(item)));
+                && !string.IsNullOrWhiteSpace(AutomationProperties.GetName(item)))
+            && new[]
+            {
+                "AI高画質化",
+                "AI実写化",
+                "AI実写高画質化のみ",
+                "次に高画質化",
+                "次に実写化",
+            }.All(name => ModalContextMenu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(
+                    AutomationProperties.GetName(item),
+                    name,
+                    StringComparison.Ordinal)));
     public bool GalleryContextMenuContractForSmoke
         => new[] { CardsContextMenu, RowsContextMenu }.All(menu =>
-            menu.Items.OfType<MenuItem>().Count() == 3
+            menu.Items.OfType<MenuItem>().Count() >= 10
             && menu.Items.OfType<MenuItem>().Any(item =>
                 string.Equals(item.Header?.ToString(), "AI高画質化", StringComparison.Ordinal)
                 && string.Equals(AutomationProperties.GetName(item), "AI高画質化", StringComparison.Ordinal))
             && menu.Items.OfType<MenuItem>().Any(item =>
                 string.Equals(item.Header?.ToString(), "AI実写化", StringComparison.Ordinal)
                 && string.Equals(AutomationProperties.GetName(item), "AI実写化", StringComparison.Ordinal))
+            && menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(item.Header?.ToString(), "AI実写高画質化のみ", StringComparison.Ordinal)
+                && string.Equals(AutomationProperties.GetName(item), "AI実写高画質化のみ", StringComparison.Ordinal))
+            && menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(item.Header?.ToString(), "次に高画質化", StringComparison.Ordinal)
+                && string.Equals(AutomationProperties.GetName(item), "次に高画質化", StringComparison.Ordinal))
+            && menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(item.Header?.ToString(), "次に実写化", StringComparison.Ordinal)
+                && string.Equals(AutomationProperties.GetName(item), "次に実写化", StringComparison.Ordinal))
             && menu.Items.OfType<MenuItem>().Any(item =>
                 string.Equals(item.Header?.ToString(), "動画化", StringComparison.Ordinal)
                 && string.Equals(
@@ -22973,7 +28952,18 @@ public partial class MainWindow : Window
                         StringComparison.Ordinal)
                     || child.Tag?.ToString()?.StartsWith(
                         PhotorealVideoSourceRequestPrefix,
-                        StringComparison.Ordinal) == true)));
+                        StringComparison.Ordinal) == true))
+            && new[]
+            {
+                "Open enlarged image",
+                "Open selected image externally",
+                "Show selected source in folder",
+                "Add selected image to Album",
+            }.All(name => menu.Items.OfType<MenuItem>().Any(item =>
+                string.Equals(
+                    AutomationProperties.GetName(item),
+                    name,
+                    StringComparison.Ordinal))));
     public bool ModalEdgeChromeContractForSmoke
         => ModalPreviousZoneColumn.Width.GridUnitType == GridUnitType.Star
             && ModalCenterZoneColumn.Width.GridUnitType == GridUnitType.Star
@@ -23237,10 +29227,18 @@ public partial class MainWindow : Window
             _modalPanX,
             _modalPanY,
             ModalPanLimits().MaxX,
-            ModalPanLimits().MaxY);
+            ModalPanLimits().MaxY,
+            Math.Max(0, ModalImage?.Width ?? 0) * _modalZoom,
+            Math.Max(0, ModalImage?.Height ?? 0) * _modalZoom);
 
     public bool ModalShowingEnhancedForSmoke => _modalShowingEnhanced;
-    public bool ModalEnhancedToggleAvailableForSmoke => SelectedTile() is Tile tile && TryGetModalEnhancedOutput(tile, out _);
+    public int ModalDecodeStartCountForSmoke
+        => Volatile.Read(ref _modalDecodeStartCountForSmoke);
+    public int ModalDecodeApplyCountForSmoke
+        => Volatile.Read(ref _modalDecodeApplyCountForSmoke);
+    public bool ModalEnhancedToggleAvailableForSmoke
+        => TryGetModalSourceTile(out Tile tile)
+            && TryGetModalEnhancedOutput(tile, out _);
     public string? ModalDisplayPathForSmoke => _modalDisplayPath;
     public string? ModalEnhancementJobIdForSmoke => _modalEnhancementJobId;
     public string? ModalEnhancementStatusForSmoke => _modalEnhancementJobStatus;
@@ -23262,11 +29260,10 @@ public partial class MainWindow : Window
                 ? choice.Kind.ToString()
                 : "Unavailable";
     public bool ModalEnhancedToolbarClarityContractForSmoke
-        => string.Equals(
-                ModalEnhancedToggleLabel.Text,
-                CurrentModalEnhancementVersionLabel(),
-                StringComparison.Ordinal)
+        => ModalEnhancedToggleButton.Visibility == Visibility.Collapsed
+            && !ModalEnhancedToggleButton.IsTabStop
             && ModalEnhancementVersionComboBox.Visibility == Visibility.Visible
+            && ModalEnhancementVersionComboBox.IsTabStop
             && ModalEnhancementVersionComboBox.Items.Count
                 == _modalEnhancementVersions.Count + _modalVideoVersions.Count + 1
             && ModalEnhancementVersionComboBox.SelectedItem
@@ -23275,7 +29272,6 @@ public partial class MainWindow : Window
             && AutomationProperties.GetName(ModalEnhancementVersionComboBox).Contains(
                 "動画化",
                 StringComparison.Ordinal)
-            && ModalEnhancedToggleButton.Width >= 64
             && ModalDeleteButton.Width <= 36
             && ModalDeleteButton.Content is System.Windows.Shapes.Path
             && (_modalShowingVideo || _modalShowingEnhanced
@@ -23284,10 +29280,7 @@ public partial class MainWindow : Window
                     StringComparison.OrdinalIgnoreCase) == true
                 : ModalDeleteButton.ToolTip?.ToString()?.Contains(
                     "Recycle Bin",
-                    StringComparison.OrdinalIgnoreCase) == true)
-            && AutomationProperties.GetName(ModalEnhancedToggleButton).Contains(
-                CurrentModalEnhancementVersionLabel(),
-                StringComparison.Ordinal);
+                    StringComparison.OrdinalIgnoreCase) == true);
 
     public void ConfigureModalEnhancementForSmoke(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sender,
@@ -23296,6 +29289,7 @@ public partial class MainWindow : Window
     {
         _modalEnhancementSender = sender;
         _usingDefaultModalEnhancementSender = false;
+        _recoveredPhotorealSourceUpscaleSupported = null;
         _startEnhancementCompanionForSmoke = null;
         _confirmLargeEnhancementForSmoke = () => confirmLargeJob;
         _confirmEnhancedOutputDeleteForSmoke = () => confirmOutputDelete;
@@ -23331,7 +29325,8 @@ public partial class MainWindow : Window
 
     public async Task<bool> RefreshModalEnhancementForSmokeAsync()
     {
-        if (Modal.Visibility != Visibility.Visible || SelectedTile() is not Tile tile)
+        if (Modal.Visibility != Visibility.Visible
+            || !TryGetModalSourceTile(out Tile tile))
             return false;
         await RefreshModalEnhancementStateAsync(tile.Path, _modalEnhancementGeneration, showUnavailableError: true);
         return true;
@@ -23344,12 +29339,48 @@ public partial class MainWindow : Window
         return completed && _modalEnhancementJobStatus is "queued" or "running";
     }
 
-    public async Task<bool> StartGalleryContextEnhancementForSmokeAsync(string operation)
+    public async Task<bool> StartGalleryContextEnhancementForSmokeAsync(
+        string operation,
+        bool enqueueNext = false,
+        bool requirePhotorealSource = false)
     {
         if (Modal.Visibility == Visibility.Visible)
             CloseModal();
-        await StartGalleryContextEnhancementAsync(operation);
+        await StartGalleryContextEnhancementAsync(
+            operation,
+            enqueueNext,
+            requirePhotorealSource);
         return Modal.Visibility != Visibility.Visible;
+    }
+
+    public async Task<bool> StartModalContextEnhancementNextForSmokeAsync(
+        string operation)
+    {
+        if (Modal.Visibility != Visibility.Visible)
+            return false;
+        await StartModalContextEnhancementNextAsync(operation);
+        return Modal.Visibility == Visibility.Visible
+            && !_galleryContextEnhancementRequestPending;
+    }
+
+    public async Task<bool> StartGalleryContextEnhancementDoubleActivationForSmokeAsync(
+        string operation,
+        bool enqueueNext = false,
+        bool requirePhotorealSource = false)
+    {
+        if (Modal.Visibility == Visibility.Visible)
+            CloseModal();
+        Task first = StartGalleryContextEnhancementAsync(
+            operation,
+            enqueueNext,
+            requirePhotorealSource);
+        Task second = StartGalleryContextEnhancementAsync(
+            operation,
+            enqueueNext,
+            requirePhotorealSource);
+        await Task.WhenAll(first, second);
+        return Modal.Visibility != Visibility.Visible
+            && !_galleryContextEnhancementRequestPending;
     }
 
     public async Task<bool> StartModalEnhancementWithShortcutForSmokeAsync()
@@ -23377,7 +29408,9 @@ public partial class MainWindow : Window
     public async Task<bool> DeleteModalEnhancedOutputForSmokeAsync()
     {
         await DeleteDisplayedModalEnhancedOutputAsync();
-        return SelectedTile() is Tile tile && !tile.Enhanced && !_modalShowingEnhanced;
+        return TryGetModalSourceTile(out Tile tile)
+            && !tile.Enhanced
+            && !_modalShowingEnhanced;
     }
 
     private async Task<bool> WaitForModalEnhancementRequestForSmokeAsync(int timeoutMilliseconds = 3000)
@@ -23440,9 +29473,25 @@ public partial class MainWindow : Window
     public void SetFolderDropAffordanceForSmoke(bool landing, bool visible)
         => SetFolderDropAffordance(landing ? Landing : ViewerFolderDropTarget, visible);
 
+    public bool DismissFolderDropAffordanceForSmoke(bool landing)
+    {
+        SetFolderDropAffordance(
+            landing ? Landing : ViewerFolderDropTarget,
+            visible: true);
+        bool shown = (landing
+                ? LandingFolderDropOverlay
+                : ViewerFolderDropOverlay).Visibility == Visibility.Visible;
+        DismissFolderDropOverlays();
+        return shown
+            && LandingFolderDropOverlay.Visibility == Visibility.Collapsed
+            && ViewerFolderDropOverlay.Visibility == Visibility.Collapsed;
+    }
+
     public bool FolderDropSurfaceContractForSmoke
         => !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetHelpText(Landing))
-            && !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetHelpText(ViewerFolderDropTarget));
+            && !string.IsNullOrWhiteSpace(System.Windows.Automation.AutomationProperties.GetHelpText(ViewerFolderDropTarget))
+            && LandingFolderDropOverlay.IsHitTestVisible
+            && ViewerFolderDropOverlay.IsHitTestVisible;
 
     public Task<bool> AddFoldersToCurrentSetForSmokeAsync(IEnumerable<string> folders)
         => AddFoldersToCurrentSetAsync(folders);
@@ -23470,6 +29519,28 @@ public partial class MainWindow : Window
     public bool SeenWriterPendingForSmoke => _seenWriter?.HasPendingOrInFlight == true;
     public int FavoriteWriterBatchCountForSmoke => _favoriteWriter?.BatchWriteCount ?? 0;
     public int SeenWriterBatchCountForSmoke => _seenWriter?.BatchWriteCount ?? 0;
+    public long LastFavoriteWriteApplyMillisecondsForSmoke
+        => Interlocked.Read(ref _lastFavoriteWriteApplyMilliseconds);
+    public long MaxFavoriteWriteApplyMillisecondsForSmoke
+        => Interlocked.Read(ref _maxFavoriteWriteApplyMilliseconds);
+    public int LastDerivedFavoriteVisitedTileCountForSmoke
+        => Volatile.Read(ref _lastDerivedFavoriteVisitedTileCount);
+    public int MaxDerivedFavoriteVisitedTileCountForSmoke
+        => Volatile.Read(ref _maxDerivedFavoriteVisitedTileCount);
+    public int FavoritePresentationStateWriteCountForSmoke
+        => Volatile.Read(ref _favoritePresentationStateWriteCount);
+    public bool FavoritePresentationStatePendingForSmoke
+    {
+        get
+        {
+            lock (_favoritePresentationStateQueueGate)
+            {
+                return _favoritePresentationStatePumpRunning != 0
+                    || _pendingFavoritePresentationActivity.Count > 0
+                    || _pendingFavoriteFilterState is not null;
+            }
+        }
+    }
     public int PendingFavoriteMutationCountForSmoke => _pendingFavoriteMutations.Count;
     public int PendingSeenMutationCountForSmoke => _pendingSeenMutations.Count;
     public bool FavoritesWriteBlockedForSmoke => _favoritesWriteBlocked;
@@ -23514,6 +29585,39 @@ public partial class MainWindow : Window
             ? seenWriter.DrainAsync(CancellationToken.None)
             : Task.FromResult(SharedWriteStatus.Succeeded);
         return await Task.WhenAll(favorite, seen);
+    }
+
+    internal async Task<bool> WaitForFavoritePresentationStateForSmokeAsync(
+        TimeSpan timeout)
+    {
+        using var timeoutSource = new CancellationTokenSource(timeout);
+        while (true)
+        {
+            Task activeWrite;
+            bool failed;
+            lock (_favoritePresentationStateQueueGate)
+            {
+                if (_favoritePresentationStatePumpRunning == 0)
+                {
+                    return _pendingFavoritePresentationActivity.Count == 0
+                        && _pendingFavoriteFilterState is null
+                        && _failedFavoritePresentationStateBatch is null;
+                }
+                activeWrite = _favoritePresentationStateWriteTask;
+                failed = _failedFavoritePresentationStateBatch is not null;
+            }
+
+            if (failed)
+                return false;
+            try
+            {
+                await activeWrite.WaitAsync(timeoutSource.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+        }
     }
 
     public Task CloseAndWaitForSmokeAsync()
@@ -23565,6 +29669,21 @@ public partial class MainWindow : Window
             debounce: false,
             reorderCatalog: false,
             selectFirst: true);
+    }
+
+    public Task<SearchFilterCompletion>
+        SetPhotorealFavoriteFilterLevelsForSmokeAsync(params int[] levels)
+    {
+        bool changed = SetPhotorealFavoriteFilterLevels(
+            levels,
+            asynchronous: true);
+        if (!changed)
+            return Task.FromResult(new SearchFilterCompletion(true, false, null));
+        return _pendingSearchFilterCompletion?.Task
+            ?? Task.FromResult(new SearchFilterCompletion(
+                false,
+                false,
+                "photoreal Favorite filter did not schedule a projection"));
     }
 
     public void SetEnhancedOnlyFilterForSmoke(bool enabled)
@@ -24025,8 +30144,9 @@ public partial class MainWindow : Window
 
     private ModalMetadataSmokeSnapshot ModalMetadataForSmoke()
     {
-        bool current = SelectedTile() is Tile selected
-            && string.Equals(selected.Path, _currentPreviewMetadataPath, StringComparison.OrdinalIgnoreCase);
+        bool current = CurrentDisplayedModalVideoVersion() is not null
+            || (!string.IsNullOrWhiteSpace(_modalDisplayPath)
+                && CurrentDisplayedModalPngMetadata() is not null);
         return new ModalMetadataSmokeSnapshot(
             Modal.Visibility == Visibility.Visible,
             ModalMetadataSidebar.Visibility == Visibility.Visible,
@@ -24072,6 +30192,7 @@ public sealed class ViewerState
     public string? SearchQuery { get; set; }
     public string? SelectedPath { get; set; }
     public double CardWidth { get; set; } = 200;
+    public double SidebarWidth { get; set; } = 300;
     public bool? RightPanelOpen { get; set; }
     public double RightPanelWidth { get; set; } = 340;
     public string? DisplayStyle { get; set; }
@@ -24084,9 +30205,32 @@ public sealed class ViewerState
     public bool ShowFavoritesOnly { get; set; }
     public bool ShowUnfavoriteOnly { get; set; }
     public List<int>? FavoriteFilterLevels { get; set; }
+    // WPF-local gallery filter over the highest Favorite level among validated
+    // managed Photoreal outputs. Level 0 still requires a Photoreal version.
+    public List<int>? PhotorealFavoriteFilterLevels { get; set; }
+    // WPF-local gallery filter over the highest Favorite level among currently
+    // valid managed Video outputs. Missing older state means no selection, and
+    // Level 0 still requires at least one valid Video output.
+    public List<int>? VideoFavoriteFilterLevels { get; set; }
     public bool ShowUnseenDots { get; set; }
+    // WPF-local Grid caption presentation. Missing older state keeps captions on.
+    public bool? ShowGridFileInfoOverlay { get; set; }
+    // Optional WPF-local diagnostics. Missing older state stays off.
+    public bool? ShowLoadTiming { get; set; }
     // WPF-local presentation only. Missing in older state keeps notifications on.
     public bool? ShowFavoriteChangeNotifications { get; set; }
+    // WPF-local gallery presentation. Per-image choices remain session-only.
+    public bool? UseLastDisplayedImageVersionForThumbnails { get; set; }
+    // WPF-local defaults for explicit AI upscale requests. They do not change
+    // Browser settings or an already queued/running job snapshot.
+    public string? UpscalePresetId { get; set; }
+    public string? UpscaleAdapterId { get; set; }
+    public int? UpscaleBackendVersion { get; set; }
+    public double? UpscaleScale { get; set; }
+    public string? UpscaleOutputFormat { get; set; }
+    // WPF-local activity history used by the "Fav touched" sort. Level 0
+    // entries are retained so clearing a favorite is still an interaction.
+    public Dictionary<string, DateTimeOffset>? FavoriteChangedAtUtcByPath { get; set; }
     // Defaults to true for both fresh and pre-P0C state files.
     public bool ConfirmBeforeDelete { get; set; } = true;
     // Missing in v1 state means expanded, preserving the original sidebar behavior.
@@ -24096,13 +30240,25 @@ public sealed class ViewerState
     // WPF-only viewer hit zone; it does not modify the shared settings.json contract.
     public double? ModalEdgeNavigationPercent { get; set; }
     // WPF-local request defaults for the explicit AI photorealization action.
+    public bool? PhotorealLoraEnabled { get; set; }
     public double? PhotorealStrength { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public double? PhotorealStructureStrength { get; set; }
     public double? PhotorealCfgScale { get; set; }
     public int? PhotorealSteps { get; set; }
     public int? PhotorealMaxDimension { get; set; }
     public string? PhotorealPrompt { get; set; }
+    public string? PhotorealEmptyPrompt { get; set; }
+    public string? PhotorealNegativePrompt { get; set; }
+    // Missing in older state defaults to OFF because FLUX.2 does not support
+    // natural-language negative prompts. The text itself remains preserved.
+    public bool? PhotorealNegativePromptEnabled { get; set; }
+    public string? PhotorealSeedMode { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? PhotorealSeedValue { get; set; }
     public List<PhotorealStyleState>? PhotorealStyles { get; set; }
+    public List<PhotorealPromptMappingState>? PhotorealPromptMappings { get; set; }
+    public int? PhotorealPromptMappingDefaultsRevision { get; set; }
     public string? SelectedPhotorealStyleName { get; set; }
     // WPF-local request defaults for the explicit managed-video action.
     public int? VideoDurationSeconds { get; set; }
@@ -24111,6 +30267,9 @@ public sealed class ViewerState
     public string? VideoPrompt { get; set; }
     public string? VideoModelId { get; set; }
     public string? VideoQualityId { get; set; }
+    public string? VideoSeedMode { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? VideoSeedValue { get; set; }
     public List<VideoStyleState>? VideoStyles { get; set; }
     public string? SelectedVideoStyleName { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
@@ -24135,12 +30294,18 @@ public sealed class ViewerState
 public sealed class PhotorealStyleState
 {
     public string Name { get; set; } = "";
+    public bool? LoraEnabled { get; set; }
     public double Strength { get; set; }
-    public double StructureStrength { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public double? StructureStrength { get; set; }
     public double? CfgScale { get; set; }
     public int Steps { get; set; }
     public int MaxDimension { get; set; }
     public string Prompt { get; set; } = "";
+    public string? EmptyPrompt { get; set; }
+    public string? NegativePrompt { get; set; }
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }
 
 public sealed class VideoStyleState
@@ -24194,7 +30359,9 @@ public readonly record struct ModalTransformSnapshot(
     double PanX,
     double PanY,
     double MaxPanX,
-    double MaxPanY);
+    double MaxPanY,
+    double DisplayedWidth,
+    double DisplayedHeight);
 
 public readonly record struct ModalPanCadenceSnapshot(
     bool Available,
@@ -24469,6 +30636,19 @@ public sealed record GalleryAutomationItemSmokeSnapshot(
         => new(index, "", "", false, false, false, false, false, false);
 }
 
+public sealed record SynchronousFilterOwnershipSmokeSnapshot(
+    int Count,
+    long AutomationProjectionCreateDelta,
+    long ActiveCreatorDelta,
+    int ProjectionResetDelta);
+
+public sealed record CancellationAwareReadSmokeSnapshot(
+    bool ReadEntered,
+    bool CancelReturned,
+    bool ReadCompleted,
+    bool ReadCanceled,
+    bool InnerDisposedBeforeCleanup);
+
 public sealed class GalleryAutomationPeerSmokeLease(
     VirtualizedGalleryListBoxItemAutomationPeer peer)
 {
@@ -24693,7 +30873,11 @@ public readonly record struct ImageMetadataLoadMetrics(
 
 public readonly record struct ThumbnailLoadMetrics(int Total, int Workers, int Completed, long ElapsedMs);
 
-internal readonly record struct BitmapDecodePlan(int PixelWidth, int PixelHeight);
+internal readonly record struct BitmapDecodePlan(
+    int PixelWidth,
+    int PixelHeight,
+    int SourceWidth,
+    int SourceHeight);
 
 internal readonly record struct GridZoomAnchor(string Path, double ViewportY, double CenterDistance);
 
@@ -24702,10 +30886,12 @@ internal readonly record struct DecodedThumbnail(Tile Tile, BitmapSource? Thumbn
 internal readonly record struct DecodedImageMetadata(
     Tile Tile,
     ImageDimensions Dimensions,
-    string Prompt);
+    byte[] PromptUtf8);
 
 internal sealed record MetadataIndexSnapshotPlan(
     MetadataIndexEntry[] Entries,
+    MetadataIndexEntry[] Upserts,
+    string[] RemovedPaths,
     bool DurableEntrySetExact);
 
 internal sealed class SnapshotCollectionView<T> : CollectionView, IReadOnlyList<T>
@@ -24805,6 +30991,25 @@ internal sealed class ResettableObservableCollection<T> :
         if (count < 0 || count > items.Length)
             throw new ArgumentOutOfRangeException(nameof(count));
         ReplaceOwned(count == items.Length ? items : items.AsSpan(0, count).ToArray());
+    }
+
+    public bool Matches(T[] items, int count)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (count < 0 || count > items.Length)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        if (_items.Length != count)
+            return false;
+        if (ReferenceEquals(_items, items))
+            return true;
+
+        EqualityComparer<T> comparer = EqualityComparer<T>.Default;
+        for (int index = 0; index < count; index++)
+        {
+            if (!comparer.Equals(_items[index], items[index]))
+                return false;
+        }
+        return true;
     }
 
     public bool CanReplaceOneRemoved(T[] items, int count, int removedIndex)
@@ -24966,9 +31171,48 @@ internal sealed class ResettableObservableCollection<T> :
 }
 
 // ─────────── Tile view model ───────────
+public readonly record struct FavoriteBadgeVisualSmokeSnapshot(
+    bool PhotorealVisible,
+    bool VideoVisible,
+    string PhotorealAutomationName,
+    string VideoAutomationName,
+    string PhotorealBorderColor,
+    string VideoBorderColor,
+    string PhotorealBackgroundColor,
+    string VideoBackgroundColor);
+
 public sealed class Tile : INotifyPropertyChanged
 {
-    private static readonly PropertyChangedEventArgs AllLayoutPropertiesChanged = new(string.Empty);
+    private const double VariantCountCardWidthThreshold = 140;
+    private static readonly PropertyChangedEventArgs CardWidthChanged = new(nameof(CardWidth));
+    private static readonly PropertyChangedEventArgs CardHeightChanged = new(nameof(CardHeight));
+    private static readonly PropertyChangedEventArgs CardThumbnailStretchChanged = new(nameof(CardThumbnailStretch));
+    private static readonly PropertyChangedEventArgs ShowCardDetailsChanged = new(nameof(ShowCardDetails));
+    private static readonly PropertyChangedEventArgs ShowCardStatusBadgeChanged = new(nameof(ShowCardStatusBadge));
+    private static readonly PropertyChangedEventArgs CardFavoriteButtonSizeChanged = new(nameof(CardFavoriteButtonSize));
+    private static readonly PropertyChangedEventArgs UseCompactCardTemplateChanged = new(nameof(UseCompactCardTemplate));
+    private static readonly PropertyChangedEventArgs CompactFavoriteControlHeightChanged = new(nameof(CompactFavoriteControlHeight));
+    private static readonly PropertyChangedEventArgs ListThumbnailWidthChanged = new(nameof(ListThumbnailWidth));
+    private static readonly PropertyChangedEventArgs ListThumbnailHeightChanged = new(nameof(ListThumbnailHeight));
+    private static readonly PropertyChangedEventArgs ListThumbnailSizeChanged = new(nameof(ListThumbnailSize));
+    private static readonly PropertyChangedEventArgs ShowFavoriteBadgeChanged = new(nameof(ShowFavoriteBadge));
+    private static readonly PropertyChangedEventArgs ShowPhotorealFavoriteBadgeChanged = new(nameof(ShowPhotorealFavoriteBadge));
+    private static readonly PropertyChangedEventArgs ShowVideoFavoriteBadgeChanged = new(nameof(ShowVideoFavoriteBadge));
+    private static readonly PropertyChangedEventArgs ShowEnhancedBadgeChanged = new(nameof(ShowEnhancedBadge));
+    private static readonly PropertyChangedEventArgs ShowUpscaleBadgeChanged = new(nameof(ShowUpscaleBadge));
+    private static readonly PropertyChangedEventArgs ShowPhotorealBadgeChanged = new(nameof(ShowPhotorealBadge));
+    private static readonly PropertyChangedEventArgs ShowI2iBadgeChanged = new(nameof(ShowI2iBadge));
+    private static readonly PropertyChangedEventArgs ShowVideoBadgeChanged = new(nameof(ShowVideoBadge));
+    private static readonly PropertyChangedEventArgs ShowUpscaleVariantCountChanged = new(nameof(ShowUpscaleVariantCount));
+    private static readonly PropertyChangedEventArgs ShowPhotorealVariantCountChanged = new(nameof(ShowPhotorealVariantCount));
+    private static readonly PropertyChangedEventArgs ShowI2iVariantCountChanged = new(nameof(ShowI2iVariantCount));
+    private static readonly PropertyChangedEventArgs ShowVideoVariantCountChanged = new(nameof(ShowVideoVariantCount));
+    private static readonly PropertyChangedEventArgs ShowUpscaleQueueBadgeChanged = new(nameof(ShowUpscaleQueueBadge));
+    private static readonly PropertyChangedEventArgs ShowPhotorealQueueBadgeChanged = new(nameof(ShowPhotorealQueueBadge));
+    private static readonly PropertyChangedEventArgs ShowI2iQueueBadgeChanged = new(nameof(ShowI2iQueueBadge));
+    private static readonly PropertyChangedEventArgs ShowVideoQueueBadgeChanged = new(nameof(ShowVideoQueueBadge));
+    private static readonly PropertyChangedEventArgs ShowUnseenDotOnCardChanged = new(nameof(ShowUnseenDotOnCard));
+    private static readonly PropertyChangedEventArgs PromptChanged = new(nameof(Prompt));
 
     public Brush? ArtBase { get; set; }
     public Brush? ArtGlow { get; set; }
@@ -24982,6 +31226,14 @@ public sealed class Tile : INotifyPropertyChanged
     public string? VideoOutputPath { get; set; }
     public DateTime ModifiedUtc { get; set; }
     public DateTime CreatedUtc { get; set; }
+    public DateTimeOffset? UpscaleCompletedAtUtc { get; set; }
+    public DateTimeOffset? PhotorealCompletedAtUtc { get; set; }
+    public DateTimeOffset? VideoCompletedAtUtc { get; set; }
+    public DateTimeOffset? UpscaleQueueAddedAtUtc { get; set; }
+    public DateTimeOffset? PhotorealQueueAddedAtUtc { get; set; }
+    public DateTimeOffset? I2iQueueAddedAtUtc { get; set; }
+    public DateTimeOffset? VideoQueueAddedAtUtc { get; set; }
+    public DateTimeOffset? FavoriteChangedAtUtc { get; set; }
     public long SourceLength { get; set; }
     public long SourceLastWriteUtcTicks { get; set; }
     public long SourceCreationUtcTicks { get; set; }
@@ -24989,19 +31241,37 @@ public sealed class Tile : INotifyPropertyChanged
     public string ModifiedText { get; set; } = "";
     public string AutomationHelpText
         => $"{SizeText}. Favorite level {_fav}. "
-            + $"{(_upscaled ? "AI-upscaled. " : "")}"
-            + $"{(_photorealized ? "AI-photorealized. " : "")}"
-            + $"{(_videoGenerated ? "Generated video available. " : "")}"
+            + $"{(_photorealized ? $"Highest Photoreal favorite level {_photorealFavoriteLevel}. " : "")}"
+            + $"{(_videoGenerated ? $"Highest Video favorite level {_videoFavoriteLevel}. " : "")}"
+            + $"{(_upscaled ? _upscaleVersionCount > 1 ? $"AI-upscaled versions {_upscaleVersionCount}. " : "AI-upscaled. " : "")}"
+            + $"{(_upscaleQueueActive ? "AI-upscale queued. " : "")}"
+            + $"{(_photorealized ? _photorealVersionCount > 1 ? $"AI-photorealized versions {_photorealVersionCount}. " : "AI-photorealized. " : "")}"
+            + $"{(_photorealQueueActive ? "AI-photoreal queued. " : "")}"
+            + $"{(_i2iEdited ? _i2iVersionCount > 1 ? $"AI-edited versions {_i2iVersionCount}. " : "AI-edited. " : "")}"
+            + $"{(_i2iQueueActive ? "AI-edit queued. " : "")}"
+            + $"{(_videoGenerated ? _videoVersionCount > 1 ? $"Generated video versions {_videoVersionCount}. " : "Generated video available. " : "")}"
+            + $"{(_videoQueueActive ? "Video generation queued. " : "")}"
             + $"{(!_enhanced ? "Original. " : "")}"
             + $"{(_unseen ? "Unseen" : "Seen")}.";
 
-    private string _prompt = "";
+    private byte[] _promptUtf8 = [];
     private int _imagePixelWidth;
     private int _imagePixelHeight;
     private bool _enhanced;
     private bool _upscaled;
     private bool _photorealized;
+    private bool _i2iEdited;
     private bool _videoGenerated;
+    private int _upscaleVersionCount;
+    private int _photorealVersionCount;
+    private int _photorealFavoriteLevel;
+    private int _i2iVersionCount;
+    private int _videoVersionCount;
+    private int _videoFavoriteLevel;
+    private bool _upscaleQueueActive;
+    private bool _photorealQueueActive;
+    private bool _i2iQueueActive;
+    private bool _videoQueueActive;
     private bool _showCardDetails = true;
     private bool _showCardStatusBadge = true;
     private bool _isCanonicalSelected;
@@ -25039,6 +31309,7 @@ public sealed class Tile : INotifyPropertyChanged
             _upscaled = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Upscaled)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleVariantCount)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
@@ -25052,6 +31323,22 @@ public sealed class Tile : INotifyPropertyChanged
             _photorealized = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Photorealized)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public bool I2iEdited
+    {
+        get => _i2iEdited;
+        set
+        {
+            if (_i2iEdited == value) return;
+            _i2iEdited = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(I2iEdited)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowI2iBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowI2iVariantCount)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
@@ -25065,6 +31352,146 @@ public sealed class Tile : INotifyPropertyChanged
             _videoGenerated = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoGenerated)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public int UpscaleVersionCount
+    {
+        get => _upscaleVersionCount;
+        set
+        {
+            int normalized = Math.Max(0, value);
+            if (_upscaleVersionCount == normalized) return;
+            _upscaleVersionCount = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UpscaleVersionCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public int PhotorealVersionCount
+    {
+        get => _photorealVersionCount;
+        set
+        {
+            int normalized = Math.Max(0, value);
+            if (_photorealVersionCount == normalized) return;
+            _photorealVersionCount = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhotorealVersionCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public int PhotorealFavoriteLevel
+    {
+        get => _photorealFavoriteLevel;
+        set
+        {
+            int normalized = Math.Clamp(value, 0, 5);
+            if (_photorealFavoriteLevel == normalized) return;
+            _photorealFavoriteLevel = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhotorealFavoriteLevel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhotorealFavoriteAutomationName)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public int I2iVersionCount
+    {
+        get => _i2iVersionCount;
+        set
+        {
+            int normalized = Math.Max(0, value);
+            if (_i2iVersionCount == normalized) return;
+            _i2iVersionCount = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(I2iVersionCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowI2iVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public int VideoVersionCount
+    {
+        get => _videoVersionCount;
+        set
+        {
+            int normalized = Math.Max(0, value);
+            if (_videoVersionCount == normalized) return;
+            _videoVersionCount = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoVersionCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public int VideoFavoriteLevel
+    {
+        get => _videoFavoriteLevel;
+        set
+        {
+            int normalized = Math.Clamp(value, 0, 5);
+            if (_videoFavoriteLevel == normalized) return;
+            _videoFavoriteLevel = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoFavoriteLevel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoFavoriteAutomationName)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public bool UpscaleQueueActive
+    {
+        get => _upscaleQueueActive;
+        set
+        {
+            if (_upscaleQueueActive == value) return;
+            _upscaleQueueActive = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UpscaleQueueActive)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleQueueBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public bool PhotorealQueueActive
+    {
+        get => _photorealQueueActive;
+        set
+        {
+            if (_photorealQueueActive == value) return;
+            _photorealQueueActive = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PhotorealQueueActive)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealQueueBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public bool I2iQueueActive
+    {
+        get => _i2iQueueActive;
+        set
+        {
+            if (_i2iQueueActive == value) return;
+            _i2iQueueActive = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(I2iQueueActive)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowI2iQueueBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
+        }
+    }
+
+    public bool VideoQueueActive
+    {
+        get => _videoQueueActive;
+        set
+        {
+            if (_videoQueueActive == value) return;
+            _videoQueueActive = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VideoQueueActive)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoQueueBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AutomationHelpText)));
         }
     }
@@ -25089,20 +31516,60 @@ public sealed class Tile : INotifyPropertyChanged
             _showCardStatusBadge = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowCardStatusBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealFavoriteBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoFavoriteBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowEnhancedBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowI2iBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowI2iVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleQueueBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealQueueBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowI2iQueueBadge)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoQueueBadge)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUnseenDotOnCard)));
         }
     }
 
     public bool ShowFavoriteBadge => _showCardStatusBadge && _fav > 0;
+    public bool ShowPhotorealFavoriteBadge =>
+        _showCardStatusBadge && _photorealized && _photorealFavoriteLevel > 0;
+    public bool ShowVideoFavoriteBadge =>
+        _showCardStatusBadge && _videoGenerated && _videoFavoriteLevel > 0;
+    public string PhotorealFavoriteAutomationName =>
+        $"Photoreal Favorite level {_photorealFavoriteLevel}";
+    public string VideoFavoriteAutomationName =>
+        $"Video Favorite level {_videoFavoriteLevel}";
     public string FavoriteGlyph => _fav > 0 ? "\uEB52" : "\uEB51";
     public bool ShowEnhancedBadge => _showCardStatusBadge && _enhanced;
     public bool ShowUpscaleBadge => _showCardStatusBadge && _upscaled;
     public bool ShowPhotorealBadge => _showCardStatusBadge && _photorealized;
+    public bool ShowI2iBadge => _showCardStatusBadge && _i2iEdited;
     public bool ShowVideoBadge => _showCardStatusBadge && _videoGenerated;
+    public bool ShowUpscaleVariantCount =>
+        ShowUpscaleBadge
+        && _cardWidth >= VariantCountCardWidthThreshold
+        && _upscaleVersionCount > 1;
+    public bool ShowPhotorealVariantCount =>
+        ShowPhotorealBadge
+        && _cardWidth >= VariantCountCardWidthThreshold
+        && _photorealVersionCount > 1;
+    public bool ShowI2iVariantCount =>
+        ShowI2iBadge
+        && _cardWidth >= VariantCountCardWidthThreshold
+        && _i2iVersionCount > 1;
+    public bool ShowVideoVariantCount =>
+        ShowVideoBadge
+        && _cardWidth >= VariantCountCardWidthThreshold
+        && _videoVersionCount > 1;
+    public bool ShowUpscaleQueueBadge => _showCardStatusBadge && _upscaleQueueActive;
+    public bool ShowPhotorealQueueBadge => _showCardStatusBadge && _photorealQueueActive;
+    public bool ShowI2iQueueBadge => _showCardStatusBadge && _i2iQueueActive;
+    public bool ShowVideoQueueBadge => _showCardStatusBadge && _videoQueueActive;
     public bool ShowUnseenDotOnCard => _showCardStatusBadge && _showUnseenDot;
     public double CardFavoriteButtonSize => Math.Clamp(_cardWidth - 4, 18, 34);
     public bool UseCompactCardTemplate => _cardWidth < 80;
@@ -25110,13 +31577,23 @@ public sealed class Tile : INotifyPropertyChanged
 
     public string Prompt
     {
-        get => _prompt;
+        get => MetadataIndexStore.DecodePrompt(_promptUtf8);
+        set => PromptUtf8 = MetadataIndexStore.EncodePrompt(value);
+    }
+
+    internal byte[] PromptUtf8
+    {
+        get => _promptUtf8;
         set
         {
-            value ??= "";
-            if (string.Equals(_prompt, value, StringComparison.Ordinal)) return;
-            _prompt = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Prompt)));
+            value ??= [];
+            if (ReferenceEquals(_promptUtf8, value)
+                || _promptUtf8.AsSpan().SequenceEqual(value))
+            {
+                return;
+            }
+            _promptUtf8 = value;
+            PropertyChanged?.Invoke(this, PromptChanged);
         }
     }
 
@@ -25228,6 +31705,8 @@ public sealed class Tile : INotifyPropertyChanged
     }
 
     private BitmapSource? _thumbnail;
+    private string? _thumbnailAssetPath;
+    private long _thumbnailDisplayRevision;
     public BitmapSource? Thumbnail
     {
         get => _thumbnail;
@@ -25235,9 +31714,23 @@ public sealed class Tile : INotifyPropertyChanged
         {
             if (ReferenceEquals(_thumbnail, value)) return;
             _thumbnail = value;
+            if (value is null)
+                _thumbnailAssetPath = null;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Thumbnail)));
         }
     }
+
+    internal string? ThumbnailAssetPath => _thumbnailAssetPath;
+    internal long ThumbnailDisplayRevision => _thumbnailDisplayRevision;
+
+    internal void SetThumbnailAsset(BitmapSource thumbnail, string assetPath)
+    {
+        _thumbnailAssetPath = assetPath;
+        Thumbnail = thumbnail;
+    }
+
+    internal void AdvanceThumbnailDisplayRevision()
+        => _thumbnailDisplayRevision++;
 
     private double _cardWidth = 190;
     public double CardWidth
@@ -25250,6 +31743,9 @@ public sealed class Tile : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CardWidth)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CardFavoriteButtonSize)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UseCompactCardTemplate)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowUpscaleVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowPhotorealVariantCount)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ShowVideoVariantCount)));
         }
     }
 
@@ -25310,18 +31806,28 @@ public sealed class Tile : INotifyPropertyChanged
         bool showStatusBadge,
         double listThumbnailWidth,
         double listThumbnailHeight,
-        double listThumbnailSize)
+        double listThumbnailSize,
+        bool notify = true)
     {
-        bool changed = Math.Abs(_cardWidth - cardWidth) >= 0.01
-            || Math.Abs(_cardHeight - cardHeight) >= 0.01
-            || _cardThumbnailStretch != cardThumbnailStretch
-            || _showCardDetails != showDetails
-            || _showCardStatusBadge != showStatusBadge
-            || Math.Abs(_listThumbnailWidth - listThumbnailWidth) >= 0.01
-            || Math.Abs(_listThumbnailHeight - listThumbnailHeight) >= 0.01
-            || Math.Abs(_listThumbnailSize - listThumbnailSize) >= 0.01;
-        if (!changed)
+        bool cardWidthChanged = Math.Abs(_cardWidth - cardWidth) >= 0.01;
+        bool cardHeightChanged = Math.Abs(_cardHeight - cardHeight) >= 0.01;
+        bool cardThumbnailStretchChanged = _cardThumbnailStretch != cardThumbnailStretch;
+        bool showDetailsChanged = _showCardDetails != showDetails;
+        bool showStatusBadgeChanged = _showCardStatusBadge != showStatusBadge;
+        bool listThumbnailWidthChanged = Math.Abs(_listThumbnailWidth - listThumbnailWidth) >= 0.01;
+        bool listThumbnailHeightChanged = Math.Abs(_listThumbnailHeight - listThumbnailHeight) >= 0.01;
+        bool listThumbnailSizeChanged = Math.Abs(_listThumbnailSize - listThumbnailSize) >= 0.01;
+        if (!cardWidthChanged
+            && !cardHeightChanged
+            && !cardThumbnailStretchChanged
+            && !showDetailsChanged
+            && !showStatusBadgeChanged
+            && !listThumbnailWidthChanged
+            && !listThumbnailHeightChanged
+            && !listThumbnailSizeChanged)
+        {
             return;
+        }
 
         _cardWidth = cardWidth;
         _cardHeight = cardHeight;
@@ -25332,11 +31838,98 @@ public sealed class Tile : INotifyPropertyChanged
         _listThumbnailHeight = listThumbnailHeight;
         _listThumbnailSize = listThumbnailSize;
 
-        // Only realized cards have WPF binding subscribers. Non-realized
-        // catalog entries therefore update without allocating event args, and
-        // realized cards refresh all layout bindings with one notification.
+        if (!notify)
+            return;
+
         PropertyChangedEventHandler? handler = PropertyChanged;
-        handler?.Invoke(this, AllLayoutPropertiesChanged);
+        if (handler is null)
+            return;
+
+        // Keep thumbnail bindings stable while zoom/layout values change.
+        // Empty-name notifications re-evaluate every binding, including the
+        // already loaded BitmapSource, and make recycled cards visibly flash.
+        if (cardWidthChanged)
+        {
+            handler(this, CardWidthChanged);
+            handler(this, CardFavoriteButtonSizeChanged);
+            handler(this, UseCompactCardTemplateChanged);
+            handler(this, ShowUpscaleVariantCountChanged);
+            handler(this, ShowPhotorealVariantCountChanged);
+            handler(this, ShowI2iVariantCountChanged);
+            handler(this, ShowVideoVariantCountChanged);
+        }
+        if (cardHeightChanged)
+        {
+            handler(this, CardHeightChanged);
+            handler(this, CompactFavoriteControlHeightChanged);
+        }
+        if (cardThumbnailStretchChanged)
+            handler(this, CardThumbnailStretchChanged);
+        if (showDetailsChanged)
+            handler(this, ShowCardDetailsChanged);
+        if (showStatusBadgeChanged)
+        {
+            handler(this, ShowCardStatusBadgeChanged);
+            handler(this, ShowFavoriteBadgeChanged);
+            handler(this, ShowPhotorealFavoriteBadgeChanged);
+            handler(this, ShowVideoFavoriteBadgeChanged);
+            handler(this, ShowEnhancedBadgeChanged);
+            handler(this, ShowUpscaleBadgeChanged);
+            handler(this, ShowPhotorealBadgeChanged);
+            handler(this, ShowI2iBadgeChanged);
+            handler(this, ShowVideoBadgeChanged);
+            handler(this, ShowUpscaleVariantCountChanged);
+            handler(this, ShowPhotorealVariantCountChanged);
+            handler(this, ShowI2iVariantCountChanged);
+            handler(this, ShowVideoVariantCountChanged);
+            handler(this, ShowUpscaleQueueBadgeChanged);
+            handler(this, ShowPhotorealQueueBadgeChanged);
+            handler(this, ShowI2iQueueBadgeChanged);
+            handler(this, ShowVideoQueueBadgeChanged);
+            handler(this, ShowUnseenDotOnCardChanged);
+        }
+        if (listThumbnailWidthChanged)
+            handler(this, ListThumbnailWidthChanged);
+        if (listThumbnailHeightChanged)
+            handler(this, ListThumbnailHeightChanged);
+        if (listThumbnailSizeChanged)
+            handler(this, ListThumbnailSizeChanged);
+    }
+
+    internal void RefreshCardLayoutBindings()
+    {
+        PropertyChangedEventHandler? handler = PropertyChanged;
+        if (handler is null)
+            return;
+
+        handler(this, CardWidthChanged);
+        handler(this, CardHeightChanged);
+        handler(this, CardThumbnailStretchChanged);
+        handler(this, ShowCardDetailsChanged);
+        handler(this, ShowCardStatusBadgeChanged);
+        handler(this, CardFavoriteButtonSizeChanged);
+        handler(this, UseCompactCardTemplateChanged);
+        handler(this, CompactFavoriteControlHeightChanged);
+        handler(this, ListThumbnailWidthChanged);
+        handler(this, ListThumbnailHeightChanged);
+        handler(this, ListThumbnailSizeChanged);
+        handler(this, ShowFavoriteBadgeChanged);
+        handler(this, ShowPhotorealFavoriteBadgeChanged);
+        handler(this, ShowVideoFavoriteBadgeChanged);
+        handler(this, ShowEnhancedBadgeChanged);
+        handler(this, ShowUpscaleBadgeChanged);
+        handler(this, ShowPhotorealBadgeChanged);
+        handler(this, ShowI2iBadgeChanged);
+        handler(this, ShowVideoBadgeChanged);
+        handler(this, ShowUpscaleVariantCountChanged);
+        handler(this, ShowPhotorealVariantCountChanged);
+        handler(this, ShowI2iVariantCountChanged);
+        handler(this, ShowVideoVariantCountChanged);
+        handler(this, ShowUpscaleQueueBadgeChanged);
+        handler(this, ShowPhotorealQueueBadgeChanged);
+        handler(this, ShowI2iQueueBadgeChanged);
+        handler(this, ShowVideoQueueBadgeChanged);
+        handler(this, ShowUnseenDotOnCardChanged);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

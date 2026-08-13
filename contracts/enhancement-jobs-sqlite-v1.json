@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-JOBS-SQLITE-001",
+  "protocol": "aibos.enhancement-jobs-sqlite/v1",
+  "authority": {
+    "currentPath": "enhance/jobs.sqlite3",
+    "legacyPath": "enhance/jobs.json",
+    "selection": "when the current path exists and no explicit jobs-path override is set, WPF reads SQLite; otherwise it reads the explicitly selected SQLite or JSON path, or falls back to legacy JSON",
+    "singleWriter": "the loopback companion owns all writes",
+    "dualWrite": false,
+    "migration": "pause and drain before import; preserve every logical job, queue order, pause state, and receipt; retain the source JSON and a verified rollback export"
+  },
+  "sqlite": {
+    "journalMode": "WAL",
+    "minimumRuntimeVersion": "3.50.2",
+    "applicationStoreVersion": 1,
+    "unknownTables": "ignored",
+    "unknownColumns": "ignored"
+  },
+  "readerSurface": {
+    "enhancement_store_metadata": {
+      "cardinality": "exactly one row where singleton = 1",
+      "requiredColumns": {
+        "singleton": 1,
+        "store_version": 1,
+        "catalog_revision": "non-negative integer"
+      }
+    },
+    "enhancement_jobs": {
+      "requiredColumns": {
+        "position": "unique non-negative integer",
+        "id": "non-empty unique string",
+        "status": "string or null",
+        "reader_payload_json": "UTF-8 JSON object"
+      },
+      "ordering": "position ascending",
+      "fullPayloadStatuses": [
+        "queued",
+        "running",
+        "succeeded"
+      ],
+      "minimalPayloadStatuses": [
+        "failed",
+        "canceled",
+        "deleted",
+        "unknown"
+      ],
+      "minimalPayloadFields": [
+        "id",
+        "status"
+      ]
+    }
+  },
+  "catalogRevision": {
+    "incrementsFor": "changes to the WPF-visible managed-media projection, including add, remove, source identity, status, and managed-output identity",
+    "stableFor": "heartbeat and progress-only writes",
+    "readerUse": "probe before rebuilding the direct managed-media projection"
+  },
+  "wpfRules": {
+    "connection": "read-only with query_only enabled",
+    "sqliteRuntimeSidecars": "SQLite may create or update only its standard -wal and -shm coordination sidecars; those files are not a second logical writer or product-data authority",
+    "createsStore": false,
+    "repairsStore": false,
+    "migratesStore": false,
+    "mutatesQueue": false,
+    "startsWorker": false,
+    "unsupportedOrMalformed": "fail the direct Enhancement projection closed without rewriting either store",
+    "explicitOverride": "an explicit jobs-path override is authoritative and is never silently replaced by its SQLite sibling"
+  },
+  "syntheticFixture": {
+    "metadata": {
+      "singleton": 1,
+      "store_version": 1,
+      "catalog_revision": 1
+    },
+    "rows": [
+      {
+        "position": 0,
+        "id": "fixture-running",
+        "status": "running",
+        "reader_payload_json": {
+          "id": "fixture-running",
+          "status": "running",
+          "operation": "photoreal",
+          "progress": 42
+        }
+      },
+      {
+        "position": 1,
+        "id": "fixture-succeeded",
+        "status": "succeeded",
+        "reader_payload_json": {
+          "id": "fixture-succeeded",
+          "status": "succeeded",
+          "operation": "upscale",
+          "progress": 100,
+          "output": {
+            "path": "X:\\synthetic\\Upscaled\\2026-08-11\\fixture.png"
+          }
+        }
+      }
+    ],
+    "expected": {
+      "visibleOrder": [
+        "fixture-running",
+        "fixture-succeeded"
+      ],
+      "mainDatabaseBytesChangedByWpf": false,
+      "queueMutationCount": 0
+    }
+  }
+}

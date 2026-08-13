@@ -72,6 +72,7 @@ internal static class SharedDataRootActivationSmokeRunner
             switch (caseId)
             {
                 case "valid":
+                case "sqlite":
                 case "store-override":
                     WriteLocator(locatorPath, dataRoot);
                     break;
@@ -94,6 +95,13 @@ internal static class SharedDataRootActivationSmokeRunner
                     break;
                 default:
                     throw new ArgumentException($"Unknown activation smoke case: {caseId}");
+            }
+
+            if (string.Equals(caseId, "sqlite", StringComparison.Ordinal))
+            {
+                string enhanceRoot = Path.Combine(dataRoot, "enhance");
+                Directory.CreateDirectory(enhanceRoot);
+                File.WriteAllBytes(Path.Combine(enhanceRoot, "jobs.sqlite3"), []);
             }
 
             string? favoriteOverride = null;
@@ -138,13 +146,13 @@ internal static class SharedDataRootActivationSmokeRunner
 
             string expectedRoot = caseId switch
             {
-                "valid" or "store-override" => dataRoot,
+                "valid" or "sqlite" or "store-override" => dataRoot,
                 "legacy" or "legacy-uninitialized" => legacyRoot,
                 _ => "",
             };
             bool expectedStatus = caseId switch
             {
-                "valid" or "store-override" or "legacy" =>
+                "valid" or "sqlite" or "store-override" or "legacy" =>
                     activation.Status == SharedDataRootActivationStatus.Activated,
                 "invalid" =>
                     activation.Status == SharedDataRootActivationStatus.Unavailable
@@ -166,7 +174,7 @@ internal static class SharedDataRootActivationSmokeRunner
                     StringComparison.OrdinalIgnoreCase);
             bool allCanonicalPaths = caseId switch
             {
-                "valid" or "legacy" or "legacy-uninitialized" => AllPathsUnder(
+                "valid" or "sqlite" or "legacy" or "legacy-uninitialized" => AllPathsUnder(
                     activation.Paths,
                     expectedRoot),
                 "store-override" =>
@@ -200,6 +208,25 @@ internal static class SharedDataRootActivationSmokeRunner
                 : IsInside(
                     outputsRoot,
                     caseId == "overrides-only" ? overrideRoot : expectedRoot);
+            bool enhancementStoreMatches = caseId switch
+            {
+                "sqlite" => activation.Paths.TryGetValue(
+                        SharedDataRootActivation.EnhancementJobsEnvironmentVariable,
+                        out string? enhancementStorePath)
+                    && string.Equals(
+                        Path.GetFileName(enhancementStorePath),
+                        "jobs.sqlite3",
+                        StringComparison.Ordinal),
+                "valid" or "legacy" or "legacy-uninitialized" =>
+                    activation.Paths.TryGetValue(
+                        SharedDataRootActivation.EnhancementJobsEnvironmentVariable,
+                        out string? enhancementStorePath)
+                    && string.Equals(
+                        Path.GetFileName(enhancementStorePath),
+                        "jobs.json",
+                        StringComparison.Ordinal),
+                _ => true,
+            };
 
             bool readerLeaseHeld = true;
             if (activation.Status is SharedDataRootActivationStatus.Activated
@@ -241,7 +268,7 @@ internal static class SharedDataRootActivationSmokeRunner
                 && pathsMatchEnvironment;
             bool sourceMetadataMatches = caseId switch
             {
-                "valid" or "store-override" =>
+                "valid" or "sqlite" or "store-override" =>
                     activation.ResolutionStatus == SharedDataRootResolutionStatus.Resolved
                     && string.Equals(
                         activation.LocatorPath,
@@ -269,6 +296,7 @@ internal static class SharedDataRootActivationSmokeRunner
                 && rootMatches
                 && allCanonicalPaths
                 && outputsMatch
+                && enhancementStoreMatches
                 && pathsMatchEnvironment
                 && pathCountMatches
                 && productionResolversMatch
@@ -292,6 +320,7 @@ internal static class SharedDataRootActivationSmokeRunner
                 rootMatches,
                 allCanonicalPaths,
                 outputsMatch,
+                enhancementStoreMatches,
                 pathsMatchEnvironment,
                 productionResolversMatch,
                 storePaths = resolverPathsBefore,

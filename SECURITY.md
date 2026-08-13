@@ -10,11 +10,31 @@ visibility does not make it a public service.
 - Keep explicit source deletion on the Windows Recycle Bin path; do not add a
   permanent-delete fallback.
 
-Ordinary WPF viewing does not require a network service. The optional
-Enhancement companion is the independently maintained H25 Browser application
-and is contacted only over loopback after an explicit user action. It must
-remain bound to `127.0.0.1`; do not expose it through a LAN listener, reverse
-proxy, tunnel, hosted deployment, or the Internet.
+Public branches and review material must also follow the repository's
+[publication boundary](docs/publication-boundary.md). A clean working tree is
+not sufficient when a branch still contains private ancestors or an
+unredacted local-development history.
+
+Ordinary WPF viewing does not require a network service. The optional,
+dedicated H25 Enhancement API companion may start with Aibos so authenticated
+Jobs history is available. This launch is API-only and explicitly defers queue
+recovery, inbox draining, worker pumping, ComfyUI startup, and GPU work until
+an explicit AI action. It opens no Browser window and does not load the
+Browser Viewer or its gallery data. It must remain bound to `127.0.0.1`; do not
+expose it through a LAN listener, reverse proxy, tunnel, hosted deployment, or
+the Internet.
+
+Loopback is not an ownership proof. WPF must authenticate the companion before
+sending a source identity, prompt, settings, credential, or job body, and the
+companion must authenticate every non-identity API request. An unknown process
+on the configured port fails closed before a durable reservation is written.
+After identity proof, request and response envelopes remain encrypted and bound
+to the verified process epoch so a replacement listener cannot read or forge
+API traffic. Durable enqueue wakes are bodyless and never resend the job body.
+The per-user capability is a CurrentUser DPAPI blob at rest; its directory and
+file must be non-reparse, owned by the current user, and protected so only that
+user and LOCAL SYSTEM have allow entries. Unknown existing state is preserved
+and rejected rather than repaired in place.
 
 The WPF and Browser applications will share a versioned durable-state contract.
 Malformed or unsupported future state must fail non-destructively. Never reset,

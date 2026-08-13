@@ -15,7 +15,8 @@ public partial class MainWindow
         string Path,
         string FileName,
         int Before,
-        int After);
+        int After,
+        bool RequiresCatalogTile);
 
     private sealed class FavoriteHistoryBatch
     {
@@ -47,8 +48,38 @@ public partial class MainWindow
                 NormalizeFavoritePath(mutation.Tile.Path),
                 mutation.Tile.FileName,
                 Math.Clamp(mutation.Before, 0, 5),
-                Math.Clamp(mutation.After, 0, 5)))
+                Math.Clamp(mutation.After, 0, 5),
+                RequiresCatalogTile: true))
             .ToList();
+        RecordFavoriteHistory(changes);
+    }
+
+    private void RecordIndependentFavoriteHistory(
+        string path,
+        string displayName,
+        int before,
+        int after)
+    {
+        if (_applyingFavoriteHistory
+            || string.IsNullOrWhiteSpace(path)
+            || before == after)
+        {
+            return;
+        }
+
+        RecordFavoriteHistory([
+            new FavoriteHistoryChange(
+                NormalizeFavoritePath(path),
+                displayName,
+                Math.Clamp(before, 0, 5),
+                Math.Clamp(after, 0, 5),
+                RequiresCatalogTile: false),
+        ]);
+    }
+
+    private void RecordFavoriteHistory(
+        IReadOnlyList<FavoriteHistoryChange> changes)
+    {
         if (changes.Count == 0)
             return;
 
@@ -139,14 +170,25 @@ public partial class MainWindow
         if (!CanStartSharedStateAction(SharedStoreKind.Favorite))
             return false;
 
-        var tilesByPath = _allTiles
-            .Where(static tile => tile.IsRealFile)
-            .GroupBy(static tile => NormalizeFavoritePath(tile.Path), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, Tile>? tilesByPath = batch.Changes.Any(
+            static change => change.RequiresCatalogTile)
+                ? _allTiles
+                    .Where(static tile => tile.IsRealFile)
+                    .GroupBy(
+                        static tile => NormalizeFavoritePath(tile.Path),
+                        StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        static group => group.Key,
+                        static group => group.First(),
+                        StringComparer.OrdinalIgnoreCase)
+                : null;
         var changes = new List<(Tile Tile, int Level)>(batch.Changes.Count);
         foreach (FavoriteHistoryChange change in batch.Changes)
         {
-            if (!tilesByPath.TryGetValue(change.Path, out Tile? tile))
+            if (!change.RequiresCatalogTile)
+                continue;
+            if (tilesByPath is null
+                || !tilesByPath.TryGetValue(change.Path, out Tile? tile))
             {
                 ShowFavoriteChangeStatus($"Cannot apply history because {change.FileName} is no longer in the catalog.");
                 return false;
@@ -158,11 +200,12 @@ public partial class MainWindow
         try
         {
             bool applied;
-            if (ShouldUseFavoriteWriter())
+            if (changes.Count == batch.Changes.Count
+                && ShouldUseFavoriteWriter())
             {
                 applied = QueueFavoriteLevels(changes, status);
             }
-            else
+            else if (changes.Count == batch.Changes.Count)
             {
                 applied = true;
                 foreach ((Tile tile, int level) in changes)
@@ -175,6 +218,32 @@ public partial class MainWindow
                 }
                 if (applied)
                     ShowFavoriteChangeStatus(status);
+            }
+            else
+            {
+                applied = true;
+                foreach (FavoriteHistoryChange change in batch.Changes)
+                {
+                    int level = useBefore ? change.Before : change.After;
+                    if (change.RequiresCatalogTile)
+                    {
+                        Tile tile = tilesByPath![change.Path];
+                        if (!SetFavoriteLevel(tile, level))
+                        {
+                            applied = false;
+                            break;
+                        }
+                    }
+                    else if (!SetIndependentFavoriteLevel(
+                                 change.Path,
+                                 change.FileName,
+                                 level,
+                                 status))
+                    {
+                        applied = false;
+                        break;
+                    }
+                }
             }
             return applied;
         }
@@ -197,9 +266,11 @@ public partial class MainWindow
         FavoriteHistoryList.Visibility = _favoriteHistory.Count == 0
             ? Visibility.Collapsed
             : Visibility.Visible;
-        FavoriteHistoryButton.Content = _favoriteHistory.Count == 0
-            ? "History"
-            : $"History {_favoriteHistory.Count}";
+        string historyDescription = _favoriteHistory.Count == 0
+            ? "No favorite changes in this session."
+            : $"{_favoriteHistory.Count} favorite changes in this session.";
+        FavoriteHistoryButton.ToolTip = $"Show favorite changes made in this session. {historyDescription}";
+        AutomationProperties.SetHelpText(FavoriteHistoryButton, historyDescription);
     }
 
     private bool TryHandleFavoriteUndoRedo(Key key, ModifierKeys modifiers)
@@ -222,6 +293,8 @@ public partial class MainWindow
         => string.Equals(AutomationProperties.GetName(FavoriteUndoButton), "Undo favorite change", StringComparison.Ordinal)
             && string.Equals(AutomationProperties.GetName(FavoriteRedoButton), "Redo favorite change", StringComparison.Ordinal)
             && string.Equals(AutomationProperties.GetName(FavoriteHistoryButton), "Show favorite change history", StringComparison.Ordinal)
+            && FavoriteHistoryButton.Content is System.Windows.Shapes.Path
+            && !string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(FavoriteHistoryButton))
             && FavoriteUndoButton.ToolTip?.ToString()?.Contains("Ctrl+Z", StringComparison.OrdinalIgnoreCase) == true
             && FavoriteRedoButton.ToolTip?.ToString()?.Contains("Ctrl+Y", StringComparison.OrdinalIgnoreCase) == true;
 }

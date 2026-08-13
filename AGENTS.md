@@ -13,7 +13,9 @@ Before changing code, read:
 3. `docs/product-contract.md`;
 4. `contracts/parity-v1.json` when changing a registered shared-state meaning;
 5. `contracts/shared-root-locator-v1.json` when changing shared-root discovery;
-6. any more specific `AGENTS.md` closer to the files being changed.
+6. `contracts/enhancement-enqueue-inbox-v1.json` when changing explicit
+   Enhancement registration or delivery;
+7. any more specific `AGENTS.md` closer to the files being changed.
 
 `docs/product-contract.md` is normative for this WPF application and for the
 cross-repository durable-state boundary. Historical documents, screenshots,
@@ -22,14 +24,15 @@ tests, and the behavior of only one application do not override it.
 ## Repository authority
 
 - Maintain the native WPF application in this repository.
-- The independent Browser application is maintained in
-  <https://github.com/a9ui/tools-h000025-photoviewer>. Do not add its Next.js
-  UI, API implementation, Node.js toolchain, or Browser tests here.
-- WPF product work does not require Browser UI or runtime parity.
-- A shared-state schema or meaning change does require versioned fixtures and
-  compatibility evidence from an exact H25 Browser revision. Make Browser
-  implementation changes in that repository through its own issue and pull
-  request.
+- The active product lane is Aibos WPF plus its optional loopback Enhancement
+  companion. The historical Browser/Next.js product is out of scope unless the
+  repository owner explicitly reactivates it in a later instruction.
+- Do not inspect, start, benchmark, modify, import, or use Browser UI/runtime
+  source, Browser caches, Browser screenshots, or Browser tests as product
+  evidence. This restriction also applies during performance and cleanup work.
+- Shared-state compatibility is contract-only. Use versioned public contracts
+  and synthetic fixtures; do not require Browser UI/runtime parity or a Browser
+  checkout.
 - Treat `Aibos Image` as the public product name and `Aibos` as its compact UI
   label. Legacy `PhotoViewer` assembly, namespace, cache, and persistence names
   are compatibility identifiers; do not rename them without a tested migration.
@@ -45,8 +48,9 @@ tests, and the behavior of only one application do not override it.
   search, modal navigation, and state hydration must not enqueue jobs or start
   workers.
 - Ordinary WPF viewing must not require a Browser or Node.js runtime. The
-  optional H25 Browser Enhancement companion is loopback-only and must remain
-  bound to `127.0.0.1`.
+  optional dedicated H25 Enhancement API companion is loopback-only, must
+  remain bound to `127.0.0.1`, and must not load, inspect, or open the Browser
+  UI.
 - Treat file paths, process arguments, image metadata, loopback responses, and
   durable-state files as untrusted input. Preserve validation and resource
   bounds.

@@ -1,6 +1,7 @@
 param(
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$DotnetPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,12 +18,21 @@ $activationRoot = Join-Path $runRoot 'activation'
 $leaseProofRoot = Join-Path $runRoot 'lease-proof'
 $buildOutput = Join-Path $runRoot 'build'
 $holderProcesses = [Collections.Generic.List[Diagnostics.Process]]::new()
+if ([string]::IsNullOrWhiteSpace($DotnetPath)) {
+    $localDotnet10 = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+    $DotnetPath = if (Test-Path -LiteralPath $localDotnet10 -PathType Leaf) {
+        $localDotnet10
+    }
+    else {
+        'dotnet'
+    }
+}
 
 function Start-DotNetSmokeProcess {
     param([string[]]$Arguments)
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = 'dotnet'
+    $startInfo.FileName = $DotnetPath
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $quotedArguments = foreach ($argument in $Arguments) {
@@ -56,13 +66,13 @@ function Wait-SmokeSignal {
 
 try {
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
-    & dotnet build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+    & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
     if ($LASTEXITCODE -ne 0) {
         throw "WPF build failed with exit $LASTEXITCODE."
     }
 
     $dll = Join-Path $buildOutput 'PhotoViewer.Wpf.dll'
-    & dotnet $dll --shared-root-locator-smoke $resultPath --contract $contract --temp-root $fixtureRoot
+    & $DotnetPath $dll --shared-root-locator-smoke $resultPath --contract $contract --temp-root $fixtureRoot
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
         throw "Shared root locator smoke failed with exit $exitCode."
@@ -93,6 +103,7 @@ try {
 
     $activationCases = @(
         'valid',
+        'sqlite',
         'store-override',
         'invalid',
         'legacy',
@@ -102,7 +113,7 @@ try {
     $activationResults = foreach ($caseId in $activationCases) {
         $caseRoot = Join-Path $activationRoot $caseId
         $caseResult = Join-Path $runRoot ("activation-$caseId.json")
-        & dotnet $dll --shared-root-activation-smoke $caseResult --case $caseId --temp-root $caseRoot
+        & $DotnetPath $dll --shared-root-activation-smoke $caseResult --case $caseId --temp-root $caseRoot
         $exitCode = $LASTEXITCODE
         if ($exitCode -ne 0) {
             throw "Shared root activation case '$caseId' failed with exit $exitCode."
@@ -119,6 +130,7 @@ try {
         $_.rootMatches -ne $true -or
         $_.allCanonicalPaths -ne $true -or
         $_.outputsMatch -ne $true -or
+        $_.enhancementStoreMatches -ne $true -or
         $_.pathsMatchEnvironment -ne $true -or
         $_.pathCountMatches -ne $true -or
         $_.productionResolversMatch -ne $true -or
@@ -148,7 +160,7 @@ try {
             [string]$SelectedLeaseDirectory = $leaseDirectory,
             [string]$SelectedLocatorPath = $locatorPath
         )
-        & dotnet $dll --shared-root-lease-writer-smoke $Result `
+        & $DotnetPath $dll --shared-root-lease-writer-smoke $Result `
             --mode $Mode `
             --temp-root $leaseProofRoot `
             --locator-path $SelectedLocatorPath `

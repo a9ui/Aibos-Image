@@ -1,0 +1,100 @@
+{
+  "contract": "enhancement-companion-auth-v2",
+  "capabilityProvisioning": {
+    "trustBoundary": "current Windows user",
+    "atRest": "CurrentUser DPAPI blob",
+    "directory": "%LOCALAPPDATA%/PhotoViewer.Wpf/companion-auth-v1",
+    "directoryAndFileOwner": "current Windows user",
+    "protectedDaclAllow": [
+      "current Windows user",
+      "LOCAL SYSTEM"
+    ],
+    "reparsePointsAllowed": false,
+    "read": "exclusive handle with final-path, owner, protected-DACL, regular-file, and bounded-length verification before reading from that same handle",
+    "unknownExistingState": "preserve and fail closed",
+    "plaintextDelivery": "inherited only by the WPF-owned child; the launcher has no plaintext file fallback"
+  },
+  "identity": {
+    "route": "GET /api/enhance/identity",
+    "requestHeader": "X-Aibos-Companion-Challenge",
+    "protocol": "aibos.companion-auth/v1",
+    "proofMessageUtf8": "protocol\\0challenge\\0instanceId\\0processId\\0serverStartedAtUtc",
+    "proof": "base64url(HMAC-SHA256(user capability, proofMessageUtf8))",
+    "responseMaxBytes": 4096,
+    "sensitiveRequestDataAllowed": false
+  },
+  "requests": {
+    "outerRoute": "POST /api/enhance/secure",
+    "protocol": "aibos.companion-request/v2",
+    "requiredHeaders": [
+      "X-Aibos-Auth-Timestamp",
+      "X-Aibos-Auth-Nonce",
+      "X-Aibos-Auth-Signature",
+      "X-Aibos-Companion-Instance",
+      "X-Aibos-Companion-Epoch"
+    ],
+    "signatureMessageUtf8": "protocol\\0timestampMilliseconds\\0nonce\\0instanceId\\0serverStartedAtUtc\\0POST\\0/api/enhance/secure\\0base64urlSha256Envelope",
+    "signature": "base64url(HMAC-SHA256(user capability, signatureMessageUtf8))",
+    "maximumClockSkewMilliseconds": 30000,
+    "nonceBytes": 16,
+    "replay": "reject a timestamp and nonce pair after its first valid use within the same server epoch",
+    "directApiRoutesAccepted": false
+  },
+  "tunnel": {
+    "protocol": "aibos.companion-tunnel/v1",
+    "key": "HMAC-SHA256(user capability, aibos.companion-tunnel-key/v1\\0instanceId\\0serverStartedAtUtc)",
+    "cipher": "AES-256-GCM",
+    "ivBytes": 12,
+    "tagBytes": 16,
+    "aadUtf8": "protocol\\0timestampMilliseconds\\0requestNonce\\0instanceId\\0serverStartedAtUtc",
+    "plaintext": "JSON containing uppercase method, exact pathAndQuery, optional base64url body, and optional idempotency key"
+  },
+  "responses": {
+    "protocol": "aibos.companion-response/v1",
+    "encrypted": true,
+    "aadUtf8": "protocol\\0requestNonce\\0instanceId\\0serverStartedAtUtc\\0innerStatus",
+    "signatureHeader": "X-Aibos-Response-Signature",
+    "signatureMessageUtf8": "protocol\\0requestNonce\\0instanceId\\0serverStartedAtUtc\\0innerStatus\\0base64urlSha256Envelope"
+  },
+  "durableEnqueue": {
+    "wakeRoute": "POST /api/enhance/inbox/wake",
+    "jobBodyAllowed": false,
+    "ordering": "publish the durable inbox item only after ownership proof, then send an encrypted bodyless wake carrying only its idempotency key",
+    "receipt": "the companion drains the durable inbox before returning the matching job receipt",
+    "postPublishUnauthenticatedFailure": "return SavedForDelivery and recover using the same request id; only an authenticated inner 4xx is authoritative"
+  },
+  "startup": {
+    "launcherArgument": "--defer-queue-recovery",
+    "applicationLaunch": "start authenticated API for persisted Jobs history",
+    "deferredSideEffects": [
+      "interrupted-job recovery",
+      "durable-inbox drain",
+      "queue worker pump",
+      "ComfyUI startup",
+      "GPU work"
+    ],
+    "explicitRecoveryRoute": "POST /api/enhance/queue/recover",
+    "explicitRecoveryBodyAllowed": false,
+    "explicitRecoveryProcessSemantics": "successful recovery runs at most once per companion process; concurrent or repeated authenticated requests reuse that result"
+  },
+  "server": {
+    "bind": "127.0.0.1",
+    "maximumBodyBytes": 1048576,
+    "bodyTimeoutMilliseconds": 15000,
+    "maximumConcurrentRequests": 16,
+    "maximumConnections": 64,
+    "maximumHeaderBytes": 16384,
+    "maximumHeaders": 64,
+    "maximumPlaintextResponseBytes": 33554432,
+    "responseLimitEnforcement": "reject oversized Content-Length before reading and cancel an unknown-length stream as soon as the running total exceeds the limit or the client disconnects",
+    "unauthenticatedRoutes": [
+      "GET /api/enhance/identity"
+    ]
+  },
+  "wpf": {
+    "ownership": "verify HMAC, instance id, live process id, and process start time before explicit enqueue, and bind every encrypted request and authenticated response to that exact server epoch",
+    "listenerHandoff": "a replacement listener receives only an epoch-bound encrypted envelope and its response is rejected without the response proof",
+    "unknownListener": "fail closed before source identity, prompt, settings, credential, job body, or durable reservation",
+    "bearerToUnknownListener": false
+  }
+}
