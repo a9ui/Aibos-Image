@@ -486,9 +486,9 @@ public partial class App
                     && customExecutable.PostRequests == 0
                     && customModelDirectory.PostRequests == 0
                     && whitespaceOverride.PostRequests == 0;
-                bool restoredComfySettings =
+                bool legacyComfySettingsNormalized =
                     restoredUpscaleSettings.PresetId == "anime-sharp-x2"
-                    && restoredUpscaleSettings.AdapterId == "comfyui"
+                    && restoredUpscaleSettings.AdapterId == "realesrgan-ncnn"
                     && restoredUpscaleSettings.Scale == 2d
                     && restoredUpscaleSettings.OutputFormat == "webp";
                 int expectedBatchPostCount = postAttempts.Values.Sum();
@@ -496,7 +496,7 @@ public partial class App
                     && receivedUpscaleSettings.Count == expectedBatchPostCount
                     && receivedUpscaleSettings.All(static settings =>
                         settings.PresetId == "anime-sharp-x2"
-                        && settings.AdapterId == "comfyui"
+                        && settings.AdapterId == "realesrgan-ncnn"
                         && settings.Scale == 2d
                         && settings.OutputFormat == "webp");
 
@@ -509,7 +509,7 @@ public partial class App
                     && narrowLayoutFits
                     && responsiveOpen
                     && customAdapterPathDeferred
-                    && restoredComfySettings
+                    && legacyComfySettingsNormalized
                     && batchPostSettingsMatch
                     && boundedConcurrency
                     && doubleClickSuppressed
@@ -545,7 +545,7 @@ public partial class App
                         modelDirectoryStatus = customModelDirectory.AdapterStatus,
                         whitespaceStatus = whitespaceOverride.AdapterStatus,
                     },
-                    restoredComfySettings,
+                    legacyComfySettingsNormalized,
                     restoredUpscaleSettings = new
                     {
                         restoredUpscaleSettings.PresetId,
