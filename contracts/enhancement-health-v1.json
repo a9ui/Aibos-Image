@@ -67,6 +67,7 @@
     "unknownIssue": "preserve the needs-attention status and show a generic attention message",
     "missingWorkerPaused": "keep health and jobs readable but disable pause and resume controls",
     "missingQueuedPhotorealPromptUpdate": "keep health and jobs readable but hide the queued prompt-update action",
+    "missingTerminalHistoryBatchDismissV1": "keep health and jobs readable and fall back to protected per-job terminal history dismissal",
     "missingPhotorealPromptControlsV2": "keep health and jobs readable but block new photoreal submissions so an older companion cannot silently ignore Negative, LoRA OFF, or the removal of legacy hidden prompt text",
     "missingAtomicImageEnqueueNext": "keep health and jobs readable but hide or block enqueue-next actions so an older companion cannot silently append the job to the tail",
     "missingStoreBackendGeneration": "treat the store as a compatible legacy backend and keep the existing jobs API behavior",

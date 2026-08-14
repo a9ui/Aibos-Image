@@ -60,6 +60,7 @@
       "capabilities": {
         "queuedPhotorealPromptUpdate": true,
         "queuedPhotorealSettingsUpdateV1": true,
+        "terminalHistoryBatchDismissV1": true,
         "photorealPromptControlsV2": true,
         "atomicImageEnqueueNext": true,
         "videoH3StepsV1": {
