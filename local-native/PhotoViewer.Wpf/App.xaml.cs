@@ -6964,6 +6964,20 @@ public partial class App : Application
                 int storeCountAfterAssign = first.FavoriteStoreCountForSmoke;
 
                 first.ClearFavoriteFiltersForSmoke();
+                first.SetFavoriteOnlyFilterForSmoke(true);
+                bool selectedLevel0 = first.SetFavoriteFilterLevelsForSmoke(0);
+                int favoritesLv0Count = first.FilteredCountForSmoke;
+                List<string> favoritesLv0Order =
+                    first.FilteredFileNamesForSmoke(10);
+                first.FlushStateForSmoke();
+                ViewerState? persistedLevelZeroState =
+                    ReadPersistedState(statePath);
+                bool persistedLevelZero =
+                    persistedLevelZeroState is
+                        { ShowFavoritesOnly: true, ShowUnfavoriteOnly: false }
+                    && persistedLevelZeroState.FavoriteFilterLevels
+                        ?.SequenceEqual([0]) == true;
+                first.ClearFavoriteFiltersForSmoke();
                 bool selectedLevel1 = first.SelectFileNameForSmoke(fixture.Level1Name);
                 first.SetFavoriteOnlyFilterForSmoke(true);
                 first.SetFavoriteFilterLevelsForSmoke(1);
@@ -7021,6 +7035,12 @@ public partial class App : Application
                     && assignedLevel3
                     && assignedLevel5
                     && storeCountAfterAssign == 3
+                    && selectedLevel0
+                    && favoritesLv0Count == 1
+                    && favoritesLv0Order.SequenceEqual(
+                        fixture.UnratedExpected,
+                        StringComparer.OrdinalIgnoreCase)
+                    && persistedLevelZero
                     && selectedLevel1
                     && favoritesLv1Count == 1
                     && favoritesLv1Order.SequenceEqual([fixture.Level1Name], StringComparer.OrdinalIgnoreCase)
@@ -7062,6 +7082,9 @@ public partial class App : Application
                     AllCount = allCount,
                     AllOrder = allOrder,
                     StoreCountAfterAssign = storeCountAfterAssign,
+                    FavoritesLv0Count = favoritesLv0Count,
+                    FavoritesLv0Order = favoritesLv0Order,
+                    PersistedLevelZeroFilter = persistedLevelZero,
                     FavoritesLv1Count = favoritesLv1Count,
                     FavoritesLv1Order = favoritesLv1Order,
                     FavoritesLv3Count = favoritesLv3Count,
@@ -32490,6 +32513,9 @@ public partial class App : Application
         public int AllCount { get; init; }
         public List<string> AllOrder { get; init; } = [];
         public int StoreCountAfterAssign { get; init; }
+        public int FavoritesLv0Count { get; init; }
+        public List<string> FavoritesLv0Order { get; init; } = [];
+        public bool PersistedLevelZeroFilter { get; init; }
         public int FavoritesLv1Count { get; init; }
         public List<string> FavoritesLv1Order { get; init; } = [];
         public int FavoritesLv3Count { get; init; }
