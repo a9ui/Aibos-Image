@@ -902,6 +902,51 @@ public partial class MainWindow
         return ShowValidatedModalVideoVersion(version, index, autoplay);
     }
 
+    private void ReplaceModalVideoTransport()
+    {
+        MediaElement previous = ModalVideo;
+        int childIndex = ModalVisual.Children.IndexOf(previous);
+        previous.MediaOpened -= ModalVideo_MediaOpened;
+        previous.MediaEnded -= ModalVideo_MediaEnded;
+        previous.MediaFailed -= ModalVideo_MediaFailed;
+        try
+        {
+            previous.Stop();
+            previous.Close();
+            previous.Source = null;
+        }
+        catch
+        {
+        }
+
+        var replacement = new MediaElement
+        {
+            Stretch = System.Windows.Media.Stretch.Uniform,
+            Visibility = Visibility.Visible,
+            LoadedBehavior = MediaState.Manual,
+            UnloadedBehavior = MediaState.Manual,
+            ScrubbingEnabled = true,
+            IsHitTestVisible = false,
+        };
+        AutomationProperties.SetName(
+            replacement,
+            "Generated video playback");
+        replacement.MediaOpened += ModalVideo_MediaOpened;
+        replacement.MediaEnded += ModalVideo_MediaEnded;
+        replacement.MediaFailed += ModalVideo_MediaFailed;
+
+        if (childIndex >= 0)
+        {
+            ModalVisual.Children.RemoveAt(childIndex);
+            ModalVisual.Children.Insert(childIndex, replacement);
+        }
+        else
+        {
+            ModalVisual.Children.Add(replacement);
+        }
+        ModalVideo = replacement;
+    }
+
     private bool ShowValidatedModalVideoVersion(
         ManagedVideoVersion version,
         int index,
@@ -925,6 +970,8 @@ public partial class MainWindow
         _modalVideoMediaOpenCompletion =
             new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_modalVideoTransportStubForSmoke)
+            ReplaceModalVideoTransport();
         ModalVideo.Visibility = Visibility.Visible;
         ModalBitmap.Visibility = Visibility.Collapsed;
         ModalArtBase.Visibility = Visibility.Collapsed;
@@ -937,8 +984,6 @@ public partial class MainWindow
         {
             try
             {
-                ModalVideo.Stop();
-                ModalVideo.Source = null;
                 ModalVideo.Source = new Uri(version.Output.OutputPath, UriKind.Absolute);
                 // Manual MediaElement transport does not open a newly assigned
                 // source until a transport state is requested. Pause kicks the
@@ -994,7 +1039,10 @@ public partial class MainWindow
             {
                 ModalVideo.Stop();
                 if (clearSource)
+                {
+                    ModalVideo.Close();
                     ModalVideo.Source = null;
+                }
             }
             catch
             {
@@ -1435,7 +1483,7 @@ public partial class MainWindow
 
     private void ModalVideo_MediaOpened(object sender, RoutedEventArgs e)
     {
-        if (!_modalShowingVideo)
+        if (!_modalShowingVideo || !ReferenceEquals(sender, ModalVideo))
             return;
 
         long playbackGeneration = _modalVideoPlaybackGeneration;
@@ -1488,7 +1536,7 @@ public partial class MainWindow
 
     private void ModalVideo_MediaEnded(object sender, RoutedEventArgs e)
     {
-        if (!_modalShowingVideo)
+        if (!_modalShowingVideo || !ReferenceEquals(sender, ModalVideo))
             return;
 
         try
@@ -1661,10 +1709,10 @@ public partial class MainWindow
     }
 
     private void ModalVideo_MediaFailed(
-        object sender,
+        object? sender,
         System.Windows.ExceptionRoutedEventArgs e)
     {
-        if (!_modalShowingVideo)
+        if (!_modalShowingVideo || !ReferenceEquals(sender, ModalVideo))
             return;
 
         _modalVideoMediaFailureForSmoke =
@@ -1707,6 +1755,10 @@ public partial class MainWindow
         _modalVideoVersionIndex >= 0 && _modalVideoVersionIndex < _modalVideoVersions.Count
             ? _modalVideoVersions[_modalVideoVersionIndex].Output.OutputPath
             : null;
+    public string? ModalVideoElementSourcePathForSmoke =>
+        ModalVideo.Source is { IsFile: true } source
+            ? source.LocalPath
+            : ModalVideo.Source?.ToString();
     public string? ModalVideoMediaFailureForSmoke =>
         _modalVideoMediaFailureForSmoke;
     public string[] ModalVideoVersionLabelsForSmoke =>
