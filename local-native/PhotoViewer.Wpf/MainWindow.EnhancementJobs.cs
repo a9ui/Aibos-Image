@@ -3280,10 +3280,89 @@ public partial class MainWindow
         return TryOpenEnhancementJobInViewer(job, output);
     }
 
-    private void OpenEnhancementSourceInViewer_Click(object sender, RoutedEventArgs e)
+    private async void OpenEnhancementSourceInViewer_Click(
+        object sender,
+        RoutedEventArgs e)
     {
         if (sender is Button { Tag: EnhancementWorkspaceJobView job })
-            TryOpenEnhancementSourceInViewer(job);
+            await OpenEnhancementSourceInViewerAsync(job);
+    }
+
+    private async Task<bool> OpenEnhancementSourceInViewerAsync(
+        EnhancementWorkspaceJobView job)
+    {
+        var watch = Stopwatch.StartNew();
+        string outcome = "failed";
+        long generation = _enhancementWorkspaceGeneration;
+        try
+        {
+            if (job.IsVideoOperation && job.CanUseOutput)
+            {
+                // The jobs workspace already starts durable-state hydration in
+                // the background after applying its inventory. Await that
+                // single-flight task without probing or scanning SQLite again
+                // on the input/UI thread.
+                Task refreshTask = _enhancedStateRefreshTask;
+                if (!refreshTask.IsCompleted)
+                {
+                    EnhancementJobsStatusText.Text =
+                        "動画情報を読み込み中です。画面はそのまま操作できます。";
+                }
+                try
+                {
+                    await refreshTask;
+                }
+                catch (OperationCanceledException)
+                {
+                    outcome = "canceled";
+                    return false;
+                }
+
+                if (generation != _enhancementWorkspaceGeneration
+                    || EnhancementJobsDialog.Visibility != Visibility.Visible
+                    || !_enhancementWorkspaceJobs.Contains(job)
+                    || !job.CanUseOutput)
+                {
+                    outcome = "canceled";
+                    return false;
+                }
+                if (!_enhancementReadOk)
+                {
+                    EnhancementJobsStatusText.Text =
+                        "動画情報を確認できませんでした。Jobsを更新してからもう一度試してください。";
+                    return false;
+                }
+            }
+
+            bool opened = TryOpenEnhancementSourceInViewer(job);
+            outcome = opened ? "completed" : "failed";
+            return opened;
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or InvalidDataException
+                or InvalidOperationException
+                or ArgumentException
+                or NotSupportedException)
+        {
+            Trace.TraceWarning(
+                $"Enhancement workspace viewer open failed: {ex.GetType().Name}");
+            if (EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                EnhancementJobsStatusText.Text =
+                    "表示を切り替えられませんでした。Jobsを更新してからもう一度試してください。";
+            }
+            return false;
+        }
+        finally
+        {
+            AibosOperationLog.Write(
+                "jobs_thumbnail_open",
+                outcome,
+                watch.ElapsedMilliseconds,
+                mode: job.IsVideoOperation ? "video" : "image");
+        }
     }
 
     private bool TryOpenEnhancementSourceInViewer(EnhancementWorkspaceJobView job)
@@ -3794,8 +3873,7 @@ public partial class MainWindow
             || job.SourceMtimeMs is null
             || !TryResolveEnhancementWorkspaceCatalogSource(
                 job,
-                out string canonicalSource)
-            || !ReloadEnhancedOutputsForVisibleCatalog())
+                out string canonicalSource))
         {
             return false;
         }
@@ -4262,10 +4340,12 @@ public partial class MainWindow
         }
     }
 
-    public bool OpenEnhancementJobSourceInViewerForSmoke(string id)
+    public async Task<bool> OpenEnhancementJobSourceInViewerForSmokeAsync(
+        string id)
     {
         EnhancementWorkspaceJobView? job = _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
-        return job is not null && TryOpenEnhancementSourceInViewer(job);
+        return job is not null
+            && await OpenEnhancementSourceInViewerAsync(job);
     }
 
     public bool EnhancementJobsHeaderChromeContractForSmoke

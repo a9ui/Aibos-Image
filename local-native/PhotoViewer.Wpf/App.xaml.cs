@@ -20454,7 +20454,7 @@ public partial class App : Application
                         [$"/select,{Path.GetFullPath(videoOutputPath)}"]);
                 window.EnableModalVideoTransportStubForSmoke();
                 bool videoThumbnailOpened =
-                    window.OpenEnhancementJobSourceInViewerForSmoke(
+                    await window.OpenEnhancementJobSourceInViewerForSmokeAsync(
                         "video-reader-job");
                 openedVideoOutput = window.ModalVideoPathForSmoke;
                 bool videoThumbnailAutoplay =
@@ -20486,7 +20486,9 @@ public partial class App : Application
                 var storesBeforeViewerOpen = environment
                     .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
                     .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
-                bool sourceOpenedInViewer = window.OpenEnhancementJobSourceInViewerForSmoke("done-job");
+                bool sourceOpenedInViewer =
+                    await window.OpenEnhancementJobSourceInViewerForSmokeAsync(
+                        "done-job");
                 EnhancementJobsWorkspaceSmokeSnapshot whileSourceViewerOpen = window.EnhancementJobsWorkspaceForSmoke();
                 window.CloseModalForSmoke();
                 await window.WaitForEnhancementJobsReturnForSmokeAsync();
