@@ -1640,7 +1640,7 @@
                               <Button Style="{StaticResource GhostButton}" Content="これを次に処理" Tag="{Binding}" CommandParameter="next" Click="MoveEnhancementJobInQueue_Click" Height="28" MinWidth="96" Margin="6,0,0,0" Visibility="{Binding ShowMoveNext, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding CanMoveNext}" ToolTip="画面へすぐ反映し、処理中ジョブの直後へ保存" AutomationProperties.Name="このジョブを次に処理"/>
                               <Button Style="{StaticResource GhostButton}" Content="現在設定へ更新" Tag="{Binding}" Click="UpdateQueuedPhotorealPrompts_Click" Height="28" MinWidth="114" Margin="6,0,0,0" Visibility="{Binding CanUpdatePhotorealPrompts, Converter={StaticResource BoolToVis}}" IsEnabled="{Binding CanUpdatePhotorealPrompts}" ToolTip="現在のPrompt・LoRA・強さ・CFG・品質・解像度・Seedへ更新。元画像ごとの個別Prompt変換と待ち順は維持"/>
                               <Button Style="{StaticResource GhostButton}" Content="{Binding CancelLabel}" Tag="{Binding}" Click="CancelEnhancementJob_Click" Height="28" MinWidth="76" Margin="6,0,0,0" Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}"/>
-                              <Button Style="{StaticResource GhostButton}" Content="元設定でRetry" Tag="{Binding}" Click="RetryEnhancementJob_Click" Height="28" MinWidth="88" Margin="6,0,0,0" Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}" ToolTip="失敗・キャンセル時に保存された元の設定で再試行"/>
+                              <Button Style="{StaticResource GhostButton}" Content="{Binding RetryLabel}" Tag="{Binding}" Click="RetryEnhancementJob_Click" Height="28" MinWidth="104" Margin="6,0,0,0" Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}" ToolTip="{Binding RetryToolTip}"/>
                               <Button Style="{StaticResource GhostButton}" Content="現在設定で再実写化" Tag="{Binding}" Click="RerunPhotorealJob_Click" Height="28" MinWidth="126" Margin="6,0,0,0" Visibility="{Binding CanRerunWithCurrentSettings, Converter={StaticResource BoolToVis}}" ToolTip="設定画面の現在のPromptと実写化設定で新しいジョブを追加"/>
                               <Button Style="{StaticResource GhostButton}" Content="現在設定で次に実写化" Tag="{Binding}" Click="RerunPhotorealJobNext_Click" Height="28" MinWidth="144" Margin="6,0,0,0" Visibility="{Binding CanRerunNextWithCurrentSettings, Converter={StaticResource BoolToVis}}" ToolTip="現在の設定で、処理中ジョブの直後へ原子的に追加"/>
                               <Button Style="{StaticResource DangerButton}" Content="Remove" Tag="{Binding}" Click="DismissEnhancementJob_Click" Height="28" MinWidth="72" Margin="6,0,0,0" Visibility="{Binding CanDismiss, Converter={StaticResource BoolToVis}}"
@@ -2142,7 +2142,7 @@
                 <ComboBoxItem Content="MiniMax H3 — 5・10・12・15秒／音声あり" Tag="minimax-h3"/>
               </ComboBox>
               <TextBlock x:Name="AppVideoModelDescriptionText"
-                         Text="MiniMax H3の5・10・12・15秒動画。動画サイズは元画像比率から自動、STEP数は生成反復回数です。24fps・AAC音声あり。"
+                         Text="MiniMax H3の5・10・12・15秒動画。動画サイズは元画像比率から自動計算。STEP数は独立した生成反復回数です。24fps・AAC音声あり。"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,5,0,9"/>
               <StackPanel x:Name="AppVideoH3ControlsPanel">
@@ -2157,7 +2157,7 @@
                   <ComboBoxItem Content="12秒" Tag="12"/>
                   <ComboBoxItem Content="15秒" Tag="15"/>
                 </ComboBox>
-                <TextBlock x:Name="AppVideoH3StepsLabel" Text="STEP数（生成反復回数）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,8,0,4"/>
+                <TextBlock x:Name="AppVideoH3StepsLabel" Text="STEP数（生成反復回数・サイズとは独立）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,8,0,4"/>
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="58"/></Grid.ColumnDefinitions>
                   <Slider x:Name="AppVideoH3StepsSlider" Grid.Column="0" Minimum="1" Maximum="40" Value="20"
@@ -2171,7 +2171,7 @@
                            BorderBrush="{StaticResource BorderStrong}" TextChanged="MiniMaxH3StepsTextBox_TextChanged"
                            AutomationProperties.Name="Default MiniMax H3 video steps value"/>
                 </Grid>
-                <TextBlock Text="動画サイズとは別です。1〜40の整数で、20が既定。40は生成時間がおよそ2倍になります。"
+                <TextBlock Text="1〜40の整数で20が既定。ここを変えても動画サイズは変わりません。40は生成時間がおよそ2倍になります。"
                            Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                            TextWrapping="Wrap" Margin="0,5,0,7"/>
                 <Grid Margin="0,2,0,0">
@@ -2183,7 +2183,7 @@
                     </Border>
                   </StackPanel>
                   <StackPanel Grid.Column="2">
-                    <TextBlock x:Name="AppVideoH3ResolutionLabel" Text="動画サイズ" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="AppVideoH3ResolutionLabel" Text="動画サイズ（自動）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
                     <Border Padding="7,5" CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
                       <TextBlock x:Name="AppVideoH3ResolutionFixedText" Text="自動・最大414,720px" Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis"
                                  AutomationProperties.Name="Video size is automatic up to 414,720 pixels"/>
@@ -3248,7 +3248,7 @@
               <ComboBoxItem Content="MiniMax H3 — 5・10・12・15秒／音声あり" Tag="minimax-h3"/>
             </ComboBox>
             <TextBlock x:Name="ModalVideoModelDescriptionText"
-                       Text="MiniMax H3の5・10・12・15秒動画。動画サイズは元画像比率から自動、STEP数は生成反復回数です。24fps・AAC音声あり。"
+                       Text="MiniMax H3の5・10・12・15秒動画。動画サイズは元画像比率から自動計算。STEP数は独立した生成反復回数です。24fps・AAC音声あり。"
                        Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                        TextWrapping="Wrap" Margin="0,5,0,10"/>
             <StackPanel x:Name="ModalVideoH3ControlsPanel" Margin="0,0,0,10">
@@ -3263,7 +3263,7 @@
                 <ComboBoxItem Content="12秒" Tag="12"/>
                 <ComboBoxItem Content="15秒" Tag="15"/>
               </ComboBox>
-              <TextBlock x:Name="ModalVideoH3StepsLabel" Text="STEP数（生成反復回数）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,8,0,4"/>
+              <TextBlock x:Name="ModalVideoH3StepsLabel" Text="STEP数（生成反復回数・サイズとは独立）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,8,0,4"/>
               <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="58"/></Grid.ColumnDefinitions>
                 <Slider x:Name="ModalVideoH3StepsSlider" Grid.Column="0" Minimum="1" Maximum="40" Value="20"
@@ -3277,7 +3277,7 @@
                          BorderBrush="{StaticResource BorderStrong}" TextChanged="MiniMaxH3StepsTextBox_TextChanged"
                          AutomationProperties.Name="MiniMax H3 video steps value"/>
               </Grid>
-              <TextBlock Text="動画サイズとは別です。1〜40の整数で、20が既定。40は生成時間がおよそ2倍。10秒以上は他の重い作業を閉じて実行してください。"
+              <TextBlock Text="1〜40の整数で20が既定。ここを変えても動画サイズは変わりません。40は生成時間がおよそ2倍。10秒以上は他の重い作業を閉じて実行してください。"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,5,0,7"/>
               <Grid>
@@ -3289,7 +3289,7 @@
                   </Border>
                 </StackPanel>
                 <StackPanel Grid.Column="2">
-                  <TextBlock x:Name="ModalVideoH3ResolutionLabel" Text="動画サイズ" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <TextBlock x:Name="ModalVideoH3ResolutionLabel" Text="動画サイズ（自動）" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
                   <Border Padding="7,5" CornerRadius="3" Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
                     <TextBlock x:Name="ModalVideoH3ResolutionFixedText" Text="自動・最大414,720px" Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis"
                                AutomationProperties.Name="Video size is automatic up to 414,720 pixels"/>

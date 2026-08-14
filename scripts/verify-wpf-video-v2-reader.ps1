@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$DotNetPath = 'dotnet'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,8 @@ $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot (
 $buildRoot = Join-Path $runRoot 'build'
 $resultPath = Join-Path $runRoot 'result.json'
 $process = $null
+$previousDotNetRoot = [Environment]::GetEnvironmentVariable('DOTNET_ROOT', 'Process')
+$previousDotNetRootX64 = [Environment]::GetEnvironmentVariable('DOTNET_ROOT_X64', 'Process')
 
 if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Verifier root must stay under TEMP.'
@@ -63,7 +66,9 @@ try {
 
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    dotnet build $project `
+    $dotNetExecutable = (Get-Command $DotNetPath -ErrorAction Stop).Source
+    $dotNetRoot = Split-Path -Parent $dotNetExecutable
+    & $dotNetExecutable build $project `
         -c $Configuration `
         "-p:OutputPath=$buildOutput" `
         --nologo `
@@ -76,6 +81,9 @@ try {
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
         throw "WPF executable was not found: $exe"
     }
+
+    [Environment]::SetEnvironmentVariable('DOTNET_ROOT', $dotNetRoot, 'Process')
+    [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $dotNetRoot, 'Process')
 
     $process = Start-Process -FilePath $exe `
         -ArgumentList @(
@@ -123,6 +131,7 @@ try {
         'labelsExact',
         'validWorkspace',
         'validPlayback',
+        'selectedStepsPlayback',
         'invalidPlaybackProtected',
         'sourceAspectPolicyProtected',
         'exactSets',
@@ -170,6 +179,8 @@ try {
     $smoke | ConvertTo-Json -Depth 8
 }
 finally {
+    [Environment]::SetEnvironmentVariable('DOTNET_ROOT', $previousDotNetRoot, 'Process')
+    [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $previousDotNetRootX64, 'Process')
     if ($null -ne $process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     }

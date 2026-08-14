@@ -445,7 +445,7 @@ public partial class MainWindow
             HunyuanVideoModelId =>
                 "実写・人物の顔や手を重視する候補。12GBの隔離ランタイム実測前なので、現在は選択内容の確認だけできます。",
             MiniMaxH3VideoModelId =>
-                $"RTX 4070 SUPER 12GBで実測済みのMiniMax H3 5・10・12・15秒プロファイル。元画像比率・32px単位・最大414,720px・24fps・{_videoSteps} STEP・H.264 / yuv420p・AAC音声あり。"
+                $"RTX 4070 SUPER 12GBで実測済みのMiniMax H3 5・10・12・15秒プロファイル。動画サイズは元画像比率・32px単位・最大414,720pxで自動。独立した生成反復は{_videoSteps} STEP。24fps・H.264 / yuv420p・AAC音声あり。"
                 + " 10秒以上はRAMを大きく使うため、他の重い作業を閉じて実行してください。"
                 + MiniMaxH3ReadinessSuffix(),
             _ =>
@@ -1935,7 +1935,7 @@ public partial class MainWindow
             string modelDescription = VideoModelDescription(_videoModelId);
             bool h3Selected = IsMiniMaxH3VideoModel(_videoModelId);
             string qualityLabel = h3Selected
-                ? $"元画像比率プレビュー · {_videoSteps} STEP"
+                ? $"動画サイズ 自動（最大414,720px） ／ STEP {_videoSteps}"
                 : VideoQualityLabel(_videoQualityId);
             ModalVideoPresetText.Text =
                 $"{VideoModelLabel(_videoModelId)} · {qualityLabel}";
@@ -2534,11 +2534,11 @@ public partial class MainWindow
             }
             if (!string.Equals(
                     ModalVideoH3StepsLabel.Text,
-                    "STEP数（生成反復回数）",
+                    "STEP数（生成反復回数・サイズとは独立）",
                     StringComparison.Ordinal)
                 || !string.Equals(
                     ModalVideoH3ResolutionLabel.Text,
-                    "動画サイズ",
+                    "動画サイズ（自動）",
                     StringComparison.Ordinal)
                 || !string.Equals(
                     ModalVideoH3ResolutionFixedText.Text,
@@ -2549,11 +2549,11 @@ public partial class MainWindow
             }
             if (!string.Equals(
                     AppVideoH3StepsLabel.Text,
-                    "STEP数（生成反復回数）",
+                    "STEP数（生成反復回数・サイズとは独立）",
                     StringComparison.Ordinal)
                 || !string.Equals(
                     AppVideoH3ResolutionLabel.Text,
-                    "動画サイズ",
+                    "動画サイズ（自動）",
                     StringComparison.Ordinal)
                 || !string.Equals(
                     AppVideoH3ResolutionFixedText.Text,
