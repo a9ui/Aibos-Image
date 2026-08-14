@@ -1015,13 +1015,15 @@ snapshots remain protected rather than being coerced to the Wan v1 shape.
   or saved Style is normalized to H3 while retaining its name and prompt; there
   is no silent fallback from an unavailable H3 writer to Wan.
 
-- The visible H3 control exposes only the measured 5 / 10 / 12 / 15 second
-  profiles and describes all four as high quality. FPS and steps are fixed at
-  24 and 20; the UI does not fabricate unmeasured quality or FPS choices.
-  The 10-to-15-second options carry an idle-system warning because the RTX
-  4070 SUPER / 32 GiB measurements used most physical RAM. The 12.250-second
-  512x768 run completed in 802.452 seconds with 11,332 MiB peak VRAM,
-  1.78 GiB minimum free physical RAM, and 81 C peak GPU temperature.
+- The visible H3 control exposes only the measured 5 / 10 second profiles.
+  FPS and steps are fixed at 24 and 20; the UI does not fabricate unmeasured
+  quality or FPS choices. The measured 12 / 15 second profiles remain valid
+  durable-reader and backend contracts for existing jobs, but are not offered
+  for new selection. The 10-second option carries an idle-system warning
+  because the RTX 4070 SUPER / 32 GiB measurements used most physical RAM.
+  The retained 12.250-second 512x768 measurement completed in 802.452 seconds
+  with 11,332 MiB peak VRAM, 1.78 GiB minimum free physical RAM, and 81 C peak
+  GPU temperature.
 
 - The video input prompt remains the only authoritative prompt. The explicit
   MiniMax conversion action reads that text and the currently selected source
