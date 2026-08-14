@@ -19120,6 +19120,8 @@ public partial class App : Application
                 var dismissedCanceledJobs = new HashSet<string>(
                     StringComparer.Ordinal);
                 var terminalHistoryBatchBodies = new List<string>();
+                var jobsBulkConfirmations = new List<(string Title, string Message)>();
+                bool acceptJobsBulkConfirmation = true;
                 bool canceledRetryCreated = false;
                 bool rerunCreated = false;
                 bool queueLaterFirst = false;
@@ -19678,6 +19680,12 @@ public partial class App : Application
 
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
+                window.ConfigureEnhancementJobsBulkConfirmationForSmoke(
+                    (title, message) =>
+                    {
+                        jobsBulkConfirmations.Add((title, message));
+                        return acceptJobsBulkConfirmation;
+                    });
                 window.ConfigureModalEnhancementForSmoke((request, _) =>
                 {
                     string route = request.RequestUri?.AbsolutePath ?? "";
@@ -20780,6 +20788,28 @@ public partial class App : Application
                         return false;
                     }
                 }
+                int failedConfirmationsBefore = jobsBulkConfirmations.Count;
+                int requestsBeforeRejectedFailedActions = requests.Count;
+                acceptJobsBulkConfirmation = false;
+                int rejectedFailedRetry =
+                    await window.RetryAllFailedEnhancementJobsForSmokeAsync();
+                int rejectedFailedClear =
+                    await window.ClearAllFailedEnhancementJobsForSmokeAsync();
+                acceptJobsBulkConfirmation = true;
+                (string Title, string Message)[] rejectedFailedConfirmations =
+                    jobsBulkConfirmations.Skip(failedConfirmationsBefore).ToArray();
+                bool failedBulkConfirmationContract = rejectedFailedRetry == 0
+                    && rejectedFailedClear == 0
+                    && requests.Count == requestsBeforeRejectedFailedActions
+                    && rejectedFailedConfirmations.Length == 2
+                    && rejectedFailedConfirmations[0].Title.Contains(
+                        "失敗を全部リトライ",
+                        StringComparison.Ordinal)
+                    && rejectedFailedConfirmations[1].Title.Contains(
+                        "失敗を全部消す",
+                        StringComparison.Ordinal)
+                    && rejectedFailedConfirmations.All(static confirmation =>
+                        confirmation.Message.Contains("保護対象", StringComparison.Ordinal));
                 int rerunBodiesBeforeBulkFailed = rerunBodies.Count;
                 int bulkFailedRetried =
                     await window.RetryAllFailedEnhancementJobsForSmokeAsync();
@@ -20823,6 +20853,28 @@ public partial class App : Application
                     window.CanceledBulkPanelVisibleForSmoke
                     && window.RetryAllCanceledEnhancementJobsControlForSmoke
                     && window.ClearAllCanceledEnhancementJobsControlForSmoke;
+                int canceledConfirmationsBefore = jobsBulkConfirmations.Count;
+                int requestsBeforeRejectedCanceledActions = requests.Count;
+                acceptJobsBulkConfirmation = false;
+                int rejectedCanceledRetry =
+                    await window.RetryAllCanceledEnhancementJobsForSmokeAsync();
+                int rejectedCanceledClear =
+                    await window.ClearAllCanceledEnhancementJobsForSmokeAsync();
+                acceptJobsBulkConfirmation = true;
+                (string Title, string Message)[] rejectedCanceledConfirmations =
+                    jobsBulkConfirmations.Skip(canceledConfirmationsBefore).ToArray();
+                bool canceledBulkConfirmationContract = rejectedCanceledRetry == 0
+                    && rejectedCanceledClear == 0
+                    && requests.Count == requestsBeforeRejectedCanceledActions
+                    && rejectedCanceledConfirmations.Length == 2
+                    && rejectedCanceledConfirmations[0].Title.Contains(
+                        "キャンセル済みを全部リトライ",
+                        StringComparison.Ordinal)
+                    && rejectedCanceledConfirmations[1].Title.Contains(
+                        "キャンセル済みを全部消す",
+                        StringComparison.Ordinal)
+                    && rejectedCanceledConfirmations.All(static confirmation =>
+                        confirmation.Message.Contains("保護対象", StringComparison.Ordinal));
                 int rerunBodiesBeforeBulkCanceled = rerunBodies.Count;
                 int bulkCanceledRetried =
                     await window.RetryAllCanceledEnhancementJobsForSmokeAsync();
@@ -21065,6 +21117,8 @@ public partial class App : Application
                     && completedElapsedVisible
                     && bulkFailedActionsContract
                     && bulkCanceledActionsContract
+                    && failedBulkConfirmationContract
+                    && canceledBulkConfirmationContract
                     && terminalHistoryBatchDismissContract
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
@@ -21174,6 +21228,8 @@ public partial class App : Application
                     jobsScrollTopControl,
                     jobsFilterLayoutContract,
                     terminalHistoryBatchDismissContract,
+                    failedBulkConfirmationContract,
+                    canceledBulkConfirmationContract,
                     progressUsesOneDecimal,
                     mixedRetryCapabilityPartition,
                     legacyHealth,
