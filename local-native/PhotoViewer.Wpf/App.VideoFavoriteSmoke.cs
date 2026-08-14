@@ -275,6 +275,14 @@ public partial class App
                     && !window.FilteredFileNamesForSmoke().Contains(
                         fileWithoutVideo,
                         StringComparer.OrdinalIgnoreCase);
+                _ = window.SetFavoriteFilterLevelsForSmoke();
+                _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
+                bool videoZeroSelected =
+                    window.SetVideoFavoriteFilterLevelsForSmoke(0);
+                bool videoLevelZeroFilter = videoZeroSelected
+                    && window.FilteredFileNamesForSmoke().ToHashSet(
+                            StringComparer.OrdinalIgnoreCase)
+                        .SetEquals([fileB]);
                 window.SetFavoriteOnlyFilterForSmoke(false);
                 _ = window.SetFavoriteFilterLevelsForSmoke();
                 _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
@@ -295,10 +303,13 @@ public partial class App
                             window.VideoFavoriteFilterTitleForSmoke)
                         .Contains(retiredFavoriteLabel, StringComparison.Ordinal);
                 surfaceContract = shortJapaneseLabels
-                    && window.FavoriteFilterSurfaceContractForSmoke;
+                    && window.FavoriteFilterSurfaceContractForSmoke
+                    && videoLevelZeroFilter;
                 levelToggleRoundTrip = new[] { "original", "photoreal", "video" }
                     .All(category =>
-                        window.ToggleFavoriteLevelFilterForSmoke(category, 3)
+                        window.ToggleFavoriteLevelFilterForSmoke(category, 0)
+                        && window.ToggleFavoriteLevelFilterForSmoke(category, 0)
+                        && window.ToggleFavoriteLevelFilterForSmoke(category, 3)
                         && window.ToggleFavoriteLevelFilterForSmoke(category, 3));
                 _ = window.SetUiLanguageForSmoke(UiLanguageResources.English);
 

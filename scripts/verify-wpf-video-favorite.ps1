@@ -73,9 +73,12 @@ try {
         photorealPanel = $mainXaml -match 'x:Name="PhotorealFavoriteLevelFilterPanel" Grid.Row="1" Columns="3"'
         videoPanel = $mainXaml -match 'x:Name="VideoFavoriteLevelFilterPanel" Grid.Row="1" Columns="3"'
         globalUnrated = $mainXaml -match 'x:Name="UnfavoriteOnlyFilter"[^>]*Content="\{DynamicResource UiUnratedOnly\}"'
-        originalUnratedCompatibilityHidden = $mainXaml -match 'x:Name="FavoriteLevel0Filter"[^>]*Visibility="Collapsed"[^>]*IsTabStop="False"'
-        photorealUnratedCompatibilityHidden = $mainXaml -match 'x:Name="PhotorealFavoriteLevel0Filter"[^>]*Visibility="Collapsed"[^>]*IsTabStop="False"'
-        videoUnratedCompatibilityHidden = $mainXaml -match 'x:Name="VideoFavoriteLevel0Filter"[^>]*Visibility="Collapsed"[^>]*IsTabStop="False"'
+        originalLevelZeroVisible = $mainXaml -match 'x:Name="FavoriteLevel0Filter"[^>]*Content="Lv 0"[^>]*Tag="0"' `
+            -and $mainXaml -notmatch 'x:Name="FavoriteLevel0Filter"[^>]*Visibility="Collapsed"'
+        photorealLevelZeroVisible = $mainXaml -match 'x:Name="PhotorealFavoriteLevel0Filter"[^>]*Content="Lv 0"[^>]*Tag="0"' `
+            -and $mainXaml -notmatch 'x:Name="PhotorealFavoriteLevel0Filter"[^>]*Visibility="Collapsed"'
+        videoLevelZeroVisible = $mainXaml -match 'x:Name="VideoFavoriteLevel0Filter"[^>]*Content="Lv 0"[^>]*Tag="0"' `
+            -and $mainXaml -notmatch 'x:Name="VideoFavoriteLevel0Filter"[^>]*Visibility="Collapsed"'
         videoChangeHandler = $mainXaml -match 'Checked="VideoFavoriteLevelFilter_Changed"'
     }
     $failedPillChecks = @($pillChecks.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object Key)
@@ -84,7 +87,7 @@ try {
             + ($failedPillChecks -join ','))
     }
     foreach ($prefix in @('Favorite', 'PhotorealFavorite', 'VideoFavorite')) {
-        foreach ($level in 1..5) {
+        foreach ($level in 0..5) {
             $levelLabelPattern = 'x:Name="' + $prefix + 'Level' + $level `
                 + 'Filter"[^>]*Content="Lv ' + $level + '"[^>]*Tag="' + $level + '"'
             if ($mainXaml -notmatch $levelLabelPattern) {

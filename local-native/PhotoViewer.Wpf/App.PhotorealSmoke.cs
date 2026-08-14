@@ -2290,11 +2290,24 @@ public partial class App
                     && ReadFavoriteLevel(
                         favoritesPath,
                         photorealOutputPath) == 0;
+                bool photorealLevelZeroAccepted =
+                    window.SetPhotorealFavoriteFilterLevelsForSmoke(0);
+                window.SetFavoriteOnlyFilterForSmoke(true);
+                _ = await window.WaitForFavoritePresentationStateForSmokeAsync(
+                    TimeSpan.FromSeconds(10));
+                bool photorealLevelZeroIncludes =
+                    photorealLevelZeroAccepted
+                    && window.FilteredFileNamesForSmoke().Contains(
+                        sourceFileNameForFavorite,
+                        StringComparer.OrdinalIgnoreCase);
+                window.SetFavoriteOnlyFilterForSmoke(false);
+                _ = window.SetPhotorealFavoriteFilterLevelsForSmoke();
                 photorealFavoriteRetryContract =
                     failedFavoriteRolledBack
                     && retryPresentationAppliedImmediately
                     && retriedFavoritePersisted
-                    && retryFavoriteReset;
+                    && retryFavoriteReset
+                    && photorealLevelZeroIncludes;
                 if (!photorealFavoriteRetryContract)
                 {
                     failure =
@@ -2309,6 +2322,8 @@ public partial class App
                         + $"resetLevel={window.PhotorealFavoriteLevelForFileForSmoke(sourceFileNameForFavorite)}; "
                         + $"resetBadge={window.PhotorealFavoriteBadgeForFileForSmoke(sourceFileNameForFavorite)}; "
                         + $"resetDurable={ReadFavoriteLevel(favoritesPath, photorealOutputPath)}; "
+                        + $"levelZeroAccepted={photorealLevelZeroAccepted}; "
+                        + $"levelZeroIncludes={photorealLevelZeroIncludes}; "
                         + $"failedStatuses={string.Join(',', failedFavoriteStatuses)}; "
                         + $"retryStatuses={string.Join(',', retriedFavoriteStatuses)}; "
                         + $"resetStatuses={string.Join(',', retryFavoriteResetStatuses)}";
@@ -2336,13 +2351,10 @@ public partial class App
                         sourceFileNameForFavorite) == 2
                     && window.PhotorealFavoriteBadgeForFileForSmoke(
                         sourceFileNameForFavorite);
-                bool hiddenPhotorealLevelZeroRejected =
-                    !window.SetPhotorealFavoriteFilterLevelsForSmoke(0);
                 window.SetUnfavoriteOnlyFilterForSmoke(true);
                 _ = await window.WaitForFavoritePresentationStateForSmokeAsync(
                     TimeSpan.FromSeconds(10));
                 bool originalUnratedIncludes = globalUnratedFixture
-                    && hiddenPhotorealLevelZeroRejected
                     && window.ShowUnfavoriteOnlyForSmoke
                     && window.FilteredFileNamesForSmoke().Contains(
                         sourceFileNameForFavorite,
@@ -2373,7 +2385,6 @@ public partial class App
                         + $"levelTwo={levelTwoIncludes}; "
                         + $"levelOneExcluded={levelOneExcludes}; "
                         + $"globalFixture={globalUnratedFixture}; "
-                        + $"hiddenZeroRejected={hiddenPhotorealLevelZeroRejected}; "
                         + $"showUnrated={window.ShowUnfavoriteOnlyForSmoke}; "
                         + $"originalUnratedIncludes={originalUnratedIncludes}; "
                         + $"persisted={filterPersisted}; "

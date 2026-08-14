@@ -188,10 +188,10 @@ public partial class MainWindow : Window
     private const string ModalMetadataPromptTab = "prompt";
     private const string ModalMetadataNegativeTab = "negative";
     private const string ModalMetadataSettingsTab = "settings";
-    private const int MinFavoriteFilterLevel = 1;
+    private const int MinFavoriteFilterLevel = 0;
     private const int MaxFavoriteFilterLevel = 5;
-    private const int MinPhotorealFavoriteFilterLevel = 1;
-    private const int MinVideoFavoriteFilterLevel = 1;
+    private const int MinPhotorealFavoriteFilterLevel = 0;
+    private const int MinVideoFavoriteFilterLevel = 0;
     private const int MaxPersistedPreviewTabs = 30;
     private static readonly JsonSerializerOptions SharedRecentJsonOptions = new()
     {
@@ -12671,7 +12671,7 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
-            SetCheckBoxState(FavoriteLevel0Filter, false);
+            SetCheckBoxState(FavoriteLevel0Filter, _favoriteFilterLevels.Contains(0));
             SetCheckBoxState(FavoriteLevel1Filter, _favoriteFilterLevels.Contains(1));
             SetCheckBoxState(FavoriteLevel2Filter, _favoriteFilterLevels.Contains(2));
             SetCheckBoxState(FavoriteLevel3Filter, _favoriteFilterLevels.Contains(3));
@@ -12735,6 +12735,7 @@ public partial class MainWindow : Window
     private void SyncFavoriteFilterLevelsFromControls()
     {
         _favoriteFilterLevels.Clear();
+        if (FavoriteLevel0Filter?.IsChecked == true) _favoriteFilterLevels.Add(0);
         if (FavoriteLevel1Filter?.IsChecked == true) _favoriteFilterLevels.Add(1);
         if (FavoriteLevel2Filter?.IsChecked == true) _favoriteFilterLevels.Add(2);
         if (FavoriteLevel3Filter?.IsChecked == true) _favoriteFilterLevels.Add(3);
@@ -12758,7 +12759,7 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
-            SetCheckBoxState(PhotorealFavoriteLevel0Filter, false);
+            SetCheckBoxState(PhotorealFavoriteLevel0Filter, _photorealFavoriteFilterLevels.Contains(0));
             SetCheckBoxState(PhotorealFavoriteLevel1Filter, _photorealFavoriteFilterLevels.Contains(1));
             SetCheckBoxState(PhotorealFavoriteLevel2Filter, _photorealFavoriteFilterLevels.Contains(2));
             SetCheckBoxState(PhotorealFavoriteLevel3Filter, _photorealFavoriteFilterLevels.Contains(3));
@@ -12808,6 +12809,7 @@ public partial class MainWindow : Window
     private void SyncPhotorealFavoriteFilterLevelsFromControls()
     {
         _photorealFavoriteFilterLevels.Clear();
+        if (PhotorealFavoriteLevel0Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(0);
         if (PhotorealFavoriteLevel1Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(1);
         if (PhotorealFavoriteLevel2Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(2);
         if (PhotorealFavoriteLevel3Filter?.IsChecked == true) _photorealFavoriteFilterLevels.Add(3);
@@ -12831,7 +12833,7 @@ public partial class MainWindow : Window
         _syncingFavoriteFilterControls = true;
         try
         {
-            SetCheckBoxState(VideoFavoriteLevel0Filter, false);
+            SetCheckBoxState(VideoFavoriteLevel0Filter, _videoFavoriteFilterLevels.Contains(0));
             SetCheckBoxState(VideoFavoriteLevel1Filter, _videoFavoriteFilterLevels.Contains(1));
             SetCheckBoxState(VideoFavoriteLevel2Filter, _videoFavoriteFilterLevels.Contains(2));
             SetCheckBoxState(VideoFavoriteLevel3Filter, _videoFavoriteFilterLevels.Contains(3));
@@ -12881,6 +12883,7 @@ public partial class MainWindow : Window
     private void SyncVideoFavoriteFilterLevelsFromControls()
     {
         _videoFavoriteFilterLevels.Clear();
+        if (VideoFavoriteLevel0Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(0);
         if (VideoFavoriteLevel1Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(1);
         if (VideoFavoriteLevel2Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(2);
         if (VideoFavoriteLevel3Filter?.IsChecked == true) _videoFavoriteFilterLevels.Add(3);
@@ -23327,13 +23330,13 @@ public partial class MainWindow : Window
         _randomSortSeed = string.IsNullOrWhiteSpace(state.RandomSortSeed) ? "default" : state.RandomSortSeed;
         SyncSortButtons();
         RestoreDateFilter(state);
-        bool legacyOriginalUnratedSelection =
-            state.FavoriteFilterLevels?.Contains(0) == true
-            || state.FavoriteFilterLevel == 0;
+        bool legacyOriginalUnratedScalar =
+            state.FavoriteFilterLevels is not { Count: > 0 }
+            && state.FavoriteFilterLevel == 0;
         _favoriteFilterLevels.Clear();
         if (state.FavoriteFilterLevels is { Count: > 0 })
             _favoriteFilterLevels.UnionWith(state.FavoriteFilterLevels.Where(level => level is >= MinFavoriteFilterLevel and <= MaxFavoriteFilterLevel));
-        else if (state.FavoriteFilterLevel is >= MinFavoriteFilterLevel and <= MaxFavoriteFilterLevel)
+        else if (state.FavoriteFilterLevel is >= 1 and <= MaxFavoriteFilterLevel)
             _favoriteFilterLevels.Add(state.FavoriteFilterLevel.Value); // additive migration from the scalar schema
         _photorealFavoriteFilterLevels.Clear();
         if (state.PhotorealFavoriteFilterLevels is { Count: > 0 })
@@ -23388,13 +23391,8 @@ public partial class MainWindow : Window
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
-        bool hasPositiveFavoriteLevelSelection =
-            _favoriteFilterLevels.Count > 0
-            || _photorealFavoriteFilterLevels.Count > 0
-            || _videoFavoriteFilterLevels.Count > 0;
         bool restoredUnfavoriteOnly = state.ShowUnfavoriteOnly
-            || (legacyOriginalUnratedSelection
-                && !hasPositiveFavoriteLevelSelection);
+            || legacyOriginalUnratedScalar;
         bool restoredFavoritesOnly = state.ShowFavoritesOnly
             && !restoredUnfavoriteOnly;
         SetFavoriteFilterState(
@@ -27939,6 +27937,7 @@ public partial class MainWindow : Window
         {
             CheckBox[] original =
             [
+                FavoriteLevel0Filter,
                 FavoriteLevel1Filter,
                 FavoriteLevel2Filter,
                 FavoriteLevel3Filter,
@@ -27947,6 +27946,7 @@ public partial class MainWindow : Window
             ];
             CheckBox[] photoreal =
             [
+                PhotorealFavoriteLevel0Filter,
                 PhotorealFavoriteLevel1Filter,
                 PhotorealFavoriteLevel2Filter,
                 PhotorealFavoriteLevel3Filter,
@@ -27955,6 +27955,7 @@ public partial class MainWindow : Window
             ];
             CheckBox[] video =
             [
+                VideoFavoriteLevel0Filter,
                 VideoFavoriteLevel1Filter,
                 VideoFavoriteLevel2Filter,
                 VideoFavoriteLevel3Filter,
@@ -27967,25 +27968,25 @@ public partial class MainWindow : Window
                 && OriginalFavoriteFilterRow.RowDefinitions.Count == 2
                 && PhotorealFavoriteFilterRow.RowDefinitions.Count == 2
                 && VideoFavoriteFilterRow.RowDefinitions.Count == 2
-                && FavoriteLevel0Filter.Visibility == Visibility.Collapsed
-                && PhotorealFavoriteLevel0Filter.Visibility == Visibility.Collapsed
-                && VideoFavoriteLevel0Filter.Visibility == Visibility.Collapsed
+                && original.Concat(photoreal).Concat(video).All(static control =>
+                    control.Visibility == Visibility.Visible
+                    && control.IsTabStop)
                 && original.Select((control, index) =>
                         string.Equals(
                             control.Tag?.ToString(),
-                            (index + 1).ToString(CultureInfo.InvariantCulture),
+                            index.ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && photoreal.Select((control, index) =>
                         string.Equals(
                             control.Tag?.ToString(),
-                            (index + 1).ToString(CultureInfo.InvariantCulture),
+                            index.ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && video.Select((control, index) =>
                         string.Equals(
                             control.Tag?.ToString(),
-                            (index + 1).ToString(CultureInfo.InvariantCulture),
+                            index.ToString(CultureInfo.InvariantCulture),
                             StringComparison.Ordinal))
                     .All(static matched => matched)
                 && original.Concat(photoreal).Concat(video).All(static control =>
@@ -28016,7 +28017,7 @@ public partial class MainWindow : Window
     }
     public bool ToggleFavoriteLevelFilterForSmoke(string category, int level)
     {
-        if (level is < 1 or > 5)
+        if (level is < 0 or > 5)
             return false;
         CheckBox control = category switch
         {
