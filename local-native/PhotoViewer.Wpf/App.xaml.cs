@@ -19836,7 +19836,20 @@ public partial class App : Application
                         && route.Split(
                                 '/',
                                 StringSplitOptions.RemoveEmptyEntries) is { Length: > 0 } deleteSegments
-                        && retriedCanceledJobIds.Contains(deleteSegments[^1]))
+                        && (retriedCanceledJobIds.Contains(deleteSegments[^1])
+                            || new[]
+                            {
+                                "failed-cancel-job",
+                                "canceled-job",
+                                "legacy-reader-job",
+                                "active-job",
+                                "queue-first-job",
+                                "queue-later-job",
+                                "delivery-queue-job",
+                                "retry-job",
+                                "canceled-retry-job",
+                                "rerun-job",
+                            }.Contains(deleteSegments[^1], StringComparer.Ordinal)))
                     {
                         dismissedCanceledJobs.Add(deleteSegments[^1]);
                         return Task.FromResult(JsonResponse(
@@ -19965,6 +19978,19 @@ public partial class App : Application
                 await window.OpenEnhancementJobsForSmokeAsync();
                 window.UpdateLayout();
                 EnhancementJobsWorkspaceSmokeSnapshot initial = window.EnhancementJobsWorkspaceForSmoke();
+                int visibleThumbnailBatch =
+                    await window.QueueVisibleEnhancementJobThumbnailsForSmokeAsync();
+                bool thumbnailViewportLoadBounded =
+                    window.EnhancementJobsThumbnailViewportLimitForSmoke == 12
+                    && visibleThumbnailBatch >= 0
+                    && visibleThumbnailBatch
+                        <= window.EnhancementJobsThumbnailViewportLimitForSmoke
+                    && window.EnhancementJobsRealizedContainerCountForSmoke
+                        <= initial.Filtered;
+                double scrollTopProbeOffset =
+                    window.ScrollEnhancementJobsForSmoke(240);
+                bool jobsScrollTopControl = scrollTopProbeOffset > 0
+                    && window.ActivateEnhancementJobsScrollTopForSmoke();
                 EnhancementJobsPagingSmokeSnapshot firstLargeHistoryPage =
                     PhotoViewer.Wpf.MainWindow
                         .CalculateEnhancementJobsPagingForSmoke(205, 0);
@@ -20149,10 +20175,17 @@ public partial class App : Application
                 object? viewAfterRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
                 bool stableJobViews = viewBeforeRefresh is not null
                     && ReferenceEquals(viewBeforeRefresh, viewAfterRefresh);
-                window.SelectEnhancementJobsFilterForSmoke("running");
-                EnhancementJobsWorkspaceSmokeSnapshot running = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("queued");
                 EnhancementJobsWorkspaceSmokeSnapshot queued = window.EnhancementJobsWorkspaceForSmoke();
+                bool jobsFilterLayoutContract =
+                    window.EnhancementJobsFilterOrderForSmoke.SequenceEqual(
+                        ["all", "queued", "completed", "video", "failed", "canceled"],
+                        StringComparer.Ordinal)
+                    && queued.VisibleIds.Length > 0
+                    && queued.VisibleIds[0] == "active-job"
+                    && window.QueuedBulkPanelVisibleForSmoke
+                    && !window.FailedBulkPanelVisibleForSmoke
+                    && !window.CanceledBulkPanelVisibleForSmoke;
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot failed = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("completed");
@@ -20653,8 +20686,47 @@ public partial class App : Application
                 bool receiptOnlyResponseStaysVisible =
                     PhotoViewer.Wpf.MainWindow
                         .ReceiptOnlyDurableResponseIsPendingForSmoke();
+                static bool IsCurrentPhotorealRetryBody(string bodyText)
+                {
+                    try
+                    {
+                        using JsonDocument document = JsonDocument.Parse(bodyText);
+                        JsonElement body = document.RootElement;
+                        return body.GetProperty("operation").GetString()
+                                == "photoreal"
+                            && body.GetProperty("prompt").GetString()
+                                == "workspace rerun prompt, workspace metadata mapped"
+                            && body.GetProperty("negativePrompt").GetString()
+                                == "workspace negative prompt"
+                            && !body.GetProperty("loraEnabled").GetBoolean()
+                            && Math.Abs(
+                                body.GetProperty("strength").GetDouble()
+                                - 0.45) < 0.001
+                            && !body.TryGetProperty("structureStrength", out _)
+                            && Math.Abs(
+                                body.GetProperty("cfgScale").GetDouble()
+                                - 1.4) < 0.001
+                            && body.GetProperty("steps").GetInt32() == 6
+                            && body.GetProperty("maxDimension").GetInt32()
+                                == 1024
+                            && !body.TryGetProperty("seed", out _)
+                            && body.GetProperty("queuePlacement").GetString()
+                                == "last";
+                    }
+                    catch (Exception ex) when (
+                        ex is JsonException
+                            or InvalidOperationException
+                            or KeyNotFoundException)
+                    {
+                        return false;
+                    }
+                }
+                int rerunBodiesBeforeBulkFailed = rerunBodies.Count;
                 int bulkFailedRetried =
                     await window.RetryAllFailedEnhancementJobsForSmokeAsync();
+                string[] bulkFailedCurrentSettingBodies = rerunBodies
+                    .Skip(rerunBodiesBeforeBulkFailed)
+                    .ToArray();
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkFailedRetry =
                     window.EnhancementJobsWorkspaceForSmoke();
                 int bulkFailedCleared =
@@ -20665,11 +20737,14 @@ public partial class App : Application
                 bool bulkFailedActionsContract = bulkFailedControlsReady
                     && receiptOnlyResponseStaysVisible
                     && bulkFailedRetried == 1
+                    && bulkFailedCurrentSettingBodies.Length == 1
+                    && IsCurrentPhotorealRetryBody(
+                        bulkFailedCurrentSettingBodies[0])
                     && !afterBulkFailedRetry.VisibleIds.Contains(
-                        "delivery-failed-job",
+                        "clearable-failed-job",
                         StringComparer.Ordinal)
                     && afterBulkFailedRetry.VisibleIds.Contains(
-                        "bulk-retry-job",
+                        "rerun-job",
                         StringComparer.Ordinal)
                     && bulkFailedCleared == 1
                     && afterBulkFailedClear.Filtered == 3
@@ -20689,15 +20764,23 @@ public partial class App : Application
                     window.CanceledBulkPanelVisibleForSmoke
                     && window.RetryAllCanceledEnhancementJobsControlForSmoke
                     && window.ClearAllCanceledEnhancementJobsControlForSmoke;
+                int rerunBodiesBeforeBulkCanceled = rerunBodies.Count;
                 int bulkCanceledRetried =
                     await window.RetryAllCanceledEnhancementJobsForSmokeAsync();
+                string[] bulkCanceledCurrentSettingBodies = rerunBodies
+                    .Skip(rerunBodiesBeforeBulkCanceled)
+                    .ToArray();
                 int bulkCanceledCleared =
                     await window.ClearAllCanceledEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkCanceledClear =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool bulkCanceledActionsContract = bulkCanceledControlsReady
                     && bulkCanceledRetried > 0
-                    && bulkCanceledCleared == bulkCanceledRetried
+                    && bulkCanceledCurrentSettingBodies.Length
+                        == bulkCanceledRetried
+                    && bulkCanceledCurrentSettingBodies.All(
+                        IsCurrentPhotorealRetryBody)
+                    && bulkCanceledCleared >= bulkCanceledRetried
                     && afterBulkCanceledClear.Filtered == 1
                     && afterBulkCanceledClear.VisibleIds.SequenceEqual(
                         ["future-canceled-reader-job"],
@@ -20726,9 +20809,9 @@ public partial class App : Application
                     && requests.Contains("POST /api/enhance/jobs/failed-cancel-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-retry-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/failed-retry-job", StringComparer.Ordinal)
-                    && requests.Contains("POST /api/enhance/jobs/delivery-failed-job/retry", StringComparer.Ordinal)
+                    && !requests.Contains("POST /api/enhance/jobs/delivery-failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/delivery-failed-job", StringComparer.Ordinal)
-                    && requests.Contains("POST /api/enhance/jobs/clearable-failed-job/retry", StringComparer.Ordinal)
+                    && !requests.Contains("POST /api/enhance/jobs/clearable-failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/clearable-failed-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/video-malformed-provenance-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/future-reader-job", StringComparer.Ordinal)
@@ -20752,14 +20835,16 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && queued.VisibleIds.SequenceEqual(
                         [
+                            "active-job",
                             "queue-first-job",
                             "queue-later-job",
                             "delivery-queue-job",
                         ],
                         StringComparer.Ordinal)
-                    && queued.VisibleStatusLabels[0].Contains("待ち順 1", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[2].Contains("待ち順 3", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[0].Contains("Running", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[1].Contains("待ち順 1", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[2].Contains("待ち順 2", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[3].Contains("待ち順 3", StringComparison.Ordinal)
                     && afterMove.VisibleIds.Take(4).SequenceEqual(
                         [
                             "active-job",
@@ -20863,7 +20948,12 @@ public partial class App : Application
                 ok = initial.Visible
                     && initial.Total == 18
                     && initial.Active == 4
+                    && initial.Failed == 7
+                    && initial.Canceled == 3
                     && largeHistoryPaging
+                    && thumbnailViewportLoadBounded
+                    && jobsScrollTopControl
+                    && jobsFilterLayoutContract
                     && progressUsesOneDecimal
                     && mixedRetryCapabilityPartition
                     && initial.Polling
@@ -20883,8 +20973,7 @@ public partial class App : Application
                     && healthRecovered
                     && queuePauseContract
                     && stableJobViews
-                    && running.Filtered == 1
-                    && queued.Filtered == 3
+                    && queued.Filtered == 4
                     && queueInventoryOrdered
                     && failed.Filtered == 7
                     && completed.Filtered == 4
@@ -21005,13 +21094,16 @@ public partial class App : Application
                     largeHistoryPaging,
                     firstLargeHistoryPage,
                     lastLargeHistoryPage,
+                    thumbnailViewportLoadBounded,
+                    visibleThumbnailBatch,
+                    jobsScrollTopControl,
+                    jobsFilterLayoutContract,
                     progressUsesOneDecimal,
                     mixedRetryCapabilityPartition,
                     legacyHealth,
                     futureHealth,
                     unknownIssueHealth,
                     recoveredHealth,
-                    running,
                     queued,
                     failed,
                     completed,

@@ -20,7 +20,7 @@ namespace PhotoViewer.Wpf;
 
 public partial class MainWindow
 {
-    private const int EnhancementJobsThumbnailLimit = 48;
+    private const int EnhancementJobsThumbnailViewportLimit = 12;
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private const int EnhancementJobsPageSize = 100;
     private const string UnsupportedEnhancementOperation = "unsupported";
@@ -43,7 +43,11 @@ public partial class MainWindow
     private readonly Dictionary<string, BitmapSource> _enhancementWorkspaceThumbnailCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _enhancementWorkspaceHighlightedJobIds = new(StringComparer.Ordinal);
     private DispatcherTimer _enhancementWorkspacePollTimer = null!;
+    private DispatcherTimer _enhancementWorkspaceThumbnailViewportTimer = null!;
     private CancellationTokenSource? _enhancementWorkspaceThumbnailCts;
+    private bool _enhancementWorkspaceThumbnailViewportLoadPending;
+    private int _enhancementWorkspaceLastThumbnailBatchSize;
+    private int _enhancementWorkspaceThumbnailScrollCancellationCount;
     private bool _enhancementWorkspaceRefreshPending;
     private bool _enhancementWorkspaceHealthPollPending;
     private long _enhancementWorkspaceRefreshGeneration;
@@ -930,7 +934,9 @@ public partial class MainWindow
 
     private bool CanRetryAllTerminalEnhancementJobs(string status)
         => _enhancementWorkspaceJobs.Any(job =>
-            job.Status == status && job.CanRetry && job.CanDismiss);
+            job.Status == status
+            && job.CanRerunWithCurrentSettings
+            && job.CanDismiss);
 
     private bool CanClearAllTerminalEnhancementJobs(string status)
         => _enhancementWorkspaceJobs.Any(job =>
@@ -943,6 +949,14 @@ public partial class MainWindow
             EnhancementJobsClearQueuedButton.IsEnabled =
                 !_enhancementWorkspaceMutationPending
                 && CanCancelAllQueuedEnhancementJobs();
+        }
+
+        if (EnhancementJobsQueuedBulkPanel is not null)
+        {
+            EnhancementJobsQueuedBulkPanel.Visibility =
+                _enhancementWorkspaceFilter == "queued"
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
         }
 
         if (EnhancementJobsUpdateQueuedPromptsButton is not null)
@@ -1004,6 +1018,13 @@ public partial class MainWindow
             Interval = TimeSpan.FromSeconds(1),
         };
         _enhancementWorkspacePollTimer.Tick += EnhancementWorkspacePollTimer_Tick;
+        _enhancementWorkspaceThumbnailViewportTimer = new DispatcherTimer(
+            DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(140),
+        };
+        _enhancementWorkspaceThumbnailViewportTimer.Tick +=
+            EnhancementWorkspaceThumbnailViewportTimer_Tick;
     }
 
     private async void OpenEnhancementJobs_Click(object sender, RoutedEventArgs e)
@@ -1026,14 +1047,13 @@ public partial class MainWindow
             StopGalleryAutoScroll();
             SearchHistoryPopup.IsOpen = false;
             _enhancementWorkspaceFocusBeforeDialog = focusToRestore ?? Keyboard.FocusedElement;
-            _enhancementWorkspaceFilter = initialFilter is "queued" or "running" or "failed" or "canceled" or "completed" or "video"
+            _enhancementWorkspaceFilter = initialFilter is "queued" or "failed" or "canceled" or "completed" or "video"
                 ? initialFilter
                 : "all";
             if (!restoreReturnViewport)
                 _enhancementWorkspacePageIndex = 0;
             EnhancementJobsAllFilter.IsChecked = _enhancementWorkspaceFilter == "all";
             EnhancementJobsQueuedFilter.IsChecked = _enhancementWorkspaceFilter == "queued";
-            EnhancementJobsRunningFilter.IsChecked = _enhancementWorkspaceFilter == "running";
             EnhancementJobsFailedFilter.IsChecked = _enhancementWorkspaceFilter == "failed";
             EnhancementJobsCanceledFilter.IsChecked = _enhancementWorkspaceFilter == "canceled";
             EnhancementJobsCompletedFilter.IsChecked = _enhancementWorkspaceFilter == "completed";
@@ -1093,7 +1113,9 @@ public partial class MainWindow
 
         _enhancementWorkspaceGeneration++;
         _enhancementWorkspacePollTimer.Stop();
-        Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
+        _enhancementWorkspaceThumbnailViewportTimer.Stop();
+        _enhancementWorkspaceThumbnailViewportLoadPending = false;
+        Volatile.Read(ref _enhancementWorkspaceThumbnailCts)?.Cancel();
         EnhancementJobsDialog.Visibility = Visibility.Collapsed;
         if (restoreFocus)
             RestoreOverlayFocus(_enhancementWorkspaceFocusBeforeDialog);
@@ -1409,7 +1431,7 @@ public partial class MainWindow
             ReconcileEnhancementWorkspaceJobs(jobs);
             if (!isPoll || activeMembershipChanged)
                 QueueEnhancedStateRefreshIfChanged();
-            bool highlightedBatchAlreadyTerminal = _enhancementWorkspaceFilter is "queued" or "running"
+            bool highlightedBatchAlreadyTerminal = _enhancementWorkspaceFilter == "queued"
                 && jobs.Any(static job => job.IsHighlighted)
                 && !jobs.Any(static job => job.IsHighlighted && job.IsActive);
             if (highlightedBatchAlreadyTerminal)
@@ -1418,15 +1440,18 @@ public partial class MainWindow
                 _enhancementWorkspacePageIndex = 0;
                 EnhancementJobsAllFilter.IsChecked = true;
                 EnhancementJobsQueuedFilter.IsChecked = false;
-                EnhancementJobsRunningFilter.IsChecked = false;
             }
             ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
             int activeCount = jobs.Count(static job => job.IsActive);
             int runningCount = jobs.Count(static job => job.Status == "running");
             int queuedCount = jobs.Count(static job => job.Status == "queued");
             int completedCount = jobs.Count(static job => job.Status is "succeeded" or "deleted");
+            int failedCount = jobs.Count(static job => job.Status == "failed");
+            int canceledCount = jobs.Count(static job => job.Status == "canceled");
             RefreshEnhancementQueueBulkControls();
-            EnhancementJobsHeaderSummary.Text = $"{jobs.Count:N0} total  ·  {activeCount:N0} active  ·  {completedCount:N0} completed";
+            EnhancementJobsHeaderSummary.Text =
+                $"{jobs.Count:N0} total  ·  {activeCount:N0} active  ·  {completedCount:N0} completed"
+                + $"  ·  {failedCount:N0} failed  ·  {canceledCount:N0} canceled";
             EnhancementJobsStatusText.Text = activeCount > 0
                 ? $"共有GPUキューを実行順で表示中です。実行中 {runningCount:N0}、待ち {queuedCount:N0}。"
                 : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
@@ -2259,6 +2284,38 @@ public partial class MainWindow
         }
     }
 
+    private void EnhancementJobsScrollTop_Click(object sender, RoutedEventArgs e)
+        => FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.ScrollToTop();
+
+    private void EnhancementJobsList_ScrollChanged(
+        object sender,
+        ScrollChangedEventArgs e)
+    {
+        if (EnhancementJobsDialog.Visibility != Visibility.Visible
+            || Math.Abs(e.VerticalChange) < 0.01)
+        {
+            return;
+        }
+
+        CancellationTokenSource? activeLoad =
+            Volatile.Read(ref _enhancementWorkspaceThumbnailCts);
+        if (activeLoad is not null)
+        {
+            activeLoad.Cancel();
+            _enhancementWorkspaceThumbnailScrollCancellationCount++;
+        }
+        _enhancementWorkspaceThumbnailViewportTimer.Stop();
+        _enhancementWorkspaceThumbnailViewportTimer.Start();
+    }
+
+    private void EnhancementWorkspaceThumbnailViewportTimer_Tick(
+        object? sender,
+        EventArgs e)
+    {
+        _enhancementWorkspaceThumbnailViewportTimer.Stop();
+        QueueEnhancementWorkspaceVisibleThumbnailLoad();
+    }
+
     private void EnhancementJobsPreviousPage_Click(object sender, RoutedEventArgs e)
     {
         if (_enhancementWorkspacePageIndex <= 0)
@@ -2288,8 +2345,7 @@ public partial class MainWindow
             .Where(job => _enhancementWorkspaceFilter switch
             {
                 "active" => job.IsActive,
-                "queued" => job.Status == "queued",
-                "running" => job.Status == "running",
+                "queued" => job.IsActive,
                 "failed" => job.Status == "failed",
                 "canceled" => job.Status == "canceled",
                 "completed" => job.Status is "succeeded" or "deleted",
@@ -2323,7 +2379,7 @@ public partial class MainWindow
             ? "0 / 0"
             : $"{page.FirstIndex + 1:N0}–{page.FirstIndex + page.ItemCount:N0} / {filtered.Length:N0}";
         if (loadThumbnails)
-            BeginEnhancementWorkspaceThumbnailLoad(visible);
+            QueueEnhancementWorkspaceVisibleThumbnailLoad();
     }
 
     private static EnhancementJobsPageWindow CalculateEnhancementJobsPageWindow(
@@ -2348,18 +2404,53 @@ public partial class MainWindow
             itemCount);
     }
 
-    private void BeginEnhancementWorkspaceThumbnailLoad(IReadOnlyList<EnhancementWorkspaceJobView> jobs)
+    private void QueueEnhancementWorkspaceVisibleThumbnailLoad()
+    {
+        if (EnhancementJobsDialog.Visibility != Visibility.Visible
+            || _enhancementWorkspaceThumbnailViewportLoadPending)
+        {
+            return;
+        }
+
+        _enhancementWorkspaceThumbnailViewportLoadPending = true;
+        _ = Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                _enhancementWorkspaceThumbnailViewportLoadPending = false;
+                if (EnhancementJobsDialog.Visibility != Visibility.Visible)
+                    return;
+
+                EnhancementWorkspaceJobView[] realized =
+                    FindVisualDescendants<ListBoxItem>(EnhancementJobsList)
+                        .Select(static container =>
+                            container.DataContext as EnhancementWorkspaceJobView)
+                        .Where(static job => job is not null)
+                        .Select(static job => job!)
+                        .DistinctBy(static job => job.Id, StringComparer.Ordinal)
+                        .Where(static job => job.Thumbnail is null)
+                        .Take(EnhancementJobsThumbnailViewportLimit)
+                        .ToArray();
+                BeginEnhancementWorkspaceThumbnailLoad(realized);
+            }),
+            DispatcherPriority.Loaded);
+    }
+
+    private void BeginEnhancementWorkspaceThumbnailLoad(
+        IReadOnlyList<EnhancementWorkspaceJobView> jobs)
     {
         EnhancementWorkspaceJobView[] missing = jobs
             .Where(static job => job.Thumbnail is null)
-            .Take(EnhancementJobsThumbnailLimit)
+            .Take(EnhancementJobsThumbnailViewportLimit)
             .ToArray();
+        _enhancementWorkspaceLastThumbnailBatchSize = missing.Length;
         if (EnhancementJobsDialog.Visibility != Visibility.Visible || missing.Length == 0)
             return;
 
-        Interlocked.Exchange(ref _enhancementWorkspaceThumbnailCts, null)?.Cancel();
         var cts = new CancellationTokenSource();
-        _enhancementWorkspaceThumbnailCts = cts;
+        CancellationTokenSource? previous = Interlocked.Exchange(
+            ref _enhancementWorkspaceThumbnailCts,
+            cts);
+        previous?.Cancel();
         long generation = _enhancementWorkspaceGeneration;
         _ = LoadEnhancementWorkspaceThumbnailsAsync(missing, generation, cts);
     }
@@ -2374,9 +2465,14 @@ public partial class MainWindow
             foreach (EnhancementWorkspaceJobView job in jobs)
             {
                 cts.Token.ThrowIfCancellationRequested();
-                if (!TryResolveEnhancementWorkspaceInput(
+                string? canonicalSource = await Task.Run(
+                    () => TryResolveEnhancementWorkspaceInput(
                         job,
-                        out string canonicalSource))
+                        out string resolvedSource)
+                            ? resolvedSource
+                            : null,
+                    cts.Token);
+                if (canonicalSource is null)
                 {
                     continue;
                 }
@@ -2402,11 +2498,11 @@ public partial class MainWindow
         }
         finally
         {
-            if (ReferenceEquals(_enhancementWorkspaceThumbnailCts, cts))
-            {
-                _enhancementWorkspaceThumbnailCts = null;
-                cts.Dispose();
-            }
+            Interlocked.CompareExchange(
+                ref _enhancementWorkspaceThumbnailCts,
+                null,
+                cts);
+            cts.Dispose();
         }
     }
 
@@ -2961,9 +3057,13 @@ public partial class MainWindow
     private async Task<int> RetryAllTerminalEnhancementJobsAsync(
         string terminalStatus)
     {
+        int terminalCount = _enhancementWorkspaceJobs.Count(job =>
+            job.Status == terminalStatus);
         EnhancementWorkspaceJobView[] terminalJobs = _enhancementWorkspaceJobs
             .Where(job =>
-                job.Status == terminalStatus && job.CanRetry && job.CanDismiss)
+                job.Status == terminalStatus
+                && job.CanRerunWithCurrentSettings
+                && job.CanDismiss)
             .OrderBy(static job => job.CreatedAt)
             .ThenBy(static job => job.ApiOrdinal)
             .ToArray();
@@ -2973,9 +3073,17 @@ public partial class MainWindow
         {
             return 0;
         }
+        if (!TryResolvePhotorealSeed(out int? photorealSeed, out string seedError))
+        {
+            EnhancementJobsStatusText.Text = seedError;
+            return 0;
+        }
 
         bool removeOriginalAfterSuccess = terminalStatus == "failed";
         string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル";
+        int protectedCount = terminalCount - terminalJobs.Length;
+        ModalPhotorealRequestSettings currentSettings =
+            CurrentModalPhotorealRequestSettings();
         var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
         RefreshEnhancementQueueBulkControls();
@@ -2986,16 +3094,53 @@ public partial class MainWindow
         string? failure = null;
         int? failureStatus = null;
         EnhancementJobsStatusText.Text =
-            $"{terminalLabel} {terminalJobs.Length:N0}件の再試行を予約しています…";
+            $"{terminalLabel}した実写化 {terminalJobs.Length:N0}件を現在設定で再試行しています…";
         await Dispatcher.Yield(DispatcherPriority.Render);
         try
         {
-            DurableEnhancementBatchResponse batch =
-                await TrySendDurableEnhancementRetryBatchAsync(terminalJobs);
             for (int index = 0; index < terminalJobs.Length; index++)
             {
                 EnhancementWorkspaceJobView job = terminalJobs[index];
-                EnhancementApiResponse retry = batch.Responses[index];
+                if (generation != _enhancementWorkspaceGeneration
+                    || EnhancementJobsDialog.Visibility != Visibility.Visible)
+                {
+                    return retriedCount;
+                }
+                if (!TryResolveEnhancementWorkspaceInput(
+                        job,
+                        out string sourceIdentity))
+                {
+                    failedCount++;
+                    failure ??= "SOURCE_IDENTITY_INVALID";
+                    continue;
+                }
+
+                ModalPhotorealRequestSettings settings;
+                try
+                {
+                    settings = await ResolvePhotorealRequestSettingsAsync(
+                        currentSettings,
+                        sourceIdentity);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    failedCount++;
+                    failure ??= ex.Message;
+                    continue;
+                }
+
+                EnhancementApiResponse retry = await SendEnhancementEnqueueAsync(
+                    CreatePhotorealRequestBody(
+                        sourceIdentity,
+                        settings,
+                        photorealSeed,
+                        "last"),
+                    "last",
+                    healthValidator: CreateImageEnhancementHealthValidator(
+                        "photoreal",
+                        enqueueNext: false,
+                        requiresPhotorealSeedControl: photorealSeed.HasValue),
+                    recoverySourceIdentity: sourceIdentity);
                 if (retry.SavedForDelivery)
                 {
                     pendingCount++;
@@ -3027,7 +3172,7 @@ public partial class MainWindow
                     && index + 1 < terminalJobs.Length)
                 {
                     EnhancementJobsStatusText.Text =
-                        $"再試行を確認中… {index + 1:N0}/{terminalJobs.Length:N0}件";
+                        $"現在設定で再試行中… {index + 1:N0}/{terminalJobs.Length:N0}件";
                     await Dispatcher.Yield(DispatcherPriority.Background);
                 }
             }
@@ -3043,9 +3188,12 @@ public partial class MainWindow
                     ? $"確認済み{retriedCount:N0}件の元失敗履歴を消しました。"
                     : $"確認済み{retriedCount:N0}件を新しいジョブとして追加しました。";
                 EnhancementJobsStatusText.Text =
-                    $"{terminalLabel}の再試行を{acceptedCount:N0}件受付。{completedDetail}"
+                    $"{terminalLabel}した実写化を現在設定で{acceptedCount:N0}件受付。{completedDetail}"
                     + (pendingCount > 0
                         ? $" {pendingCount:N0}件は登録確認中なので元履歴を残しています。"
+                        : "")
+                    + (protectedCount > 0
+                        ? $" 現在設定で再試行できない保護対象 {protectedCount:N0}件は残しました。"
                         : "")
                     + (failedCount > 0
                         ? $" {failedCount:N0}件は失敗しました（{failure}）。"
@@ -3054,7 +3202,7 @@ public partial class MainWindow
             string? operationError = failure
                 ?? (pendingCount > 0 ? "RETRY_SAVED_FOR_DELIVERY" : null);
             AibosOperationLog.Write(
-                $"{terminalStatus}_jobs_retry_all",
+                $"{terminalStatus}_photoreal_jobs_retry_all_current",
                 operationError is null ? "completed" : "partial",
                 operationWatch.ElapsedMilliseconds,
                 failureStatus ?? (pendingCount > 0 ? 202 : null),
@@ -4335,6 +4483,8 @@ public partial class MainWindow
                 _enhancementWorkspacePageIndex).PageCount,
             EnhancementJobsPageSize,
             _enhancementWorkspaceJobs.Count(static job => job.IsActive),
+            _enhancementWorkspaceJobs.Count(static job => job.Status == "failed"),
+            _enhancementWorkspaceJobs.Count(static job => job.Status == "canceled"),
             visible.Count(static job => job.IsHighlighted),
             _enhancementWorkspacePollTimer.IsEnabled,
             _enhancementWorkspaceGetCount,
@@ -4434,6 +4584,38 @@ public partial class MainWindow
 
     public bool CanceledBulkPanelVisibleForSmoke =>
         EnhancementJobsCanceledBulkPanel.Visibility == Visibility.Visible;
+
+    public bool QueuedBulkPanelVisibleForSmoke =>
+        EnhancementJobsQueuedBulkPanel.Visibility == Visibility.Visible;
+
+    public string[] EnhancementJobsFilterOrderForSmoke =>
+        EnhancementJobsAllFilter.Parent is Panel panel
+            ? panel.Children
+                .OfType<FrameworkElement>()
+                .Where(static item => item.Tag is string)
+                .Select(static item => (string)item.Tag)
+                .ToArray()
+            : [];
+
+    public int EnhancementJobsRealizedContainerCountForSmoke =>
+        FindVisualDescendants<ListBoxItem>(EnhancementJobsList).Count();
+
+    public int EnhancementJobsLastThumbnailBatchSizeForSmoke =>
+        _enhancementWorkspaceLastThumbnailBatchSize;
+
+    public int EnhancementJobsThumbnailViewportLimitForSmoke =>
+        EnhancementJobsThumbnailViewportLimit;
+
+    public int EnhancementJobsThumbnailScrollCancellationCountForSmoke =>
+        _enhancementWorkspaceThumbnailScrollCancellationCount;
+
+    public async Task<int> QueueVisibleEnhancementJobThumbnailsForSmokeAsync()
+    {
+        QueueEnhancementWorkspaceVisibleThumbnailLoad();
+        await Dispatcher.Yield(DispatcherPriority.Loaded);
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        return _enhancementWorkspaceLastThumbnailBatchSize;
+    }
 
     public async Task<(bool Ok, bool SavedForDelivery, int StatusCode, string Error)>
         RetryMiniMaxH3JobForSmokeAsync(string id)
@@ -4607,10 +4789,20 @@ public partial class MainWindow
     public bool EnhancementJobsHeaderChromeContractForSmoke
         => WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsCloseButton)
             && WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsRefreshButton)
+            && WindowChrome.GetIsHitTestVisibleInChrome(
+                EnhancementJobsScrollTopButton)
             && string.Equals(
                 AutomationProperties.GetName(EnhancementJobsVideoFilter),
                 "Show video generation jobs",
                 StringComparison.Ordinal);
+
+    public bool ActivateEnhancementJobsScrollTopForSmoke()
+    {
+        EnhancementJobsScrollTopButton.RaiseEvent(
+            new RoutedEventArgs(Button.ClickEvent));
+        EnhancementJobsList.UpdateLayout();
+        return EnhancementJobsVerticalOffsetForSmoke < 0.5;
+    }
 
     public bool ActivateEnhancementJobsCloseForSmoke()
     {
@@ -5314,6 +5506,8 @@ public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     int PageCount,
     int PageSize,
     int Active,
+    int Failed,
+    int Canceled,
     int Highlighted,
     bool Polling,
     int GetRequests,
