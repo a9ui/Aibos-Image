@@ -99,7 +99,12 @@ public partial class MainWindow
         };
         _enhancementNotificationDismissTimer.Tick += (_, _) =>
         {
-            if (WindowState == WindowState.Minimized || !IsActive)
+            if (WindowState == WindowState.Minimized)
+            {
+                _enhancementNotificationDismissTimer.Stop();
+                return;
+            }
+            if (!IsActive)
             {
                 _enhancementNotificationDismissTimer.Stop();
                 _enhancementNotificationDismissTimer.Start();
@@ -264,6 +269,11 @@ public partial class MainWindow
                 : "結果はJobsまたは元画像のバージョン切替から確認できます。",
             failed);
 
+        _ = ShowAiProcessingTrayNotification(
+            presentation.Title,
+            presentation.Message,
+            presentation.Failed);
+
         if (EnhancementResultToast.Visibility != Visibility.Visible)
         {
             ShowEnhancementNotification(presentation);
@@ -289,7 +299,8 @@ public partial class MainWindow
         EnhancementResultToast.Visibility = Visibility.Visible;
         _enhancementNotificationShownCount++;
         _enhancementNotificationDismissTimer.Stop();
-        _enhancementNotificationDismissTimer.Start();
+        if (WindowState != WindowState.Minimized)
+            _enhancementNotificationDismissTimer.Start();
     }
 
     private void HideCurrentEnhancementNotification(bool showNext)

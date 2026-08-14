@@ -1,6 +1,6 @@
 param(
     [string]$Configuration = "Release",
-    [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-enhancement-notifications.json"),
+    [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-ai-processing-minimize.json"),
     [string]$DotnetPath = "dotnet",
     [switch]$NoRestore,
     [ValidateRange(10, 120)]
@@ -12,7 +12,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
-$runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-notification-verifier-' + [guid]::NewGuid().ToString('N'))))
+$runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-ai-minimize-verifier-' + [guid]::NewGuid().ToString('N'))))
 $buildRoot = Join-Path $runRoot 'build'
 $fullOutputPath = [IO.Path]::GetFullPath($OutputPath)
 $process = $null
@@ -39,7 +39,7 @@ try {
     if ($NoRestore) { $buildArguments += '--no-restore' }
     & $DotnetPath @buildArguments
     if ($LASTEXITCODE -ne 0) {
-        throw "WPF notification verifier build failed with exit code $LASTEXITCODE."
+        throw "WPF AI-processing minimize verifier build failed with exit code $LASTEXITCODE."
     }
 
     $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
@@ -52,7 +52,7 @@ try {
 
     $process = Start-Process `
         -FilePath $DotnetPath `
-        -ArgumentList @(('"{0}"' -f $dll), '--enhancement-notification-smoke', ('"{0}"' -f $fullOutputPath)) `
+        -ArgumentList @(('"{0}"' -f $dll), '--ai-processing-minimize-smoke', ('"{0}"' -f $fullOutputPath)) `
         -WindowStyle Hidden `
         -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds($OverallTimeoutSeconds)
@@ -62,7 +62,7 @@ try {
     }
     if (-not $process.HasExited) {
         Stop-Process -Id $process.Id -Force
-        throw "WPF notification verifier exceeded $OverallTimeoutSeconds seconds."
+        throw "WPF AI-processing minimize verifier exceeded $OverallTimeoutSeconds seconds."
     }
     if ($process.ExitCode -ne 0) {
         $detail = if (Test-Path -LiteralPath $fullOutputPath -PathType Leaf) {
@@ -70,14 +70,14 @@ try {
         } else {
             'No result JSON was produced.'
         }
-        throw "WPF notification smoke failed with exit code $($process.ExitCode). $detail"
+        throw "WPF AI-processing minimize smoke failed with exit code $($process.ExitCode). $detail"
     }
     if (-not (Test-Path -LiteralPath $fullOutputPath -PathType Leaf)) {
-        throw "WPF notification smoke did not produce a result JSON."
+        throw "WPF AI-processing minimize smoke did not produce a result JSON."
     }
     $result = Get-Content -LiteralPath $fullOutputPath -Raw | ConvertFrom-Json
     if ($result.success -ne $true) {
-        throw "WPF notification smoke reported failure: $($result | ConvertTo-Json -Depth 8 -Compress)"
+        throw "WPF AI-processing minimize smoke reported failure: $($result | ConvertTo-Json -Depth 8 -Compress)"
     }
     $result
 }

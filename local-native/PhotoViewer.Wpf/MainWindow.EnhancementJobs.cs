@@ -1254,6 +1254,11 @@ public partial class MainWindow
 
     private async void EnhancementWorkspacePollTimer_Tick(object? sender, EventArgs e)
     {
+        if (_aiProcessingMinimizedMode)
+        {
+            _enhancementWorkspacePollTimer.Stop();
+            return;
+        }
         if (EnhancementJobsDialog.Visibility != Visibility.Visible
             || _enhancementWorkspaceMutationPending
             || _enhancementWorkspaceHealthPollPending
@@ -1266,7 +1271,8 @@ public partial class MainWindow
 
     private async Task PollEnhancementJobsWorkspaceAsync(long generation)
     {
-        if (_enhancementWorkspaceHealthPollPending
+        if (_aiProcessingMinimizedMode
+            || _enhancementWorkspaceHealthPollPending
             || _enhancementWorkspaceMutationPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
         {
@@ -1460,7 +1466,8 @@ public partial class MainWindow
                 : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
             if (highlightedBatchAlreadyTerminal)
                 EnhancementJobsStatusText.Text += " The new batch already finished, so all highlighted jobs are shown.";
-            if (activeCount > 0 || forceHealthPollAfterInventory)
+            if (!_aiProcessingMinimizedMode
+                && (activeCount > 0 || forceHealthPollAfterInventory))
                 _enhancementWorkspacePollTimer.Start();
             else
                 _enhancementWorkspacePollTimer.Stop();
@@ -2314,7 +2321,8 @@ public partial class MainWindow
         object sender,
         ScrollChangedEventArgs e)
     {
-        if (EnhancementJobsDialog.Visibility != Visibility.Visible
+        if (_aiProcessingMinimizedMode
+            || EnhancementJobsDialog.Visibility != Visibility.Visible
             || Math.Abs(e.VerticalChange) < 0.01)
         {
             return;
@@ -2429,7 +2437,8 @@ public partial class MainWindow
 
     private void QueueEnhancementWorkspaceVisibleThumbnailLoad()
     {
-        if (EnhancementJobsDialog.Visibility != Visibility.Visible
+        if (_aiProcessingMinimizedMode
+            || EnhancementJobsDialog.Visibility != Visibility.Visible
             || _enhancementWorkspaceThumbnailViewportLoadPending)
         {
             return;
@@ -2440,7 +2449,8 @@ public partial class MainWindow
             new Action(() =>
             {
                 _enhancementWorkspaceThumbnailViewportLoadPending = false;
-                if (EnhancementJobsDialog.Visibility != Visibility.Visible)
+                if (_aiProcessingMinimizedMode
+                    || EnhancementJobsDialog.Visibility != Visibility.Visible)
                     return;
 
                 EnhancementWorkspaceJobView[] realized =
@@ -2466,7 +2476,9 @@ public partial class MainWindow
             .Take(EnhancementJobsThumbnailViewportLimit)
             .ToArray();
         _enhancementWorkspaceLastThumbnailBatchSize = missing.Length;
-        if (EnhancementJobsDialog.Visibility != Visibility.Visible || missing.Length == 0)
+        if (_aiProcessingMinimizedMode
+            || EnhancementJobsDialog.Visibility != Visibility.Visible
+            || missing.Length == 0)
             return;
 
         var cts = new CancellationTokenSource();
@@ -4982,6 +4994,7 @@ public partial class MainWindow
         finally
         {
             if (resumePolling
+                && !_aiProcessingMinimizedMode
                 && EnhancementJobsDialog.Visibility == Visibility.Visible
                 && _enhancementWorkspaceJobs.Any(static job => job.IsActive))
             {
