@@ -69,6 +69,7 @@ public partial class MainWindow
     private bool _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
     private bool _enhancementWorkspacePhotorealEnqueueNextSupported;
     private bool _enhancementWorkspaceTerminalHistoryBatchDismissSupported;
+    private Func<string, string, bool>? _confirmEnhancementJobsBulkActionForSmoke;
     private bool _returnToEnhancementJobsAfterModalClose;
     private Tile? _enhancementJobsTemporaryVisibleTile;
     private string? _enhancementJobsTrustedModalSourcePath;
@@ -3104,6 +3105,14 @@ public partial class MainWindow
         bool removeOriginalAfterSuccess = terminalStatus == "failed";
         string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル";
         int protectedCount = terminalCount - terminalJobs.Length;
+        if (!ConfirmEnhancementJobsBulkAction(
+                terminalStatus,
+                retry: true,
+                terminalJobs.Length,
+                protectedCount))
+        {
+            return 0;
+        }
         ModalPhotorealRequestSettings currentSettings =
             CurrentModalPhotorealRequestSettings();
         var operationWatch = Stopwatch.StartNew();
@@ -3287,6 +3296,14 @@ public partial class MainWindow
         {
             return 0;
         }
+        if (!ConfirmEnhancementJobsBulkAction(
+                terminalStatus,
+                retry: false,
+                dismissibleIds.Length,
+                protectedCount))
+        {
+            return 0;
+        }
 
         string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル";
         var operationWatch = Stopwatch.StartNew();
@@ -3427,6 +3444,33 @@ public partial class MainWindow
             return false;
         }
         return true;
+    }
+
+    private bool ConfirmEnhancementJobsBulkAction(
+        string terminalStatus,
+        bool retry,
+        int actionCount,
+        int protectedCount)
+    {
+        string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル済み";
+        string actionLabel = retry ? "全部リトライ" : "全部消す";
+        string detail = retry
+            ? "現在の実写化設定で新しい待機ジョブを追加します。元画像と出力ファイルは変更しません。"
+            : "対象の履歴だけを消します。元画像と出力ファイルは削除しません。";
+        string message =
+            $"{terminalLabel}の対象 {actionCount:N0}件を{actionLabel}しますか？\n\n{detail}"
+            + (protectedCount > 0
+                ? $"\n\nfuture・malformed・read-only等の保護対象 {protectedCount:N0}件は残します。"
+                : "");
+        string title = $"{terminalLabel}を{actionLabel}";
+        return _confirmEnhancementJobsBulkActionForSmoke?.Invoke(title, message)
+            ?? MessageBox.Show(
+                this,
+                message,
+                title,
+                MessageBoxButton.YesNo,
+                retry ? MessageBoxImage.Question : MessageBoxImage.Warning,
+                MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     private async void RerunPhotorealJob_Click(object sender, RoutedEventArgs e)
@@ -4457,6 +4501,10 @@ public partial class MainWindow
         OpenEnhancementJobs_Click(this, new RoutedEventArgs());
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
     }
+
+    public void ConfigureEnhancementJobsBulkConfirmationForSmoke(
+        Func<string, string, bool>? confirmation)
+        => _confirmEnhancementJobsBulkActionForSmoke = confirmation;
 
     public List<string> EnhancementWorkspaceCatalogPathsForSmoke
         => _allTiles.Where(static tile => tile.IsRealFile).Select(static tile => tile.Path).ToList();
