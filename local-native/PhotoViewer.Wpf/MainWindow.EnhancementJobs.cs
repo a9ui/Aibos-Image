@@ -5339,7 +5339,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             ? $"{I2iTargetDisplayLabel}: {I2iInstructionSummary}"
             : $"{I2iTargetDisplayLabel}: verified public instruction is unavailable.";
     private string ProgressPercentText =>
-        $"{Progress.ToString("00.0", CultureInfo.InvariantCulture)}%";
+        $"{Progress.ToString("0", CultureInfo.InvariantCulture)}%";
     public string StatusLabel => CancelRequested && Status == "running"
         ? $"中止処理中  ·  Running {ProgressPercentText}"
         : Status switch

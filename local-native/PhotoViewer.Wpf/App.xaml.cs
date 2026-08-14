@@ -20053,11 +20053,13 @@ public partial class App : Application
                         FirstIndex: 200,
                         ItemCount: 5,
                     };
-                bool progressUsesOneDecimal =
+                bool progressUsesWholePercent =
                     initial.VisibleStatusLabels.Any(static label =>
-                        label.Contains("Running 42.0%", StringComparison.Ordinal))
+                        label.Contains("Running 42%", StringComparison.Ordinal))
                     && initial.VisibleStatusLabels.Any(static label =>
-                        label.Contains("Queued 00.0%", StringComparison.Ordinal));
+                        label.Contains("Queued 0%", StringComparison.Ordinal))
+                    && initial.VisibleStatusLabels.All(static label =>
+                        !label.Contains(".0%", StringComparison.Ordinal));
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -21080,7 +21082,7 @@ public partial class App : Application
                     && thumbnailViewportLoadBounded
                     && jobsScrollTopControl
                     && jobsFilterLayoutContract
-                    && progressUsesOneDecimal
+                    && progressUsesWholePercent
                     && mixedRetryCapabilityPartition
                     && initial.Polling
                     && passiveOpen
@@ -21230,7 +21232,7 @@ public partial class App : Application
                     terminalHistoryBatchDismissContract,
                     failedBulkConfirmationContract,
                     canceledBulkConfirmationContract,
-                    progressUsesOneDecimal,
+                    progressUsesWholePercent,
                     mixedRetryCapabilityPartition,
                     legacyHealth,
                     futureHealth,
