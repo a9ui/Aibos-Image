@@ -1305,14 +1305,18 @@ public partial class MainWindow
             string queuePlacement = "last",
             CancellationToken token = default,
             Action? onFirstPublish = null,
-            Func<bool>? shouldStopBeforeFirstPublish = null)
+            Func<bool>? shouldStopBeforeFirstPublish = null,
+            Func<JsonElement, string?>? healthValidator = null,
+            bool requireExactHealthValidation = false)
         => await TrySendDurableEnhancementBatchCoreAsync(
             bodies.Select(static body =>
                 new DurableEnhancementBatchItem(body, null)).ToArray(),
             queuePlacement,
             token,
             onFirstPublish,
-            shouldStopBeforeFirstPublish);
+            shouldStopBeforeFirstPublish,
+            healthValidator,
+            requireExactHealthValidation);
 
     private async Task<DurableEnhancementBatchResponse>
         TrySendDurableEnhancementRetryBatchAsync(
@@ -1508,7 +1512,11 @@ public partial class MainWindow
         int nudgeCount = 0;
         if (EnhancementEnqueueProbePolicy.AllowsImmediateNudge(probe.Mode))
         {
-            foreach ((int globalIndex, EnhancementEnqueueInboxItem item) in publishedItems)
+            IReadOnlyList<(int GlobalIndex, EnhancementEnqueueInboxItem Item)> nudgeItems =
+                _usingDefaultModalEnhancementSender && publishedItems.Count > 0
+                    ? publishedItems.Take(1).ToArray()
+                    : publishedItems;
+            foreach ((int globalIndex, EnhancementEnqueueInboxItem item) in nudgeItems)
             {
                 int remaining = RemainingEnhancementEnqueueActionMilliseconds(probe);
                 if (remaining <= 0 || token.IsCancellationRequested)
@@ -1528,7 +1536,24 @@ public partial class MainWindow
                         : item.BodyJson,
                     idempotencyKey: item.RequestId,
                     timeoutMilliseconds: remaining);
-                responses[globalIndex] = NormalizeDurableEnqueueResponse(nudge, item);
+                if (_usingDefaultModalEnhancementSender)
+                {
+                    // One wake drains the published inbox envelope. Repeating
+                    // the same API wake once per item makes large batches wait
+                    // on redundant loopback round trips without adding
+                    // durability or ordering guarantees.
+                    foreach ((int publishedIndex, EnhancementEnqueueInboxItem publishedItem)
+                        in publishedItems)
+                    {
+                        responses[publishedIndex] = NormalizeDurableEnqueueResponse(
+                            nudge,
+                            publishedItem);
+                    }
+                }
+                else
+                {
+                    responses[globalIndex] = NormalizeDurableEnqueueResponse(nudge, item);
+                }
             }
             if (publishedItems.Any(entry =>
                     responses[entry.GlobalIndex].SavedForDelivery))
