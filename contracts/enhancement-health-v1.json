@@ -134,8 +134,16 @@
       },
       "capabilities": {
         "queuedPhotorealPromptUpdate": true,
+        "queuedPhotorealSettingsUpdateV1": true,
         "photorealPromptControlsV2": true,
-        "atomicImageEnqueueNext": true
+        "atomicImageEnqueueNext": true,
+        "videoH3StepsV1": {
+          "contractId": "PV-ENHANCE-VIDEO-H3-STEPS-001",
+          "protocol": "aibos.enhancement-video-h3-steps/v1",
+          "defaultSteps": 20,
+          "minimumSteps": 1,
+          "maximumSteps": 40
+        }
       },
       "comfyUi": {
         "endpoint": "http://127.0.0.1:8190",

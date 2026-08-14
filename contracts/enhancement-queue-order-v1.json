@@ -43,6 +43,33 @@
     "afterClaim": "return conflict without changing the running job",
     "wakesWorker": false
   },
+  "queuedPhotorealSettingsUpdateV1": {
+    "route": "POST /api/enhance/jobs/:id/prompts",
+    "body": {
+      "prompt": "string up to 2000 characters",
+      "negativePrompt": "string up to 2000 characters",
+      "loraEnabled": "boolean",
+      "strength": "number from 0.2 to 0.8",
+      "steps": "integer from 4 to 12",
+      "cfgScale": "number from 1 to 2",
+      "maxDimension": "one of 512, 640, 768, 1024, or 1280",
+      "seed": "integer from 0 to 2147483647, or null to request a new server-owned random seed"
+    },
+    "appliesTo": "queued photoreal jobs using comfyui-flux2-photoreal only",
+    "updates": "preset.denoise and the exact current prompt, negativePrompt, LoRA, steps, CFG, work resolution, and seed options; then presetHash and updatedAt",
+    "perSourcePrompt": "the WPF resolves enabled PNG metadata prompt mappings separately for each source before sending the body",
+    "preserves": [
+      "job id",
+      "status",
+      "queueOrder",
+      "source identity",
+      "unknown additive preset fields"
+    ],
+    "sharesClaimLock": true,
+    "afterClaim": "return conflict without changing the running job",
+    "wakesWorker": false,
+    "legacyReader": "a WPF reader must require capabilities.queuedPhotorealSettingsUpdateV1 before sending the extended body"
+  },
   "atomicImageEnqueueNext": {
     "route": "POST /api/enhance/jobs",
     "field": "queuePlacement",

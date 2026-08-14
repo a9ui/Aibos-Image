@@ -215,7 +215,7 @@ public partial class App
                 && requestRoot.TryGetProperty("video", out JsonElement video)
                 && HasExactNames(video, "requested")
                 && video.TryGetProperty("requested", out JsonElement requested)
-                && HasExactNames(requested, "profileId", "prompt")
+                && HasExactNames(requested, "profileId", "prompt", "steps")
                 && ExactString(
                     requested,
                     "profileId",
@@ -223,7 +223,10 @@ public partial class App
                 && ExactString(
                     requested,
                     "prompt",
-                    "A gentle head turn in dawn light.");
+                    "A gentle head turn in dawn light.")
+                && requested.TryGetProperty("steps", out JsonElement requestSteps)
+                && requestSteps.TryGetInt32(out int requestStepsValue)
+                && requestStepsValue == 20;
             using JsonDocument longRequest = JsonDocument.Parse(
                 window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
                     "two connected phases",
@@ -233,6 +236,18 @@ public partial class App
                     .GetProperty("requested")
                     .GetProperty("profileId")
                     .GetString() == "minimax-h3-hq-10s-v1";
+            window.SelectMiniMaxH3StepsForSmoke(40);
+            using JsonDocument highStepsRequest = JsonDocument.Parse(
+                window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
+                    "more sampling",
+                    durationSeconds: 5));
+            bool highStepsRequestExact = highStepsRequest.RootElement
+                    .GetProperty("video")
+                    .GetProperty("requested")
+                    .GetProperty("steps")
+                    .GetInt32() == 40
+                && window.MiniMaxH3StepsForSmoke == 40;
+            window.SelectMiniMaxH3StepsForSmoke(20);
 
             string readyHealthJson = CreateVideoV2HealthJson(
                 writerEnabled: true,
@@ -296,6 +311,11 @@ public partial class App
                     "\"frameCount\":362",
                     "\"frameCount\":361",
                     StringComparison.Ordinal));
+            using JsonDocument malformedStepsHealth = JsonDocument.Parse(
+                readyHealthJson.Replace(
+                    "\"maximumSteps\":40",
+                    "\"maximumSteps\":400",
+                    StringComparison.Ordinal));
             bool readyParsed = PhotoViewer.Wpf.MainWindow
                 .TryParseMiniMaxH3VideoCapabilityForSmoke(
                     readyHealth.RootElement,
@@ -347,6 +367,12 @@ public partial class App
             bool malformedProfilesRejected = !PhotoViewer.Wpf.MainWindow
                 .TryParseMiniMaxH3VideoProfilesCapabilityForSmoke(
                     malformedProfilesHealth.RootElement);
+            bool stepsParsed = PhotoViewer.Wpf.MainWindow
+                .TryParseMiniMaxH3VideoStepsCapabilityForSmoke(
+                    readyHealth.RootElement);
+            bool malformedStepsRejected = !PhotoViewer.Wpf.MainWindow
+                .TryParseMiniMaxH3VideoStepsCapabilityForSmoke(
+                    malformedStepsHealth.RootElement);
             bool healthExact = readyParsed
                 && ready
                 && readyReason is null
@@ -369,7 +395,9 @@ public partial class App
                 && duplicateCapabilitiesRejected
                 && duplicateVideoV2Rejected
                 && profilesParsed
-                && malformedProfilesRejected;
+                && malformedProfilesRejected
+                && stepsParsed
+                && malformedStepsRejected;
 
             window.SetMiniMaxH3CapabilityForSmoke(
                 checkedHealth: true,
@@ -613,6 +641,7 @@ public partial class App
                 && h3ReservationStatusExact
                 && requestExact
                 && longRequestExact
+                && highStepsRequestExact
                 && healthExact
                 && invalidSealReasonVisible
                 && h3ReadySafe
@@ -642,12 +671,15 @@ public partial class App
                 readyReservationStatus,
                 requestExact,
                 longRequestExact,
+                highStepsRequestExact,
                 healthExact,
                 invalidSealReasonVisible,
                 duplicateCapabilitiesRejected,
                 duplicateVideoV2Rejected,
                 profilesParsed,
                 malformedProfilesRejected,
+                stepsParsed,
+                malformedStepsRejected,
                 h3ReadySafe,
                 h3ReadyRunnable,
                 h3ReadySurfaceIssues,
@@ -788,6 +820,14 @@ public partial class App
                             frameCount = 362,
                         },
                     },
+                },
+                videoH3StepsV1 = new
+                {
+                    contractId = "PV-ENHANCE-VIDEO-H3-STEPS-001",
+                    protocol = "aibos.enhancement-video-h3-steps/v1",
+                    defaultSteps = 20,
+                    minimumSteps = 1,
+                    maximumSteps = 40,
                 },
             },
         });

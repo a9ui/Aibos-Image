@@ -69,6 +69,7 @@ public partial class MainWindow
     private double _enhancementJobsReturnVerticalOffset;
     private string? _enhancementJobsReturnJobId;
     private double _enhancementJobsReturnAnchorViewportTop = double.NaN;
+    private bool _enhancementJobsReturnViewportPending;
 
     private static string ReadEnhancementOperation(JsonElement job)
     {
@@ -1621,7 +1622,7 @@ public partial class MainWindow
             if (capabilitiesElement.ValueKind != JsonValueKind.Object)
                 return false;
             if (capabilitiesElement.TryGetProperty(
-                    "queuedPhotorealPromptUpdate",
+                    "queuedPhotorealSettingsUpdateV1",
                     out JsonElement promptUpdateElement))
             {
                 if (promptUpdateElement.ValueKind is
@@ -2588,6 +2589,11 @@ public partial class MainWindow
         }
 
         ModalPhotorealRequestSettings settings;
+        if (!TryResolvePhotorealSeed(out int? seed, out string seedError))
+        {
+            EnhancementJobsStatusText.Text = seedError;
+            return;
+        }
         try
         {
             settings = await ResolvePhotorealRequestSettingsAsync(
@@ -2603,13 +2609,25 @@ public partial class MainWindow
             job,
             HttpMethod.Post,
             $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/prompts",
-            "待機中の実写化ジョブを現在のPositive／Negativeへ更新しました。数値設定・LoRA・待ち順は変更していません。",
-            new
-            {
-                prompt = settings.Prompt,
-                negativePrompt = settings.NegativePrompt,
-            });
+            "待機中の実写化ジョブを現在設定へ更新しました。個別Prompt変換と待ち順は維持しています。",
+            CreateQueuedPhotorealSettingsUpdateBody(settings, seed));
     }
+
+    private static Dictionary<string, object?>
+        CreateQueuedPhotorealSettingsUpdateBody(
+            ModalPhotorealRequestSettings settings,
+            int? seed)
+        => new(StringComparer.Ordinal)
+        {
+            ["prompt"] = settings.Prompt,
+            ["negativePrompt"] = settings.NegativePrompt,
+            ["loraEnabled"] = settings.LoraEnabled,
+            ["strength"] = settings.Strength,
+            ["steps"] = settings.Steps,
+            ["cfgScale"] = settings.CfgScale,
+            ["maxDimension"] = settings.MaxDimension,
+            ["seed"] = seed,
+        };
 
     private async void UpdateAllQueuedPhotorealPrompts_Click(
         object sender,
@@ -2628,6 +2646,11 @@ public partial class MainWindow
                 .ToArray();
         ModalPhotorealRequestSettings currentSettings =
             CurrentModalPhotorealRequestSettings();
+        if (!TryResolvePhotorealSeed(out int? seed, out string seedError))
+        {
+            EnhancementJobsStatusText.Text = seedError;
+            return;
+        }
         long generation = _enhancementWorkspaceGeneration;
         int updatedCount = 0;
         int skippedCount = 0;
@@ -2637,7 +2660,7 @@ public partial class MainWindow
         RefreshEnhancementQueueBulkControls();
         RefreshEnhancementQueuePauseControl();
         EnhancementJobsStatusText.Text =
-            $"待機中の実写化 {queuedPhotorealJobs.Length:N0}件を現在Promptへ更新しています…";
+            $"待機中の実写化 {queuedPhotorealJobs.Length:N0}件を現在設定へ更新しています…";
         try
         {
             foreach (EnhancementWorkspaceJobView job in queuedPhotorealJobs)
@@ -2674,11 +2697,7 @@ public partial class MainWindow
                 EnhancementApiResponse response = await SendEnhancementApiAsync(
                     HttpMethod.Post,
                     $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/prompts",
-                    new
-                    {
-                        prompt = settings.Prompt,
-                        negativePrompt = settings.NegativePrompt,
-                    });
+                    CreateQueuedPhotorealSettingsUpdateBody(settings, seed));
                 if (response.Ok)
                 {
                     updatedCount++;
@@ -2698,7 +2717,7 @@ public partial class MainWindow
 
             await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
             EnhancementJobsStatusText.Text = skippedCount == 0
-                ? $"待機中の実写化 {updatedCount:N0}件を現在のPositive・Negativeへ更新しました。数値設定・LoRA・待ち順は維持しています。"
+                ? $"待機中の実写化 {updatedCount:N0}件を現在のPrompt・LoRA・強さ・CFG・品質・解像度・Seedへ更新しました。元画像ごとの個別Prompt変換と待ち順は維持しています。"
                 : $"{updatedCount:N0}件を更新、{skippedCount:N0}件をスキップしました。{firstError}";
         }
         finally
@@ -2772,25 +2791,32 @@ public partial class MainWindow
         RefreshEnhancementQueueBulkControls();
         long generation = _enhancementWorkspaceGeneration;
         int retriedCount = 0;
+        int pendingCount = 0;
+        int failedCount = 0;
         string? failure = null;
         int? failureStatus = null;
+        EnhancementJobsStatusText.Text =
+            $"失敗 {failed.Length:N0}件の再試行を予約しています…";
+        await Dispatcher.Yield(DispatcherPriority.Render);
         try
         {
-            foreach (EnhancementWorkspaceJobView job in failed)
+            DurableEnhancementBatchResponse batch =
+                await TrySendDurableEnhancementRetryBatchAsync(failed);
+            for (int index = 0; index < failed.Length; index++)
             {
-                EnhancementApiResponse retry =
-                    await SendEnhancementWorkspaceRetryAsync(job);
+                EnhancementWorkspaceJobView job = failed[index];
+                EnhancementApiResponse retry = batch.Responses[index];
                 if (retry.SavedForDelivery)
                 {
-                    failure = "RETRY_SAVED_FOR_DELIVERY";
-                    failureStatus = retry.StatusCode;
-                    break;
+                    pendingCount++;
+                    continue;
                 }
                 if (!retry.Ok)
                 {
-                    failure = EnhancementApiErrorCode(retry);
-                    failureStatus = retry.StatusCode;
-                    break;
+                    failedCount++;
+                    failure ??= EnhancementApiErrorCode(retry);
+                    failureStatus ??= retry.StatusCode;
+                    continue;
                 }
 
                 EnhancementApiResponse remove = await SendEnhancementApiAsync(
@@ -2798,11 +2824,18 @@ public partial class MainWindow
                     $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}");
                 if (!remove.Ok)
                 {
-                    failure = EnhancementApiErrorCode(remove);
-                    failureStatus = remove.StatusCode;
-                    break;
+                    failedCount++;
+                    failure ??= EnhancementApiErrorCode(remove);
+                    failureStatus ??= remove.StatusCode;
+                    continue;
                 }
                 retriedCount++;
+                if ((index + 1) % 25 == 0 && index + 1 < failed.Length)
+                {
+                    EnhancementJobsStatusText.Text =
+                        $"再試行を確認中… {index + 1:N0}/{failed.Length:N0}件";
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                }
             }
 
             if (generation == _enhancementWorkspaceGeneration
@@ -2811,17 +2844,27 @@ public partial class MainWindow
                 await RefreshEnhancementJobsWorkspaceAsync(
                     generation,
                     isPoll: false);
-                EnhancementJobsStatusText.Text = failure is null
-                    ? $"失敗 {retriedCount:N0}件を元設定で再試行し、元の失敗履歴を消しました。"
-                    : $"{retriedCount:N0}件を再試行しました。残りは停止しました（{failure}）。";
+                int acceptedCount = retriedCount + pendingCount;
+                EnhancementJobsStatusText.Text = pendingCount == 0
+                    && failedCount == 0
+                        ? $"失敗 {retriedCount:N0}件を元設定で再試行し、元の失敗履歴を消しました。"
+                        : $"再試行を{acceptedCount:N0}件受付。確認済み{retriedCount:N0}件の元失敗を消しました。"
+                            + (pendingCount > 0
+                                ? $" {pendingCount:N0}件は登録確認中なので元失敗を残しています。"
+                                : "")
+                            + (failedCount > 0
+                                ? $" {failedCount:N0}件は失敗しました（{failure}）。"
+                                : "");
             }
+            string? operationError = failure
+                ?? (pendingCount > 0 ? "RETRY_SAVED_FOR_DELIVERY" : null);
             AibosOperationLog.Write(
                 "failed_jobs_retry_all",
-                failure is null ? "completed" : "partial",
+                operationError is null ? "completed" : "partial",
                 operationWatch.ElapsedMilliseconds,
-                failureStatus,
-                failure,
-                itemCount: retriedCount);
+                failureStatus ?? (pendingCount > 0 ? 202 : null),
+                operationError,
+                itemCount: retriedCount + pendingCount);
             return retriedCount;
         }
         finally
@@ -3486,14 +3529,26 @@ public partial class MainWindow
         _returnToEnhancementJobsAfterModalClose = false;
         RestoreEnhancementJobsModalSelection();
         string filter = _enhancementWorkspaceFilter;
+        _enhancementJobsReturnViewportPending = true;
         _ = Dispatcher.BeginInvoke(
             new Action(async () =>
             {
-                if (IsLoaded && IsVisible && EnhancementJobsDialog.Visibility != Visibility.Visible)
-                    await OpenEnhancementJobsWorkspaceAsync(
-                        filter,
-                        focusToRestore: OpenEnhancementJobsButton,
-                        restoreReturnViewport: true);
+                try
+                {
+                    if (IsLoaded
+                        && IsVisible
+                        && EnhancementJobsDialog.Visibility != Visibility.Visible)
+                    {
+                        await OpenEnhancementJobsWorkspaceAsync(
+                            filter,
+                            focusToRestore: OpenEnhancementJobsButton,
+                            restoreReturnViewport: true);
+                    }
+                }
+                finally
+                {
+                    _enhancementJobsReturnViewportPending = false;
+                }
             }),
             DispatcherPriority.Background);
     }
@@ -4234,7 +4289,8 @@ public partial class MainWindow
         for (int attempt = 0; attempt < 400; attempt++)
         {
             if (EnhancementJobsDialog.Visibility == Visibility.Visible
-                && !_enhancementWorkspaceRefreshPending)
+                && !_enhancementWorkspaceRefreshPending
+                && !_enhancementJobsReturnViewportPending)
             {
                 return;
             }

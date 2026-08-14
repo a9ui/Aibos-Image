@@ -157,10 +157,7 @@ internal static partial class AibosOperationLog
         {
             string expectedRoot = Path.TrimEndingDirectorySeparator(
                 Path.GetFullPath(localAppDataRoot));
-            FileAttributes rootAttributes = File.GetAttributes(expectedRoot);
             if (!Path.IsPathFullyQualified(expectedRoot)
-                || !rootAttributes.HasFlag(FileAttributes.Directory)
-                || rootAttributes.HasFlag(FileAttributes.ReparsePoint)
                 || !WindowsPathIdentity.TryResolveExistingDirectory(
                     expectedRoot,
                     out string canonicalRoot)

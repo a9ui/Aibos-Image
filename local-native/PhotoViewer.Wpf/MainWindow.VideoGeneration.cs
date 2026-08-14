@@ -27,6 +27,10 @@ public partial class MainWindow
         "PV-ENHANCE-VIDEO-H3-PROFILES-001";
     private const string MiniMaxH3VideoProfilesProtocol =
         "aibos.enhancement-video-h3-profiles/v1";
+    private const string MiniMaxH3VideoStepsContractId =
+        "PV-ENHANCE-VIDEO-H3-STEPS-001";
+    private const string MiniMaxH3VideoStepsProtocol =
+        "aibos.enhancement-video-h3-steps/v1";
     private const string MiniMaxH3VideoPresetId = "minimax-h3-i2v-preview-v1";
     private const string MiniMaxH3VideoBackendId = "minimax-h3-local-v1";
     private const string MiniMaxH3VideoWorkflowRevision =
@@ -42,6 +46,8 @@ public partial class MainWindow
     private const int MiniMaxH3VideoFrameCount = 124;
     private const int MiniMaxH3VideoPlaybackFps = 24;
     private const int MiniMaxH3VideoSteps = 20;
+    private const int MiniMaxH3VideoMinimumSteps = 1;
+    private const int MiniMaxH3VideoMaximumSteps = 40;
     private const int MiniMaxH3VideoDefaultNominalDurationSeconds = 5;
     private const string MiniMaxH3VideoDefaultProfileId =
         "minimax-h3-hq-5s-v1";
@@ -85,6 +91,8 @@ public partial class MainWindow
         MiniMaxH3VideoDefaultNominalDurationSeconds;
     private int _videoPlaybackFps = DefaultVideoPlaybackFps;
     private int _videoMaximumPixelArea = DefaultVideoMaximumPixelArea;
+    private int _videoSteps = MiniMaxH3VideoSteps;
+    private bool _videoStepsInputValid = true;
     private string _videoModelId = DefaultVideoModelId;
     private string _videoQualityId = DefaultVideoPresetId;
     private string _videoPrompt = "";
@@ -163,6 +171,7 @@ public partial class MainWindow
         int DurationSeconds,
         int PlaybackFps,
         int MaximumPixelArea,
+        int Steps,
         string Prompt);
 
     private VideoGenerationRequestSettings CurrentVideoGenerationRequestSettings()
@@ -179,6 +188,7 @@ public partial class MainWindow
             _videoDurationSeconds,
             _videoPlaybackFps,
             _videoMaximumPixelArea,
+            _videoSteps,
             _videoPrompt.Trim());
 
     private bool TryResolveVideoSeed(out int? seed, out string error)
@@ -425,7 +435,7 @@ public partial class MainWindow
         => modelId switch
         {
             HunyuanVideoModelId => "HunyuanVideo 1.5 — 実写・人物向け／実験",
-            MiniMaxH3VideoModelId => "MiniMax H3 — 高画質・5〜15秒・音声あり",
+            MiniMaxH3VideoModelId => "MiniMax H3 — 5秒・10秒・音声あり",
             _ => "Wan2.2 TI2V 5B — アニメ・汎用",
         };
 
@@ -435,7 +445,7 @@ public partial class MainWindow
             HunyuanVideoModelId =>
                 "実写・人物の顔や手を重視する候補。12GBの隔離ランタイム実測前なので、現在は選択内容の確認だけできます。",
             MiniMaxH3VideoModelId =>
-                "RTX 4070 SUPER 12GBで実測済みのMiniMax H3 5秒・10秒プロファイル。元画像比率・32px単位・最大414,720px・24fps・20 step・H.264 / yuv420p・AAC音声あり。"
+                $"RTX 4070 SUPER 12GBで実測済みのMiniMax H3 5秒・10秒プロファイル。元画像比率・32px単位・最大414,720px・24fps・{_videoSteps} STEP・H.264 / yuv420p・AAC音声あり。"
                 + " 10秒はRAMを大きく使うため、他の重い作業を閉じて実行してください。"
                 + MiniMaxH3ReadinessSuffix(),
             _ =>
@@ -491,6 +501,8 @@ public partial class MainWindow
                 "MiniMax H3のloopback backend設定を検証できません。",
             "MINIMAX_H3_PROFILES_UNAVAILABLE" =>
                 "Aibos ImageのローカルAIサービスが実測済みの5・10・12・15秒プロファイルを公開していません。再起動してください。",
+            "MINIMAX_H3_STEPS_UNAVAILABLE" =>
+                $"Aibos ImageのローカルAIサービスがMiniMax H3の{MiniMaxH3VideoMinimumSteps}〜{MiniMaxH3VideoMaximumSteps} STEPを公開していません。再起動してください。",
             "HEALTH_UNAVAILABLE" =>
                 "Aibos ImageのローカルAIサービスからMiniMax H3の準備状態を取得できません。",
             _ =>
@@ -515,9 +527,13 @@ public partial class MainWindow
         {
             bool profilesReady =
                 TryParseMiniMaxH3VideoProfilesCapability(payload);
-            _miniMaxH3Ready = capability.Ready && profilesReady;
+            bool stepsReady =
+                TryParseMiniMaxH3VideoStepsCapability(payload);
+            _miniMaxH3Ready = capability.Ready && profilesReady && stepsReady;
             _miniMaxH3ReasonCode = !profilesReady
                 ? "MINIMAX_H3_PROFILES_UNAVAILABLE"
+                : !stepsReady
+                    ? "MINIMAX_H3_STEPS_UNAVAILABLE"
                 : capability.Ready
                     ? null
                     : capability.ReasonCode;
@@ -926,8 +942,13 @@ public partial class MainWindow
                 15 => "約18分35秒以上",
                 _ => "約3分50秒〜約9分7秒",
             };
-            return $"完了目安: {measured}"
-                + "（RTX 4070 SUPER 12GB実測・最大414,720px・24fps・20 step・キュー待ちを除く。長尺は他の重い作業を閉じて実行）";
+            string stepRatio = (_videoSteps / (double)MiniMaxH3VideoSteps)
+                .ToString("0.##", CultureInfo.InvariantCulture);
+            string stepsNote = _videoSteps == MiniMaxH3VideoSteps
+                ? measured
+                : $"{measured}を基準に約{stepRatio}倍（STEP比の概算）";
+            return $"完了目安: {stepsNote}"
+                + $"（RTX 4070 SUPER 12GBの20 STEP実測を基準・最大414,720px・24fps・{_videoSteps} STEP・キュー待ちを除く。長尺は他の重い作業を閉じて実行）";
         }
         if (!IsVideoModelRunnable(_videoModelId))
         {
@@ -962,7 +983,7 @@ public partial class MainWindow
                 _videoDurationSeconds).ToString(
                     "F3",
                     CultureInfo.InvariantCulture);
-            return $"元画像比率出力: 32px単位・最大414,720px・{frameCount}f・24fps・{exactDuration}秒 · 20 step"
+            return $"元画像比率出力: 32px単位・最大414,720px・{frameCount}f・24fps・{exactDuration}秒 · {_videoSteps} STEP"
                 + " · H.264 / yuv420p · AAC音声あり";
         }
         int generationFrameCount =
@@ -984,7 +1005,7 @@ public partial class MainWindow
                     ? "空欄はH3のよく動く既定Dynamic。"
                     : "")
                 + "H3 previewは元画像比率に近い32px単位のcanvasを最大414,720px内で選び、ぼかした両サイドを足しません。"
-                + "長さは実測済み5/10/12/15秒から選び、FPSとstepは24fps・20 step固定です。"
+                + $"長さは実測済み5/10/12/15秒から選び、FPSは24fps固定、STEPは{_videoSteps}です。"
                 + "既存の単一GPUキューで1 jobずつ実行します。";
         }
         string promptHint = includeDefaultPrompt
@@ -1003,19 +1024,7 @@ public partial class MainWindow
         => OpenVideoGenerationBoard(requestedSource: null);
 
     private void OpenModalVideoSettings_Click(object sender, RoutedEventArgs e)
-    {
-        OpenAppSettings(focusShortcuts: false);
-        SelectAppSettingsSection("video", bringIntoView: false);
-        _ = Dispatcher.BeginInvoke(
-            new Action(() =>
-            {
-                if (AppSettingsDialog.Visibility != Visibility.Visible)
-                    return;
-                SelectAppSettingsSection("video", bringIntoView: true);
-                SettingsVideoNav?.Focus();
-            }),
-            DispatcherPriority.Input);
-    }
+        => OpenVideoGenerationBoard(requestedSource: null);
 
     private void GalleryContextVideo_Click(object sender, RoutedEventArgs e)
     {
@@ -1161,7 +1170,59 @@ public partial class MainWindow
         VideoH3PromptRewriteContextChanged();
         SyncVideoGenerationSettingsControls();
         SetVideoGenerationSettingsStatus(
-            $"MiniMax H3の高画質{MiniMaxH3ExactDurationSeconds(_videoDurationSeconds):F3}秒プロファイルを保存しました。次に追加する動画ジョブから使われます。");
+            $"MiniMax H3の{MiniMaxH3ExactDurationSeconds(_videoDurationSeconds):F3}秒プロファイルを保存しました。次に追加する動画ジョブから使われます。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void MiniMaxH3StepsSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncingVideoGenerationSettings)
+            return;
+
+        _videoSteps = Math.Clamp(
+            (int)Math.Round(e.NewValue, MidpointRounding.AwayFromZero),
+            MiniMaxH3VideoMinimumSteps,
+            MiniMaxH3VideoMaximumSteps);
+        _videoStepsInputValid = true;
+        MarkVideoStyleAsCustom();
+        SyncVideoGenerationSettingsControls();
+        SetVideoGenerationSettingsStatus(
+            $"MiniMax H3の{_videoSteps} STEPを保存しました。次に追加する動画ジョブから使われます。");
+        if (!_initializing)
+            SaveState();
+    }
+
+    private void MiniMaxH3StepsTextBox_TextChanged(
+        object sender,
+        TextChangedEventArgs e)
+    {
+        if (_syncingVideoGenerationSettings || sender is not TextBox source)
+            return;
+
+        if (!int.TryParse(
+                source.Text,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int steps)
+            || steps < MiniMaxH3VideoMinimumSteps
+            || steps > MiniMaxH3VideoMaximumSteps)
+        {
+            _videoStepsInputValid = false;
+            SetVideoGenerationSettingsStatus(
+                $"STEPは{MiniMaxH3VideoMinimumSteps}〜{MiniMaxH3VideoMaximumSteps}の整数で入力してください。ジョブは追加しません。");
+            UpdateVideoGenerationActionControls();
+            return;
+        }
+
+        _videoSteps = steps;
+        _videoStepsInputValid = true;
+        MarkVideoStyleAsCustom();
+        SyncVideoGenerationSettingsControls();
+        SetVideoGenerationSettingsStatus(
+            $"MiniMax H3の{_videoSteps} STEPを保存しました。次に追加する動画ジョブから使われます。");
         if (!_initializing)
             SaveState();
     }
@@ -1322,7 +1383,7 @@ public partial class MainWindow
         VideoH3PromptRewriteContextChanged();
         RefreshVideoStyleControls(updateNameFields: true);
         SetVideoGenerationSettingsStatus(
-            "MiniMax H3の高画質5.167秒・24fps・元画像比率・20 step既定へ戻しました。準備確認後に実行できます。");
+            "MiniMax H3の5.167秒・24fps・元画像比率・20 STEP既定へ戻しました。準備確認後に実行できます。");
         if (!_initializing)
             SaveState();
     }
@@ -1465,7 +1526,8 @@ public partial class MainWindow
             style.MaximumPixelArea,
             style.Prompt,
             style.ModelId,
-            style.QualityId);
+            style.QualityId,
+            style.Steps);
         VideoH3PromptRewriteContextChanged();
         RefreshVideoStyleControls(updateNameFields: true);
         SetVideoStyleStatus($"「{style.Name}」を反映しました。次に追加する動画ジョブから使われます。");
@@ -1594,6 +1656,11 @@ public partial class MainWindow
                 candidate.DurationSeconds),
             PlaybackFps = candidate.PlaybackFps,
             MaximumPixelArea = candidate.MaximumPixelArea,
+            Steps = candidate.Steps is int steps
+                && steps >= MiniMaxH3VideoMinimumSteps
+                && steps <= MiniMaxH3VideoMaximumSteps
+                    ? steps
+                    : MiniMaxH3VideoSteps,
             Prompt = prompt,
         };
     }
@@ -1611,6 +1678,7 @@ public partial class MainWindow
             DurationSeconds = _videoDurationSeconds,
             PlaybackFps = _videoPlaybackFps,
             MaximumPixelArea = _videoMaximumPixelArea,
+            Steps = _videoSteps,
             Prompt = _videoPrompt,
         };
 
@@ -1626,6 +1694,7 @@ public partial class MainWindow
             && style.DurationSeconds == _videoDurationSeconds
             && style.PlaybackFps == _videoPlaybackFps
             && style.MaximumPixelArea == _videoMaximumPixelArea
+            && (style.Steps ?? MiniMaxH3VideoSteps) == _videoSteps
             && string.Equals(style.Prompt, _videoPrompt, StringComparison.Ordinal);
 
     private void MarkVideoStyleAsCustom()
@@ -1699,7 +1768,7 @@ public partial class MainWindow
             return;
 
         AppVideoStyleSummaryText.Text = IsMiniMaxH3VideoModel(_videoModelId)
-            ? $"現在: {VideoModelLabel(_videoModelId)} / {MiniMaxH3ExactDurationSeconds(_videoDurationSeconds):F3}秒 / 24fps / 元画像比率・最大414,720px / 20 step / AAC"
+            ? $"現在: {VideoModelLabel(_videoModelId)} / {MiniMaxH3ExactDurationSeconds(_videoDurationSeconds):F3}秒 / 24fps / 元画像比率・最大414,720px / {_videoSteps} STEP / AAC"
             : $"現在: {VideoModelLabel(_videoModelId)} / {VideoQualityLabel(_videoQualityId)} / {_videoDurationSeconds}秒 / 生成{_videoPlaybackFps}fps / {_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}px";
     }
 
@@ -1722,6 +1791,7 @@ public partial class MainWindow
                 DurationSeconds = style.DurationSeconds,
                 PlaybackFps = style.PlaybackFps,
                 MaximumPixelArea = style.MaximumPixelArea,
+                Steps = style.Steps,
                 Prompt = style.Prompt,
             }).ToList();
 
@@ -1731,7 +1801,8 @@ public partial class MainWindow
         int? maximumPixelArea,
         string? prompt,
         string? modelId = null,
-        string? qualityId = null)
+        string? qualityId = null,
+        int? steps = null)
     {
         _videoDurationSeconds = NormalizeSelectableMiniMaxH3DurationSeconds(
             durationSeconds ?? MiniMaxH3VideoDefaultNominalDurationSeconds);
@@ -1743,6 +1814,12 @@ public partial class MainWindow
             && SupportedVideoMaximumPixelAreas.Contains(area)
                 ? area
                 : DefaultVideoMaximumPixelArea;
+        _videoSteps = steps is int restoredSteps
+            && restoredSteps >= MiniMaxH3VideoMinimumSteps
+            && restoredSteps <= MiniMaxH3VideoMaximumSteps
+                ? restoredSteps
+                : MiniMaxH3VideoSteps;
+        _videoStepsInputValid = true;
         // Retain legacy model ids in job readers, not in the new-job surface.
         // Persisted Wan/Hunyuan selections migrate to H3 without deleting the
         // user's prompt or other saved request values.
@@ -1814,6 +1891,11 @@ public partial class MainWindow
             SelectIntegerTag(
                 ModalVideoH3DurationComboBox,
                 NormalizeMiniMaxH3DurationSeconds(_videoDurationSeconds));
+            if (ModalVideoH3StepsSlider is not null)
+                ModalVideoH3StepsSlider.Value = _videoSteps;
+            if (ModalVideoH3StepsTextBox is not null)
+                ModalVideoH3StepsTextBox.Text = _videoSteps.ToString(
+                    CultureInfo.InvariantCulture);
             SelectIntegerTag(ModalVideoFpsComboBox, _videoPlaybackFps);
             SelectIntegerTag(ModalVideoResolutionComboBox, _videoMaximumPixelArea);
             SelectVideoModelId(ModalVideoModelComboBox, _videoModelId);
@@ -1830,6 +1912,11 @@ public partial class MainWindow
                     NormalizeMiniMaxH3DurationSeconds(
                         _videoDurationSeconds));
             }
+            if (AppVideoH3StepsSlider is not null)
+                AppVideoH3StepsSlider.Value = _videoSteps;
+            if (AppVideoH3StepsTextBox is not null)
+                AppVideoH3StepsTextBox.Text = _videoSteps.ToString(
+                    CultureInfo.InvariantCulture);
             if (AppVideoFpsComboBox is not null)
                 SelectIntegerTag(AppVideoFpsComboBox, _videoPlaybackFps);
             if (AppVideoResolutionComboBox is not null)
@@ -1848,7 +1935,7 @@ public partial class MainWindow
             string modelDescription = VideoModelDescription(_videoModelId);
             bool h3Selected = IsMiniMaxH3VideoModel(_videoModelId);
             string qualityLabel = h3Selected
-                ? "元画像比率プレビュー · 20 step"
+                ? $"元画像比率プレビュー · {_videoSteps} STEP"
                 : VideoQualityLabel(_videoQualityId);
             ModalVideoPresetText.Text =
                 $"{VideoModelLabel(_videoModelId)} · {qualityLabel}";
@@ -1869,8 +1956,16 @@ public partial class MainWindow
             if (AppVideoH3ControlsPanel is not null)
                 AppVideoH3ControlsPanel.Visibility = h3ControlsVisibility;
             ModalVideoH3DurationComboBox.IsEnabled = h3Selected;
+            if (ModalVideoH3StepsSlider is not null)
+                ModalVideoH3StepsSlider.IsEnabled = h3Selected;
+            if (ModalVideoH3StepsTextBox is not null)
+                ModalVideoH3StepsTextBox.IsEnabled = h3Selected;
             if (AppVideoH3DurationComboBox is not null)
                 AppVideoH3DurationComboBox.IsEnabled = h3Selected;
+            if (AppVideoH3StepsSlider is not null)
+                AppVideoH3StepsSlider.IsEnabled = h3Selected;
+            if (AppVideoH3StepsTextBox is not null)
+                AppVideoH3StepsTextBox.IsEnabled = h3Selected;
             bool qualityEnabled = string.Equals(
                 _videoModelId,
                 WanVideoModelId,
@@ -1962,6 +2057,7 @@ public partial class MainWindow
             capturedSourceReady
             && modelRegistered
             && seedReady
+            && _videoStepsInputValid
             && !_videoGenerationRequestPending;
         QueueVideoGenerationButton.Content = _videoGenerationRequestPending
             ? "追加中..."
@@ -2152,6 +2248,7 @@ public partial class MainWindow
                 {
                     profileId = settings.ProfileId,
                     prompt = settings.Prompt,
+                    steps = settings.Steps,
                 },
             }
             : new
@@ -2320,6 +2417,7 @@ public partial class MainWindow
             NormalizeMiniMaxH3DurationSeconds(durationSeconds),
             DefaultVideoPlaybackFps,
             DefaultVideoMaximumPixelArea,
+            _videoSteps,
             boundedPrompt.Trim());
         return JsonSerializer.Serialize(
             BuildVideoGenerationRequestBody(
@@ -2328,6 +2426,18 @@ public partial class MainWindow
                 h3Selected: true,
                 seed: null));
     }
+
+    public void SelectMiniMaxH3StepsForSmoke(int steps)
+    {
+        _videoSteps = steps >= MiniMaxH3VideoMinimumSteps
+            && steps <= MiniMaxH3VideoMaximumSteps
+                ? steps
+                : MiniMaxH3VideoSteps;
+        _videoStepsInputValid = true;
+        SyncVideoGenerationSettingsControls();
+    }
+
+    public int MiniMaxH3StepsForSmoke => _videoSteps;
 
     public bool MiniMaxH3SurfaceForSmoke
         => MiniMaxH3SurfaceIssuesForSmoke.Count == 0;
@@ -2410,12 +2520,36 @@ public partial class MainWindow
             {
                 issues.Add("app-h3-duration-profiles");
             }
+            if (ModalVideoH3StepsSlider.Minimum != MiniMaxH3VideoMinimumSteps
+                || ModalVideoH3StepsSlider.Maximum != MiniMaxH3VideoMaximumSteps
+                || ModalVideoH3StepsTextBox.MaxLength != 2)
+            {
+                issues.Add("modal-h3-steps");
+            }
+            if (AppVideoH3StepsSlider.Minimum != MiniMaxH3VideoMinimumSteps
+                || AppVideoH3StepsSlider.Maximum != MiniMaxH3VideoMaximumSteps
+                || AppVideoH3StepsTextBox.MaxLength != 2)
+            {
+                issues.Add("app-h3-steps");
+            }
+            if (!string.Equals(ModalVideoH3FpsFixedText.Text, "24（固定）", StringComparison.Ordinal)
+                || !ModalVideoH3ResolutionFixedText.Text.Contains("414,720px", StringComparison.Ordinal)
+                || !string.Equals(ModalVideoH3SeedFixedText.Text, "自動", StringComparison.Ordinal))
+            {
+                issues.Add("modal-h3-fixed-settings");
+            }
+            if (!string.Equals(AppVideoH3FpsFixedText.Text, "24（固定）", StringComparison.Ordinal)
+                || !AppVideoH3ResolutionFixedText.Text.Contains("414,720px", StringComparison.Ordinal)
+                || !string.Equals(AppVideoH3SeedFixedText.Text, "自動", StringComparison.Ordinal))
+            {
+                issues.Add("app-h3-fixed-settings");
+            }
             if (ModalVideoPromptTextBox.Visibility != Visibility.Visible)
                 issues.Add("modal-prompt");
             if (AppVideoPromptTextBox.Visibility != Visibility.Visible)
                 issues.Add("app-prompt");
             if (!ModalVideoDeliveryText.Text.Contains(
-                    "元画像比率出力: 32px単位・最大414,720px・124f・24fps・5.167秒",
+                    "元画像比率出力: 32px単位・最大414,720px・124f・24fps・5.167秒 · 20 STEP",
                     StringComparison.Ordinal))
             {
                 issues.Add("canvas-policy");

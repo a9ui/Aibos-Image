@@ -496,6 +496,13 @@ public partial class App : Application
             return;
         }
 
+        int galleryOrderContinuitySmokeIdx = Array.IndexOf(e.Args, "--gallery-order-continuity-smoke");
+        if (galleryOrderContinuitySmokeIdx >= 0 && galleryOrderContinuitySmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureGalleryOrderContinuitySmoke(e.Args[galleryOrderContinuitySmokeIdx + 1]);
+            return;
+        }
+
         int keyBindingsSmokeIdx = Array.IndexOf(e.Args, "--key-bindings-smoke");
         if (keyBindingsSmokeIdx >= 0 && keyBindingsSmokeIdx + 1 < e.Args.Length)
         {
@@ -19467,7 +19474,10 @@ public partial class App : Application
                     var capabilities = new Dictionary<string, object?>(
                         StringComparer.Ordinal);
                     if (healthMode != "legacy-prompt-update")
+                    {
                         capabilities["queuedPhotorealPromptUpdate"] = true;
+                        capabilities["queuedPhotorealSettingsUpdateV1"] = true;
+                    }
                     capabilities["photorealPromptControlsV2"] = true;
                     capabilities["atomicImageEnqueueNext"] = true;
                     capabilities["durableEnqueueInboxV1"] = new
@@ -20468,6 +20478,9 @@ public partial class App : Application
                 bool bulkFailedControlsReady =
                     window.RetryAllFailedEnhancementJobsControlForSmoke
                     && window.ClearAllFailedEnhancementJobsControlForSmoke;
+                bool receiptOnlyResponseStaysVisible =
+                    PhotoViewer.Wpf.MainWindow
+                        .ReceiptOnlyDurableResponseIsPendingForSmoke();
                 int bulkFailedRetried =
                     await window.RetryAllFailedEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkFailedRetry =
@@ -20479,6 +20492,7 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("all");
                 bool bulkFailedActionsContract = bulkFailedControlsReady
+                    && receiptOnlyResponseStaysVisible
                     && bulkFailedRetried == 1
                     && !afterBulkFailedRetry.VisibleIds.Contains(
                         "delivery-failed-job",
@@ -20601,11 +20615,17 @@ public partial class App : Application
                         JsonDocument.Parse(queuedPromptUpdateBody);
                     JsonElement body = updateDocument.RootElement;
                     queuedPromptUpdateContract =
-                        body.EnumerateObject().Count() == 2
+                        body.EnumerateObject().Count() == 8
                         && body.GetProperty("prompt").GetString()
                             == "workspace rerun prompt, workspace metadata mapped"
                         && body.GetProperty("negativePrompt").GetString()
-                            == "workspace negative prompt";
+                            == "workspace negative prompt"
+                        && !body.GetProperty("loraEnabled").GetBoolean()
+                        && Math.Abs(body.GetProperty("strength").GetDouble() - 0.45) < 0.001
+                        && body.GetProperty("steps").GetInt32() == 6
+                        && Math.Abs(body.GetProperty("cfgScale").GetDouble() - 1.4) < 0.001
+                        && body.GetProperty("maxDimension").GetInt32() == 1024
+                        && body.GetProperty("seed").ValueKind == JsonValueKind.Null;
                 }
                 bool bulkQueuedPromptUpdateContract =
                     bulkPromptControlReady
@@ -20623,11 +20643,17 @@ public partial class App : Application
                     {
                         using JsonDocument document = JsonDocument.Parse(update.Body);
                         JsonElement body = document.RootElement;
-                        return body.EnumerateObject().Count() == 2
+                        return body.EnumerateObject().Count() == 8
                             && body.GetProperty("prompt").GetString()
                                 == "workspace rerun prompt, workspace metadata mapped"
                             && body.GetProperty("negativePrompt").GetString()
-                                == "workspace negative prompt";
+                                == "workspace negative prompt"
+                            && !body.GetProperty("loraEnabled").GetBoolean()
+                            && Math.Abs(body.GetProperty("strength").GetDouble() - 0.45) < 0.001
+                            && body.GetProperty("steps").GetInt32() == 6
+                            && Math.Abs(body.GetProperty("cfgScale").GetDouble() - 1.4) < 0.001
+                            && body.GetProperty("maxDimension").GetInt32() == 1024
+                            && body.GetProperty("seed").ValueKind == JsonValueKind.Null;
                     });
                 ok = initial.Visible
                     && initial.Total == 16

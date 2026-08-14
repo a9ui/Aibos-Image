@@ -93,12 +93,20 @@
       ],
       "requested": {
         "requiredFields": [
-          "prompt"
+          "prompt",
+          "steps"
         ],
         "allowedFields": [
-          "prompt"
+          "prompt",
+          "steps"
         ],
-        "promptMaximumCharacters": 2000
+        "promptMaximumCharacters": 2000,
+        "steps": {
+          "defaultForLegacyRows": 20,
+          "minimum": 1,
+          "maximum": 40,
+          "capability": "capabilities.videoH3StepsV1"
+        }
       },
       "forbiddenClientControls": [
         "durationSeconds",
@@ -106,7 +114,6 @@
         "frameCount",
         "width",
         "height",
-        "steps",
         "sampler",
         "scheduler",
         "denoise",
@@ -124,7 +131,7 @@
       "maximum": 2147483647,
       "fixedAtEnqueue": true
     },
-    "serverMeaning": "the server resolves source identity and oriented source geometry, selects the bounded source-aspect canvas, fixes the complete H3 profile, revalidates exact readiness, and persists the effective snapshot"
+    "serverMeaning": "the server resolves source identity and oriented source geometry, selects the bounded source-aspect canvas, validates requested.steps as an integer from 1 to 40, revalidates exact readiness, and persists the effective snapshot"
   },
   "promptPolicy": {
     "nonBlank": "requested.prompt is trimmed and copied exactly to effective.positivePrompt",

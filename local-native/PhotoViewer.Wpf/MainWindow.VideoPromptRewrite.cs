@@ -225,7 +225,7 @@ public partial class MainWindow
         RefreshVideoH3PromptRewriteControls(updateStatus: false);
         SetStatusIfCurrent(VideoH3Localized(
             "UiVideoH3StatusWorking",
-            "画像と入力を確認し、H3向け候補を作成しています…"));
+            "CPUでH3向け候補を作成しています。JobsやGPU処理とは別に実行中です…"));
 
         try
         {
@@ -616,7 +616,7 @@ public partial class MainWindow
         {
             SetVideoH3PromptRewriteStatus(VideoH3Localized(
                 "UiVideoH3StatusWorking",
-                "画像と入力を確認し、H3向け候補を作成しています…"));
+                "CPUでH3向け候補を作成しています。JobsやGPU処理とは別に実行中です…"));
         }
         else if (!sourceReady)
         {

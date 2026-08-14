@@ -729,27 +729,28 @@ or stores.
     both the original-snapshot Retry and current-settings actions; none of these
     actions mutates the source row. The latter requires the atomic enqueue-next
     capability and requests `queuePlacement: "next"`.
-  - A waiting `comfyui-flux2-photoreal` row exposes `現在のPromptへ更新`.
-    This explicit action atomically replaces only its resolved Positive and
-    Negative prompts. It preserves job ID, queued status, waiting order, LoRA
-    enabled/strength, steps, CFG, work resolution, and source identity, and
-    does not wake the worker. The update shares the companion's claim lock;
+  - A waiting `comfyui-flux2-photoreal` row exposes `現在設定へ更新`.
+    This explicit action atomically replaces its resolved Positive and Negative
+    prompts, LoRA enabled state, strength, steps, CFG, work resolution, and
+    fixed or newly randomized Seed. It preserves job ID, queued status, waiting
+    order, source identity, and unknown additive preset fields, and does not
+    wake the worker. The update shares the companion's claim lock;
     once claimed/running it fails with conflict and changes nothing. Historical
     `a1111-photoreal` rows never expose this action because that adapter does not
-    consume these saved prompt options. The action also requires the exact
-    `capabilities.queuedPhotorealPromptUpdate` health flag; an older companion
+    consume these saved settings. The action also requires the exact
+    `capabilities.queuedPhotorealSettingsUpdateV1` health flag; an older companion
     without it keeps Jobs readable but does not expose a button that would 404.
     The Jobs header also exposes one bulk variant for all currently waiting,
-    eligible rows. It resolves the current WPF Positive and Negative separately
+    eligible rows. It resolves the current WPF settings and Positive separately
     for each source PNG, then invokes the same per-row replacement contract.
     Resolved Positive means the current nonblank (or empty-state fallback)
     Positive plus outputs from enabled WPF-local Prompt mappings matched
     against that source PNG's `parameters` metadata. Resolved Negative is the
     current WPF Negative; a metadata `Negative prompt` is intentionally not
     inherited.
-    It does not change LoRA, numeric settings, source identity, status, or queue
-    order; ineligible and concurrently claimed rows are skipped or reported
-    without rolling back successful updates to other rows.
+    Source identity, status, and queue order do not change; ineligible and
+    concurrently claimed rows are skipped or reported without rolling back
+    successful updates to other rows.
   - Cancel never deletes the source, a managed output, or failure diagnostics.
     Cancel, Retry, re-run, Open output, and Delete output remain explicit user
     actions.
@@ -1002,10 +1003,12 @@ writer base contract for MiniMax H3. The additive
 `contracts/enhancement-video-h3-profiles-v1.json` contract defines the four
 measured high-quality duration profiles: 124, 243, 294, or 362 native frames
 at 24 fps, delivering 5.167, 10.125, 12.250, or 15.083 seconds. Every profile
-retains the source-aspect canvas capped at 414,720 pixels, 20 steps, H.264,
+retains the source-aspect canvas capped at 414,720 pixels, H.264,
 and the contract-defined AAC audio path. Legacy prompt-only v2 rows remain the
-124-frame profile. New requests pin `requested.profileId`; arbitrary duration,
-frame, FPS, resolution, or step values are rejected. Unknown or inconsistent
+124-frame, 20 STEP profile. New requests pin `requested.profileId`. The additive
+`contracts/enhancement-video-h3-steps-v1.json` contract allows an integer from
+1 through 40 in `requested.steps`; arbitrary duration, frame, FPS, resolution, or invalid STEP
+values are rejected. Unknown or inconsistent
 snapshots remain protected rather than being coerced to the Wan v1 shape.
 
 - MiniMax H3 is the only model exposed by the new-video UI and the persisted
@@ -1015,9 +1018,10 @@ snapshots remain protected rather than being coerced to the Wan v1 shape.
   or saved Style is normalized to H3 while retaining its name and prompt; there
   is no silent fallback from an unavailable H3 writer to Wan.
 
-- The visible H3 control exposes only the measured 5 / 10 second profiles.
-  FPS and steps are fixed at 24 and 20; the UI does not fabricate unmeasured
-  quality or FPS choices. The measured 12 / 15 second profiles remain valid
+- The visible H3 control exposes only the measured 5 / 10 second profiles and
+  a synchronized integer slider/input from 1 through 40 STEP. FPS remains fixed
+  at 24. Changing STEP changes only the scheduler iteration count and is presented without an
+  unmeasured quality guarantee. The measured 12 / 15 second profiles remain valid
   durable-reader and backend contracts for existing jobs, but are not offered
   for new selection. The 10-second option carries an idle-system warning
   because the RTX 4070 SUPER / 32 GiB measurements used most physical RAM.

@@ -69,6 +69,7 @@ public partial class App
             bool ncnnHighScaleSelectionContract = false;
             bool legacyComfyDefaultMigrationContract = false;
             bool photorealShortcutContract = false;
+            bool queueAddedToastContract = false;
             bool sourceUntouched = false;
             bool independentCompanionContract = false;
             bool galleryContextNoModal = false;
@@ -1690,6 +1691,11 @@ public partial class App
                 _ = window.OpenModalForSmoke();
                 photorealShortcutContract = await window.StartModalPhotorealWithShortcutForSmokeAsync();
                 started = photorealShortcutContract;
+                queueAddedToastContract = photorealShortcutContract
+                    && window.DeleteStatusVisibleForSmoke
+                    && window.DeleteStatusForSmoke.Contains(
+                        "Jobsの待機列へ追加しました",
+                        StringComparison.Ordinal);
                 modalPhotorealOperation =
                     window.ModalEnhancementOperationForSmoke == "photoreal";
                 int createRequestsBeforeGalleryContext = requests.Count(static request =>
@@ -2407,6 +2413,7 @@ public partial class App
                     && ncnnHighScaleSelectionContract
                     && legacyComfyDefaultMigrationContract
                     && photorealShortcutContract
+                    && queueAddedToastContract
                     && requestContract
                     && fallbackPromptContract
                     && negativePromptContract
@@ -2493,6 +2500,7 @@ public partial class App
                     ncnnHighScaleSelectionContract,
                     legacyComfyDefaultMigrationContract,
                     photorealShortcutContract,
+                    queueAddedToastContract,
                     requestContract,
                     fallbackPromptContract,
                     negativePromptContract,
