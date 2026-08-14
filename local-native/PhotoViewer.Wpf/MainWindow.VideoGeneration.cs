@@ -83,7 +83,7 @@ public partial class MainWindow
     private static readonly int[] SupportedMiniMaxH3VideoDurationSeconds =
         [5, 10, 12, 15];
     private static readonly int[] SelectableMiniMaxH3VideoDurationSeconds =
-        [5, 10];
+        [5, 10, 12, 15];
     private static readonly int[] SupportedVideoPlaybackFps = [12, 16];
     private static readonly int[] SupportedVideoMaximumPixelAreas = [230_400, 307_200, 409_600];
 
@@ -435,7 +435,7 @@ public partial class MainWindow
         => modelId switch
         {
             HunyuanVideoModelId => "HunyuanVideo 1.5 — 実写・人物向け／実験",
-            MiniMaxH3VideoModelId => "MiniMax H3 — 5秒・10秒・音声あり",
+            MiniMaxH3VideoModelId => "MiniMax H3 — 5・10・12・15秒／音声あり",
             _ => "Wan2.2 TI2V 5B — アニメ・汎用",
         };
 
@@ -445,8 +445,8 @@ public partial class MainWindow
             HunyuanVideoModelId =>
                 "実写・人物の顔や手を重視する候補。12GBの隔離ランタイム実測前なので、現在は選択内容の確認だけできます。",
             MiniMaxH3VideoModelId =>
-                $"RTX 4070 SUPER 12GBで実測済みのMiniMax H3 5秒・10秒プロファイル。元画像比率・32px単位・最大414,720px・24fps・{_videoSteps} STEP・H.264 / yuv420p・AAC音声あり。"
-                + " 10秒はRAMを大きく使うため、他の重い作業を閉じて実行してください。"
+                $"RTX 4070 SUPER 12GBで実測済みのMiniMax H3 5・10・12・15秒プロファイル。元画像比率・32px単位・最大414,720px・24fps・{_videoSteps} STEP・H.264 / yuv420p・AAC音声あり。"
+                + " 10秒以上はRAMを大きく使うため、他の重い作業を閉じて実行してください。"
                 + MiniMaxH3ReadinessSuffix(),
             _ =>
                 "RTX 4070 SUPER 12GBで検証済みのモデル。アニメ画像と汎用画像を、RIFE 4.25で正確な30fpsへ仕上げます。",
@@ -2491,7 +2491,7 @@ public partial class MainWindow
                 issues.Add("modal-wan-tuning");
             if (AppVideoWanControlsPanel.Visibility != Visibility.Collapsed)
                 issues.Add("app-wan-controls");
-            int[] expectedDurations = [5, 10];
+            int[] expectedDurations = [5, 10, 12, 15];
             if (ModalVideoH3ControlsPanel.Visibility != Visibility.Visible
                 || !ModalVideoH3DurationComboBox.Items
                     .OfType<ComboBoxItem>()
@@ -2531,6 +2531,36 @@ public partial class MainWindow
                 || AppVideoH3StepsTextBox.MaxLength != 2)
             {
                 issues.Add("app-h3-steps");
+            }
+            if (!string.Equals(
+                    ModalVideoH3StepsLabel.Text,
+                    "STEP数（生成反復回数）",
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    ModalVideoH3ResolutionLabel.Text,
+                    "動画サイズ",
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    ModalVideoH3ResolutionFixedText.Text,
+                    "自動・最大414,720px",
+                    StringComparison.Ordinal))
+            {
+                issues.Add("modal-h3-size-steps-labels");
+            }
+            if (!string.Equals(
+                    AppVideoH3StepsLabel.Text,
+                    "STEP数（生成反復回数）",
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    AppVideoH3ResolutionLabel.Text,
+                    "動画サイズ",
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    AppVideoH3ResolutionFixedText.Text,
+                    "自動・最大414,720px",
+                    StringComparison.Ordinal))
+            {
+                issues.Add("app-h3-size-steps-labels");
             }
             if (!string.Equals(ModalVideoH3FpsFixedText.Text, "24（固定）", StringComparison.Ordinal)
                 || !ModalVideoH3ResolutionFixedText.Text.Contains("414,720px", StringComparison.Ordinal)
