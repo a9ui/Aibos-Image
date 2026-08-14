@@ -21527,6 +21527,7 @@ public partial class App : Application
                         StringComparison.Ordinal);
 
                 int readinessProbeCount = 0;
+                int readinessJobsRequestCount = 0;
                 bool injectedStarterCalled = false;
                 bool simulateListenerHandoff = false;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
@@ -21599,6 +21600,19 @@ public partial class App : Application
                             && !inner.OuterEnvelopeJson.Contains(
                                 canonicalSourcePath,
                                 StringComparison.Ordinal);
+                        bool healthRequest = authenticatedEnvelope
+                            && string.Equals(
+                                inner!.Method,
+                                "GET",
+                                StringComparison.Ordinal)
+                            && string.Equals(
+                                inner.PathAndQuery,
+                                "/api/enhance/health",
+                                StringComparison.Ordinal)
+                            && inner.BodyJson is null
+                            && !inner.OuterEnvelopeJson.Contains(
+                                canonicalSourcePath,
+                                StringComparison.Ordinal);
                         bool queueRecoveryRequest = authenticatedEnvelope
                             && string.Equals(
                                 inner!.Method,
@@ -21609,14 +21623,37 @@ public partial class App : Application
                                 "/api/enhance/queue/recover",
                                 StringComparison.Ordinal)
                             && inner.BodyJson is null;
-                        companionAuthenticatedRequestHeaders |= jobsRequest;
+                        if (jobsRequest)
+                            readinessJobsRequestCount++;
+                        companionAuthenticatedRequestHeaders |= healthRequest;
                         companionQueueRecoveryAuthenticated |=
                             queueRecoveryRequest;
-                        return jobsRequest
+                        return healthRequest
                             ? win.EnhancementCompanionSecureResponseForSmoke(
                                 request,
                                 (int)HttpStatusCode.OK,
-                                new { jobs = Array.Empty<object>() })
+                                new
+                                {
+                                    version = 1,
+                                    status = "healthy",
+                                    jobs = new
+                                    {
+                                        counts = new
+                                        {
+                                            queued = 0,
+                                            running = 0,
+                                            succeeded = 0,
+                                            failed = 0,
+                                            canceled = 0,
+                                            deleted = 0,
+                                        },
+                                    },
+                                    worker = new
+                                    {
+                                        pumpRunning = false,
+                                        paused = true,
+                                    },
+                                })
                             : queueRecoveryRequest
                                 ? win.EnhancementCompanionSecureResponseForSmoke(
                                     request,
@@ -21637,6 +21674,7 @@ public partial class App : Application
                     && injectedStarterCalled
                     && win.EnhancementCompanionLaunchAttemptCountForSmoke == 1
                     && companionAuthenticatedRequestHeaders
+                    && readinessJobsRequestCount == 0
                     && !companionQueueRecoveryAuthenticated;
                 explicitCompanionAutoStart = await win.EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
                     && injectedStarterCalled
@@ -21702,6 +21740,25 @@ public partial class App : Application
                         {
                             "/api/enhance/health" => new
                             {
+                                version = 1,
+                                status = "healthy",
+                                jobs = new
+                                {
+                                    counts = new
+                                    {
+                                        queued = 0,
+                                        running = 0,
+                                        succeeded = 0,
+                                        failed = 0,
+                                        canceled = 0,
+                                        deleted = 0,
+                                    },
+                                },
+                                worker = new
+                                {
+                                    pumpRunning = false,
+                                    paused = true,
+                                },
                                 capabilities = new
                                 {
                                     durableEnqueueInboxV1 = new

@@ -123,13 +123,16 @@ public partial class MainWindow
         CancellationToken token = default)
     {
         _ = sourceIdentity;
-        const string readinessRoute = "api/enhance/jobs";
+        const string readinessRoute = "api/enhance/health";
         if (!_usingDefaultModalEnhancementSender)
         {
-            return await SendEnhancementApiAsync(
+            EnhancementApiResponse response = await SendEnhancementApiAsync(
                 HttpMethod.Get,
                 readinessRoute,
                 token: token);
+            return IsReadyEnhancementCompanionResponse(response)
+                ? response
+                : InvalidEnhancementCompanionReadiness(response);
         }
         if (!TryGetOrCreateEnhancementCompanionAuthToken(
                 out string authToken,
@@ -143,10 +146,13 @@ public partial class MainWindow
         if (ownership.Verified)
         {
             _enhancementCompanionOwnershipVerified = true;
-            return await SendEnhancementApiAsync(
+            EnhancementApiResponse response = await SendEnhancementApiAsync(
                 HttpMethod.Get,
                 readinessRoute,
                 token: token);
+            return IsReadyEnhancementCompanionResponse(response)
+                ? response
+                : InvalidEnhancementCompanionReadiness(response);
         }
         _enhancementCompanionOwnershipVerified = false;
         if (!ownership.TransportUnavailable)
@@ -171,10 +177,13 @@ public partial class MainWindow
             if (ownership.Verified)
             {
                 _enhancementCompanionOwnershipVerified = true;
-                return await SendEnhancementApiAsync(
+                EnhancementApiResponse response = await SendEnhancementApiAsync(
                     HttpMethod.Get,
                     readinessRoute,
                     token: linkedToken);
+                return IsReadyEnhancementCompanionResponse(response)
+                    ? response
+                    : InvalidEnhancementCompanionReadiness(response);
             }
             if (!ownership.TransportUnavailable)
             {
@@ -2141,8 +2150,29 @@ public partial class MainWindow
         => response.Ok
             && response.Payload is JsonElement payload
             && payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("version", out JsonElement version)
+            && version.ValueKind == JsonValueKind.Number
+            && version.TryGetInt32(out int versionNumber)
+            && versionNumber == 1
+            && payload.TryGetProperty("status", out JsonElement status)
+            && status.ValueKind == JsonValueKind.String
+            && status.GetString() is "healthy" or "working" or "needs-attention"
             && payload.TryGetProperty("jobs", out JsonElement jobs)
-            && jobs.ValueKind == JsonValueKind.Array;
+            && jobs.ValueKind == JsonValueKind.Object
+            && jobs.TryGetProperty("counts", out JsonElement counts)
+            && counts.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("worker", out JsonElement worker)
+            && worker.ValueKind == JsonValueKind.Object;
+
+    private static EnhancementApiResponse InvalidEnhancementCompanionReadiness(
+        EnhancementApiResponse response)
+        => response.Ok
+            ? new EnhancementApiResponse(
+                false,
+                response.StatusCode,
+                response.Payload,
+                "The local AI companion health response was malformed or unsupported.")
+            : response;
 
     private bool TryStartOwnedEnhancementCompanion(out string error)
     {
