@@ -19951,6 +19951,16 @@ public partial class App : Application
                     .Where(static pair => !pair.Key.EndsWith("METADATA_INDEX_DIRECTORY", StringComparison.Ordinal))
                     .ToDictionary(static pair => pair.Key, pair => FileFingerprint(pair.Value), StringComparer.Ordinal);
 
+                int requestsBeforeMixedRetry = requests.Count;
+                bool mixedRetryCapabilityPartition =
+                    await window.MixedRetryCapabilityPartitionForSmokeAsync()
+                    && requests.Skip(requestsBeforeMixedRetry).Contains(
+                        "POST /api/enhance/jobs/capability-accepted-image-job/retry",
+                        StringComparer.Ordinal)
+                    && !requests.Skip(requestsBeforeMixedRetry).Contains(
+                        "POST /api/enhance/jobs/capability-rejected-video-job/retry",
+                        StringComparer.Ordinal);
+
                 int requestsBeforeOpen = requests.Count;
                 await window.OpenEnhancementJobsForSmokeAsync();
                 window.UpdateLayout();
@@ -20855,6 +20865,7 @@ public partial class App : Application
                     && initial.Active == 4
                     && largeHistoryPaging
                     && progressUsesOneDecimal
+                    && mixedRetryCapabilityPartition
                     && initial.Polling
                     && passiveOpen
                     && healthVisible
@@ -20995,6 +21006,7 @@ public partial class App : Application
                     firstLargeHistoryPage,
                     lastLargeHistoryPage,
                     progressUsesOneDecimal,
+                    mixedRetryCapabilityPartition,
                     legacyHealth,
                     futureHealth,
                     unknownIssueHealth,
@@ -21452,6 +21464,7 @@ public partial class App : Application
             bool companionIdentityFieldTamperRejected = false;
             bool companionListenerHandoffEncrypted = false;
             bool companionListenerHandoffResponseRejected = false;
+            bool companionPassiveReadReconnected = false;
             bool durableListenerHandoffSavedForDelivery = false;
             bool companionAuthAclProvenanceContract = false;
             bool companionPrimaryRootSettingPrecedence = false;
@@ -21844,6 +21857,11 @@ public partial class App : Application
                                         paused = true,
                                     },
                                 })
+                            : jobsRequest
+                                ? win.EnhancementCompanionSecureResponseForSmoke(
+                                    request,
+                                    (int)HttpStatusCode.OK,
+                                    new { jobs = Array.Empty<object>() })
                             : queueRecoveryRequest
                                 ? win.EnhancementCompanionSecureResponseForSmoke(
                                     request,
@@ -21880,6 +21898,14 @@ public partial class App : Application
                         prompt = "handoff-private-prompt",
                     });
                 simulateListenerHandoff = false;
+                int passiveReconnectProbeCount = readinessProbeCount;
+                int passiveReconnectLaunchCount =
+                    win.EnhancementCompanionLaunchAttemptCountForSmoke;
+                companionPassiveReadReconnected =
+                    await win.SendPassiveEnhancementReadForSmokeAsync()
+                    && readinessProbeCount == passiveReconnectProbeCount + 1
+                    && win.EnhancementCompanionLaunchAttemptCountForSmoke
+                        == passiveReconnectLaunchCount;
                 bool durableListenerSwapped = false;
                 bool durableListenerSawOnlyCiphertext = true;
                 string pendingDirectory = EnhancementEnqueueInboxStore
@@ -22337,6 +22363,7 @@ public partial class App : Application
                     && companionAuthenticatedRequestHeaders
                     && companionListenerHandoffEncrypted
                     && companionListenerHandoffResponseRejected
+                    && companionPassiveReadReconnected
                     && durableListenerHandoffSavedForDelivery
                     && companionAuthAclProvenanceContract
                     && companionIdentityFieldTamperRejected
@@ -22482,6 +22509,7 @@ public partial class App : Application
                 companionQueueRecoveryAuthenticated,
                 companionListenerHandoffEncrypted,
                 companionListenerHandoffResponseRejected,
+                companionPassiveReadReconnected,
                 durableListenerHandoffSavedForDelivery,
                 companionAuthAclProvenanceContract,
                 companionIdentityFieldTamperRejected,

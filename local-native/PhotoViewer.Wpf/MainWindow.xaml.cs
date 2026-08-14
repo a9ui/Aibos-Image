@@ -18655,6 +18655,8 @@ public partial class MainWindow : Window
         string? timeoutError = null)
     {
         CancellationTokenSource? requestTimeoutCts = null;
+        string? secureRequestInstanceId = null;
+        string? secureRequestServerStartedAtUtc = null;
         try
         {
             int effectiveTimeoutMilliseconds = Math.Max(
@@ -18687,6 +18689,12 @@ public partial class MainWindow : Window
                     null,
                     "The local AI companion has not proved ownership. No request was sent.");
             }
+            if (_usingDefaultModalEnhancementSender)
+            {
+                secureRequestInstanceId = _verifiedEnhancementCompanionInstanceId;
+                secureRequestServerStartedAtUtc =
+                    _verifiedEnhancementCompanionServerStartedAtUtc;
+            }
             using var request = securedRequest
                 ?? new HttpRequestMessage(method, endpoint);
             if (!_usingDefaultModalEnhancementSender)
@@ -18708,7 +18716,9 @@ public partial class MainWindow : Window
             if (_usingDefaultModalEnhancementSender
                 && (int)response.StatusCode is 401 or 403)
             {
-                _enhancementCompanionOwnershipVerified = false;
+                InvalidateEnhancementCompanionOwnershipIfCurrent(
+                    secureRequestInstanceId,
+                    secureRequestServerStartedAtUtc);
             }
             int statusCode = (int)response.StatusCode;
             byte[] responseBytes;
@@ -18733,7 +18743,9 @@ public partial class MainWindow : Window
                         out statusCode,
                         out responseBytes))
                 {
-                    _enhancementCompanionOwnershipVerified = false;
+                    InvalidateEnhancementCompanionOwnershipIfCurrent(
+                        secureRequestInstanceId,
+                        secureRequestServerStartedAtUtc);
                     return new EnhancementApiResponse(
                         false,
                         403,
@@ -18805,6 +18817,9 @@ public partial class MainWindow : Window
             !token.IsCancellationRequested
             && requestTimeoutCts?.IsCancellationRequested == true)
         {
+            InvalidateEnhancementCompanionOwnershipIfCurrent(
+                secureRequestInstanceId,
+                secureRequestServerStartedAtUtc);
             if (!string.IsNullOrWhiteSpace(timeoutError))
             {
                 return new EnhancementApiResponse(
@@ -18832,6 +18847,9 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
+            InvalidateEnhancementCompanionOwnershipIfCurrent(
+                secureRequestInstanceId,
+                secureRequestServerStartedAtUtc);
             string error = method == HttpMethod.Get
                 ? "The local AI companion did not answer within 30 seconds. Try the request again."
                 : "The local AI companion did not return a receipt within 30 seconds. The change may already have been applied; check Jobs before retrying.";
@@ -18843,6 +18861,9 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException)
         {
+            InvalidateEnhancementCompanionOwnershipIfCurrent(
+                secureRequestInstanceId,
+                secureRequestServerStartedAtUtc);
             return new EnhancementApiResponse(
                 false,
                 0,
@@ -19003,8 +19024,7 @@ public partial class MainWindow : Window
         }
 
         string encodedSource = Uri.EscapeDataString(sourceIdentity);
-        Task<EnhancementApiResponse> jobsTask = SendEnhancementApiAsync(
-            HttpMethod.Get,
+        Task<EnhancementApiResponse> jobsTask = SendPassiveEnhancementReadAsync(
             $"api/enhance/jobs?sourceId={encodedSource}",
             token: token);
         Task<bool?>? recoveredCapabilityTask = TryGetModalSourceTile(out Tile currentTile)

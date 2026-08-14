@@ -1325,7 +1325,8 @@ public partial class MainWindow
             }
 
             _enhancementWorkspaceGetCount++;
-            EnhancementApiResponse response = await SendEnhancementApiAsync(HttpMethod.Get, "api/enhance/jobs");
+            EnhancementApiResponse response = await SendPassiveEnhancementReadAsync(
+                "api/enhance/jobs");
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
                 return;
 
@@ -1478,7 +1479,7 @@ public partial class MainWindow
 
         _enhancementWorkspaceHealthGetCount++;
         EnhancementApiResponse response =
-            await SendEnhancementApiAsync(HttpMethod.Get, "api/enhance/health");
+            await SendPassiveEnhancementReadAsync("api/enhance/health");
         if (generation != _enhancementWorkspaceGeneration
             || EnhancementJobsDialog.Visibility != Visibility.Visible)
         {
