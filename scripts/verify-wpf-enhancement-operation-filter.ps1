@@ -2,7 +2,8 @@ param(
     [string]$Configuration = 'Release',
     [string]$DotnetPath = 'dotnet',
     [string]$TargetFrameworkOverride = '',
-    [string]$VideoFixturePath = ''
+    [string]$VideoFixturePath = '',
+    [switch]$SkipRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,7 +41,19 @@ try {
 
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        & $DotnetPath build $project -c $Configuration --nologo -v:minimal "-p:OutputPath=$buildOutput"
+        $buildArgs = @(
+            'build',
+            $project,
+            '-c',
+            $Configuration,
+            '--nologo',
+            '-v:minimal',
+            "-p:OutputPath=$buildOutput"
+        )
+        if ($SkipRestore) {
+            $buildArgs += '--no-restore'
+        }
+        & $DotnetPath @buildArgs
     }
     else {
         & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal

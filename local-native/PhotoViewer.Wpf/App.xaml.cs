@@ -18226,11 +18226,14 @@ public partial class App : Application
                         && HasExactNames(
                             requestedVideo,
                             "profileId",
-                            "prompt")
+                            "prompt",
+                            "steps")
                         && requestedVideo.GetProperty("profileId").GetString()
                             == "minimax-h3-hq-5s-v1"
                         && requestedVideo.GetProperty("prompt").GetString()
-                            == japaneseVideoPrompt;
+                            == japaneseVideoPrompt
+                        && requestedVideo.GetProperty("steps").GetInt32()
+                            == win.MiniMaxH3StepsForSmoke;
                 }
                 const int fixedVideoSeed = int.MaxValue;
                 win.ConfigureVideoSeedForSmoke(
