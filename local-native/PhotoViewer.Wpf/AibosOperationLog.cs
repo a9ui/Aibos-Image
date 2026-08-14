@@ -96,11 +96,13 @@ internal static partial class AibosOperationLog
     {
         try
         {
-            Directory.CreateDirectory(DirectoryPath);
-            CleanupExpiredLogsOnce();
-            string path = Path.Combine(
-                DirectoryPath,
-                $"operations-{DateTime.UtcNow:yyyy-MM-dd}.jsonl");
+            string localAppData = Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData);
+            if (!TryPrepareTrustedLogDirectory(localAppData, out string trustedDirectory))
+                return;
+
+            DateTime utcNow = DateTime.UtcNow;
+            CleanupExpiredLogsOnce(trustedDirectory, utcNow);
             var batch = new StringBuilder(8 * 1024);
             while (Pending.TryDequeue(out string? line))
             {
@@ -108,12 +110,12 @@ internal static partial class AibosOperationLog
                 batch.AppendLine(line);
                 if (batch.Length >= 8 * 1024)
                 {
-                    AppendBounded(path, batch);
+                    AppendBounded(trustedDirectory, utcNow, batch);
                     batch.Clear();
                 }
             }
             if (batch.Length > 0)
-                AppendBounded(path, batch);
+                AppendBounded(trustedDirectory, utcNow, batch);
         }
         catch
         {
@@ -128,29 +130,197 @@ internal static partial class AibosOperationLog
         }
     }
 
-    private static void AppendBounded(string path, StringBuilder batch)
+    internal static bool TryWriteBatchForSecuritySmoke(
+        string localAppDataRoot,
+        DateTime utcNow,
+        string line)
     {
-        long existingBytes = File.Exists(path) ? new FileInfo(path).Length : 0;
-        int batchBytes = Utf8NoBom.GetByteCount(batch.ToString());
-        if (existingBytes + batchBytes > MaximumDailyBytes)
-            return;
-        File.AppendAllText(path, batch.ToString(), Utf8NoBom);
+        if (!TryPrepareTrustedLogDirectory(
+                localAppDataRoot,
+                out string trustedDirectory))
+        {
+            return false;
+        }
+
+        CleanupExpiredLogsOnce(trustedDirectory, utcNow);
+        var batch = new StringBuilder(line.Length + Environment.NewLine.Length);
+        batch.AppendLine(line);
+        return AppendBounded(trustedDirectory, utcNow, batch);
     }
 
-    private static void CleanupExpiredLogsOnce()
+    private static bool TryPrepareTrustedLogDirectory(
+        string localAppDataRoot,
+        out string trustedDirectory)
+    {
+        trustedDirectory = "";
+        try
+        {
+            string expectedRoot = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(localAppDataRoot));
+            FileAttributes rootAttributes = File.GetAttributes(expectedRoot);
+            if (!Path.IsPathFullyQualified(expectedRoot)
+                || !rootAttributes.HasFlag(FileAttributes.Directory)
+                || rootAttributes.HasFlag(FileAttributes.ReparsePoint)
+                || !WindowsPathIdentity.TryResolveExistingDirectory(
+                    expectedRoot,
+                    out string canonicalRoot)
+                || !string.Equals(
+                    expectedRoot,
+                    canonicalRoot,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string current = canonicalRoot;
+            foreach (string fixedName in new[] { "Aibos Image", "Logs" })
+            {
+                string candidate = Path.GetFullPath(Path.Combine(current, fixedName));
+                if (!string.Equals(
+                        Path.GetDirectoryName(candidate),
+                        current,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                // current was resolved from an open directory handle and fixedName
+                // is application-owned. The created child is re-opened and checked
+                // before it is trusted by any write or delete operation.
+                // codeql[cs/path-injection]
+                Directory.CreateDirectory(candidate);
+                FileAttributes attributes = File.GetAttributes(candidate);
+                if (!attributes.HasFlag(FileAttributes.Directory)
+                    || attributes.HasFlag(FileAttributes.ReparsePoint)
+                    || !WindowsPathIdentity.TryResolveExistingDirectory(
+                        candidate,
+                        out string canonicalCandidate)
+                    || !string.Equals(
+                        candidate,
+                        canonicalCandidate,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                current = canonicalCandidate;
+            }
+
+            trustedDirectory = current;
+            return true;
+        }
+        catch
+        {
+            trustedDirectory = "";
+            return false;
+        }
+    }
+
+    private static bool IsTrustedLogDirectory(string trustedDirectory)
+    {
+        try
+        {
+            FileAttributes attributes = File.GetAttributes(trustedDirectory);
+            return attributes.HasFlag(FileAttributes.Directory)
+                && !attributes.HasFlag(FileAttributes.ReparsePoint)
+                && WindowsPathIdentity.TryResolveExistingDirectory(
+                    trustedDirectory,
+                    out string canonicalDirectory)
+                && string.Equals(
+                    trustedDirectory,
+                    canonicalDirectory,
+                    StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool AppendBounded(
+        string trustedDirectory,
+        DateTime utcNow,
+        StringBuilder batch)
+    {
+        if (!IsTrustedLogDirectory(trustedDirectory))
+            return false;
+
+        string expectedPath = Path.GetFullPath(Path.Combine(
+            trustedDirectory,
+            $"operations-{utcNow:yyyy-MM-dd}.jsonl"));
+        if (!string.Equals(
+                Path.GetDirectoryName(expectedPath),
+                trustedDirectory,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        byte[] payload = Utf8NoBom.GetBytes(batch.ToString());
+        if (payload.LongLength > MaximumDailyBytes)
+            return false;
+
+        // trustedDirectory is a direct, handle-resolved application child. The
+        // opened file handle is compared with the exact fixed daily path before
+        // any bytes are written, so a file link or directory redirection fails closed.
+        // codeql[cs/path-injection]
+        using var stream = new FileStream(
+            expectedPath,
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            FileShare.Read,
+            bufferSize: 4_096,
+            FileOptions.WriteThrough);
+        if (!WindowsPathIdentity.TryGetFinalPath(
+                stream.SafeFileHandle,
+                out string finalPath)
+            || !string.Equals(
+                expectedPath,
+                finalPath,
+                StringComparison.OrdinalIgnoreCase)
+            || (File.GetAttributes(stream.SafeFileHandle) & FileAttributes.ReparsePoint) != 0
+            || !WindowsPathIdentity.TryGetHardLinkCount(
+                stream.SafeFileHandle,
+                out uint linkCount)
+            || linkCount != 1
+            || stream.Length + payload.LongLength > MaximumDailyBytes)
+        {
+            return false;
+        }
+
+        stream.Seek(0, SeekOrigin.End);
+        stream.Write(payload);
+        stream.Flush(flushToDisk: false);
+        return true;
+    }
+
+    private static void CleanupExpiredLogsOnce(
+        string trustedDirectory,
+        DateTime utcNow)
     {
         if (Interlocked.Exchange(ref _cleanupAttempted, 1) != 0)
             return;
-        DateTime cutoffUtc = DateTime.UtcNow.AddDays(-RetentionDays);
+
+        if (!IsTrustedLogDirectory(trustedDirectory))
+            return;
+
+        DateTime cutoffUtc = utcNow.AddDays(-RetentionDays);
+        // trustedDirectory is a direct, handle-resolved application child and
+        // enumeration is limited to the fixed daily-log pattern at top level.
+        // codeql[cs/path-injection]
         foreach (string candidate in Directory.EnumerateFiles(
-                     DirectoryPath,
+                     trustedDirectory,
                      "operations-????-??-??.jsonl",
                      SearchOption.TopDirectoryOnly))
         {
             try
             {
-                if (File.GetLastWriteTimeUtc(candidate) < cutoffUtc)
-                    File.Delete(candidate);
+                if (!IsTrustedLogDirectory(trustedDirectory))
+                    return;
+                WindowsPathIdentity.TryDeleteDirectFileOlderThan(
+                    candidate,
+                    trustedDirectory,
+                    cutoffUtc);
             }
             catch
             {

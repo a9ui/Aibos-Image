@@ -454,6 +454,20 @@ public partial class App : Application
             return;
         }
 
+        int operationLogSecuritySmokeIdx = Array.IndexOf(
+            e.Args,
+            "--operation-log-security-smoke");
+        if (operationLogSecuritySmokeIdx >= 0
+            && operationLogSecuritySmokeIdx + 1 < e.Args.Length)
+        {
+            int exitCode = OperationLogSecuritySmokeRunner.Run(
+                e.Args[operationLogSecuritySmokeIdx + 1],
+                ArgValue(e.Args, "--expect"));
+            Environment.ExitCode = exitCode;
+            Shutdown(exitCode);
+            return;
+        }
+
         int settingsUnseenDotsSmokeIdx = Array.IndexOf(e.Args, "--settings-unseen-dots-smoke");
         if (settingsUnseenDotsSmokeIdx >= 0 && settingsUnseenDotsSmokeIdx + 1 < e.Args.Length)
         {
