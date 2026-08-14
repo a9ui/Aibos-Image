@@ -21,7 +21,8 @@ if not exist "%PROJECT%" (
     exit /b 1
 )
 
-if not defined AIBOS_H25_COMPANION_ROOT call :resolve_h25_companion_root
+if not defined AIBOS_COMPANION_ROOT if defined AIBOS_H25_COMPANION_ROOT set "AIBOS_COMPANION_ROOT=%AIBOS_H25_COMPANION_ROOT%"
+if not defined AIBOS_COMPANION_ROOT call :resolve_companion_root
 
 if /I "%PHOTOVIEWER_WPF_DOTNET_RUN%"=="1" (
     echo [Aibos WPF] Launching via dotnet run for development...
@@ -76,10 +77,18 @@ if errorlevel 1 exit /b %ERRORLEVEL%
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\check-wpf-launch-target.ps1" -ProjectPath "%PROJECT%" -TargetPath "%TARGET%" -Record
 exit /b %ERRORLEVEL%
 
-:resolve_h25_companion_root
+:resolve_companion_root
+for /f "tokens=1,*" %%I in ('git -C "%~dp0" worktree list --porcelain 2^>nul') do (
+    if /I "%%I"=="worktree" call :try_companion_root "%%J"
+)
+if defined AIBOS_COMPANION_ROOT exit /b 0
 for /f "usebackq delims=" %%I in (`git -C "%~dp0" rev-parse --path-format^=absolute --git-common-dir 2^>nul`) do (
     for %%J in ("%%~fI\..") do (
-        if exist "%%~fJ\package.json" if exist "%%~fJ\project.toml" if exist "%%~fJ\scripts\prod_launcher.js" set "AIBOS_H25_COMPANION_ROOT=%%~fJ"
+        call :try_companion_root "%%~fJ"
     )
 )
+exit /b 0
+
+:try_companion_root
+if exist "%~1\package.json" if exist "%~1\project.toml" if exist "%~1\scripts\enhancement_companion.js" set "AIBOS_COMPANION_ROOT=%~f1"
 exit /b 0

@@ -98,7 +98,7 @@ public partial class MainWindow : Window
     private const long MinResidentThumbnailBudgetBytes = 128L * 1024 * 1024;
     private const long MaxResidentThumbnailBudgetBytes = 256L * 1024 * 1024;
     private const long FallbackResidentThumbnailBudgetBytes = 192L * 1024 * 1024;
-    private const int TransientStatusToastMilliseconds = 850;
+    private const int TransientStatusToastMilliseconds = 2_800;
     private const int MinParallelCatalogPreparationCount = 512;
     private const int MaxCatalogPreparationWorkers = 4;
     private const int ImmediateViewportThumbnailCount = 1;
@@ -437,6 +437,7 @@ public partial class MainWindow : Window
     private PreviewTabView? _previewTabDragSource;
     private string? _modalTransformPath;
     private string? _modalSourceTilePath;
+    private Tile[] _modalNavigationSnapshot = [];
     private string? _modalDisplayPath;
     private int _modalDisplayedImagePixelWidth;
     private int _modalDisplayedImagePixelHeight;
@@ -15072,12 +15073,22 @@ public partial class MainWindow : Window
         if (_galleryVirtualizingPanel is null)
             AttachGalleryVirtualizationPanel();
         VirtualizingWrapPanel? preparedPanel = _galleryVirtualizingPanel;
+        bool collectionOrderChanged =
+            !_tiles.Matches(filterResult.Tiles, filterResult.Count);
+        int singleMoveOldIndex = -1;
+        int singleMoveNewIndex = -1;
+        bool publishSingleMove = collectionOrderChanged
+            && _tiles.TryGetSingleMoveToMatch(
+                filterResult.Tiles,
+                filterResult.Count,
+                out singleMoveOldIndex,
+                out singleMoveNewIndex);
         bool releaseWpfSelectionBeforePublication =
-            ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult);
-        bool projectionChanged =
-            !_tiles.Matches(filterResult.Tiles, filterResult.Count)
+            !publishSingleMove
+            && ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult);
+        bool projectionChanged = collectionOrderChanged
             || releaseWpfSelectionBeforePublication;
-        if (projectionChanged)
+        if (projectionChanged && !publishSingleMove)
         {
             CancelThumbnailViewportLoading();
             _thumbnailViewportRevision++;
@@ -15095,8 +15106,10 @@ public partial class MainWindow : Window
                 filterResult.Tiles,
                 filterResult.Count,
                 exactSingleRemovalIndex);
+        bool publishBoundedCollectionMutation =
+            publishSingleRemoval || publishSingleMove;
         if (projectionChanged
-            && !publishSingleRemoval
+            && !publishBoundedCollectionMutation
             && snapshot.RestoreGalleryFocus
             && Keyboard.FocusedElement is DependencyObject focusedElement)
         {
@@ -15131,7 +15144,7 @@ public partial class MainWindow : Window
             _ = await YieldForInputAsync(checkGeneration: false);
         }
         bool resetPreparationStarted = projectionChanged
-            && !publishSingleRemoval
+            && !publishBoundedCollectionMutation
             && preparedPanel?.BeginItemsResetPreparation() == true;
         try
         {
@@ -15255,6 +15268,14 @@ public partial class MainWindow : Window
                         filterResult.Count,
                         exactSingleRemovalIndex);
                 }
+                else if (publishSingleMove)
+                {
+                    _tiles.ReplaceOneMovedAfterValidation(
+                        filterResult.Tiles,
+                        filterResult.Count,
+                        singleMoveOldIndex,
+                        singleMoveNewIndex);
+                }
                 else if (projectionChanged)
                 {
                     // The work above remains part of the app-owned
@@ -15325,8 +15346,8 @@ public partial class MainWindow : Window
         }
 
         publishMs = slice.ElapsedMilliseconds;
-        // A proven one-item exclusion has already staged the matching
-        // Automation projection and emitted one bounded Remove notification.
+        // A proven one-item exclusion or relocation has already staged the
+        // matching Automation projection and emitted one bounded notification.
         // Retain both mandatory input turns around publication, then keep only
         // its remaining O(1) presentation phases in the same dispatcher turn.
         // Reset and broader projection paths continue to yield after every
@@ -15355,7 +15376,7 @@ public partial class MainWindow : Window
             _galleryVirtualizingPanel?.InvalidateItemLayout();
         phase.Stop();
         statsMs = phase.ElapsedMilliseconds;
-        if (!publishSingleRemoval)
+        if (!publishBoundedCollectionMutation)
         {
             if (!await YieldForInputAsync())
                 return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
@@ -15377,7 +15398,7 @@ public partial class MainWindow : Window
 
         phase.Stop();
         selectionMs = phase.ElapsedMilliseconds;
-        if (!publishSingleRemoval)
+        if (!publishBoundedCollectionMutation)
         {
             if (!await YieldForInputAsync())
                 return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
@@ -15400,7 +15421,7 @@ public partial class MainWindow : Window
 
         phase.Stop();
         selectionMs += phase.ElapsedMilliseconds;
-        if (!publishSingleRemoval)
+        if (!publishBoundedCollectionMutation)
         {
             if (!await YieldForInputAsync())
                 return new CatalogProjectionApplyMetrics(maxSliceMs, publishMs, statsMs, selectionMs, reconcileMs);
@@ -15518,15 +15539,24 @@ public partial class MainWindow : Window
         }
 
         bool wasSyncingSelection = _syncingSelection;
+        bool collectionOrderChanged = !_tiles.Matches(filtered, filteredCount);
+        int singleMoveOldIndex = -1;
+        int singleMoveNewIndex = -1;
+        bool publishSingleMove = collectionOrderChanged
+            && _tiles.TryGetSingleMoveToMatch(
+                filtered,
+                filteredCount,
+                out singleMoveOldIndex,
+                out singleMoveNewIndex);
         bool releaseWpfSelectionBeforePublication =
-            ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult);
-        bool projectionChanged =
-            !_tiles.Matches(filtered, filteredCount)
+            !publishSingleMove
+            && ShouldReleaseWpfSelectionBeforeCatalogPublication(filterResult);
+        bool projectionChanged = collectionOrderChanged
             || releaseWpfSelectionBeforePublication;
         _syncingSelection = true;
         try
         {
-            if (projectionChanged)
+            if (projectionChanged && !publishSingleMove)
             {
                 CancelThumbnailViewportLoading();
                 _thumbnailViewportRevision++;
@@ -15538,7 +15568,15 @@ public partial class MainWindow : Window
             }
             if (projectionChanged)
                 StageGalleryAutomationProjection(filterResult);
-            if (projectionChanged)
+            if (publishSingleMove)
+            {
+                _tiles.ReplaceOneMovedAfterValidation(
+                    filtered,
+                    filteredCount,
+                    singleMoveOldIndex,
+                    singleMoveNewIndex);
+            }
+            else if (projectionChanged)
                 _tiles.ReplaceAll(filtered, filteredCount);
         }
         finally
@@ -17690,6 +17728,22 @@ public partial class MainWindow : Window
             await ChooseAndLoadFolderAsync();
     }
 
+    private void GalleryScrollToTop_Click(object sender, RoutedEventArgs e)
+    {
+        ListBox activeList = RowsList.Visibility == Visibility.Visible
+            ? RowsList
+            : CardsList;
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(activeList);
+        if (viewer is not null)
+        {
+            viewer.ScrollToHome();
+            return;
+        }
+
+        if (activeList.Items.Count > 0)
+            activeList.ScrollIntoView(activeList.Items[0]);
+    }
+
     private async void OpenLastFolder_Click(object sender, RoutedEventArgs e)
     {
         var lastFolderSet = _lastFolderSet;
@@ -18062,10 +18116,12 @@ public partial class MainWindow : Window
         // background.
         QueueEnhancedStateRefreshIfChanged();
         if ((requestedTile ?? SelectedTile()) is not Tile t) return;
+        bool opening = Modal.Visibility != Visibility.Visible;
+        if (opening && !ExternalFileDropSessionActive)
+            _modalNavigationSnapshot = _tiles.ToArray();
         int projectedIndex = _tiles.IndexOf(t);
         UpdateModalPositionText(t, projectedIndex);
         StopGalleryAutoScroll();
-        bool opening = Modal.Visibility != Visibility.Visible;
         bool sourceChanged = !string.Equals(_modalSourceTilePath, t.Path, StringComparison.OrdinalIgnoreCase);
         bool restoreVideoOnOpen = false;
         if (opening)
@@ -19279,6 +19335,7 @@ public partial class MainWindow : Window
         _modalEnhancementOperation = normalizedOperation;
         _modalEnhancementRequestPending = true;
         _modalEnhancementError = null;
+        var operationWatch = Stopwatch.StartNew();
         UpdateModalEnhancementActionControls();
         try
         {
@@ -19375,6 +19432,13 @@ public partial class MainWindow : Window
             if (response.SavedForDelivery)
             {
                 _modalEnhancementError = null;
+                AibosOperationLog.Write(
+                    "modal_enhancement_enqueue",
+                    "reserved",
+                    operationWatch.ElapsedMilliseconds,
+                    response.StatusCode,
+                    "SAVED_FOR_DELIVERY",
+                    mode: normalizedOperation);
                 SetTransientStatusToast(
                     $"{tile.FileName}: 予約を保存しました。Jobsへの登録を継続しています。");
                 ShowModalInteractionFeedback("AI予約を保存しました");
@@ -19384,14 +19448,34 @@ public partial class MainWindow : Window
             if (!response.Ok || response.Payload is not JsonElement payload
                 || !payload.TryGetProperty("job", out JsonElement jobElement))
             {
-                _modalEnhancementError = response.Error;
-                SetStatusToast(response.Error);
+                string error = !string.IsNullOrWhiteSpace(response.Error)
+                    ? response.Error
+                    : "結果を確認できませんでした。Jobsを更新して現在の状態を確認してください。";
+                _modalEnhancementError = error;
+                AibosOperationLog.Write(
+                    "modal_enhancement_enqueue",
+                    "failed",
+                    operationWatch.ElapsedMilliseconds,
+                    response.StatusCode,
+                    response.Ok
+                        ? "RESPONSE_CONTRACT_INVALID"
+                        : EnhancementApiErrorCode(response),
+                    mode: normalizedOperation);
+                SetStatusToast(error);
                 return;
             }
 
+            AibosOperationLog.Write(
+                "modal_enhancement_enqueue",
+                "accepted",
+                operationWatch.ElapsedMilliseconds,
+                response.StatusCode,
+                mode: normalizedOperation);
             ApplyModalEnhancementJob(tile, ParseModalEnhancementJob(jobElement));
             ApplyActiveEnhancementQueueJobToVisibleCatalog(jobElement, tile);
             QueueEnhancedStateRefreshIfChanged();
+            SetTransientStatusToast(
+                $"{tile.FileName}: Jobsの待機列へ追加しました。");
             ShowModalInteractionFeedback(normalizedOperation == "photoreal"
                 ? "AI実写化を開始しました"
                 : requestSource.UsesPhotorealSource
@@ -19710,6 +19794,7 @@ public partial class MainWindow : Window
         ModalBitmap.Visibility = Visibility.Collapsed;
         _modalShowingEnhanced = false;
         _modalSourceTilePath = null;
+        _modalNavigationSnapshot = [];
         _modalDisplayPath = null;
         _modalEnhancementRequestPending = false;
         _modalEnhancementJobId = null;
@@ -20920,26 +21005,34 @@ public partial class MainWindow : Window
         int currentIndex = selected is null
             ? -1
             : IndexOfTile(navigationTiles, selected);
-        int nextIndex;
-        if (currentIndex < 0)
+        Tile? next = null;
+        for (int offset = 1; offset <= navigationTiles.Count; offset++)
         {
-            nextIndex = delta > 0 ? 0 : navigationTiles.Count - 1;
+            int nextIndex = currentIndex < 0
+                ? delta > 0
+                    ? offset - 1
+                    : navigationTiles.Count - offset
+                : ((currentIndex + (delta * offset)) % navigationTiles.Count
+                    + navigationTiles.Count) % navigationTiles.Count;
+            if (nextIndex == currentIndex
+                || !TryResolveModalNavigationTile(
+                    navigationTiles[nextIndex],
+                    out Tile candidate))
+            {
+                continue;
+            }
+            next = candidate;
+            break;
         }
-        else
-        {
-            nextIndex = ((currentIndex + delta) % navigationTiles.Count
-                + navigationTiles.Count) % navigationTiles.Count;
-        }
-        if (nextIndex == currentIndex)
+        if (next is null)
             return false;
 
-        Tile next = navigationTiles[nextIndex];
         SelectTile(next, _tiles.IndexOf(next));
 
         if (Modal.Visibility == Visibility.Visible)
         {
             bool chromeWasVisible = ModalChromeEffectivelyVisible;
-            OpenModal();
+            OpenModal(next);
             if (chromeWasVisible)
                 ShowModalInteractionFeedback(delta > 0 ? "Next image" : "Previous image");
         }
@@ -22863,6 +22956,11 @@ public partial class MainWindow : Window
 
     private void SetStatusToast(string status, Action? retryAction = null)
     {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            status =
+                "結果を表示できませんでした。Jobsを更新して現在の状態を確認してください。";
+        }
         _statusToastDismissTimer?.Stop();
         if (HasUnresolvedSharedFailures)
         {
@@ -22929,16 +23027,6 @@ public partial class MainWindow : Window
         _statusToastDismissTimer?.Stop();
         DeleteStatusToast.Visibility = Visibility.Hidden;
     }
-
-    private void StatusToastText_PreviewMouseDown(
-        object sender,
-        MouseButtonEventArgs e)
-        => _statusToastDismissTimer?.Stop();
-
-    private void StatusToastText_GotKeyboardFocus(
-        object sender,
-        KeyboardFocusChangedEventArgs e)
-        => _statusToastDismissTimer?.Stop();
 
     private void RetryDelete_Click(object sender, RoutedEventArgs e)
     {
@@ -23199,7 +23287,8 @@ public partial class MainWindow : Window
             state.VideoMaximumPixelArea,
             state.VideoPrompt,
             state.VideoModelId,
-            state.VideoQualityId);
+            state.VideoQualityId,
+            state.VideoSteps);
         RestoreVideoSeedSettings(state.VideoSeedMode, state.VideoSeedValue);
         RestoreVideoStyles(state.VideoStyles, state.SelectedVideoStyleName);
         SyncFoldersSectionControls();
@@ -23396,6 +23485,7 @@ public partial class MainWindow : Window
                 VideoDurationSeconds = _videoDurationSeconds,
                 VideoPlaybackFps = _videoPlaybackFps,
                 VideoMaximumPixelArea = _videoMaximumPixelArea,
+                VideoSteps = _videoSteps,
                 VideoPrompt = _videoPrompt,
                 VideoModelId = _videoModelId,
                 VideoQualityId = _videoQualityId,
@@ -26565,6 +26655,75 @@ public partial class MainWindow : Window
     public int GridItemsSourceCountForSmoke => CardsList.Items.Count;
     public int ProjectionResetNotificationCountForSmoke => _tiles.ResetNotificationCount;
     public int ProjectionRemoveNotificationCountForSmoke => _tiles.RemoveNotificationCount;
+    public int ProjectionMoveNotificationCountForSmoke => _tiles.MoveNotificationCount;
+    public bool ReorderProjectionOneTileForSmoke(string fileName, int newIndex)
+    {
+        int oldIndex = -1;
+        for (int index = 0; index < _tiles.Count; index++)
+        {
+            if (!string.Equals(
+                    _tiles[index].FileName,
+                    fileName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            oldIndex = index;
+            break;
+        }
+        if (oldIndex < 0
+            || (uint)newIndex >= (uint)_tiles.Count
+            || newIndex == oldIndex)
+        {
+            return false;
+        }
+
+        Tile[] target = _tiles.ToArray();
+        Tile moved = target[oldIndex];
+        if (oldIndex < newIndex)
+            Array.Copy(target, oldIndex + 1, target, oldIndex, newIndex - oldIndex);
+        else
+            Array.Copy(target, newIndex, target, newIndex + 1, oldIndex - newIndex);
+        target[newIndex] = moved;
+
+        var thumbnails = _tiles.ToDictionary(
+            static tile => tile.Path,
+            static tile => tile.Thumbnail,
+            StringComparer.OrdinalIgnoreCase);
+        int resetBefore = _tiles.ResetNotificationCount;
+        int moveBefore = _tiles.MoveNotificationCount;
+        int thumbnailCancelBefore = _thumbnailViewportCancelCount;
+        Tile[] selectedTiles = _tiles
+            .Where(tile => _selectedPaths.Contains(tile.Path))
+            .ToArray();
+        Tile? preferred = SelectedTile();
+        int preferredIndex = preferred is null
+            ? -1
+            : Array.IndexOf(target, preferred);
+        var result = new FilterResult(
+            target,
+            target.Length,
+            null,
+            selectedTiles,
+            preferred,
+            preferredIndex,
+            0,
+            true,
+            null,
+            null,
+            null,
+            null);
+        ApplyFilterResult(result, selectFirst: false);
+
+        return _tiles.ResetNotificationCount == resetBefore
+            && _tiles.MoveNotificationCount == moveBefore + 1
+            && _thumbnailViewportCancelCount == thumbnailCancelBefore
+            && _tiles.Matches(target, target.Length)
+            && _tiles.All(tile => thumbnails.TryGetValue(
+                    tile.Path,
+                    out BitmapSource? thumbnail)
+                && ReferenceEquals(tile.Thumbnail, thumbnail));
+    }
     public SynchronousFilterOwnershipSmokeSnapshot RunSynchronousNoOpFilterForSmoke()
     {
         long createdBefore = GalleryAutomationProjectionIndex.CreatedCount;
@@ -27045,6 +27204,23 @@ public partial class MainWindow : Window
     public void StopGalleryAutoScrollForSmoke() => StopGalleryAutoScroll();
     public double GalleryVerticalOffsetForSmoke
         => FindVisualDescendant<ScrollViewer>(CardsList)?.VerticalOffset ?? 0;
+    public bool GalleryScrollToTopButtonContractForSmoke
+        => GalleryScrollToTopButton is not null
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetName(GalleryScrollToTopButton))
+            && string.Equals(
+                AutomationProperties.GetName(GalleryScrollToTopButton),
+                GalleryScrollToTopButton.ToolTip?.ToString(),
+                StringComparison.Ordinal);
+    public async Task<bool> InvokeGalleryScrollToTopForSmokeAsync()
+    {
+        GalleryScrollToTop_Click(GalleryScrollToTopButton, new RoutedEventArgs());
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+        ListBox activeList = RowsList.Visibility == Visibility.Visible
+            ? RowsList
+            : CardsList;
+        return (FindVisualDescendant<ScrollViewer>(activeList)?.VerticalOffset ?? 0) <= 0.5;
+    }
 
     public int MaterializedSelectionVisualLimitForSmoke => MaxMaterializedSelectionVisualItems;
     public int SelectionVisualItemCountForSmoke => CardsList.SelectedItems.Count + RowsList.SelectedItems.Count;
@@ -30264,6 +30440,7 @@ public sealed class ViewerState
     public int? VideoDurationSeconds { get; set; }
     public int? VideoPlaybackFps { get; set; }
     public int? VideoMaximumPixelArea { get; set; }
+    public int? VideoSteps { get; set; }
     public string? VideoPrompt { get; set; }
     public string? VideoModelId { get; set; }
     public string? VideoQualityId { get; set; }
@@ -30316,6 +30493,7 @@ public sealed class VideoStyleState
     public int DurationSeconds { get; set; }
     public int PlaybackFps { get; set; }
     public int MaximumPixelArea { get; set; }
+    public int? Steps { get; set; }
     public string Prompt { get; set; } = "";
 }
 
@@ -30944,6 +31122,7 @@ internal sealed class ResettableObservableCollection<T> :
     public int Count => _items.Length;
     public int ResetNotificationCount { get; private set; }
     public int RemoveNotificationCount { get; private set; }
+    public int MoveNotificationCount { get; private set; }
     public bool IsReadOnly => false;
     bool IList.IsFixedSize => false;
     bool IList.IsReadOnly => false;
@@ -31031,6 +31210,130 @@ internal sealed class ResettableObservableCollection<T> :
         for (int index = removedIndex; index < count; index++)
         {
             if (!comparer.Equals(_items[index + 1], items[index]))
+                return false;
+        }
+        return true;
+    }
+
+    public bool TryGetSingleMoveToMatch(
+        T[] items,
+        int count,
+        out int oldIndex,
+        out int newIndex)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        oldIndex = -1;
+        newIndex = -1;
+        if (count != items.Length || _items.Length != count || count < 2)
+            return false;
+
+        EqualityComparer<T> comparer = EqualityComparer<T>.Default;
+        int firstMismatch = -1;
+        for (int index = 0; index < count; index++)
+        {
+            if (comparer.Equals(_items[index], items[index]))
+                continue;
+            firstMismatch = index;
+            break;
+        }
+        if (firstMismatch < 0)
+            return false;
+
+        int movedForwardIndex = Array.FindIndex(
+            items,
+            firstMismatch + 1,
+            candidate => comparer.Equals(candidate, _items[firstMismatch]));
+        if (movedForwardIndex >= 0
+            && MatchesSingleMove(
+                items,
+                count,
+                firstMismatch,
+                movedForwardIndex,
+                comparer))
+        {
+            oldIndex = firstMismatch;
+            newIndex = movedForwardIndex;
+            return true;
+        }
+
+        int movedBackwardIndex = Array.FindIndex(
+            _items,
+            firstMismatch + 1,
+            candidate => comparer.Equals(candidate, items[firstMismatch]));
+        if (movedBackwardIndex >= 0
+            && MatchesSingleMove(
+                items,
+                count,
+                movedBackwardIndex,
+                firstMismatch,
+                comparer))
+        {
+            oldIndex = movedBackwardIndex;
+            newIndex = firstMismatch;
+            return true;
+        }
+
+        return false;
+    }
+
+    public void ReplaceOneMovedAfterValidation(
+        T[] items,
+        int count,
+        int oldIndex,
+        int newIndex)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        EqualityComparer<T> comparer = EqualityComparer<T>.Default;
+        if (count != items.Length
+            || _items.Length != count
+            || oldIndex == newIndex
+            || (uint)oldIndex >= (uint)count
+            || (uint)newIndex >= (uint)count
+            || !MatchesSingleMove(items, count, oldIndex, newIndex, comparer))
+        {
+            throw new InvalidOperationException("The validated one-item move shape changed before publication.");
+        }
+
+        T moved = _items[oldIndex];
+        _items = items;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+        MoveNotificationCount++;
+        CollectionChanged?.Invoke(
+            this,
+            new NotifyCollectionChangedEventArgs(
+                NotifyCollectionChangedAction.Move,
+                moved,
+                newIndex,
+                oldIndex));
+    }
+
+    private bool MatchesSingleMove(
+        T[] items,
+        int count,
+        int oldIndex,
+        int newIndex,
+        EqualityComparer<T> comparer)
+    {
+        for (int index = 0; index < count; index++)
+        {
+            int sourceIndex;
+            if (oldIndex < newIndex)
+            {
+                sourceIndex = index < oldIndex || index > newIndex
+                    ? index
+                    : index == newIndex
+                        ? oldIndex
+                        : index + 1;
+            }
+            else
+            {
+                sourceIndex = index < newIndex || index > oldIndex
+                    ? index
+                    : index == newIndex
+                        ? oldIndex
+                        : index - 1;
+            }
+            if (!comparer.Equals(_items[sourceIndex], items[index]))
                 return false;
         }
         return true;

@@ -90,6 +90,9 @@ public partial class MainWindow
         EnhancementApiResponse[] Responses,
         int NudgeCount,
         int PublishedCount);
+    private sealed record DurableEnhancementBatchItem(
+        object? Body,
+        string? RetryJobId);
     private sealed record EnhancementCompanionOwnershipProbe(
         bool Verified,
         bool TransportUnavailable,
@@ -259,11 +262,50 @@ public partial class MainWindow
             return;
         }
 
+        long startedAt = Stopwatch.GetTimestamp();
+        AibosOperationLog.Write("companion.startup", "started");
         EnhancementApiResponse response =
             await EnsureEnhancementCompanionApiReadyAsync(
                 token: _enhancementCompanionLifetimeCts.Token);
-        if (!response.Ok)
+        long elapsedMilliseconds = (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+        if (response.Ok)
+        {
+            AibosOperationLog.Write(
+                "companion.startup",
+                "ready",
+                elapsedMilliseconds,
+                response.StatusCode);
+        }
+        else
+        {
             _enhancementCompanionLaunchError = response.Error;
+            AibosOperationLog.Write(
+                "companion.startup",
+                "failed",
+                elapsedMilliseconds,
+                response.StatusCode,
+                ClassifyEnhancementCompanionStartupError(response.Error));
+        }
+    }
+
+    private static string ClassifyEnhancementCompanionStartupError(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+            return "request_failed";
+        if (error.Contains("untrusted process", StringComparison.OrdinalIgnoreCase)
+            || error.Contains("proved ownership", StringComparison.OrdinalIgnoreCase))
+            return "ownership_rejected";
+        if (error.Contains("could not find", StringComparison.OrdinalIgnoreCase))
+            return "root_not_found";
+        if (error.Contains("authentication", StringComparison.OrdinalIgnoreCase))
+            return "authentication_failed";
+        if (error.Contains("stopped before", StringComparison.OrdinalIgnoreCase))
+            return "process_stopped";
+        if (error.Contains("within two minutes", StringComparison.OrdinalIgnoreCase))
+            return "startup_timeout";
+        if (error.Contains("canceled", StringComparison.OrdinalIgnoreCase))
+            return "canceled";
+        return "request_failed";
     }
 
     private async Task<EnhancementApiResponse> EnsurePhotorealCompanionReadyForExplicitActionAsync(
@@ -697,7 +739,9 @@ public partial class MainWindow
             ? "The Aibos Image local AI service cannot prove the exact MiniMax H3 protocol. No job was added."
             : !TryParseMiniMaxH3VideoProfilesCapability(payload)
                 ? "The Aibos Image local AI service does not expose the tested MiniMax H3 5, 10, 12, and 15 second profiles. Restart the local AI service first; no job was added."
-                : null;
+                : !TryParseMiniMaxH3VideoStepsCapability(payload)
+                    ? "The Aibos Image local AI service does not expose bounded MiniMax H3 STEP control. Restart the local AI service first; no job was added."
+                    : null;
 
     private static bool TryParseMiniMaxH3VideoProfilesCapability(
         JsonElement payload)
@@ -788,6 +832,51 @@ public partial class MainWindow
         return true;
     }
 
+    private static bool TryParseMiniMaxH3VideoStepsCapability(
+        JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(payload, "capabilities")
+            || !payload.TryGetProperty("capabilities", out JsonElement capabilities)
+            || capabilities.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(capabilities, "videoH3StepsV1")
+            || !capabilities.TryGetProperty(
+                "videoH3StepsV1",
+                out JsonElement capability)
+            || capability.ValueKind != JsonValueKind.Object
+            || !HasExactVideoV2Properties(
+                capability,
+                "contractId",
+                "protocol",
+                "defaultSteps",
+                "minimumSteps",
+                "maximumSteps")
+            || !VideoV2ExactString(
+                capability,
+                "contractId",
+                MiniMaxH3VideoStepsContractId)
+            || !VideoV2ExactString(
+                capability,
+                "protocol",
+                MiniMaxH3VideoStepsProtocol)
+            || !VideoV2ExactInt32(
+                capability,
+                "defaultSteps",
+                MiniMaxH3VideoSteps)
+            || !VideoV2ExactInt32(
+                capability,
+                "minimumSteps",
+                MiniMaxH3VideoMinimumSteps)
+            || !VideoV2ExactInt32(
+                capability,
+                "maximumSteps",
+                MiniMaxH3VideoMaximumSteps))
+        {
+            return false;
+        }
+        return true;
+    }
+
     private static bool HasExactVideoV2Properties(
         JsonElement element,
         params string[] expectedNames)
@@ -854,6 +943,10 @@ public partial class MainWindow
     public static bool TryParseMiniMaxH3VideoProfilesCapabilityForSmoke(
         JsonElement payload)
         => TryParseMiniMaxH3VideoProfilesCapability(payload);
+
+    public static bool TryParseMiniMaxH3VideoStepsCapabilityForSmoke(
+        JsonElement payload)
+        => TryParseMiniMaxH3VideoStepsCapability(payload);
 
     private async Task<EnhancementEnqueueProbe> ProbeEnhancementEnqueueBackendAsync(
         CancellationToken token)
@@ -1025,8 +1118,49 @@ public partial class MainWindow
             CancellationToken token = default,
             Action? onFirstPublish = null,
             Func<bool>? shouldStopBeforeFirstPublish = null)
+        => await TrySendDurableEnhancementBatchCoreAsync(
+            bodies.Select(static body =>
+                new DurableEnhancementBatchItem(body, null)).ToArray(),
+            queuePlacement,
+            token,
+            onFirstPublish,
+            shouldStopBeforeFirstPublish);
+
+    private async Task<DurableEnhancementBatchResponse>
+        TrySendDurableEnhancementRetryBatchAsync(
+            IReadOnlyList<EnhancementWorkspaceJobView> jobs,
+            CancellationToken token = default)
     {
-        if (bodies.Count == 0)
+        Func<JsonElement, string?>[] validators = jobs
+            .Select(CreateEnhancementRetryHealthValidator)
+            .Where(static validator => validator is not null)
+            .Cast<Func<JsonElement, string?>>()
+            .ToArray();
+        Func<JsonElement, string?>? combinedValidator = validators.Length == 0
+            ? null
+            : payload => validators
+                .Select(validator => validator(payload))
+                .FirstOrDefault(static error => !string.IsNullOrWhiteSpace(error));
+        return await TrySendDurableEnhancementBatchCoreAsync(
+            jobs.Select(static job =>
+                new DurableEnhancementBatchItem(null, job.Id)).ToArray(),
+            "last",
+            token,
+            healthValidator: combinedValidator,
+            requireExactHealthValidation: combinedValidator is not null);
+    }
+
+    private async Task<DurableEnhancementBatchResponse>
+        TrySendDurableEnhancementBatchCoreAsync(
+            IReadOnlyList<DurableEnhancementBatchItem> items,
+            string queuePlacement = "last",
+            CancellationToken token = default,
+            Action? onFirstPublish = null,
+            Func<bool>? shouldStopBeforeFirstPublish = null,
+            Func<JsonElement, string?>? healthValidator = null,
+            bool requireExactHealthValidation = false)
+    {
+        if (items.Count == 0)
             return new DurableEnhancementBatchResponse([], 0, 0);
         if (_usingDefaultModalEnhancementSender)
         {
@@ -1041,7 +1175,7 @@ public partial class MainWindow
                     readiness.Payload,
                     readiness.Error);
                 return new DurableEnhancementBatchResponse(
-                    Enumerable.Repeat(rejected, bodies.Count).ToArray(),
+                    Enumerable.Repeat(rejected, items.Count).ToArray(),
                     0,
                     0);
             }
@@ -1049,6 +1183,18 @@ public partial class MainWindow
 
         EnhancementEnqueueProbe probe =
             await ProbeEnhancementEnqueueBackendAsync(token);
+        EnhancementApiResponse? validationFailure =
+            ValidateEnhancementEnqueueProbe(
+                probe,
+                healthValidator,
+                requireExactHealthValidation);
+        if (validationFailure is not null)
+        {
+            return new DurableEnhancementBatchResponse(
+                Enumerable.Repeat(validationFailure, items.Count).ToArray(),
+                0,
+                0);
+        }
         EnhancementApiResponse unsavedFailure = new(
             false,
             0,
@@ -1059,9 +1205,9 @@ public partial class MainWindow
             499,
             null,
             "Batch submission was stopped before the reservation was saved.");
-        var responses = Enumerable.Repeat(unsavedFailure, bodies.Count).ToArray();
+        var responses = Enumerable.Repeat(unsavedFailure, items.Count).ToArray();
         var publishedItems = new List<(int GlobalIndex, EnhancementEnqueueInboxItem Item)>(
-            bodies.Count);
+            items.Count);
         bool firstPublishReported = false;
         bool abortRemainingPublishes = false;
 
@@ -1070,7 +1216,7 @@ public partial class MainWindow
             if (!firstPublishReported
                 && shouldStopBeforeFirstPublish?.Invoke() == true)
             {
-                for (int index = start; index < bodies.Count; index++)
+                for (int index = start; index < items.Count; index++)
                     responses[index] = stoppedResponse;
                 abortRemainingPublishes = true;
                 return false;
@@ -1079,10 +1225,19 @@ public partial class MainWindow
             try
             {
                 EnhancementEnqueueInboxItem[] chunk = Enumerable.Range(0, count)
-                    .Select(localIndex => EnhancementEnqueueInboxStore.CreateItem(
-                        bodies[start + localIndex],
-                        queuePlacement,
-                        localIndex))
+                    .Select(localIndex =>
+                    {
+                        DurableEnhancementBatchItem batchItem =
+                            items[start + localIndex];
+                        return EnhancementEnqueueInboxStore.CreateItem(
+                            batchItem.Body,
+                            queuePlacement,
+                            localIndex,
+                            kind: batchItem.RetryJobId is null
+                                ? "create"
+                                : "retry",
+                            retryJobId: batchItem.RetryJobId);
+                    })
                     .ToArray();
                 _ = EnhancementEnqueueInboxStore.Publish(
                     ResolvedEnhancementJobsPath,
@@ -1130,10 +1285,10 @@ public partial class MainWindow
             }
         }
 
-        for (int start = 0; start < bodies.Count; start += EnhancementEnqueueInboxStore.MaximumItemsPerEnvelope)
+        for (int start = 0; start < items.Count; start += EnhancementEnqueueInboxStore.MaximumItemsPerEnvelope)
         {
             int count = EnhancementEnqueueProbePolicy.NextEnvelopeItemCount(
-                bodies.Count - start);
+                items.Count - start);
             if (!PublishRange(start, count))
                 break;
         }
@@ -1158,7 +1313,9 @@ public partial class MainWindow
                     HttpMethod.Post,
                     _usingDefaultModalEnhancementSender
                         ? EnhancementCompanionWakeRoute
-                        : "api/enhance/jobs",
+                        : item.RetryJobId is null
+                            ? "api/enhance/jobs"
+                            : $"api/enhance/jobs/{Uri.EscapeDataString(item.RetryJobId)}/retry",
                     token: token,
                     exactBodyJson: _usingDefaultModalEnhancementSender
                         ? null
@@ -1213,7 +1370,12 @@ public partial class MainWindow
                 response.Payload,
                 item.RequestId))
         {
-            return response;
+            return response.Payload is JsonElement payload
+                && payload.ValueKind == JsonValueKind.Object
+                && payload.TryGetProperty("job", out JsonElement job)
+                && job.ValueKind == JsonValueKind.Object
+                    ? response
+                    : SavedForDeliveryResponse(item);
         }
         if (response.InnerStatusAuthoritative
             && response.StatusCode is >= 400 and < 500
@@ -2010,7 +2172,7 @@ public partial class MainWindow
         ValidatedEnhancementCompanionRoot? companionRoot = ResolveEnhancementCompanionRoot();
         if (companionRoot is null)
         {
-            error = "Aibos could not find the local AI service beside this portable build. Open a build with the local AI service available, or set the compatibility variable AIBOS_H25_COMPANION_ROOT.";
+            error = "Aibos could not find the local AI companion. Set AIBOS_COMPANION_ROOT when it is stored separately from this build.";
             return false;
         }
 
@@ -2093,9 +2255,18 @@ public partial class MainWindow
 
     private static ValidatedEnhancementCompanionRoot? ResolveEnhancementCompanionRoot()
         => ResolveEnhancementCompanionRoot(
-            Environment.GetEnvironmentVariable("AIBOS_H25_COMPANION_ROOT"),
+            FirstConfiguredEnhancementCompanionRoot(
+                Environment.GetEnvironmentVariable("AIBOS_COMPANION_ROOT"),
+                Environment.GetEnvironmentVariable("AIBOS_H25_COMPANION_ROOT")),
             AppContext.BaseDirectory,
             UseLegacyNextCompanionLauncher());
+
+    private static string? FirstConfiguredEnhancementCompanionRoot(
+        string? configuredRoot,
+        string? compatibilityRoot)
+        => !string.IsNullOrWhiteSpace(configuredRoot)
+            ? configuredRoot
+            : compatibilityRoot;
 
     private static bool UseLegacyNextCompanionLauncher()
         => string.Equals(
@@ -2335,6 +2506,12 @@ public partial class MainWindow
     public string? EnhancementCompanionLaunchErrorForSmoke => _enhancementCompanionLaunchError;
     public static string? ResolveEnhancementCompanionRootForSmoke()
         => ResolveEnhancementCompanionRoot()?.RootPath;
+    public static string? SelectEnhancementCompanionRootSettingForSmoke(
+        string? configuredRoot,
+        string? compatibilityRoot)
+        => FirstConfiguredEnhancementCompanionRoot(
+            configuredRoot,
+            compatibilityRoot);
     public static string? ResolveEnhancementCompanionRootForSmoke(
         string? configuredRoot,
         string appBaseDirectory)
@@ -2399,10 +2576,9 @@ public partial class MainWindow
     public void EnableEnhancementCompanionAutoStartProbeForSmoke(
         Func<Uri, (bool Started, string Error)> starter)
     {
-        _usingDefaultModalEnhancementSender = true;
+        // This helper observes launch attempts only. It must not replace a
+        // smoke-provided HTTP sender with the production authenticated path.
         _startEnhancementCompanionForSmoke = starter;
-        _enhancementCompanionAuthToken = EnhancementCompanionSmokeAuthToken;
-        _enhancementCompanionOwnershipVerified = false;
     }
 
     public IReadOnlyDictionary<string, object>
@@ -2696,6 +2872,34 @@ public partial class MainWindow
         DurableEnhancementBatchResponse response =
             await TrySendDurableEnhancementBatchAsync(bodies);
         return response.PublishedCount;
+    }
+    public static bool ReceiptOnlyDurableResponseIsPendingForSmoke()
+    {
+        EnhancementEnqueueInboxItem item =
+            EnhancementEnqueueInboxStore.CreateItem(
+                new { operation = "photoreal" },
+                "last",
+                0);
+        using JsonDocument document = JsonDocument.Parse(
+            JsonSerializer.Serialize(new
+            {
+                receipt = new
+                {
+                    idempotencyKey = item.RequestId,
+                    jobId = "already-consumed-job",
+                },
+            }));
+        EnhancementApiResponse response = new(
+            true,
+            200,
+            document.RootElement.Clone(),
+            "");
+        EnhancementApiResponse normalized =
+            NormalizeDurableEnqueueResponse(response, item);
+        return normalized.Ok
+            && normalized.SavedForDelivery
+            && normalized.StatusCode == 202
+            && string.IsNullOrWhiteSpace(normalized.Error);
     }
     public async Task<bool> EnsurePhotorealCompanionForExplicitActionForSmokeAsync()
     {

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-H3-STEPS-001",
+  "protocol": "aibos.enhancement-video-h3-steps/v1",
+  "extends": {
+    "contractId": "PV-ENHANCE-VIDEO-002",
+    "protocol": "aibos.enhancement-video/v2",
+    "compatibility": "legacy rows and requests without requested.steps remain 20 STEP"
+  },
+  "healthCapability": {
+    "field": "capabilities.videoH3StepsV1",
+    "requireExactBeforeDurablePublish": true,
+    "shape": {
+      "contractId": "PV-ENHANCE-VIDEO-H3-STEPS-001",
+      "protocol": "aibos.enhancement-video-h3-steps/v1",
+      "defaultSteps": 20,
+      "minimumSteps": 1,
+      "maximumSteps": 40
+    },
+    "oldCompanionBehavior": "reject locally with restart guidance and do not reserve or enqueue a job"
+  },
+  "request": {
+    "field": "video.requested.steps",
+    "requiredForNewWriter": true,
+    "minimum": 1,
+    "maximum": 40,
+    "defaultForLegacyRows": 20,
+    "nonIntegerOrOutOfRangeValues": "reject before durable reservation"
+  },
+  "runtime": {
+    "schedulerInput": "effective.steps",
+    "unchangedFields": [
+      "profileId",
+      "frameCount",
+      "playbackFps",
+      "canvasPolicy",
+      "sampler",
+      "scheduler",
+      "denoise",
+      "delivery"
+    ],
+    "performanceMeaning": "40 STEP runs approximately twice as many diffusion steps as 20 STEP; no quality or latency guarantee is implied"
+  }
+}

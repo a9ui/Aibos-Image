@@ -210,7 +210,31 @@ public partial class MainWindow
     private IReadOnlyList<Tile> ModalNavigationTiles()
         => ExternalFileDropSessionActive
             ? _externalFileDropCohort
-            : _tiles;
+            : _modalNavigationSnapshot.Length > 0
+                ? _modalNavigationSnapshot
+                : _tiles;
+
+    private bool TryResolveModalNavigationTile(Tile candidate, out Tile tile)
+    {
+        if (TryGetExternalFileDropSessionTile(candidate.Path, out tile))
+            return true;
+
+        string normalizedPath = NormalizeFavoritePath(candidate.Path);
+        if (_catalogTilesByFavoritePath.TryGetValue(
+                normalizedPath,
+                out List<Tile>? indexedTiles)
+            && indexedTiles.Count > 0)
+        {
+            tile = indexedTiles[0];
+            return true;
+        }
+
+        tile = _tiles.FirstOrDefault(item => string.Equals(
+            item.Path,
+            candidate.Path,
+            StringComparison.OrdinalIgnoreCase))!;
+        return tile is not null;
+    }
 
     private static int IndexOfTile(
         IReadOnlyList<Tile> tiles,
