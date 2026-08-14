@@ -1581,7 +1581,7 @@
                        ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True"
                        ScrollViewer.IsDeferredScrollingEnabled="True"
                        VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
-                       VirtualizingPanel.CacheLength="1,1" VirtualizingPanel.CacheLengthUnit="Page"
+                       VirtualizingPanel.CacheLength="0.25,0.25" VirtualizingPanel.CacheLengthUnit="Page"
                        ScrollViewer.ScrollChanged="EnhancementJobsList_ScrollChanged"
                        AutomationProperties.Name="AI enhancement job list">
                 <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
