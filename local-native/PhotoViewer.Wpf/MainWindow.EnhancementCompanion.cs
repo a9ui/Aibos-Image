@@ -72,6 +72,7 @@ public partial class MainWindow
             "aibos-companion-capability-dpapi/v1"));
 
     private readonly SemaphoreSlim _enhancementCompanionLaunchGate = new(1, 1);
+    private readonly SemaphoreSlim _enhancementCompanionPassiveProbeGate = new(1, 1);
     private readonly CancellationTokenSource _enhancementCompanionLifetimeCts = new();
     private Process? _ownedEnhancementCompanion;
     private string? _enhancementCompanionLaunchError;
@@ -294,6 +295,133 @@ public partial class MainWindow
                 elapsedMilliseconds,
                 response.StatusCode,
                 ClassifyEnhancementCompanionStartupError(response.Error));
+        }
+    }
+
+    private async Task<EnhancementApiResponse> SendPassiveEnhancementReadAsync(
+        string relativePath,
+        CancellationToken token = default,
+        int? timeoutMilliseconds = null,
+        int? maxResponseBytes = null,
+        string? timeoutError = null)
+    {
+        if (!_usingDefaultModalEnhancementSender)
+        {
+            return await SendEnhancementApiAsync(
+                HttpMethod.Get,
+                relativePath,
+                token: token,
+                timeoutMilliseconds: timeoutMilliseconds,
+                maxResponseBytes: maxResponseBytes,
+                timeoutError: timeoutError);
+        }
+
+        EnhancementApiResponse? verificationFailure =
+            await EnsureEnhancementCompanionOwnershipForPassiveReadAsync(token);
+        if (verificationFailure is not null)
+            return verificationFailure;
+
+        EnhancementApiResponse response = await SendEnhancementApiAsync(
+            HttpMethod.Get,
+            relativePath,
+            token: token,
+            timeoutMilliseconds: timeoutMilliseconds,
+            maxResponseBytes: maxResponseBytes,
+            timeoutError: timeoutError);
+        if (!ShouldReverifyEnhancementCompanionAfterPassiveRead(response))
+            return response;
+
+        verificationFailure =
+            await EnsureEnhancementCompanionOwnershipForPassiveReadAsync(token);
+        if (verificationFailure is not null)
+            return verificationFailure;
+
+        return await SendEnhancementApiAsync(
+            HttpMethod.Get,
+            relativePath,
+            token: token,
+            timeoutMilliseconds: timeoutMilliseconds,
+            maxResponseBytes: maxResponseBytes,
+            timeoutError: timeoutError);
+    }
+
+    private async Task<EnhancementApiResponse?>
+        EnsureEnhancementCompanionOwnershipForPassiveReadAsync(
+            CancellationToken token)
+    {
+        if (_enhancementCompanionOwnershipVerified)
+            return null;
+
+        bool gateEntered = false;
+        try
+        {
+            await _enhancementCompanionPassiveProbeGate.WaitAsync(token);
+            gateEntered = true;
+            if (_enhancementCompanionOwnershipVerified)
+                return null;
+            if (!TryGetOrCreateEnhancementCompanionAuthToken(
+                    out string authToken,
+                    out string authError))
+            {
+                return new EnhancementApiResponse(false, 0, null, authError);
+            }
+
+            EnhancementCompanionOwnershipProbe ownership =
+                await ProbeEnhancementCompanionOwnershipAsync(authToken, token);
+            if (ownership.Verified)
+            {
+                _enhancementCompanionOwnershipVerified = true;
+                return null;
+            }
+
+            _enhancementCompanionOwnershipVerified = false;
+            return new EnhancementApiResponse(
+                false,
+                ownership.StatusCode,
+                ownership.Payload,
+                ownership.Error);
+        }
+        catch (OperationCanceledException)
+        {
+            return new EnhancementApiResponse(
+                false,
+                0,
+                null,
+                "The passive local AI status read was canceled.");
+        }
+        finally
+        {
+            if (gateEntered)
+                _enhancementCompanionPassiveProbeGate.Release();
+        }
+    }
+
+    private static bool ShouldReverifyEnhancementCompanionAfterPassiveRead(
+        EnhancementApiResponse response)
+        => !response.Ok
+            && !response.InnerStatusAuthoritative
+            && response.StatusCode is 0 or 401 or 403;
+
+    private void InvalidateEnhancementCompanionOwnershipIfCurrent(
+        string? requestInstanceId,
+        string? requestServerStartedAtUtc)
+    {
+        if (!_usingDefaultModalEnhancementSender
+            || string.IsNullOrWhiteSpace(requestInstanceId)
+            || string.IsNullOrWhiteSpace(requestServerStartedAtUtc))
+        {
+            return;
+        }
+        if (string.Equals(
+                requestInstanceId,
+                _verifiedEnhancementCompanionInstanceId,
+                StringComparison.Ordinal)
+            && string.Equals(
+                requestServerStartedAtUtc,
+                _verifiedEnhancementCompanionServerStartedAtUtc,
+                StringComparison.Ordinal))
+        {
+            _enhancementCompanionOwnershipVerified = false;
         }
     }
 
@@ -1191,23 +1319,16 @@ public partial class MainWindow
             IReadOnlyList<EnhancementWorkspaceJobView> jobs,
             CancellationToken token = default)
     {
-        Func<JsonElement, string?>[] validators = jobs
+        Func<JsonElement, string?>?[] validators = jobs
             .Select(CreateEnhancementRetryHealthValidator)
-            .Where(static validator => validator is not null)
-            .Cast<Func<JsonElement, string?>>()
             .ToArray();
-        Func<JsonElement, string?>? combinedValidator = validators.Length == 0
-            ? null
-            : payload => validators
-                .Select(validator => validator(payload))
-                .FirstOrDefault(static error => !string.IsNullOrWhiteSpace(error));
         return await TrySendDurableEnhancementBatchCoreAsync(
             jobs.Select(static job =>
                 new DurableEnhancementBatchItem(null, job.Id)).ToArray(),
             "last",
             token,
-            healthValidator: combinedValidator,
-            requireExactHealthValidation: combinedValidator is not null);
+            itemHealthValidators: validators,
+            requireExactItemHealthValidation: true);
     }
 
     private async Task<DurableEnhancementBatchResponse>
@@ -1218,10 +1339,19 @@ public partial class MainWindow
             Action? onFirstPublish = null,
             Func<bool>? shouldStopBeforeFirstPublish = null,
             Func<JsonElement, string?>? healthValidator = null,
-            bool requireExactHealthValidation = false)
+            bool requireExactHealthValidation = false,
+            IReadOnlyList<Func<JsonElement, string?>?>? itemHealthValidators = null,
+            bool requireExactItemHealthValidation = false)
     {
         if (items.Count == 0)
             return new DurableEnhancementBatchResponse([], 0, 0);
+        if (itemHealthValidators is not null
+            && itemHealthValidators.Count != items.Count)
+        {
+            throw new ArgumentException(
+                "Item health validators must match the batch item count.",
+                nameof(itemHealthValidators));
+        }
         if (_usingDefaultModalEnhancementSender)
         {
             EnhancementApiResponse readiness =
@@ -1266,8 +1396,23 @@ public partial class MainWindow
             null,
             "Batch submission was stopped before the reservation was saved.");
         var responses = Enumerable.Repeat(unsavedFailure, items.Count).ToArray();
+        var publishIndices = new List<int>(items.Count);
+        for (int index = 0; index < items.Count; index++)
+        {
+            EnhancementApiResponse? itemValidationFailure =
+                itemHealthValidators is null
+                    ? null
+                    : ValidateEnhancementEnqueueProbe(
+                        probe,
+                        itemHealthValidators[index],
+                        requireExactItemHealthValidation);
+            if (itemValidationFailure is null)
+                publishIndices.Add(index);
+            else
+                responses[index] = itemValidationFailure;
+        }
         var publishedItems = new List<(int GlobalIndex, EnhancementEnqueueInboxItem Item)>(
-            items.Count);
+            publishIndices.Count);
         bool firstPublishReported = false;
         bool abortRemainingPublishes = false;
 
@@ -1276,8 +1421,8 @@ public partial class MainWindow
             if (!firstPublishReported
                 && shouldStopBeforeFirstPublish?.Invoke() == true)
             {
-                for (int index = start; index < items.Count; index++)
-                    responses[index] = stoppedResponse;
+                for (int index = start; index < publishIndices.Count; index++)
+                    responses[publishIndices[index]] = stoppedResponse;
                 abortRemainingPublishes = true;
                 return false;
             }
@@ -1287,8 +1432,9 @@ public partial class MainWindow
                 EnhancementEnqueueInboxItem[] chunk = Enumerable.Range(0, count)
                     .Select(localIndex =>
                     {
+                        int globalIndex = publishIndices[start + localIndex];
                         DurableEnhancementBatchItem batchItem =
-                            items[start + localIndex];
+                            items[globalIndex];
                         return EnhancementEnqueueInboxStore.CreateItem(
                             batchItem.Body,
                             queuePlacement,
@@ -1304,7 +1450,7 @@ public partial class MainWindow
                     chunk);
                 for (int localIndex = 0; localIndex < chunk.Length; localIndex++)
                 {
-                    int globalIndex = start + localIndex;
+                    int globalIndex = publishIndices[start + localIndex];
                     responses[globalIndex] = SavedForDeliveryResponse(chunk[localIndex]);
                     publishedItems.Add((globalIndex, chunk[localIndex]));
                 }
@@ -1325,7 +1471,7 @@ public partial class MainWindow
             }
             catch (EnhancementEnqueuePayloadTooLargeException ex)
             {
-                responses[start] = new EnhancementApiResponse(
+                responses[publishIndices[start]] = new EnhancementApiResponse(
                     false,
                     413,
                     null,
@@ -1345,10 +1491,10 @@ public partial class MainWindow
             }
         }
 
-        for (int start = 0; start < items.Count; start += EnhancementEnqueueInboxStore.MaximumItemsPerEnvelope)
+        for (int start = 0; start < publishIndices.Count; start += EnhancementEnqueueInboxStore.MaximumItemsPerEnvelope)
         {
             int count = EnhancementEnqueueProbePolicy.NextEnvelopeItemCount(
-                items.Count - start);
+                publishIndices.Count - start);
             if (!PublishRange(start, count))
                 break;
         }
@@ -1831,7 +1977,10 @@ public partial class MainWindow
             _verifiedEnhancementCompanionServerStartedAtUtc = serverStartedAtRaw;
             return new(true, false, statusCode, payload, "");
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (
+            ex is HttpRequestException
+                or IOException
+                or InvalidOperationException)
         {
             return new(
                 false,
@@ -2946,6 +3095,36 @@ public partial class MainWindow
             "api/enhance/jobs",
             body);
         return response.Ok;
+    }
+    public async Task<bool> SendPassiveEnhancementReadForSmokeAsync()
+    {
+        EnhancementApiResponse response = await SendPassiveEnhancementReadAsync(
+            "api/enhance/jobs");
+        return response.Ok;
+    }
+    public async Task<bool> MixedRetryCapabilityPartitionForSmokeAsync()
+    {
+        DurableEnhancementBatchResponse response =
+            await TrySendDurableEnhancementBatchCoreAsync(
+            [
+                new DurableEnhancementBatchItem(null, "capability-rejected-video-job"),
+                new DurableEnhancementBatchItem(null, "capability-accepted-image-job"),
+            ],
+            itemHealthValidators:
+            [
+                static _ => "Synthetic video capability is unavailable.",
+                null,
+            ],
+            requireExactItemHealthValidation: true);
+        return response.PublishedCount == 1
+            && response.Responses.Length == 2
+            && response.Responses[0] is
+            {
+                Ok: false,
+                StatusCode: 426,
+                SavedForDelivery: false,
+            }
+            && response.Responses[1].Ok;
     }
     public async Task<int> SendEnhancementBatchForSmokeAsync(
         IReadOnlyList<object?> bodies)
