@@ -1,7 +1,8 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotnetPath = '',
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$NoRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,7 +45,17 @@ try {
     }
     else {
         $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-        & $DotnetPath build $project -c $Configuration --nologo -v:minimal "-p:OutputPath=$buildOutput"
+        $buildArguments = @(
+            'build',
+            $project,
+            '-c',
+            $Configuration,
+            '--nologo',
+            '-v:minimal',
+            "-p:OutputPath=$buildOutput"
+        )
+        if ($NoRestore) { $buildArguments += '--no-restore' }
+        & $DotnetPath @buildArguments
         Assert-True ($LASTEXITCODE -eq 0) "WPF build failed with exit code $LASTEXITCODE."
         $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     }

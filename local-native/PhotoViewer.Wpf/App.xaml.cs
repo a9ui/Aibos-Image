@@ -1083,6 +1083,16 @@ public partial class App : Application
             return;
         }
 
+        int enhancementNotificationSmokeIdx =
+            Array.IndexOf(e.Args, "--enhancement-notification-smoke");
+        if (enhancementNotificationSmokeIdx >= 0
+            && enhancementNotificationSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureEnhancementNotificationSmoke(
+                e.Args[enhancementNotificationSmokeIdx + 1]);
+            return;
+        }
+
         int selectedBatchEnhancementSmokeIdx = Array.IndexOf(e.Args, "--selected-batch-enhancement-smoke");
         if (selectedBatchEnhancementSmokeIdx >= 0 && selectedBatchEnhancementSmokeIdx + 1 < e.Args.Length)
         {

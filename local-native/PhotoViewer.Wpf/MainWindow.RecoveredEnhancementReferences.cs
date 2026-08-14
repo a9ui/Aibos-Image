@@ -169,6 +169,8 @@ public partial class MainWindow
                 StringComparer.OrdinalIgnoreCase),
             new HashSet<string>(StringComparer.Ordinal),
             new HashSet<string>(StringComparer.Ordinal),
+            [],
+            [],
             0,
             candidateCount,
             0,
@@ -985,7 +987,8 @@ public partial class MainWindow
         EnhancedStateReadResult result = ReadEnhancedStateSnapshot(
             Path.GetFullPath(jobsPath),
             activeCatalogPaths,
-            catalogRevision);
+            catalogRevision,
+            new HashSet<string>(StringComparer.Ordinal));
         if (result.Snapshot is not EnhancedStateSnapshot snapshot)
             return new RecoveredEnhancementReferenceSmokeSnapshot(false, 0, 0, 0);
 
