@@ -1,7 +1,8 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotNetPath = 'dotnet',
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$NoRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,10 +66,20 @@ try {
     $dotNetExecutable = (Get-Command $DotNetPath -ErrorAction Stop).Source
     $dotNetRoot = Split-Path -Parent $dotNetExecutable
     if (-not $SkipBuild) {
-        & $dotNetExecutable build $project `
-            -c $Configuration `
-            --artifacts-path $buildRoot `
-            --nologo
+        $buildArguments = @('build', $project, '-c', $Configuration)
+        if ($NoRestore) {
+            $buildOutput = $buildRoot.TrimEnd('\', '/') `
+                + [IO.Path]::DirectorySeparatorChar
+            $buildArguments += @(
+                "-p:OutputPath=$buildOutput",
+                '--no-restore'
+            )
+        }
+        else {
+            $buildArguments += @('--artifacts-path', $buildRoot)
+        }
+        $buildArguments += '--nologo'
+        & $dotNetExecutable @buildArguments
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 

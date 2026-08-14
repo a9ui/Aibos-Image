@@ -729,6 +729,10 @@ or stores.
     both the original-snapshot Retry and current-settings actions; none of these
     actions mutates the source row. The latter requires the atomic enqueue-next
     capability and requests `queuePlacement: "next"`.
+    Once a Retry of a Failed row has a matching durable receipt, its original
+    failed history row is removed; Canceled source history remains visible.
+    A lost response or replay repeats that cleanup idempotently and never
+    removes the original before the replacement job is durably registered.
   - A waiting `comfyui-flux2-photoreal` row exposes `現在設定へ更新`.
     This explicit action atomically replaces its resolved Positive and Negative
     prompts, LoRA enabled state, strength, steps, CFG, work resolution, and
@@ -775,7 +779,9 @@ or stores.
     create this directory. A failed write or move is an explicit no-save error.
   - The API-only companion claims envelopes through `processing`, dispatches
     the fixed create or Retry route with the saved request ID as its idempotency
-    key, and deletes the envelope only after a matching durable receipt. A lost
+    key, and deletes the envelope only after a matching durable receipt. For a
+    Failed-row Retry, it also dismisses the original failed history after that
+    receipt and before envelope deletion. A lost
     response, timeout, 408, 425, 429, 5xx, job-store contention, restart, or
     WPF exit retains the reservation and retries it in FIFO order. Definitive
     4xx input failures move to `needs-action` without blocking later valid
