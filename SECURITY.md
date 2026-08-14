@@ -1,53 +1,40 @@
-# Security Policy
+# Security policy
 
-Aibos Image is a local-first native Windows application. Public source
-visibility does not make it a public service.
+Aibos Image is a local-first Windows application, not a public service.
 
-- Do not commit personal media, generated caches, durable-state files, logs,
-  credentials, API keys, cookies, private URLs, or machine-specific secrets.
-- Use synthetic temporary fixtures when reporting or testing a problem.
-- Preserve source images and durable state during normal viewing and testing.
-- Keep explicit source deletion on the Windows Recycle Bin path; do not add a
-  permanent-delete fallback.
+## Required boundaries
 
-Public branches and review material must also follow the repository's
-[publication boundary](docs/publication-boundary.md). A clean working tree is
-not sufficient when a branch still contains private ancestors or an
-unredacted local-development history.
+- Do not commit personal media, credentials, private URLs, machine-specific
+  paths, durable-state files, databases, caches, logs, or generated runtime
+  output. Use synthetic TEMP fixtures.
+- Normal viewing and tests preserve source images and durable state. Explicit
+  source deletion uses the Windows Recycle Bin and has no permanent-delete
+  fallback.
+- The optional Enhancement companion stays on `127.0.0.1`. Do not expose it
+  through a LAN listener, proxy, tunnel, hosted deployment, or the Internet.
+- Loopback is not identity. Authenticate the companion before sending sensitive
+  data, authenticate protected requests and responses, prevent replay, and fail
+  closed if ownership cannot be proved.
+- Treat paths, metadata, process data, API data, and durable files as untrusted.
+  Bound inputs and reject malformed or unsupported future state without
+  rewriting it.
+- Never reset, truncate, replace, merge, or migrate user state merely to recover
+  from a read or compatibility failure.
 
-Ordinary WPF viewing does not require a network service. The optional,
-dedicated H25 Enhancement API companion may start with Aibos so authenticated
-Jobs history is available. This launch is API-only and explicitly defers queue
-recovery, inbox draining, worker pumping, ComfyUI startup, and GPU work until
-an explicit AI action. It opens no Browser window and does not load the
-Browser Viewer or its gallery data. It must remain bound to `127.0.0.1`; do not
-expose it through a LAN listener, reverse proxy, tunnel, hosted deployment, or
-the Internet.
+Protocol details belong in the affected machine-readable contract, especially
+`contracts/enhancement-companion-auth-v2.json`, rather than being duplicated
+here.
 
-Loopback is not an ownership proof. WPF must authenticate the companion before
-sending a source identity, prompt, settings, credential, or job body, and the
-companion must authenticate every non-identity API request. An unknown process
-on the configured port fails closed before a durable reservation is written.
-After identity proof, request and response envelopes remain encrypted and bound
-to the verified process epoch so a replacement listener cannot read or forge
-API traffic. Durable enqueue wakes are bodyless and never resend the job body.
-The per-user capability is a CurrentUser DPAPI blob at rest; its directory and
-file must be non-reparse, owned by the current user, and protected so only that
-user and LOCAL SYSTEM have allow entries. Unknown existing state is preserved
-and rejected rather than repaired in place.
-
-The WPF and Browser applications will share a versioned durable-state contract.
-Malformed or unsupported future state must fail non-destructively. Never reset,
-truncate, replace, migrate, or merge a user's store merely to recover from a
-read or compatibility failure.
+Public branches and review material must follow
+[`docs/publication-boundary.md`](docs/publication-boundary.md). A clean working
+tree does not prove that branch history is safe to publish.
 
 ## Reporting a vulnerability
 
 Use **Security > Report a vulnerability** in this GitHub repository when the
-private form is available. If it is unavailable, do not disclose sensitive
-details publicly. Do not include credentials, private images, unredacted
-absolute paths, cache/state files, or other personal data in a public issue or
-pull request.
+private form is available. Otherwise, do not disclose sensitive details in a
+public issue.
 
-There are no published releases. Security fixes target the current active
-development revision.
+Do not include credentials, personal images, private paths, state or database
+files, logs, or exploit details that expose users. There are no published
+releases; fixes target the current development revision.

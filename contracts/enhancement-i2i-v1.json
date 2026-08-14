@@ -121,46 +121,27 @@
     "pixelIdenticalFaceGuarantee": "the deterministic composite restores the protected face core and every pixel outside the editable hair mask from the exact selected source before output encoding"
   },
   "executionV1": {
-    "modelFamily": "FLUX.2 Klein reference editing",
-    "installedModel": "flux-2-klein-9b-Q4_K_M.gguf",
-    "referenceConditioning": "ReferenceLatent",
-    "modelPasses": 1,
-    "internalStages": [
-      "resolve and revalidate the exact selected source",
-      "detect one primary face and person",
-      "derive a hair mask with SAM 3.1 text segmentation",
-      "derive the protected face core with MediaPipe face detection",
-      "run one FLUX.2 reference edit candidate",
-      "composite only the editable hair mask with bounded feathering onto the exact source",
-      "verify protected and out-of-mask pixels before publishing one output"
-    ],
-    "singleDurableQueue": true,
-    "singleWorker": true,
-    "parallelInference": false,
-    "samAndFluxSimultaneouslyResident": false,
-    "manualMaskRequired": false,
-    "automaticHairMaskRequired": true,
-    "automaticFaceDetectorRequired": true,
-    "failClosed": "no output is published when a single primary subject, hair mask, protected face core, exact source, or composite invariant cannot be established",
-    "comparisonLora": "off"
+    "source": "resolve and revalidate the exact selected source before processing",
+    "selection": "derive the target and protected region automatically; v1 accepts no manual mask",
+    "queue": "run through the single durable Enhancement queue",
+    "publication": "publish one managed output only after protected and out-of-target regions pass validation",
+    "failClosed": "publish no output when the target, protected region, exact source, or composite invariant cannot be established"
   },
   "capabilityV1": {
     "healthPath": "capabilities.i2i",
-    "shape": {
-      "contractId": "PV-ENHANCE-I2I-001",
-      "operation": "i2i",
-      "readerReady": true,
-      "writerEnabled": false,
-      "backendConfigured": false,
-      "ready": false,
-      "supportedTargets": [
-        "hair-color"
-      ],
-      "backendId": "comfyui-flux2-i2i",
-      "workflowRevision": "i2i-flux2-klein9b-sam31-v1",
-      "maskRevision": "sam31-hair-mediapipe-face-v1",
-      "issueCode": "WORKFLOW_UNVERIFIED"
-    },
+    "requiredFields": [
+      "contractId",
+      "operation",
+      "readerReady",
+      "writerEnabled",
+      "backendConfigured",
+      "ready",
+      "supportedTargets",
+      "backendId",
+      "workflowRevision",
+      "maskRevision",
+      "issueCode"
+    ],
     "enqueueGate": "POST operation=i2i requires readerReady, writerEnabled, backendConfigured, and ready to all be exactly true and target to be listed in supportedTargets",
     "notReady": "validate the request and source envelope, then return 503 I2I_BACKEND_NOT_READY without writing a job or waking the queue",
     "passiveRead": "health, Jobs readers, and version readers never load models or start the worker"
@@ -172,15 +153,8 @@
     "passiveUi": "opening menus, boards, source selectors, Jobs, or versions never starts the companion or enqueues work"
   },
   "readerFirst": {
-    "canonicalAuthority": "a9ui/Aibos-Image",
-    "wpfWriterEnabled": false,
-    "h25WriterEnabled": false,
-    "requirements": [
-      "Aibos recognizes exact valid i2i rows as managed image versions and keeps malformed rows reader-only",
-      "H25 vendors this exact fixture revision and keeps its writer capability disabled until both readers pass",
-      "both exact readers pass before H25 may emit operation=i2i",
-      "rollback keeps i2i-capable readers after any i2i row is written"
-    ]
+    "writerRule": "enable an i2i writer only after every active reader accepts i2i rows",
+    "rollback": "after an i2i row exists, retain an i2i-capable reader even if enqueue is disabled"
   },
   "displayV1": {
     "productLabel": "AI編集",

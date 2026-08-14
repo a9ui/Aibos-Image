@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-002-HEALTH-FIXTURES",
+  "forContractId": "PV-ENHANCE-VIDEO-002",
+  "readyShape": {
+    "contractId": "PV-ENHANCE-VIDEO-002",
+    "protocol": "aibos.enhancement-video/v2",
+    "readerReady": true,
+    "writerEnabled": true,
+    "backendConfigured": true,
+    "runtimeSealVerified": true,
+    "runtimeManifestVerified": true,
+    "licenseAccepted": true,
+    "modelsVerified": true,
+    "workflowConfigured": true,
+    "gpuCanaryVerified": true,
+    "ready": true,
+    "state": "ready",
+    "reasonCode": null,
+    "presetId": "minimax-h3-i2v-preview-v1",
+    "backendId": "minimax-h3-local-v1",
+    "workflowRevision": "minimax-h3-comfy-15-node-v1",
+    "runtimeMode": "on-demand",
+    "profile": {
+      "canvasPolicy": {
+        "kind": "source-aspect-aligned-v1",
+        "alignment": 32,
+        "minDimension": 256,
+        "maxDimension": 1344,
+        "maxPixelArea": 414720
+      },
+      "canary": {
+        "width": 864,
+        "height": 480
+      },
+      "frameCount": 124,
+      "playbackFps": 24,
+      "steps": 20,
+      "audio": true
+    }
+  },
+  "notReadyShape": {
+    "contractId": "PV-ENHANCE-VIDEO-002",
+    "protocol": "aibos.enhancement-video/v2",
+    "readerReady": true,
+    "writerEnabled": false,
+    "backendConfigured": true,
+    "runtimeSealVerified": true,
+    "runtimeManifestVerified": true,
+    "licenseAccepted": true,
+    "modelsVerified": true,
+    "workflowConfigured": true,
+    "gpuCanaryVerified": true,
+    "ready": false,
+    "state": "disabled",
+    "reasonCode": "MINIMAX_H3_WRITER_DISABLED",
+    "presetId": "minimax-h3-i2v-preview-v1",
+    "backendId": "minimax-h3-local-v1",
+    "workflowRevision": "minimax-h3-comfy-15-node-v1",
+    "runtimeMode": "on-demand",
+    "profile": {
+      "canvasPolicy": {
+        "kind": "source-aspect-aligned-v1",
+        "alignment": 32,
+        "minDimension": 256,
+        "maxDimension": 1344,
+        "maxPixelArea": 414720
+      },
+      "canary": {
+        "width": 864,
+        "height": 480
+      },
+      "frameCount": 124,
+      "playbackFps": 24,
+      "steps": 20,
+      "audio": true
+    }
+  }
+}

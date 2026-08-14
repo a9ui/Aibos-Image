@@ -91,7 +91,7 @@
     "writerDeletesPublishedEnvelope": false
   },
   "consumer": {
-    "owner": "API-only H25 companion",
+    "owner": "API-only Enhancement companion",
     "order": "createdAt, then publish mtime, then file name",
     "claim": "atomic pending-to-processing move",
     "dispatch": "fixed route with exact bodyJson and Idempotency-Key=requestId",

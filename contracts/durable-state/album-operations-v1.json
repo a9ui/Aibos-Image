@@ -1,0 +1,163 @@
+{
+  "id": "PV-ALB-002",
+  "kind": "album-operations",
+  "cases": [
+    {
+      "id": "revision-idempotency-conflict-and-cleanup",
+      "initial": {
+        "mode": "json",
+        "document": {
+          "version": 1,
+          "revision": 5,
+          "updatedAtUtc": "2026-07-21T00:00:00.000Z",
+          "albums": [
+            {
+              "id": "album-1",
+              "name": "Before",
+              "pinned": false,
+              "coverMemberId": "member-one",
+              "createdAtUtc": "2026-07-21T00:00:00.000Z",
+              "updatedAtUtc": "2026-07-21T00:00:00.000Z",
+              "revision": 1,
+              "members": [
+                {
+                  "id": "member-one",
+                  "imagePath": "${ROOT}/one.png",
+                  "addedAtUtc": "2026-07-21T00:00:00.000Z"
+                },
+                {
+                  "id": "member-retained",
+                  "imagePath": "${ROOT}/retained.png",
+                  "addedAtUtc": "2026-07-21T00:00:00.000Z",
+                  "futureMember": {
+                    "keep": true
+                  }
+                }
+              ],
+              "futureAlbum": {
+                "keep": true
+              }
+            }
+          ],
+          "recentAlbumIds": [
+            "album-1"
+          ],
+          "futureRoot": {
+            "keep": true
+          }
+        }
+      },
+      "operations": [
+        {
+          "action": "add",
+          "albumId": "album-1",
+          "paths": [
+            "${ROOT}/retained.png"
+          ],
+          "expectedRevision": 5
+        },
+        {
+          "action": "add",
+          "albumId": "album-1",
+          "paths": [
+            "${ROOT}/added.png"
+          ],
+          "expectedRevision": 5
+        },
+        {
+          "action": "update",
+          "albumId": "album-1",
+          "name": "Must conflict",
+          "expectedRevision": 5
+        },
+        {
+          "action": "update",
+          "albumId": "album-1",
+          "name": "After",
+          "pinned": true,
+          "expectedRevision": 6
+        },
+        {
+          "action": "cleanupPaths",
+          "paths": [
+            "${ROOT}/one.png"
+          ],
+          "expectedRevision": 7
+        },
+        {
+          "action": "cleanupPaths",
+          "paths": [
+            "${ROOT}/one.png"
+          ],
+          "expectedRevision": 8
+        }
+      ],
+      "expected": {
+        "initialSupported": true,
+        "initialExists": true,
+        "initialMalformed": false,
+        "initialFutureVersion": false,
+        "initialRevision": 5,
+        "initialAlbumCount": 1,
+        "statuses": [
+          "Succeeded",
+          "Succeeded",
+          "Conflict",
+          "Succeeded",
+          "Succeeded",
+          "Succeeded"
+        ],
+        "changed": [
+          false,
+          true,
+          false,
+          true,
+          true,
+          false
+        ],
+        "revisions": [
+          5,
+          6,
+          6,
+          7,
+          8,
+          8
+        ],
+        "finalRevision": 8,
+        "finalAlbumCount": 1,
+        "fileExists": true,
+        "bytesUnchangedAfterRead": true,
+        "bytesUnchangedAfterOperations": false,
+        "finalAlbum": {
+          "id": "album-1",
+          "name": "After",
+          "pinned": true,
+          "coverMemberId": null,
+          "revision": 4,
+          "memberPaths": [
+            "${ROOT}/retained.png",
+            "${ROOT}/added.png"
+          ]
+        },
+        "unknownRoot": {
+          "futureRoot": {
+            "keep": true
+          }
+        },
+        "unknownAlbum": {
+          "futureAlbum": {
+            "keep": true
+          }
+        },
+        "unknownMember": {
+          "memberId": "member-retained",
+          "fields": {
+            "futureMember": {
+              "keep": true
+            }
+          }
+        }
+      }
+    }
+  ]
+}

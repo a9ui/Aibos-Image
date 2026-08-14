@@ -1,0 +1,150 @@
+{
+  "id": "PV-SH-002",
+  "kind": "search-history-document",
+  "cases": [
+    {
+      "id": "latest-mutation-preserves-unknown",
+      "initial": {
+        "mode": "json",
+        "document": {
+          "version": 1,
+          "entries": [
+            " keep ",
+            "KEEP",
+            "other"
+          ],
+          "updatedAtUtc": "2026-07-21T00:00:00.000Z",
+          "ownerMarker": {
+            "keep": true
+          }
+        }
+      },
+      "operations": [
+        {
+          "action": "commit",
+          "query": "new"
+        },
+        {
+          "action": "delete",
+          "query": "other"
+        }
+      ],
+      "expected": {
+        "initialSupported": true,
+        "initialMalformed": false,
+        "initialFutureVersion": false,
+        "finalSupported": true,
+        "finalMalformed": false,
+        "finalFutureVersion": false,
+        "fileExists": true,
+        "statuses": [
+          "Succeeded",
+          "Succeeded"
+        ],
+        "entries": [
+          "new",
+          "keep"
+        ],
+        "unknownRoot": {
+          "ownerMarker": {
+            "keep": true
+          }
+        },
+        "bytesUnchanged": false
+      }
+    },
+    {
+      "id": "malformed-protected",
+      "initial": {
+        "mode": "raw",
+        "text": "{\"version\":1,\"entries\":\"invalid\"}\n"
+      },
+      "operations": [
+        {
+          "action": "commit",
+          "query": "must not publish"
+        }
+      ],
+      "expected": {
+        "initialSupported": false,
+        "initialMalformed": true,
+        "initialFutureVersion": false,
+        "finalSupported": false,
+        "finalMalformed": true,
+        "finalFutureVersion": false,
+        "fileExists": true,
+        "statuses": [
+          "Protected"
+        ],
+        "entries": [],
+        "unknownRoot": {},
+        "bytesUnchanged": true
+      }
+    },
+    {
+      "id": "future-version-protected",
+      "initial": {
+        "mode": "json",
+        "document": {
+          "version": 2,
+          "entries": [],
+          "updatedAtUtc": "2026-07-21T00:00:00.000Z",
+          "futureRoot": {
+            "keep": true
+          }
+        }
+      },
+      "operations": [
+        {
+          "action": "clear"
+        }
+      ],
+      "expected": {
+        "initialSupported": false,
+        "initialMalformed": false,
+        "initialFutureVersion": true,
+        "finalSupported": false,
+        "finalMalformed": false,
+        "finalFutureVersion": true,
+        "fileExists": true,
+        "statuses": [
+          "Protected"
+        ],
+        "entries": [],
+        "unknownRoot": {},
+        "bytesUnchanged": true
+      }
+    },
+    {
+      "id": "fifty-entry-mru-bound",
+      "initial": {
+        "mode": "missing"
+      },
+      "generatedCommits": {
+        "prefix": "query-",
+        "count": 52,
+        "pad": 2
+      },
+      "expected": {
+        "initialSupported": true,
+        "initialMalformed": false,
+        "initialFutureVersion": false,
+        "finalSupported": true,
+        "finalMalformed": false,
+        "finalFutureVersion": false,
+        "fileExists": true,
+        "statuses": {
+          "all": "Succeeded",
+          "count": 52
+        },
+        "entryWindow": {
+          "count": 50,
+          "first": "query-51",
+          "last": "query-02"
+        },
+        "unknownRoot": {},
+        "bytesUnchanged": false
+      }
+    }
+  ]
+}

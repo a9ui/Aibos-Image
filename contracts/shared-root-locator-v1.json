@@ -3,7 +3,6 @@
   "contractId": "PV-ROOT-001",
   "protocol": "aibos.shared-root-locator/v1",
   "activation": "reader-only",
-  "wpfProductionRouting": "process-lifetime-reader-lease-candidate",
   "environmentVariable": "AIBOS_SHARED_ROOT_LOCATOR_PATH",
   "defaultLocator": {
     "specialFolder": "LocalApplicationData",

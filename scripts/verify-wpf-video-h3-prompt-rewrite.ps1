@@ -6,8 +6,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'lib\ContractBundles.ps1')
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$contractPath = Join-Path $repoRoot 'contracts\enhancement-video-v2.json'
 $xamlPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.xaml'
 $implementationPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoPromptRewrite.cs'
 $jaResourcePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\Localization\StringResources.ja.xaml'
@@ -42,8 +42,8 @@ $environmentPaths = [ordered]@{
 
 try {
     New-Item -ItemType Directory -Path $runRoot, $storesRoot -Force | Out-Null
-    Copy-Item -LiteralPath $contractPath -Destination $contractFixturePath
-    $contract = Get-Content -Raw -Encoding UTF8 -LiteralPath $contractFixturePath | ConvertFrom-Json
+    $contract = Get-AibosVideoV2Bundle $repoRoot
+    Write-AibosJsonFile $contractFixturePath $contract
     $rewriteContract = $contract.promptRewriteProtocol
     if ($rewriteContract.schemaVersion -ne 1 `
         -or $rewriteContract.contractId -ne 'PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001' `

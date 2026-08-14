@@ -1,0 +1,453 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-002-READER-FIXTURES",
+  "forContractId": "PV-ENHANCE-VIDEO-002",
+  "readerFixture": {
+    "syntheticSourcePngBase64": "iVBORw0KGgoAAAANSUhEUgAABkAAAAOEAQMAAADDg2/hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAGUExURQAAAP///6XZn90AAAAJcEhZcwAADsMAAA7DAcdvqGQAAADGSURBVHja7cGBAAAAAMOg+VNf4QBVAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPAawsIAARQ5jy0AAAAASUVORK5CYII=",
+    "syntheticSourceByteLength": 323,
+    "syntheticSourceWidth": 1600,
+    "syntheticSourceHeight": 900,
+    "syntheticSourceSha256": "9be09b982e5cb105dd5e604e026cfe1a4d06dd156edc03ced6b8b5b2f052b0ea",
+    "stableSnapshotHash": "recursively sort object keys with ordinal string comparison, serialize compact JSON, SHA-256 UTF-8 bytes, and take the first 12 lowercase hex characters",
+    "stableSnapshotHashVectors": [
+      {
+        "id": "ascii-prompt",
+        "prompt": "A gentle head turn in dawn light.",
+        "seed": 168866841,
+        "effectiveWidth": 864,
+        "effectiveHeight": 480,
+        "expectedPresetHash": "3ce3c192fdba"
+      },
+      {
+        "id": "utf8-japanese-prompt",
+        "prompt": "夜明けの光でゆっくり振り向く。",
+        "seed": 168866841,
+        "effectiveWidth": 864,
+        "effectiveHeight": 480,
+        "expectedPresetHash": "90dd9033b37c"
+      },
+      {
+        "id": "portrait-source-aspect",
+        "prompt": "subtle forest motion",
+        "seed": 42,
+        "sourceWidth": 1240,
+        "sourceHeight": 1848,
+        "effectiveWidth": 512,
+        "effectiveHeight": 768,
+        "expectedPresetHash": "c05870432635"
+      }
+    ],
+    "canvasPolicyVectors": [
+      {
+        "sourceWidth": 1600,
+        "sourceHeight": 900,
+        "effectiveWidth": 864,
+        "effectiveHeight": 480
+      },
+      {
+        "sourceWidth": 1240,
+        "sourceHeight": 1848,
+        "effectiveWidth": 512,
+        "effectiveHeight": 768
+      },
+      {
+        "sourceWidth": 1264,
+        "sourceHeight": 1680,
+        "effectiveWidth": 544,
+        "effectiveHeight": 736
+      },
+      {
+        "sourceWidth": 10000,
+        "sourceHeight": 1,
+        "effectiveWidth": 864,
+        "effectiveHeight": 480
+      },
+      {
+        "sourceWidth": 1,
+        "sourceHeight": 10000,
+        "effectiveWidth": 256,
+        "effectiveHeight": 1344
+      }
+    ],
+    "canvasPolicyMutationFixture": {
+      "id": "out-of-policy-h3-canvas",
+      "effectiveWidth": 512,
+      "effectiveHeight": 768,
+      "expectedPresetHash": "ab2e483748e9",
+      "expectedOperation": "video",
+      "expectedMutationSafe": false
+    },
+    "jobs": [
+      {
+        "id": "valid-h3-video",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "succeeded",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "sourceSignature": {
+          "size": 323,
+          "mtimeMs": 1786320000000
+        },
+        "sourceSha256": "9be09b982e5cb105dd5e604e026cfe1a4d06dd156edc03ced6b8b5b2f052b0ea",
+        "outputPath": "${OUTPUT_ROOT}/Videos/2026-08-11/valid-h3-video__source__9be09b982e5cb105__minimax-h3-i2v-preview-v1__3ce3c192fdba.mp4",
+        "presetId": "minimax-h3-i2v-preview-v1",
+        "adapterId": "minimax-h3-local-v1",
+        "presetHash": "3ce3c192fdba",
+        "preset": {
+          "id": "minimax-h3-i2v-preview-v1",
+          "label": "MiniMax H3 I2V Preview v1",
+          "modelFamily": "general",
+          "modelName": "MiniMax-H3",
+          "scale": 1,
+          "outputFormat": "png",
+          "denoise": 0,
+          "sharpen": 0,
+          "detail": 0,
+          "smoothness": 0,
+          "colorBrightness": 0,
+          "colorContrast": 0,
+          "colorSaturation": 0,
+          "options": {
+            "backendId": "minimax-h3-local-v1",
+            "container": "mp4",
+            "codec": "h264",
+            "audioCodec": "aac",
+            "pixelFormat": "yuv420p"
+          }
+        },
+        "progress": 100,
+        "createdAt": "2026-08-10T00:00:00.000Z",
+        "updatedAt": "2026-08-10T00:09:06.551Z",
+        "video": {
+          "schemaVersion": 2,
+          "workflowRevision": "minimax-h3-comfy-15-node-v1",
+          "presetId": "minimax-h3-i2v-preview-v1",
+          "backendId": "minimax-h3-local-v1",
+          "modelName": "MiniMax-H3",
+          "model": {
+            "repository": "Comfy-Org/MiniMax-H3",
+            "revision": "014cd40f7e177756c6b2473c0d93b1c89a790dd2",
+            "diffusion": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "textEncoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "videoVae": "minimax_h3_video_vae_fp16.safetensors",
+            "audioVae": "minimax_h3_audio_vae_fp32.safetensors"
+          },
+          "requested": {
+            "prompt": "A gentle head turn in dawn light."
+          },
+          "effective": {
+            "width": 864,
+            "height": 480,
+            "frameCount": 124,
+            "playbackFps": 24,
+            "steps": 20,
+            "sampler": "res_multistep",
+            "scheduler": "simple",
+            "denoise": 1,
+            "positivePrompt": "A gentle head turn in dawn light."
+          },
+          "delivery": {
+            "frameCount": 124,
+            "targetFps": 24,
+            "durationSeconds": 5.166666666666667,
+            "pixelFormat": "yuv420p",
+            "videoCodec": "h264",
+            "audioCodec": "aac",
+            "audio": true
+          },
+          "seed": 168866841,
+          "codec": "h264",
+          "container": "mp4",
+          "bitDepth": 8
+        }
+      },
+      {
+        "id": "malformed-h3-audio",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "succeeded",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "sourceSignature": {
+          "size": 323,
+          "mtimeMs": 1786320000000
+        },
+        "sourceSha256": "9be09b982e5cb105dd5e604e026cfe1a4d06dd156edc03ced6b8b5b2f052b0ea",
+        "outputPath": "${OUTPUT_ROOT}/Videos/malformed-h3-audio__source__9be09b982e5cb105__minimax-h3-i2v-preview-v1__87fe9f03e840.mp4",
+        "presetId": "minimax-h3-i2v-preview-v1",
+        "adapterId": "minimax-h3-local-v1",
+        "presetHash": "87fe9f03e840",
+        "preset": {
+          "id": "minimax-h3-i2v-preview-v1",
+          "label": "MiniMax H3 I2V Preview v1",
+          "modelFamily": "general",
+          "modelName": "MiniMax-H3",
+          "scale": 1,
+          "outputFormat": "png",
+          "denoise": 0,
+          "sharpen": 0,
+          "detail": 0,
+          "smoothness": 0,
+          "colorBrightness": 0,
+          "colorContrast": 0,
+          "colorSaturation": 0,
+          "options": {
+            "backendId": "minimax-h3-local-v1",
+            "container": "mp4",
+            "codec": "h264",
+            "audioCodec": "aac",
+            "pixelFormat": "yuv420p"
+          }
+        },
+        "progress": 100,
+        "createdAt": "2026-08-10T00:00:00.000Z",
+        "updatedAt": "2026-08-10T00:09:06.551Z",
+        "video": {
+          "schemaVersion": 2,
+          "workflowRevision": "minimax-h3-comfy-15-node-v1",
+          "presetId": "minimax-h3-i2v-preview-v1",
+          "backendId": "minimax-h3-local-v1",
+          "modelName": "MiniMax-H3",
+          "model": {
+            "repository": "Comfy-Org/MiniMax-H3",
+            "revision": "014cd40f7e177756c6b2473c0d93b1c89a790dd2",
+            "diffusion": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "textEncoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "videoVae": "minimax_h3_video_vae_fp16.safetensors",
+            "audioVae": "minimax_h3_audio_vae_fp32.safetensors"
+          },
+          "requested": {
+            "prompt": "fixture"
+          },
+          "effective": {
+            "width": 864,
+            "height": 480,
+            "frameCount": 124,
+            "playbackFps": 24,
+            "steps": 20,
+            "sampler": "res_multistep",
+            "scheduler": "simple",
+            "denoise": 1,
+            "positivePrompt": "fixture"
+          },
+          "delivery": {
+            "frameCount": 124,
+            "targetFps": 24,
+            "durationSeconds": 5.166666666666667,
+            "pixelFormat": "yuv420p",
+            "videoCodec": "h264",
+            "audioCodec": "aac",
+            "audio": false
+          },
+          "seed": 101,
+          "codec": "h264",
+          "container": "mp4",
+          "bitDepth": 8
+        }
+      },
+      {
+        "id": "malformed-h3-backend",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "failed",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "sourceSignature": {
+          "size": 323,
+          "mtimeMs": 1786320000000
+        },
+        "sourceSha256": "9be09b982e5cb105dd5e604e026cfe1a4d06dd156edc03ced6b8b5b2f052b0ea",
+        "presetId": "minimax-h3-i2v-preview-v1",
+        "adapterId": "minimax-h3-local-v1",
+        "presetHash": "59e8f256cbf8",
+        "preset": {
+          "id": "minimax-h3-i2v-preview-v1",
+          "label": "MiniMax H3 I2V Preview v1",
+          "modelFamily": "general",
+          "modelName": "MiniMax-H3",
+          "scale": 1,
+          "outputFormat": "png",
+          "denoise": 0,
+          "sharpen": 0,
+          "detail": 0,
+          "smoothness": 0,
+          "colorBrightness": 0,
+          "colorContrast": 0,
+          "colorSaturation": 0,
+          "options": {
+            "backendId": "minimax-h3-local-v1",
+            "container": "mp4",
+            "codec": "h264",
+            "audioCodec": "aac",
+            "pixelFormat": "yuv420p"
+          }
+        },
+        "progress": 0,
+        "createdAt": "2026-08-10T00:00:00.000Z",
+        "updatedAt": "2026-08-10T00:00:01.000Z",
+        "video": {
+          "schemaVersion": 2,
+          "workflowRevision": "minimax-h3-comfy-15-node-v1",
+          "presetId": "minimax-h3-i2v-preview-v1",
+          "backendId": "wan22-ti2v-5b-core-v1",
+          "modelName": "MiniMax-H3",
+          "model": {
+            "repository": "Comfy-Org/MiniMax-H3",
+            "revision": "014cd40f7e177756c6b2473c0d93b1c89a790dd2",
+            "diffusion": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "textEncoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "videoVae": "minimax_h3_video_vae_fp16.safetensors",
+            "audioVae": "minimax_h3_audio_vae_fp32.safetensors"
+          },
+          "requested": {
+            "prompt": "fixture"
+          },
+          "effective": {
+            "width": 864,
+            "height": 480,
+            "frameCount": 124,
+            "playbackFps": 24,
+            "steps": 20,
+            "sampler": "res_multistep",
+            "scheduler": "simple",
+            "denoise": 1,
+            "positivePrompt": "fixture"
+          },
+          "delivery": {
+            "frameCount": 124,
+            "targetFps": 24,
+            "durationSeconds": 5.166666666666667,
+            "pixelFormat": "yuv420p",
+            "videoCodec": "h264",
+            "audioCodec": "aac",
+            "audio": true
+          },
+          "seed": 102,
+          "codec": "h264",
+          "container": "mp4",
+          "bitDepth": 8
+        }
+      },
+      {
+        "id": "future-field-h3",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "queued",
+        "sourceId": "${ROOT}/source.png",
+        "sourcePath": "${ROOT}/source.png",
+        "sourceSignature": {
+          "size": 323,
+          "mtimeMs": 1786320000000
+        },
+        "sourceSha256": "9be09b982e5cb105dd5e604e026cfe1a4d06dd156edc03ced6b8b5b2f052b0ea",
+        "presetId": "minimax-h3-i2v-preview-v1",
+        "adapterId": "minimax-h3-local-v1",
+        "presetHash": "ba533dd583e8",
+        "preset": {
+          "id": "minimax-h3-i2v-preview-v1",
+          "label": "MiniMax H3 I2V Preview v1",
+          "modelFamily": "general",
+          "modelName": "MiniMax-H3",
+          "scale": 1,
+          "outputFormat": "png",
+          "denoise": 0,
+          "sharpen": 0,
+          "detail": 0,
+          "smoothness": 0,
+          "colorBrightness": 0,
+          "colorContrast": 0,
+          "colorSaturation": 0,
+          "options": {
+            "backendId": "minimax-h3-local-v1",
+            "container": "mp4",
+            "codec": "h264",
+            "audioCodec": "aac",
+            "pixelFormat": "yuv420p"
+          }
+        },
+        "progress": 0,
+        "createdAt": "2026-08-10T00:00:00.000Z",
+        "updatedAt": "2026-08-10T00:00:00.000Z",
+        "futureJobField": {
+          "keep": true
+        },
+        "video": {
+          "schemaVersion": 2,
+          "workflowRevision": "minimax-h3-comfy-15-node-v1",
+          "presetId": "minimax-h3-i2v-preview-v1",
+          "backendId": "minimax-h3-local-v1",
+          "modelName": "MiniMax-H3",
+          "model": {
+            "repository": "Comfy-Org/MiniMax-H3",
+            "revision": "014cd40f7e177756c6b2473c0d93b1c89a790dd2",
+            "diffusion": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "textEncoder": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "videoVae": "minimax_h3_video_vae_fp16.safetensors",
+            "audioVae": "minimax_h3_audio_vae_fp32.safetensors"
+          },
+          "requested": {
+            "prompt": "fixture"
+          },
+          "effective": {
+            "width": 864,
+            "height": 480,
+            "frameCount": 124,
+            "playbackFps": 24,
+            "steps": 20,
+            "sampler": "res_multistep",
+            "scheduler": "simple",
+            "denoise": 1,
+            "positivePrompt": "fixture",
+            "futureEffectiveField": {
+              "keep": true
+            }
+          },
+          "delivery": {
+            "frameCount": 124,
+            "targetFps": 24,
+            "durationSeconds": 5.166666666666667,
+            "pixelFormat": "yuv420p",
+            "videoCodec": "h264",
+            "audioCodec": "aac",
+            "audio": true
+          },
+          "seed": 103,
+          "codec": "h264",
+          "container": "mp4",
+          "bitDepth": 8
+        }
+      }
+    ],
+    "expectedOperations": {
+      "valid-h3-video": "video",
+      "malformed-h3-audio": "video",
+      "malformed-h3-backend": "video",
+      "future-field-h3": "video"
+    },
+    "expectedPlaybackMetadata": {
+      "valid-h3-video": {
+        "fps": 24,
+        "frameCount": 124,
+        "durationSeconds": 5.166666666666667,
+        "audio": true,
+        "source": "h3-delivery"
+      },
+      "malformed-h3-audio": "protected",
+      "malformed-h3-backend": "protected",
+      "future-field-h3": "protected"
+    },
+    "expectedMutationSafeIds": [
+      "valid-h3-video"
+    ],
+    "expectedProtectedIds": [
+      "malformed-h3-audio",
+      "malformed-h3-backend",
+      "future-field-h3"
+    ],
+    "expectedUnknownFieldPreservationIds": [
+      "future-field-h3"
+    ],
+    "expectedMutationRequestsDuringRead": 0
+  }
+}

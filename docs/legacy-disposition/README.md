@@ -1,5 +1,8 @@
 # Legacy Disposition Overlay
 
+Start with `summary-v1.json`. Read `overlay-v1.json` only when investigating a
+specific legacy asset; it is never required for ordinary product work.
+
 This directory contains the public-safe M2 disposition overlay for the
 immutable M1 legacy asset ledger.
 

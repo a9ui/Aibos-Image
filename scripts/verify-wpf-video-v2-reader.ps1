@@ -7,8 +7,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'lib\ContractBundles.ps1')
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$contract = Join-Path $repoRoot 'contracts\enhancement-video-v2.json'
 $mediaFixture = Join-Path $repoRoot (
     'local-native\PhotoViewer.Wpf\SmokeFixtures\' +
     'valid-h3-864x480-124f-h264-aac.mp4.b64')
@@ -17,6 +17,7 @@ $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot (
     'photoviewer-wpf-video-v2-reader-' + [guid]::NewGuid().ToString('N'))))
 $buildRoot = Join-Path $runRoot 'build'
+$contract = Join-Path $runRoot 'enhancement-video-v2.json'
 $resultPath = Join-Path $runRoot 'result.json'
 $process = $null
 $previousDotNetRoot = [Environment]::GetEnvironmentVariable('DOTNET_ROOT', 'Process')
@@ -25,16 +26,14 @@ $previousDotNetRootX64 = [Environment]::GetEnvironmentVariable('DOTNET_ROOT_X64'
 if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Verifier root must stay under TEMP.'
 }
-if (-not (Test-Path -LiteralPath $contract -PathType Leaf)) {
-    throw "MiniMax H3 video v2 contract was not found: $contract"
-}
 if (-not (Test-Path -LiteralPath $mediaFixture -PathType Leaf)) {
     throw "Synthetic H3 media fixture was not found: $mediaFixture"
 }
 
 try {
-    $readerContract = Get-Content -LiteralPath $contract -Raw -Encoding UTF8 |
-        ConvertFrom-Json
+    New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+    $readerContract = Get-AibosVideoV2Bundle $repoRoot
+    Write-AibosJsonFile $contract $readerContract
     $asciiVector = @($readerContract.readerFixture.stableSnapshotHashVectors |
         Where-Object { $_.id -eq 'ascii-prompt' })
     $japaneseVector = @($readerContract.readerFixture.stableSnapshotHashVectors |

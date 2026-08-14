@@ -56,9 +56,6 @@
     "sourceImagePathField": "forbidden"
   },
   "promptPolicyV1": {
-    "pathEnvironmentVariable": "AIBOS_I2I_PROMPT_POLICY_PATH",
-    "defaultIgnoredPath": "config/i2i-prompts.local.json",
-    "trackedExample": "no backend policy example is tracked in this WPF repository; local-native/PhotoViewer.Wpf/config/wpf-prompts.example.json documents the separate WPF-local policy schema with synthetic placeholders only",
     "schemaVersion": 1,
     "requiredTargets": [
       "outfit",
@@ -111,43 +108,32 @@
     "retry": "reuse the complete persisted preset, prompt, policy receipts, seed, and source provenance without loading the current prompt policy"
   },
   "executionV2": {
-    "modelFamily": "FLUX.2 Klein reference editing",
-    "installedModel": "flux-2-klein-9b-Q4_K_M.gguf",
-    "referenceConditioning": "ReferenceLatent",
-    "singleDurableQueue": true,
-    "singleWorker": true,
-    "parallelInference": false,
-    "manualMaskRequired": false,
-    "identityProtectionRequired": true,
-    "compositionProtectionRequired": true,
+    "source": "resolve and revalidate the exact selected source before processing",
+    "queue": "run through the single durable Enhancement queue",
+    "selection": "derive the target automatically; v2 accepts no manual mask",
+    "publication": "publish one managed output only after identity, composition, and target-specific invariants pass",
     "failClosed": "no output is published when the target-specific invariant or exact selected source cannot be established"
   },
   "capabilityV2": {
     "healthPath": "capabilities.i2iV2",
     "additiveTo": "capabilities.i2i remains the v1 hair-color capability",
-    "writerEnvironmentVariable": "PVU_I2I_V2_WRITER_ENABLED",
-    "shape": {
-      "contractId": "PV-ENHANCE-I2I-002",
-      "operation": "i2i",
-      "schemaVersion": 2,
-      "readerReady": true,
-      "writerEnabled": false,
-      "backendConfigured": false,
-      "promptPolicyConfigured": false,
-      "ready": false,
-      "supportedTargets": [
-        "outfit",
-        "expression",
-        "background",
-        "pose"
-      ],
-      "backendId": "comfyui-flux2-i2i-v2",
-      "workflowRevision": "i2i-flux2-klein9b-multitarget-v2",
-      "maskRevision": "sam31-mediapipe-target-v2",
-      "promptPolicyRevision": null,
-      "promptPolicySha256": null,
-      "issueCode": "WORKFLOW_UNVERIFIED"
-    },
+    "requiredFields": [
+      "contractId",
+      "operation",
+      "schemaVersion",
+      "readerReady",
+      "writerEnabled",
+      "backendConfigured",
+      "promptPolicyConfigured",
+      "ready",
+      "supportedTargets",
+      "backendId",
+      "workflowRevision",
+      "maskRevision",
+      "promptPolicyRevision",
+      "promptPolicySha256",
+      "issueCode"
+    ],
     "enqueueGate": "POST operation=i2i schema v2 requires readerReady, writerEnabled, backendConfigured, promptPolicyConfigured, and ready to all be exactly true and target to be listed in supportedTargets",
     "notReady": "validate request and source envelope, then return 503 I2I_BACKEND_NOT_READY without writing a job or waking the queue",
     "passiveRead": "health and Jobs readers never load models or start the worker"

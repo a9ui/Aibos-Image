@@ -7,8 +7,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'lib\ContractBundles.ps1')
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$contractPath = Join-Path $repoRoot 'contracts\enhancement-video-v2.json'
 $xamlPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.xaml'
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-video-v2-ui-' + [guid]::NewGuid().ToString('N'))))
@@ -40,8 +40,8 @@ $environmentPaths = [ordered]@{
 
 try {
     New-Item -ItemType Directory -Path $runRoot, $storesRoot -Force | Out-Null
-    Copy-Item -LiteralPath $contractPath -Destination $contractFixturePath
-    $contract = Get-Content -Raw -Encoding UTF8 -LiteralPath $contractPath | ConvertFrom-Json
+    $contract = Get-AibosVideoV2Bundle $repoRoot
+    Write-AibosJsonFile $contractFixturePath $contract
     if ($contract.contractId -ne 'PV-ENHANCE-VIDEO-002' `
         -or $contract.protocol -ne 'aibos.enhancement-video/v2' `
         -or $contract.passiveHealthGate.field -ne 'capabilities.videoV2' `

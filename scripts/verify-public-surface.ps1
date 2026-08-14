@@ -46,11 +46,14 @@ try {
         'docs/legacy-ledger/README.md',
         'docs/legacy-ledger/manifest-v3.json',
         'docs/legacy-ledger/summary-v3.json',
-        'contracts/parity-v1.json',
+        'contracts/index.json',
         'local-native/PhotoViewer.Wpf/PhotoViewer.Wpf.csproj',
         'start_aibos.bat',
         'start_wpf.bat',
         'scripts/verify-public-surface.ps1',
+        'scripts/verify-contract-index.ps1',
+        'scripts/verify-shared-state-contracts.ps1',
+        'scripts/lib/ContractBundles.ps1',
         'scripts/verify-legacy-asset-ledger.ps1',
         'scripts/build-legacy-asset-ledger.ps1',
         'scripts/capture-legacy-asset-ledger.ps1',
@@ -76,7 +79,7 @@ try {
         if ($path -in $forbiddenExact -or
             $path -match '^(src|e2e|config|docs/performance)/' -or
             [IO.Path]::GetExtension($path).ToLowerInvariant() -in @('.js', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts')) {
-            Add-Finding 'browser-runtime-surface' $path 0 'Aibos must not track Browser/Node runtime or test infrastructure.'
+            Add-Finding 'web-runtime-surface' $path 0 'The WPF repository must not track a web or Node.js runtime.'
         }
     }
 
@@ -171,7 +174,7 @@ try {
         mode = if ($FullTree) { 'full-tree' } else { 'public-surfaces' }
         filesChecked = @($paths).Count
         workflowFilesChecked = $workflowFiles.Count
-        browserRuntimeFiles = @($findings | Where-Object { $_.rule -eq 'browser-runtime-surface' }).Count
+        webRuntimeFiles = @($findings | Where-Object { $_.rule -eq 'web-runtime-surface' }).Count
         findings = @($findings)
         warnings = @($warnings)
     }
