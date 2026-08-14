@@ -24,6 +24,8 @@ public partial class MainWindow
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private const int EnhancementJobsPageSize = 100;
     private const int EnhancementTerminalHistoryBatchLimit = 1_000;
+    private static readonly TimeSpan EnhancementJobsThumbnailViewportDebounce =
+        TimeSpan.FromMilliseconds(140);
     private const string UnsupportedEnhancementOperation = "unsupported";
     private const string VideoPreservationPreamble =
         "Animate the supplied image as the exact first frame. "
@@ -52,6 +54,7 @@ public partial class MainWindow
     private int _enhancementWorkspaceThumbnailScrollCancellationCount;
     private int _enhancementWorkspaceScrollChangedCount;
     private int _enhancementWorkspaceThumbnailTimerRestartCount;
+    private long _enhancementWorkspaceLastThumbnailScrollTimestamp;
     private bool _enhancementWorkspaceRefreshPending;
     private bool _enhancementWorkspaceHealthPollPending;
     private long _enhancementWorkspaceRefreshGeneration;
@@ -1027,7 +1030,7 @@ public partial class MainWindow
         _enhancementWorkspaceThumbnailViewportTimer = new DispatcherTimer(
             DispatcherPriority.Background)
         {
-            Interval = TimeSpan.FromMilliseconds(140),
+            Interval = EnhancementJobsThumbnailViewportDebounce,
         };
         _enhancementWorkspaceThumbnailViewportTimer.Tick +=
             EnhancementWorkspaceThumbnailViewportTimer_Tick;
@@ -1119,7 +1122,7 @@ public partial class MainWindow
 
         _enhancementWorkspaceGeneration++;
         _enhancementWorkspacePollTimer.Stop();
-        _enhancementWorkspaceThumbnailViewportTimer.Stop();
+        StopEnhancementWorkspaceThumbnailViewportDebounce();
         _enhancementWorkspaceThumbnailViewportLoadPending = false;
         Volatile.Read(ref _enhancementWorkspaceThumbnailCts)?.Cancel();
         EnhancementJobsDialog.Visibility = Visibility.Collapsed;
@@ -2334,22 +2337,45 @@ public partial class MainWindow
         _enhancementWorkspaceScrollChangedCount++;
         CancellationTokenSource? activeLoad =
             Volatile.Read(ref _enhancementWorkspaceThumbnailCts);
-        if (activeLoad is not null)
+        if (activeLoad is not null && !activeLoad.IsCancellationRequested)
         {
             activeLoad.Cancel();
             _enhancementWorkspaceThumbnailScrollCancellationCount++;
         }
-        _enhancementWorkspaceThumbnailViewportTimer.Stop();
-        _enhancementWorkspaceThumbnailViewportTimer.Start();
-        _enhancementWorkspaceThumbnailTimerRestartCount++;
+        _enhancementWorkspaceLastThumbnailScrollTimestamp = Stopwatch.GetTimestamp();
+        if (!_enhancementWorkspaceThumbnailViewportTimer.IsEnabled)
+        {
+            _enhancementWorkspaceThumbnailViewportTimer.Start();
+            _enhancementWorkspaceThumbnailTimerRestartCount++;
+        }
     }
 
     private void EnhancementWorkspaceThumbnailViewportTimer_Tick(
         object? sender,
         EventArgs e)
     {
-        _enhancementWorkspaceThumbnailViewportTimer.Stop();
+        long lastScrollTimestamp = _enhancementWorkspaceLastThumbnailScrollTimestamp;
+        if (lastScrollTimestamp > 0)
+        {
+            TimeSpan quietDuration = Stopwatch.GetElapsedTime(lastScrollTimestamp);
+            TimeSpan remaining = EnhancementJobsThumbnailViewportDebounce - quietDuration;
+            if (remaining > TimeSpan.Zero)
+            {
+                _enhancementWorkspaceThumbnailViewportTimer.Interval = remaining;
+                return;
+            }
+        }
+
+        StopEnhancementWorkspaceThumbnailViewportDebounce();
         QueueEnhancementWorkspaceVisibleThumbnailLoad();
+    }
+
+    private void StopEnhancementWorkspaceThumbnailViewportDebounce()
+    {
+        _enhancementWorkspaceThumbnailViewportTimer.Stop();
+        _enhancementWorkspaceThumbnailViewportTimer.Interval =
+            EnhancementJobsThumbnailViewportDebounce;
+        _enhancementWorkspaceLastThumbnailScrollTimestamp = 0;
     }
 
     private void EnhancementJobsPreviousPage_Click(object sender, RoutedEventArgs e)
@@ -4600,7 +4626,7 @@ public partial class MainWindow
         int boundedJobCount = Math.Max(1, jobCount);
         int boundedStepCount = Math.Max(1, scrollStepCount);
         _enhancementWorkspacePollTimer.Stop();
-        _enhancementWorkspaceThumbnailViewportTimer.Stop();
+        StopEnhancementWorkspaceThumbnailViewportDebounce();
         Volatile.Read(ref _enhancementWorkspaceThumbnailCts)?.Cancel();
         _enhancementWorkspaceThumbnailCts = null;
         _suppressEnhancementWorkspaceThumbnailLoadsForSmoke = true;
@@ -4687,6 +4713,8 @@ public partial class MainWindow
         int scrollChangedBefore = _enhancementWorkspaceScrollChangedCount;
         int timerRestartBefore = _enhancementWorkspaceThumbnailTimerRestartCount;
         int cancellationBefore = _enhancementWorkspaceThumbnailScrollCancellationCount;
+        using var syntheticActiveThumbnailLoad = new CancellationTokenSource();
+        _enhancementWorkspaceThumbnailCts = syntheticActiveThumbnailLoad;
         int realizedPeak = FindVisualDescendants<ListBoxItem>(EnhancementJobsList).Count();
         var stepMilliseconds = new List<double>(boundedStepCount);
         for (int step = 0; step < boundedStepCount; step++)
@@ -4704,6 +4732,13 @@ public partial class MainWindow
                 realizedPeak,
                 FindVisualDescendants<ListBoxItem>(EnhancementJobsList).Count());
         }
+
+        await Task.Delay(EnhancementJobsThumbnailViewportDebounce + TimeSpan.FromMilliseconds(80));
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        Interlocked.CompareExchange(
+            ref _enhancementWorkspaceThumbnailCts,
+            null,
+            syntheticActiveThumbnailLoad);
 
         double[] orderedSteps = stepMilliseconds.Order().ToArray();
         int p95Index = Math.Clamp(
@@ -4731,6 +4766,7 @@ public partial class MainWindow
             _enhancementWorkspaceScrollChangedCount - scrollChangedBefore,
             _enhancementWorkspaceThumbnailTimerRestartCount - timerRestartBefore,
             _enhancementWorkspaceThumbnailScrollCancellationCount - cancellationBefore,
+            _enhancementWorkspaceThumbnailViewportTimer.IsEnabled,
             realizedPeak,
             _enhancementWorkspaceLastThumbnailBatchSize,
             viewer.ScrollableHeight);
@@ -5860,6 +5896,7 @@ public sealed record EnhancementJobsScrollPerformanceSmokeSnapshot(
     int ScrollChangedCount,
     int ThumbnailTimerRestartCount,
     int ThumbnailScrollCancellationCount,
+    bool ThumbnailDebouncePending,
     int RealizedContainerPeak,
     int ThumbnailBatchSize,
     double ScrollableHeight);

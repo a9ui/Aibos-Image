@@ -19112,6 +19112,9 @@ public partial class App : Application
                     && snapshot.PageCount == 100
                     && snapshot.ScrollableHeight > 0
                     && snapshot.ScrollChangedCount >= 40
+                    && snapshot.ThumbnailTimerRestartCount == 1
+                    && snapshot.ThumbnailScrollCancellationCount == 1
+                    && !snapshot.ThumbnailDebouncePending
                     && snapshot.RealizedContainerPeak > 0
                     && snapshot.RealizedContainerPeak <= 8
                     && snapshot.ThumbnailBatchSize == 0;
@@ -19131,6 +19134,7 @@ public partial class App : Application
                     snapshot.ScrollChangedCount,
                     snapshot.ThumbnailTimerRestartCount,
                     snapshot.ThumbnailScrollCancellationCount,
+                    snapshot.ThumbnailDebouncePending,
                     snapshot.RealizedContainerPeak,
                     snapshot.ThumbnailBatchSize,
                     snapshot.ScrollableHeight,
