@@ -680,6 +680,7 @@ public partial class MainWindow : Window
     {
         _tilesView = new SnapshotCollectionView<Tile>(_tiles);
         InitializeComponent();
+        InitializeEnhancementNotifications();
         string productVersionLabel = ResolveProductVersionLabel();
         HeaderProductVersionText.Text = productVersionLabel;
         Title = $"Aibos Image {productVersionLabel}";
@@ -825,6 +826,7 @@ public partial class MainWindow : Window
             _modalChromeTransientTimer.Stop();
             _modalEnhancementPollTimer.Stop();
             _activeEnhancementStateRefreshTimer.Stop();
+            StopEnhancementNotifications();
             _modalEnhancementGeneration++;
             _enhancementWorkspacePollTimer.Stop();
             _enhancementWorkspaceGeneration++;
@@ -1804,6 +1806,8 @@ public partial class MainWindow : Window
         Dictionary<string, ManagedEnhancementQueueActivity> CatalogQueueActivityByPath,
         HashSet<string> AmbiguousJobIds,
         HashSet<string> ActiveI2iSourceProducerJobIds,
+        List<EnhancementNotificationJobState> ActiveNotificationJobs,
+        List<EnhancementNotificationJobState> TerminalNotificationJobs,
         int JobsRead,
         int CandidateCount,
         int VideoCandidateCount,
@@ -4900,6 +4904,7 @@ public partial class MainWindow : Window
                         $"Enhancement SQLite job {id} has malformed reader payload JSON.",
                         ex);
                 }
+                JsonElement? operation = null;
                 using (payload)
                 {
                     JsonElement root = payload.RootElement;
@@ -4924,6 +4929,12 @@ public partial class MainWindow : Window
                         throw new InvalidDataException(
                             $"Enhancement SQLite job {id} reader payload does not match its row.");
                     }
+                    if (root.TryGetProperty(
+                            "operation",
+                            out JsonElement payloadOperation))
+                    {
+                        operation = payloadOperation.Clone();
+                    }
 
                     if (status is "queued" or "running" or "succeeded")
                     {
@@ -4940,6 +4951,11 @@ public partial class MainWindow : Window
                     writer.WriteNull("status");
                 else
                     writer.WriteString("status", status);
+                if (operation is JsonElement terminalOperation)
+                {
+                    writer.WritePropertyName("operation");
+                    terminalOperation.WriteTo(writer);
+                }
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
@@ -4973,7 +4989,8 @@ public partial class MainWindow : Window
         EnhancedStateReadResult result = ReadEnhancedStateSnapshot(
             ResolvedEnhancementJobsPath,
             activeCatalogPaths,
-            recoveryCatalogRevision);
+            recoveryCatalogRevision,
+            SnapshotTrackedEnhancementNotificationJobIds());
         if (result.Snapshot is null)
         {
             _enhancementReadOk = false;
@@ -4988,7 +5005,8 @@ public partial class MainWindow : Window
     private EnhancedStateReadResult ReadEnhancedStateSnapshot(
         string path,
         IReadOnlyList<string>? activeCatalogPaths,
-        long catalogRevision)
+        long catalogRevision,
+        IReadOnlySet<string> terminalNotificationJobIds)
     {
         var jobsInfo = new FileInfo(path);
         if (!jobsInfo.Exists)
@@ -5022,6 +5040,8 @@ public partial class MainWindow : Window
         var pendingI2iJobs = new List<JsonElement>();
         var activeI2iSourceProducerJobIds = new HashSet<string>(
             StringComparer.Ordinal);
+        var activeNotificationJobs = new List<EnhancementNotificationJobState>();
+        var terminalNotificationJobs = new List<EnhancementNotificationJobState>();
         var photorealVideoSources =
             new Dictionary<string, ManagedPhotorealVideoSource>(
                 StringComparer.Ordinal);
@@ -5062,9 +5082,20 @@ public partial class MainWindow : Window
                 if (!TryGetStringProperty(job, "status", out string? status))
                     continue;
                 string operation = ReadEnhancementOperation(job);
+                TryGetStringProperty(job, "id", out string? notificationJobId);
                 if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(status, "running", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (!string.IsNullOrWhiteSpace(notificationJobId)
+                        && IsEnhancementNotificationOperation(operation)
+                        && activeNotificationJobs.Count
+                            < MaxTrackedEnhancementNotificationJobs)
+                    {
+                        activeNotificationJobs.Add(new(
+                            notificationJobId!,
+                            operation,
+                            status!.ToLowerInvariant()));
+                    }
                     TryRecordActiveEnhancementQueueActivity(
                         job,
                         operation,
@@ -5078,6 +5109,21 @@ public partial class MainWindow : Window
                         activeI2iSourceProducerJobIds.Add(activeProducerJobId);
                     }
                     continue;
+                }
+                if (!string.IsNullOrWhiteSpace(notificationJobId)
+                    && terminalNotificationJobIds.Contains(notificationJobId!)
+                    && status is not null
+                    && (status.Equals("succeeded", StringComparison.OrdinalIgnoreCase)
+                        || status.Equals("failed", StringComparison.OrdinalIgnoreCase)
+                        || status.Equals("canceled", StringComparison.OrdinalIgnoreCase)
+                        || status.Equals("deleted", StringComparison.OrdinalIgnoreCase))
+                    && terminalNotificationJobs.Count
+                        < MaxTrackedEnhancementNotificationJobs)
+                {
+                    terminalNotificationJobs.Add(new(
+                        notificationJobId!,
+                        operation,
+                        status.ToLowerInvariant()));
                 }
                 if (!string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
                     continue;
@@ -5254,6 +5300,8 @@ public partial class MainWindow : Window
                     nextCatalogQueueActivityByPath,
                     ambiguousJobIds,
                     activeI2iSourceProducerJobIds,
+                    activeNotificationJobs,
+                    terminalNotificationJobs,
                     nextJobsRead,
                     nextCandidateCount,
                     nextVideoCandidateCount,
@@ -5382,6 +5430,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        TrackActiveEnhancementNotificationJob(job);
         TryRecordActiveEnhancementQueueActivity(
             job,
             ReadEnhancementOperation(job),
@@ -5403,6 +5452,9 @@ public partial class MainWindow : Window
 
     private void ApplyEnhancedStateSnapshot(EnhancedStateSnapshot snapshot)
     {
+        ApplyEnhancementNotificationSnapshot(
+            snapshot.ActiveNotificationJobs,
+            snapshot.TerminalNotificationJobs);
         _enhancedOutputs.Clear();
         foreach ((string source, ManagedEnhancedOutput output) in snapshot.Outputs)
             _enhancedOutputs[source] = output;
@@ -5555,10 +5607,13 @@ public partial class MainWindow : Window
                 NeedsRecoveredEnhancementCatalogSnapshot(path, catalogRevision)
                     ? SnapshotActiveEnhancementCatalogPaths()
                     : null;
+            IReadOnlySet<string> terminalNotificationJobIds =
+                SnapshotTrackedEnhancementNotificationJobIds();
             _enhancedStateRefreshTask = RefreshEnhancedStateInBackgroundAsync(
                 path,
                 activeCatalogPaths,
                 catalogRevision,
+                terminalNotificationJobIds,
                 generation,
                 cts.Token);
         }
@@ -5586,6 +5641,7 @@ public partial class MainWindow : Window
         string path,
         IReadOnlyList<string>? activeCatalogPaths,
         long catalogRevision,
+        IReadOnlySet<string> terminalNotificationJobIds,
         long generation,
         CancellationToken token)
     {
@@ -5595,7 +5651,8 @@ public partial class MainWindow : Window
                 () => ReadEnhancedStateSnapshot(
                     path,
                     activeCatalogPaths,
-                    catalogRevision),
+                    catalogRevision,
+                    terminalNotificationJobIds),
                 token);
             token.ThrowIfCancellationRequested();
             if (generation != _enhancedStateRefreshGeneration
@@ -21972,6 +22029,9 @@ public partial class MainWindow : Window
         SetShowLoadTiming(_showLoadTiming, persist: false);
         SetShowUnseenDots(_showUnseenDots, persist: false);
         SetFavoriteChangeNotifications(_showFavoriteChangeNotifications, persist: false);
+        SetEnhancementNotificationPreferences(
+            _enhancementNotificationPreferences,
+            persist: false);
         SetUseLastDisplayedImageVersionForThumbnails(
             _useLastDisplayedImageVersionForThumbnails,
             persist: false);
@@ -23180,6 +23240,7 @@ public partial class MainWindow : Window
         SetFavoriteChangeNotifications(
             state?.ShowFavoriteChangeNotifications ?? true,
             persist: false);
+        RestoreEnhancementNotificationPreferences(state);
         SetAccessibilityPreferences(
             state?.ReducedMotionOverride,
             state?.ReducedTransparencyOverride,
@@ -23460,6 +23521,9 @@ public partial class MainWindow : Window
                 ShowGridFileInfoOverlay = _showGridFileInfoOverlay,
                 ShowLoadTiming = _showLoadTiming,
                 ShowFavoriteChangeNotifications = _showFavoriteChangeNotifications,
+                EnhancementNotifications =
+                    _enhancementNotificationPreferences.ToState(
+                        _enhancementNotificationStateExtensionData),
                 UseLastDisplayedImageVersionForThumbnails =
                     _useLastDisplayedImageVersionForThumbnails,
                 UpscalePresetId = _modalEnhancementPresetId,
@@ -23541,6 +23605,10 @@ public partial class MainWindow : Window
                     return false;
                 }
                 state.ExtensionData = CloneExtensionData(latest is null ? _stateExtensionData : latest.ExtensionData);
+                state.EnhancementNotifications!.ExtensionData =
+                    CloneExtensionData(
+                        latest?.EnhancementNotifications?.ExtensionData
+                        ?? _enhancementNotificationStateExtensionData);
                 _ = KeyBindingSettings.NormalizePersisted(latest?.KeyBindings, out Dictionary<string, JsonElement>? latestUnknownKeyBindings);
                 state.KeyBindings = KeyBindingSettings.ToPersisted(
                     _keyBindings,
@@ -23581,6 +23649,8 @@ public partial class MainWindow : Window
                 return;
             }
             _stateExtensionData = CloneExtensionData(state.ExtensionData);
+            _enhancementNotificationStateExtensionData = CloneExtensionData(
+                state.EnhancementNotifications?.ExtensionData);
             _ = KeyBindingSettings.NormalizePersisted(state.KeyBindings, out _keyBindingUnknownEntries);
         }
         catch
@@ -30415,6 +30485,9 @@ public sealed class ViewerState
     public bool? ShowLoadTiming { get; set; }
     // WPF-local presentation only. Missing in older state keeps notifications on.
     public bool? ShowFavoriteChangeNotifications { get; set; }
+    // WPF-local presentation only. Missing older state enables all six result
+    // notifications and never changes shared settings or a durable job.
+    public EnhancementNotificationState? EnhancementNotifications { get; set; }
     // WPF-local gallery presentation. Per-image choices remain session-only.
     public bool? UseLastDisplayedImageVersionForThumbnails { get; set; }
     // WPF-local defaults for explicit AI upscale requests. They do not change
