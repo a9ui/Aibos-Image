@@ -1982,6 +1982,11 @@ public partial class MainWindow
             if (AppVideoH3StepsTextBox is not null)
                 AppVideoH3StepsTextBox.Text = _videoSteps.ToString(
                     CultureInfo.InvariantCulture);
+            // This sync replaces any invalid free-form STEP text with the
+            // canonical in-memory value. Keep the validity flag aligned with
+            // what both surfaces now display so an unrelated setting change
+            // cannot leave a valid-looking, permanently disabled form.
+            _videoStepsInputValid = true;
             if (AppVideoH3ResolutionComboBox is not null)
             {
                 SelectIntegerTag(
@@ -2515,6 +2520,18 @@ public partial class MainWindow
 
     public int MiniMaxH3StepsForSmoke => _videoSteps;
 
+    public bool MiniMaxH3StepsInputValidForSmoke =>
+        _videoStepsInputValid;
+
+    public string MiniMaxH3StepsTextForSmoke =>
+        AppVideoH3StepsTextBox.Text;
+
+    public void EnterMiniMaxH3StepsTextForSmoke(string text)
+        => AppVideoH3StepsTextBox.Text = text;
+
+    public void SyncVideoGenerationSettingsForSmoke()
+        => SyncVideoGenerationSettingsControls();
+
     public void SelectMiniMaxH3MaximumPixelAreaForSmoke(int maximumPixelArea)
     {
         _videoMaximumPixelArea = NormalizeMiniMaxH3MaximumPixelArea(
@@ -2676,7 +2693,7 @@ public partial class MainWindow
             if (AppVideoPromptTextBox.Visibility != Visibility.Visible)
                 issues.Add("app-prompt");
             if (!ModalVideoDeliveryText.Text.Contains(
-                    "元画像比率出力: 32px単位・最大414,720px・124f・24fps・5.167秒 · 20 STEP",
+                    $"元画像比率出力: 32px単位・最大{_videoMaximumPixelArea.ToString("N0", CultureInfo.InvariantCulture)}px・124f・24fps・5.167秒 · {_videoSteps} STEP",
                     StringComparison.Ordinal))
             {
                 issues.Add("canvas-policy");
@@ -2907,73 +2924,114 @@ public partial class MainWindow
         => VideoGenerationStatusText.Text;
 
     public bool VideoGenerationSurfaceForSmoke
-        => ModalVideoGenerateButton is not null
-            && ModalVideoGenerationPopup is not null
-            && ModalVideoGenerationPopup is Grid
-            && VideoStyleSurfaceForSmoke
-            && ModalVideoGenerationBoardBorder.MaxHeight <= 680
-            && ModalVideoGenerationScrollViewer.VerticalScrollBarVisibility
-                == ScrollBarVisibility.Auto
-            && MiniMaxH3SurfaceForSmoke
-            && LegacyVideoModelOptionsRetiredForSmoke
-            && ModalVideoWanControlsPanel.Visibility == Visibility.Collapsed
-            && ModalVideoWanTuningPanel.Visibility == Visibility.Collapsed
-            && AppVideoWanControlsPanel.Visibility == Visibility.Collapsed
-            && !ModalVideoQualityComboBox.IsEnabled
-            && !AppVideoQualityComboBox.IsEnabled
-            && !ModalVideoDurationComboBox.IsEnabled
-            && !ModalVideoFpsComboBox.IsEnabled
-            && !ModalVideoResolutionComboBox.IsEnabled
-            && !AppVideoDurationComboBox.IsEnabled
-            && !AppVideoFpsComboBox.IsEnabled
-            && !AppVideoResolutionComboBox.IsEnabled
-            && ModalVideoH3DurationComboBox.IsEnabled
-            && AppVideoH3DurationComboBox.IsEnabled
-            && !ModalVideoSeedModeComboBox.IsEnabled
-            && !AppVideoSeedModeComboBox.IsEnabled
-            && ModalVideoModelDescriptionText.Text.Contains(
-                "RTX 4070 SUPER 12GB",
-                StringComparison.Ordinal)
-            && ModalVideoPromptTextBox.MaxLength == MaxVideoPromptLength
-            && string.Equals(
-                AutomationProperties.GetName(QueueVideoGenerationButton),
-                "Add video generation job",
-                StringComparison.Ordinal)
-            && ModalVideoPresetText.Text.Contains(
-                "MiniMax H3",
-                StringComparison.Ordinal)
-            && string.Equals(
-                AppVideoDeliveryText.Text,
-                ModalVideoDeliveryText.Text,
-                StringComparison.Ordinal)
-            && AppVideoDeliveryText.Text.Contains(
-                "124f・24fps・5.167秒",
-                StringComparison.Ordinal)
-            && ModalVideoDeliveryText.Text.Contains(
-                "AAC音声あり",
-                StringComparison.Ordinal)
-            && AppVideoResolutionHintText.Text.Contains(
-                "最大414,720px",
-                StringComparison.Ordinal)
-            && ModalVideoResolutionHintText.Text.Contains(
-                "H3 preview",
-                StringComparison.Ordinal)
-            && ModalVideoGenerationEstimateText is not null
-            && AppVideoGenerationEstimateText is not null
-            && string.Equals(
-                ModalVideoGenerationEstimateText.Text,
-                AppVideoGenerationEstimateText.Text,
-                StringComparison.Ordinal)
-            && string.Equals(
-                ModalVideoGenerationEstimateText.Text,
-                VideoGenerationEstimateText(),
-                StringComparison.Ordinal)
-            && ModalVideoGenerationEstimateText.Text.Contains(
-                "約3分50秒〜約9分7秒",
-                StringComparison.Ordinal)
-            && ModalVideoGenerationEstimateText.Text.Contains(
-                "RTX 4070 SUPER 12GB",
-                StringComparison.Ordinal)
-            && AppVideoSettingsHeading is not null
-            && SettingsVideoNav is not null;
+        => VideoGenerationSurfaceIssuesForSmoke.Count == 0;
+
+    public IReadOnlyList<string> VideoGenerationSurfaceIssuesForSmoke
+    {
+        get
+        {
+            var issues = new List<string>();
+            if (ModalVideoGenerateButton is null
+                || ModalVideoGenerationPopup is not Grid)
+                issues.Add("surface");
+            if (!VideoStyleSurfaceForSmoke)
+                issues.Add("style");
+            if (ModalVideoGenerationBoardBorder.MaxHeight > 680
+                || ModalVideoGenerationScrollViewer.VerticalScrollBarVisibility
+                    != ScrollBarVisibility.Auto)
+                issues.Add("layout");
+            if (!MiniMaxH3SurfaceForSmoke)
+                issues.Add("h3");
+            if (!LegacyVideoModelOptionsRetiredForSmoke)
+                issues.Add("legacy-model-options");
+            if (ModalVideoWanControlsPanel.Visibility != Visibility.Collapsed
+                || ModalVideoWanTuningPanel.Visibility != Visibility.Collapsed
+                || AppVideoWanControlsPanel.Visibility != Visibility.Collapsed)
+                issues.Add("wan-controls");
+            if (ModalVideoQualityComboBox.IsEnabled
+                || AppVideoQualityComboBox.IsEnabled)
+                issues.Add("quality-controls");
+            if (ModalVideoDurationComboBox.IsEnabled
+                || ModalVideoFpsComboBox.IsEnabled
+                || ModalVideoResolutionComboBox.IsEnabled
+                || AppVideoDurationComboBox.IsEnabled
+                || AppVideoFpsComboBox.IsEnabled
+                || AppVideoResolutionComboBox.IsEnabled)
+                issues.Add("legacy-tuning-controls");
+            if (!ModalVideoH3DurationComboBox.IsEnabled
+                || !AppVideoH3DurationComboBox.IsEnabled)
+                issues.Add("h3-duration-controls");
+            if (ModalVideoSeedModeComboBox.IsEnabled
+                || AppVideoSeedModeComboBox.IsEnabled)
+                issues.Add("seed-controls");
+            if (!ModalVideoModelDescriptionText.Text.Contains(
+                    "RTX 4070 SUPER 12GB",
+                    StringComparison.Ordinal))
+                issues.Add("model-description");
+            if (ModalVideoPromptTextBox.MaxLength != MaxVideoPromptLength)
+                issues.Add("prompt-limit");
+            if (!string.Equals(
+                    AutomationProperties.GetName(QueueVideoGenerationButton),
+                    "Add video generation job",
+                    StringComparison.Ordinal))
+                issues.Add("queue-automation");
+            if (!ModalVideoPresetText.Text.Contains(
+                    "MiniMax H3",
+                    StringComparison.Ordinal))
+                issues.Add("preset");
+            if (!string.Equals(
+                    AppVideoDeliveryText.Text,
+                    ModalVideoDeliveryText.Text,
+                    StringComparison.Ordinal))
+                issues.Add("delivery-sync");
+            if (!AppVideoDeliveryText.Text.Contains(
+                    "124f・24fps・5.167秒",
+                    StringComparison.Ordinal))
+                issues.Add("delivery-profile");
+            if (!ModalVideoDeliveryText.Text.Contains(
+                    "AAC音声あり",
+                    StringComparison.Ordinal))
+                issues.Add("delivery-audio");
+            string maximumPixelArea = _videoMaximumPixelArea.ToString(
+                "N0",
+                CultureInfo.InvariantCulture);
+            if (!AppVideoResolutionHintText.Text.Contains(
+                    $"上限{maximumPixelArea}px",
+                    StringComparison.Ordinal))
+                issues.Add("app-resolution-hint");
+            if (!ModalVideoResolutionHintText.Text.Contains(
+                    "H3 preview",
+                    StringComparison.Ordinal))
+                issues.Add("modal-resolution-hint");
+            if (ModalVideoGenerationEstimateText is null
+                || AppVideoGenerationEstimateText is null)
+            {
+                issues.Add("estimate-controls");
+            }
+            else
+            {
+                if (!string.Equals(
+                        ModalVideoGenerationEstimateText.Text,
+                        AppVideoGenerationEstimateText.Text,
+                        StringComparison.Ordinal))
+                    issues.Add("estimate-sync");
+                if (!string.Equals(
+                        ModalVideoGenerationEstimateText.Text,
+                        VideoGenerationEstimateText(),
+                        StringComparison.Ordinal))
+                    issues.Add("estimate-current");
+                if (!ModalVideoGenerationEstimateText.Text.Contains(
+                        "約3分50秒〜約9分7秒",
+                        StringComparison.Ordinal))
+                    issues.Add("estimate-profile");
+                if (!ModalVideoGenerationEstimateText.Text.Contains(
+                        "RTX 4070 SUPER 12GB",
+                        StringComparison.Ordinal))
+                    issues.Add("estimate-gpu");
+            }
+            if (AppVideoSettingsHeading is null || SettingsVideoNav is null)
+                issues.Add("settings-navigation");
+            return issues;
+        }
+    }
 }

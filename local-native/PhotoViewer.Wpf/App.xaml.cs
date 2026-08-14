@@ -17852,6 +17852,13 @@ public partial class App : Application
                 bool videoModalOpened = win.OpenModalForSmoke();
                 bool videoMediaOpened = videoModalOpened
                     && await win.WaitForModalVideoMediaOpenedForSmokeAsync();
+                string? newestVideoElementSource =
+                    win.ModalVideoElementSourcePathForSmoke;
+                bool newestVideoTransportSource = videoFixturePath is null
+                    || string.Equals(
+                        Path.GetFullPath(newestVideoElementSource ?? ""),
+                        Path.GetFullPath(videoOutput),
+                        StringComparison.OrdinalIgnoreCase);
                 bool videoStartsAtZero = videoMediaOpened
                     && win.ModalVideoSeekVisibleForSmoke
                     && win.ModalVideoSeekValueForSmoke <= 0.25;
@@ -17954,6 +17961,17 @@ public partial class App : Application
                         win.ModalVideoPathForSmoke,
                         olderVideoOutput,
                         StringComparison.OrdinalIgnoreCase);
+                string? olderVideoElementSource =
+                    win.ModalVideoElementSourcePathForSmoke;
+                bool videoTransportSwitched = videoFixturePath is null
+                    || (string.Equals(
+                            Path.GetFullPath(olderVideoElementSource ?? ""),
+                            Path.GetFullPath(olderVideoOutput),
+                            StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(
+                            Path.GetFullPath(olderVideoElementSource ?? ""),
+                            Path.GetFullPath(newestVideoElementSource ?? ""),
+                            StringComparison.OrdinalIgnoreCase));
                 win.CloseModalForSmoke();
 
                 win.SetVideoOnlyFilterForSmoke(false);
@@ -17995,6 +18013,16 @@ public partial class App : Application
                     && win.VideoModelIdForSmoke == "minimax-h3"
                     && win.LegacyVideoModelOptionsRetiredForSmoke
                     && win.MiniMaxH3SurfaceForSmoke;
+                win.SelectMiniMaxH3StepsForSmoke(20);
+                win.EnterMiniMaxH3StepsTextForSmoke("0");
+                bool invalidStepStateVisible =
+                    !win.MiniMaxH3StepsInputValidForSmoke
+                    && win.MiniMaxH3StepsTextForSmoke == "0";
+                win.SyncVideoGenerationSettingsForSmoke();
+                bool stepDisplayStateAligned = invalidStepStateVisible
+                    && win.MiniMaxH3StepsInputValidForSmoke
+                    && win.MiniMaxH3StepsForSmoke == 20
+                    && win.MiniMaxH3StepsTextForSmoke == "20";
                 win.SelectVideoModelForSmoke(
                     "hunyuan-video-1.5-i2v-step-distilled-experimental");
                 bool experimentalVideoModelBlocked =
@@ -18178,6 +18206,10 @@ public partial class App : Application
                 bool videoSurface = win.VideoGenerationSurfaceForSmoke
                     && win.VideoModelIdForSmoke == "minimax-h3"
                     && win.MiniMaxH3SurfaceForSmoke;
+                string[] videoSurfaceIssues =
+                    win.VideoGenerationSurfaceIssuesForSmoke.ToArray();
+                bool videoStyleSurface = win.VideoStyleSurfaceForSmoke;
+                string videoSurfaceModelId = win.VideoModelIdForSmoke;
                 bool videoQueueSucceeded =
                     await win.QueueVideoGenerationForSmokeAsync();
                 bool videoRequestExact = false;
@@ -18238,6 +18270,7 @@ public partial class App : Application
                         && videoRequestMedia.TryGetProperty("requested", out JsonElement requestedVideo)
                         && HasExactNames(
                             requestedVideo,
+                            "maximumPixelArea",
                             "profileId",
                             "prompt",
                             "steps")
@@ -18246,7 +18279,9 @@ public partial class App : Application
                         && requestedVideo.GetProperty("prompt").GetString()
                             == japaneseVideoPrompt
                         && requestedVideo.GetProperty("steps").GetInt32()
-                            == win.MiniMaxH3StepsForSmoke;
+                            == win.MiniMaxH3StepsForSmoke
+                        && requestedVideo.GetProperty("maximumPixelArea")
+                            .GetInt32() == 307200;
                 }
                 const int fixedVideoSeed = int.MaxValue;
                 win.ConfigureVideoSeedForSmoke(
@@ -18569,6 +18604,7 @@ public partial class App : Application
                     && videoOutputMatches
                     && videoModalOpened
                     && videoMediaOpened
+                    && newestVideoTransportSource
                     && videoStartsAtZero
                     && videoSeekSurface
                     && videoNaturalDuration
@@ -18585,6 +18621,7 @@ public partial class App : Application
                     && olderVideoMediaOpened
                     && olderVideoPlaybackProgress
                     && olderVideoSelected
+                    && videoTransportSwitched
                     && ordinaryVideoSourceSelected
                     && ordinaryModalOpened
                     && lastVideoRestoredMediaOpened
@@ -18595,6 +18632,7 @@ public partial class App : Application
                     && returnedToVideoSource
                     && lastVideoRestoredAfterReturn
                     && videoDefaults
+                    && stepDisplayStateAligned
                     && experimentalVideoModelBlocked
                     && legacyVideoModelMigrated
                     && videoBoardSourceSelected
@@ -18677,6 +18715,8 @@ public partial class App : Application
                         : "media-foundation",
                     VideoModalOpened = videoModalOpened,
                     VideoMediaOpened = videoMediaOpened,
+                    NewestVideoElementSource = newestVideoElementSource,
+                    NewestVideoTransportSource = newestVideoTransportSource,
                     VideoStartsAtZero = videoStartsAtZero,
                     VideoSeekSurface = videoSeekSurface,
                     VideoNaturalDuration = videoNaturalDuration,
@@ -18696,6 +18736,9 @@ public partial class App : Application
                     OlderVideoPlaybackProgress =
                         olderVideoPlaybackProgress,
                     OlderVideoSelected = olderVideoSelected,
+                    OlderVideoElementSource = olderVideoElementSource,
+                    VideoTransportSwitched = videoTransportSwitched,
+                    StepDisplayStateAligned = stepDisplayStateAligned,
                     LastVideoRestoredMediaOpened =
                         lastVideoRestoredMediaOpened,
                     LastVideoRestoredPlaybackProgress =
@@ -18720,8 +18763,12 @@ public partial class App : Application
                     DisplayedPhotorealVideoSource =
                         displayedPhotorealVideoSource,
                     VideoSurface = videoSurface,
+                    VideoSurfaceIssues = videoSurfaceIssues,
+                    VideoStyleSurface = videoStyleSurface,
+                    VideoSurfaceModelId = videoSurfaceModelId,
                     VideoQueueSucceeded = videoQueueSucceeded,
                     VideoRequestExact = videoRequestExact,
+                    VideoRequestJson = videoRequestJson,
                     VideoSeedContract = videoSeedContract,
                     VideoBoardFailureFeedback = videoBoardFailureFeedback,
                     ImageDeleteOwnershipGuard = imageDeleteOwnershipGuard,
@@ -19068,6 +19115,10 @@ public partial class App : Application
                 bool bulkRetryCreated = false;
                 var dismissedFailedJobs = new HashSet<string>(
                     StringComparer.Ordinal);
+                var retriedCanceledJobIds = new HashSet<string>(
+                    StringComparer.Ordinal);
+                var dismissedCanceledJobs = new HashSet<string>(
+                    StringComparer.Ordinal);
                 bool canceledRetryCreated = false;
                 bool rerunCreated = false;
                 bool queueLaterFirst = false;
@@ -19308,6 +19359,12 @@ public partial class App : Application
                             error: "Delivery runtime stopped",
                             presetHash: "f102bafe68e9",
                             delivery: "current"),
+                        Job(
+                            "clearable-failed-job",
+                            "failed",
+                            31,
+                            error: "Retry remains unavailable",
+                            operation: "photoreal"),
                         VideoJob(
                             "active-job",
                             activeCanceled ? "canceled" : "running",
@@ -19377,6 +19434,12 @@ public partial class App : Application
                             0,
                             error: "null operation",
                             operation: null),
+                        Job(
+                            "future-canceled-reader-job",
+                            "canceled",
+                            0,
+                            error: "future canceled operation",
+                            operation: "future-motion-v2"),
                     };
                     if (retryCreated)
                         jobs.Insert(0, VideoJob(
@@ -19419,6 +19482,13 @@ public partial class App : Application
                     if (dismissedFailedJobs.Count > 0)
                     {
                         jobs.RemoveAll(job => dismissedFailedJobs.Any(id =>
+                            JsonSerializer.Serialize(job).Contains(
+                                $"\"id\":\"{id}\"",
+                                StringComparison.Ordinal)));
+                    }
+                    if (dismissedCanceledJobs.Count > 0)
+                    {
+                        jobs.RemoveAll(job => dismissedCanceledJobs.Any(id =>
                             JsonSerializer.Serialize(job).Contains(
                                 $"\"id\":\"{id}\"",
                                 StringComparison.Ordinal)));
@@ -19700,10 +19770,18 @@ public partial class App : Application
                                 receipt = DurableReceipt(request, "bulk-retry-job"),
                             }));
                     }
+                    if (request.Method == HttpMethod.Post
+                        && route.EndsWith("/clearable-failed-job/retry", StringComparison.Ordinal))
+                    {
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.BadRequest,
+                            new { error = "synthetic retry rejection" }));
+                    }
                     if (request.Method == HttpMethod.Delete
                         && new[]
                         {
                             "delivery-failed-job",
+                            "clearable-failed-job",
                             "video-malformed-provenance-job",
                             "future-reader-job",
                             "null-operation-reader-job",
@@ -19720,6 +19798,7 @@ public partial class App : Application
                     if (request.Method == HttpMethod.Post && route.EndsWith("/canceled-job/retry", StringComparison.Ordinal))
                     {
                         canceledRetryCreated = true;
+                        retriedCanceledJobIds.Add("canceled-job");
                         return Task.FromResult(JsonResponse(HttpStatusCode.Accepted, new
                         {
                             job = Job(
@@ -19729,6 +19808,40 @@ public partial class App : Application
                                 operation: "photoreal"),
                             receipt = DurableReceipt(request, "canceled-retry-job"),
                         }));
+                    }
+                    if (request.Method == HttpMethod.Post
+                        && route.EndsWith("/retry", StringComparison.Ordinal))
+                    {
+                        string[] segments = route.Split(
+                            '/',
+                            StringSplitOptions.RemoveEmptyEntries);
+                        string jobId = segments.Length >= 2
+                            ? segments[^2]
+                            : "unknown-job";
+                        retriedCanceledJobIds.Add(jobId);
+                        string retryJobId = $"bulk-canceled-retry-{jobId}";
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.Accepted,
+                            new
+                            {
+                                job = Job(
+                                    retryJobId,
+                                    "queued",
+                                    0,
+                                    operation: "photoreal"),
+                                receipt = DurableReceipt(request, retryJobId),
+                            }));
+                    }
+                    if (request.Method == HttpMethod.Delete
+                        && route.Split(
+                                '/',
+                                StringSplitOptions.RemoveEmptyEntries) is { Length: > 0 } deleteSegments
+                        && retriedCanceledJobIds.Contains(deleteSegments[^1]))
+                    {
+                        dismissedCanceledJobs.Add(deleteSegments[^1]);
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.OK,
+                            new { dismissed = true }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/queue-later-job/queue", StringComparison.Ordinal))
                     {
@@ -19842,6 +19955,33 @@ public partial class App : Application
                 await window.OpenEnhancementJobsForSmokeAsync();
                 window.UpdateLayout();
                 EnhancementJobsWorkspaceSmokeSnapshot initial = window.EnhancementJobsWorkspaceForSmoke();
+                EnhancementJobsPagingSmokeSnapshot firstLargeHistoryPage =
+                    PhotoViewer.Wpf.MainWindow
+                        .CalculateEnhancementJobsPagingForSmoke(205, 0);
+                EnhancementJobsPagingSmokeSnapshot lastLargeHistoryPage =
+                    PhotoViewer.Wpf.MainWindow
+                        .CalculateEnhancementJobsPagingForSmoke(205, 99);
+                bool largeHistoryPaging = firstLargeHistoryPage is
+                    {
+                        PageSize: 100,
+                        PageIndex: 0,
+                        PageCount: 3,
+                        FirstIndex: 0,
+                        ItemCount: 100,
+                    }
+                    && lastLargeHistoryPage is
+                    {
+                        PageSize: 100,
+                        PageIndex: 2,
+                        PageCount: 3,
+                        FirstIndex: 200,
+                        ItemCount: 5,
+                    };
+                bool progressUsesOneDecimal =
+                    initial.VisibleStatusLabels.Any(static label =>
+                        label.Contains("Running 42.0%", StringComparison.Ordinal))
+                    && initial.VisibleStatusLabels.Any(static label =>
+                        label.Contains("Queued 00.0%", StringComparison.Ordinal));
                 string[] passiveOpenRequests = requests.Skip(requestsBeforeOpen).ToArray();
                 bool passiveOpen = passiveOpenRequests.All(static request =>
                         request is "GET /api/enhance/jobs" or "GET /api/enhance/health")
@@ -20493,9 +20633,13 @@ public partial class App : Application
                 window.CloseModalForSmoke();
                 await window.WaitForEnhancementJobsReturnForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterSourceOpen = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsFilterForSmoke("failed");
                 bool bulkFailedControlsReady =
+                    window.FailedBulkPanelVisibleForSmoke
+                    &&
                     window.RetryAllFailedEnhancementJobsControlForSmoke
                     && window.ClearAllFailedEnhancementJobsControlForSmoke;
+                window.SelectEnhancementJobsFilterForSmoke("all");
                 bool receiptOnlyResponseStaysVisible =
                     PhotoViewer.Wpf.MainWindow
                         .ReceiptOnlyDurableResponseIsPendingForSmoke();
@@ -20508,7 +20652,6 @@ public partial class App : Application
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkFailedClear =
                     window.EnhancementJobsWorkspaceForSmoke();
-                window.SelectEnhancementJobsFilterForSmoke("all");
                 bool bulkFailedActionsContract = bulkFailedControlsReady
                     && receiptOnlyResponseStaysVisible
                     && bulkFailedRetried == 1
@@ -20518,10 +20661,40 @@ public partial class App : Application
                     && afterBulkFailedRetry.VisibleIds.Contains(
                         "bulk-retry-job",
                         StringComparer.Ordinal)
-                    && bulkFailedCleared == 3
-                    && afterBulkFailedClear.Filtered == 0
+                    && bulkFailedCleared == 1
+                    && afterBulkFailedClear.Filtered == 3
+                    && afterBulkFailedClear.VisibleIds.Contains(
+                        "video-malformed-provenance-job",
+                        StringComparer.Ordinal)
+                    && afterBulkFailedClear.VisibleIds.Contains(
+                        "future-reader-job",
+                        StringComparer.Ordinal)
+                    && afterBulkFailedClear.VisibleIds.Contains(
+                        "null-operation-reader-job",
+                        StringComparer.Ordinal)
                     && !window.RetryAllFailedEnhancementJobsControlForSmoke
                     && !window.ClearAllFailedEnhancementJobsControlForSmoke;
+                window.SelectEnhancementJobsFilterForSmoke("canceled");
+                bool bulkCanceledControlsReady =
+                    window.CanceledBulkPanelVisibleForSmoke
+                    && window.RetryAllCanceledEnhancementJobsControlForSmoke
+                    && window.ClearAllCanceledEnhancementJobsControlForSmoke;
+                int bulkCanceledRetried =
+                    await window.RetryAllCanceledEnhancementJobsForSmokeAsync();
+                int bulkCanceledCleared =
+                    await window.ClearAllCanceledEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterBulkCanceledClear =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool bulkCanceledActionsContract = bulkCanceledControlsReady
+                    && bulkCanceledRetried > 0
+                    && bulkCanceledCleared == bulkCanceledRetried
+                    && afterBulkCanceledClear.Filtered == 1
+                    && afterBulkCanceledClear.VisibleIds.SequenceEqual(
+                        ["future-canceled-reader-job"],
+                        StringComparer.Ordinal)
+                    && !window.RetryAllCanceledEnhancementJobsControlForSmoke
+                    && !window.ClearAllCanceledEnhancementJobsControlForSmoke;
+                window.SelectEnhancementJobsFilterForSmoke("all");
                 bool jobsHeaderChromeContract = window.EnhancementJobsHeaderChromeContractForSmoke;
                 bool closeButtonClosedWorkspace = window.ActivateEnhancementJobsCloseForSmoke();
 
@@ -20545,9 +20718,13 @@ public partial class App : Application
                     && requests.Contains("DELETE /api/enhance/jobs/failed-retry-job", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/delivery-failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/delivery-failed-job", StringComparer.Ordinal)
-                    && requests.Contains("DELETE /api/enhance/jobs/video-malformed-provenance-job", StringComparer.Ordinal)
-                    && requests.Contains("DELETE /api/enhance/jobs/future-reader-job", StringComparer.Ordinal)
-                    && requests.Contains("DELETE /api/enhance/jobs/null-operation-reader-job", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/clearable-failed-job/retry", StringComparer.Ordinal)
+                    && requests.Contains("DELETE /api/enhance/jobs/clearable-failed-job", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/video-malformed-provenance-job", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/future-reader-job", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/null-operation-reader-job", StringComparer.Ordinal)
+                    && !requests.Contains("POST /api/enhance/jobs/future-canceled-reader-job/retry", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/future-canceled-reader-job", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/canceled-job/retry", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/queue-later-job/queue", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs", StringComparer.Ordinal)
@@ -20674,8 +20851,10 @@ public partial class App : Application
                             && body.GetProperty("seed").ValueKind == JsonValueKind.Null;
                     });
                 ok = initial.Visible
-                    && initial.Total == 16
+                    && initial.Total == 18
                     && initial.Active == 4
+                    && largeHistoryPaging
+                    && progressUsesOneDecimal
                     && initial.Polling
                     && passiveOpen
                     && healthVisible
@@ -20696,9 +20875,9 @@ public partial class App : Application
                     && running.Filtered == 1
                     && queued.Filtered == 3
                     && queueInventoryOrdered
-                    && failed.Filtered == 6
+                    && failed.Filtered == 7
                     && completed.Filtered == 4
-                    && canceled.Filtered == 2
+                    && canceled.Filtered == 3
                     && operationLabelsVisible
                     && videoActionsEnabled
                     && legacyVideoMutationSafe
@@ -20711,6 +20890,7 @@ public partial class App : Application
                     && photorealTerminalCurrentSettingsActions
                     && completedElapsedVisible
                     && bulkFailedActionsContract
+                    && bulkCanceledActionsContract
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
                     && moveNextIssued
@@ -20718,31 +20898,31 @@ public partial class App : Application
                     && moveAvoidedFullInventoryReload
                     && staleQueueRefreshSuppressed
                     && cancelIssued
-                    && afterCancel.Total == 16
+                    && afterCancel.Total == 18
                     && afterCancel.Active == 4
                     && afterCancel.Polling
                     && videoCancelPendingSafe
                     && videoCancelSettled
                     && afterVideoCancelSettled.Active == 3
                     && failedCancelIssued
-                    && afterFailedCancel.Total == 16
+                    && afterFailedCancel.Total == 18
                     && afterFailedCancel.Active == 3
                     && afterFailedCancel.VisibleIds.Contains("failed-cancel-job", StringComparer.Ordinal)
-                    && canceledAfterActions.Filtered == 4
+                    && canceledAfterActions.Filtered == 5
                     && retryIssued
-                    && afterRetry.Total == 16
+                    && afterRetry.Total == 18
                     && afterRetry.Active == 4
                     && afterRetry.VisibleIds.Contains("retry-job", StringComparer.Ordinal)
                     && !afterRetry.VisibleIds.Contains("failed-retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 4", StringComparison.Ordinal))
                     && canceledRetryIssued
-                    && afterCanceledRetry.Total == 17
+                    && afterCanceledRetry.Total == 19
                     && afterCanceledRetry.Active == 5
                     && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
                     && rerunIssued
                     && rerunSettingsContract
                     && rerunSeedContract
-                    && afterRerun.Total == 18
+                    && afterRerun.Total == 20
                     && afterRerun.Active == 6
                     && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
                     && queuedPromptUpdateIssued
@@ -20811,6 +20991,10 @@ public partial class App : Application
                     healthRecovered,
                     queuePauseContract,
                     initial,
+                    largeHistoryPaging,
+                    firstLargeHistoryPage,
+                    lastLargeHistoryPage,
+                    progressUsesOneDecimal,
                     legacyHealth,
                     futureHealth,
                     unknownIssueHealth,
@@ -20859,6 +21043,10 @@ public partial class App : Application
                     afterBulkFailedRetry,
                     bulkFailedCleared,
                     afterBulkFailedClear,
+                    bulkCanceledActionsContract,
+                    bulkCanceledRetried,
+                    bulkCanceledCleared,
+                    afterBulkCanceledClear,
                     whileSourceViewerOpen,
                     afterSourceOpen,
                     outputOpened,
@@ -34186,6 +34374,8 @@ public partial class App : Application
         public string? VideoTransport { get; init; }
         public bool VideoModalOpened { get; init; }
         public bool VideoMediaOpened { get; init; }
+        public string? NewestVideoElementSource { get; init; }
+        public bool NewestVideoTransportSource { get; init; }
         public bool VideoStartsAtZero { get; init; }
         public bool VideoSeekSurface { get; init; }
         public bool VideoNaturalDuration { get; init; }
@@ -34203,6 +34393,9 @@ public partial class App : Application
         public bool OlderVideoMediaOpened { get; init; }
         public bool OlderVideoPlaybackProgress { get; init; }
         public bool OlderVideoSelected { get; init; }
+        public string? OlderVideoElementSource { get; init; }
+        public bool VideoTransportSwitched { get; init; }
+        public bool StepDisplayStateAligned { get; init; }
         public bool LastVideoRestoredMediaOpened { get; init; }
         public bool LastVideoRestoredPlaybackProgress { get; init; }
         public bool LastVideoRestored { get; init; }
@@ -34219,8 +34412,12 @@ public partial class App : Application
         public bool VideoBoardOpened { get; init; }
         public bool DisplayedPhotorealVideoSource { get; init; }
         public bool VideoSurface { get; init; }
+        public string[] VideoSurfaceIssues { get; init; } = [];
+        public bool VideoStyleSurface { get; init; }
+        public string? VideoSurfaceModelId { get; init; }
         public bool VideoQueueSucceeded { get; init; }
         public bool VideoRequestExact { get; init; }
+        public string? VideoRequestJson { get; init; }
         public bool VideoSeedContract { get; init; }
         public bool VideoBoardFailureFeedback { get; init; }
         public bool ImageDeleteOwnershipGuard { get; init; }
