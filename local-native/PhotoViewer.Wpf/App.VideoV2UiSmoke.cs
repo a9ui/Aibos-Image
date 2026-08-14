@@ -109,6 +109,28 @@ public partial class App
                     .IsExactMiniMaxH3VideoSnapshotForSmoke(
                         outOfRangeStepsVideo.RootElement);
 
+            JsonObject lightweightCanvasVideoNode = JsonNode.Parse(
+                    canonicalValidVideo.GetRawText())!
+                .AsObject();
+            lightweightCanvasVideoNode["requested"]!["maximumPixelArea"] = 230400;
+            lightweightCanvasVideoNode["effective"]!["width"] = 640;
+            lightweightCanvasVideoNode["effective"]!["height"] = 352;
+            using JsonDocument lightweightCanvasVideo = JsonDocument.Parse(
+                lightweightCanvasVideoNode.ToJsonString());
+            JsonObject mismatchedCanvasVideoNode = JsonNode.Parse(
+                    lightweightCanvasVideoNode.ToJsonString())!
+                .AsObject();
+            mismatchedCanvasVideoNode["effective"]!["width"] = 864;
+            mismatchedCanvasVideoNode["effective"]!["height"] = 480;
+            using JsonDocument mismatchedCanvasVideo = JsonDocument.Parse(
+                mismatchedCanvasVideoNode.ToJsonString());
+            bool h3CanvasTierSnapshotExact = PhotoViewer.Wpf.MainWindow
+                    .IsExactMiniMaxH3VideoSnapshotForSmoke(
+                        lightweightCanvasVideo.RootElement)
+                && !PhotoViewer.Wpf.MainWindow
+                    .IsExactMiniMaxH3VideoSnapshotForSmoke(
+                        mismatchedCanvasVideo.RootElement);
+
             window = new MainWindow();
             bool h3DefaultOnly = window.VideoModelIdForSmoke == "minimax-h3"
                 && window.LegacyVideoModelOptionsRetiredForSmoke
@@ -248,7 +270,12 @@ public partial class App
                 && requestRoot.TryGetProperty("video", out JsonElement video)
                 && HasExactNames(video, "requested")
                 && video.TryGetProperty("requested", out JsonElement requested)
-                && HasExactNames(requested, "profileId", "prompt", "steps")
+                && HasExactNames(
+                    requested,
+                    "profileId",
+                    "prompt",
+                    "steps",
+                    "maximumPixelArea")
                 && ExactString(
                     requested,
                     "profileId",
@@ -259,7 +286,13 @@ public partial class App
                     "A gentle head turn in dawn light.")
                 && requested.TryGetProperty("steps", out JsonElement requestSteps)
                 && requestSteps.TryGetInt32(out int requestStepsValue)
-                && requestStepsValue == 20;
+                && requestStepsValue == 20
+                && requested.TryGetProperty(
+                    "maximumPixelArea",
+                    out JsonElement requestMaximumPixelArea)
+                && requestMaximumPixelArea.TryGetInt32(
+                    out int requestMaximumPixelAreaValue)
+                && requestMaximumPixelAreaValue == 414720;
             using JsonDocument longRequest = JsonDocument.Parse(
                 window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
                     "two connected phases",
@@ -288,6 +321,19 @@ public partial class App
                     .GetProperty("requested")
                     .GetProperty("profileId")
                     .GetString() == "minimax-h3-hq-15s-v1";
+            window.SelectMiniMaxH3MaximumPixelAreaForSmoke(230400);
+            using JsonDocument lightweightRequest = JsonDocument.Parse(
+                window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
+                    "smaller canvas",
+                    durationSeconds: 5));
+            JsonElement lightweightRequested = lightweightRequest.RootElement
+                .GetProperty("video")
+                .GetProperty("requested");
+            bool videoSizeIndependent = lightweightRequested
+                    .GetProperty("maximumPixelArea")
+                    .GetInt32() == 230400
+                && lightweightRequested.GetProperty("steps").GetInt32() == 20
+                && window.MiniMaxH3MaximumPixelAreaForSmoke == 230400;
             window.SelectMiniMaxH3StepsForSmoke(40);
             using JsonDocument highStepsRequest = JsonDocument.Parse(
                 window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
@@ -298,8 +344,15 @@ public partial class App
                     .GetProperty("requested")
                     .GetProperty("steps")
                     .GetInt32() == 40
-                && window.MiniMaxH3StepsForSmoke == 40;
+                && highStepsRequest.RootElement
+                    .GetProperty("video")
+                    .GetProperty("requested")
+                    .GetProperty("maximumPixelArea")
+                    .GetInt32() == 230400
+                && window.MiniMaxH3StepsForSmoke == 40
+                && window.MiniMaxH3MaximumPixelAreaForSmoke == 230400;
             window.SelectMiniMaxH3StepsForSmoke(20);
+            window.SelectMiniMaxH3MaximumPixelAreaForSmoke(414720);
 
             string readyHealthJson = CreateVideoV2HealthJson(
                 writerEnabled: true,
@@ -368,6 +421,11 @@ public partial class App
                     "\"maximumSteps\":40",
                     "\"maximumSteps\":400",
                     StringComparison.Ordinal));
+            using JsonDocument malformedCanvasTiersHealth = JsonDocument.Parse(
+                readyHealthJson.Replace(
+                    "\"maximumPixelAreas\":[230400,307200,414720]",
+                    "\"maximumPixelAreas\":[230400,307200,409600]",
+                    StringComparison.Ordinal));
             bool readyParsed = PhotoViewer.Wpf.MainWindow
                 .TryParseMiniMaxH3VideoCapabilityForSmoke(
                     readyHealth.RootElement,
@@ -425,6 +483,12 @@ public partial class App
             bool malformedStepsRejected = !PhotoViewer.Wpf.MainWindow
                 .TryParseMiniMaxH3VideoStepsCapabilityForSmoke(
                     malformedStepsHealth.RootElement);
+            bool canvasTiersParsed = PhotoViewer.Wpf.MainWindow
+                .TryParseMiniMaxH3VideoCanvasTiersCapabilityForSmoke(
+                    readyHealth.RootElement);
+            bool malformedCanvasTiersRejected = !PhotoViewer.Wpf.MainWindow
+                .TryParseMiniMaxH3VideoCanvasTiersCapabilityForSmoke(
+                    malformedCanvasTiersHealth.RootElement);
             bool healthExact = readyParsed
                 && ready
                 && readyReason is null
@@ -449,7 +513,9 @@ public partial class App
                 && profilesParsed
                 && malformedProfilesRejected
                 && stepsParsed
-                && malformedStepsRejected;
+                && malformedStepsRejected
+                && canvasTiersParsed
+                && malformedCanvasTiersRejected;
 
             window.SetMiniMaxH3CapabilityForSmoke(
                 checkedHealth: true,
@@ -693,6 +759,7 @@ public partial class App
                 && h3ReservationStatusExact
                 && requestExact
                 && allSelectableProfilesExact
+                && videoSizeIndependent
                 && highStepsRequestExact
                 && healthExact
                 && invalidSealReasonVisible
@@ -701,6 +768,7 @@ public partial class App
                 && durationExact
                 && canvasPolicyExact
                 && h3StepsSnapshotExact
+                && h3CanvasTierSnapshotExact
                 && h3ExactUnreadyProfilesFailClosed
                 && h3RetryExactHealth;
             result = new
@@ -725,6 +793,7 @@ public partial class App
                 requestExact,
                 longRequestExact,
                 allSelectableProfilesExact,
+                videoSizeIndependent,
                 highStepsRequestExact,
                 healthExact,
                 invalidSealReasonVisible,
@@ -734,6 +803,8 @@ public partial class App
                 malformedProfilesRejected,
                 stepsParsed,
                 malformedStepsRejected,
+                canvasTiersParsed,
+                malformedCanvasTiersRejected,
                 h3ReadySafe,
                 h3ReadyRunnable,
                 h3ReadySurfaceIssues,
@@ -741,6 +812,7 @@ public partial class App
                 durationExact,
                 canvasPolicyExact,
                 h3StepsSnapshotExact,
+                h3CanvasTierSnapshotExact,
                 h3ExactUnreadyProfilesFailClosed,
                 disabledMissingProfilesStatus,
                 disabledDuplicatedProfilesStatus,
@@ -883,6 +955,13 @@ public partial class App
                     defaultSteps = 20,
                     minimumSteps = 1,
                     maximumSteps = 40,
+                },
+                videoH3CanvasTiersV1 = new
+                {
+                    contractId = "PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001",
+                    protocol = "aibos.enhancement-video-h3-canvas-tiers/v1",
+                    defaultMaximumPixelArea = 414720,
+                    maximumPixelAreas = new[] { 230400, 307200, 414720 },
                 },
             },
         });

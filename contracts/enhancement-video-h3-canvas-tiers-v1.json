@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001",
+  "protocol": "aibos.enhancement-video-h3-canvas-tiers/v1",
+  "extends": {
+    "contractId": "PV-ENHANCE-VIDEO-002",
+    "protocol": "aibos.enhancement-video/v2",
+    "compatibility": "legacy H3 requests and rows without requested.maximumPixelArea remain the 414720-pixel tier"
+  },
+  "healthCapability": {
+    "field": "capabilities.videoH3CanvasTiersV1",
+    "requireExactBeforeDurablePublish": true,
+    "shape": {
+      "contractId": "PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001",
+      "protocol": "aibos.enhancement-video-h3-canvas-tiers/v1",
+      "defaultMaximumPixelArea": 414720,
+      "maximumPixelAreas": [230400, 307200, 414720]
+    },
+    "oldCompanionBehavior": "reject locally with restart guidance and do not reserve or enqueue a job"
+  },
+  "request": {
+    "field": "video.requested.maximumPixelArea",
+    "requiredForNewWriter": true,
+    "allowedValues": [230400, 307200, 414720],
+    "defaultForLegacyRows": 414720,
+    "unknownOrNonIntegerValues": "reject before durable reservation"
+  },
+  "runtime": {
+    "canvasPolicy": "source-aspect-aligned-v1",
+    "alignment": 32,
+    "minimumDimension": 256,
+    "maximumDimension": 1344,
+    "effectiveAreaRule": "effective.width multiplied by effective.height is no greater than requested.maximumPixelArea",
+    "independentFields": [
+      "profileId",
+      "frameCount",
+      "playbackFps",
+      "steps",
+      "sampler",
+      "scheduler",
+      "denoise",
+      "delivery"
+    ]
+  },
+  "ui": {
+    "230400": "lightweight",
+    "307200": "standard",
+    "414720": "high-quality-default",
+    "stepIndependence": "changing the canvas tier never changes requested.steps, and changing STEP never changes requested.maximumPixelArea"
+  }
+}

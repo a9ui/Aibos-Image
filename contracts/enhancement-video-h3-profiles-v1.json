@@ -5,7 +5,7 @@
   "extends": {
     "contractId": "PV-ENHANCE-VIDEO-002",
     "protocol": "aibos.enhancement-video/v2",
-    "compatibility": "legacy prompt-only v2 requests and rows remain the 124-frame, 20 STEP profile; new writers include requested.profileId and the separate steps capability may add requested.steps"
+    "compatibility": "legacy prompt-only v2 requests and rows remain the 124-frame, 20 STEP, 414720-pixel profile; new writers include requested.profileId and the separate steps and canvas-tier capabilities add their independent requested fields"
   },
   "fixedRuntime": {
     "presetId": "minimax-h3-i2v-preview-v1",
@@ -30,7 +30,7 @@
   ],
   "request": {
     "shape": { "video": { "requested": { "profileId": "one exact profile id above", "prompt": "trimmed UTF-16 string up to 2000 code units" } } },
-    "arbitraryControls": "reject unknown profile ids and arbitrary duration, frame, FPS, or resolution fields; STEP is governed by PV-ENHANCE-VIDEO-H3-STEPS-001"
+    "arbitraryControls": "reject unknown profile ids and arbitrary duration, frame, FPS, or resolution fields; STEP is governed by PV-ENHANCE-VIDEO-H3-STEPS-001 and maximumPixelArea by PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001"
   },
   "promptRewrite": {
     "acceptedFrameCounts": [124, 243, 294, 362],

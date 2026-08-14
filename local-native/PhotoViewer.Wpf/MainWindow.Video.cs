@@ -551,7 +551,8 @@ public partial class MainWindow
                 requested,
                 out int frameCount,
                 out double expectedDurationSeconds,
-                out int requestedSteps)
+                out int requestedSteps,
+                out _)
             || !TryGetStringPropertyAllowEmpty(
                 requested,
                 "prompt",

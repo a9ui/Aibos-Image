@@ -405,50 +405,47 @@ public partial class MainWindow
         JsonElement requested,
         out int frameCount,
         out double durationSeconds,
-        out int steps)
+        out int steps,
+        out int maximumPixelArea)
     {
         frameCount = 0;
         durationSeconds = 0;
-        steps = 0;
-        string? profileId;
-        if (HasExactProperties(requested, "prompt"))
+        steps = MiniMaxH3VideoSteps;
+        maximumPixelArea = MiniMaxH3VideoCanvasMaximumPixelArea;
+        string[] names = requested.EnumerateObject()
+            .Select(static property => property.Name)
+            .ToArray();
+        string[] allowedNames =
+            ["profileId", "prompt", "steps", "maximumPixelArea"];
+        if (names.Length is < 1 or > 4
+            || names.Distinct(StringComparer.Ordinal).Count() != names.Length
+            || !names.Contains("prompt", StringComparer.Ordinal)
+            || names.Any(name => !allowedNames.Contains(
+                name,
+                StringComparer.Ordinal)))
         {
-            profileId = MiniMaxH3VideoDefaultProfileId;
-            steps = MiniMaxH3VideoSteps;
+            return false;
         }
-        else if (HasExactProperties(requested, "prompt", "steps")
-            && requested.TryGetProperty("steps", out JsonElement stepsElement)
-            && stepsElement.TryGetInt32(out steps)
-            && steps >= MiniMaxH3VideoMinimumSteps
-            && steps <= MiniMaxH3VideoMaximumSteps)
+
+        string? profileId = MiniMaxH3VideoDefaultProfileId;
+        if (names.Contains("profileId", StringComparer.Ordinal)
+            && !TryGetStringProperty(requested, "profileId", out profileId))
+            return false;
+        if (names.Contains("steps", StringComparer.Ordinal)
+            && (!requested.TryGetProperty("steps", out JsonElement stepsElement)
+                || !stepsElement.TryGetInt32(out steps)
+                || steps < MiniMaxH3VideoMinimumSteps
+                || steps > MiniMaxH3VideoMaximumSteps))
         {
-            profileId = MiniMaxH3VideoDefaultProfileId;
+            return false;
         }
-        else if (HasExactProperties(requested, "profileId", "prompt")
-            && TryGetStringProperty(
-                requested,
-                "profileId",
-                out profileId))
-        {
-            steps = MiniMaxH3VideoSteps;
-        }
-        else if (HasExactProperties(
-                requested,
-                "profileId",
-                "prompt",
-                "steps")
-            && TryGetStringProperty(
-                requested,
-                "profileId",
-                out profileId)
-            && requested.TryGetProperty("steps", out stepsElement)
-            && stepsElement.TryGetInt32(out steps)
-            && steps >= MiniMaxH3VideoMinimumSteps
-            && steps <= MiniMaxH3VideoMaximumSteps)
-        {
-            // Parsed below.
-        }
-        else
+        if (names.Contains("maximumPixelArea", StringComparer.Ordinal)
+            && (!requested.TryGetProperty(
+                    "maximumPixelArea",
+                    out JsonElement maximumPixelAreaElement)
+                || !maximumPixelAreaElement.TryGetInt32(out maximumPixelArea)
+                || !SupportedMiniMaxH3VideoMaximumPixelAreas.Contains(
+                    maximumPixelArea)))
         {
             return false;
         }
@@ -542,7 +539,8 @@ public partial class MainWindow
                 requested,
                 out int expectedFrameCount,
                 out double expectedDurationSeconds,
-                out int expectedSteps)
+                out int expectedSteps,
+                out int expectedMaximumPixelArea)
             || !TryGetStringPropertyAllowEmpty(
                 requested,
                 "prompt",
@@ -569,7 +567,10 @@ public partial class MainWindow
             || !widthElement.TryGetInt32(out int width)
             || !effective.TryGetProperty("height", out JsonElement heightElement)
             || !heightElement.TryGetInt32(out int height)
-            || !IsValidMiniMaxH3VideoCanvas(width, height)
+            || !IsValidMiniMaxH3VideoCanvas(
+                width,
+                height,
+                expectedMaximumPixelArea)
             || !HasExactInt32(
                 effective,
                 "frameCount",
