@@ -19115,8 +19115,10 @@ public partial class App : Application
                     && snapshot.ThumbnailTimerRestartCount == 1
                     && snapshot.ThumbnailScrollCancellationCount == 1
                     && !snapshot.ThumbnailDebouncePending
+                    && snapshot.ActionPresentationContract
                     && snapshot.RealizedContainerPeak > 0
                     && snapshot.RealizedContainerPeak <= 8
+                    && snapshot.RealizedButtonPeak <= snapshot.RealizedContainerPeak * 7
                     && snapshot.ThumbnailBatchSize == 0;
                 result = new
                 {
@@ -19135,7 +19137,9 @@ public partial class App : Application
                     snapshot.ThumbnailTimerRestartCount,
                     snapshot.ThumbnailScrollCancellationCount,
                     snapshot.ThumbnailDebouncePending,
+                    snapshot.ActionPresentationContract,
                     snapshot.RealizedContainerPeak,
+                    snapshot.RealizedButtonPeak,
                     snapshot.ThumbnailBatchSize,
                     snapshot.ScrollableHeight,
                 };
