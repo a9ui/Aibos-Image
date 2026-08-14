@@ -415,6 +415,35 @@ $heartbeatHostedPreemptionAccepted =
 $heartbeatWithinHostedAcceptance =
     [double]$dispatcherDiagnostic.maxProductGapMs -le $heartbeatAcceptanceLimitMs `
     -or $heartbeatHostedPreemptionAccepted
+$controlProbeValid = $null -ne $controlConsensus `
+    -and $controlConsensus.sensorValid -eq $true `
+    -and $controlConsensus.initialSamplesReady -eq $true `
+    -and $controlConsensus.uiThreadPriorityNormal -eq $true `
+    -and $controlConsensus.initialPhaseValid -eq $true `
+    -and $controlConsensus.aboveNormalProbe.requestedPriority -eq 'AboveNormal' `
+    -and $controlConsensus.normalProbe.requestedPriority -eq 'Normal' `
+    -and $controlConsensus.aboveNormalProbe.priorityApplied -eq $true `
+    -and $controlConsensus.normalProbe.priorityApplied -eq $true `
+    -and $controlConsensus.aboveNormalProbe.highResolutionTimerCreated -eq $true `
+    -and $controlConsensus.normalProbe.highResolutionTimerCreated -eq $true `
+    -and $controlConsensus.aboveNormalProbe.threadStopped -eq $true `
+    -and $controlConsensus.normalProbe.threadStopped -eq $true `
+    -and $controlConsensus.aboveNormalProbe.bufferOverflow -eq $false `
+    -and $controlConsensus.normalProbe.bufferOverflow -eq $false `
+    -and $controlConsensus.aboveNormalProbe.timestampsMonotonic -eq $true `
+    -and $controlConsensus.normalProbe.timestampsMonotonic -eq $true `
+    -and $controlConsensus.aboveNormalProbe.cadenceValid -eq $true `
+    -and $controlConsensus.normalProbe.cadenceValid -eq $true `
+    -and $controlConsensus.aboveNormalProbe.setTimerError -eq 0 `
+    -and $controlConsensus.normalProbe.setTimerError -eq 0 `
+    -and $controlConsensus.aboveNormalProbe.waitError -eq 0 `
+    -and $controlConsensus.normalProbe.waitError -eq 0 `
+    -and $controlConsensus.probePeriodMs -eq 2 `
+    -and $controlConsensus.probePhaseOffsetMs -eq 1 `
+    -and $controlConsensus.lateIntervalEpsilonMs -eq 0.5 `
+    -and $controlConsensus.probeCadenceToleranceMs -eq 0.75 `
+    -and $controlConsensus.probeCadenceAgreementToleranceMs -eq 0.25 `
+    -and $controlConsensus.probeCadenceAgreementValid -eq $true
 if ($result.dispatcherHeartbeatBudgetMs -ne 50 `
     -or $result.dispatcherHeartbeatMeasurementToleranceMs -ne $heartbeatMeasurementToleranceMs `
     -or $result.dispatcherHeartbeatHostedPreemptionAbsoluteCeilingMs `
@@ -438,35 +467,11 @@ elseif ($result.dispatcherHeartbeatHostedPreemptionAccepted `
         -ne $heartbeatWithinHostedAcceptance) {
     $failures.Add('dispatcher heartbeat hosted-acceptance classification was inconsistent')
 }
-elseif ($controlConsensus.sensorValid -ne $true `
-    -or $controlConsensus.initialSamplesReady -ne $true `
-    -or $controlConsensus.uiThreadPriorityNormal -ne $true `
-    -or $controlConsensus.initialPhaseValid -ne $true `
-    -or $controlConsensus.aboveNormalProbe.requestedPriority -ne 'AboveNormal' `
-    -or $controlConsensus.normalProbe.requestedPriority -ne 'Normal' `
-    -or $controlConsensus.aboveNormalProbe.priorityApplied -ne $true `
-    -or $controlConsensus.normalProbe.priorityApplied -ne $true `
-    -or $controlConsensus.aboveNormalProbe.highResolutionTimerCreated -ne $true `
-    -or $controlConsensus.normalProbe.highResolutionTimerCreated -ne $true `
-    -or $controlConsensus.aboveNormalProbe.threadStopped -ne $true `
-    -or $controlConsensus.normalProbe.threadStopped -ne $true `
-    -or $controlConsensus.aboveNormalProbe.bufferOverflow -ne $false `
-    -or $controlConsensus.normalProbe.bufferOverflow -ne $false `
-    -or $controlConsensus.aboveNormalProbe.timestampsMonotonic -ne $true `
-    -or $controlConsensus.normalProbe.timestampsMonotonic -ne $true `
-    -or $controlConsensus.aboveNormalProbe.cadenceValid -ne $true `
-    -or $controlConsensus.normalProbe.cadenceValid -ne $true `
-    -or $controlConsensus.aboveNormalProbe.setTimerError -ne 0 `
-    -or $controlConsensus.normalProbe.setTimerError -ne 0 `
-    -or $controlConsensus.aboveNormalProbe.waitError -ne 0 `
-    -or $controlConsensus.normalProbe.waitError -ne 0 `
-    -or $controlConsensus.probePeriodMs -ne 2 `
-    -or $controlConsensus.probePhaseOffsetMs -ne 1 `
-    -or $controlConsensus.lateIntervalEpsilonMs -ne 0.5 `
-    -or $controlConsensus.probeCadenceToleranceMs -ne 0.75 `
-    -or $controlConsensus.probeCadenceAgreementToleranceMs -ne 0.25 `
-    -or $controlConsensus.probeCadenceAgreementValid -ne $true) {
+elseif ($heartbeatHostedPreemptionAccepted -and -not $controlProbeValid) {
     $failures.Add('independent high-resolution scheduler probes were invalid or incomplete')
+}
+elseif (-not $controlProbeValid) {
+    Write-Warning 'Independent scheduler probes were incomplete, but no hosted-preemption exception was used.'
 }
 if ($result.dispatcherHeartbeatProductTargetMet -ne $true) {
     if ($heartbeatHostedPreemptionAccepted) {
