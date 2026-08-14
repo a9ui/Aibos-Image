@@ -2680,6 +2680,51 @@ public partial class MainWindow
             await RunEnhancementWorkspaceMutationAsync(job, HttpMethod.Post, $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel", "Cancel requested.");
     }
 
+    private async void EnhancementJobAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button
+            {
+                Tag: EnhancementWorkspaceJobView job,
+                CommandParameter: string action,
+            })
+        {
+            return;
+        }
+
+        switch (action)
+        {
+            case "move-up":
+            case "move-down":
+            case "move-next":
+                await MoveEnhancementJobInQueueAsync(job, action[5..]);
+                break;
+            case "update-prompts":
+                UpdateQueuedPhotorealPrompts_Click(sender, e);
+                break;
+            case "cancel":
+                CancelEnhancementJob_Click(sender, e);
+                break;
+            case "retry":
+                RetryEnhancementJob_Click(sender, e);
+                break;
+            case "rerun":
+                RerunPhotorealJob_Click(sender, e);
+                break;
+            case "rerun-next":
+                RerunPhotorealJobNext_Click(sender, e);
+                break;
+            case "dismiss":
+                DismissEnhancementJob_Click(sender, e);
+                break;
+            case "open-output":
+                OpenEnhancementOutput_Click(sender, e);
+                break;
+            case "delete-output":
+                DeleteEnhancementOutput_Click(sender, e);
+                break;
+        }
+    }
+
     private async void RetryEnhancementJob_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: EnhancementWorkspaceJobView job } && job.CanRetry)
@@ -4655,7 +4700,7 @@ public partial class MainWindow
                 _ => "video",
             };
             DateTimeOffset createdAt = now.AddSeconds(-boundedJobCount + index);
-            _enhancementWorkspaceJobs.Add(new EnhancementWorkspaceJobView(
+            var job = new EnhancementWorkspaceJobView(
                 $"synthetic-job-{index:D5}",
                 $"synthetic-source-{index:D5}",
                 Path.Combine(Path.GetTempPath(), $"synthetic-source-{index:D5}.png"),
@@ -4689,8 +4734,24 @@ public partial class MainWindow
                 sourceSize: 1_024,
                 sourceMtimeMs: createdAt.ToUnixTimeMilliseconds(),
                 queueOrder: status == "queued" ? index : null,
-                apiOrdinal: index));
+                apiOrdinal: index);
+            if (status == "queued")
+            {
+                int queuePosition = index / 5 + 1;
+                job.ApplyQueuePresentation(
+                    queuePosition,
+                    (boundedJobCount + 4) / 5,
+                    index);
+                if (operation == "photoreal")
+                    job.QueuedPhotorealPromptUpdateCapabilitySafe = true;
+            }
+            if (operation == "photoreal")
+                job.PhotorealEnqueueNextCapabilitySafe = true;
+            _enhancementWorkspaceJobs.Add(job);
         }
+
+        bool actionPresentationContract = _enhancementWorkspaceJobs.All(
+            static job => job.ActionPresentationMatchesCapabilitiesForSmoke());
 
         _enhancementWorkspaceFilter = "all";
         _enhancementWorkspacePageIndex = 0;
@@ -4716,6 +4777,7 @@ public partial class MainWindow
         using var syntheticActiveThumbnailLoad = new CancellationTokenSource();
         _enhancementWorkspaceThumbnailCts = syntheticActiveThumbnailLoad;
         int realizedPeak = FindVisualDescendants<ListBoxItem>(EnhancementJobsList).Count();
+        int realizedButtonPeak = FindVisualDescendants<Button>(EnhancementJobsList).Count();
         var stepMilliseconds = new List<double>(boundedStepCount);
         for (int step = 0; step < boundedStepCount; step++)
         {
@@ -4731,6 +4793,9 @@ public partial class MainWindow
             realizedPeak = Math.Max(
                 realizedPeak,
                 FindVisualDescendants<ListBoxItem>(EnhancementJobsList).Count());
+            realizedButtonPeak = Math.Max(
+                realizedButtonPeak,
+                FindVisualDescendants<Button>(EnhancementJobsList).Count());
         }
 
         await Task.Delay(EnhancementJobsThumbnailViewportDebounce + TimeSpan.FromMilliseconds(80));
@@ -4767,7 +4832,9 @@ public partial class MainWindow
             _enhancementWorkspaceThumbnailTimerRestartCount - timerRestartBefore,
             _enhancementWorkspaceThumbnailScrollCancellationCount - cancellationBefore,
             _enhancementWorkspaceThumbnailViewportTimer.IsEnabled,
+            actionPresentationContract,
             realizedPeak,
+            realizedButtonPeak,
             _enhancementWorkspaceLastThumbnailBatchSize,
             viewer.ScrollableHeight);
     }
@@ -5454,6 +5521,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 nameof(QueuedPhotorealPromptUpdateCapabilitySafe)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
                 nameof(CanUpdatePhotorealPrompts)));
+            NotifyActionPresentationsChanged();
         }
     }
     public bool PhotorealEnqueueNextCapabilitySafe
@@ -5468,6 +5536,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 nameof(PhotorealEnqueueNextCapabilitySafe)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
                 nameof(CanRerunNextWithCurrentSettings)));
+            NotifyActionPresentationsChanged();
         }
     }
     public bool CanUseOutput =>
@@ -5476,6 +5545,201 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && Status == "succeeded"
         && !string.IsNullOrWhiteSpace(OutputPath);
     public bool CanDeleteOutput => CanUseOutput && !OutputDependencyProtected;
+    public EnhancementJobActionPresentation Action1 => Status switch
+    {
+        "queued" => JobAction(
+            "move-up",
+            "↑",
+            "待機順を1つ上へ",
+            ShowMoveUp,
+            CanMoveUp,
+            32),
+        "running" or "failed" => JobAction(
+            "cancel",
+            CancelLabel,
+            "",
+            CanCancel,
+            CanCancel,
+            76),
+        "canceled" => JobAction(
+            "retry",
+            RetryLabel,
+            RetryToolTip,
+            CanRetry,
+            CanRetry,
+            104),
+        "succeeded" => JobAction(
+            "rerun",
+            "現在設定で再実写化",
+            "設定画面の現在のPromptと実写化設定で新しいジョブを追加",
+            CanRerunWithCurrentSettings,
+            CanRerunWithCurrentSettings,
+            126),
+        _ => EnhancementJobActionPresentation.Hidden,
+    };
+    public EnhancementJobActionPresentation Action2 => Status switch
+    {
+        "queued" => JobAction(
+            "move-down",
+            "↓",
+            "待機順を1つ下へ",
+            ShowMoveDown,
+            CanMoveDown,
+            32),
+        "failed" => JobAction(
+            "retry",
+            RetryLabel,
+            RetryToolTip,
+            CanRetry,
+            CanRetry,
+            104),
+        "canceled" => JobAction(
+            "rerun",
+            "現在設定で再実写化",
+            "設定画面の現在のPromptと実写化設定で新しいジョブを追加",
+            CanRerunWithCurrentSettings,
+            CanRerunWithCurrentSettings,
+            126),
+        "succeeded" => JobAction(
+            "rerun-next",
+            "現在設定で次に実写化",
+            "現在の設定で、処理中ジョブの直後へ原子的に追加",
+            CanRerunNextWithCurrentSettings,
+            CanRerunNextWithCurrentSettings,
+            144),
+        _ => EnhancementJobActionPresentation.Hidden,
+    };
+    public EnhancementJobActionPresentation Action3 => Status switch
+    {
+        "queued" => JobAction(
+            "move-next",
+            "これを次に処理",
+            "画面へすぐ反映し、処理中ジョブの直後へ保存",
+            ShowMoveNext,
+            CanMoveNext,
+            96,
+            "このジョブを次に処理"),
+        "failed" => JobAction(
+            "rerun",
+            "現在設定で再実写化",
+            "設定画面の現在のPromptと実写化設定で新しいジョブを追加",
+            CanRerunWithCurrentSettings,
+            CanRerunWithCurrentSettings,
+            126),
+        "canceled" => JobAction(
+            "rerun-next",
+            "現在設定で次に実写化",
+            "現在の設定で、処理中ジョブの直後へ原子的に追加",
+            CanRerunNextWithCurrentSettings,
+            CanRerunNextWithCurrentSettings,
+            144),
+        "succeeded" => JobAction(
+            "open-output",
+            "Open output",
+            OpenOutputToolTip,
+            CanUseOutput,
+            CanUseOutput,
+            88),
+        _ => EnhancementJobActionPresentation.Hidden,
+    };
+    public EnhancementJobActionPresentation Action4 => Status switch
+    {
+        "queued" => JobAction(
+            "update-prompts",
+            "現在設定へ更新",
+            "現在のPrompt・LoRA・強さ・CFG・品質・解像度・Seedへ更新。元画像ごとの個別Prompt変換と待ち順は維持",
+            CanUpdatePhotorealPrompts,
+            CanUpdatePhotorealPrompts,
+            114),
+        "failed" => JobAction(
+            "rerun-next",
+            "現在設定で次に実写化",
+            "現在の設定で、処理中ジョブの直後へ原子的に追加",
+            CanRerunNextWithCurrentSettings,
+            CanRerunNextWithCurrentSettings,
+            144),
+        _ => EnhancementJobActionPresentation.Hidden,
+    };
+    public EnhancementJobActionPresentation Action5 => Status == "queued"
+        ? JobAction(
+            "cancel",
+            CancelLabel,
+            "",
+            CanCancel,
+            CanCancel,
+            76)
+        : EnhancementJobActionPresentation.Hidden;
+    public EnhancementJobActionPresentation DangerAction => Status switch
+    {
+        "failed" or "canceled" or "deleted" => JobAction(
+            "dismiss",
+            "Remove",
+            "Remove this terminal job from history. Source and output files are not changed.",
+            CanDismiss,
+            CanDismiss,
+            72,
+            "Remove terminal job from history"),
+        "succeeded" => JobAction(
+            "delete-output",
+            "Delete output",
+            "",
+            CanDeleteOutput,
+            CanDeleteOutput,
+            94),
+        _ => EnhancementJobActionPresentation.Hidden,
+    };
+
+    private static EnhancementJobActionPresentation JobAction(
+        string kind,
+        string label,
+        string toolTip,
+        bool visible,
+        bool enabled,
+        double minWidth,
+        string? automationName = null)
+        => new(
+            kind,
+            label,
+            toolTip,
+            visible,
+            enabled,
+            minWidth,
+            automationName ?? label);
+
+    public bool ActionPresentationMatchesCapabilitiesForSmoke()
+    {
+        var expected = new List<string>(6);
+        if (ShowMoveUp)
+            expected.Add("move-up");
+        if (ShowMoveDown)
+            expected.Add("move-down");
+        if (ShowMoveNext)
+            expected.Add("move-next");
+        if (CanUpdatePhotorealPrompts)
+            expected.Add("update-prompts");
+        if (CanCancel)
+            expected.Add("cancel");
+        if (CanRetry)
+            expected.Add("retry");
+        if (CanRerunWithCurrentSettings)
+            expected.Add("rerun");
+        if (CanRerunNextWithCurrentSettings)
+            expected.Add("rerun-next");
+        if (CanDismiss)
+            expected.Add("dismiss");
+        if (CanUseOutput)
+            expected.Add("open-output");
+        if (CanDeleteOutput)
+            expected.Add("delete-output");
+
+        EnhancementJobActionPresentation[] actionSlots =
+            [Action1, Action2, Action3, Action4, Action5, DangerAction];
+        string[] actual = actionSlots
+            .Where(static action => action.Visible)
+            .Select(static action => action.Kind)
+            .ToArray();
+        return expected.SequenceEqual(actual, StringComparer.Ordinal);
+    }
     public string ThumbnailToolTip => IsVideoOperation && CanUseOutput
         ? "完成動画をAibosの拡大ビューで再生"
         : "元画像をAibosのビューワーで開く";
@@ -5714,6 +5978,17 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         if (statusChanged
             || cancelRequestedChanged
             || outputChanged
+            || queueChanged
+            || queueCountChanged
+            || queueOrderChanged
+            || queueMutationScopeChanged
+            || outputDependencyChanged)
+        {
+            NotifyActionPresentationsChanged();
+        }
+        if (statusChanged
+            || cancelRequestedChanged
+            || outputChanged
             || errorChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DetailText)));
         if (statusChanged || updatedChanged || timingChanged)
@@ -5780,6 +6055,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveDown)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveNext)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
+        NotifyActionPresentationsChanged();
     }
 
     public bool IsHighlighted
@@ -5826,10 +6102,34 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUpdatePhotorealPrompts)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUseOutput)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDeleteOutput)));
+            NotifyActionPresentationsChanged();
         }
     }
 
+    private void NotifyActionPresentationsChanged()
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Action1)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Action2)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Action3)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Action4)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Action5)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(DangerAction)));
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed record EnhancementJobActionPresentation(
+    string Kind,
+    string Label,
+    string ToolTip,
+    bool Visible,
+    bool Enabled,
+    double MinWidth,
+    string AutomationName)
+{
+    public static EnhancementJobActionPresentation Hidden { get; } =
+        new("", "", "", false, false, 0, "");
 }
 
 internal readonly record struct EnhancementQueueHealthView(
@@ -5897,7 +6197,9 @@ public sealed record EnhancementJobsScrollPerformanceSmokeSnapshot(
     int ThumbnailTimerRestartCount,
     int ThumbnailScrollCancellationCount,
     bool ThumbnailDebouncePending,
+    bool ActionPresentationContract,
     int RealizedContainerPeak,
+    int RealizedButtonPeak,
     int ThumbnailBatchSize,
     double ScrollableHeight);
 
