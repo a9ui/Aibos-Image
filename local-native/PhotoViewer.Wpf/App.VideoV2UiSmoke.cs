@@ -236,6 +236,25 @@ public partial class App
                     .GetProperty("requested")
                     .GetProperty("profileId")
                     .GetString() == "minimax-h3-hq-10s-v1";
+            using JsonDocument twelveSecondRequest = JsonDocument.Parse(
+                window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
+                    "three connected phases",
+                    durationSeconds: 12));
+            using JsonDocument fifteenSecondRequest = JsonDocument.Parse(
+                window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
+                    "long connected motion",
+                    durationSeconds: 15));
+            bool allSelectableProfilesExact = longRequestExact
+                && twelveSecondRequest.RootElement
+                    .GetProperty("video")
+                    .GetProperty("requested")
+                    .GetProperty("profileId")
+                    .GetString() == "minimax-h3-hq-12s-v1"
+                && fifteenSecondRequest.RootElement
+                    .GetProperty("video")
+                    .GetProperty("requested")
+                    .GetProperty("profileId")
+                    .GetString() == "minimax-h3-hq-15s-v1";
             window.SelectMiniMaxH3StepsForSmoke(40);
             using JsonDocument highStepsRequest = JsonDocument.Parse(
                 window.BuildMiniMaxH3EnqueueRequestJsonForSmoke(
@@ -640,7 +659,7 @@ public partial class App
                 && h3UnavailableSafe
                 && h3ReservationStatusExact
                 && requestExact
-                && longRequestExact
+                && allSelectableProfilesExact
                 && highStepsRequestExact
                 && healthExact
                 && invalidSealReasonVisible
@@ -671,6 +690,7 @@ public partial class App
                 readyReservationStatus,
                 requestExact,
                 longRequestExact,
+                allSelectableProfilesExact,
                 highStepsRequestExact,
                 healthExact,
                 invalidSealReasonVisible,

@@ -1018,12 +1018,12 @@ snapshots remain protected rather than being coerced to the Wan v1 shape.
   or saved Style is normalized to H3 while retaining its name and prompt; there
   is no silent fallback from an unavailable H3 writer to Wan.
 
-- The visible H3 control exposes only the measured 5 / 10 second profiles and
+- The visible H3 control exposes the measured 5 / 10 / 12 / 15 second profiles and
   a synchronized integer slider/input from 1 through 40 STEP. FPS remains fixed
   at 24. Changing STEP changes only the scheduler iteration count and is presented without an
-  unmeasured quality guarantee. The measured 12 / 15 second profiles remain valid
-  durable-reader and backend contracts for existing jobs, but are not offered
-  for new selection. The 10-second option carries an idle-system warning
+  unmeasured quality guarantee; it does not change video dimensions. The UI labels
+  this control as the generation iteration count and presents video size separately
+  as an automatic source-aspect canvas capped at 414,720 pixels. The 10 / 12 / 15-second options carry an idle-system warning
   because the RTX 4070 SUPER / 32 GiB measurements used most physical RAM.
   The retained 12.250-second 512x768 measurement completed in 802.452 seconds
   with 11,332 MiB peak VRAM, 1.78 GiB minimum free physical RAM, and 81 C peak
