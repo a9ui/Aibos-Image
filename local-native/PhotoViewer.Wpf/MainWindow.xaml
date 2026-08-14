@@ -214,7 +214,7 @@
                      AutomationProperties.Name="Aibos Gallery Fold mark"/>
               <TextBlock Text="Aibos" FontSize="18.5" FontWeight="Bold" Foreground="{StaticResource LogoBrush}"
                          VerticalAlignment="Center" Margin="7,0,0,0"/>
-              <TextBlock x:Name="HeaderProductVersionText" Text="v1.0.0"
+              <TextBlock x:Name="HeaderProductVersionText" Text="v0.2.0"
                          FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource TextTertiary}"
                          VerticalAlignment="Center" Margin="6,3,0,0"
                          AutomationProperties.Name="Aibos Image product version"/>
