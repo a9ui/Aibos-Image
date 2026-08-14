@@ -143,6 +143,12 @@
           "defaultSteps": 20,
           "minimumSteps": 1,
           "maximumSteps": 40
+        },
+        "videoH3CanvasTiersV1": {
+          "contractId": "PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001",
+          "protocol": "aibos.enhancement-video-h3-canvas-tiers/v1",
+          "defaultMaximumPixelArea": 414720,
+          "maximumPixelAreas": [230400, 307200, 414720]
         }
       },
       "comfyUi": {

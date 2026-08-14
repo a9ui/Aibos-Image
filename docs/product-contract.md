@@ -1009,11 +1009,15 @@ writer base contract for MiniMax H3. The additive
 `contracts/enhancement-video-h3-profiles-v1.json` contract defines the four
 measured high-quality duration profiles: 124, 243, 294, or 362 native frames
 at 24 fps, delivering 5.167, 10.125, 12.250, or 15.083 seconds. Every profile
-retains the source-aspect canvas capped at 414,720 pixels, H.264,
+retains the source-aspect canvas, H.264,
 and the contract-defined AAC audio path. Legacy prompt-only v2 rows remain the
 124-frame, 20 STEP profile. New requests pin `requested.profileId`. The additive
 `contracts/enhancement-video-h3-steps-v1.json` contract allows an integer from
-1 through 40 in `requested.steps`; arbitrary duration, frame, FPS, resolution, or invalid STEP
+1 through 40 in `requested.steps`. The additive
+`contracts/enhancement-video-h3-canvas-tiers-v1.json` contract independently
+selects a 230,400, 307,200, or 414,720-pixel source-aspect ceiling through
+`requested.maximumPixelArea`; an omitted legacy field means 414,720 pixels.
+Arbitrary duration, frame, FPS, resolution, pixel ceiling, or invalid STEP
 values are rejected. Unknown or inconsistent
 snapshots remain protected rather than being coerced to the Wan v1 shape.
 
@@ -1029,7 +1033,10 @@ snapshots remain protected rather than being coerced to the Wan v1 shape.
   at 24. Changing STEP changes only the scheduler iteration count and is presented without an
   unmeasured quality guarantee; it does not change video dimensions. The UI labels
   this control as the generation iteration count and presents video size separately
-  as an automatic source-aspect canvas capped at 414,720 pixels. The 10 / 12 / 15-second options carry an idle-system warning
+  as Lightweight (230,400 pixels), Standard (307,200 pixels), or High quality
+  (414,720 pixels, default). Selecting a video size changes only the bounded
+  source-aspect canvas and never changes STEP, duration, FPS, or delivery.
+  The 10 / 12 / 15-second options carry an idle-system warning
   because the RTX 4070 SUPER / 32 GiB measurements used most physical RAM.
   The retained 12.250-second 512x768 measurement completed in 802.452 seconds
   with 11,332 MiB peak VRAM, 1.78 GiB minimum free physical RAM, and 81 C peak

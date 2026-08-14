@@ -750,7 +750,9 @@ public partial class MainWindow
                 ? "The Aibos Image local AI service does not expose the tested MiniMax H3 5, 10, 12, and 15 second profiles. Restart the local AI service first; no job was added."
                 : !TryParseMiniMaxH3VideoStepsCapability(payload)
                     ? "The Aibos Image local AI service does not expose bounded MiniMax H3 STEP control. Restart the local AI service first; no job was added."
-                    : null;
+                    : !TryParseMiniMaxH3VideoCanvasTiersCapability(payload)
+                        ? "The Aibos Image local AI service does not expose bounded MiniMax H3 video-size tiers. Restart the local AI service first; no job was added."
+                        : null;
 
     private static bool TryParseMiniMaxH3VideoProfilesCapability(
         JsonElement payload)
@@ -886,6 +888,51 @@ public partial class MainWindow
         return true;
     }
 
+    private static bool TryParseMiniMaxH3VideoCanvasTiersCapability(
+        JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(payload, "capabilities")
+            || !payload.TryGetProperty("capabilities", out JsonElement capabilities)
+            || capabilities.ValueKind != JsonValueKind.Object
+            || !HasSingleProperty(capabilities, "videoH3CanvasTiersV1")
+            || !capabilities.TryGetProperty(
+                "videoH3CanvasTiersV1",
+                out JsonElement capability)
+            || capability.ValueKind != JsonValueKind.Object
+            || !HasExactVideoV2Properties(
+                capability,
+                "contractId",
+                "protocol",
+                "defaultMaximumPixelArea",
+                "maximumPixelAreas")
+            || !VideoV2ExactString(
+                capability,
+                "contractId",
+                MiniMaxH3VideoCanvasTiersContractId)
+            || !VideoV2ExactString(
+                capability,
+                "protocol",
+                MiniMaxH3VideoCanvasTiersProtocol)
+            || !VideoV2ExactInt32(
+                capability,
+                "defaultMaximumPixelArea",
+                MiniMaxH3VideoCanvasMaximumPixelArea)
+            || !capability.TryGetProperty(
+                "maximumPixelAreas",
+                out JsonElement maximumPixelAreas)
+            || maximumPixelAreas.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        int[] actual = maximumPixelAreas
+            .EnumerateArray()
+            .Select(static item => item.TryGetInt32(out int value) ? value : -1)
+            .ToArray();
+        return actual.SequenceEqual(SupportedMiniMaxH3VideoMaximumPixelAreas);
+    }
+
     private static bool HasExactVideoV2Properties(
         JsonElement element,
         params string[] expectedNames)
@@ -956,6 +1003,10 @@ public partial class MainWindow
     public static bool TryParseMiniMaxH3VideoStepsCapabilityForSmoke(
         JsonElement payload)
         => TryParseMiniMaxH3VideoStepsCapability(payload);
+
+    public static bool TryParseMiniMaxH3VideoCanvasTiersCapabilityForSmoke(
+        JsonElement payload)
+        => TryParseMiniMaxH3VideoCanvasTiersCapability(payload);
 
     private async Task<EnhancementEnqueueProbe> ProbeEnhancementEnqueueBackendAsync(
         CancellationToken token)

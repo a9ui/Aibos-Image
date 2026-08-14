@@ -93,12 +93,16 @@
       ],
       "requested": {
         "requiredFields": [
+          "profileId",
           "prompt",
-          "steps"
+          "steps",
+          "maximumPixelArea"
         ],
         "allowedFields": [
+          "profileId",
           "prompt",
-          "steps"
+          "steps",
+          "maximumPixelArea"
         ],
         "promptMaximumCharacters": 2000,
         "steps": {
@@ -106,6 +110,11 @@
           "minimum": 1,
           "maximum": 40,
           "capability": "capabilities.videoH3StepsV1"
+        },
+        "maximumPixelArea": {
+          "defaultForLegacyRows": 414720,
+          "allowedValues": [230400, 307200, 414720],
+          "capability": "capabilities.videoH3CanvasTiersV1"
         }
       },
       "forbiddenClientControls": [
@@ -131,7 +140,7 @@
       "maximum": 2147483647,
       "fixedAtEnqueue": true
     },
-    "serverMeaning": "the server resolves source identity and oriented source geometry, selects the bounded source-aspect canvas, validates requested.steps as an integer from 1 to 40, revalidates exact readiness, and persists the effective snapshot"
+    "serverMeaning": "the server resolves source identity and oriented source geometry, selects the bounded source-aspect canvas from requested.maximumPixelArea, validates requested.steps independently as an integer from 1 to 40, revalidates exact readiness, and persists the effective snapshot"
   },
   "promptPolicy": {
     "nonBlank": "requested.prompt is trimmed and copied exactly to effective.positivePrompt",
@@ -465,7 +474,10 @@
       "model.textEncoder",
       "model.videoVae",
       "model.audioVae",
+      "requested.profileId",
       "requested.prompt",
+      "requested.steps",
+      "requested.maximumPixelArea",
       "effective.width",
       "effective.height",
       "effective.frameCount",
@@ -487,7 +499,7 @@
       "container",
       "bitDepth"
     ],
-    "exactKnownValues": "effective.width and effective.height must satisfy profile.canvasPolicy and are selected once by the writer; all other values are exactly those in profile; effective.positivePrompt follows promptPolicy; seed is an integer from 0 through 2147483647",
+    "exactKnownValues": "effective.width and effective.height must satisfy profile.canvasPolicy and their product must not exceed requested.maximumPixelArea; legacy rows without that field use 414720. All other values are exactly those in profile except the independently selected requested.steps; effective.positivePrompt follows promptPolicy; seed is an integer from 0 through 2147483647",
     "unknownFields": "preserve at the job-store boundary; an H3 row containing unknown nested fields is protected rather than rewritten by the v2 mutation client",
     "malformedKnownOrUnknownNestedField": "reader-only protected row; never cancel, retry, reorder, open, play, or delete through a managed-video mutation path",
     "retry": "reuse the complete persisted exact H3 snapshot, prompt, source provenance, and seed after a fresh exact health validation"
