@@ -87,6 +87,9 @@ try {
         ($healthFixture.workingFixture.payload.capabilities.queuedPhotorealPromptUpdate -eq $true)
         ($healthContract.readerRules.missingQueuedPhotorealPromptUpdate -eq
             "keep health and jobs readable but hide the queued prompt-update action")
+        ($healthContract.readerRules.missingTerminalHistoryBatchDismissV1 -eq
+            "keep health and jobs readable and fall back to protected per-job terminal history dismissal")
+        ($healthFixture.workingFixture.payload.capabilities.terminalHistoryBatchDismissV1 -eq $true)
     )
     if ($healthContractChecks -contains $false) {
         throw "Enhancement health contract fields are invalid."

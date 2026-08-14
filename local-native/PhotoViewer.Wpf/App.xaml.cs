@@ -19119,6 +19119,7 @@ public partial class App : Application
                     StringComparer.Ordinal);
                 var dismissedCanceledJobs = new HashSet<string>(
                     StringComparer.Ordinal);
+                var terminalHistoryBatchBodies = new List<string>();
                 bool canceledRetryCreated = false;
                 bool rerunCreated = false;
                 bool queueLaterFirst = false;
@@ -19566,6 +19567,7 @@ public partial class App : Application
                     }
                     capabilities["photorealPromptControlsV2"] = true;
                     capabilities["atomicImageEnqueueNext"] = true;
+                    capabilities["terminalHistoryBatchDismissV1"] = true;
                     capabilities["durableEnqueueInboxV1"] = new
                     {
                         ready = true,
@@ -19743,6 +19745,36 @@ public partial class App : Application
                             {
                                 job = VideoJob("retry-job", "queued", 0),
                                 receipt = DurableReceipt(request, "retry-job"),
+                            }));
+                    }
+                    if (request.Method == HttpMethod.Delete
+                        && route.EndsWith("/api/enhance/jobs/terminal", StringComparison.Ordinal))
+                    {
+                        string body = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "";
+                        terminalHistoryBatchBodies.Add(body);
+                        using JsonDocument dismissDocument = JsonDocument.Parse(body);
+                        string status = dismissDocument.RootElement.GetProperty("status").GetString() ?? "";
+                        string[] ids = dismissDocument.RootElement.GetProperty("ids")
+                            .EnumerateArray()
+                            .Select(static element => element.GetString() ?? "")
+                            .ToArray();
+                        if (status == "failed")
+                        {
+                            foreach (string id in ids)
+                                dismissedFailedJobs.Add(id);
+                        }
+                        else if (status == "canceled")
+                        {
+                            foreach (string id in ids)
+                                dismissedCanceledJobs.Add(id);
+                        }
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.OK,
+                            new
+                            {
+                                dismissedCount = ids.Length,
+                                protectedCount = 0,
+                                missingCount = 0,
                             }));
                     }
                     if (request.Method == HttpMethod.Delete
@@ -20721,6 +20753,33 @@ public partial class App : Application
                         return false;
                     }
                 }
+                static bool IsTerminalHistoryBatchBody(
+                    string bodyText,
+                    string expectedStatus,
+                    string requiredId,
+                    params string[] protectedIds)
+                {
+                    try
+                    {
+                        using JsonDocument document = JsonDocument.Parse(bodyText);
+                        JsonElement body = document.RootElement;
+                        string[] ids = body.GetProperty("ids")
+                            .EnumerateArray()
+                            .Select(static element => element.GetString() ?? "")
+                            .ToArray();
+                        return body.GetProperty("status").GetString() == expectedStatus
+                            && ids.Contains(requiredId, StringComparer.Ordinal)
+                            && protectedIds.All(id =>
+                                !ids.Contains(id, StringComparer.Ordinal));
+                    }
+                    catch (Exception ex) when (
+                        ex is JsonException
+                            or InvalidOperationException
+                            or KeyNotFoundException)
+                    {
+                        return false;
+                    }
+                }
                 int rerunBodiesBeforeBulkFailed = rerunBodies.Count;
                 int bulkFailedRetried =
                     await window.RetryAllFailedEnhancementJobsForSmokeAsync();
@@ -20787,6 +20846,20 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && !window.RetryAllCanceledEnhancementJobsControlForSmoke
                     && !window.ClearAllCanceledEnhancementJobsControlForSmoke;
+                bool terminalHistoryBatchDismissContract =
+                    terminalHistoryBatchBodies.Count == 2
+                    && IsTerminalHistoryBatchBody(
+                        terminalHistoryBatchBodies[0],
+                        "failed",
+                        "delivery-failed-job",
+                        "video-malformed-provenance-job",
+                        "future-reader-job",
+                        "null-operation-reader-job")
+                    && IsTerminalHistoryBatchBody(
+                        terminalHistoryBatchBodies[1],
+                        "canceled",
+                        "canceled-job",
+                        "future-canceled-reader-job");
                 window.SelectEnhancementJobsFilterForSmoke("all");
                 bool jobsHeaderChromeContract = window.EnhancementJobsHeaderChromeContractForSmoke;
                 bool closeButtonClosedWorkspace = window.ActivateEnhancementJobsCloseForSmoke();
@@ -20810,7 +20883,8 @@ public partial class App : Application
                     && requests.Contains("POST /api/enhance/jobs/failed-retry-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/failed-retry-job", StringComparer.Ordinal)
                     && !requests.Contains("POST /api/enhance/jobs/delivery-failed-job/retry", StringComparer.Ordinal)
-                    && requests.Contains("DELETE /api/enhance/jobs/delivery-failed-job", StringComparer.Ordinal)
+                    && requests.Contains("DELETE /api/enhance/jobs/terminal", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/delivery-failed-job", StringComparer.Ordinal)
                     && !requests.Contains("POST /api/enhance/jobs/clearable-failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/clearable-failed-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/video-malformed-provenance-job", StringComparer.Ordinal)
@@ -20991,6 +21065,7 @@ public partial class App : Application
                     && completedElapsedVisible
                     && bulkFailedActionsContract
                     && bulkCanceledActionsContract
+                    && terminalHistoryBatchDismissContract
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
                     && moveNextIssued
@@ -21098,6 +21173,7 @@ public partial class App : Application
                     visibleThumbnailBatch,
                     jobsScrollTopControl,
                     jobsFilterLayoutContract,
+                    terminalHistoryBatchDismissContract,
                     progressUsesOneDecimal,
                     mixedRetryCapabilityPartition,
                     legacyHealth,

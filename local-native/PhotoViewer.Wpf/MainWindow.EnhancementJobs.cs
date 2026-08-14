@@ -23,6 +23,7 @@ public partial class MainWindow
     private const int EnhancementJobsThumbnailViewportLimit = 12;
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private const int EnhancementJobsPageSize = 100;
+    private const int EnhancementTerminalHistoryBatchLimit = 1_000;
     private const string UnsupportedEnhancementOperation = "unsupported";
     private const string VideoPreservationPreamble =
         "Animate the supplied image as the exact first frame. "
@@ -67,6 +68,7 @@ public partial class MainWindow
     private bool? _enhancementWorkspaceQueuePaused;
     private bool _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
     private bool _enhancementWorkspacePhotorealEnqueueNextSupported;
+    private bool _enhancementWorkspaceTerminalHistoryBatchDismissSupported;
     private bool _returnToEnhancementJobsAfterModalClose;
     private Tile? _enhancementJobsTemporaryVisibleTile;
     private string? _enhancementJobsTrustedModalSourcePath;
@@ -1709,6 +1711,7 @@ public partial class MainWindow
         bool queuedPhotorealPromptUpdate = false;
         bool photorealPromptControls = false;
         bool atomicImageEnqueueNext = false;
+        bool terminalHistoryBatchDismiss = false;
         if (payload.TryGetProperty(
                 "capabilities",
                 out JsonElement capabilitiesElement))
@@ -1726,6 +1729,21 @@ public partial class MainWindow
                         promptUpdateElement.GetBoolean();
                 }
                 else if (promptUpdateElement.ValueKind != JsonValueKind.Null)
+                {
+                    return false;
+                }
+            }
+            if (capabilitiesElement.TryGetProperty(
+                    "terminalHistoryBatchDismissV1",
+                    out JsonElement terminalHistoryBatchDismissElement))
+            {
+                if (terminalHistoryBatchDismissElement.ValueKind is
+                    JsonValueKind.True or JsonValueKind.False)
+                {
+                    terminalHistoryBatchDismiss =
+                        terminalHistoryBatchDismissElement.GetBoolean();
+                }
+                else if (terminalHistoryBatchDismissElement.ValueKind != JsonValueKind.Null)
                 {
                     return false;
                 }
@@ -1799,6 +1817,7 @@ public partial class MainWindow
             paused,
             queuedPhotorealPromptUpdate,
             photorealPromptControls && atomicImageEnqueueNext,
+            terminalHistoryBatchDismiss,
             inventorySignature,
             currentJobId,
             currentProgress,
@@ -1862,6 +1881,8 @@ public partial class MainWindow
         ApplyQueuedPhotorealPromptUpdateCapability(
             health.QueuedPhotorealPromptUpdate);
         ApplyPhotorealEnqueueNextCapability(health.PhotorealEnqueueNext);
+        _enhancementWorkspaceTerminalHistoryBatchDismissSupported =
+            health.TerminalHistoryBatchDismiss;
         EnhancementJobsHealthStateText.Text = health.State;
         EnhancementJobsHealthStateText.Foreground =
             (Brush)FindResource(health.ForegroundResource);
@@ -1885,6 +1906,7 @@ public partial class MainWindow
         _enhancementWorkspaceQueuePaused = null;
         ApplyQueuedPhotorealPromptUpdateCapability(false);
         ApplyPhotorealEnqueueNextCapability(false);
+        _enhancementWorkspaceTerminalHistoryBatchDismissSupported = false;
         EnhancementJobsHealthStateText.Text = "Health unavailable";
         EnhancementJobsHealthStateText.Foreground =
             (Brush)FindResource("TextTertiary");
@@ -3273,6 +3295,7 @@ public partial class MainWindow
         long generation = _enhancementWorkspaceGeneration;
         int clearedCount = 0;
         int failedCount = 0;
+        int alreadyMissingCount = 0;
         string? failure = null;
         int? failureStatus = null;
         EnhancementJobsStatusText.Text =
@@ -3280,31 +3303,63 @@ public partial class MainWindow
         await Dispatcher.Yield(DispatcherPriority.Render);
         try
         {
-            for (int index = 0; index < dismissibleIds.Length; index++)
+            if (_enhancementWorkspaceTerminalHistoryBatchDismissSupported)
             {
-                string id = dismissibleIds[index];
-                EnhancementApiResponse remove = await SendEnhancementApiAsync(
-                    HttpMethod.Delete,
-                    $"api/enhance/jobs/{Uri.EscapeDataString(id)}");
-                if (!remove.Ok)
+                foreach (string[] ids in dismissibleIds.Chunk(
+                    EnhancementTerminalHistoryBatchLimit))
                 {
-                    failedCount++;
-                    failure ??= EnhancementApiErrorCode(remove);
-                    failureStatus ??= remove.StatusCode;
-                    if (remove.StatusCode is 0 or 401 or 403
-                        || remove.StatusCode >= 500)
+                    EnhancementApiResponse remove = await SendEnhancementApiAsync(
+                        HttpMethod.Delete,
+                        "api/enhance/jobs/terminal",
+                        new { status = terminalStatus, ids });
+                    if (!remove.Ok
+                        || !TryParseTerminalHistoryBatchDismissResponse(
+                            remove.Payload,
+                            ids.Length,
+                            out int dismissedCount,
+                            out int newlyProtectedCount,
+                            out int missingCount))
                     {
+                        failedCount += ids.Length;
+                        failure ??= remove.Ok
+                            ? "TERMINAL_HISTORY_BATCH_RESPONSE_INVALID"
+                            : EnhancementApiErrorCode(remove);
+                        failureStatus ??= remove.StatusCode;
                         break;
                     }
-                    continue;
+                    clearedCount += dismissedCount;
+                    protectedCount += newlyProtectedCount;
+                    alreadyMissingCount += missingCount;
                 }
-                clearedCount++;
-                if ((index + 1) % 25 == 0
-                    && index + 1 < dismissibleIds.Length)
+            }
+            else
+            {
+                for (int index = 0; index < dismissibleIds.Length; index++)
                 {
-                    EnhancementJobsStatusText.Text =
-                        $"{terminalLabel}履歴を削除中… {index + 1:N0}/{dismissibleIds.Length:N0}件";
-                    await Dispatcher.Yield(DispatcherPriority.Background);
+                    string id = dismissibleIds[index];
+                    EnhancementApiResponse remove = await SendEnhancementApiAsync(
+                        HttpMethod.Delete,
+                        $"api/enhance/jobs/{Uri.EscapeDataString(id)}");
+                    if (!remove.Ok)
+                    {
+                        failedCount++;
+                        failure ??= EnhancementApiErrorCode(remove);
+                        failureStatus ??= remove.StatusCode;
+                        if (remove.StatusCode is 0 or 401 or 403
+                            || remove.StatusCode >= 500)
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+                    clearedCount++;
+                    if ((index + 1) % 25 == 0
+                        && index + 1 < dismissibleIds.Length)
+                    {
+                        EnhancementJobsStatusText.Text =
+                            $"{terminalLabel}履歴を削除中… {index + 1:N0}/{dismissibleIds.Length:N0}件";
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                    }
                 }
             }
 
@@ -3318,6 +3373,9 @@ public partial class MainWindow
                     $"{terminalLabel}履歴 {clearedCount:N0}件を消しました。元画像と出力ファイルは変更していません。"
                     + (protectedCount > 0
                         ? $" 保護対象 {protectedCount:N0}件は残しました。"
+                        : "")
+                    + (alreadyMissingCount > 0
+                        ? $" {alreadyMissingCount:N0}件はすでに履歴から消えていました。"
                         : "")
                     + (failedCount > 0
                         ? $" {failedCount:N0}件は削除できませんでした（{failure}）。"
@@ -3338,6 +3396,37 @@ public partial class MainWindow
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
+    }
+
+    private static bool TryParseTerminalHistoryBatchDismissResponse(
+        JsonElement? payload,
+        int requestedCount,
+        out int dismissedCount,
+        out int protectedCount,
+        out int missingCount)
+    {
+        dismissedCount = 0;
+        protectedCount = 0;
+        missingCount = 0;
+        if (payload is not JsonElement root
+            || root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("dismissedCount", out JsonElement dismissedElement)
+            || !dismissedElement.TryGetInt32(out dismissedCount)
+            || !root.TryGetProperty("protectedCount", out JsonElement protectedElement)
+            || !protectedElement.TryGetInt32(out protectedCount)
+            || !root.TryGetProperty("missingCount", out JsonElement missingElement)
+            || !missingElement.TryGetInt32(out missingCount)
+            || dismissedCount < 0
+            || protectedCount < 0
+            || missingCount < 0
+            || dismissedCount + protectedCount + missingCount != requestedCount)
+        {
+            dismissedCount = 0;
+            protectedCount = 0;
+            missingCount = 0;
+            return false;
+        }
+        return true;
     }
 
     private async void RerunPhotorealJob_Click(object sender, RoutedEventArgs e)
@@ -5504,6 +5593,7 @@ internal readonly record struct EnhancementQueueHealthView(
     bool? Paused,
     bool QueuedPhotorealPromptUpdate,
     bool PhotorealEnqueueNext,
+    bool TerminalHistoryBatchDismiss,
     string InventorySignature,
     string? CurrentJobId,
     int? CurrentProgress,
