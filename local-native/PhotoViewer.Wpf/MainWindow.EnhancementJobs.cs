@@ -3098,6 +3098,8 @@ public partial class MainWindow
         await Dispatcher.Yield(DispatcherPriority.Render);
         try
         {
+            var retryRequests = new List<(EnhancementWorkspaceJobView Job, object Body)>(
+                terminalJobs.Length);
             for (int index = 0; index < terminalJobs.Length; index++)
             {
                 EnhancementWorkspaceJobView job = terminalJobs[index];
@@ -3129,18 +3131,28 @@ public partial class MainWindow
                     continue;
                 }
 
-                EnhancementApiResponse retry = await SendEnhancementEnqueueAsync(
+                retryRequests.Add((
+                    job,
                     CreatePhotorealRequestBody(
                         sourceIdentity,
                         settings,
                         photorealSeed,
-                        "last"),
+                        "last")));
+            }
+
+            DurableEnhancementBatchResponse retryBatch =
+                await TrySendDurableEnhancementBatchAsync(
+                    retryRequests.Select(static request => request.Body).ToArray(),
                     "last",
                     healthValidator: CreateImageEnhancementHealthValidator(
                         "photoreal",
                         enqueueNext: false,
                         requiresPhotorealSeedControl: photorealSeed.HasValue),
-                    recoverySourceIdentity: sourceIdentity);
+                    requireExactHealthValidation: true);
+            for (int index = 0; index < retryRequests.Count; index++)
+            {
+                EnhancementWorkspaceJobView job = retryRequests[index].Job;
+                EnhancementApiResponse retry = retryBatch.Responses[index];
                 if (retry.SavedForDelivery)
                 {
                     pendingCount++;
