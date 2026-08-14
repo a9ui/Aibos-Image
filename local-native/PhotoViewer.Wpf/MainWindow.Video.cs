@@ -550,7 +550,8 @@ public partial class MainWindow
             || !TryGetMiniMaxH3SnapshotProfile(
                 requested,
                 out int frameCount,
-                out double expectedDurationSeconds)
+                out double expectedDurationSeconds,
+                out int requestedSteps)
             || !TryGetStringPropertyAllowEmpty(
                 requested,
                 "prompt",
@@ -686,7 +687,7 @@ public partial class MainWindow
                 requestedPrompt!,
                 positivePrompt!,
                 "",
-                MiniMaxH3VideoSteps,
+                requestedSteps,
                 0,
                 "res_multistep",
                 "simple",

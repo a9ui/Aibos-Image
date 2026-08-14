@@ -11,6 +11,7 @@ set "LOCAL_DOTNET10=%LOCALAPPDATA%\Microsoft\dotnet10\dotnet.exe"
 
 if exist "%LOCAL_DOTNET10%" (
     set "DOTNET_ROOT=%LOCALAPPDATA%\Microsoft\dotnet10"
+    set "DOTNET_ROOT_X64=%LOCALAPPDATA%\Microsoft\dotnet10"
     set "PATH=%LOCALAPPDATA%\Microsoft\dotnet10;%PATH%"
     set "DOTNET_CMD=%LOCAL_DOTNET10%"
 )

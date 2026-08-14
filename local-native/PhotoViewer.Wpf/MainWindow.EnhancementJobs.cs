@@ -404,12 +404,23 @@ public partial class MainWindow
     private static bool TryGetMiniMaxH3SnapshotProfile(
         JsonElement requested,
         out int frameCount,
-        out double durationSeconds)
+        out double durationSeconds,
+        out int steps)
     {
         frameCount = 0;
         durationSeconds = 0;
+        steps = 0;
         string? profileId;
         if (HasExactProperties(requested, "prompt"))
+        {
+            profileId = MiniMaxH3VideoDefaultProfileId;
+            steps = MiniMaxH3VideoSteps;
+        }
+        else if (HasExactProperties(requested, "prompt", "steps")
+            && requested.TryGetProperty("steps", out JsonElement stepsElement)
+            && stepsElement.TryGetInt32(out steps)
+            && steps >= MiniMaxH3VideoMinimumSteps
+            && steps <= MiniMaxH3VideoMaximumSteps)
         {
             profileId = MiniMaxH3VideoDefaultProfileId;
         }
@@ -418,6 +429,22 @@ public partial class MainWindow
                 requested,
                 "profileId",
                 out profileId))
+        {
+            steps = MiniMaxH3VideoSteps;
+        }
+        else if (HasExactProperties(
+                requested,
+                "profileId",
+                "prompt",
+                "steps")
+            && TryGetStringProperty(
+                requested,
+                "profileId",
+                out profileId)
+            && requested.TryGetProperty("steps", out stepsElement)
+            && stepsElement.TryGetInt32(out steps)
+            && steps >= MiniMaxH3VideoMinimumSteps
+            && steps <= MiniMaxH3VideoMaximumSteps)
         {
             // Parsed below.
         }
@@ -514,7 +541,8 @@ public partial class MainWindow
             || !TryGetMiniMaxH3SnapshotProfile(
                 requested,
                 out int expectedFrameCount,
-                out double expectedDurationSeconds)
+                out double expectedDurationSeconds,
+                out int expectedSteps)
             || !TryGetStringPropertyAllowEmpty(
                 requested,
                 "prompt",
@@ -550,7 +578,7 @@ public partial class MainWindow
                 effective,
                 "playbackFps",
                 MiniMaxH3VideoPlaybackFps)
-            || !HasExactInt32(effective, "steps", MiniMaxH3VideoSteps)
+            || !HasExactInt32(effective, "steps", expectedSteps)
             || !TryGetExactStringProperty(
                 effective,
                 "sampler",
@@ -4501,6 +4529,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         !_isBusy
         && IsSupportedMutationOperation
         && Status is "failed" or "canceled";
+    public string RetryLabel => IsVideoOperation
+        ? "動画をやり直す"
+        : "元設定でRetry";
+    public string RetryToolTip => IsVideoOperation
+        ? "失敗・キャンセルした動画を、保存された長さ・STEP数・Prompt・Seedで再生成"
+        : "失敗・キャンセル時に保存された元の設定で再試行";
     public bool CanDismiss =>
         !_isBusy
         && IsSupportedMutationOperation

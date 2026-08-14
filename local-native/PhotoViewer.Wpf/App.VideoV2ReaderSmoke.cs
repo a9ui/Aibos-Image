@@ -363,6 +363,46 @@ public partial class App
             Directory.CreateDirectory(resolvedValidOutputFolder!);
             File.WriteAllBytes(resolvedValidOutputPath, mediaFixtureBytes);
 
+            const int selectedVideoSteps = 7;
+            JsonObject selectedStepsJobNode = JsonNode.Parse(
+                    validJob.GetRawText())!
+                .AsObject();
+            const string selectedStepsJobId = "valid-h3-selected-steps";
+            selectedStepsJobNode["id"] = selectedStepsJobId;
+            JsonObject selectedStepsVideoNode = selectedStepsJobNode["video"]!
+                .AsObject();
+            JsonObject selectedStepsRequested = selectedStepsVideoNode["requested"]!
+                .AsObject();
+            selectedStepsRequested["profileId"] = "minimax-h3-hq-5s-v1";
+            selectedStepsRequested["steps"] = selectedVideoSteps;
+            selectedStepsVideoNode["effective"]!["steps"] = selectedVideoSteps;
+            using (JsonDocument selectedStepsVideoDocument = JsonDocument.Parse(
+                selectedStepsVideoNode.ToJsonString()))
+            {
+                selectedStepsJobNode["presetHash"] = PhotoViewer.Wpf.MainWindow
+                    .ComputeMiniMaxH3VideoSnapshotHashForSmoke(
+                        selectedStepsVideoDocument.RootElement)[..12];
+            }
+            string selectedStepsOutputFileName = PhotoViewer.Wpf.MainWindow
+                .BuildVideoOutputFileNameForSmoke(
+                    selectedStepsJobId,
+                    selectedStepsJobNode["sourcePath"]!.GetValue<string>(),
+                    selectedStepsJobNode["sourceSha256"]!.GetValue<string>(),
+                    selectedStepsJobNode["presetId"]!.GetValue<string>(),
+                    selectedStepsJobNode["presetHash"]!.GetValue<string>());
+            string selectedStepsOutputPath = Path.Combine(
+                outputRoot,
+                "Videos",
+                selectedStepsOutputFileName);
+            selectedStepsJobNode["outputPath"] = selectedStepsOutputPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(
+                selectedStepsOutputPath)!);
+            File.WriteAllBytes(selectedStepsOutputPath, mediaFixtureBytes);
+            using JsonDocument selectedStepsJobDocument = JsonDocument.Parse(
+                selectedStepsJobNode.ToJsonString());
+            JsonElement selectedStepsJob =
+                selectedStepsJobDocument.RootElement.Clone();
+
             const int exifStoredWidth = 96;
             const int exifStoredHeight = 64;
             (int exifWriterWidth, int exifWriterHeight) =
@@ -730,6 +770,26 @@ public partial class App
                 && settingsText.Contains("Frames: 124", StringComparison.Ordinal)
                 && settingsText.Contains("aac", StringComparison.OrdinalIgnoreCase)
                 && settingsText.Contains("audio True", StringComparison.Ordinal);
+            bool selectedStepsPlayback = PhotoViewer.Wpf.MainWindow
+                    .IsMiniMaxH3VideoMutationSafeForSmoke(selectedStepsJob)
+                && window.TryBuildMiniMaxH3ManagedVideoVersionForSmoke(
+                    selectedStepsJob,
+                    out int selectedStepsWidth,
+                    out int selectedStepsHeight,
+                    out int selectedStepsPlaybackFps,
+                    out int selectedStepsFrameCount,
+                    out double selectedStepsDuration,
+                    out bool selectedStepsAudio,
+                    out string selectedStepsSettingsText)
+                && selectedStepsWidth == 864
+                && selectedStepsHeight == 480
+                && selectedStepsPlaybackFps == 24
+                && selectedStepsFrameCount == 124
+                && Math.Abs(selectedStepsDuration - 124d / 24d) <= 1e-12
+                && selectedStepsAudio
+                && selectedStepsSettingsText.Contains(
+                    $"Steps: {selectedVideoSteps}",
+                    StringComparison.Ordinal);
             bool exactSets = observedMutationSafe.SequenceEqual(
                     expectedMutationSafe,
                     StringComparer.Ordinal)
@@ -845,6 +905,9 @@ public partial class App
                 && File.Exists(resolvedValidOutputPath)
                 && File.ReadAllBytes(resolvedValidOutputPath)
                     .SequenceEqual(mediaFixtureBytes)
+                && File.Exists(selectedStepsOutputPath)
+                && File.ReadAllBytes(selectedStepsOutputPath)
+                    .SequenceEqual(mediaFixtureBytes)
                 && exifFixturesReadOnly
                 && mutationRequests == readerFixture
                     .GetProperty("expectedMutationRequestsDuringRead")
@@ -853,6 +916,7 @@ public partial class App
                 {
                     sourcePath,
                     resolvedValidOutputPath,
+                    selectedStepsOutputPath,
                     corruptVideoPath,
                     jobsPath,
                     statePath,
@@ -891,6 +955,7 @@ public partial class App
                 && labelsExact
                 && validWorkspace
                 && validPlayback
+                && selectedStepsPlayback
                 && invalidPlaybackProtected
                 && sourceAspectPolicyProtected
                 && exactSets
@@ -938,6 +1003,7 @@ public partial class App
                 labelsExact,
                 validWorkspace,
                 validPlayback,
+                selectedStepsPlayback,
                 invalidPlaybackProtected,
                 sourceAspectPolicyProtected,
                 exactSets,

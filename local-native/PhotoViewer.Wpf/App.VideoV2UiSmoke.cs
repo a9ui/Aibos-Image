@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace PhotoViewer.Wpf;
 
@@ -75,6 +76,38 @@ public partial class App
                     oversizedDimensionVideo.RootElement)
                 && !PhotoViewer.Wpf.MainWindow.IsExactMiniMaxH3VideoSnapshotForSmoke(
                     oversizedAreaVideo.RootElement);
+
+            JsonObject selectedStepsVideoNode = JsonNode.Parse(
+                    canonicalValidVideo.GetRawText())!
+                .AsObject();
+            selectedStepsVideoNode["requested"]!["profileId"] =
+                "minimax-h3-hq-5s-v1";
+            selectedStepsVideoNode["requested"]!["steps"] = 7;
+            selectedStepsVideoNode["effective"]!["steps"] = 7;
+            using JsonDocument selectedStepsVideo = JsonDocument.Parse(
+                selectedStepsVideoNode.ToJsonString());
+            JsonObject mismatchedStepsVideoNode = JsonNode.Parse(
+                    selectedStepsVideoNode.ToJsonString())!
+                .AsObject();
+            mismatchedStepsVideoNode["effective"]!["steps"] = 8;
+            using JsonDocument mismatchedStepsVideo = JsonDocument.Parse(
+                mismatchedStepsVideoNode.ToJsonString());
+            JsonObject outOfRangeStepsVideoNode = JsonNode.Parse(
+                    selectedStepsVideoNode.ToJsonString())!
+                .AsObject();
+            outOfRangeStepsVideoNode["requested"]!["steps"] = 41;
+            outOfRangeStepsVideoNode["effective"]!["steps"] = 41;
+            using JsonDocument outOfRangeStepsVideo = JsonDocument.Parse(
+                outOfRangeStepsVideoNode.ToJsonString());
+            bool h3StepsSnapshotExact = PhotoViewer.Wpf.MainWindow
+                    .IsExactMiniMaxH3VideoSnapshotForSmoke(
+                        selectedStepsVideo.RootElement)
+                && !PhotoViewer.Wpf.MainWindow
+                    .IsExactMiniMaxH3VideoSnapshotForSmoke(
+                        mismatchedStepsVideo.RootElement)
+                && !PhotoViewer.Wpf.MainWindow
+                    .IsExactMiniMaxH3VideoSnapshotForSmoke(
+                        outOfRangeStepsVideo.RootElement);
 
             window = new MainWindow();
             bool h3DefaultOnly = window.VideoModelIdForSmoke == "minimax-h3"
@@ -667,6 +700,7 @@ public partial class App
                 && legacyWanMigratedToH3
                 && durationExact
                 && canvasPolicyExact
+                && h3StepsSnapshotExact
                 && h3ExactUnreadyProfilesFailClosed
                 && h3RetryExactHealth;
             result = new
@@ -706,6 +740,7 @@ public partial class App
                 legacyWanMigratedToH3,
                 durationExact,
                 canvasPolicyExact,
+                h3StepsSnapshotExact,
                 h3ExactUnreadyProfilesFailClosed,
                 disabledMissingProfilesStatus,
                 disabledDuplicatedProfilesStatus,
