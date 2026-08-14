@@ -1093,6 +1093,16 @@ public partial class App : Application
             return;
         }
 
+        int aiProcessingMinimizeSmokeIdx =
+            Array.IndexOf(e.Args, "--ai-processing-minimize-smoke");
+        if (aiProcessingMinimizeSmokeIdx >= 0
+            && aiProcessingMinimizeSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureAiProcessingMinimizeSmoke(
+                e.Args[aiProcessingMinimizeSmokeIdx + 1]);
+            return;
+        }
+
         int selectedBatchEnhancementSmokeIdx = Array.IndexOf(e.Args, "--selected-batch-enhancement-smoke");
         if (selectedBatchEnhancementSmokeIdx >= 0 && selectedBatchEnhancementSmokeIdx + 1 < e.Args.Length)
         {

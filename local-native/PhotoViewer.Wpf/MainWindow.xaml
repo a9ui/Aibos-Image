@@ -439,7 +439,7 @@
           <Rectangle Width="1" Height="22" Fill="{StaticResource GlassBorder}" Margin="8,0"/>
 
           <!-- window caption buttons -->
-          <Button Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize window" WindowChrome.IsHitTestVisibleInChrome="True">
+          <Button Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize to notification area while AI processing continues" AutomationProperties.Name="Minimize while AI processing continues" WindowChrome.IsHitTestVisibleInChrome="True">
             <Rectangle Width="11" Height="1.4" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
           </Button>
           <Button x:Name="MaxButton" Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="Maximize" AutomationProperties.Name="Maximize window" WindowChrome.IsHitTestVisibleInChrome="True">
@@ -1194,7 +1194,7 @@
         </StackPanel>
       </Button>
       <StackPanel x:Name="LandingCaptionControls" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,9,8,0" Panel.ZIndex="20">
-        <Button x:Name="LandingMinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize window" WindowChrome.IsHitTestVisibleInChrome="True">
+        <Button x:Name="LandingMinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize to notification area while AI processing continues" AutomationProperties.Name="Minimize while AI processing continues" WindowChrome.IsHitTestVisibleInChrome="True">
           <Rectangle Width="11" Height="1.4" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
         </Button>
         <Button x:Name="LandingMaximizeButton" Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="Maximize" AutomationProperties.Name="Maximize window" WindowChrome.IsHitTestVisibleInChrome="True">
@@ -2826,7 +2826,7 @@
               Panel.ZIndex="120" WindowChrome.IsHitTestVisibleInChrome="True">
         <StackPanel Orientation="Horizontal">
           <Button x:Name="ModalMinimizeButton" Style="{StaticResource CaptionButton}" Click="Minimize_Click"
-                  ToolTip="Minimize window" AutomationProperties.Name="Minimize window"
+                  ToolTip="Minimize to notification area while AI processing continues" AutomationProperties.Name="Minimize while AI processing continues"
                   WindowChrome.IsHitTestVisibleInChrome="True">
             <Rectangle Width="11" Height="1.4" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
           </Button>

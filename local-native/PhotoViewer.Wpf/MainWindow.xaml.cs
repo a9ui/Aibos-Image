@@ -798,6 +798,7 @@ public partial class MainWindow : Window
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
+            DisposeAiProcessingMinimize();
             if (_windowChromeSource is not null)
             {
                 _windowChromeSource.RemoveHook(WindowChromeMessageHook);
@@ -987,12 +988,15 @@ public partial class MainWindow : Window
         _windowChromeSource = PresentationSource.FromVisual(this)
             as System.Windows.Interop.HwndSource;
         _windowChromeSource?.AddHook(WindowChromeMessageHook);
+        InitializeAiProcessingMinimize();
         if (WindowState == WindowState.Normal)
             ConstrainWindowToCurrentWorkArea();
     }
 
     private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (_aiProcessingMinimizedMode || WindowState == WindowState.Minimized)
+            return;
         ScheduleModalFitUpdate();
         if (!e.WidthChanged && !e.HeightChanged)
             return;
@@ -1041,6 +1045,11 @@ public partial class MainWindow : Window
         int firstRealizedIndex,
         int lastRealizedIndex)
     {
+        if (_aiProcessingMinimizedMode)
+        {
+            CancelThumbnailViewportLoading();
+            return;
+        }
         if (_tiles.Count == 0)
         {
             CancelThumbnailViewportLoading();
@@ -1156,7 +1165,8 @@ public partial class MainWindow : Window
 
     private void ScheduleListThumbnailViewport()
     {
-        if (RowsList.Visibility != Visibility.Visible)
+        if (_aiProcessingMinimizedMode
+            || RowsList.Visibility != Visibility.Visible)
             return;
 
         ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(RowsList);
@@ -12077,6 +12087,8 @@ public partial class MainWindow : Window
     private void QueueGalleryThumbnailPreferenceRefresh()
     {
         CancelThumbnailViewportLoading();
+        if (_aiProcessingMinimizedMode)
+            return;
         if (_thumbnailPreferenceRefreshOperation is
             { Status: DispatcherOperationStatus.Pending })
         {
@@ -18667,7 +18679,8 @@ public partial class MainWindow : Window
 
     private async void ModalEnhancementPollTimer_Tick(object? sender, EventArgs e)
     {
-        if (_modalEnhancementPolling
+        if (_aiProcessingMinimizedMode
+            || _modalEnhancementPolling
             || _modalEnhancementRequestPending
             || !TryGetModalSourceTile(out Tile tile))
             return;
@@ -19169,7 +19182,7 @@ public partial class MainWindow : Window
         }
 
         bool active = job?.Status is "queued" or "running";
-        if (active)
+        if (active && !_aiProcessingMinimizedMode)
             _modalEnhancementPollTimer.Start();
         else
             _modalEnhancementPollTimer.Stop();
@@ -24550,6 +24563,9 @@ public partial class MainWindow : Window
         nint lParam,
         ref bool handled)
     {
+        if (HandleAiProcessingTrayMessage(message, lParam, ref handled))
+            return 0;
+
         if (message == WindowMessageGetMinMaxInfo && lParam != 0)
         {
             if (TryApplyNativeMaximizedBounds(windowHandle, lParam))
@@ -24765,7 +24781,18 @@ public partial class MainWindow : Window
 
     private void MainWindow_StateChanged(object? sender, EventArgs e)
     {
-        _fakeMaximized = false;
+        if (WindowState == WindowState.Minimized)
+        {
+            EnterAiProcessingMinimize();
+        }
+        else
+        {
+            bool restoreFakeMaximized = _aiProcessingMinimizedMode
+                && _aiProcessingRestoreFakeMaximized;
+            ExitAiProcessingMinimize();
+            _fakeMaximized = restoreFakeMaximized;
+            _lastNonMinimizedWindowState = WindowState;
+        }
         UpdateWindowMaximizePresentation();
     }
 
@@ -25215,10 +25242,20 @@ public partial class MainWindow : Window
     public bool ActivateLandingMinimizeForSmoke()
     {
         WindowState previous = WindowState;
-        LandingMinimizeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, LandingMinimizeButton));
-        bool minimized = WindowState == WindowState.Minimized;
-        WindowState = previous == WindowState.Minimized ? WindowState.Normal : previous;
-        return minimized;
+        bool previousSuppression =
+            _suppressAiProcessingTrayNativeCallsForSmoke;
+        _suppressAiProcessingTrayNativeCallsForSmoke = true;
+        try
+        {
+            LandingMinimizeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, LandingMinimizeButton));
+            bool minimized = WindowState == WindowState.Minimized;
+            WindowState = previous == WindowState.Minimized ? WindowState.Normal : previous;
+            return minimized;
+        }
+        finally
+        {
+            _suppressAiProcessingTrayNativeCallsForSmoke = previousSuppression;
+        }
     }
     public bool ShortcutDiscoverabilityContractForSmoke
         => new[] { LandingShortcutsButton, ViewerShortcutsButton, ModalShortcutsButton }.All(button =>
@@ -28976,10 +29013,20 @@ public partial class MainWindow : Window
     public bool ActivateModalMinimizeForSmoke()
     {
         WindowState previous = WindowState;
-        ModalMinimizeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, ModalMinimizeButton));
-        bool minimized = WindowState == WindowState.Minimized;
-        WindowState = previous == WindowState.Minimized ? WindowState.Normal : previous;
-        return minimized;
+        bool previousSuppression =
+            _suppressAiProcessingTrayNativeCallsForSmoke;
+        _suppressAiProcessingTrayNativeCallsForSmoke = true;
+        try
+        {
+            ModalMinimizeButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, ModalMinimizeButton));
+            bool minimized = WindowState == WindowState.Minimized;
+            WindowState = previous == WindowState.Minimized ? WindowState.Normal : previous;
+            return minimized;
+        }
+        finally
+        {
+            _suppressAiProcessingTrayNativeCallsForSmoke = previousSuppression;
+        }
     }
     public async Task<bool> ActivateModalMaximizeForSmokeAsync()
     {
