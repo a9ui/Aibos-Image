@@ -1,5 +1,8 @@
 # Legacy Asset Recovery Ledger
 
+Start with `summary-v3.json`. Read `manifest-v3.json` only when investigating a
+specific legacy asset; it is never required for ordinary product work.
+
 This directory contains the privacy-safe, item-level M1 inventory for the
 legacy H25 repository and its preserved local Git surfaces.
 

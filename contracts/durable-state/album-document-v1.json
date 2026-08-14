@@ -1,0 +1,140 @@
+{
+  "id": "PV-ALB-001",
+  "kind": "album-document",
+  "cases": [
+    {
+      "id": "missing-is-empty-without-create",
+      "initial": {
+        "mode": "missing"
+      },
+      "operations": [],
+      "expected": {
+        "initialSupported": true,
+        "initialExists": false,
+        "initialMalformed": false,
+        "initialFutureVersion": false,
+        "initialRevision": 0,
+        "initialAlbumCount": 0,
+        "statuses": [],
+        "finalRevision": 0,
+        "finalAlbumCount": 0,
+        "fileExists": false,
+        "bytesUnchangedAfterRead": true,
+        "bytesUnchangedAfterOperations": true,
+        "unknownRoot": {}
+      }
+    },
+    {
+      "id": "versionless-empty-migrates-on-mutation",
+      "initial": {
+        "mode": "json",
+        "document": {
+          "albums": [],
+          "futureRoot": {
+            "keep": true
+          }
+        }
+      },
+      "operations": [
+        {
+          "action": "create",
+          "name": "Migrated",
+          "albumId": "legacy-upgraded",
+          "expectedRevision": 0
+        }
+      ],
+      "expected": {
+        "initialSupported": true,
+        "initialExists": true,
+        "initialMalformed": false,
+        "initialFutureVersion": false,
+        "initialRevision": 0,
+        "initialAlbumCount": 0,
+        "statuses": [
+          "Succeeded"
+        ],
+        "finalRevision": 1,
+        "finalAlbumCount": 1,
+        "fileExists": true,
+        "bytesUnchangedAfterRead": true,
+        "bytesUnchangedAfterOperations": false,
+        "unknownRoot": {
+          "futureRoot": {
+            "keep": true
+          }
+        }
+      }
+    },
+    {
+      "id": "ambiguous-versionless-protected",
+      "initial": {
+        "mode": "raw",
+        "text": "{\"albums\":[{\"id\":\"broken\"}],\"ownerMarker\":{\"keep\":true}}\n"
+      },
+      "operations": [
+        {
+          "action": "create",
+          "name": "Blocked",
+          "albumId": "blocked"
+        }
+      ],
+      "expected": {
+        "initialSupported": false,
+        "initialExists": true,
+        "initialMalformed": true,
+        "initialFutureVersion": false,
+        "initialRevision": null,
+        "initialAlbumCount": null,
+        "statuses": [
+          "Protected"
+        ],
+        "finalRevision": null,
+        "finalAlbumCount": null,
+        "fileExists": true,
+        "bytesUnchangedAfterRead": true,
+        "bytesUnchangedAfterOperations": true,
+        "unknownRoot": {}
+      }
+    },
+    {
+      "id": "future-version-protected",
+      "initial": {
+        "mode": "json",
+        "document": {
+          "version": 2,
+          "revision": 9,
+          "updatedAtUtc": "2026-07-21T00:00:00.000Z",
+          "albums": [],
+          "recentAlbumIds": [],
+          "futureRoot": {
+            "keep": true
+          }
+        }
+      },
+      "operations": [
+        {
+          "action": "create",
+          "name": "Blocked",
+          "albumId": "blocked"
+        }
+      ],
+      "expected": {
+        "initialSupported": false,
+        "initialExists": true,
+        "initialMalformed": false,
+        "initialFutureVersion": true,
+        "initialRevision": null,
+        "initialAlbumCount": null,
+        "statuses": [
+          "Protected"
+        ],
+        "finalRevision": null,
+        "finalAlbumCount": null,
+        "fileExists": true,
+        "bytesUnchangedAfterRead": true,
+        "bytesUnchangedAfterOperations": true,
+        "unknownRoot": {}
+      }
+    }
+  ]
+}

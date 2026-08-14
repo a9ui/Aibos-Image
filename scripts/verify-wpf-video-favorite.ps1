@@ -14,7 +14,6 @@ $mainCodePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.xam
 $videoCodePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.Video.cs'
 $dropCodePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.ExternalFileDrop.cs'
 $japaneseResourcesPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\Localization\StringResources.ja.xaml'
-$contractPath = Join-Path $repoRoot 'docs\product-contract.md'
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-video-favorite-' + [guid]::NewGuid().ToString('N'))))
 $runParent = [IO.Path]::GetDirectoryName($runRoot)
@@ -51,7 +50,6 @@ try {
     $videoCode = Get-Content -Raw -Encoding UTF8 -LiteralPath $videoCodePath
     $dropCode = Get-Content -Raw -Encoding UTF8 -LiteralPath $dropCodePath
     $japaneseResources = Get-Content -Raw -Encoding UTF8 -LiteralPath $japaneseResourcesPath
-    $contract = Get-Content -Raw -Encoding UTF8 -LiteralPath $contractPath
 
     $retiredLabel = ([string][char]0x30D5) + ([char]0x30A1) + ([char]0x30DC)
     if (($mainXaml + $japaneseResources) -match [regex]::Escape($retiredLabel)) {
@@ -124,11 +122,6 @@ try {
         -or $dropCode -notmatch 'ApplyTileVideoAvailability\(tile\)') {
         throw 'Video Favorite max/filter/state or transient-drop live-tile wiring is incomplete.'
     }
-    if ($contract -notmatch 'purple heart' `
-        -or $contract -notmatch 'WPF groups its local\s+Favorite filters') {
-        throw 'The product contract does not describe the unified Favorite group.'
-    }
-
     if ($DotNetPath -eq 'dotnet') {
         $localDotNet10 = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
         if (Test-Path -LiteralPath $localDotNet10 -PathType Leaf) {

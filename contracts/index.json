@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "semanticAuthority": "docs/product-contract.md",
+  "readPolicy": "Read only the contract matching the changed behavior. Read a fixture only when verifying its vectors.",
+  "contracts": [
+    {
+      "contractId": "PV-SH-001",
+      "path": "contracts/durable-state/search-history-identity-v1.json",
+      "scope": "Search History identity and comparison"
+    },
+    {
+      "contractId": "PV-SH-002",
+      "path": "contracts/durable-state/search-history-document-v1.json",
+      "scope": "Search History document reads and mutations"
+    },
+    {
+      "contractId": "PV-ALB-001",
+      "path": "contracts/durable-state/album-document-v1.json",
+      "scope": "Album document reads"
+    },
+    {
+      "contractId": "PV-ALB-002",
+      "path": "contracts/durable-state/album-operations-v1.json",
+      "scope": "Album mutations and conflicts"
+    },
+    {
+      "contractId": "PV-SET-001",
+      "path": "contracts/durable-state/shared-settings-v1.json",
+      "scope": "Shared settings"
+    },
+    {
+      "contractId": "PV-REC-001",
+      "path": "contracts/durable-state/recent-folders-v1.json",
+      "scope": "Recent folders"
+    },
+    {
+      "contractId": "PV-ROOT-001",
+      "path": "contracts/shared-root-locator-v1.json",
+      "scope": "Shared-root discovery and validation"
+    },
+    {
+      "contractId": "enhancement-companion-auth-v2",
+      "path": "contracts/enhancement-companion-auth-v2.json",
+      "scope": "Companion ownership and protected loopback transport"
+    },
+    {
+      "contractId": "PV-ENHANCE-ENQUEUE-INBOX-001",
+      "path": "contracts/enhancement-enqueue-inbox-v1.json",
+      "scope": "Durable Enhancement enqueue"
+    },
+    {
+      "contractId": "PV-ENHANCE-HEALTH-001",
+      "path": "contracts/enhancement-health-v1.json",
+      "scope": "Passive health response"
+    },
+    {
+      "contractId": "PV-ENHANCE-JOBS-SQLITE-001",
+      "path": "contracts/enhancement-jobs-sqlite-v1.json",
+      "scope": "Jobs database authority"
+    },
+    {
+      "contractId": "PV-ENHANCE-QUEUE-001",
+      "path": "contracts/enhancement-queue-order-v1.json",
+      "scope": "Queue ordering and mutations"
+    },
+    {
+      "contractId": "PV-ENHANCE-OUTPUT-001",
+      "path": "contracts/enhancement-output-root-v1.json",
+      "scope": "Managed output ownership and migration"
+    },
+    {
+      "contractId": "PV-ENHANCE-I2I-001",
+      "path": "contracts/enhancement-i2i-v1.json",
+      "scope": "I2I version 1 rows"
+    },
+    {
+      "contractId": "PV-ENHANCE-I2I-002",
+      "path": "contracts/enhancement-i2i-v2.json",
+      "scope": "I2I version 2 rows"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-001",
+      "path": "contracts/enhancement-video-v1.json",
+      "scope": "Video version 1 rows"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-002",
+      "path": "contracts/enhancement-video-v2.json",
+      "scope": "Video version 2 rows and enqueue"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001",
+      "path": "contracts/enhancement-video-h3-prompt-rewrite-v1.json",
+      "scope": "Transient H3 prompt rewrite"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-H3-PROFILES-001",
+      "path": "contracts/enhancement-video-h3-profiles-v1.json",
+      "scope": "H3 duration profiles"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-H3-STEPS-001",
+      "path": "contracts/enhancement-video-h3-steps-v1.json",
+      "scope": "H3 step choices"
+    },
+    {
+      "contractId": "PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001",
+      "path": "contracts/enhancement-video-h3-canvas-tiers-v1.json",
+      "scope": "H3 canvas tiers"
+    }
+  ],
+  "fixtures": [
+    {
+      "fixtureId": "PV-ENHANCE-HEALTH-001-WORKING-FIXTURE",
+      "forContractId": "PV-ENHANCE-HEALTH-001",
+      "path": "contracts/fixtures/enhancement-health-working-v1.json"
+    },
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-001-READER-FIXTURES",
+      "forContractId": "PV-ENHANCE-VIDEO-001",
+      "path": "contracts/fixtures/enhancement-video-v1-reader-v1.json"
+    },
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001-FIXTURES",
+      "forContractId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001",
+      "path": "contracts/fixtures/enhancement-video-h3-prompt-rewrite-v1.json"
+    },
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-002-HEALTH-FIXTURES",
+      "forContractId": "PV-ENHANCE-VIDEO-002",
+      "path": "contracts/fixtures/enhancement-video-v2-health-v1.json"
+    },
+    {
+      "fixtureId": "PV-ENHANCE-VIDEO-002-READER-FIXTURES",
+      "forContractId": "PV-ENHANCE-VIDEO-002",
+      "path": "contracts/fixtures/enhancement-video-v2-reader-v1.json"
+    }
+  ],
+  "verificationBundles": [
+    {
+      "bundleId": "shared-state-v1",
+      "materialization": "TEMP only",
+      "members": [
+        "contracts/durable-state/search-history-identity-v1.json",
+        "contracts/durable-state/search-history-document-v1.json",
+        "contracts/durable-state/album-document-v1.json",
+        "contracts/durable-state/album-operations-v1.json",
+        "contracts/durable-state/shared-settings-v1.json",
+        "contracts/durable-state/recent-folders-v1.json"
+      ]
+    },
+    {
+      "bundleId": "enhancement-video-v1",
+      "materialization": "TEMP only",
+      "core": "contracts/enhancement-video-v1.json",
+      "fixtures": [
+        "contracts/fixtures/enhancement-video-v1-reader-v1.json"
+      ]
+    },
+    {
+      "bundleId": "enhancement-video-v2",
+      "materialization": "TEMP only",
+      "core": "contracts/enhancement-video-v2.json",
+      "supplementalContract": "contracts/enhancement-video-h3-prompt-rewrite-v1.json",
+      "fixtures": [
+        "contracts/fixtures/enhancement-video-h3-prompt-rewrite-v1.json",
+        "contracts/fixtures/enhancement-video-v2-health-v1.json",
+        "contracts/fixtures/enhancement-video-v2-reader-v1.json"
+      ]
+    }
+  ]
+}

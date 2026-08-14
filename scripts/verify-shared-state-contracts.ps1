@@ -7,16 +7,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'lib\ContractBundles.ps1')
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempBase + [IO.Path]::DirectorySeparatorChar
-$runRoot = [IO.Path]::GetFullPath((Join-Path $tempBase ('aibos-wpf-contract-v1-' + [guid]::NewGuid().ToString('N'))))
+$runRoot = [IO.Path]::GetFullPath((Join-Path $tempBase ('aibos-wpf-shared-state-contracts-' + [guid]::NewGuid().ToString('N'))))
 if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Refusing to use a contract verifier root outside TEMP: $runRoot"
-}
-
-$contractPath = Join-Path $repoRoot 'contracts\parity-v1.json'
-if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) {
-    throw "Shared-state contract fixture not found: $contractPath"
 }
 
 $wpfReceiptPath = Join-Path $runRoot 'wpf-lf-receipt.json'
@@ -24,6 +20,7 @@ $wpfCrlfReceiptPath = Join-Path $runRoot 'wpf-crlf-receipt.json'
 $wpfFixtureRoot = Join-Path $runRoot 'wpf-lf-fixtures'
 $wpfCrlfFixtureRoot = Join-Path $runRoot 'wpf-crlf-fixtures'
 $artifactsRoot = Join-Path $runRoot 'wpf-artifacts'
+$contractPath = Join-Path $runRoot 'shared-state-v1.json'
 $crlfContractPath = Join-Path $runRoot 'contract-crlf.json'
 $completed = $false
 
@@ -85,6 +82,7 @@ function Invoke-WpfContract([string]$Executable, [string]$Receipt, [string]$Cont
 
 try {
     New-Item -ItemType Directory -Force -Path $runRoot, $wpfFixtureRoot, $wpfCrlfFixtureRoot, $artifactsRoot | Out-Null
+    Write-AibosJsonFile $contractPath (Get-AibosSharedStateBundle $repoRoot)
     $canonical = Get-CanonicalContract $contractPath
     $contract = $canonical.Text | ConvertFrom-Json
     $expectedContractIds = @($contract.contracts | ForEach-Object { [string]$_.id })
@@ -143,7 +141,7 @@ try {
         caseIds = $expectedCaseIds
         cases = $expectedCaseIds.Count
         crlfContractHashVerified = $true
-        browserCompatibilityNotRun = $true
+        secondaryReaderNotRun = $true
         sourceOrUserStateTouched = $false
         artifactsRetained = [bool]$KeepArtifacts
     } | ConvertTo-Json -Depth 8

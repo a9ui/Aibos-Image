@@ -37,20 +37,5 @@
     "playbackFps": 24,
     "maximumTimelineMilliseconds": [5166, 10125, 12250, 15083],
     "maximumBeatCount": [2, 3, 3, 3]
-  },
-  "measuredMachine": {
-    "gpu": "NVIDIA GeForce RTX 4070 SUPER 12GB",
-    "physicalRamGiB": 32,
-    "warning": "10 to 15 second profiles use most available physical RAM; close other heavy work and prefer unattended overnight execution"
-  },
-  "evidence": {
-    "sourceSha256": "94398c403bf50d171e2d553c3516cf46b75ade6d9b29e8cce8ccebdfdbeb6395",
-    "twelveSecond512x768": {
-      "wallMilliseconds": 802452,
-      "peakGpuMemoryMiB": 11332,
-      "minimumFreeMemoryGiB": 1.78,
-      "peakGpuTemperatureC": 81,
-      "outputSha256": "03ac08b8364e3610ca2c96cc5da1c2b6b5243787d5479189cfd3beb7a8129ef3"
-    }
   }
 }

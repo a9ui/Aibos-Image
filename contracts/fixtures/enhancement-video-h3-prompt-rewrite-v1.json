@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001-FIXTURES",
+  "forContractId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001",
+  "sourceFixture": {
+    "fileName": "synthetic-h3-prompt-source.png",
+    "pngBase64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "sha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+  },
+  "requestFixture": {
+    "sourceId": "${SOURCE_ID}",
+    "prompt": "A clearly adult idol smiles and gives a bright welcoming wave.",
+    "frameCount": 124,
+    "playbackFps": 24
+  },
+  "responseFixture": {
+    "candidatePrompt": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description: [Shot 1] A clearly adult idol with short dark hair and a red stage jacket stands under warm studio lights. The shot begins in one continuous take. She steps to the side and raises one hand in a confident wave. A smooth medium-shot dolly moves slightly left. Her warm smile maintains direct eye contact. The motion develops continuously. She turns through two distinct poses and finishes with a playful gesture. The view makes a restrained clockwise arc and settles without a cut. Cheerful excitement resolves into a composed smile. By the end, the movement settles naturally without a cut. Hair follows each turn with delayed settling. Clothing folds and accessories respond naturally to acceleration.\n\noverall_soundscape: Soft footsteps, fabric motion, and quiet room ambience.\n\nnon_diegetic_music: Bright upbeat synth-pop plays at a moderate tempo.",
+    "rewriteRevision": "aibos-h3-i2va-local-v1",
+    "sourceSha256": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+    "modelId": "Qwen3-VL-4B-Instruct-Q4_K_M",
+    "inferenceMilliseconds": 1234
+  },
+  "revisionFixtures": [
+    {
+      "id": "supported-v1",
+      "rewriteRevision": "aibos-h3-i2va-local-v1",
+      "expectedAccepted": true
+    },
+    {
+      "id": "unsupported-future-v2",
+      "rewriteRevision": "aibos-h3-i2va-local-v2",
+      "expectedAccepted": false
+    }
+  ],
+  "errorFixtures": [
+    {
+      "id": "invalid-request",
+      "status": 400,
+      "body": {
+        "error": "Request body is invalid.",
+        "code": "INVALID_REQUEST"
+      }
+    },
+    {
+      "id": "invalid-input-prompt",
+      "status": 400,
+      "body": {
+        "error": "The input prompt is invalid.",
+        "code": "INVALID_INPUT_PROMPT"
+      }
+    },
+    {
+      "id": "protected-literal-invalid",
+      "status": 400,
+      "body": {
+        "error": "A protected prompt literal is invalid.",
+        "code": "PROTECTED_LITERAL_INVALID"
+      }
+    },
+    {
+      "id": "source-stale",
+      "status": 409,
+      "body": {
+        "error": "Pinned source is no longer current.",
+        "code": "H3_PROMPT_REWRITE_SOURCE_STALE"
+      }
+    },
+    {
+      "id": "request-too-large",
+      "status": 413,
+      "body": {
+        "error": "Request body is too large.",
+        "code": "REQUEST_TOO_LARGE"
+      }
+    },
+    {
+      "id": "invalid-source",
+      "status": 422,
+      "body": {
+        "error": "The selected source is unavailable or invalid.",
+        "code": "H3_PROMPT_REWRITE_INVALID_SOURCE"
+      }
+    },
+    {
+      "id": "runtime-busy",
+      "status": 429,
+      "body": {
+        "error": "Local H3 prompt rewriting is already busy.",
+        "code": "H3_PROMPT_REWRITE_BUSY"
+      }
+    },
+    {
+      "id": "invalid-model-output",
+      "status": 502,
+      "body": {
+        "error": "Local VLM returned an invalid H3 prompt plan.",
+        "code": "H3_PROMPT_REWRITE_INVALID_MODEL_OUTPUT"
+      }
+    },
+    {
+      "id": "runtime-unavailable",
+      "status": 503,
+      "body": {
+        "error": "Local H3 prompt rewriting is unavailable.",
+        "code": "H3_PROMPT_REWRITE_UNAVAILABLE"
+      }
+    },
+    {
+      "id": "runtime-timeout",
+      "status": 504,
+      "body": {
+        "error": "Local H3 prompt rewriting timed out.",
+        "code": "H3_PROMPT_REWRITE_TIMEOUT"
+      }
+    },
+    {
+      "id": "request-canceled",
+      "status": 408,
+      "body": {
+        "error": "H3 prompt rewriting was canceled.",
+        "code": "H3_PROMPT_REWRITE_CANCELED"
+      }
+    }
+  ]
+}

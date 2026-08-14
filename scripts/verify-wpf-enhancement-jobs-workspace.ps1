@@ -9,11 +9,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'lib\ContractBundles.ps1')
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
 $queueContractPath = Join-Path $repoRoot "contracts\enhancement-queue-order-v1.json"
 $healthContractPath = Join-Path $repoRoot "contracts\enhancement-health-v1.json"
-$videoContractPath = Join-Path $repoRoot "contracts\enhancement-video-v1.json"
-$videoActivationPath = Join-Path $repoRoot "contracts\enhancement-video-writer-activation-v1.json"
+$healthFixturePath = Join-Path $repoRoot "contracts\fixtures\enhancement-health-working-v1.json"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-enhancement-jobs-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -62,6 +62,7 @@ try {
         throw "Enhancement health contract was not found: $healthContractPath"
     }
     $healthContract = Get-Content -LiteralPath $healthContractPath -Raw | ConvertFrom-Json
+    $healthFixture = Get-Content -LiteralPath $healthFixturePath -Raw | ConvertFrom-Json
     $healthContractChecks = @(
         ($healthContract.schemaVersion -eq 1)
         ($healthContract.contractId -eq "PV-ENHANCE-HEALTH-001")
@@ -77,21 +78,19 @@ try {
         ($healthContract.passiveRead.retriesJobs -eq $false)
         ($healthContract.passiveRead.pollsComfyUi -eq $false)
         (($healthContract.status -join ",") -eq "healthy,working,needs-attention")
-        ($healthContract.workingFixture.expectedDisplay.state -eq "Working")
-        ($healthContract.workingFixture.expectedDisplay.detail -eq "1 running / 4 queued")
-        ($healthContract.workingFixture.expectedDisplay.sourceRevisionPrefix -eq "69684954")
-        ($healthContract.workingFixture.payload.worker.paused -eq $false)
-        ($healthContract.workingFixture.payload.capabilities.queuedPhotorealPromptUpdate -eq $true)
+        ($healthFixture.forContractId -eq $healthContract.contractId)
+        ($healthFixture.workingFixture.expectedDisplay.state -eq "Working")
+        ($healthFixture.workingFixture.expectedDisplay.detail -eq "1 running / 4 queued")
+        ($healthFixture.workingFixture.expectedDisplay.sourceRevisionPrefix -eq "69684954")
+        ($healthFixture.workingFixture.payload.worker.paused -eq $false)
+        ($healthFixture.workingFixture.payload.capabilities.queuedPhotorealPromptUpdate -eq $true)
         ($healthContract.readerRules.missingQueuedPhotorealPromptUpdate -eq
             "keep health and jobs readable but hide the queued prompt-update action")
     )
     if ($healthContractChecks -contains $false) {
         throw "Enhancement health contract fields are invalid."
     }
-    if (-not (Test-Path -LiteralPath $videoContractPath -PathType Leaf)) {
-        throw "Enhancement video contract was not found: $videoContractPath"
-    }
-    $videoContract = Get-Content -LiteralPath $videoContractPath -Raw | ConvertFrom-Json
+    $videoContract = Get-AibosVideoV1Bundle $repoRoot
     $videoContractChecks = @(
         ($videoContract.schemaVersion -eq 1)
         ($videoContract.contractId -eq "PV-ENHANCE-VIDEO-001")
@@ -201,8 +200,6 @@ try {
             800)
         ($videoContract.managedOutput.folder -eq "Videos")
         ($videoContract.managedOutput.flat -eq $true)
-        ($videoContract.readerFirst.wpfWriterEnabled -eq $false)
-        ($videoContract.readerFirst.h25WriterEnabled -eq $false)
         ($videoContract.readerFixture.expectedOperations.'legacy-missing-operation' -eq "upscale")
         ($videoContract.readerFixture.expectedOperations.'explicit-video' -eq "video")
         ($videoContract.readerFixture.expectedOperations.'explicit-video-delivery' -eq "video")
@@ -228,98 +225,6 @@ try {
     if ($videoContractChecks -contains $false) {
         throw "Enhancement video contract fields are invalid."
     }
-    if (-not (Test-Path -LiteralPath $videoActivationPath -PathType Leaf)) {
-        throw "Enhancement video writer activation record was not found: $videoActivationPath"
-    }
-    $videoActivation = Get-Content -LiteralPath $videoActivationPath -Raw | ConvertFrom-Json
-    $videoActivationChecks = @(
-        ($videoActivation.schemaVersion -eq 1)
-        ($videoActivation.recordId -eq "PV-ENHANCE-VIDEO-WRITER-ACTIVATION-001")
-        ($videoActivation.protocolContract -eq "PV-ENHANCE-VIDEO-001")
-        ($videoActivation.codeReady.wpfMutationClient -eq $true)
-        ($videoActivation.codeReady.h25Wan22Writer -eq $true)
-        ($videoActivation.codeReady.h25Commit -eq
-            "1bd9673c6f92ba448b99552ed5bb230294bbafad")
-        ($videoActivation.deliveryExtension.issue -eq
-            "a9ui/tools-h000025-photoviewer#356")
-        ($videoActivation.deliveryExtension.backendId -eq
-            "vs-rife-5.7.0-rife-4.25-v1")
-        ($videoActivation.deliveryExtension.model -eq "4.25")
-        ($videoActivation.deliveryExtension.targetFps -eq 30)
-        ($videoActivation.deliveryExtension.durationFrameCounts.'4' -eq 120)
-        ($videoActivation.deliveryExtension.durationFrameCounts.'6' -eq 180)
-        ($videoActivation.deliveryExtension.pixelFormat -eq "yuv420p")
-        ($videoActivation.deliveryExtension.audio -eq $false)
-        ([string]$videoActivation.deliveryExtension.h25CandidateCommit -ceq
-            'e10cc052572da8e5b6e0cb9da06b928a44deb3e7')
-        ($videoActivation.qualityExtension.protocolChange -eq
-            "additive within aibos.enhancement-video/v1")
-        ($videoActivation.qualityExtension.normalPresetId -eq
-            "wan22-ti2v-5b-normal-v1")
-        ($videoActivation.qualityExtension.highPresetId -eq
-            "wan22-ti2v-5b-high-v1")
-        ($videoActivation.qualityExtension.normalSteps -eq 20)
-        ($videoActivation.qualityExtension.highSteps -eq 40)
-        ($videoActivation.qualityExtension.model -eq
-            "wan2.2_ti2v_5B_fp16.safetensors")
-        ($videoActivation.qualityExtension.sameNativeFrameCount -eq $true)
-        ($videoActivation.qualityExtension.sameMaximumPixelArea -eq $true)
-        ($videoActivation.qualityExtension.sameDeliveryProfile -eq
-            "deliveryV1")
-        ($videoActivation.qualityExtension.keepSingleWorker -eq $true)
-        ($videoActivation.qualityExtension.keepInferenceSerial -eq $true)
-        ([string]$videoActivation.qualityExtension.h25CandidateCommit -ceq
-            '15496ced189586daf384501cbec30fc732429a6c')
-        ([string]$videoActivation.qualityExtension.aibosReaderUiCandidateCommit -ceq
-            'c3c32a5da5da4921f0d8d9b7e16ccde6d250593c')
-        ([string]$videoActivation.qualityExtension.canonicalContractSha256 -ceq
-            'd604d5926b23afaa84aff75dd78a3a3705cbe7fc0e4d3870c85c97b6d80c634d')
-        ($videoActivation.qualityExtension.highRuntimeMeasured -eq $false)
-        ($videoActivation.liveRuntime.wpfMutationClientEnabled -eq $false)
-        ($videoActivation.liveRuntime.h25WriterEnabled -eq $false)
-        ($videoActivation.liveRuntime.productionProcessesRestarted -eq $false)
-        ($videoActivation.candidateEvidence.durationSeconds -eq 6)
-        ($videoActivation.candidateEvidence.playbackFps -eq 16)
-        ($videoActivation.candidateEvidence.frameCount -eq 97)
-        ($videoActivation.candidateEvidence.width -eq 832)
-        ($videoActivation.candidateEvidence.height -eq 480)
-        ($videoActivation.candidateEvidence.maximumPixelArea -eq 409600)
-        ($videoActivation.candidateEvidence.codec -eq "h264")
-        ($videoActivation.candidateEvidence.pixelFormat -eq "yuv420p")
-        ($videoActivation.candidateEvidence.delivery.elapsedMilliseconds -eq
-            11768)
-        ($videoActivation.candidateEvidence.delivery.targetFps -eq 30)
-        ($videoActivation.candidateEvidence.delivery.frameCount -eq 180)
-        ($videoActivation.candidateEvidence.delivery.pixelFormat -eq
-            "yuv420p")
-        ($videoActivation.candidateEvidence.delivery.audio -eq $false)
-        ($videoActivation.portraitTimingUpperEvidence.width -eq 480)
-        ($videoActivation.portraitTimingUpperEvidence.height -eq 832)
-        ($videoActivation.portraitTimingUpperEvidence.wanElapsedMilliseconds -eq
-            202942)
-        ($videoActivation.portraitTimingUpperEvidence.deliveryElapsedMilliseconds -eq
-            15318)
-        ($videoActivation.portraitTimingUpperEvidence.totalElapsedMilliseconds -eq
-            218810)
-        ($videoActivation.refinedPortraitCandidateEvidence.width -eq 480)
-        ($videoActivation.refinedPortraitCandidateEvidence.height -eq 800)
-        ($videoActivation.refinedPortraitCandidateEvidence.totalElapsedMilliseconds -eq
-            177458)
-        ($videoActivation.refinedPortraitCandidateEvidence.peakVramMiB -eq
-            11765)
-        ($videoActivation.refinedPortraitCandidateEvidence.qualityAdjudication -eq
-            "adopted for anime M1 smoke")
-        ($videoActivation.candidateEvidence.mediaFoundationPlayback -eq $true)
-        ($videoActivation.candidateEvidence.mediaFoundationInCi -eq $false)
-        ($videoActivation.cutover.requiresControlledRestart -eq $true)
-        ($videoActivation.cutover.keepSingleWorker -eq $true)
-        ($videoActivation.cutover.keepInferenceSerial -eq $true)
-        ($videoActivation.cutover.forceHighVram -eq $false)
-    )
-    if ($videoActivationChecks -contains $false) {
-        throw "Enhancement video writer activation fields are invalid."
-    }
-
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {

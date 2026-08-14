@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001",
+  "protocol": "aibos.enhancement-video-h3-prompt-rewrite/v1",
+  "route": {
+    "method": "POST",
+    "path": "/api/enhance/video-prompts/h3/rewrite",
+    "loopbackOnly": true,
+    "cacheControl": "no-store, max-age=0"
+  },
+  "rewriteRevision": "aibos-h3-i2va-local-v1",
+  "sideEffects": "explicit UI-only rewrite; never create, reserve, retry, reorder, claim, start, or wake an Enhancement job and never persist the candidate",
+  "request": {
+    "maximumUtf8Bytes": 16384,
+    "requiredFields": [
+      "sourceId",
+      "prompt",
+      "frameCount",
+      "playbackFps"
+    ],
+    "optionalFields": [
+      "sourceProducerJobId"
+    ],
+    "unknownOrDuplicateFields": "reject before resolving or reading the source",
+    "fixedValues": {
+      "frameCount": 124,
+      "playbackFps": 24
+    },
+    "sourceIdMaximumUtf16CodeUnits": 32768,
+    "sourceProducerJobIdMaximumUtf16CodeUnits": 128
+  },
+  "response": {
+    "requiredFields": [
+      "candidatePrompt",
+      "rewriteRevision",
+      "sourceSha256"
+    ],
+    "optionalFields": [
+      "modelId",
+      "inferenceMilliseconds"
+    ],
+    "unknownOrDuplicateFields": "reject the whole response and retain the prior candidate",
+    "sourceSha256": "64 lowercase hexadecimal characters matching WPF's pre-request hash",
+    "modelIdMaximumUtf16CodeUnits": 128,
+    "inferenceMilliseconds": {
+      "minimum": 0,
+      "maximum": 600000
+    }
+  },
+  "candidateGrammar": {
+    "maximumRawUtf16CodeUnits": 2000,
+    "opening": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.",
+    "orderedSections": [
+      "integrated_multimodal_description: [Shot 1] ",
+      "overall_soundscape: ",
+      "non_diegetic_music: "
+    ],
+    "sectionSeparator": "\n\n",
+    "markerRule": "each section marker occurs exactly once across the whole raw candidate and the three markers occur only in the declared order",
+    "lineEndingRule": "reject a raw candidate over 2000 UTF-16 code units before converting CRLF to LF; after conversion reject every remaining carriage return",
+    "emptySectionRule": "each section body contains at least one non-whitespace character",
+    "controlCharacterRule": "only LF and TAB control characters are allowed"
+  },
+  "runtimeErrorMapping": {
+    "H3_PROMPT_RUNTIME_INVALID_SOURCE": "H3_PROMPT_REWRITE_INVALID_SOURCE",
+    "H3_PROMPT_RUNTIME_BUSY": "H3_PROMPT_REWRITE_BUSY",
+    "H3_PROMPT_RUNTIME_REQUEST_FAILED": "H3_PROMPT_REWRITE_INVALID_MODEL_OUTPUT",
+    "H3_PROMPT_RUNTIME_RESPONSE_INVALID": "H3_PROMPT_REWRITE_INVALID_MODEL_OUTPUT",
+    "H3_PROMPT_RUNTIME_UNAVAILABLE": "H3_PROMPT_REWRITE_UNAVAILABLE",
+    "H3_PROMPT_RUNTIME_INVALID_MANIFEST": "H3_PROMPT_REWRITE_UNAVAILABLE",
+    "H3_PROMPT_RUNTIME_START_FAILED": "H3_PROMPT_REWRITE_UNAVAILABLE",
+    "H3_PROMPT_RUNTIME_TIMEOUT": "H3_PROMPT_REWRITE_TIMEOUT",
+    "H3_PROMPT_RUNTIME_CANCELED": "H3_PROMPT_REWRITE_CANCELED"
+  },
+  "readerFirst": {
+    "rule": "enable a route writer only after every active response reader accepts this revision",
+    "unknownRevision": "reject the response whole, retain the prior transient candidate, and leave the authoritative input unchanged",
+    "malformedOrError": "never persist or apply a candidate and never create an Enhancement reservation",
+    "rollback": "the route writer may be disabled without changing the durable video job schema because candidates are UI-only"
+  }
+}

@@ -1,179 +1,81 @@
 # Aibos Image
 
-Aibos Image is a local-first native image workspace for Windows. This
-repository is the development authority for the WPF application. The Browser
-application is maintained independently in
-[`a9ui/tools-h000025-photoviewer`](https://github.com/a9ui/tools-h000025-photoviewer).
-Browser UI parity is not a completion gate for this repository.
+Aibos Image is a local-first native image workspace for Windows. The current
+product in this repository is the WPF application.
 
-This repository is an early public source snapshot. It is not a hosted service,
-not a release-quality claim, and may contain known product defects that are
-being tracked and fixed incrementally.
+This is an early public source snapshot, not a hosted service or a release
+quality claim.
 
 ## Requirements and launch
 
-- Windows;
-- .NET 10 SDK.
+- Windows
+- .NET 10 SDK
 
 ```powershell
 dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
 .\start_aibos.bat
 ```
 
-`start_aibos.bat` launches the native WPF application directly. The compatible
-`start_wpf.bat` entry point remains available.
+`start_wpf.bat` remains as a compatibility entry point.
 
-## Security boundary
+## Product boundary
 
-Aibos Image reads user-selected image folders. Normal browsing, metadata
-inspection, Favorite, Seen, Album, Search History, and Enhancement state do not
-rewrite source images. Source deletion is a separate explicit action and uses
-the operating system Recycle Bin.
+- Normal viewing and state changes do not rewrite source images.
+- Source deletion is explicit and goes through the Windows Recycle Bin.
+- Browsing, search, navigation, state loading, health checks, and Jobs viewing
+  do not enqueue AI work or start workers.
+- Ordinary viewing is local and does not require Node.js or a web UI.
+- The optional Enhancement companion is an authenticated API bound only to
+  `127.0.0.1`. It does not load or open a UI. AI recovery and
+  processing remain behind an explicit user action.
+- LAN, tunnel, reverse-proxy, hosted, and Internet exposure are outside the
+  supported boundary.
 
-Ordinary viewing is fully local and does not require a Browser or Node.js
-runtime. When installed, the API-only H25 Enhancement companion starts with
-Aibos so persisted Jobs history is immediately available. Startup defers queue
-recovery, durable-inbox draining, worker pumping, ComfyUI startup, and GPU work;
-those remain behind an explicit AI Start/Retry. The companion binds to
-`127.0.0.1`, opens no Browser window, and
-does not load the Browser Viewer, Albums, Search, thumbnails, or Favorites.
-These guarantees apply to the default Enhancement companion launcher. The
-explicit `AIBOS_H25_LEGACY_NEXT_COMPANION=1` rollback switch selects the
-unchanged legacy Next runtime instead; it is outside the API-only companion
-mode and is retained only for a controlled rollback.
-LAN, tunnel, reverse-proxy, hosted, and Internet exposure are outside the
-product boundary. If the companion is not already running, an explicit AI
-Start/Retry action may start it and sends a bodyless authenticated recovery
-request before new work is reserved. Browsing, preview, search, navigation,
-and passive job inspection never recover or pump the queue. After a queue
-reservation is durably saved, the companion can register and process it after
-Aibos closes or the companion restarts. Reopening Aibos reads the persisted
-queue, operation type, status, and latest saved progress from the companion.
-Before any API request or durable reservation, Aibos proves the companion's
-per-user identity with a nonce challenge. Every later loopback request and
-response is encrypted, authenticated, and bound to that exact companion
-instance and start epoch. A replacement listener receives no source identity,
-prompt, settings, credential, job body, or accepted response data. The
-per-user capability is stored as a CurrentUser DPAPI blob in a protected,
-owner-checked directory and is passed in plaintext only to the WPF-owned child.
-After durable publish, an unauthenticated wake response is reported as saved
-for delivery rather than as a permanent failure.
+## Data and compatibility
 
-## Cross-repository durable state
+Versioned durable formats cover Favorites, Seen state, settings, Albums,
+Search History, recent folders, and Enhancement Jobs. Presentation-only state
+stays local to WPF.
 
-The WPF and Browser applications remain independent products but will read and
-write one versioned durable-state contract. The shared set is intended to
-include:
+Start at [`contracts/index.json`](contracts/index.json), then read only the
+contract or synthetic fixture relevant to a change. Stable cross-cutting
+semantics are in [`docs/product-contract.md`](docs/product-contract.md).
 
-- `favorites.json`, `seen.json`, `settings.json`, `albums.json`,
-  `search-history.json`, and `recent-folders.json`;
-- `enhance/jobs.sqlite3` as the current Enhancement Jobs authority,
-  `enhance/jobs.json` as the retained legacy/rollback store, the versioned
-  explicit-enqueue inbox below `enhance/enqueue-inbox/**`, plus managed outputs
-  at the parent selected by
-  `enhance/output-root.txt` (falling back to `enhance/outputs/**`). Image
-  outputs remain under `Upscaled/`, `Photorealized/`, and `Edited/`; video uses
-  the sibling `Videos/` folder. Completed files in all four operation folders
-  are finalized below `YYYY-MM-DD/`, where the date comes only from the output
-  file's own Windows CreationTime in the companion's local timezone. Job and
-  source timestamps never choose that date.
+`PhotoViewer`, `photoviewer`, and `Browser` still appear in assemblies,
+paths, environment variables, and fixtures as compatibility identifiers. They
+must not be renamed without a non-destructive migration.
 
-Renderer-local presentation state, including WPF window geometry, panel sizes,
-keyboard bindings, current selection, preview layout, and named AI
-photorealization and video-generation Styles stay local. A photoreal Style
-snapshots LoRA enabled, the current Positive prompt, Positive fallback used
-when blank, Negative prompt, strength, CFG scale, quality steps, and work
-resolution. A
-video Style snapshots its prompt, model, quality, duration,
-generation FPS, and pixel budget. Both can be reapplied from the preview or
-application settings. In particular, the existing WPF `state.json` is not
-shared wholesale.
+The former Browser/Next.js implementation is preserved in an
+[archived repository](https://github.com/a9ui/tools-h000025-photoviewer). It is
+historical evidence, not an active product or contract authority.
 
-Fresh photoreal settings use the base FLUX.2 model with the comparison LoRA
-OFF. The WPF-local PNG Prompt inheritance table can translate selected A1111
-source tags into editable Positive fragments at explicit enqueue time. A
-local ignored prompt policy supplies production defaults. The tracked WPF
-schema example at
-`local-native/PhotoViewer.Wpf/config/wpf-prompts.example.json` contains
-synthetic placeholder values only. Set `AIBOS_WPF_PROMPT_POLICY_PATH` or place
-`config/wpf-prompts.local.json` beside the application/current directory.
-Missing or invalid policy uses bounded public placeholders and an empty default
-inheritance table without changing persisted user edits. A
-photoreal output carries its effective generation settings in the PNG
-`parameters` chunk. Existing photoreal PNGs that predate that writer remain
-readable through their bounded ComfyUI `prompt` graph when no `parameters`
-  chunk exists; `parameters` always wins when both are present. Video versions
-continue to use their existing immutable snapshot in the active Enhancement
-Jobs store, so no per-output JSON sidecars are added.
+## Development and verification
 
-Normal application startup remains reader-only: it never creates a locator,
-shared root, durable-data directory, or logical store. Its operational writes
-are limited to an empty lock file under the operating-system temporary
-directory and SQLite's standard `-wal`/`-shm` coordination sidecars when the
-current Enhancement Jobs database requires them. A separate
-`.NET 10` command-line tool, `Aibos.SharedRootSetup`, can perform the reviewed
-one-time creation of the default locator after an inspection-only preflight and
-an explicit `--apply --confirm CREATE`. It is create-only, requires the
-protocol-global writer lease, and refuses malformed, future, unreadable,
-ambiguous, redirected, or conflicting state. It does not copy, merge,
-initialize, rewrite, or delete durable state; root migration and locator
-replacement remain disabled.
+Focused verifiers live under `scripts/` and use synthetic data under the
+operating-system temporary directory. Choose the verifier for the changed
+surface; do not run every verifier for an unrelated documentation edit.
 
-The WPF application fixes the seven durable-store paths from one validated root
-for the process lifetime while preserving explicit per-store test overrides.
-Shared settings protect unsupported or unreadable documents, fail safe to
-delete confirmation enabled, and preserve unknown fields; a supported shared
-recent-folder document is authoritative, including an explicit empty folder
-set. The exact H25 Browser reader and cross-repository TEMP matrix must remain
-green.
-
-## Verification
+Common entry points include:
 
 ```powershell
-dotnet build .\local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj -c Release --nologo
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-setup.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-legacy-asset-ledger.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-parity-foundation.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-interaction.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-ui-language.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-root-locator.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-thumbnail-status-borders.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-shared-recent.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-cross-repo-shared-root-paths.ps1 -LegacyRepo <path> -BrowserCommit <sha>
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-album-library-hardening.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-modal-enhancement-actions.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-public-surface.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-contract-index.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-shared-state-contracts.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhancement-jobs-workspace.ps1
 ```
 
-Additional focused WPF verifiers live under `scripts/` and use synthetic
-fixtures under the operating-system temporary directory.
-
-## Product contract and compatibility identifiers
-
-WPF behavior and the cross-repository durable-state boundary are defined in
-[`docs/product-contract.md`](docs/product-contract.md). Some technical paths,
-assemblies, namespaces, cache keys, environment variables, and fixtures still
-use `PhotoViewer`, `photoviewer`, or `Browser`. They are compatibility
-identifiers and remain stable until a separately tested, non-destructive
-migration exists.
+Repository instructions for agents are in [`AGENTS.md`](AGENTS.md). Security
+and disclosure rules are in [`SECURITY.md`](SECURITY.md).
 
 ## Privacy when reporting bugs
 
-Do not attach personal images, unredacted absolute paths, cache/state files,
-logs, database files, environment files, credentials, or private URLs to a
-public issue or pull request. Use synthetic files under a temporary directory.
-
-Security reports should use GitHub private vulnerability reporting when it is
-available. If the private form is unavailable, do not disclose sensitive
-details in a public issue.
+Use synthetic files and redact local data. Follow [`SECURITY.md`](SECURITY.md)
+for the publication boundary and private vulnerability reporting; never put
+sensitive security details in a public issue.
 
 ## License status
 
-No license is currently granted. The source is publicly visible, but this
-repository is not described as open source and no permission to use, copy,
-modify, or redistribute is granted beyond rights provided by applicable law.
-A future `LICENSE` file, if added, will supersede this notice.
-
-Third-party packages keep their own terms. In particular,
-`Microsoft.Data.Sqlite.Core` is MIT-licensed and the referenced
-`SQLitePCLRaw` packages are Apache-2.0-licensed; this repository does not vendor
-their source or relicense them under the Aibos notice above.
+No license is currently granted. Public source visibility does not grant
+permission to use, copy, modify, or redistribute the repository beyond rights
+provided by applicable law. A future `LICENSE` file, if added, supersedes this
+notice. Third-party dependencies retain their own licenses.

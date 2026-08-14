@@ -1,0 +1,46 @@
+{
+  "id": "PV-SH-001",
+  "kind": "search-history-identity",
+  "cases": [
+    {
+      "id": "explicit-trim-and-empty-token",
+      "samples": [
+        {
+          "input": "﻿  trim  ﻿, ,parity",
+          "normalized": "trim, parity",
+          "comparisonKey": "trim, parity"
+        }
+      ]
+    },
+    {
+      "id": "nfkc-dotted-i-equivalence",
+      "samples": [
+        {
+          "input": "ＣＡＴ, İ",
+          "normalized": "ＣＡＴ, İ",
+          "comparisonKey": "cat, i̇"
+        },
+        {
+          "input": "cat, i̇",
+          "normalized": "cat, i̇",
+          "comparisonKey": "cat, i̇"
+        }
+      ]
+    },
+    {
+      "id": "greek-cyrillic-equivalence",
+      "samples": [
+        {
+          "input": "МОСКВА, ΟΣ",
+          "normalized": "МОСКВА, ΟΣ",
+          "comparisonKey": "москва, οσ"
+        },
+        {
+          "input": "москва, οσ",
+          "normalized": "москва, οσ",
+          "comparisonKey": "москва, οσ"
+        }
+      ]
+    }
+  ]
+}
