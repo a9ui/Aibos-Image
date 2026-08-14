@@ -3,6 +3,7 @@ param(
     [string]$OutputPath = (Join-Path $env:TEMP "aibos-wpf-enhancement-jobs-workspace.json"),
     [string]$DotnetPath = "dotnet",
     [string]$TargetFrameworkOverride = "",
+    [switch]$NoRestore,
     [ValidateRange(1, 300)]
     [int]$OverallTimeoutSeconds = 90
 )
@@ -228,10 +229,30 @@ try {
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+        $buildArguments = @(
+            'build',
+            $project,
+            '-c',
+            $Configuration,
+            "-p:OutputPath=$buildOutput",
+            '--nologo',
+            '-v:minimal'
+        )
+        if ($NoRestore) { $buildArguments += '--no-restore' }
+        & $DotnetPath @buildArguments
     }
     else {
-        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+        $msbuildArguments = @(
+            'msbuild',
+            $project,
+            "-property:TargetFramework=$TargetFrameworkOverride",
+            "-property:OutputPath=$buildOutput",
+            "-property:Configuration=$Configuration",
+            '-nologo',
+            '-verbosity:minimal'
+        )
+        if (-not $NoRestore) { $msbuildArguments += '-restore' }
+        & $DotnetPath @msbuildArguments
     }
     if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
@@ -286,6 +307,9 @@ try {
         'outputOpened',
         'sourceOpenedInViewer',
         'queueInventoryOrdered',
+        'jobsFilterLayoutContract',
+        'jobsScrollTopControl',
+        'thumbnailViewportLoadBounded',
         'operationLabelsVisible',
         'videoActionsEnabled',
         'legacyVideoMutationSafe',

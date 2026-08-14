@@ -1488,9 +1488,45 @@
                     WindowChrome.IsHitTestVisibleInChrome="True">
               <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
             </Button>
-            <Button x:Name="EnhancementJobsRefreshButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="Refresh" Click="RefreshEnhancementJobs_Click"
-                    Height="30" MinWidth="72" Margin="0,0,6,0" AutomationProperties.Name="Refresh AI enhancement jobs"
-                    WindowChrome.IsHitTestVisibleInChrome="True"/>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+              <Button x:Name="EnhancementJobsScrollTopButton" Style="{StaticResource GhostButton}" Content="一番上へ" Click="EnhancementJobsScrollTop_Click"
+                      Height="30" MinWidth="76" Margin="0,0,6,0" AutomationProperties.Name="Scroll AI enhancement jobs to top"
+                      WindowChrome.IsHitTestVisibleInChrome="True"/>
+              <StackPanel x:Name="EnhancementJobsQueuedBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
+                <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機中をすべて消す"
+                        Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="126" Margin="0,0,6,0"
+                        AutomationProperties.Name="Cancel all queued enhancement jobs"
+                        ToolTip="実行中のジョブは変えず、待機中だけをキャンセルします"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+              </StackPanel>
+              <StackPanel x:Name="EnhancementJobsFailedBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
+                <Button x:Name="EnhancementJobsRetryFailedButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
+                        Click="RetryAllFailedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="92" Margin="0,0,6,0"
+                        AutomationProperties.Name="Retry all failed enhancement jobs with current settings"
+                        ToolTip="再試行できる失敗した実写化を現在設定で待機列へ追加します"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+                <Button x:Name="EnhancementJobsClearFailedButton" Style="{StaticResource DangerButton}" Content="失敗を全部消す"
+                        Click="ClearAllFailedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="108" Margin="0,0,6,0"
+                        AutomationProperties.Name="Remove all failed enhancement jobs"
+                        ToolTip="削除可能な失敗履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+              </StackPanel>
+              <StackPanel x:Name="EnhancementJobsCanceledBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
+                <Button x:Name="EnhancementJobsRetryCanceledButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
+                        Click="RetryAllCanceledEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="92" Margin="0,0,6,0"
+                        AutomationProperties.Name="Retry all canceled enhancement jobs with current settings"
+                        ToolTip="再試行できるキャンセル済みの実写化を現在設定で待機列へ追加します"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+                <Button x:Name="EnhancementJobsClearCanceledButton" Style="{StaticResource DangerButton}" Content="キャンセルを全部消す"
+                        Click="ClearAllCanceledEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="132" Margin="0,0,6,0"
+                        AutomationProperties.Name="Remove all canceled enhancement jobs"
+                        ToolTip="削除可能なキャンセル履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"
+                        WindowChrome.IsHitTestVisibleInChrome="True"/>
+              </StackPanel>
+              <Button x:Name="EnhancementJobsRefreshButton" Style="{StaticResource GhostButton}" Content="Refresh" Click="RefreshEnhancementJobs_Click"
+                      Height="30" MinWidth="72" AutomationProperties.Name="Refresh AI enhancement jobs"
+                      WindowChrome.IsHitTestVisibleInChrome="True"/>
+            </StackPanel>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
               <TextBlock Text="AI jobs" Foreground="{StaticResource TextPrimary}" FontSize="17" FontWeight="SemiBold"/>
               <TextBlock x:Name="EnhancementJobsHeaderSummary" Foreground="{StaticResource TextTertiary}" FontSize="11.5" Margin="12,2,0,0"/>
@@ -1505,7 +1541,6 @@
                 <TextBlock Text="FILTER" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="4,0,0,8"/>
                 <RadioButton x:Name="EnhancementJobsAllFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="待機中" Tag="queued" Click="EnhancementJobsFilter_Click"/>
-                <RadioButton x:Name="EnhancementJobsRunningFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="処理中" Tag="running" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="完成したもののみ" Tag="completed" Click="EnhancementJobsFilter_Click"/>
                 <RadioButton x:Name="EnhancementJobsVideoFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsFilter" Content="動画化" Tag="video" Click="EnhancementJobsFilter_Click"
                              AutomationProperties.Name="Show video generation jobs"/>
@@ -1519,30 +1554,6 @@
                         Click="UpdateAllQueuedPhotorealPrompts_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
                         AutomationProperties.Name="Update all queued photoreal settings"
                         ToolTip="待機中の実写化へ現在のPrompt・LoRA・強さ・CFG・品質・解像度・Seedを反映。各PNGの個別Prompt変換と待ち順は維持します"/>
-                <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機中をすべて消す"
-                        Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
-                        AutomationProperties.Name="Cancel all queued enhancement jobs"
-                        ToolTip="実行中のジョブは変えず、待機中だけをキャンセルします"/>
-                <StackPanel x:Name="EnhancementJobsFailedBulkPanel" Visibility="Collapsed">
-                  <Button x:Name="EnhancementJobsRetryFailedButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
-                          Click="RetryAllFailedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
-                          AutomationProperties.Name="Retry all failed enhancement jobs"
-                          ToolTip="再試行できる失敗ジョブを元設定で順に追加し、追加できた元の失敗履歴を消します"/>
-                  <Button x:Name="EnhancementJobsClearFailedButton" Style="{StaticResource DangerButton}" Content="失敗を全部消す"
-                          Click="ClearAllFailedEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
-                          AutomationProperties.Name="Remove all failed enhancement jobs"
-                          ToolTip="削除可能な失敗履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"/>
-                </StackPanel>
-                <StackPanel x:Name="EnhancementJobsCanceledBulkPanel" Visibility="Collapsed">
-                  <Button x:Name="EnhancementJobsRetryCanceledButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
-                          Click="RetryAllCanceledEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
-                          AutomationProperties.Name="Retry all canceled enhancement jobs"
-                          ToolTip="再試行できるキャンセル済みジョブを元設定で順に追加します"/>
-                  <Button x:Name="EnhancementJobsClearCanceledButton" Style="{StaticResource DangerButton}" Content="キャンセルを全部消す"
-                          Click="ClearAllCanceledEnhancementJobs_Click" IsEnabled="False" MinHeight="30" Margin="0,8,0,0"
-                          AutomationProperties.Name="Remove all canceled enhancement jobs"
-                          ToolTip="削除可能なキャンセル履歴だけを消します。保護対象、元画像、出力ファイルは変更しません"/>
-                </StackPanel>
                 <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" CornerRadius="4" Padding="9" Margin="0,16,0,0">
                   <StackPanel>
                     <TextBlock Text="Local companion" Foreground="{StaticResource TextSecondary}" FontSize="11.5" FontWeight="SemiBold"/>
@@ -1571,6 +1582,7 @@
                        ScrollViewer.IsDeferredScrollingEnabled="True"
                        VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"
                        VirtualizingPanel.CacheLength="1,1" VirtualizingPanel.CacheLengthUnit="Page"
+                       ScrollViewer.ScrollChanged="EnhancementJobsList_ScrollChanged"
                        AutomationProperties.Name="AI enhancement job list">
                 <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
                 <ListBox.ItemContainerStyle>
