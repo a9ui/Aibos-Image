@@ -1083,6 +1083,16 @@ public partial class App : Application
             return;
         }
 
+        int enhancementJobsScrollPerformanceSmokeIdx =
+            Array.IndexOf(e.Args, "--enhancement-jobs-scroll-performance-smoke");
+        if (enhancementJobsScrollPerformanceSmokeIdx >= 0
+            && enhancementJobsScrollPerformanceSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureEnhancementJobsScrollPerformanceSmoke(
+                e.Args[enhancementJobsScrollPerformanceSmokeIdx + 1]);
+            return;
+        }
+
         int enhancementNotificationSmokeIdx =
             Array.IndexOf(e.Args, "--enhancement-notification-smoke");
         if (enhancementNotificationSmokeIdx >= 0
@@ -19042,6 +19052,115 @@ public partial class App : Application
 
             WriteModalEnhancedSmokeResult(resultFullPath, result);
             Shutdown(result.Ok ? 0 : 1);
+        }, DispatcherPriority.ContextIdle);
+    }
+
+    private void CaptureEnhancementJobsScrollPerformanceSmoke(string resultPath)
+    {
+        string resultFullPath = Path.GetFullPath(resultPath);
+        string smokeRoot = Directory.CreateTempSubdirectory(
+            "aibos-enhancement-jobs-scroll-performance-").FullName;
+        string storeRoot = Path.Combine(smokeRoot, "stores");
+        var environmentOverrides = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["PHOTOVIEWER_WPF_STATE_PATH"] = Path.Combine(storeRoot, "state.json"),
+            ["PHOTOVIEWER_WPF_SETTINGS_PATH"] = Path.Combine(storeRoot, "settings.json"),
+            ["PHOTOVIEWER_WPF_FAVORITES_PATH"] = Path.Combine(storeRoot, "favorites.json"),
+            ["PHOTOVIEWER_WPF_SEEN_PATH"] = Path.Combine(storeRoot, "seen.json"),
+            ["PHOTOVIEWER_WPF_RECENT_PATH"] = Path.Combine(storeRoot, "recent.json"),
+            ["PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH"] = Path.Combine(storeRoot, "search-history.json"),
+            ["PHOTOVIEWER_WPF_ALBUMS_PATH"] = Path.Combine(storeRoot, "albums.json"),
+            ["PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY"] = Path.Combine(storeRoot, "metadata-index"),
+            ["PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH"] = Path.Combine(storeRoot, "enhance", "jobs.sqlite3"),
+            ["PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT"] = Path.Combine(storeRoot, "enhance", "outputs"),
+        };
+        Dictionary<string, string?> previousEnvironment = environmentOverrides.Keys.ToDictionary(
+            static key => key,
+            static key => Environment.GetEnvironmentVariable(key),
+            StringComparer.Ordinal);
+
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        _ = Dispatcher.InvokeAsync(async () =>
+        {
+            PhotoViewer.Wpf.MainWindow? window = null;
+            object result;
+            bool ok = false;
+            try
+            {
+                Directory.CreateDirectory(storeRoot);
+                foreach ((string key, string value) in environmentOverrides)
+                    Environment.SetEnvironmentVariable(key, value);
+
+                window = new PhotoViewer.Wpf.MainWindow
+                {
+                    Width = 1_200,
+                    Height = 800,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -10_000,
+                    Top = -10_000,
+                };
+                window.Show();
+                await Dispatcher.Yield(DispatcherPriority.Loaded);
+                EnhancementJobsScrollPerformanceSmokeSnapshot snapshot =
+                    await window.RunEnhancementJobsScrollPerformanceSmokeAsync(
+                        jobCount: 10_000,
+                        scrollStepCount: 48);
+                ok = snapshot.JobCount == 10_000
+                    && snapshot.FilteredCount == 10_000
+                    && snapshot.VisibleCount == 100
+                    && snapshot.PageSize == 100
+                    && snapshot.PageCount == 100
+                    && snapshot.ScrollableHeight > 0
+                    && snapshot.ScrollChangedCount >= 40
+                    && snapshot.RealizedContainerPeak > 0
+                    && snapshot.RealizedContainerPeak <= 8
+                    && snapshot.ThumbnailBatchSize == 0;
+                result = new
+                {
+                    ok,
+                    snapshot.JobCount,
+                    snapshot.FilteredCount,
+                    snapshot.VisibleCount,
+                    snapshot.PageSize,
+                    snapshot.PageCount,
+                    snapshot.FilterMilliseconds,
+                    snapshot.InitialLayoutMilliseconds,
+                    snapshot.TotalScrollMilliseconds,
+                    snapshot.MaximumScrollStepMilliseconds,
+                    snapshot.P95ScrollStepMilliseconds,
+                    snapshot.ScrollChangedCount,
+                    snapshot.ThumbnailTimerRestartCount,
+                    snapshot.ThumbnailScrollCancellationCount,
+                    snapshot.RealizedContainerPeak,
+                    snapshot.ThumbnailBatchSize,
+                    snapshot.ScrollableHeight,
+                };
+            }
+            catch (Exception ex)
+            {
+                result = new { ok = false, message = ex.ToString() };
+            }
+            finally
+            {
+                window?.Close();
+                foreach ((string key, string? value) in previousEnvironment)
+                    Environment.SetEnvironmentVariable(key, value);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
+            File.WriteAllText(
+                resultFullPath,
+                JsonSerializer.Serialize(
+                    result,
+                    new JsonSerializerOptions { WriteIndented = true }));
+            try
+            {
+                Directory.Delete(smokeRoot, recursive: true);
+            }
+            catch
+            {
+            }
+            Shutdown(ok ? 0 : 1);
         }, DispatcherPriority.ContextIdle);
     }
 

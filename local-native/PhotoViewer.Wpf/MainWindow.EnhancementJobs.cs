@@ -47,8 +47,11 @@ public partial class MainWindow
     private DispatcherTimer _enhancementWorkspaceThumbnailViewportTimer = null!;
     private CancellationTokenSource? _enhancementWorkspaceThumbnailCts;
     private bool _enhancementWorkspaceThumbnailViewportLoadPending;
+    private bool _suppressEnhancementWorkspaceThumbnailLoadsForSmoke;
     private int _enhancementWorkspaceLastThumbnailBatchSize;
     private int _enhancementWorkspaceThumbnailScrollCancellationCount;
+    private int _enhancementWorkspaceScrollChangedCount;
+    private int _enhancementWorkspaceThumbnailTimerRestartCount;
     private bool _enhancementWorkspaceRefreshPending;
     private bool _enhancementWorkspaceHealthPollPending;
     private long _enhancementWorkspaceRefreshGeneration;
@@ -2328,6 +2331,7 @@ public partial class MainWindow
             return;
         }
 
+        _enhancementWorkspaceScrollChangedCount++;
         CancellationTokenSource? activeLoad =
             Volatile.Read(ref _enhancementWorkspaceThumbnailCts);
         if (activeLoad is not null)
@@ -2337,6 +2341,7 @@ public partial class MainWindow
         }
         _enhancementWorkspaceThumbnailViewportTimer.Stop();
         _enhancementWorkspaceThumbnailViewportTimer.Start();
+        _enhancementWorkspaceThumbnailTimerRestartCount++;
     }
 
     private void EnhancementWorkspaceThumbnailViewportTimer_Tick(
@@ -2439,6 +2444,7 @@ public partial class MainWindow
     {
         if (_aiProcessingMinimizedMode
             || EnhancementJobsDialog.Visibility != Visibility.Visible
+            || _suppressEnhancementWorkspaceThumbnailLoadsForSmoke
             || _enhancementWorkspaceThumbnailViewportLoadPending)
         {
             return;
@@ -4586,6 +4592,150 @@ public partial class MainWindow
         return viewer.VerticalOffset;
     }
 
+    public async Task<EnhancementJobsScrollPerformanceSmokeSnapshot>
+        RunEnhancementJobsScrollPerformanceSmokeAsync(
+            int jobCount,
+            int scrollStepCount)
+    {
+        int boundedJobCount = Math.Max(1, jobCount);
+        int boundedStepCount = Math.Max(1, scrollStepCount);
+        _enhancementWorkspacePollTimer.Stop();
+        _enhancementWorkspaceThumbnailViewportTimer.Stop();
+        Volatile.Read(ref _enhancementWorkspaceThumbnailCts)?.Cancel();
+        _enhancementWorkspaceThumbnailCts = null;
+        _suppressEnhancementWorkspaceThumbnailLoadsForSmoke = true;
+        _enhancementWorkspaceLastThumbnailBatchSize = 0;
+        _enhancementWorkspaceJobs.Clear();
+        _enhancementWorkspaceJobs.Capacity = Math.Max(
+            _enhancementWorkspaceJobs.Capacity,
+            boundedJobCount);
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        for (int index = 0; index < boundedJobCount; index++)
+        {
+            string status = (index % 5) switch
+            {
+                0 => "running",
+                1 => "queued",
+                2 => "failed",
+                3 => "canceled",
+                _ => "succeeded",
+            };
+            string operation = (index % 4) switch
+            {
+                0 => "upscale",
+                1 => "photoreal",
+                2 => "i2i",
+                _ => "video",
+            };
+            DateTimeOffset createdAt = now.AddSeconds(-boundedJobCount + index);
+            _enhancementWorkspaceJobs.Add(new EnhancementWorkspaceJobView(
+                $"synthetic-job-{index:D5}",
+                $"synthetic-source-{index:D5}",
+                Path.Combine(Path.GetTempPath(), $"synthetic-source-{index:D5}.png"),
+                sourceProducerJobId: null,
+                presetId: operation == "video"
+                    ? "wan22-ti2v-5b-normal-v1"
+                    : "synthetic-preset",
+                adapterId: operation == "video"
+                    ? "comfyui-wan22-ti2v"
+                    : "synthetic-adapter",
+                operation,
+                videoMutationSafe: operation == "video",
+                i2iMutationSafe: operation == "i2i",
+                i2iSchemaVersion: operation == "i2i" ? 2 : null,
+                i2iTarget: operation == "i2i" ? "hair_color" : null,
+                i2iInstructionSummary: operation == "i2i" ? "synthetic" : null,
+                i2iV2EnvelopeClaimed: operation == "i2i",
+                status,
+                cancelRequested: false,
+                progress: status == "running" ? 83 : status == "succeeded" ? 100 : 0,
+                outputPath: status == "succeeded"
+                    ? Path.Combine(Path.GetTempPath(), $"synthetic-output-{index:D5}.webp")
+                    : null,
+                errorMessage: status == "failed" ? "Synthetic failure" : null,
+                createdAt,
+                updatedAt: createdAt.AddSeconds(1),
+                startedAt: status is "running" or "succeeded" ? createdAt : null,
+                finishedAt: status is "failed" or "canceled" or "succeeded"
+                    ? createdAt.AddSeconds(1)
+                    : null,
+                sourceSize: 1_024,
+                sourceMtimeMs: createdAt.ToUnixTimeMilliseconds(),
+                queueOrder: status == "queued" ? index : null,
+                apiOrdinal: index));
+        }
+
+        _enhancementWorkspaceFilter = "all";
+        _enhancementWorkspacePageIndex = 0;
+        EnhancementJobsDialog.Visibility = Visibility.Visible;
+        var filterWatch = Stopwatch.StartNew();
+        ApplyEnhancementWorkspaceFilter(loadThumbnails: false);
+        filterWatch.Stop();
+
+        var initialLayoutWatch = Stopwatch.StartNew();
+        await Dispatcher.Yield(DispatcherPriority.Loaded);
+        EnhancementJobsList.UpdateLayout();
+        await Dispatcher.Yield(DispatcherPriority.Render);
+        EnhancementJobsList.UpdateLayout();
+        initialLayoutWatch.Stop();
+
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(EnhancementJobsList);
+        if (viewer is null)
+            throw new InvalidOperationException("Enhancement Jobs scroll viewer was not realized.");
+
+        int scrollChangedBefore = _enhancementWorkspaceScrollChangedCount;
+        int timerRestartBefore = _enhancementWorkspaceThumbnailTimerRestartCount;
+        int cancellationBefore = _enhancementWorkspaceThumbnailScrollCancellationCount;
+        int realizedPeak = FindVisualDescendants<ListBoxItem>(EnhancementJobsList).Count();
+        var stepMilliseconds = new List<double>(boundedStepCount);
+        for (int step = 0; step < boundedStepCount; step++)
+        {
+            double fraction = (step % 2 == 0)
+                ? (step + 1d) / boundedStepCount
+                : 1d - ((step + 1d) / boundedStepCount);
+            var stepWatch = Stopwatch.StartNew();
+            viewer.ScrollToVerticalOffset(viewer.ScrollableHeight * fraction);
+            EnhancementJobsList.UpdateLayout();
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            stepWatch.Stop();
+            stepMilliseconds.Add(stepWatch.Elapsed.TotalMilliseconds);
+            realizedPeak = Math.Max(
+                realizedPeak,
+                FindVisualDescendants<ListBoxItem>(EnhancementJobsList).Count());
+        }
+
+        double[] orderedSteps = stepMilliseconds.Order().ToArray();
+        int p95Index = Math.Clamp(
+            (int)Math.Ceiling(orderedSteps.Length * 0.95) - 1,
+            0,
+            orderedSteps.Length - 1);
+        EnhancementJobsPageWindow page = CalculateEnhancementJobsPageWindow(
+            _enhancementWorkspaceFilteredCount,
+            _enhancementWorkspacePageIndex);
+        var visible = (EnhancementJobsList.ItemsSource
+                as IEnumerable<EnhancementWorkspaceJobView>)?
+            .ToArray()
+            ?? [];
+        return new EnhancementJobsScrollPerformanceSmokeSnapshot(
+            boundedJobCount,
+            _enhancementWorkspaceFilteredCount,
+            visible.Length,
+            EnhancementJobsPageSize,
+            page.PageCount,
+            filterWatch.Elapsed.TotalMilliseconds,
+            initialLayoutWatch.Elapsed.TotalMilliseconds,
+            stepMilliseconds.Sum(),
+            stepMilliseconds.Max(),
+            orderedSteps[p95Index],
+            _enhancementWorkspaceScrollChangedCount - scrollChangedBefore,
+            _enhancementWorkspaceThumbnailTimerRestartCount - timerRestartBefore,
+            _enhancementWorkspaceThumbnailScrollCancellationCount - cancellationBefore,
+            realizedPeak,
+            _enhancementWorkspaceLastThumbnailBatchSize,
+            viewer.ScrollableHeight);
+    }
+
     public double EnhancementJobsVerticalThumbSlotHeightForSmoke
     {
         get
@@ -5695,6 +5845,24 @@ public sealed record EnhancementJobsPagingSmokeSnapshot(
     int PageCount,
     int FirstIndex,
     int ItemCount);
+
+public sealed record EnhancementJobsScrollPerformanceSmokeSnapshot(
+    int JobCount,
+    int FilteredCount,
+    int VisibleCount,
+    int PageSize,
+    int PageCount,
+    double FilterMilliseconds,
+    double InitialLayoutMilliseconds,
+    double TotalScrollMilliseconds,
+    double MaximumScrollStepMilliseconds,
+    double P95ScrollStepMilliseconds,
+    int ScrollChangedCount,
+    int ThumbnailTimerRestartCount,
+    int ThumbnailScrollCancellationCount,
+    int RealizedContainerPeak,
+    int ThumbnailBatchSize,
+    double ScrollableHeight);
 
 internal readonly record struct EnhancementJobsPageWindow(
     int PageIndex,
