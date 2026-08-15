@@ -140,10 +140,16 @@ public partial class App
                 .SequenceEqual(
                 [
                     "custom",
+                    "image-aware-auto",
                     "dynamic-general",
                     "cute-sexy",
                     "cinematic-camera",
                     "natural-visible",
+                    "expressive-emotion",
+                    "action-power",
+                    "dreamy-flow",
+                    "atmospheric-scene",
+                    "romantic-warm",
                 ],
                 StringComparer.Ordinal);
             bool builtInTemplatesUseH3Grammar = templateIdsExact
@@ -161,12 +167,63 @@ public partial class App
                             normalized,
                             window.VideoPromptForSmoke,
                             StringComparison.Ordinal));
+            bool imageAwareAutoExact =
+                window.SelectVideoPromptTemplateForSmoke("image-aware-auto")
+                && window.VideoPromptForSmoke.Contains(
+                    "choose the single most natural and engaging video direction",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "subject type, pose, gaze, framing, available space",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "whether expression, body motion, an existing interaction, camera movement, or environmental atmosphere should lead",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "without forcing a generic action",
+                    StringComparison.Ordinal);
+            bool addedTemplatesDistinct = imageAwareAutoExact
+                && window.SelectVideoPromptTemplateForSmoke("expressive-emotion")
+                && window.VideoPromptForSmoke.Contains(
+                    "clear and engaging emotional change",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "When no face is clearly visible",
+                    StringComparison.Ordinal)
+                && window.SelectVideoPromptTemplateForSmoke("action-power")
+                && window.VideoPromptForSmoke.Contains(
+                    "decisive, physically plausible movement",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "without forcing an unsupported jump",
+                    StringComparison.Ordinal)
+                && window.SelectVideoPromptTemplateForSmoke("dreamy-flow")
+                && window.VideoPromptForSmoke.Contains(
+                    "soft, dreamlike, and unhurried mood",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "Do not introduce unsupported glow, fog, particles",
+                    StringComparison.Ordinal)
+                && window.SelectVideoPromptTemplateForSmoke("atmospheric-scene")
+                && window.VideoPromptForSmoke.Contains(
+                    "environment is as important as any subject",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "Do not add new weather",
+                    StringComparison.Ordinal)
+                && window.SelectVideoPromptTemplateForSmoke("romantic-warm")
+                && window.VideoPromptForSmoke.Contains(
+                    "If two or more subjects are visible",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "without inventing a partner",
+                    StringComparison.Ordinal);
             bool cuteSexySelected = window.SelectVideoPromptTemplateForSmoke(
                 "cute-sexy");
             string cuteSexyPrompt = window.VideoPromptForSmoke;
             bool templateExact = templateSurface
                 && templateIdsExact
                 && builtInTemplatesUseH3Grammar
+                && addedTemplatesDistinct
                 && cuteSexySelected
                 && string.Equals(
                     window.SelectedVideoPromptTemplateIdForSmoke,
@@ -798,6 +855,8 @@ public partial class App
                 h3DefaultOnly,
                 templateSurface,
                 templateIdsExact,
+                imageAwareAutoExact,
+                addedTemplatesDistinct,
                 cuteSexySelected,
                 templateExact,
                 h3UnavailableSafe,
