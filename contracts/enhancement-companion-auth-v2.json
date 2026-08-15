@@ -58,9 +58,10 @@
   },
   "durableEnqueue": {
     "wakeRoute": "POST /api/enhance/inbox/wake",
+    "recoveryAwareWakeRoute": "POST /api/enhance/queue/recover",
     "jobBodyAllowed": false,
-    "ordering": "publish the durable inbox item only after ownership proof, then send an encrypted bodyless wake carrying only its idempotency key",
-    "receipt": "the companion drains the durable inbox before returning the matching job receipt",
+    "ordering": "after ownership proof and exact feature validation, publish the durable inbox item before sending an encrypted bodyless recovery-aware wake carrying only its idempotency key; the companion recovers an interrupted running row before draining the inbox",
+    "receipt": "the companion drains the durable inbox after recovery before returning the matching job receipt",
     "postPublishUnauthenticatedFailure": "return SavedForDelivery and recover using the same request id; only an authenticated inner 4xx is authoritative"
   },
   "startup": {
@@ -75,7 +76,7 @@
     ],
     "explicitRecoveryRoute": "POST /api/enhance/queue/recover",
     "explicitRecoveryBodyAllowed": false,
-    "explicitRecoveryProcessSemantics": "successful recovery runs at most once per companion process; concurrent or repeated authenticated requests reuse that result"
+    "explicitRecoveryProcessSemantics": "successful recovery runs at most once per companion process; concurrent or repeated authenticated requests reuse that result, while a request carrying an idempotency key drains the durable inbox after recovery and returns the matching receipt"
   },
   "server": {
     "bind": "127.0.0.1",

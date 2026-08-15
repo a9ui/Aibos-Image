@@ -137,7 +137,7 @@
     "browserViewerLoaded": false,
     "legacyDirectPost": "never used by this v1 WPF writer",
     "unknownOrLegacyProbe": "publish locally and send no POST",
-    "immediateNudge": "allowed only for the exact ready v1 capability",
+    "immediateNudge": "allowed only for the exact ready v1 capability; after publication the authenticated bodyless queue-recovery route recovers an interrupted running row before draining the inbox and returns the matching receipt when the request id is present",
     "rollback": "restore the prior WPF and companion together; retain published envelopes"
   },
   "vectors": [

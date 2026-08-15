@@ -1207,7 +1207,7 @@ public partial class MainWindow
         if (_usingDefaultModalEnhancementSender)
         {
             EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
+                await EnsureEnhancementCompanionApiReadyAsync(
                     recoverySourceIdentity,
                     token);
             if (!readiness.Ok)
@@ -1276,7 +1276,7 @@ public partial class MainWindow
             return SavedForDeliveryResponse(item);
         }
         string nudgeRoute = _usingDefaultModalEnhancementSender
-            ? EnhancementCompanionWakeRoute
+            ? EnhancementCompanionQueueRecoveryRoute
             : retryJobId is null
                 ? "api/enhance/jobs"
                 : $"api/enhance/jobs/{Uri.EscapeDataString(retryJobId)}/retry";
@@ -1359,7 +1359,7 @@ public partial class MainWindow
         if (_usingDefaultModalEnhancementSender)
         {
             EnhancementApiResponse readiness =
-                await EnsureEnhancementCompanionReadyForExplicitActionAsync(
+                await EnsureEnhancementCompanionApiReadyAsync(
                     token: token);
             if (!readiness.Ok)
             {
@@ -1526,7 +1526,7 @@ public partial class MainWindow
                 EnhancementApiResponse nudge = await SendEnhancementApiAsync(
                     HttpMethod.Post,
                     _usingDefaultModalEnhancementSender
-                        ? EnhancementCompanionWakeRoute
+                        ? EnhancementCompanionQueueRecoveryRoute
                         : item.RetryJobId is null
                             ? "api/enhance/jobs"
                             : $"api/enhance/jobs/{Uri.EscapeDataString(item.RetryJobId)}/retry",
