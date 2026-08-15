@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Interop;
 using System.Windows.Threading;
 
 namespace PhotoViewer.Wpf;
@@ -176,6 +177,31 @@ public partial class MainWindow
             UpdateWindowMaximizePresentation();
         }
         _ = Activate();
+    }
+
+    internal void ActivateFromSecondaryInstance()
+    {
+        if (_aiProcessingMinimizedMode)
+        {
+            RestoreFromAiProcessingMinimize();
+        }
+        else
+        {
+            ShowInTaskbar = true;
+            if (!IsVisible)
+                Show();
+            if (WindowState == WindowState.Minimized)
+            {
+                WindowState = _lastNonMinimizedWindowState == WindowState.Minimized
+                    ? WindowState.Normal
+                    : _lastNonMinimizedWindowState;
+            }
+            _ = Activate();
+        }
+
+        nint handle = new WindowInteropHelper(this).Handle;
+        if (handle != 0)
+            _ = SetForegroundWindow(handle);
     }
 
     private async void ResumeInteractivePresentationAfterAiProcessingMinimize()
@@ -493,6 +519,10 @@ public partial class MainWindow
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint RegisterWindowMessage(string message);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint windowHandle);
 
     [DllImport(
         "shell32.dll",
