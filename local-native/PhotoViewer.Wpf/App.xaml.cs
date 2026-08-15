@@ -21908,6 +21908,8 @@ public partial class App : Application
             bool startupCompanionAutoStart = false;
             bool serverErrorCompanionStartSuppressed = false;
             bool explicitCompanionAutoStart = false;
+            bool companionIdentityBusySeparated = false;
+            bool companionIdentityBusyReconnected = false;
             bool untrustedProbeContainedNoSensitiveData = true;
             bool untrustedDurableReservationSuppressed = false;
             int untrustedProbeCount = 0;
@@ -22185,6 +22187,147 @@ public partial class App : Application
                         File.ReadAllText(jobsPath),
                         jobsSeed,
                         StringComparison.Ordinal);
+
+                int persistentBusyProbeCount = 0;
+                bool persistentBusyStarterCalled = false;
+                bool persistentBusyProbeOnly = true;
+                string busyPendingDirectory = EnhancementEnqueueInboxStore
+                    .GetPendingDirectory(jobsPath);
+                int busyPendingBefore = Directory.Exists(busyPendingDirectory)
+                    ? Directory.GetFiles(busyPendingDirectory, "*.json").Length
+                    : 0;
+                win.ConfigureEnhancementCompanionAutoStartForSmoke(
+                    (request, _) =>
+                    {
+                        persistentBusyProbeCount++;
+                        persistentBusyProbeOnly &=
+                            request.Method == HttpMethod.Get
+                            && request.RequestUri?.AbsolutePath.EndsWith(
+                                "/api/enhance/identity",
+                                StringComparison.Ordinal) == true
+                            && request.Content is null
+                            && !PhotoViewer.Wpf.MainWindow
+                                .HasCompanionRequestAuthenticationForSmoke(request);
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.ServiceUnavailable,
+                            new { error = "The local AI companion is busy." }));
+                    },
+                    _ =>
+                    {
+                        persistentBusyStarterCalled = true;
+                        return (true, "");
+                    });
+                string persistentBusyError =
+                    await win.SendEnhancementEnqueueErrorForSmokeAsync(new
+                    {
+                        sourceId = canonicalSourcePath,
+                        prompt = "must-stay-local-while-identity-is-busy",
+                    });
+                int busyPendingAfter = Directory.Exists(busyPendingDirectory)
+                    ? Directory.GetFiles(busyPendingDirectory, "*.json").Length
+                    : 0;
+                companionIdentityBusySeparated =
+                    persistentBusyProbeCount >= 2
+                    && persistentBusyProbeOnly
+                    && !persistentBusyStarterCalled
+                    && persistentBusyError.Contains(
+                        "busy",
+                        StringComparison.OrdinalIgnoreCase)
+                    && !persistentBusyError.Contains(
+                        "untrusted",
+                        StringComparison.OrdinalIgnoreCase)
+                    && busyPendingAfter == busyPendingBefore;
+
+                int reconnectBusyProbeCount = 0;
+                bool reconnectBusyStarterCalled = false;
+                bool reconnectHealthAuthenticated = false;
+                bool reconnectRecoveryAuthenticated = false;
+                win.ConfigureEnhancementCompanionAutoStartForSmoke(
+                    async (request, token) =>
+                    {
+                        string route = request.RequestUri?.AbsolutePath ?? "";
+                        if (route.EndsWith(
+                                "/api/enhance/identity",
+                                StringComparison.Ordinal))
+                        {
+                            reconnectBusyProbeCount++;
+                            if (reconnectBusyProbeCount == 1)
+                            {
+                                return JsonResponse(
+                                    HttpStatusCode.ServiceUnavailable,
+                                    new { error = "The local AI companion is busy." });
+                            }
+                            string challenge = request.Headers
+                                .GetValues("X-Aibos-Companion-Challenge")
+                                .Single();
+                            return JsonResponse(
+                                HttpStatusCode.OK,
+                                win.EnhancementCompanionIdentityPayloadForSmoke(
+                                    challenge));
+                        }
+
+                        EnhancementCompanionSecureRequestSmokeSnapshot? inner =
+                            await win.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
+                                request,
+                                token);
+                        if (string.Equals(
+                                inner?.PathAndQuery,
+                                "/api/enhance/health",
+                                StringComparison.Ordinal))
+                        {
+                            reconnectHealthAuthenticated = true;
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new
+                                {
+                                    version = 1,
+                                    status = "working",
+                                    jobs = new
+                                    {
+                                        counts = new
+                                        {
+                                            queued = 1,
+                                            running = 1,
+                                            succeeded = 0,
+                                            failed = 0,
+                                            canceled = 0,
+                                            deleted = 0,
+                                        },
+                                    },
+                                    worker = new
+                                    {
+                                        pumpRunning = true,
+                                        paused = false,
+                                    },
+                                });
+                        }
+                        if (string.Equals(
+                                inner?.PathAndQuery,
+                                "/api/enhance/queue/recover",
+                                StringComparison.Ordinal))
+                        {
+                            reconnectRecoveryAuthenticated = true;
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new { recovered = true });
+                        }
+                        return JsonResponse(
+                            HttpStatusCode.Unauthorized,
+                            new { error = "missing authentication" });
+                    },
+                    _ =>
+                    {
+                        reconnectBusyStarterCalled = true;
+                        return (true, "");
+                    });
+                companionIdentityBusyReconnected =
+                    await win.EnsureEnhancementCompanionForExplicitActionForSmokeAsync()
+                    && reconnectBusyProbeCount == 2
+                    && !reconnectBusyStarterCalled
+                    && reconnectHealthAuthenticated
+                    && reconnectRecoveryAuthenticated;
 
                 int readinessProbeCount = 0;
                 int readinessJobsRequestCount = 0;
@@ -22965,6 +23108,8 @@ public partial class App : Application
                     && startupCompanionAutoStart
                     && serverErrorCompanionStartSuppressed
                     && untrustedDurableReservationSuppressed
+                    && companionIdentityBusySeparated
+                    && companionIdentityBusyReconnected
                     && explicitCompanionAutoStart
                     && companionAuthenticatedRequestHeaders
                     && companionListenerHandoffEncrypted
@@ -23112,6 +23257,8 @@ public partial class App : Application
                 passiveCompanionStartSuppressed,
                 startupCompanionAutoStart,
                 serverErrorCompanionStartSuppressed,
+                companionIdentityBusySeparated,
+                companionIdentityBusyReconnected,
                 explicitCompanionAutoStart,
                 companionAuthenticatedRequestHeaders,
                 companionQueueRecoveryAuthenticated,

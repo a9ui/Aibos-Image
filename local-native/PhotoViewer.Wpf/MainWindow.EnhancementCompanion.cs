@@ -14,6 +14,7 @@ public partial class MainWindow
 {
     private const int EnhancementCompanionReadyTimeoutMilliseconds = 120_000;
     private const int EnhancementCompanionProbeDelayMilliseconds = 450;
+    private const int EnhancementCompanionIdentityBusyRetryAttempts = 3;
     private const string EnhancementCompanionLauncherFileName =
         "enhancement_companion.js";
     private const string LegacyNextCompanionLauncherFileName =
@@ -103,6 +104,7 @@ public partial class MainWindow
     private sealed record EnhancementCompanionOwnershipProbe(
         bool Verified,
         bool TransportUnavailable,
+        bool RetryableBusy,
         int StatusCode,
         JsonElement? Payload,
         string Error);
@@ -162,7 +164,7 @@ public partial class MainWindow
                 : InvalidEnhancementCompanionReadiness(response);
         }
         _enhancementCompanionOwnershipVerified = false;
-        if (!ownership.TransportUnavailable)
+        if (!ownership.TransportUnavailable && !ownership.RetryableBusy)
         {
             return new EnhancementApiResponse(
                 false,
@@ -192,7 +194,47 @@ public partial class MainWindow
                     ? response
                     : InvalidEnhancementCompanionReadiness(response);
             }
-            if (!ownership.TransportUnavailable)
+            if (!ownership.TransportUnavailable && !ownership.RetryableBusy)
+            {
+                return new EnhancementApiResponse(
+                    false,
+                    ownership.StatusCode,
+                    ownership.Payload,
+                    ownership.Error);
+            }
+
+            for (int attempt = 0;
+                ownership.RetryableBusy
+                    && attempt < EnhancementCompanionIdentityBusyRetryAttempts;
+                attempt++)
+            {
+                await Task.Delay(
+                    EnhancementCompanionProbeDelayMilliseconds,
+                    linkedToken);
+                ownership = await ProbeEnhancementCompanionOwnershipAsync(
+                    authToken,
+                    linkedToken);
+                if (ownership.Verified)
+                {
+                    _enhancementCompanionOwnershipVerified = true;
+                    EnhancementApiResponse response = await SendEnhancementApiAsync(
+                        HttpMethod.Get,
+                        readinessRoute,
+                        token: linkedToken);
+                    return IsReadyEnhancementCompanionResponse(response)
+                        ? response
+                        : InvalidEnhancementCompanionReadiness(response);
+                }
+                if (!ownership.TransportUnavailable && !ownership.RetryableBusy)
+                {
+                    return new EnhancementApiResponse(
+                        false,
+                        ownership.StatusCode,
+                        ownership.Payload,
+                        ownership.Error);
+                }
+            }
+            if (ownership.RetryableBusy)
             {
                 return new EnhancementApiResponse(
                     false,
@@ -240,7 +282,7 @@ public partial class MainWindow
                         return response;
                     }
                 }
-                else if (!ownership.TransportUnavailable)
+                else if (!ownership.TransportUnavailable && !ownership.RetryableBusy)
                 {
                     string error = ownership.Error;
                     _enhancementCompanionLaunchError = error;
@@ -435,6 +477,8 @@ public partial class MainWindow
     {
         if (string.IsNullOrWhiteSpace(error))
             return "request_failed";
+        if (error.Contains("busy", StringComparison.OrdinalIgnoreCase))
+            return "identity_busy";
         if (error.Contains("untrusted process", StringComparison.OrdinalIgnoreCase)
             || error.Contains("proved ownership", StringComparison.OrdinalIgnoreCase))
             return "ownership_rejected";
@@ -2071,6 +2115,7 @@ public partial class MainWindow
                 return new(
                     false,
                     false,
+                    false,
                     statusCode,
                     null,
                     "The process on the local AI port returned an oversized identity response. No request was sent.");
@@ -2084,6 +2129,18 @@ public partial class MainWindow
             }
             catch (JsonException)
             {
+            }
+            if (IsRetryableEnhancementCompanionIdentityBusyResponse(
+                    response,
+                    payload))
+            {
+                return new(
+                    false,
+                    false,
+                    true,
+                    statusCode,
+                    payload,
+                    "The local AI companion is busy and has not proved ownership yet. No source, prompt, secret, job body, or durable reservation was sent or published. Try again.");
             }
             if (!response.IsSuccessStatusCode
                 || payload is not JsonElement identity
@@ -2112,13 +2169,14 @@ public partial class MainWindow
                 return new(
                     false,
                     false,
+                    false,
                     statusCode,
                     payload,
                     "The local AI service port is occupied by an untrusted process. No source, prompt, secret, job body, or durable reservation was sent.");
             }
             _verifiedEnhancementCompanionInstanceId = instanceId;
             _verifiedEnhancementCompanionServerStartedAtUtc = serverStartedAtRaw;
-            return new(true, false, statusCode, payload, "");
+            return new(true, false, false, statusCode, payload, "");
         }
         catch (Exception ex) when (
             ex is HttpRequestException
@@ -2128,10 +2186,35 @@ public partial class MainWindow
             return new(
                 false,
                 true,
+                false,
                 0,
                 null,
                 "No local AI companion is listening yet.");
         }
+    }
+
+    private static bool IsRetryableEnhancementCompanionIdentityBusyResponse(
+        HttpResponseMessage response,
+        JsonElement? payload)
+    {
+        if ((int)response.StatusCode != 503
+            || payload is not JsonElement root
+            || root.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        JsonProperty[] properties = root.EnumerateObject().ToArray();
+        return properties.Length == 1
+            && string.Equals(
+                properties[0].Name,
+                "error",
+                StringComparison.Ordinal)
+            && properties[0].Value.ValueKind == JsonValueKind.String
+            && string.Equals(
+                properties[0].Value.GetString(),
+                "The local AI companion is busy.",
+                StringComparison.Ordinal);
     }
 
     private bool IsExpectedEnhancementCompanionIdentity(
@@ -3229,6 +3312,11 @@ public partial class MainWindow
     {
         EnhancementApiResponse response = await EnsureEnhancementCompanionReadyForExplicitActionAsync();
         return response.Ok;
+    }
+    public async Task<string> SendEnhancementEnqueueErrorForSmokeAsync(object body)
+    {
+        EnhancementApiResponse response = await SendEnhancementEnqueueAsync(body);
+        return response.Error;
     }
     public async Task<bool> StartEnhancementCompanionApiForApplicationLaunchForSmokeAsync()
     {
