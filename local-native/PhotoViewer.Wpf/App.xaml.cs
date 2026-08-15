@@ -262,6 +262,7 @@ public partial class App : Application
     private bool _highContrastPaletteApplied;
     private bool _reducedMotionEnabled;
     private bool _reducedTransparencyEnabled;
+    private SingleInstanceCoordinator? _singleInstanceCoordinator;
     internal bool HighContrastPaletteApplied => _highContrastPaletteApplied;
     internal bool ReducedMotionEnabled => _reducedMotionEnabled;
     internal bool ReducedTransparencyEnabled => _reducedTransparencyEnabled;
@@ -270,7 +271,43 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         SQLitePCL.Batteries_V2.Init();
-        AibosOperationLog.Enabled = !IsAutomationInvocation(e.Args);
+        bool automationInvocation = IsAutomationInvocation(e.Args);
+        AibosOperationLog.Enabled = !automationInvocation;
+        if (!automationInvocation)
+        {
+            try
+            {
+                _singleInstanceCoordinator =
+                    SingleInstanceCoordinator.CreateForCurrentUser();
+                if (!_singleInstanceCoordinator.IsPrimary)
+                {
+                    _ = _singleInstanceCoordinator.SignalPrimary();
+                    _singleInstanceCoordinator.Dispose();
+                    _singleInstanceCoordinator = null;
+                    Environment.ExitCode = 0;
+                    base.OnStartup(e);
+                    Shutdown(0);
+                    return;
+                }
+            }
+            catch (Exception ex) when (ex is
+                IOException or
+                UnauthorizedAccessException or
+                System.Security.SecurityException or
+                InvalidOperationException)
+            {
+                MessageBox.Show(
+                    "Aibos Image could not safely establish its single-instance guard. "
+                        + "No additional window was opened. Restart Windows or close the existing Aibos Image process, then try again.",
+                    "Aibos Image startup blocked",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Environment.ExitCode = 1;
+                base.OnStartup(e);
+                Shutdown(1);
+                return;
+            }
+        }
         int parityContractSmokeIdx = Array.IndexOf(e.Args, "--parity-contract-smoke");
         int h25EnhancementCompanionSmokeIdx = Array.IndexOf(e.Args, "--h25-enhancement-companion-smoke");
         int videoV2ReaderSmokeIdx = Array.IndexOf(e.Args, "--video-v2-reader-smoke");
@@ -362,6 +399,19 @@ public partial class App : Application
         }
         UiLanguageResources.Apply(UiLanguageResources.English);
         InitializeAccessibilityPalette(e.Args.Contains("--force-high-contrast", StringComparer.OrdinalIgnoreCase));
+
+        int singleInstanceSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--single-instance-coordinator-smoke");
+        if (singleInstanceSmokeIdx >= 0
+            && singleInstanceSmokeIdx + 1 < e.Args.Length)
+        {
+            int exitCode = SingleInstanceCoordinatorSmokeRunner.Run(
+                e.Args[singleInstanceSmokeIdx + 1]);
+            Environment.ExitCode = exitCode;
+            Shutdown(exitCode);
+            return;
+        }
 
         if (videoV2ReaderSmokeIdx >= 0
             && videoV2ReaderSmokeIdx + 1 < e.Args.Length)
@@ -1266,6 +1316,10 @@ public partial class App : Application
 
         var mainWindow = new MainWindow();
         mainWindow.Show();
+        _singleInstanceCoordinator?.StartListening(() =>
+            Dispatcher.BeginInvoke(
+                mainWindow.ActivateFromSecondaryInstance,
+                DispatcherPriority.Send));
         AibosOperationLog.Write(
             "app_start",
             "window_shown",
@@ -1276,6 +1330,8 @@ public partial class App : Application
     {
         try
         {
+            _singleInstanceCoordinator?.Dispose();
+            _singleInstanceCoordinator = null;
             if (_accessibilityPaletteInitialized)
                 SystemParameters.StaticPropertyChanged -= SystemParameters_StaticPropertyChanged;
             base.OnExit(e);
