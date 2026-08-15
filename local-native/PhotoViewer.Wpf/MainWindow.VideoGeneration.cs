@@ -145,18 +145,6 @@ public partial class MainWindow
         string Label,
         string Prompt);
 
-    private static string BuildMiniMaxH3PromptTemplate(
-        string integratedDescription,
-        string soundscape,
-        string music)
-        => VideoH3PromptOpening
-            + VideoH3IntegratedPrefix
-            + integratedDescription
-            + VideoH3SoundscapePrefix
-            + soundscape
-            + VideoH3MusicPrefix
-            + music;
-
     private static readonly IReadOnlyList<VideoPromptTemplateChoice>
         VideoPromptTemplates =
         [
@@ -167,31 +155,19 @@ public partial class MainWindow
             new(
                 DynamicVideoPromptTemplateId,
                 "Dynamic · よく動く（推奨）",
-                BuildMiniMaxH3PromptTemplate(
-                    "The target remains one continuous, source-faithful shot. Preserve the visible subjects, identities, composition, lighting, setting, and existing interactions. Across the target duration, use two connected motion phases: first, the main visible subject makes a noticeable head and upper-body shift with a clear expression change; second, the subject moves into a distinct final pose. The camera makes a smooth push-in with a small image-compatible arc. Motion becomes strongest through the middle and settles cleanly at the end. Keep existing hand positions and contacts coherent. Do not invent a new gesture, touch, object, person, or cut. Hair, clothing, water, and other visible loose details follow the movement naturally.",
-                    "Use only image-consistent diegetic ambience, with subtle movement sounds from visible clothing, hair, water, or nearby scene elements when applicable. Keep the sound spatially coherent and do not invent dialogue or an unseen sound source.",
-                    "No non-diegetic music; preserve the natural scene ambience only.")),
+                "明るくエネルギッシュで、見ていて楽しい雰囲気にする。被写体は画像に見えている範囲を大きく使い、勢いのある動きと豊かな表情の変化を見せる。動きには自然な強弱をつけ、中盤で盛り上がり、最後は気持ちよくまとまる。カメラは被写体の動きを邪魔しない範囲で、軽快に追いかける。具体的な動作は、人物の姿勢、服装、場所、周囲の物体に無理がないものを画像から選ぶ。音は場面に合った、明るく活気のある雰囲気にする。"),
             new(
                 "cute-sexy",
                 "Cute & Sexy · 魅惑的な緩急",
-                BuildMiniMaxH3PromptTemplate(
-                    "The target remains one continuous source-faithful shot with a cute, sexy, and seductive adult mood. Preserve the visible adult identities, composition, lighting, setting, clothing, and existing interactions. Across two connected phases, the main visible adult subject first shifts the head and upper body with confident, clearly readable motion while the expression develops from shy and inviting into playfully seductive, then finishes in a distinct alluring pose. The camera smoothly pushes closer with a small image-compatible arc. Motion is strongest through the middle and settles at the end. Keep existing hand positions and contacts coherent. Do not invent a new gesture, touch, object, person, exposure, or cut. Hair, clothing, water, and other loose visible details respond naturally.",
-                    "Use image-consistent close ambience with restrained breathing, fabric movement, water, or room tone only when supported by the picture. Keep it tasteful and spatially coherent; do not invent dialogue, moans, or an unseen sound source.",
-                    "Use a soft, tasteful, low-volume instrumental pulse that supports the playful adult mood without overpowering the scene.")),
+                "可愛らしさの中に、大人っぽい色気と余裕を感じる雰囲気にする。被写体は少し控えめで照れた印象から、だんだん自信のある表情と魅力的な仕草へ変化する。動きは滑らかで、急ぎすぎず、緩急と印象的な間をつける。カメラは被写体との距離を少し縮め、魅力が自然に伝わる角度と動きを選ぶ。具体的な仕草は画像の人物、姿勢、衣服、場面に合わせる。画像にない過度な露出や接触は追加しない。音は柔らかく、上品で、少し遊び心のある雰囲気にする。"),
             new(
                 "cinematic-camera",
                 "Cinematic · カメラ主導",
-                BuildMiniMaxH3PromptTemplate(
-                    "The target remains one continuous cinematic take. Preserve the visible subjects, identities, composition, setting, lighting, and existing interactions. Across the target duration, the camera makes a pronounced smooth push-in and a restrained image-compatible arc that creates clear parallax. In two connected phases, the visible subjects respond with a noticeable posture, gaze, and expression change, then land in a composed final pose. Keep existing hand positions and contacts coherent. Do not add a new gesture, touch, object, person, or cut. Visible hair, fabric, water, smoke, reflections, and lighting response follow the motion naturally and settle at the end.",
-                    "Build an image-consistent cinematic soundscape from visible movement and environment cues, with restrained spatial detail and no invented dialogue or unseen event.",
-                    "Use a subtle cinematic instrumental underscore with a gentle rise through the middle and a clean, restrained resolution at the end.")),
+                "映画のワンシーンのような、ドラマチックで奥行きのある雰囲気にする。被写体の動きと表情は場面に自然に合わせながら、カメラの動きによって印象を大きく変える。カメラは滑らかに移動し、前景と背景の奥行きや光の変化を見せる。動きは落ち着いて始まり、中盤で印象を強め、最後は余韻のある画面にまとめる。具体的なカメラ方向と被写体の反応は、画像の構図から判断する。音は環境の広がりを感じさせ、必要なら控えめな映画的音楽で雰囲気を支える。"),
             new(
                 "natural-visible",
                 "Natural · 自然だが見える動き",
-                BuildMiniMaxH3PromptTemplate(
-                    "The target remains one continuous, source-faithful shot with natural but clearly visible motion. Preserve the visible identities, composition, lighting, setting, and existing interactions. Across two connected phases, the main visible subject breathes, shifts weight, turns the head and upper body, changes expression, and settles into a second readable pose while the camera makes a gentle push-in. Keep existing hand positions and contacts coherent without inventing a new gesture or touch. Hair, clothing, and loose scene details follow with delayed settling. Do not add a cut, object, person, or unsupported event.",
-                    "Use quiet, image-consistent natural ambience with subtle breathing, fabric, wind, water, or room tone only when supported by the visible scene. Do not invent dialogue or an unseen sound source.",
-                    "No non-diegetic music; keep the result grounded in natural ambient sound.")),
+                "落ち着いて自然だが、静止画のままには見えない動きを作る。被写体には呼吸、視線、表情、姿勢、重心など、画像に合った小さく自然な変化を組み合わせる。動きは控えめでも、動画として変化がはっきり分かる強さにする。カメラはゆっくりと安定して動くか、場面に合う場合はほぼ固定したままにする。髪、衣服、風、水、光などは、画像に存在するものだけを自然に反応させる。音楽で盛り上げすぎず、その場所らしい自然な環境音を中心にする。"),
         ];
 
     private sealed record VideoGenerationRequestSettings(
@@ -1515,7 +1491,7 @@ public partial class MainWindow
         }
         RefreshVideoPromptTemplateControls();
         SetVideoGenerationSettingsStatus(
-            $"「{choice.Label}」をMiniMax H3形式でPromptへ反映しました。画像に合わせて作り直す場合はMiniMax語化してください。");
+            $"「{choice.Label}」を動画の方向としてPromptへ反映しました。MiniMax語化すると画像に合わせて具体化できます。");
     }
 
     private void MarkVideoPromptTemplateAsCustom()

@@ -146,41 +146,40 @@ public partial class App
                     "natural-visible",
                 ],
                 StringComparer.Ordinal);
-            bool builtInTemplatesUseH3Grammar = templateIdsExact
+            bool builtInTemplatesAreDirectionSeeds = templateIdsExact
                 && window.VideoPromptTemplateIdsForSmoke
                     .Where(static id => !string.Equals(
                         id,
                         "custom",
                         StringComparison.Ordinal))
                     .All(id => window.SelectVideoPromptTemplateForSmoke(id)
-                        && PhotoViewer.Wpf.MainWindow
-                            .TryValidateVideoH3PromptForSmoke(
-                                window.VideoPromptForSmoke,
-                                out string normalized)
-                        && string.Equals(
-                            normalized,
-                            window.VideoPromptForSmoke,
+                        && !string.IsNullOrWhiteSpace(window.VideoPromptForSmoke)
+                        && window.VideoPromptForSmoke.Length <= 1_000
+                        && window.VideoPromptForSmoke.Contains(
+                            "画像",
+                            StringComparison.Ordinal)
+                        && !window.VideoPromptForSmoke.Contains(
+                            "[Shot 1]",
+                            StringComparison.Ordinal)
+                        && !window.VideoPromptForSmoke.Contains(
+                            "integrated_multimodal_description",
                             StringComparison.Ordinal));
             bool cuteSexySelected = window.SelectVideoPromptTemplateForSmoke(
                 "cute-sexy");
             string cuteSexyPrompt = window.VideoPromptForSmoke;
             bool templateExact = templateSurface
                 && templateIdsExact
-                && builtInTemplatesUseH3Grammar
+                && builtInTemplatesAreDirectionSeeds
                 && cuteSexySelected
                 && string.Equals(
                     window.SelectedVideoPromptTemplateIdForSmoke,
                     "cute-sexy",
                     StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("cute", StringComparison.OrdinalIgnoreCase)
-                && cuteSexyPrompt.Contains("seductive", StringComparison.OrdinalIgnoreCase)
-                && cuteSexyPrompt.Contains("clearly readable motion", StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("shy and inviting", StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("distinct alluring pose", StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("integrated_multimodal_description: [Shot 1]", StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("overall_soundscape:", StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("non_diegetic_music:", StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("Do not invent a new gesture", StringComparison.Ordinal);
+                && cuteSexyPrompt.Contains("可愛らしさ", StringComparison.Ordinal)
+                && cuteSexyPrompt.Contains("大人っぽい色気", StringComparison.Ordinal)
+                && cuteSexyPrompt.Contains("緩急と印象的な間", StringComparison.Ordinal)
+                && cuteSexyPrompt.Contains("画像の人物", StringComparison.Ordinal)
+                && cuteSexyPrompt.Contains("上品", StringComparison.Ordinal);
 
             window.SetMiniMaxH3CapabilityForSmoke(
                 checkedHealth: true,
