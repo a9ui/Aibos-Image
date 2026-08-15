@@ -74,6 +74,7 @@ public partial class MainWindow
     private const int MaxVideoStyleCount = 32;
     private const int MaxVideoStyleNameLength = 40;
     private const string CustomVideoPromptTemplateId = "custom";
+    private const string ImageAwareAutoVideoPromptTemplateId = "image-aware-auto";
     private const string DynamicVideoPromptTemplateId = "dynamic-general";
     private const double VideoWanLandscapeEstimateBaselineSeconds = 146.691;
     private const double VideoWanPortraitEstimateBaselineSeconds = 274.801;
@@ -165,8 +166,15 @@ public partial class MainWindow
                 "現在のPrompt（カスタム）",
                 ""),
             new(
+                ImageAwareAutoVideoPromptTemplateId,
+                "Auto · 画像からおまかせ（推奨）",
+                BuildMiniMaxH3PromptTemplate(
+                    "Inspect the fully referenced source image and choose the single most natural and engaging video direction from what is actually visible. Decide whether expression, body motion, an existing interaction, camera movement, or environmental atmosphere should lead based on the subject type, pose, gaze, framing, available space, existing contacts, and scene cues. Create one continuous, image-faithful shot with a clear beginning, development, and satisfying finish, using motion strong enough to read as video without forcing a generic action. When people or animals are visible, preserve identity and anatomy; when the environment is dominant, preserve geometry, scale, and lighting logic. Animate only visible and physically supported details. Do not add a new person, object, touch, weather condition, event, or cut.",
+                    "Choose the most fitting image-consistent soundscape from visible subjects, movement, and environmental cues. Keep distance and direction coherent, and do not invent dialogue or an unseen event.",
+                    "Choose restrained non-diegetic music only when it clearly strengthens the visible scene; otherwise use no music and let the natural ambience lead.")),
+            new(
                 DynamicVideoPromptTemplateId,
-                "Dynamic · よく動く（推奨）",
+                "Dynamic · よく動く",
                 BuildMiniMaxH3PromptTemplate(
                     "Create one continuous, image-faithful shot with a bright, energetic, and playful mood. Let the main visible subject use a broad but physically plausible range of motion with lively expression changes. Choose the exact action from the subject's visible pose, clothing, setting, and nearby objects instead of forcing an unsupported action. Give the movement natural variation in intensity, build toward a lively middle, and settle into a satisfying finish. Let the camera follow lightly without obscuring or fighting the subject. Preserve identity, anatomy, composition, existing contacts, and scene continuity. Animate visible hair, clothing, water, light, and environmental details only where the image supports them. Do not add a new person, object, contact, exposure, event, or cut.",
                     "Use bright, lively ambience that fits the visible setting, with image-supported movement and environmental sounds. Keep the sound spatially coherent and do not invent dialogue or an unseen event.",
@@ -192,6 +200,41 @@ public partial class MainWindow
                     "Create one continuous, image-faithful shot that feels calm and natural but is clearly alive rather than frozen. Combine only the small changes that suit the visible subject and scene, such as breathing, gaze, expression, posture, or weight shift. Keep the motion restrained yet strong enough to read clearly as video. Let the camera move slowly and steadily, or remain nearly fixed when that better fits the composition. Preserve identity, anatomy, lighting, existing contacts, and scene continuity. Let visible hair, clothing, wind, water, and light respond naturally only when present in the image. Do not add a new gesture, person, object, contact, event, or cut.",
                     "Use quiet natural ambience specific to the visible place, with subtle image-supported breathing, fabric, wind, water, or room tone. Do not invent dialogue or an unseen event.",
                     "No non-diegetic music; keep the result grounded in the natural ambient sound of the visible scene.")),
+            new(
+                "expressive-emotion",
+                "Expressive · 表情と感情",
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful shot centered on a clear and engaging emotional change. When a face is visible, let the gaze, eyes, brows, mouth, head angle, and posture develop into one coherent expression that suits the pictured situation. When no face is clearly visible, communicate the emotional shift through image-supported posture, timing, and environmental response without inventing facial detail. Keep larger body motion restrained enough for the expression to remain the focus, and use a gentle camera approach or steady close framing chosen from the composition. Preserve identity, anatomy, lighting, existing contacts, and scene continuity. Do not add a new person, object, touch, event, or cut.",
+                    "Use close, image-consistent ambience with subtle breathing, fabric, room, wind, or environmental sound only where supported. Do not invent dialogue or an unseen event.",
+                    "Use a subtle emotional instrumental accent when it suits the scene; keep it low enough for the visible performance to remain central.")),
+            new(
+                "action-power",
+                "Action · 力強くダイナミック",
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful action shot with decisive, physically plausible movement and a strong sense of momentum. Choose the exact action from the visible pose, available space, clothing, setting, and nearby objects. Shape the motion with readable preparation, a bold main movement, and natural recovery without forcing an unsupported jump, spin, impact, or stunt. Let the camera track energetically from a direction supported by the composition while keeping the subject readable. Preserve identity, anatomy, balance, existing contacts, object continuity, and lighting. Let visible hair, fabric, water, dust, or loose details react naturally only when present. Do not add a new person, object, collision, contact, event, or cut.",
+                    "Use energetic, image-supported movement and environmental sounds with clear spatial impact, but do not invent dialogue, a collision, or an unseen event.",
+                    "Use a driving rhythmic instrumental pulse that follows the movement without overwhelming the visible action.")),
+            new(
+                "dreamy-flow",
+                "Dreamy · 幻想的でゆったり",
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful shot with a soft, dreamlike, and unhurried mood. Use slow, graceful subject motion and gentle expression changes chosen from the visible pose and scene. Let the camera drift smoothly or make a very soft push chosen from the composition, with calm timing and a lingering finish. Preserve identity, anatomy, composition, lighting logic, existing contacts, and scene continuity. Let visible hair, fabric, water, haze, reflections, foliage, or light move delicately only when they already exist in the image. Do not introduce unsupported glow, fog, particles, a new person, object, touch, event, or cut.",
+                    "Use airy, image-consistent ambience with soft environmental detail and spacious quiet. Do not invent dialogue or an unseen sound source.",
+                    "Use a gentle, sparse, dreamlike instrumental texture at low volume, leaving generous space for the natural ambience.")),
+            new(
+                "atmospheric-scene",
+                "Atmospheric · 風景と空気感",
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful atmospheric shot in which the visible environment is as important as any subject. Use a slow, composition-aware camera move to reveal depth, scale, light, and foreground-background relationships. Keep subject motion natural and secondary unless the image clearly calls for more. Animate visible wind, clouds, foliage, water, smoke, reflections, shadows, fabric, or light only where present and physically appropriate. Build a calm progression from observation to a memorable environmental moment, then settle with visual breathing room. Preserve identity, geometry, lighting logic, existing contacts, and scene continuity. Do not add new weather, a person, object, event, or cut.",
+                    "Build a rich, location-specific soundscape from visible environmental cues, with coherent distance and direction. Do not invent dialogue or an unseen event.",
+                    "Use no music when the natural environment is expressive enough; otherwise add only a minimal, spacious ambient tone.")),
+            new(
+                "romantic-warm",
+                "Romantic · 温かく柔らかい",
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful shot with a warm, tender, and quietly romantic mood. If two or more subjects are visible, preserve their existing distance, relationship, gaze, and contact while using subtle synchronized movement and expression to deepen the pictured connection. If only one subject is visible, convey warmth and affectionate confidence without inventing a partner or interaction. Keep the motion smooth and unhurried, with a gentle image-compatible camera approach and a soft lingering finish. Preserve identity, anatomy, clothing, lighting, existing contacts, and scene continuity. Do not add a kiss, embrace, touch, exposure, new person, object, event, or cut unless it is already clearly present in the image.",
+                    "Use warm, intimate ambience supported by the visible setting, with subtle breathing, fabric, room, wind, or water sound where appropriate. Do not invent dialogue or an unseen event.",
+                    "Use a soft, warm instrumental theme with restrained dynamics, keeping the visible relationship and natural ambience in focus.")),
         ];
 
     private sealed record VideoGenerationRequestSettings(
