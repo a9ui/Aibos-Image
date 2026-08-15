@@ -27,6 +27,7 @@ public partial class MainWindow
         "photorealSeedControlV1";
     private const string VideoSeedControlCapability = "videoSeedControlV1";
     private const int DurableEnqueueActionDeadlineMilliseconds = 2_000;
+    private const int DurableEnqueueRecoveryAttempts = 3;
     private const string EnhancementCompanionAuthProtocol =
         "aibos.companion-auth/v1";
     private const string EnhancementCompanionRequestAuthProtocol =
@@ -74,6 +75,7 @@ public partial class MainWindow
     private readonly SemaphoreSlim _enhancementCompanionLaunchGate = new(1, 1);
     private readonly SemaphoreSlim _enhancementCompanionPassiveProbeGate = new(1, 1);
     private readonly CancellationTokenSource _enhancementCompanionLifetimeCts = new();
+    private readonly object _enhancementCompanionDurableRecoverySync = new();
     private Process? _ownedEnhancementCompanion;
     private string? _enhancementCompanionLaunchError;
     private int _enhancementCompanionLaunchAttemptCount;
@@ -83,6 +85,10 @@ public partial class MainWindow
     private bool _enhancementCompanionOwnershipVerified;
     private string? _verifiedEnhancementCompanionInstanceId;
     private string? _verifiedEnhancementCompanionServerStartedAtUtc;
+    private bool _enhancementCompanionDurableRecoveryRequested;
+    private bool _enhancementCompanionDurableRecoveryRunning;
+    private string? _enhancementCompanionDurableRecoveryRequestId;
+    private string? _enhancementCompanionDurableRecoverySourceIdentity;
     private sealed record EnhancementEnqueueProbe(
         EnhancementEnqueueBackendMode Mode,
         JsonElement? HealthPayload,
@@ -1264,7 +1270,8 @@ public partial class MainWindow
         if (!EnhancementEnqueueProbePolicy.AllowsImmediateNudge(probe.Mode))
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
-                recoverySourceIdentity);
+                recoverySourceIdentity,
+                item.RequestId);
             return SavedForDeliveryResponse(item);
         }
 
@@ -1272,7 +1279,8 @@ public partial class MainWindow
         if (remaining <= 0)
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
-                recoverySourceIdentity);
+                recoverySourceIdentity,
+                item.RequestId);
             return SavedForDeliveryResponse(item);
         }
         string nudgeRoute = _usingDefaultModalEnhancementSender
@@ -1294,7 +1302,8 @@ public partial class MainWindow
         if (normalized.SavedForDelivery)
         {
             KickEnhancementCompanionRecoveryAfterDurablePublish(
-                recoverySourceIdentity);
+                recoverySourceIdentity,
+                item.RequestId);
         }
         return normalized;
     }
@@ -1506,7 +1515,9 @@ public partial class MainWindow
         if (!EnhancementEnqueueProbePolicy.AllowsImmediateNudge(probe.Mode)
             && publishedItems.Count > 0)
         {
-            KickEnhancementCompanionRecoveryAfterDurablePublish(null);
+            KickEnhancementCompanionRecoveryAfterDurablePublish(
+                sourceIdentity: null,
+                publishedItems[0].Item.RequestId);
         }
 
         int nudgeCount = 0;
@@ -1558,7 +1569,9 @@ public partial class MainWindow
             if (publishedItems.Any(entry =>
                     responses[entry.GlobalIndex].SavedForDelivery))
             {
-                KickEnhancementCompanionRecoveryAfterDurablePublish(null);
+                KickEnhancementCompanionRecoveryAfterDurablePublish(
+                    sourceIdentity: null,
+                    publishedItems[0].Item.RequestId);
             }
         }
 
@@ -1569,7 +1582,8 @@ public partial class MainWindow
     }
 
     private void KickEnhancementCompanionRecoveryAfterDurablePublish(
-        string? sourceIdentity)
+        string? sourceIdentity,
+        string requestId)
     {
         if (!_usingDefaultModalEnhancementSender
             || _enhancementCompanionLifetimeCts.IsCancellationRequested)
@@ -1577,19 +1591,123 @@ public partial class MainWindow
             return;
         }
 
+        lock (_enhancementCompanionDurableRecoverySync)
+        {
+            _enhancementCompanionDurableRecoveryRequested = true;
+            _enhancementCompanionDurableRecoveryRequestId = requestId;
+            _enhancementCompanionDurableRecoverySourceIdentity = sourceIdentity;
+            if (_enhancementCompanionDurableRecoveryRunning)
+                return;
+            _enhancementCompanionDurableRecoveryRunning = true;
+        }
+
         _ = Task.Run(async () =>
         {
             try
             {
-                _ = await EnsureEnhancementCompanionReadyForExplicitActionAsync(
-                    sourceIdentity,
-                    _enhancementCompanionLifetimeCts.Token);
+                while (!_enhancementCompanionLifetimeCts.IsCancellationRequested)
+                {
+                    string? nextRequestId;
+                    string? nextSourceIdentity;
+                    lock (_enhancementCompanionDurableRecoverySync)
+                    {
+                        if (!_enhancementCompanionDurableRecoveryRequested)
+                            break;
+                        _enhancementCompanionDurableRecoveryRequested = false;
+                        nextRequestId = _enhancementCompanionDurableRecoveryRequestId;
+                        nextSourceIdentity =
+                            _enhancementCompanionDurableRecoverySourceIdentity;
+                    }
+
+                    await RecoverAndWakeDurableEnqueueInboxAsync(
+                        nextSourceIdentity,
+                        nextRequestId,
+                        _enhancementCompanionLifetimeCts.Token);
+                }
             }
             catch
             {
                 // The reservation is already durable. Recovery is best-effort.
             }
+            finally
+            {
+                bool restart;
+                lock (_enhancementCompanionDurableRecoverySync)
+                {
+                    _enhancementCompanionDurableRecoveryRunning = false;
+                    restart = _enhancementCompanionDurableRecoveryRequested;
+                }
+                if (restart)
+                {
+                    KickEnhancementCompanionRecoveryAfterDurablePublish(
+                        _enhancementCompanionDurableRecoverySourceIdentity,
+                        _enhancementCompanionDurableRecoveryRequestId ?? requestId);
+                }
+            }
         });
+    }
+
+    private async Task RecoverAndWakeDurableEnqueueInboxAsync(
+        string? sourceIdentity,
+        string? requestId,
+        CancellationToken token)
+    {
+        for (int attempt = 0; attempt < DurableEnqueueRecoveryAttempts; attempt++)
+        {
+            EnhancementApiResponse readiness =
+                await EnsureEnhancementCompanionApiReadyAsync(
+                    sourceIdentity,
+                    token);
+            if (readiness.Ok)
+            {
+                EnhancementApiResponse recovery = await SendEnhancementApiAsync(
+                    HttpMethod.Post,
+                    EnhancementCompanionQueueRecoveryRoute,
+                    token: token,
+                    idempotencyKey: requestId);
+                if (recovery.Ok
+                    && requestId is not null
+                    && EnhancementEnqueueProbePolicy.HasMatchingDurableReceipt(
+                        recovery.Payload,
+                        requestId))
+                {
+                    return;
+                }
+                if (recovery.Ok)
+                {
+                    // Older authenticated companions recover the queue here
+                    // but do not drain the durable inbox. A bodyless wake is
+                    // safe after recovery and keeps saved reservations moving
+                    // during a version handoff.
+                    EnhancementApiResponse wake = await SendEnhancementApiAsync(
+                        HttpMethod.Post,
+                        EnhancementCompanionWakeRoute,
+                        token: token,
+                        idempotencyKey: requestId);
+                    if (wake.Ok)
+                        return;
+                    if (wake.InnerStatusAuthoritative
+                        && wake.StatusCode is >= 400 and < 500
+                        && wake.StatusCode is not (408 or 425 or 429))
+                    {
+                        return;
+                    }
+                }
+                else if (recovery.InnerStatusAuthoritative
+                    && recovery.StatusCode is >= 400 and < 500
+                    && recovery.StatusCode is not (408 or 425 or 429))
+                {
+                    return;
+                }
+            }
+
+            if (attempt + 1 < DurableEnqueueRecoveryAttempts)
+            {
+                await Task.Delay(
+                    EnhancementCompanionProbeDelayMilliseconds,
+                    token);
+            }
+        }
     }
 
     private static EnhancementApiResponse NormalizeDurableEnqueueResponse(
@@ -2834,6 +2952,30 @@ public partial class MainWindow
         // This helper observes launch attempts only. It must not replace a
         // smoke-provided HTTP sender with the production authenticated path.
         _startEnhancementCompanionForSmoke = starter;
+    }
+
+    public void KickDurableEnqueueRecoveryForSmoke(string requestId)
+        => KickEnhancementCompanionRecoveryAfterDurablePublish(
+            sourceIdentity: null,
+            requestId);
+
+    public async Task WaitForDurableEnqueueRecoveryForSmokeAsync()
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            bool idle;
+            lock (_enhancementCompanionDurableRecoverySync)
+            {
+                idle = !_enhancementCompanionDurableRecoveryRunning
+                    && !_enhancementCompanionDurableRecoveryRequested;
+            }
+            if (idle)
+                return;
+            await Task.Delay(10);
+        }
+        throw new TimeoutException(
+            "The durable enqueue recovery smoke did not become idle.");
     }
 
     public IReadOnlyDictionary<string, object>
