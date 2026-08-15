@@ -21862,6 +21862,9 @@ public partial class App : Application
             bool companionListenerHandoffResponseRejected = false;
             bool companionPassiveReadReconnected = false;
             bool durableListenerHandoffSavedForDelivery = false;
+            bool durableRecoveryBeforePublish = false;
+            bool durableRecoveryAfterPublish = false;
+            bool durableRecoveryCarriedRequestId = false;
             bool companionAuthAclProvenanceContract = false;
             bool companionPrimaryRootSettingPrecedence = false;
             bool companionCompatibilityRootSettingFallback = false;
@@ -22325,6 +22328,26 @@ public partial class App : Application
                                 win.EnhancementCompanionIdentityPayloadForSmoke(
                                     challenge));
                         }
+                        EnhancementCompanionSecureRequestSmokeSnapshot? inner =
+                            await win.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
+                                request,
+                                token);
+                        if (string.Equals(
+                                inner?.PathAndQuery,
+                                "/api/enhance/queue/recover",
+                                StringComparison.Ordinal))
+                        {
+                            if (durableListenerSwapped)
+                            {
+                                durableRecoveryAfterPublish = true;
+                                durableRecoveryCarriedRequestId =
+                                    !string.IsNullOrWhiteSpace(inner?.IdempotencyKey);
+                            }
+                            else
+                            {
+                                durableRecoveryBeforePublish = true;
+                            }
+                        }
                         if (durableListenerSwapped)
                         {
                             string outer = request.Content is null
@@ -22344,10 +22367,6 @@ public partial class App : Application
                                 HttpStatusCode.Forbidden,
                                 new { error = "unsigned listener response" });
                         }
-                        EnhancementCompanionSecureRequestSmokeSnapshot? inner =
-                            await win.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
-                                request,
-                                token);
                         object payload = inner?.PathAndQuery switch
                         {
                             "/api/enhance/health" => new
@@ -22404,6 +22423,9 @@ public partial class App : Application
                     durableSaved
                     && durableListenerSwapped
                     && durableListenerSawOnlyCiphertext
+                    && !durableRecoveryBeforePublish
+                    && durableRecoveryAfterPublish
+                    && durableRecoveryCarriedRequestId
                     && pendingAfterListenerSwap == pendingBeforeListenerSwap + 1;
                 bool tamperStarterCalled = false;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
@@ -22907,6 +22929,9 @@ public partial class App : Application
                 companionListenerHandoffResponseRejected,
                 companionPassiveReadReconnected,
                 durableListenerHandoffSavedForDelivery,
+                durableRecoveryBeforePublish,
+                durableRecoveryAfterPublish,
+                durableRecoveryCarriedRequestId,
                 companionAuthAclProvenanceContract,
                 companionIdentityFieldTamperRejected,
                 companionPrimaryRootSettingPrecedence,

@@ -1,7 +1,8 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotnetPath = 'dotnet',
-    [string]$TargetFrameworkOverride = ''
+    [string]$TargetFrameworkOverride = '',
+    [switch]$NoRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,10 +80,14 @@ try {
 
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+        $buildArguments = @('build', $project, '-c', $Configuration, "-p:OutputPath=$buildOutput", '--nologo', '-v:minimal')
+        if ($NoRestore) { $buildArguments += '--no-restore' }
+        & $DotnetPath @buildArguments
     }
     else {
-        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+        $msbuildArguments = @('msbuild', $project, '-target:Rebuild', "-property:TargetFramework=$TargetFrameworkOverride", "-property:OutputPath=$buildOutput", "-property:Configuration=$Configuration", '-nologo', '-verbosity:minimal')
+        if (-not $NoRestore) { $msbuildArguments += '-restore' }
+        & $DotnetPath @msbuildArguments
     }
     if ($LASTEXITCODE -ne 0) {
         throw "WPF build failed with exit code $LASTEXITCODE."
@@ -132,6 +137,9 @@ try {
         'startupCompanionAutoStart',
         'explicitCompanionAutoStart',
         'companionQueueRecoveryAuthenticated',
+        'durableListenerHandoffSavedForDelivery',
+        'durableRecoveryAfterPublish',
+        'durableRecoveryCarriedRequestId',
         'companionConfiguredRootExact',
         'companionAppBaseAncestor',
         'companionConfiguredAncestorRejected',
@@ -154,6 +162,9 @@ try {
         Assert-True ($null -ne $property) "Smoke JSON is missing required property: $propertyName"
         Assert-True ($property.Value -eq $true) "Smoke invariant failed: $propertyName"
     }
+    $recoveryBeforePublish = $result.PSObject.Properties['durableRecoveryBeforePublish']
+    Assert-True ($null -ne $recoveryBeforePublish) 'Smoke JSON is missing required property: durableRecoveryBeforePublish'
+    Assert-True ($recoveryBeforePublish.Value -eq $false) 'Durable enqueue recovered the queue before publishing its reservation.'
 
     & $DotnetPath $dll --modal-photoreal-smoke $recoveryResultPath
     $recoveryChildExitCode = $LASTEXITCODE
@@ -226,7 +237,7 @@ try {
     $appTempStoresRemoved = @($appStorePaths | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0
     Assert-True $appTempStoresRemoved 'The modal enhancement smoke left its internal TEMP stores behind.'
 
-    $allPassed = $requiredTrue.Count -eq 47 `
+    $allPassed = $requiredTrue.Count -eq 50 `
         -and $recoveryAllPassed `
         -and $callerStoresUnchanged `
         -and $metadataSentinelUnchanged `
