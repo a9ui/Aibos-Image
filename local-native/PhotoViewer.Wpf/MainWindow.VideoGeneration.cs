@@ -145,6 +145,18 @@ public partial class MainWindow
         string Label,
         string Prompt);
 
+    private static string BuildMiniMaxH3PromptTemplate(
+        string integratedDescription,
+        string soundscape,
+        string music)
+        => VideoH3PromptOpening
+            + VideoH3IntegratedPrefix
+            + integratedDescription
+            + VideoH3SoundscapePrefix
+            + soundscape
+            + VideoH3MusicPrefix
+            + music;
+
     private static readonly IReadOnlyList<VideoPromptTemplateChoice>
         VideoPromptTemplates =
         [
@@ -155,19 +167,31 @@ public partial class MainWindow
             new(
                 DynamicVideoPromptTemplateId,
                 "Dynamic · よく動く（推奨）",
-                "明るくエネルギッシュで、見ていて楽しい雰囲気にする。被写体は画像に見えている範囲を大きく使い、勢いのある動きと豊かな表情の変化を見せる。動きには自然な強弱をつけ、中盤で盛り上がり、最後は気持ちよくまとまる。カメラは被写体の動きを邪魔しない範囲で、軽快に追いかける。具体的な動作は、人物の姿勢、服装、場所、周囲の物体に無理がないものを画像から選ぶ。音は場面に合った、明るく活気のある雰囲気にする。"),
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful shot with a bright, energetic, and playful mood. Let the main visible subject use a broad but physically plausible range of motion with lively expression changes. Choose the exact action from the subject's visible pose, clothing, setting, and nearby objects instead of forcing an unsupported action. Give the movement natural variation in intensity, build toward a lively middle, and settle into a satisfying finish. Let the camera follow lightly without obscuring or fighting the subject. Preserve identity, anatomy, composition, existing contacts, and scene continuity. Animate visible hair, clothing, water, light, and environmental details only where the image supports them. Do not add a new person, object, contact, exposure, event, or cut.",
+                    "Use bright, lively ambience that fits the visible setting, with image-supported movement and environmental sounds. Keep the sound spatially coherent and do not invent dialogue or an unseen event.",
+                    "Use light, upbeat instrumental music when it suits the visible scene; otherwise let the natural ambience carry the energy.")),
             new(
                 "cute-sexy",
                 "Cute & Sexy · 魅惑的な緩急",
-                "可愛らしさの中に、大人っぽい色気と余裕を感じる雰囲気にする。被写体は少し控えめで照れた印象から、だんだん自信のある表情と魅力的な仕草へ変化する。動きは滑らかで、急ぎすぎず、緩急と印象的な間をつける。カメラは被写体との距離を少し縮め、魅力が自然に伝わる角度と動きを選ぶ。具体的な仕草は画像の人物、姿勢、衣服、場面に合わせる。画像にない過度な露出や接触は追加しない。音は柔らかく、上品で、少し遊び心のある雰囲気にする。"),
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful shot with a cute, mature, and tastefully alluring mood. When the visible subject is clearly an adult, begin with slightly reserved or shy composure and gradually develop a more confident expression and an appealing, playful gesture. If adulthood is not visually clear, favor cute, playful elegance without sexualization. Keep the movement smooth and unhurried, with natural changes of pace and a memorable pause. Let the camera move slightly closer from an image-compatible, flattering angle. Choose the exact gesture from the visible pose, clothing, setting, and existing interactions. Preserve identity, anatomy, composition, and scene continuity. Do not add exposure, intimate contact, a new person, object, event, or cut.",
+                    "Use soft, polished ambience supported by the visible setting, with restrained breathing, fabric, water, or room tone only when appropriate. Do not invent dialogue, vocalization, or an unseen event.",
+                    "Use tasteful, low-volume instrumental music with a gentle playful character, without overpowering the scene.")),
             new(
                 "cinematic-camera",
                 "Cinematic · カメラ主導",
-                "映画のワンシーンのような、ドラマチックで奥行きのある雰囲気にする。被写体の動きと表情は場面に自然に合わせながら、カメラの動きによって印象を大きく変える。カメラは滑らかに移動し、前景と背景の奥行きや光の変化を見せる。動きは落ち着いて始まり、中盤で印象を強め、最後は余韻のある画面にまとめる。具体的なカメラ方向と被写体の反応は、画像の構図から判断する。音は環境の広がりを感じさせ、必要なら控えめな映画的音楽で雰囲気を支える。"),
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful cinematic shot with drama, depth, and a strong sense of atmosphere. Let the camera move smoothly in the direction best supported by the composition, revealing natural foreground-background parallax and changes in light without forcing a specific route. Give visible subjects image-compatible motion and expression changes that respond naturally to the camera. Begin with restraint, strengthen the visual impact through the middle, and finish on a composed frame with lingering atmosphere. Preserve identity, anatomy, lighting logic, existing contacts, and scene continuity. Animate only details already visible in the image. Do not add a new person, object, contact, event, or cut.",
+                    "Build a spacious, image-consistent cinematic soundscape from visible movement and environmental cues. Keep it spatially coherent and do not invent dialogue or an unseen event.",
+                    "Use a restrained cinematic instrumental underscore only as needed, with a gentle rise and a clean, lingering resolution.")),
             new(
                 "natural-visible",
                 "Natural · 自然だが見える動き",
-                "落ち着いて自然だが、静止画のままには見えない動きを作る。被写体には呼吸、視線、表情、姿勢、重心など、画像に合った小さく自然な変化を組み合わせる。動きは控えめでも、動画として変化がはっきり分かる強さにする。カメラはゆっくりと安定して動くか、場面に合う場合はほぼ固定したままにする。髪、衣服、風、水、光などは、画像に存在するものだけを自然に反応させる。音楽で盛り上げすぎず、その場所らしい自然な環境音を中心にする。"),
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful shot that feels calm and natural but is clearly alive rather than frozen. Combine only the small changes that suit the visible subject and scene, such as breathing, gaze, expression, posture, or weight shift. Keep the motion restrained yet strong enough to read clearly as video. Let the camera move slowly and steadily, or remain nearly fixed when that better fits the composition. Preserve identity, anatomy, lighting, existing contacts, and scene continuity. Let visible hair, clothing, wind, water, and light respond naturally only when present in the image. Do not add a new gesture, person, object, contact, event, or cut.",
+                    "Use quiet natural ambience specific to the visible place, with subtle image-supported breathing, fabric, wind, water, or room tone. Do not invent dialogue or an unseen event.",
+                    "No non-diegetic music; keep the result grounded in the natural ambient sound of the visible scene.")),
         ];
 
     private sealed record VideoGenerationRequestSettings(
@@ -1491,7 +1515,7 @@ public partial class MainWindow
         }
         RefreshVideoPromptTemplateControls();
         SetVideoGenerationSettingsStatus(
-            $"「{choice.Label}」を動画の方向としてPromptへ反映しました。MiniMax語化すると画像に合わせて具体化できます。");
+            $"「{choice.Label}」をMiniMax H3形式でPromptへ反映しました。このまま動画化できます。画像固有に作り直す場合だけMiniMax語化してください。");
     }
 
     private void MarkVideoPromptTemplateAsCustom()
