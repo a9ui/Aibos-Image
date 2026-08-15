@@ -143,6 +143,7 @@ public partial class App
                     "image-aware-auto",
                     "dynamic-general",
                     "cute-sexy",
+                    "intense-allure",
                     "cinematic-camera",
                     "natural-visible",
                     "expressive-emotion",
@@ -217,6 +218,29 @@ public partial class App
                 && window.VideoPromptForSmoke.Contains(
                     "without inventing a partner",
                     StringComparison.Ordinal);
+            bool intenseAllureExact =
+                window.SelectVideoPromptTemplateForSmoke("intense-allure")
+                && window.VideoPromptForSmoke.Contains(
+                    "intensely sensual, magnetic, and deliberately provocative adult mood",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "without depicting a sexual act",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "every prominently visible human subject is clearly an adult",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "Build erotic tension through sustained image-supported eye contact",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "bold high-fashion elegance without sexualization",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "visible clothing, and the exact degree of exposure",
+                    StringComparison.Ordinal)
+                && window.VideoPromptForSmoke.Contains(
+                    "Do not add nudity, undressing, a sexual act, intimate touch",
+                    StringComparison.Ordinal);
             bool cuteSexySelected = window.SelectVideoPromptTemplateForSmoke(
                 "cute-sexy");
             string cuteSexyPrompt = window.VideoPromptForSmoke;
@@ -224,6 +248,7 @@ public partial class App
                 && templateIdsExact
                 && builtInTemplatesUseH3Grammar
                 && addedTemplatesDistinct
+                && intenseAllureExact
                 && cuteSexySelected
                 && string.Equals(
                     window.SelectedVideoPromptTemplateIdForSmoke,
@@ -857,6 +882,7 @@ public partial class App
                 templateIdsExact,
                 imageAwareAutoExact,
                 addedTemplatesDistinct,
+                intenseAllureExact,
                 cuteSexySelected,
                 templateExact,
                 h3UnavailableSafe,
