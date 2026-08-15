@@ -21865,6 +21865,8 @@ public partial class App : Application
             bool durableRecoveryBeforePublish = false;
             bool durableRecoveryAfterPublish = false;
             bool durableRecoveryCarriedRequestId = false;
+            bool durableLegacyWakeFallback = false;
+            bool durableRecoveryRequestsCoalesced = false;
             bool companionAuthAclProvenanceContract = false;
             bool companionPrimaryRootSettingPrecedence = false;
             bool companionCompatibilityRootSettingFallback = false;
@@ -22427,6 +22429,136 @@ public partial class App : Application
                     && durableRecoveryAfterPublish
                     && durableRecoveryCarriedRequestId
                     && pendingAfterListenerSwap == pendingBeforeListenerSwap + 1;
+                await win.WaitForDurableEnqueueRecoveryForSmokeAsync();
+
+                int compatibilityRecoveryCount = 0;
+                int compatibilityWakeCount = 0;
+                int compatibilityActiveWakeCount = 0;
+                int compatibilityMaximumActiveWakeCount = 0;
+                bool compatibilityRequestsCarriedId = true;
+                win.ConfigureEnhancementCompanionAutoStartForSmoke(
+                    async (request, token) =>
+                    {
+                        string route = request.RequestUri?.AbsolutePath ?? "";
+                        if (route.EndsWith(
+                                "/api/enhance/identity",
+                                StringComparison.Ordinal))
+                        {
+                            string challenge = request.Headers
+                                .GetValues("X-Aibos-Companion-Challenge")
+                                .Single();
+                            return JsonResponse(
+                                HttpStatusCode.OK,
+                                win.EnhancementCompanionIdentityPayloadForSmoke(
+                                    challenge));
+                        }
+                        EnhancementCompanionSecureRequestSmokeSnapshot? inner =
+                            await win.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
+                                request,
+                                token);
+                        if (inner is null)
+                        {
+                            return JsonResponse(
+                                HttpStatusCode.Unauthorized,
+                                new { error = "missing authentication" });
+                        }
+                        if (string.Equals(
+                                inner.PathAndQuery,
+                                "/api/enhance/health",
+                                StringComparison.Ordinal))
+                        {
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new
+                                {
+                                    version = 1,
+                                    status = "healthy",
+                                    jobs = new
+                                    {
+                                        counts = new
+                                        {
+                                            queued = 0,
+                                            running = 0,
+                                            succeeded = 0,
+                                            failed = 0,
+                                            canceled = 0,
+                                            deleted = 0,
+                                        },
+                                    },
+                                    worker = new
+                                    {
+                                        pumpRunning = false,
+                                        paused = true,
+                                    },
+                                });
+                        }
+                        compatibilityRequestsCarriedId &=
+                            !string.IsNullOrWhiteSpace(inner.IdempotencyKey);
+                        if (string.Equals(
+                                inner.PathAndQuery,
+                                "/api/enhance/queue/recover",
+                                StringComparison.Ordinal))
+                        {
+                            Interlocked.Increment(ref compatibilityRecoveryCount);
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new { recovered = true });
+                        }
+                        if (string.Equals(
+                                inner.PathAndQuery,
+                                "/api/enhance/inbox/wake",
+                                StringComparison.Ordinal))
+                        {
+                            Interlocked.Increment(ref compatibilityWakeCount);
+                            int active = Interlocked.Increment(
+                                ref compatibilityActiveWakeCount);
+                            int observedMaximum;
+                            do
+                            {
+                                observedMaximum = Volatile.Read(
+                                    ref compatibilityMaximumActiveWakeCount);
+                                if (active <= observedMaximum)
+                                    break;
+                            }
+                            while (Interlocked.CompareExchange(
+                                ref compatibilityMaximumActiveWakeCount,
+                                active,
+                                observedMaximum) != observedMaximum);
+                            await Task.Delay(25, token);
+                            Interlocked.Decrement(ref compatibilityActiveWakeCount);
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new
+                                {
+                                    receipt = new
+                                    {
+                                        jobId = "compatibility-job",
+                                        idempotencyKey = inner.IdempotencyKey,
+                                    },
+                                    job = new { id = "compatibility-job" },
+                                });
+                        }
+                        return win.EnhancementCompanionSecureResponseForSmoke(
+                            request,
+                            (int)HttpStatusCode.NotFound,
+                            new { error = "unexpected smoke route" });
+                    },
+                    endpoint => (endpoint.IsLoopback, endpoint.IsLoopback ? "" : "not loopback"));
+                win.KickDurableEnqueueRecoveryForSmoke(
+                    "11111111-1111-4111-8111-111111111111");
+                win.KickDurableEnqueueRecoveryForSmoke(
+                    "22222222-2222-4222-8222-222222222222");
+                await win.WaitForDurableEnqueueRecoveryForSmokeAsync();
+                durableLegacyWakeFallback = compatibilityRecoveryCount >= 1
+                    && compatibilityWakeCount >= 1
+                    && compatibilityRequestsCarriedId;
+                durableRecoveryRequestsCoalesced =
+                    compatibilityMaximumActiveWakeCount == 1
+                    && compatibilityRecoveryCount <= 2
+                    && compatibilityWakeCount <= 2;
                 bool tamperStarterCalled = false;
                 win.ConfigureEnhancementCompanionAutoStartForSmoke(
                     (request, _) =>
@@ -22783,6 +22915,8 @@ public partial class App : Application
                     && companionListenerHandoffResponseRejected
                     && companionPassiveReadReconnected
                     && durableListenerHandoffSavedForDelivery
+                    && durableLegacyWakeFallback
+                    && durableRecoveryRequestsCoalesced
                     && companionAuthAclProvenanceContract
                     && companionIdentityFieldTamperRejected
                     && companionPrimaryRootSettingPrecedence
@@ -22932,6 +23066,8 @@ public partial class App : Application
                 durableRecoveryBeforePublish,
                 durableRecoveryAfterPublish,
                 durableRecoveryCarriedRequestId,
+                durableLegacyWakeFallback,
+                durableRecoveryRequestsCoalesced,
                 companionAuthAclProvenanceContract,
                 companionIdentityFieldTamperRejected,
                 companionPrimaryRootSettingPrecedence,

@@ -140,6 +140,8 @@ try {
         'durableListenerHandoffSavedForDelivery',
         'durableRecoveryAfterPublish',
         'durableRecoveryCarriedRequestId',
+        'durableLegacyWakeFallback',
+        'durableRecoveryRequestsCoalesced',
         'companionConfiguredRootExact',
         'companionAppBaseAncestor',
         'companionConfiguredAncestorRejected',
@@ -237,7 +239,7 @@ try {
     $appTempStoresRemoved = @($appStorePaths | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0
     Assert-True $appTempStoresRemoved 'The modal enhancement smoke left its internal TEMP stores behind.'
 
-    $allPassed = $requiredTrue.Count -eq 50 `
+    $allPassed = $requiredTrue.Count -eq 52 `
         -and $recoveryAllPassed `
         -and $callerStoresUnchanged `
         -and $metadataSentinelUnchanged `
