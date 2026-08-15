@@ -146,11 +146,27 @@ public partial class App
                     "natural-visible",
                 ],
                 StringComparer.Ordinal);
+            bool builtInTemplatesUseH3Grammar = templateIdsExact
+                && window.VideoPromptTemplateIdsForSmoke
+                    .Where(static id => !string.Equals(
+                        id,
+                        "custom",
+                        StringComparison.Ordinal))
+                    .All(id => window.SelectVideoPromptTemplateForSmoke(id)
+                        && PhotoViewer.Wpf.MainWindow
+                            .TryValidateVideoH3PromptForSmoke(
+                                window.VideoPromptForSmoke,
+                                out string normalized)
+                        && string.Equals(
+                            normalized,
+                            window.VideoPromptForSmoke,
+                            StringComparison.Ordinal));
             bool cuteSexySelected = window.SelectVideoPromptTemplateForSmoke(
                 "cute-sexy");
             string cuteSexyPrompt = window.VideoPromptForSmoke;
             bool templateExact = templateSurface
                 && templateIdsExact
+                && builtInTemplatesUseH3Grammar
                 && cuteSexySelected
                 && string.Equals(
                     window.SelectedVideoPromptTemplateIdForSmoke,
@@ -159,9 +175,12 @@ public partial class App
                 && cuteSexyPrompt.Contains("cute", StringComparison.OrdinalIgnoreCase)
                 && cuteSexyPrompt.Contains("seductive", StringComparison.OrdinalIgnoreCase)
                 && cuteSexyPrompt.Contains("clearly readable motion", StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("shy inviting expression", StringComparison.Ordinal)
+                && cuteSexyPrompt.Contains("shy and inviting", StringComparison.Ordinal)
                 && cuteSexyPrompt.Contains("distinct alluring pose", StringComparison.Ordinal)
-                && cuteSexyPrompt.Contains("do not invent a new hand gesture", StringComparison.OrdinalIgnoreCase);
+                && cuteSexyPrompt.Contains("integrated_multimodal_description: [Shot 1]", StringComparison.Ordinal)
+                && cuteSexyPrompt.Contains("overall_soundscape:", StringComparison.Ordinal)
+                && cuteSexyPrompt.Contains("non_diegetic_music:", StringComparison.Ordinal)
+                && cuteSexyPrompt.Contains("Do not invent a new gesture", StringComparison.Ordinal);
 
             window.SetMiniMaxH3CapabilityForSmoke(
                 checkedHealth: true,

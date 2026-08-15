@@ -145,6 +145,18 @@ public partial class MainWindow
         string Label,
         string Prompt);
 
+    private static string BuildMiniMaxH3PromptTemplate(
+        string integratedDescription,
+        string soundscape,
+        string music)
+        => VideoH3PromptOpening
+            + VideoH3IntegratedPrefix
+            + integratedDescription
+            + VideoH3SoundscapePrefix
+            + soundscape
+            + VideoH3MusicPrefix
+            + music;
+
     private static readonly IReadOnlyList<VideoPromptTemplateChoice>
         VideoPromptTemplates =
         [
@@ -155,19 +167,31 @@ public partial class MainWindow
             new(
                 DynamicVideoPromptTemplateId,
                 "Dynamic · よく動く（推奨）",
-                "One continuous shot with clearly visible, source-faithful motion. Preserve the visible subjects, composition, lighting, setting, and existing interactions. Use two connected motion phases: the main visible subject makes a noticeable head and upper-body shift with a clear expression change, then moves into a distinct final pose. The camera makes a smooth push-in with a small image-compatible arc; motion becomes strongest through the middle and settles cleanly at the end. Keep existing hand positions and contacts coherent; do not invent a new gesture, touch, object, person, or cut. Hair, clothing, water, and other visible loose details follow the movement naturally."),
+                BuildMiniMaxH3PromptTemplate(
+                    "The target remains one continuous, source-faithful shot. Preserve the visible subjects, identities, composition, lighting, setting, and existing interactions. Across the target duration, use two connected motion phases: first, the main visible subject makes a noticeable head and upper-body shift with a clear expression change; second, the subject moves into a distinct final pose. The camera makes a smooth push-in with a small image-compatible arc. Motion becomes strongest through the middle and settles cleanly at the end. Keep existing hand positions and contacts coherent. Do not invent a new gesture, touch, object, person, or cut. Hair, clothing, water, and other visible loose details follow the movement naturally.",
+                    "Use only image-consistent diegetic ambience, with subtle movement sounds from visible clothing, hair, water, or nearby scene elements when applicable. Keep the sound spatially coherent and do not invent dialogue or an unseen sound source.",
+                    "No non-diegetic music; preserve the natural scene ambience only.")),
             new(
                 "cute-sexy",
                 "Cute & Sexy · 魅惑的な緩急",
-                "One continuous shot with a cute, sexy, and seductive adult mood. Preserve the visible identities, composition, setting, and existing interactions. The main visible subject shifts head and upper body with confident, clearly readable motion, develops from a shy inviting expression into a playful seductive look, and finishes in a distinct alluring pose. The camera smoothly pushes closer and makes a small image-compatible arc. Motion is strongest in the middle, then settles at the end. Do not invent a new hand gesture, touch, object, person, or cut; keep existing contacts coherent. Hair, clothing, water, and other loose visible details respond naturally."),
+                BuildMiniMaxH3PromptTemplate(
+                    "The target remains one continuous source-faithful shot with a cute, sexy, and seductive adult mood. Preserve the visible adult identities, composition, lighting, setting, clothing, and existing interactions. Across two connected phases, the main visible adult subject first shifts the head and upper body with confident, clearly readable motion while the expression develops from shy and inviting into playfully seductive, then finishes in a distinct alluring pose. The camera smoothly pushes closer with a small image-compatible arc. Motion is strongest through the middle and settles at the end. Keep existing hand positions and contacts coherent. Do not invent a new gesture, touch, object, person, exposure, or cut. Hair, clothing, water, and other loose visible details respond naturally.",
+                    "Use image-consistent close ambience with restrained breathing, fabric movement, water, or room tone only when supported by the picture. Keep it tasteful and spatially coherent; do not invent dialogue, moans, or an unseen sound source.",
+                    "Use a soft, tasteful, low-volume instrumental pulse that supports the playful adult mood without overpowering the scene.")),
             new(
                 "cinematic-camera",
                 "Cinematic · カメラ主導",
-                "One continuous cinematic take. Preserve the visible subjects and scene while the camera makes a pronounced smooth push-in and a restrained arc that creates clear parallax. The visible subjects respond with a noticeable posture, gaze, and expression change through two connected phases, then land in a composed final pose. Keep existing interactions coherent and do not add a new gesture, object, person, or cut. Visible hair, fabric, water, smoke, and lighting response follow the motion naturally."),
+                BuildMiniMaxH3PromptTemplate(
+                    "The target remains one continuous cinematic take. Preserve the visible subjects, identities, composition, setting, lighting, and existing interactions. Across the target duration, the camera makes a pronounced smooth push-in and a restrained image-compatible arc that creates clear parallax. In two connected phases, the visible subjects respond with a noticeable posture, gaze, and expression change, then land in a composed final pose. Keep existing hand positions and contacts coherent. Do not add a new gesture, touch, object, person, or cut. Visible hair, fabric, water, smoke, reflections, and lighting response follow the motion naturally and settle at the end.",
+                    "Build an image-consistent cinematic soundscape from visible movement and environment cues, with restrained spatial detail and no invented dialogue or unseen event.",
+                    "Use a subtle cinematic instrumental underscore with a gentle rise through the middle and a clean, restrained resolution at the end.")),
             new(
                 "natural-visible",
                 "Natural · 自然だが見える動き",
-                "One continuous source-faithful shot with natural but clearly visible motion. Preserve the visible identities, composition, lighting, setting, and existing interactions. The main subject breathes, shifts weight, turns the head and upper body, changes expression, and settles into a second readable pose while the camera makes a gentle push-in. Keep hands and contacts coherent without inventing a new gesture or touch. Hair, clothing, and loose scene details follow with delayed settling. No cut, new object, or new person."),
+                BuildMiniMaxH3PromptTemplate(
+                    "The target remains one continuous, source-faithful shot with natural but clearly visible motion. Preserve the visible identities, composition, lighting, setting, and existing interactions. Across two connected phases, the main visible subject breathes, shifts weight, turns the head and upper body, changes expression, and settles into a second readable pose while the camera makes a gentle push-in. Keep existing hand positions and contacts coherent without inventing a new gesture or touch. Hair, clothing, and loose scene details follow with delayed settling. Do not add a cut, object, person, or unsupported event.",
+                    "Use quiet, image-consistent natural ambience with subtle breathing, fabric, wind, water, or room tone only when supported by the visible scene. Do not invent dialogue or an unseen sound source.",
+                    "No non-diegetic music; keep the result grounded in natural ambient sound.")),
         ];
 
     private sealed record VideoGenerationRequestSettings(
@@ -1491,7 +1515,7 @@ public partial class MainWindow
         }
         RefreshVideoPromptTemplateControls();
         SetVideoGenerationSettingsStatus(
-            $"「{choice.Label}」をPromptへ反映しました。画像に合わせる場合はMiniMax語化してください。");
+            $"「{choice.Label}」をMiniMax H3形式でPromptへ反映しました。画像に合わせて作り直す場合はMiniMax語化してください。");
     }
 
     private void MarkVideoPromptTemplateAsCustom()
