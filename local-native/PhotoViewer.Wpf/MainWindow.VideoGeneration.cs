@@ -187,6 +187,13 @@ public partial class MainWindow
                     "Use soft, polished ambience supported by the visible setting, with restrained breathing, fabric, water, or room tone only when appropriate. Do not invent dialogue, vocalization, or an unseen event.",
                     "Use tasteful, low-volume instrumental music with a gentle playful character, without overpowering the scene.")),
             new(
+                "intense-allure",
+                "Intense Allure · 妖艶に振り切る",
+                BuildMiniMaxH3PromptTemplate(
+                    "Create one continuous, image-faithful shot with an intensely sensual, magnetic, and deliberately provocative adult mood, without depicting a sexual act. Apply this direction only when every prominently visible human subject is clearly an adult. Build erotic tension through sustained image-supported eye contact, slow controlled breathing, subtle changes around the eyes and lips, poised posture, smooth weight shifts, and deliberately held pauses. Let confidence grow into a commanding, self-possessed finish. Move the camera gradually closer from a flattering direction supported by the composition, lingering on the visible face, silhouette, clothing texture, and light. If adulthood is not visually clear, reinterpret the entire direction as bold high-fashion elegance without sexualization. Preserve identity, anatomy, existing contacts, visible clothing, and the exact degree of exposure. Do not add nudity, undressing, a sexual act, intimate touch, a partner, new person, object, event, or cut.",
+                    "Use close, polished, image-consistent ambience with restrained breathing, fabric movement, room tone, wind, or water only where visibly supported. Keep the sound intimate but refined, and do not invent dialogue, intimate vocalization, or an unseen event.",
+                    "Use a slow, deep, luxurious instrumental pulse with restrained dynamics, creating nocturnal tension without overpowering the visible performance.")),
+            new(
                 "cinematic-camera",
                 "Cinematic · カメラ主導",
                 BuildMiniMaxH3PromptTemplate(
