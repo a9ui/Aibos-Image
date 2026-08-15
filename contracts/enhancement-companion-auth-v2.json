@@ -21,7 +21,14 @@
     "proofMessageUtf8": "protocol\\0challenge\\0instanceId\\0processId\\0serverStartedAtUtc",
     "proof": "base64url(HMAC-SHA256(user capability, proofMessageUtf8))",
     "responseMaxBytes": 4096,
-    "sensitiveRequestDataAllowed": false
+    "sensitiveRequestDataAllowed": false,
+    "concurrency": "after the local request guard, identity proof is served outside the protected-request concurrency budget so authenticated ownership remains provable while protected work is busy",
+    "busyCompatibility": {
+      "status": 503,
+      "exactError": "The local AI companion is busy.",
+      "meaning": "an unauthenticated availability hint only; never identity proof",
+      "wpf": "retry the identity challenge a bounded number of times without launching a replacement, sending sensitive data, or publishing a durable reservation; keep proof mismatch and a different process classified as untrusted"
+    }
   },
   "requests": {
     "outerRoute": "POST /api/enhance/secure",
