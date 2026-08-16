@@ -18480,7 +18480,9 @@ public partial class App : Application
                         "photoreal-ok");
                 bool displayedPhotorealVideoSource =
                     displayedPhotorealSelected
-                    && win.OpenDisplayedModalVideoGenerationBoardForSmoke()
+                    && win.MarkDisplayedPhotorealAsRecoveredForSmoke()
+                    && await win.OpenDisplayedModalVideoGenerationBoardForSmokeAsync(
+                        "photoreal-ok")
                     && win.VideoSourceForSmoke is
                     {
                         ProducerJobId: "photoreal-ok",
@@ -18514,7 +18516,8 @@ public partial class App : Application
                     && win.MiniMaxH3SurfaceForSmoke;
                 string[] videoSurfaceIssues =
                     win.VideoGenerationSurfaceIssuesForSmoke.ToArray();
-                bool videoStyleSurface = win.VideoStyleSurfaceForSmoke;
+                bool videoStyleSurface = win.VideoStyleSurfaceForSmoke
+                    && win.OpenVideoStylesFileForSmoke();
                 string videoSurfaceModelId = win.VideoModelIdForSmoke;
                 bool videoQueueSucceeded =
                     await win.QueueVideoGenerationForSmokeAsync();

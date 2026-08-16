@@ -63,7 +63,7 @@ try {
         -or $xaml -notmatch 'x:Name="ModalVideoH3PromptCandidateTextBox"[\s\S]{0,500}Background="\{StaticResource BgPrimary\}"' `
         -or $xaml -notmatch 'x:Name="ModalVideoH3ApplyPromptButton"[\s\S]{0,180}Style="\{StaticResource PrimaryButton\}"' `
         -or $xaml -notmatch 'x:Name="ModalVideoH3UndoPromptButton"[\s\S]{0,180}Style="\{StaticResource GhostButton\}"' `
-        -or $xaml -notmatch 'x:Name="ModalVideoH3PromptCandidateTextBox"[\s\S]{0,220}MaxLength="2001"') {
+        -or $xaml -notmatch 'x:Name="ModalVideoH3PromptCandidateTextBox"[\s\S]{0,220}MaxLength="8001"') {
         throw 'The H3 prompt assistant does not preserve the existing bounded dark-resource pattern.'
     }
 

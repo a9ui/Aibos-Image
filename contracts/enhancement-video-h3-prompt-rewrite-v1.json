@@ -48,7 +48,7 @@
     }
   },
   "candidateGrammar": {
-    "maximumRawUtf16CodeUnits": 2000,
+    "maximumRawUtf16CodeUnits": 8000,
     "opening": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.",
     "orderedSections": [
       "integrated_multimodal_description: [Shot 1] ",
@@ -57,7 +57,7 @@
     ],
     "sectionSeparator": "\n\n",
     "markerRule": "each section marker occurs exactly once across the whole raw candidate and the three markers occur only in the declared order",
-    "lineEndingRule": "reject a raw candidate over 2000 UTF-16 code units before converting CRLF to LF; after conversion reject every remaining carriage return",
+    "lineEndingRule": "reject a raw candidate over 8000 UTF-16 code units before converting CRLF to LF; after conversion reject every remaining carriage return",
     "emptySectionRule": "each section body contains at least one non-whitespace character",
     "controlCharacterRule": "only LF and TAB control characters are allowed"
   },

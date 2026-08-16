@@ -174,8 +174,8 @@
   <sys:String x:Key="UiVideoH3StatusReady">候補を編集できます。動画生成にはまだ使われていません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusStale">入力・画像・Model・Style・変換方法が変わりました。もう一度変換してください。</sys:String>
   <sys:String x:Key="UiVideoH3StatusStaleResponse">変換中に入力・画像・Model・Style・変換方法が変わったため、結果を採用しませんでした。</sys:String>
-  <sys:String x:Key="UiVideoH3StatusInvalidCandidate">候補はH3形式ではないか、2000文字を超えています。入力には反映していません。</sys:String>
-  <sys:String x:Key="UiVideoH3StatusInputTooLong">選んだ変換方法の指示を含めると2000文字を超えます。入力を少し短くしてください。ジョブやworkerは変更していません。</sys:String>
+  <sys:String x:Key="UiVideoH3StatusInvalidCandidate">候補はH3形式ではないか、8000文字を超えています。入力には反映していません。</sys:String>
+  <sys:String x:Key="UiVideoH3StatusInputTooLong">選んだ変換方法の指示を含めると8000文字を超えます。入力を少し短くしてください。ジョブやworkerは変更していません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidResponse">H3語化の応答形式を確認できません。入力は変更せず、失敗分類を操作ログへ記録しました。</sys:String>
   <sys:String x:Key="UiVideoH3StatusUnavailable">ローカルのH3語化を利用できません。ジョブは追加せず、失敗分類を操作ログへ記録しました。</sys:String>
   <sys:String x:Key="UiVideoH3StatusBusy">別のMiniMax語変換を処理中です。完了してからもう一度試してください。</sys:String>

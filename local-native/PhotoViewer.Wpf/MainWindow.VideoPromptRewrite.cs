@@ -17,7 +17,7 @@ public partial class MainWindow
     private const int VideoH3PromptRewriteTimeoutMilliseconds = 360_000;
     private const int MaxVideoH3PromptRewriteResponseBytes = 32 * 1024;
     // Keep one over-limit code unit so an editor paste is rejected as
-    // oversized instead of being silently clipped into a valid 2,000-unit
+    // oversized instead of being silently clipped into a valid 8,000-unit
     // generation prompt.
     private const int MaxVideoH3CandidateEditorLength =
         MaxVideoPromptLength + 1;
@@ -189,7 +189,7 @@ public partial class MainWindow
         {
             SetVideoH3PromptRewriteStatus(VideoH3Localized(
                 "UiVideoH3StatusInputTooLong",
-                "選んだ変換方法の指示を含めると2000文字を超えます。入力を少し短くしてください。動画ジョブやworkerは変更していません。"));
+                "選んだ変換方法の指示を含めると8000文字を超えます。入力を少し短くしてください。動画ジョブやworkerは変更していません。"));
             RefreshVideoH3PromptRewriteControls(updateStatus: false);
             AibosOperationLog.Write(
                 "h3_prompt_rewrite",
@@ -644,7 +644,7 @@ public partial class MainWindow
         {
             SetVideoH3PromptRewriteStatus(VideoH3Localized(
                 "UiVideoH3StatusInvalidCandidate",
-                "候補はH3形式ではないか、2000文字を超えています。入力には反映していません。"));
+                "候補はH3形式ではないか、8000文字を超えています。入力には反映していません。"));
         }
         else
         {

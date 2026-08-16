@@ -999,6 +999,29 @@ public partial class MainWindow
             showFeedback: false);
     }
 
+    public bool MarkDisplayedPhotorealAsRecoveredForSmoke()
+    {
+        if (!_modalShowingEnhanced
+            || _modalEnhancementVersionIndex < 1
+            || _modalEnhancementVersionIndex > _modalEnhancementVersions.Count)
+        {
+            return false;
+        }
+
+        int index = _modalEnhancementVersionIndex - 1;
+        ManagedEnhancementVersion displayed = _modalEnhancementVersions[index];
+        if (!string.Equals(
+                displayed.Operation,
+                "photoreal",
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _modalEnhancementVersions[index] = displayed with { Recovered = true };
+        return true;
+    }
+
     private string? CurrentModalEnhancementVersionJobId()
         => _modalShowingEnhanced
             && _modalEnhancementVersionIndex >= 1

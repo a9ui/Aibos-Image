@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -5,6 +6,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
 
@@ -70,7 +72,7 @@ public partial class MainWindow
     private const int DefaultVideoDurationSeconds = 6;
     private const int DefaultVideoPlaybackFps = 16;
     private const int DefaultVideoMaximumPixelArea = 409_600;
-    private const int MaxVideoPromptLength = 2_000;
+    private const int MaxVideoPromptLength = 8_000;
     private const int MaxVideoStyleCount = 32;
     private const int MaxVideoStyleNameLength = 40;
     private const string CustomVideoPromptTemplateId = "custom";
@@ -1164,6 +1166,7 @@ public partial class MainWindow
 
         CancelVideoH3PromptRewrite();
         _videoSourceChoice = null;
+        (string SourcePath, string OutputPath, long Generation)? displayedPhotorealRetry = null;
         string status;
         if (!TryGetVideoGenerationSourceTile(out Tile tile))
         {
@@ -1175,8 +1178,27 @@ public partial class MainWindow
                      out VideoSourceChoice source,
                      out string sourceError))
         {
-            status = $"入力を確定できません: {sourceError} 設定は確認できますが、実行は無効です。";
-            SetTransientStatusToast(sourceError);
+            if (requestedSource is null
+                && CurrentModalEnhancementVersionIsPhotoreal()
+                && TryGetCurrentModalEnhancementVersion(
+                    tile,
+                    out ManagedEnhancementVersion displayedPhotoreal)
+                && string.Equals(
+                    displayedPhotoreal.Operation,
+                    "photoreal",
+                    StringComparison.Ordinal))
+            {
+                displayedPhotorealRetry = (
+                    tile.Path,
+                    displayedPhotoreal.Output.OutputPath,
+                    _modalEnhancementGeneration);
+                status = "表示中の実写版を最新のJobsと照合しています。選び直す必要はありません。";
+            }
+            else
+            {
+                status = $"入力を確定できません: {sourceError} 設定は確認できますが、実行は無効です。";
+                SetTransientStatusToast(sourceError);
+            }
         }
         else
         {
@@ -1193,6 +1215,13 @@ public partial class MainWindow
         if (ModalPhotorealSettingsPopup is not null)
             ModalPhotorealSettingsPopup.Visibility = Visibility.Collapsed;
         ModalVideoGenerationPopup.Visibility = Visibility.Visible;
+        if (displayedPhotorealRetry is { } retry)
+        {
+            _ = RefreshDisplayedPhotorealVideoSourceAsync(
+                retry.SourcePath,
+                retry.OutputPath,
+                retry.Generation);
+        }
         if (IsMiniMaxH3VideoModel(_videoModelId))
             _ = RefreshMiniMaxH3VideoCapabilityAsync();
         _ = Dispatcher.BeginInvoke(
@@ -1202,6 +1231,52 @@ public partial class MainWindow
                     Keyboard.Focus(ModalVideoPromptTextBox);
             }),
             DispatcherPriority.Input);
+    }
+
+    private async Task RefreshDisplayedPhotorealVideoSourceAsync(
+        string sourcePath,
+        string displayedOutputPath,
+        long generation)
+    {
+        await RefreshModalEnhancementStateAsync(
+            sourcePath,
+            generation,
+            showUnavailableError: false);
+        if (generation != _modalEnhancementGeneration
+            || ModalVideoGenerationPopup.Visibility != Visibility.Visible
+            || !TryGetVideoGenerationSourceTile(out Tile tile)
+            || !string.Equals(tile.Path, sourcePath, StringComparison.OrdinalIgnoreCase)
+            || !TryGetCurrentModalEnhancementVersion(
+                tile,
+                out ManagedEnhancementVersion displayed)
+            || !string.Equals(
+                displayed.Output.OutputPath,
+                displayedOutputPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!TryCaptureVideoSource(
+                tile,
+                requestedSource: null,
+                out VideoSourceChoice source,
+                out string sourceError))
+        {
+            VideoGenerationStatusText.Text = displayed.Recovered
+                ? "この表示中の実写版は旧成果物で、元Job記録が見つかりません。別の実写版またはOriginalを選んでください。"
+                : $"表示中の実写版をJobsで再照合できませんでした: {sourceError}";
+            SetTransientStatusToast(VideoGenerationStatusText.Text);
+            SyncVideoGenerationSettingsControls();
+            return;
+        }
+
+        _videoSourceChoice = source;
+        VideoH3PromptRewriteContextChanged(cancelPending: false);
+        SyncVideoGenerationSettingsControls();
+        VideoGenerationStatusText.Text = IsMiniMaxH3VideoModel(_videoModelId)
+            ? MiniMaxH3ReservationReadinessStatus()
+            : "旧動画モデル設定は新規生成に使いません。MiniMax H3へ切り替えてください。";
     }
 
     private void CloseVideoGenerationBoard_Click(object sender, RoutedEventArgs e)
@@ -1727,6 +1802,65 @@ public partial class MainWindow
         SetVideoStyleStatus($"「{style.Name}」を削除しました。現在の設定値はそのまま残ります。");
         if (!_initializing)
             SaveState();
+    }
+
+    private void OpenVideoStylesFile_Click(object sender, RoutedEventArgs e)
+        => TryOpenVideoStylesFile();
+
+    private bool TryOpenVideoStylesFile()
+    {
+        SaveState();
+        try
+        {
+            string path = Path.GetFullPath(ResolvedStatePath);
+            if (!File.Exists(path))
+            {
+                SetVideoStyleStatus("Style保存ファイルを作成できませんでした。保存エラーを確認してください。");
+                return false;
+            }
+
+            var startInfo = new ProcessStartInfo(path) { UseShellExecute = true };
+            if (!_externalFileLauncher(startInfo))
+            {
+                SetVideoStyleStatus("Style保存ファイルを開けませんでした。JSONの既定アプリを確認してください。");
+                return false;
+            }
+
+            SetVideoStyleStatus("Styleを含む保存JSONを開きました。外部編集はAibos Imageの次回起動で読み込みます。");
+            return true;
+        }
+        catch (Exception error) when (error is IOException
+            or UnauthorizedAccessException
+            or InvalidOperationException
+            or ArgumentException
+            or NotSupportedException
+            or System.Security.SecurityException)
+        {
+            Trace.TraceWarning($"Video style storage open failed: {error.GetType().Name}");
+            SetVideoStyleStatus("Style保存ファイルを開けませんでした。パスとJSONの既定アプリを確認してください。");
+            return false;
+        }
+    }
+
+    private void VideoPromptResizeThumb_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        if (sender is not Thumb thumb)
+            return;
+
+        TextBox promptTextBox = string.Equals(
+            thumb.Tag as string,
+            "app",
+            StringComparison.Ordinal)
+                ? AppVideoPromptTextBox
+                : ModalVideoPromptTextBox;
+        double currentHeight = double.IsNaN(promptTextBox.Height)
+            ? Math.Max(promptTextBox.MinHeight, promptTextBox.ActualHeight)
+            : promptTextBox.Height;
+        promptTextBox.Height = Math.Clamp(
+            currentHeight + e.VerticalChange,
+            promptTextBox.MinHeight,
+            promptTextBox.MaxHeight);
+        e.Handled = true;
     }
 
     private void RestoreVideoStyles(
@@ -2455,6 +2589,28 @@ public partial class MainWindow
         return ModalVideoGenerationPopup.Visibility == Visibility.Visible;
     }
 
+    public async Task<bool> OpenDisplayedModalVideoGenerationBoardForSmokeAsync(
+        string expectedProducerJobId,
+        int timeoutMilliseconds = 3_000)
+    {
+        OpenModalVideoGeneration_Click(this, new RoutedEventArgs());
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < timeoutMilliseconds)
+        {
+            if (_videoSourceChoice is { ProducerJobId: not null } source
+                && string.Equals(
+                    source.ProducerJobId,
+                    expectedProducerJobId,
+                    StringComparison.Ordinal))
+            {
+                return true;
+            }
+            await Task.Delay(20);
+        }
+
+        return false;
+    }
+
     public (int DurationSeconds, int PlaybackFps, int MaximumPixelArea, string Prompt)
         VideoGenerationSettingsForSmoke
         => (
@@ -2887,6 +3043,8 @@ public partial class MainWindow
     public bool VideoStyleSurfaceForSmoke
         => ModalVideoStyleComboBox is not null
             && AppVideoStyleListBox is not null
+            && OpenModalVideoStylesFileButton is not null
+            && OpenAppVideoStylesFileButton is not null
             && ModalVideoStyleNameTextBox.MaxLength == MaxVideoStyleNameLength
             && AppVideoStyleNameTextBox.MaxLength == MaxVideoStyleNameLength
             && AutomationProperties.GetName(ModalVideoStyleComboBox)
@@ -2905,6 +3063,31 @@ public partial class MainWindow
         AppVideoStyleNameTextBox.Text = name;
         SaveVideoStyle_Click(SaveAppVideoStyleButton, new RoutedEventArgs());
         return FindVideoStyle(name) is not null;
+    }
+
+    public bool OpenVideoStylesFileForSmoke()
+    {
+        ProcessStartInfo? captured = null;
+        Func<ProcessStartInfo, bool> previous = _externalFileLauncher;
+        _externalFileLauncher = startInfo =>
+        {
+            captured = startInfo;
+            return true;
+        };
+        try
+        {
+            return TryOpenVideoStylesFile()
+                && captured is not null
+                && captured.UseShellExecute
+                && string.Equals(
+                    Path.GetFullPath(captured.FileName),
+                    Path.GetFullPath(ResolvedStatePath),
+                    StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            _externalFileLauncher = previous;
+        }
     }
 
     public bool SelectVideoStyleForSmoke(string name)
@@ -3046,8 +3229,14 @@ public partial class MainWindow
                     "RTX 4070 SUPER 12GB",
                     StringComparison.Ordinal))
                 issues.Add("model-description");
-            if (ModalVideoPromptTextBox.MaxLength != MaxVideoPromptLength)
+            if (ModalVideoPromptTextBox.MaxLength != MaxVideoPromptLength
+                || AppVideoPromptTextBox.MaxLength != MaxVideoPromptLength)
                 issues.Add("prompt-limit");
+            if (ModalVideoPromptResizeThumb is null
+                || AppVideoPromptResizeThumb is null
+                || ModalVideoPromptTextBox.MaxHeight < 480
+                || AppVideoPromptTextBox.MaxHeight < 480)
+                issues.Add("prompt-resize");
             if (!string.Equals(
                     AutomationProperties.GetName(QueueVideoGenerationButton),
                     "Add video generation job",

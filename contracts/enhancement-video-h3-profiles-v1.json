@@ -29,7 +29,7 @@
     { "id": "minimax-h3-hq-15s-v1", "nominalDurationSeconds": 15, "frameCount": 362, "exactDurationSeconds": 15.083333333333334 }
   ],
   "request": {
-    "shape": { "video": { "requested": { "profileId": "one exact profile id above", "prompt": "trimmed UTF-16 string up to 2000 code units" } } },
+    "shape": { "video": { "requested": { "profileId": "one exact profile id above", "prompt": "trimmed UTF-16 string up to 8000 code units" } } },
     "arbitraryControls": "reject unknown profile ids and arbitrary duration, frame, FPS, or resolution fields; STEP is governed by PV-ENHANCE-VIDEO-H3-STEPS-001 and maximumPixelArea by PV-ENHANCE-VIDEO-H3-CANVAS-TIERS-001"
   },
   "promptRewrite": {
