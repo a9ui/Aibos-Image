@@ -1101,9 +1101,10 @@ public partial class MainWindow
             ? "表示中のOriginalまたは実写化版の服装・表情・背景・ポーズをAI編集"
             : error;
         ModalI2iEditButton.IsEnabled = enabled;
+        string shortcut = BindingText(ViewerKeyAction.OpenI2iEdit);
         ModalI2iEditButton.ToolTip = available
-            ? "表示中のOriginalまたは実写化版を実写編集"
-            : error;
+            ? $"表示中のOriginalまたは実写化版を実写編集 ({shortcut})"
+            : $"{error} (ショートカット: {shortcut})";
         ModalI2iEditSettingsButton.IsEnabled = enabled;
         ModalI2iEditSettingsButton.ToolTip = available
             ? "実写編集の種類を選択"
@@ -1144,7 +1145,7 @@ public partial class MainWindow
 
     public bool ExerciseUnifiedI2iEditEntryForSmoke()
     {
-        if (ModalI2iEditButton.Content is not TextBlock { Text: "実写編集" }
+        if (!string.Equals(ModalI2iEditButtonLabel.Text, "実写編集", StringComparison.Ordinal)
             || ModalI2iEditSettingsButton.ContextMenu is not ContextMenu picker
             || picker.Items.Count != 2
             || !ReferenceEquals(picker.Items[0], ModalI2iHairEditMenuItem)

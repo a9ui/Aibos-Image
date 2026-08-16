@@ -4600,6 +4600,9 @@ public partial class MainWindow
 
     public void CloseEnhancementJobsForSmoke() => CloseEnhancementJobsWorkspace(restoreFocus: false);
 
+    public bool EnhancementJobsVisibleForSmoke
+        => EnhancementJobsDialog.Visibility == Visibility.Visible;
+
     public double EnhancementJobsVerticalOffsetForSmoke
         => FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.VerticalOffset ?? 0;
 
