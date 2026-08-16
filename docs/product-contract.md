@@ -165,6 +165,9 @@ The executable cases for these meanings are routed by
   contract requires it, replay-resistant, and bound to one companion epoch.
 - Durable enqueue publishes the bounded inbox item before sending a bodyless
   wake. A post-publication transport failure does not discard the durable item.
+- An authenticated queue resume completes the companion's one-time recovery
+  before it starts a worker. Queue pause remains available during deferred
+  recovery and lets the current job stop at its normal boundary.
 - Passive reads and startup history access do not recover the queue or start GPU
   work.
 

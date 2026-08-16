@@ -83,7 +83,8 @@
     ],
     "explicitRecoveryRoute": "POST /api/enhance/queue/recover",
     "explicitRecoveryBodyAllowed": false,
-    "explicitRecoveryProcessSemantics": "successful recovery runs at most once per companion process; concurrent or repeated authenticated requests reuse that result, while a request carrying an idempotency key drains the durable inbox after recovery and returns the matching receipt"
+    "explicitRecoveryProcessSemantics": "successful recovery runs at most once per companion process; concurrent or repeated authenticated requests reuse that result, while a request carrying an idempotency key drains the durable inbox after recovery and returns the matching receipt",
+    "authenticatedQueueResume": "POST /api/enhance/queue with paused=false completes the same one-time recovery before persisting resume or starting the worker; paused=true remains available without waiting for recovery so a running worker can be stopped at the next job boundary"
   },
   "server": {
     "bind": "127.0.0.1",
