@@ -390,10 +390,21 @@ public partial class App
                     selectedStepsJobNode["sourceSha256"]!.GetValue<string>(),
                     selectedStepsJobNode["presetId"]!.GetValue<string>(),
                     selectedStepsJobNode["presetHash"]!.GetValue<string>());
+            const string selectedStepsExpectedOutputFileName =
+                "valid-h3-selected-steps__source__9be09b982e5cb105__"
+                + "minimax-h3-i2v-preview-v1__e832f2b2d204.mp4";
+            if (!string.Equals(
+                    selectedStepsOutputFileName,
+                    selectedStepsExpectedOutputFileName,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "The selected-steps output identity fixture drifted.");
+            }
             string selectedStepsOutputPath = Path.Combine(
                 outputRoot,
                 "Videos",
-                selectedStepsOutputFileName);
+                selectedStepsExpectedOutputFileName);
             selectedStepsJobNode["outputPath"] = selectedStepsOutputPath;
             Directory.CreateDirectory(Path.GetDirectoryName(
                 selectedStepsOutputPath)!);
