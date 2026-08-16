@@ -6905,9 +6905,12 @@ public partial class MainWindow : Window
     {
         if (_sharedReloadBarrierDepth > 0)
         {
-            SetStatusToast(
-                "Folder reload is synchronizing Favorite and Seen state. Try again after it finishes.",
-                retryAfterReload);
+            const string reloadStatus =
+                "Folder reload is synchronizing Favorite and Seen state. Try again after it finishes.";
+            if (retryAfterReload is null)
+                SetTransientStatusToast(reloadStatus);
+            else
+                SetStatusToast(reloadStatus, retryAfterReload);
             return false;
         }
         if (_sharedActionsDisabled)
@@ -25205,6 +25208,7 @@ public partial class MainWindow : Window
                 "Selectable status notification text",
                 StringComparison.Ordinal);
     public bool DeleteStatusRetryVisibleForSmoke => DeleteStatusRetryButton.Visibility == Visibility.Visible;
+    public bool StatusDismissScheduledForSmoke => _statusToastDismissTimer?.IsEnabled == true;
     public int PendingAlbumCleanupCountForSmoke => _pendingAlbumCleanupPaths.Length;
     public bool QueueAlbumMembershipCleanupForSmoke(params string[] paths)
     {
