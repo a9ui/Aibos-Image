@@ -26163,6 +26163,8 @@ public partial class App : Application
                     reloadFirstDrainGuarded = favoriteDrainStarted && favoriteWriterHeld
                         && reloadWindow.SharedReloadBarrierActiveForSmoke
                         && firstFavoriteRejected && firstSeenRejected
+                        && reloadWindow.StatusDismissScheduledForSmoke
+                        && !reloadWindow.DeleteStatusRetryVisibleForSmoke
                         && reloadWindow.DeleteStatusForSmoke.Contains("reload", StringComparison.OrdinalIgnoreCase);
 
                     reloadFavoriteWriterGate.Set();
@@ -26173,6 +26175,8 @@ public partial class App : Application
                     reloadSecondDrainGuarded = seenDrainStarted && seenWriterHeld
                         && reloadWindow.SharedReloadBarrierActiveForSmoke
                         && secondFavoriteRejected && secondSeenRejected
+                        && reloadWindow.StatusDismissScheduledForSmoke
+                        && !reloadWindow.DeleteStatusRetryVisibleForSmoke
                         && reloadWindow.DeleteStatusForSmoke.Contains("reload", StringComparison.OrdinalIgnoreCase);
 
                     reloadSeenWriterGate.Set();
