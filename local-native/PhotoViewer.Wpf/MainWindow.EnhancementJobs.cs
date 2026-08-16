@@ -98,7 +98,9 @@ public partial class MainWindow
         {
             "upscale" => "upscale",
             "photoreal" => "photoreal",
-            "i2i" when IsI2iMutationSafe(job) || IsI2iV2MutationSafe(job) => "i2i",
+            "i2i" when IsI2iMutationSafe(job)
+                || IsI2iV2MutationSafe(job)
+                || IsI2iV3MutationSafe(job) => "i2i",
             "video" => "video",
             _ => UnsupportedEnhancementOperation,
         };
@@ -1081,20 +1083,56 @@ public partial class MainWindow
                 _enhancementWorkspaceHighlightExpiresAt = default;
             }
             EnhancementJobsDialog.Visibility = Visibility.Visible;
-            EnhancementJobsStatusText.Text = "Loading jobs from the local companion...";
-            _enhancementWorkspaceHealthEndpointSupported = null;
-            _enhancementWorkspaceHealthInventorySignature = null;
+            bool canReuseCachedInventory =
+                _enhancementWorkspaceJobs.Count > 0
+                && _enhancementWorkspaceHealthInventorySignature is not null
+                && _enhancementWorkspaceHealthEndpointSupported != false;
+            EnhancementJobsStatusText.Text = canReuseCachedInventory
+                ? "Checking the cached jobs inventory..."
+                : "Loading jobs from the local companion...";
+            if (!canReuseCachedInventory)
+            {
+                _enhancementWorkspaceHealthEndpointSupported = null;
+                _enhancementWorkspaceHealthInventorySignature = null;
+            }
             _enhancementWorkspaceQueuePaused = null;
             RefreshEnhancementQueuePauseControl();
-            ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
+            if (!canReuseCachedInventory)
+                ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
             EnhancementJobsEmptyText.Visibility = Visibility.Collapsed;
-            if (!restoreReturnViewport)
+            if (!restoreReturnViewport && !canReuseCachedInventory)
                 EnhancementJobsList.ItemsSource = null;
             long generation = ++_enhancementWorkspaceGeneration;
             _ = Dispatcher.BeginInvoke(
                 EnhancementJobsRefreshButton.Focus,
                 DispatcherPriority.Input);
-            await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
+            if (canReuseCachedInventory)
+            {
+                // A full inventory is roughly 24 MiB for a long-lived library.
+                // Reopening Jobs used to decrypt, parse, allocate, and reconcile
+                // that entire payload even when compact health proved that the
+                // inventory had not changed. Reuse the already validated view
+                // models and let the health signature request a full refresh
+                // only when counts, terminal history, queue ownership, or the
+                // companion epoch actually changed.
+                ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+                await PollEnhancementJobsWorkspaceAsync(generation);
+                if (generation == _enhancementWorkspaceGeneration
+                    && EnhancementJobsDialog.Visibility == Visibility.Visible)
+                {
+                    int activeCount = _enhancementWorkspaceJobs.Count(
+                        static job => job.IsActive);
+                    if (!_aiProcessingMinimizedMode && activeCount > 0)
+                        _enhancementWorkspacePollTimer.Start();
+                    EnhancementJobsStatusText.Text = activeCount > 0
+                        ? $"共有GPUキューを実行順で表示中です。実行中 {_enhancementWorkspaceJobs.Count(static job => job.Status == "running"):N0}、待ち {_enhancementWorkspaceJobs.Count(static job => job.Status == "queued"):N0}。"
+                        : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
+                }
+            }
+            else
+            {
+                await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
+            }
             if (restoreReturnViewport)
                 await RestoreEnhancementJobsReturnViewportAsync();
             operationOutcome = EnhancementJobsDialog.Visibility == Visibility.Visible
@@ -2225,8 +2263,14 @@ public partial class MainWindow
             && TryReadI2iV2JobInfo(element, out I2iV2JobInfo parsedI2iV2)
                 ? parsedI2iV2
                 : null;
+        I2iV3JobInfo? i2iV3Info = operation == "i2i"
+            && TryReadI2iV3JobInfo(element, out I2iV3JobInfo parsedI2iV3)
+                ? parsedI2iV3
+                : null;
         bool i2iMutationSafe = operation == "i2i"
-            && (IsI2iMutationSafe(element) || i2iV2Info is not null);
+            && (IsI2iMutationSafe(element)
+                || i2iV2Info is not null
+                || i2iV3Info is not null);
         return new EnhancementWorkspaceJobView(
             id!,
             sourceId ?? "",
@@ -2239,10 +2283,16 @@ public partial class MainWindow
                 && (videoMutationValidator?.Invoke(element)
                     ?? IsStructurallyVideoMutationSafe(element)),
             i2iMutationSafe,
-            i2iV2Info?.SchemaVersion ?? (i2iMutationSafe ? 1 : null),
-            i2iV2Info?.Target ?? (i2iMutationSafe ? "hair-color" : null),
-            i2iV2Info?.InstructionSummary,
-            i2iV2EnvelopeClaimed,
+            i2iV3Info is not null
+                ? 3
+                : i2iV2Info?.SchemaVersion ?? (i2iMutationSafe ? 1 : null),
+            i2iV3Info is not null
+                ? BuildI2iV3Summary(i2iV3Info.Snapshot)
+                : i2iV2Info?.Target ?? (i2iMutationSafe ? "hair-color" : null),
+            i2iV3Info is not null
+                ? BuildI2iV3Summary(i2iV3Info.Snapshot)
+                : i2iV2Info?.InstructionSummary,
+            i2iV2EnvelopeClaimed || ClaimsI2iV3Envelope(element),
             status,
             cancelRequested,
             progress,
@@ -2255,7 +2305,8 @@ public partial class MainWindow
             sourceSize,
             sourceMtimeMs,
             queueOrder,
-            apiOrdinal);
+            apiOrdinal,
+            i2iV3Info?.Snapshot);
     }
 
     private static DateTimeOffset? TryReadEnhancementJobTimestamp(
@@ -2309,6 +2360,39 @@ public partial class MainWindow
         return false;
     }
 
+    private static bool ClaimsI2iV3Envelope(JsonElement element)
+    {
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.String
+                && property.Name is "presetId" or "adapterId"
+                && property.Value.GetString() is
+                    "flux2-i2i-edit-v3" or "comfyui-flux2-i2i-v3")
+            {
+                return true;
+            }
+            if (property.Name != "preset"
+                || property.Value.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            foreach (JsonProperty presetProperty in property.Value.EnumerateObject())
+            {
+                if (presetProperty.Name == "options"
+                    && presetProperty.Value.ValueKind == JsonValueKind.Object
+                    && presetProperty.Value.EnumerateObject().Any(static option =>
+                        option.Name == "i2iSchemaVersion"
+                        && option.Value.ValueKind == JsonValueKind.Number
+                        && option.Value.TryGetInt32(out int version)
+                        && version == 3))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private void EnhancementJobsFilter_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: string filter })
@@ -2322,6 +2406,26 @@ public partial class MainWindow
 
     private void EnhancementJobsScrollTop_Click(object sender, RoutedEventArgs e)
         => FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.ScrollToTop();
+
+    private void EnhancementJobsScrollBottom_Click(object sender, RoutedEventArgs e)
+        => FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.ScrollToBottom();
+
+    private void EnhancementJobsFirstJob_Click(object sender, RoutedEventArgs e)
+    {
+        _enhancementWorkspacePageIndex = 0;
+        ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+        FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.ScrollToTop();
+    }
+
+    private void EnhancementJobsLastJob_Click(object sender, RoutedEventArgs e)
+    {
+        EnhancementJobsPageWindow page = CalculateEnhancementJobsPageWindow(
+            _enhancementWorkspaceFilteredCount,
+            int.MaxValue);
+        _enhancementWorkspacePageIndex = page.PageIndex;
+        ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+        FindVisualDescendant<ScrollViewer>(EnhancementJobsList)?.ScrollToBottom();
+    }
 
     private void EnhancementJobsList_ScrollChanged(
         object sender,
@@ -2712,6 +2816,15 @@ public partial class MainWindow
                 break;
             case "rerun-next":
                 RerunPhotorealJobNext_Click(sender, e);
+                break;
+            case "i2i-v3-rerun":
+                await RerunI2iV3JobAsync(job, enqueueNext: false);
+                break;
+            case "i2i-v3-rerun-next":
+                await RerunI2iV3JobAsync(job, enqueueNext: true);
+                break;
+            case "i2i-v3-edit":
+                await EditI2iV3JobSettingsAsync(job);
                 break;
             case "dismiss":
                 DismissEnhancementJob_Click(sender, e);
@@ -3649,6 +3762,192 @@ public partial class MainWindow
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
         }
+    }
+
+    private async Task RerunI2iV3JobAsync(
+        EnhancementWorkspaceJobView job,
+        bool enqueueNext)
+    {
+        if (_enhancementWorkspaceMutationPending
+            || job.I2iV3Snapshot is not I2iV3WorkspaceSnapshot snapshot
+            || (enqueueNext ? !job.CanRerunI2iV3Next : !job.CanRerunI2iV3)
+            || !TryResolveEnhancementWorkspaceInput(job, out _)
+            || !TryResolveEnhancementWorkspaceCatalogSource(
+                job,
+                out string canonicalSource))
+        {
+            EnhancementJobsStatusText.Text =
+                "元画像または保存済み設定を検証できないため、AI編集を再実行できません。";
+            return;
+        }
+
+        _enhancementWorkspaceMutationPending = true;
+        job.IsBusy = true;
+        long generation = _enhancementWorkspaceGeneration;
+        try
+        {
+            string? ValidateHealth(JsonElement health)
+            {
+                if (!TryParseI2iV3Capability(
+                        health,
+                        out I2iV3CapabilityState capability)
+                    || !capability.IsReady)
+                {
+                    return "The Aibos Image local AI service is not ready for unified AI editing. No job was added.";
+                }
+                return null;
+            }
+
+            var edits = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["overall"] = snapshot.Overall,
+                ["expression"] = snapshot.Expression,
+                ["outfit"] = snapshot.Outfit,
+                ["background"] = snapshot.Background,
+                ["pose"] = snapshot.Pose,
+            };
+            var body = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["sourceId"] = canonicalSource,
+                ["operation"] = "i2i",
+                ["i2iSchemaVersion"] = 3,
+                ["presetId"] = I2iV3PresetId,
+                ["adapterId"] = I2iV3AdapterId,
+                ["edits"] = edits,
+                ["steps"] = snapshot.Steps,
+                ["cfgScale"] = snapshot.CfgScale,
+                ["outfitMaskMode"] = snapshot.OutfitMaskMode,
+                ["outfitMaskExpandPixels"] = snapshot.OutfitMaskExpandPixels,
+                ["seed"] = snapshot.Seed,
+            };
+            if (!string.IsNullOrWhiteSpace(job.SourceProducerJobId))
+                body["sourceProducerJobId"] = job.SourceProducerJobId;
+
+            string placement = enqueueNext ? "next" : "last";
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+                body,
+                placement,
+                healthValidator: ValidateHealth,
+                recoverySourceIdentity: canonicalSource);
+            if (generation != _enhancementWorkspaceGeneration
+                || EnhancementJobsDialog.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+            if (response.SavedForDelivery)
+            {
+                EnhancementJobsStatusText.Text =
+                    "同じAI編集設定の予約を保存しました。Jobsへの登録を継続しています。";
+                return;
+            }
+            if (!response.Ok
+                || response.Payload is not JsonElement payload
+                || !TryGetUniqueI2iProperty(payload, "job", out JsonElement created)
+                || !IsExactI2iV3Rerun(job, snapshot, created))
+            {
+                EnhancementJobsStatusText.Text = response.Ok
+                    ? "再実行ジョブの保存結果を安全に確認できません。Jobsを更新してください。"
+                    : response.Error;
+                return;
+            }
+
+            EnhancementJobsStatusText.Text = enqueueNext
+                ? "同じ5欄・STEP・CFG・マスク・Seedで、AI編集を現在処理の次へ1件追加しました。"
+                : "同じ5欄・STEP・CFG・マスク・Seedで、AI編集を待機列へ1件追加しました。";
+            await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
+        }
+        finally
+        {
+            job.IsBusy = false;
+            _enhancementWorkspaceMutationPending = false;
+            RefreshEnhancementQueueBulkControls();
+        }
+    }
+
+    private bool IsExactI2iV3Rerun(
+        EnhancementWorkspaceJobView sourceJob,
+        I2iV3WorkspaceSnapshot expected,
+        JsonElement created)
+    {
+        if (!TryReadI2iV3JobInfo(created, out I2iV3JobInfo info)
+            || !TryGetUniqueI2iString(created, "status", out string? status)
+            || status is not ("queued" or "running")
+            || !TryGetUniqueI2iString(created, "sourceId", out string? sourceId)
+            || !TryGetUniqueI2iString(created, "sourcePath", out string? sourcePath)
+            || !TryResolveEnhancementSourceIdentity(
+                sourceJob.SourceId,
+                out string expectedSource)
+            || !TryResolveEnhancementSourceIdentity(sourceId, out string createdSourceId)
+            || !TryResolveEnhancementSourceIdentity(sourcePath, out string createdSourcePath)
+            || !EnhancementSourceIdentityComparer.Equals(expectedSource, createdSourceId)
+            || !EnhancementSourceIdentityComparer.Equals(expectedSource, createdSourcePath)
+            || !TryReadOptionalI2iSourceProducerJobId(created, out string? producerId))
+        {
+            return false;
+        }
+        return string.Equals(
+                producerId,
+                sourceJob.SourceProducerJobId,
+                StringComparison.Ordinal)
+            && Equals(info.Snapshot, expected);
+    }
+
+    private async Task EditI2iV3JobSettingsAsync(EnhancementWorkspaceJobView job)
+    {
+        if (_enhancementWorkspaceMutationPending
+            || !job.CanEditI2iV3Settings
+            || job.I2iV3Snapshot is not I2iV3WorkspaceSnapshot snapshot)
+        {
+            return;
+        }
+
+        Task refreshTask = _enhancedStateRefreshTask;
+        if (!refreshTask.IsCompleted)
+            EnhancementJobsStatusText.Text = "元画像と実写版の情報を確認しています…";
+        try
+        {
+            await refreshTask;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (EnhancementJobsDialog.Visibility != Visibility.Visible
+            || !job.CanEditI2iV3Settings
+            || !TryOpenEnhancementJobInViewer(job, preferredOutput: null))
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.SourceProducerJobId))
+        {
+            int producerIndex = _modalEnhancementVersions.FindIndex(candidate =>
+                string.Equals(
+                    candidate.JobId,
+                    job.SourceProducerJobId,
+                    StringComparison.Ordinal)
+                && candidate.Operation == "photoreal");
+            if (producerIndex < 0)
+            {
+                SetStatusToast(
+                    "このAI編集が使った実写版を確認できません。Jobsを更新してから再度お試しください。");
+                return;
+            }
+            _modalEnhancementVersionIndex = producerIndex + 1;
+            _modalShowingEnhanced = true;
+            ManagedEnhancementVersion producer = _modalEnhancementVersions[producerIndex];
+            if (TryGetModalSourceTile(out Tile sourceTile))
+            {
+                RememberModalDisplayPreference(
+                    sourceTile,
+                    ModalDisplayVersionKind.Photoreal,
+                    producer.JobId);
+            }
+            OpenModal();
+        }
+
+        if (!await OpenI2iV3EditBoardAsync(snapshot))
+            SetStatusToast("保存済みAI編集設定を開けませんでした。");
     }
 
     private async Task<EnhancementApiResponse> SendEnhancementWorkspaceRetryAsync(
@@ -5206,8 +5505,20 @@ public partial class MainWindow
     public bool EnhancementJobsHeaderChromeContractForSmoke
         => WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsCloseButton)
             && WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsRefreshButton)
+            && WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsFirstJobButton)
             && WindowChrome.GetIsHitTestVisibleInChrome(
                 EnhancementJobsScrollTopButton)
+            && WindowChrome.GetIsHitTestVisibleInChrome(
+                EnhancementJobsScrollBottomButton)
+            && WindowChrome.GetIsHitTestVisibleInChrome(EnhancementJobsLastJobButton)
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetName(EnhancementJobsFirstJobButton))
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetName(EnhancementJobsScrollTopButton))
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetName(EnhancementJobsScrollBottomButton))
+            && !string.IsNullOrWhiteSpace(
+                AutomationProperties.GetName(EnhancementJobsLastJobButton))
             && string.Equals(
                 AutomationProperties.GetName(EnhancementJobsVideoFilter),
                 "Show video generation jobs",
@@ -5219,6 +5530,39 @@ public partial class MainWindow
             new RoutedEventArgs(Button.ClickEvent));
         EnhancementJobsList.UpdateLayout();
         return EnhancementJobsVerticalOffsetForSmoke < 0.5;
+    }
+
+    public bool ActivateEnhancementJobsScrollBottomForSmoke()
+    {
+        EnhancementJobsScrollBottomButton.RaiseEvent(
+            new RoutedEventArgs(Button.ClickEvent));
+        EnhancementJobsList.UpdateLayout();
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(EnhancementJobsList);
+        return viewer is not null
+            && Math.Abs(viewer.VerticalOffset - viewer.ScrollableHeight) < 0.5;
+    }
+
+    public bool ActivateEnhancementJobsFirstJobForSmoke()
+    {
+        EnhancementJobsFirstJobButton.RaiseEvent(
+            new RoutedEventArgs(Button.ClickEvent));
+        EnhancementJobsList.UpdateLayout();
+        return _enhancementWorkspacePageIndex == 0
+            && EnhancementJobsVerticalOffsetForSmoke < 0.5;
+    }
+
+    public bool ActivateEnhancementJobsLastJobForSmoke()
+    {
+        EnhancementJobsLastJobButton.RaiseEvent(
+            new RoutedEventArgs(Button.ClickEvent));
+        EnhancementJobsList.UpdateLayout();
+        EnhancementJobsPageWindow last = CalculateEnhancementJobsPageWindow(
+            _enhancementWorkspaceFilteredCount,
+            int.MaxValue);
+        ScrollViewer? viewer = FindVisualDescendant<ScrollViewer>(EnhancementJobsList);
+        return _enhancementWorkspacePageIndex == last.PageIndex
+            && viewer is not null
+            && Math.Abs(viewer.VerticalOffset - viewer.ScrollableHeight) < 0.5;
     }
 
     public bool ActivateEnhancementJobsCloseForSmoke()
@@ -5297,6 +5641,42 @@ public partial class MainWindow
         presetSummary = view.PresetSummary;
         detailText = view.DetailText;
         supportedMutation = view.IsSupportedMutationOperation;
+        return true;
+    }
+
+    public static bool TryReadI2iV3WorkspacePresentationForSmoke(
+        JsonElement job,
+        out string operation,
+        out string presetSummary,
+        out string detailText,
+        out bool supportedMutation,
+        out string[] actionKinds)
+    {
+        operation = "";
+        presetSummary = "";
+        detailText = "";
+        supportedMutation = false;
+        actionKinds = [];
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(job, 0);
+        if (view is null)
+            return false;
+        view.PhotorealEnqueueNextCapabilitySafe = true;
+        operation = view.Operation;
+        presetSummary = view.PresetSummary;
+        detailText = view.DetailText;
+        supportedMutation = view.IsSupportedMutationOperation;
+        actionKinds = new[]
+            {
+                view.Action1,
+                view.Action2,
+                view.Action3,
+                view.Action4,
+                view.Action5,
+                view.DangerAction,
+            }
+            .Where(static action => action.Visible)
+            .Select(static action => action.Kind)
+            .ToArray();
         return true;
     }
 
@@ -5400,7 +5780,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         long? sourceSize,
         double? sourceMtimeMs,
         int? queueOrder,
-        int apiOrdinal)
+        int apiOrdinal,
+        I2iV3WorkspaceSnapshot? i2iV3Snapshot = null)
     {
         Id = id;
         SourceId = sourceId;
@@ -5415,6 +5796,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         I2iTarget = i2iTarget;
         I2iInstructionSummary = i2iInstructionSummary;
         I2iV2EnvelopeClaimed = i2iV2EnvelopeClaimed;
+        I2iV3Snapshot = i2iV3Snapshot;
         Status = status;
         CancelRequested = cancelRequested;
         Progress = progress;
@@ -5443,6 +5825,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string? I2iTarget { get; }
     public string? I2iInstructionSummary { get; }
     public bool I2iV2EnvelopeClaimed { get; }
+    public I2iV3WorkspaceSnapshot? I2iV3Snapshot { get; }
     public string Status { get; private set; }
     public bool CancelRequested { get; private set; }
     public int Progress { get; private set; }
@@ -5505,6 +5888,14 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && Status is "succeeded" or "failed" or "canceled";
     public bool CanRerunNextWithCurrentSettings =>
         CanRerunWithCurrentSettings && PhotorealEnqueueNextCapabilitySafe;
+    public bool CanRerunI2iV3 =>
+        !_isBusy
+        && I2iV3Snapshot is not null
+        && I2iMutationSafe
+        && Status is "succeeded" or "failed" or "canceled";
+    public bool CanRerunI2iV3Next =>
+        CanRerunI2iV3 && PhotorealEnqueueNextCapabilitySafe;
+    public bool CanEditI2iV3Settings => CanRerunI2iV3;
     public bool CanUpdatePhotorealPrompts =>
         !_isBusy
         && !CancelRequested
@@ -5548,7 +5939,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && Status == "succeeded"
         && !string.IsNullOrWhiteSpace(OutputPath);
     public bool CanDeleteOutput => CanUseOutput && !OutputDependencyProtected;
-    public EnhancementJobActionPresentation Action1 => Status switch
+    public EnhancementJobActionPresentation Action1 => CanRerunI2iV3
+        ? JobAction(
+            "i2i-v3-rerun",
+            "同じ設定でもう一度",
+            "保存された5欄のPrompt・STEP・CFG・マスク・Seedをそのまま使って追加",
+            visible: true,
+            enabled: true,
+            minWidth: 126)
+        : Status switch
     {
         "queued" => JobAction(
             "move-up",
@@ -5580,7 +5979,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             126),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action2 => Status switch
+    public EnhancementJobActionPresentation Action2 => CanRerunI2iV3
+        ? JobAction(
+            "i2i-v3-rerun-next",
+            "同じ設定を次に",
+            "保存された設定のまま、処理中ジョブの直後へ追加",
+            visible: true,
+            enabled: CanRerunI2iV3Next,
+            minWidth: 116)
+        : Status switch
     {
         "queued" => JobAction(
             "move-down",
@@ -5612,7 +6019,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             144),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action3 => Status switch
+    public EnhancementJobActionPresentation Action3 => CanRerunI2iV3
+        ? JobAction(
+            "i2i-v3-edit",
+            "設定を編集して再実行",
+            "元の5欄と数値設定を統合AI編集へ読み込みます。開くだけでは追加しません",
+            visible: true,
+            enabled: CanEditI2iV3Settings,
+            minWidth: 136)
+        : Status switch
     {
         "queued" => JobAction(
             "move-next",
@@ -5645,7 +6060,16 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             88),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action4 => Status switch
+    public EnhancementJobActionPresentation Action4 =>
+        I2iV3Snapshot is not null && Status == "succeeded"
+        ? JobAction(
+            "open-output",
+            "Open output",
+            OpenOutputToolTip,
+            CanUseOutput,
+            CanUseOutput,
+            88)
+        : Status switch
     {
         "queued" => JobAction(
             "update-prompts",
@@ -5711,6 +6135,28 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
 
     public bool ActionPresentationMatchesCapabilitiesForSmoke()
     {
+        if (CanRerunI2iV3)
+        {
+            var expectedV3 = new List<string>
+            {
+                "i2i-v3-rerun",
+                "i2i-v3-rerun-next",
+                "i2i-v3-edit",
+            };
+            if (CanUseOutput)
+                expectedV3.Add("open-output");
+            if (CanDismiss)
+                expectedV3.Add("dismiss");
+            if (CanDeleteOutput)
+                expectedV3.Add("delete-output");
+            string[] actualV3 = new[]
+                { Action1, Action2, Action3, Action4, Action5, DangerAction }
+                .Where(static action => action.Visible)
+                .Select(static action => action.Kind)
+                .ToArray();
+            return expectedV3.SequenceEqual(actualV3, StringComparer.Ordinal);
+        }
+
         var expected = new List<string>(6);
         if (ShowMoveUp)
             expected.Add("move-up");
@@ -5772,6 +6218,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "wan22-ti2v-5b-high-v1" => "Wan2.2 TI2V 5B · 高品質 · 40 step",
             _ => PresetId,
         })}  ·  {SourceVersionLabel}"
+        : Operation == "i2i" && I2iV3Snapshot is I2iV3WorkspaceSnapshot v3
+            ? $"Schema v3  ·  {I2iTarget ?? "統合編集"}  ·  STEP {v3.Steps}  ·  CFG {v3.CfgScale.ToString("0.0", CultureInfo.InvariantCulture)}  ·  {SourceVersionLabel}"
         : Operation == "i2i" && I2iMutationSafe
             ? $"Schema v{I2iSchemaVersion ?? 0}  ·  Target: {I2iTargetDisplayLabel}  ·  {SourceVersionLabel}"
         : $"{PresetId}  ·  {AdapterId}";
@@ -5792,7 +6240,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         "pose" => "ポーズ（実験的）",
         _ => "未対応",
     };
-    private bool IsI2iV2Envelope =>
+    private bool IsStructuredI2iEnvelope =>
         I2iV2EnvelopeClaimed
         || string.Equals(PresetId, "flux2-i2i-edit-v2", StringComparison.Ordinal)
         || string.Equals(
@@ -5801,6 +6249,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             StringComparison.Ordinal);
     private string SafeI2iV2DetailText => !I2iMutationSafe
         ? "This AI edit row is incomplete or incompatible and remains protected from mutations."
+        : I2iV3Snapshot is I2iV3WorkspaceSnapshot v3
+            ? $"{I2iTarget ?? "統合編集"} · STEP {v3.Steps} · CFG {v3.CfgScale.ToString("0.0", CultureInfo.InvariantCulture)} · 服装マスク {v3.OutfitMaskMode} {v3.OutfitMaskExpandPixels}px"
         : !string.IsNullOrWhiteSpace(I2iInstructionSummary)
             ? $"{I2iTargetDisplayLabel}: {I2iInstructionSummary}"
             : $"{I2iTargetDisplayLabel}: verified public instruction is unavailable.";
@@ -5818,7 +6268,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "deleted" => "Output deleted",
             _ => Status,
         };
-    public string DetailText => IsI2iV2Envelope
+    public string DetailText => IsStructuredI2iEnvelope
         ? SafeI2iV2DetailText
         : !string.IsNullOrWhiteSpace(ErrorMessage)
         ? ErrorMessage
@@ -5905,6 +6355,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 candidate.I2iInstructionSummary,
                 StringComparison.Ordinal)
             && I2iV2EnvelopeClaimed == candidate.I2iV2EnvelopeClaimed
+            && Equals(I2iV3Snapshot, candidate.I2iV3Snapshot)
             && CreatedAt == candidate.CreatedAt
             && SourceSize == candidate.SourceSize
             && SourceMtimeMs == candidate.SourceMtimeMs;

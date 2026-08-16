@@ -1137,7 +1137,9 @@ public partial class MainWindow
         I2iV2EditDialog.Visibility == Visibility.Visible;
 
     public static bool IsManagedI2iVersionCandidateForSmoke(JsonElement job)
-        => IsI2iMutationSafe(job) || IsI2iV2MutationSafe(job);
+        => IsI2iMutationSafe(job)
+            || IsI2iV2MutationSafe(job)
+            || IsI2iV3MutationSafe(job);
 
     public static bool TryReadI2iV2JobInfoForSmoke(
         JsonElement job,

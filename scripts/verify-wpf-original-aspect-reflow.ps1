@@ -68,6 +68,8 @@ try {
         'OrderStable',
         'SelectionStable',
         'ZoomComposes',
+        'SearchClearVariableLayoutRestored',
+        'LargeSearchClearRealizationRecovered',
         'Persistence'
     )
     $missing = @($required | Where-Object { $result.$_ -ne $true })
@@ -99,6 +101,15 @@ try {
         OrderStable = $result.OrderStable
         SelectionStable = $result.SelectionStable
         ZoomComposes = $result.ZoomComposes
+        SearchClearVariableLayoutRestored = $result.SearchClearVariableLayoutRestored
+        SearchNarrowDistinctRowHeights = $result.SearchNarrowDistinctRowHeights
+        SearchClearDistinctRowHeights = $result.SearchClearDistinctRowHeights
+        LargeSearchClearRealizationRecovered = $result.LargeSearchClearRealizationRecovered
+        SearchClearInitialRealizationSettled = $result.SearchClearInitialRealizationSettled
+        SearchClearNarrowRealizationSettled = $result.SearchClearNarrowRealizationSettled
+        SearchClearFullRealizationSettled = $result.SearchClearFullRealizationSettled
+        SearchClearVisibleUnrealized = $result.SearchClearVisibleUnrealized
+        SearchClearVisiblePlaceholders = $result.SearchClearVisiblePlaceholders
         Persistence = $result.Persistence
     } | Format-List
 }
