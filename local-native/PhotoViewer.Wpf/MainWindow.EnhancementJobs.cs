@@ -1194,6 +1194,12 @@ public partial class MainWindow
                 ? "completed"
                 : "canceled";
         }
+        catch (Exception ex)
+        {
+            PreserveEnhancementWorkspaceAfterRefreshFailure(
+                "Jobs could not be refreshed. The last valid snapshot is still shown; retrying.");
+            operationOutcome = $"failed:{ex.GetType().Name}";
+        }
         finally
         {
             AibosOperationLog.Write(
@@ -1298,19 +1304,44 @@ public partial class MainWindow
 
     private async void EnhancementWorkspacePollTimer_Tick(object? sender, EventArgs e)
     {
-        if (_aiProcessingMinimizedMode)
+        try
         {
-            _enhancementWorkspacePollTimer.Stop();
-            return;
-        }
-        if (EnhancementJobsDialog.Visibility != Visibility.Visible
-            || _enhancementWorkspaceMutationPending
-            || _enhancementWorkspaceHealthPollPending
-            || (_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == _enhancementWorkspaceGeneration))
-            return;
+            if (_aiProcessingMinimizedMode)
+            {
+                _enhancementWorkspacePollTimer.Stop();
+                return;
+            }
+            if (EnhancementJobsDialog.Visibility != Visibility.Visible
+                || _enhancementWorkspaceMutationPending
+                || _enhancementWorkspaceHealthPollPending
+                || (_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == _enhancementWorkspaceGeneration))
+                return;
 
-        _enhancementWorkspacePollCount++;
-        await PollEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration);
+            _enhancementWorkspacePollCount++;
+            await PollEnhancementJobsWorkspaceAsync(_enhancementWorkspaceGeneration);
+        }
+        catch (Exception ex)
+        {
+            PreserveEnhancementWorkspaceAfterRefreshFailure(
+                "Jobs could not be refreshed. The last valid snapshot is still shown; retrying.");
+            AibosOperationLog.Write(
+                "jobs_workspace_poll",
+                "failed",
+                0,
+                mode: ex.GetType().Name,
+                itemCount: _enhancementWorkspaceJobs.Count);
+        }
+    }
+
+    private void PreserveEnhancementWorkspaceAfterRefreshFailure(string message)
+    {
+        EnhancementJobsStatusText.Text = message;
+        if (!_aiProcessingMinimizedMode
+            && EnhancementJobsDialog.Visibility == Visibility.Visible
+            && _enhancementWorkspaceJobs.Any(static job => job.IsActive))
+        {
+            _enhancementWorkspacePollTimer.Start();
+        }
     }
 
     private async Task PollEnhancementJobsWorkspaceAsync(long generation)
@@ -1421,8 +1452,8 @@ public partial class MainWindow
             }
             if (!parsed)
             {
-                EnhancementJobsStatusText.Text = error ?? "The companion returned an invalid jobs response.";
-                _enhancementWorkspacePollTimer.Stop();
+                PreserveEnhancementWorkspaceAfterRefreshFailure(
+                    error ?? "The companion returned an invalid jobs response. The last valid snapshot is still shown; retrying.");
                 return;
             }
 
@@ -2016,8 +2047,10 @@ public partial class MainWindow
 
     private void ReconcileEnhancementWorkspaceJobs(IReadOnlyList<EnhancementWorkspaceJobView> jobs)
     {
-        Dictionary<string, EnhancementWorkspaceJobView> existingById =
-            _enhancementWorkspaceJobs.ToDictionary(static job => job.Id, StringComparer.Ordinal);
+        var existingById = new Dictionary<string, EnhancementWorkspaceJobView>(
+            StringComparer.Ordinal);
+        foreach (EnhancementWorkspaceJobView existing in _enhancementWorkspaceJobs)
+            existingById.TryAdd(existing.Id, existing);
         var reconciled = new List<EnhancementWorkspaceJobView>(jobs.Count);
         foreach (EnhancementWorkspaceJobView candidate in jobs)
         {
@@ -2118,14 +2151,26 @@ public partial class MainWindow
         }
 
         int apiOrdinal = 0;
+        var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (JsonElement element in jobsElement.EnumerateArray())
         {
             EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(
                 element,
                 apiOrdinal++,
                 videoMutationValidator);
-            if (job is not null)
-                jobs.Add(job);
+            if (job is null)
+            {
+                jobs.Clear();
+                error = "The companion returned an invalid jobs row. The last valid snapshot was preserved.";
+                return false;
+            }
+            if (!ids.Add(job.Id))
+            {
+                jobs.Clear();
+                error = "The companion returned duplicate job identifiers. The last valid snapshot was preserved.";
+                return false;
+            }
+            jobs.Add(job);
         }
 
         HashSet<string> protectedPhotorealJobIds = jobs
@@ -3025,8 +3070,13 @@ public partial class MainWindow
             return false;
         }
 
-        Dictionary<string, EnhancementWorkspaceJobView> queuedById = queued
-            .ToDictionary(static candidate => candidate.Id, StringComparer.Ordinal);
+        var queuedById = new Dictionary<string, EnhancementWorkspaceJobView>(
+            StringComparer.Ordinal);
+        foreach (EnhancementWorkspaceJobView candidate in queued)
+        {
+            if (!queuedById.TryAdd(candidate.Id, candidate))
+                return false;
+        }
         if (orderedIds.Any(id => !queuedById.ContainsKey(id)))
             return false;
 

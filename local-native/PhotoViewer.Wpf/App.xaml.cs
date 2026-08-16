@@ -19513,6 +19513,7 @@ public partial class App : Application
                 TaskCompletionSource<bool>? queueMoveGate = null;
                 TaskCompletionSource<bool>? jobsGetEntered = null;
                 TaskCompletionSource<bool>? jobsGetGate = null;
+                string jobsResponseMode = "normal";
                 bool allQueuedCanceled = false;
                 bool outputDeleted = false;
                 bool videoOutputDeleted = false;
@@ -20051,9 +20052,45 @@ public partial class App : Application
 
                 async Task<HttpResponseMessage> CurrentJobsResponseAsync()
                 {
+                    object[] currentJobs = CurrentJobs();
+                    object jobsPayload = jobsResponseMode switch
+                    {
+                        "duplicate-id" => new
+                        {
+                            jobs = currentJobs.Append(currentJobs[0]).ToArray(),
+                        },
+                        "non-object-row" => new
+                        {
+                            jobs = currentJobs.Append((object)42).ToArray(),
+                        },
+                        "missing-id" => new
+                        {
+                            jobs = currentJobs.Append((object)new
+                            {
+                                status = "queued",
+                                progress = 0,
+                            }).ToArray(),
+                        },
+                        "missing-status" => new
+                        {
+                            jobs = currentJobs.Append((object)new
+                            {
+                                id = "malformed-missing-status",
+                                progress = 0,
+                            }).ToArray(),
+                        },
+                        "unknown-status" => new
+                        {
+                            jobs = currentJobs.Append(Job(
+                                "malformed-unknown-status",
+                                "future-running-v2",
+                                0)).ToArray(),
+                        },
+                        _ => new { jobs = currentJobs },
+                    };
                     HttpResponseMessage response = JsonResponse(
                         HttpStatusCode.OK,
-                        new { jobs = CurrentJobs() });
+                        jobsPayload);
                     TaskCompletionSource<bool>? gate = jobsGetGate;
                     if (gate is not null)
                     {
@@ -20468,16 +20505,83 @@ public partial class App : Application
                     && initial.QueuedPhotorealPromptUpdateSupported;
                 bool healthProvenance = initial.HealthRevision == "Local AI 69684954";
                 bool healthPassive = initial.HealthGetRequests >= 1 && passiveOpen;
+                string[] validSnapshotIds = initial.VisibleIds.ToArray();
+                async Task<bool> InvalidJobsSnapshotRejectedAsync(
+                    string mode,
+                    bool pollTwice = false)
+                {
+                    int requestsBeforeInvalidSnapshot = requests.Count;
+                    jobsResponseMode = mode;
+                    try
+                    {
+                        if (pollTwice)
+                        {
+                            healthLastTerminalAt =
+                                "2026-07-30T13:30:30.000Z";
+                            await window.PollEnhancementJobsForSmokeAsync();
+                            await window.PollEnhancementJobsForSmokeAsync();
+                        }
+                        else
+                        {
+                            await window.RefreshEnhancementJobsForSmokeAsync();
+                        }
+
+                        EnhancementJobsWorkspaceSmokeSnapshot preserved =
+                            window.EnhancementJobsWorkspaceForSmoke();
+                        return preserved.Total == initial.Total
+                            && preserved.Active == initial.Active
+                            && preserved.VisibleIds.SequenceEqual(
+                                validSnapshotIds,
+                                StringComparer.Ordinal)
+                            && preserved.Polling
+                            && preserved.Status.Contains(
+                                "preserved",
+                                StringComparison.OrdinalIgnoreCase)
+                            && requests.Skip(requestsBeforeInvalidSnapshot)
+                                .All(static request => request.StartsWith(
+                                    "GET ",
+                                    StringComparison.Ordinal));
+                    }
+                    finally
+                    {
+                        jobsResponseMode = "normal";
+                    }
+                }
+
+                bool duplicateJobsSnapshotRejected =
+                    await InvalidJobsSnapshotRejectedAsync(
+                        "duplicate-id",
+                        pollTwice: true);
+                bool malformedJobsSnapshotsRejected =
+                    await InvalidJobsSnapshotRejectedAsync("non-object-row")
+                    && await InvalidJobsSnapshotRejectedAsync("missing-id")
+                    && await InvalidJobsSnapshotRejectedAsync("missing-status")
+                    && await InvalidJobsSnapshotRejectedAsync("unknown-status");
+                healthLastTerminalAt = null;
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterInvalidRecovery =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool invalidJobsSnapshotRecovery =
+                    afterInvalidRecovery.Total == initial.Total
+                    && afterInvalidRecovery.Active == initial.Active
+                    && afterInvalidRecovery.VisibleIds.SequenceEqual(
+                        validSnapshotIds,
+                        StringComparer.Ordinal)
+                    && afterInvalidRecovery.Polling
+                    && !afterInvalidRecovery.Status.Contains(
+                        "preserved",
+                        StringComparison.OrdinalIgnoreCase);
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterHealthOnlyPoll =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool healthOnlyPollAvoidedFullInventory =
-                    afterHealthOnlyPoll.GetRequests == initial.GetRequests
+                    afterHealthOnlyPoll.GetRequests
+                        == afterInvalidRecovery.GetRequests
                     && afterHealthOnlyPoll.HealthGetRequests
-                        == initial.HealthGetRequests + 1
+                        == afterInvalidRecovery.HealthGetRequests + 1
                     && afterHealthOnlyPoll.PollRequests
-                        == initial.PollRequests + 1
-                    && afterHealthOnlyPoll.Total == initial.Total;
+                        == afterInvalidRecovery.PollRequests + 1
+                    && afterHealthOnlyPoll.Total == afterInvalidRecovery.Total;
                 healthLastTerminalAt = "2026-07-30T13:31:00.000Z";
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterTerminalSignaturePoll =
@@ -21496,6 +21600,9 @@ public partial class App : Application
                     && healthVisible
                     && healthProvenance
                     && healthPassive
+                    && duplicateJobsSnapshotRejected
+                    && malformedJobsSnapshotsRejected
+                    && invalidJobsSnapshotRecovery
                     && healthOnlyPollAvoidedFullInventory
                     && terminalSignatureRefreshesSameCountInventory
                     && companionRestartRefreshesInventory
@@ -21614,6 +21721,10 @@ public partial class App : Application
                     healthVisible,
                     healthProvenance,
                     healthPassive,
+                    duplicateJobsSnapshotRejected,
+                    malformedJobsSnapshotsRejected,
+                    invalidJobsSnapshotRecovery,
+                    afterInvalidRecovery,
                     healthOnlyPollAvoidedFullInventory,
                     afterHealthOnlyPoll,
                     terminalSignatureRefreshesSameCountInventory,
