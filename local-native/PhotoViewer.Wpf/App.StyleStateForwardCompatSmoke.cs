@@ -8,14 +8,13 @@ public partial class App
 {
     private void CaptureStyleStateForwardCompatSmoke(string resultPath)
     {
-        string resultFullPath = Path.GetFullPath(resultPath);
-        string statePath = Environment.GetEnvironmentVariable(
-                "PHOTOVIEWER_WPF_STATE_PATH")
+        string resultFullPath = RequireStyleStateSmokeTempPath(
+            resultPath,
+            "result");
+        string storageRoot = _styleStateForwardCompatSmokeStorageRoot
             ?? throw new InvalidOperationException(
-                "The isolated viewer state path was not configured.");
-        string storageRoot = Path.GetDirectoryName(statePath)
-            ?? throw new InvalidOperationException(
-                "The isolated viewer state directory was not configured.");
+                "The managed Style state smoke root was not configured.");
+        string statePath = Path.Combine(storageRoot, "state.json");
         string sourcePath = Path.Combine(storageRoot, "fixture-source.bin");
         MainWindow? window = null;
         object result;
@@ -289,5 +288,26 @@ public partial class App
         {
             // The verifier owns its isolated TEMP fixture and can retry cleanup.
         }
+    }
+
+    private static string RequireStyleStateSmokeTempPath(
+        string candidate,
+        string description)
+    {
+        string fullPath = Path.GetFullPath(candidate);
+        string tempRoot = Path.GetFullPath(Path.GetTempPath())
+            .TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar);
+        string tempPrefix = tempRoot + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(
+                tempPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"The Style state smoke {description} path must stay under TEMP.");
+        }
+
+        return fullPath;
     }
 }
