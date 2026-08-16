@@ -25,9 +25,8 @@ public partial class App
         string? contractArgument = ArgValue(args.ToArray(), "--contract");
         string? mediaFixtureArgument =
             ArgValue(args.ToArray(), "--media-fixture-base64");
-        string smokeRoot = Path.Combine(
-            Path.GetTempPath(),
-            "photoviewer-wpf-video-v2-reader-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = Directory.CreateTempSubdirectory(
+            "photoviewer-wpf-video-v2-reader-").FullName;
         string sourceRoot = Path.Combine(smokeRoot, "source");
         string exifSourceRoot = Path.Combine(smokeRoot, "exif-source");
         string outputRoot = Path.Combine(smokeRoot, "managed-output");
