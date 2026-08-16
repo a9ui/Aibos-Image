@@ -14,8 +14,32 @@ public partial class App
         string configuredStorageRoot = _styleStateForwardCompatSmokeStorageRoot
             ?? throw new InvalidOperationException(
                 "The managed Style state smoke root was not configured.");
-        string storageRoot = RequireManagedStyleStateSmokeStorageRoot(
-            configuredStorageRoot);
+        string storageRoot = Path.GetFullPath(configuredStorageRoot);
+        string tempRoot = Path.GetFullPath(Path.GetTempPath())
+            .TrimEnd(
+                Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar);
+        string expectedParent = Path.Combine(
+            tempRoot,
+            "photoviewer-wpf-automation");
+        string expectedPrefix = expectedParent + Path.DirectorySeparatorChar;
+        if (!storageRoot.StartsWith(
+                expectedPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                "The managed Style state smoke root must stay under its TEMP parent.");
+        }
+
+        string relativeStorageRoot = storageRoot[expectedPrefix.Length..];
+        if (relativeStorageRoot.Contains(Path.DirectorySeparatorChar)
+            || relativeStorageRoot.Contains(Path.AltDirectorySeparatorChar)
+            || !Guid.TryParseExact(relativeStorageRoot, "N", out _))
+        {
+            throw new ArgumentException(
+                "The managed Style state smoke root must be one GUID child under its TEMP parent.");
+        }
+
         string statePath = Path.Combine(storageRoot, "state.json");
         string sourcePath = Path.Combine(storageRoot, "fixture-source.bin");
         MainWindow? window = null;
@@ -308,38 +332,6 @@ public partial class App
         {
             throw new ArgumentException(
                 $"The Style state smoke {description} path must stay under TEMP.");
-        }
-
-        return fullPath;
-    }
-
-    private static string RequireManagedStyleStateSmokeStorageRoot(
-        string candidate)
-    {
-        string fullPath = Path.GetFullPath(candidate);
-        string tempRoot = Path.GetFullPath(Path.GetTempPath())
-            .TrimEnd(
-                Path.DirectorySeparatorChar,
-                Path.AltDirectorySeparatorChar);
-        string expectedParent = Path.Combine(
-            tempRoot,
-            "photoviewer-wpf-automation");
-        string expectedPrefix = expectedParent + Path.DirectorySeparatorChar;
-        if (!fullPath.StartsWith(
-                expectedPrefix,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException(
-                "The managed Style state smoke root must stay under its TEMP parent.");
-        }
-
-        string relative = fullPath[expectedPrefix.Length..];
-        if (relative.Contains(Path.DirectorySeparatorChar)
-            || relative.Contains(Path.AltDirectorySeparatorChar)
-            || !Guid.TryParseExact(relative, "N", out _))
-        {
-            throw new ArgumentException(
-                "The managed Style state smoke root must be one GUID child under its TEMP parent.");
         }
 
         return fullPath;
