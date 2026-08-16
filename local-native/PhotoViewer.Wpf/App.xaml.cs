@@ -3560,10 +3560,9 @@ public partial class App : Application
                     "The Style state forward-compat smoke does not support a shared automation storage slot.");
             }
 
-            root = Path.Combine(
-                Path.GetFullPath(Path.GetTempPath()),
-                "photoviewer-wpf-automation",
-                Guid.NewGuid().ToString("N"));
+            root = Directory.CreateTempSubdirectory(
+                    StyleStateSmokeTempDirectoryPrefix)
+                .FullName;
             _styleStateForwardCompatSmokeStorageRoot = root;
         }
         else
