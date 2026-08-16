@@ -443,6 +443,17 @@ public partial class App : Application
             return;
         }
 
+        int styleStateForwardCompatSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--style-state-forward-compat-smoke");
+        if (styleStateForwardCompatSmokeIdx >= 0
+            && styleStateForwardCompatSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureStyleStateForwardCompatSmoke(
+                e.Args[styleStateForwardCompatSmokeIdx + 1]);
+            return;
+        }
+
         int videoV2UiSmokeIdx = Array.IndexOf(e.Args, "--video-v2-ui-smoke");
         if (videoV2UiSmokeIdx >= 0 && videoV2UiSmokeIdx + 1 < e.Args.Length)
         {

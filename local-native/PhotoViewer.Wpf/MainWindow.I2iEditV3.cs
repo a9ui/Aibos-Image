@@ -879,7 +879,11 @@ public partial class MainWindow
         int index = _i2iV3Styles.FindIndex(style =>
             string.Equals(style.Name, name, StringComparison.OrdinalIgnoreCase));
         if (index >= 0)
+        {
+            saved.ExtensionData = I2iEditStyleState.CloneExtensionData(
+                _i2iV3Styles[index].ExtensionData);
             _i2iV3Styles[index] = saved;
+        }
         else if (_i2iV3Styles.Count >= I2iV3MaximumStyleCount)
         {
             I2iV3StyleStatusText.Text = $"Styleは最大{I2iV3MaximumStyleCount}件です。";
@@ -1101,12 +1105,26 @@ public sealed class I2iEditStyleState
         {
             return null;
         }
-        return FromSnapshot(
+        I2iEditStyleState normalized = FromSnapshot(
             name,
             new I2iV3WorkspaceSnapshot(
                 overall, expression, outfit, background, pose,
                 value.Steps, value.CfgScale, value.OutfitMaskMode,
                 value.OutfitMaskExpandPixels, value.Seed),
             value.SeedMode);
+        normalized.ExtensionData = CloneExtensionData(value.ExtensionData);
+        return normalized;
+    }
+
+    internal static Dictionary<string, JsonElement>? CloneExtensionData(
+        Dictionary<string, JsonElement>? source)
+    {
+        if (source is null || source.Count == 0)
+            return null;
+
+        var clone = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach ((string key, JsonElement value) in source)
+            clone[key] = value.Clone();
+        return clone;
     }
 }
