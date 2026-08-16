@@ -1684,6 +1684,8 @@ public partial class MainWindow
             string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
         if (existingIndex >= 0)
         {
+            style.ExtensionData = CloneExtensionData(
+                _videoStyles[existingIndex].ExtensionData);
             _videoStyles[existingIndex] = style;
         }
         else
@@ -1797,6 +1799,7 @@ public partial class MainWindow
                     ? steps
                     : MiniMaxH3VideoSteps,
             Prompt = prompt,
+            ExtensionData = CloneExtensionData(candidate.ExtensionData),
         };
     }
 
@@ -1928,6 +1931,7 @@ public partial class MainWindow
                 MaximumPixelArea = style.MaximumPixelArea,
                 Steps = style.Steps,
                 Prompt = style.Prompt,
+                ExtensionData = CloneExtensionData(style.ExtensionData),
             }).ToList();
 
     private void RestoreVideoGenerationSettings(

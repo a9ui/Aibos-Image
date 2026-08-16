@@ -23472,7 +23472,14 @@ public partial class MainWindow : Window
             if (document.RootElement.ValueKind != JsonValueKind.Object)
                 return false;
             state = JsonSerializer.Deserialize<ViewerState>(json);
-            return state is not null && state.Version <= 2;
+            if (state is null
+                || state.Version > 2
+                || !AreViewerStyleCollectionsSupported(state))
+            {
+                state = null;
+                return false;
+            }
+            return true;
         }
         catch
         {
@@ -23490,6 +23497,88 @@ public partial class MainWindow : Window
         foreach (var entry in source)
             clone[entry.Key] = entry.Value.Clone();
         return clone;
+    }
+
+    private static bool AreViewerStyleCollectionsSupported(ViewerState state)
+    {
+        if (state.VideoStyles is { Count: > MaxVideoStyleCount }
+            || state.I2iEditStyles is { Count: > I2iV3MaximumStyleCount })
+        {
+            return false;
+        }
+
+        var videoNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (VideoStyleState? candidate in state.VideoStyles ?? [])
+        {
+            VideoStyleState? normalized = NormalizeVideoStyle(candidate);
+            if (normalized is null || !videoNames.Add(normalized.Name))
+                return false;
+        }
+
+        var i2iNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (I2iEditStyleState? candidate in state.I2iEditStyles ?? [])
+        {
+            I2iEditStyleState? normalized = I2iEditStyleState.Normalize(candidate);
+            if (normalized is null || !i2iNames.Add(normalized.Name))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static void MergeLatestStyleExtensionData(
+        ViewerState state,
+        ViewerState? latest)
+    {
+        if (latest is null)
+            return;
+
+        foreach (VideoStyleState current in state.VideoStyles ?? [])
+        {
+            VideoStyleState? latestMatch = latest.VideoStyles?.FirstOrDefault(
+                candidate => string.Equals(
+                    candidate.Name.Trim(),
+                    current.Name,
+                    StringComparison.OrdinalIgnoreCase));
+            if (latestMatch is not null)
+                current.ExtensionData = CloneExtensionData(latestMatch.ExtensionData);
+        }
+
+        foreach (I2iEditStyleState current in state.I2iEditStyles ?? [])
+        {
+            I2iEditStyleState? latestMatch = latest.I2iEditStyles?.FirstOrDefault(
+                candidate => string.Equals(
+                    candidate.Name.Trim(),
+                    current.Name,
+                    StringComparison.OrdinalIgnoreCase));
+            if (latestMatch is not null)
+                current.ExtensionData = CloneExtensionData(latestMatch.ExtensionData);
+        }
+    }
+
+    private void ApplySavedStyleExtensionData(ViewerState state)
+    {
+        foreach (VideoStyleState current in _videoStyles)
+        {
+            VideoStyleState? saved = state.VideoStyles?.FirstOrDefault(
+                candidate => string.Equals(
+                    candidate.Name,
+                    current.Name,
+                    StringComparison.OrdinalIgnoreCase));
+            if (saved is not null)
+                current.ExtensionData = CloneExtensionData(saved.ExtensionData);
+        }
+
+        foreach (I2iEditStyleState current in _i2iV3Styles)
+        {
+            I2iEditStyleState? saved = state.I2iEditStyles?.FirstOrDefault(
+                candidate => string.Equals(
+                    candidate.Name,
+                    current.Name,
+                    StringComparison.OrdinalIgnoreCase));
+            if (saved is not null)
+                current.ExtensionData = CloneExtensionData(saved.ExtensionData);
+        }
     }
 
     private void SaveState()
@@ -23641,6 +23730,7 @@ public partial class MainWindow : Window
                 state.KeyBindings = KeyBindingSettings.ToPersisted(
                     _keyBindings,
                     latest is null ? _keyBindingUnknownEntries : latestUnknownKeyBindings);
+                MergeLatestStyleExtensionData(state, latest);
                 if (latest?.FavoriteChangedAtUtcByPath is { Count: > 0 } latestFavoriteActivity)
                 {
                     state.FavoriteChangedAtUtcByPath ??=
@@ -23680,6 +23770,7 @@ public partial class MainWindow : Window
             _enhancementNotificationStateExtensionData = CloneExtensionData(
                 state.EnhancementNotifications?.ExtensionData);
             _ = KeyBindingSettings.NormalizePersisted(state.KeyBindings, out _keyBindingUnknownEntries);
+            ApplySavedStyleExtensionData(state);
         }
         catch
         {
@@ -30717,6 +30808,8 @@ public sealed class VideoStyleState
     public int MaximumPixelArea { get; set; }
     public int? Steps { get; set; }
     public string Prompt { get; set; } = "";
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }
 
 public readonly record struct RecycleBinDeleteResult(bool Succeeded, string Reason)
