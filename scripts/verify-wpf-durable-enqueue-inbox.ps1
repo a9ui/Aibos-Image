@@ -1,4 +1,6 @@
-param()
+param(
+    [string]$DotnetPath = ''
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -15,7 +17,12 @@ if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) {
     throw 'Durable enqueue inbox contract is missing.'
 }
 
-$dotnet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
+$dotnet = if ([string]::IsNullOrWhiteSpace($DotnetPath)) {
+    Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
+}
+else {
+    [IO.Path]::GetFullPath($DotnetPath)
+}
 if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) {
     throw 'A local .NET SDK host is required for the focused smoke.'
 }
@@ -24,12 +31,15 @@ $smokeRoot = Join-Path $env:TEMP ('aibos-enqueue-inbox-smoke-' + [guid]::NewGuid
 $resultPath = Join-Path $smokeRoot 'result.json'
 $projectPath = Join-Path $smokeRoot 'Smoke.csproj'
 $programPath = Join-Path $smokeRoot 'Program.cs'
+$nugetConfigPath = Join-Path $smokeRoot 'NuGet.Config'
 $taskPreviousDotnetRoot = $env:DOTNET_ROOT
 $taskPreviousDotnetRootX64 = $env:DOTNET_ROOT_X64
+$taskPreviousNugetScratch = $env:NUGET_SCRATCH
 
 try {
     $env:DOTNET_ROOT = Split-Path -Parent $dotnet
     $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
+    $env:NUGET_SCRATCH = Join-Path $smokeRoot 'nuget-scratch'
     New-Item -ItemType Directory -Path $smokeRoot | Out-Null
     $escapedStoreSource = [System.Security.SecurityElement]::Escape($storeSource)
     $escapedPolicySource = [System.Security.SecurityElement]::Escape($policySource)
@@ -39,7 +49,7 @@ try {
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -357,7 +367,16 @@ return result.pass ? 0 : 1;
 '@,
         [System.Text.UTF8Encoding]::new($false))
 
-    & $dotnet run --project $projectPath --configuration Release -- $contractPath $resultPath
+    [System.IO.File]::WriteAllText(
+        $nugetConfigPath,
+        '<?xml version="1.0" encoding="utf-8"?><configuration><packageSources><clear /></packageSources></configuration>',
+        [System.Text.UTF8Encoding]::new($false))
+
+    & $dotnet restore $projectPath --configfile $nugetConfigPath --nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Durable enqueue inbox focused smoke restore failed.'
+    }
+    & $dotnet run --project $projectPath --configuration Release --no-restore -- $contractPath $resultPath
     if ($LASTEXITCODE -ne 0) {
         throw 'Durable enqueue inbox focused smoke failed.'
     }
@@ -374,6 +393,7 @@ return result.pass ? 0 : 1;
 finally {
     $env:DOTNET_ROOT = $taskPreviousDotnetRoot
     $env:DOTNET_ROOT_X64 = $taskPreviousDotnetRootX64
+    $env:NUGET_SCRATCH = $taskPreviousNugetScratch
     if (Test-Path -LiteralPath $smokeRoot) {
         Remove-Item -LiteralPath $smokeRoot -Recurse -Force
     }
