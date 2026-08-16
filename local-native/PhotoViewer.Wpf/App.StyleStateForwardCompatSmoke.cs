@@ -6,6 +6,9 @@ namespace PhotoViewer.Wpf;
 
 public partial class App
 {
+    private const string StyleStateSmokeTempDirectoryPrefix =
+        "photoviewer-wpf-automation-";
+
     private void CaptureStyleStateForwardCompatSmoke(string resultPath)
     {
         string resultFullPath = RequireStyleStateSmokeTempPath(
@@ -19,25 +22,19 @@ public partial class App
             .TrimEnd(
                 Path.DirectorySeparatorChar,
                 Path.AltDirectorySeparatorChar);
-        string expectedParent = Path.Combine(
-            tempRoot,
-            "photoviewer-wpf-automation");
-        string expectedPrefix = expectedParent + Path.DirectorySeparatorChar;
-        if (!storageRoot.StartsWith(
-                expectedPrefix,
-                StringComparison.OrdinalIgnoreCase))
+        string? storageParent = Path.GetDirectoryName(storageRoot);
+        string storageLeaf = Path.GetFileName(storageRoot);
+        if (!string.Equals(
+                storageParent,
+                tempRoot,
+                StringComparison.OrdinalIgnoreCase)
+            || !storageLeaf.StartsWith(
+                StyleStateSmokeTempDirectoryPrefix,
+                StringComparison.Ordinal)
+            || storageLeaf.Length <= StyleStateSmokeTempDirectoryPrefix.Length)
         {
             throw new ArgumentException(
-                "The managed Style state smoke root must stay under its TEMP parent.");
-        }
-
-        string relativeStorageRoot = storageRoot[expectedPrefix.Length..];
-        if (relativeStorageRoot.Contains(Path.DirectorySeparatorChar)
-            || relativeStorageRoot.Contains(Path.AltDirectorySeparatorChar)
-            || !Guid.TryParseExact(relativeStorageRoot, "N", out _))
-        {
-            throw new ArgumentException(
-                "The managed Style state smoke root must be one GUID child under its TEMP parent.");
+                "The managed Style state smoke root must be one app-created child directly under TEMP.");
         }
 
         string statePath = Path.Combine(storageRoot, "state.json");
@@ -293,18 +290,17 @@ public partial class App
                 .TrimEnd(
                     Path.DirectorySeparatorChar,
                     Path.AltDirectorySeparatorChar);
-            string expectedPrefix = Path.Combine(
-                    tempRoot,
-                    "photoviewer-wpf-automation")
-                + Path.DirectorySeparatorChar;
             string fullStorageRoot = Path.GetFullPath(storageRoot);
-            if (fullStorageRoot.StartsWith(
-                    expectedPrefix,
-                    StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(
-                    fullStorageRoot,
+            string? storageParent = Path.GetDirectoryName(fullStorageRoot);
+            string storageLeaf = Path.GetFileName(fullStorageRoot);
+            if (string.Equals(
+                    storageParent,
                     tempRoot,
                     StringComparison.OrdinalIgnoreCase)
+                && storageLeaf.StartsWith(
+                    StyleStateSmokeTempDirectoryPrefix,
+                    StringComparison.Ordinal)
+                && storageLeaf.Length > StyleStateSmokeTempDirectoryPrefix.Length
                 && Directory.Exists(fullStorageRoot))
             {
                 Directory.Delete(fullStorageRoot, recursive: true);
