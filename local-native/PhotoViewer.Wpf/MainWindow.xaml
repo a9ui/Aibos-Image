@@ -2390,7 +2390,7 @@
                       Click="OpenVideoStylesFile_Click"
                       HorizontalAlignment="Left" Margin="0,6,0,0" Padding="8,3"
                       AutomationProperties.Name="Open video generation style storage file"
-                      AutomationProperties.HelpText="Save current viewer state, then open the JSON file. External edits are loaded on the next app start."/>
+                      AutomationProperties.HelpText="Save current viewer state, then open its JSON file in Windows Notepad. External edits are loaded on the next app start."/>
               <TextBlock x:Name="AppVideoStyleSummaryText"
                          Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,6,0,0"/>
@@ -3562,7 +3562,7 @@
                     HorizontalAlignment="Left" Height="27" Padding="7,2" Margin="0,0,0,8"
                     Foreground="{StaticResource TextPrimary}"
                     AutomationProperties.Name="Open video generation style storage file"
-                    AutomationProperties.HelpText="Save current viewer state, then open the JSON file. External edits are loaded on the next app start."/>
+                    AutomationProperties.HelpText="Save current viewer state, then open its JSON file in Windows Notepad. External edits are loaded on the next app start."/>
             <TextBlock x:Name="ModalVideoStyleStatusText"
                        Foreground="{StaticResource TextSecondary}" FontSize="10"
                        TextWrapping="Wrap" Margin="0,0,0,8"

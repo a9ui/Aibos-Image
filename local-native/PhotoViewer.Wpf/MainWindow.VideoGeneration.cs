@@ -1809,20 +1809,34 @@ public partial class MainWindow
 
     private bool TryOpenVideoStylesFile()
     {
-        SaveState();
         try
         {
-            string path = Path.GetFullPath(ResolvedStatePath);
+            string path = Path.GetFullPath(StatePath);
+            if (!string.Equals(
+                    Path.GetFullPath(ResolvedStatePath),
+                    path,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                SetVideoStyleStatus("保存path override中は外部編集を開きません。通常起動で使用してください。");
+                return false;
+            }
+
+            SaveState();
             if (!File.Exists(path))
             {
                 SetVideoStyleStatus("Style保存ファイルを作成できませんでした。保存エラーを確認してください。");
                 return false;
             }
 
-            var startInfo = new ProcessStartInfo(path) { UseShellExecute = true };
+            var startInfo = new ProcessStartInfo(
+                Path.Combine(Environment.SystemDirectory, "notepad.exe"))
+            {
+                UseShellExecute = false,
+            };
+            startInfo.ArgumentList.Add(path);
             if (!_externalFileLauncher(startInfo))
             {
-                SetVideoStyleStatus("Style保存ファイルを開けませんでした。JSONの既定アプリを確認してください。");
+                SetVideoStyleStatus("Style保存ファイルをWindows Notepadで開けませんでした。");
                 return false;
             }
 
@@ -1837,7 +1851,7 @@ public partial class MainWindow
             or System.Security.SecurityException)
         {
             Trace.TraceWarning($"Video style storage open failed: {error.GetType().Name}");
-            SetVideoStyleStatus("Style保存ファイルを開けませんでした。パスとJSONの既定アプリを確認してください。");
+            SetVideoStyleStatus("Style保存ファイルをWindows Notepadで開けませんでした。");
             return false;
         }
     }
@@ -3063,31 +3077,6 @@ public partial class MainWindow
         AppVideoStyleNameTextBox.Text = name;
         SaveVideoStyle_Click(SaveAppVideoStyleButton, new RoutedEventArgs());
         return FindVideoStyle(name) is not null;
-    }
-
-    public bool OpenVideoStylesFileForSmoke()
-    {
-        ProcessStartInfo? captured = null;
-        Func<ProcessStartInfo, bool> previous = _externalFileLauncher;
-        _externalFileLauncher = startInfo =>
-        {
-            captured = startInfo;
-            return true;
-        };
-        try
-        {
-            return TryOpenVideoStylesFile()
-                && captured is not null
-                && captured.UseShellExecute
-                && string.Equals(
-                    Path.GetFullPath(captured.FileName),
-                    Path.GetFullPath(ResolvedStatePath),
-                    StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            _externalFileLauncher = previous;
-        }
     }
 
     public bool SelectVideoStyleForSmoke(string name)
