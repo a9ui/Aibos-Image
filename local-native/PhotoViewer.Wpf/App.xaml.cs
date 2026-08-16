@@ -3537,11 +3537,39 @@ public partial class App : Application
         }, DispatcherPriority.ContextIdle);
     }
 
+    private static string? _styleStateForwardCompatSmokeStorageRoot;
+
     private static void ConfigureAutomationStorage(IReadOnlyList<string> args)
     {
         ValidateAutomationPathArguments(args);
 
-        string root = ResolveAutomationStorageRoot(args);
+        bool styleStateForwardCompatSmoke = args.Any(static arg =>
+            string.Equals(
+                arg,
+                "--style-state-forward-compat-smoke",
+                StringComparison.Ordinal));
+        string root;
+        if (styleStateForwardCompatSmoke)
+        {
+            if (!string.IsNullOrWhiteSpace(
+                    ArgValue(
+                        args.ToArray(),
+                        "--automation-storage-slot")))
+            {
+                throw new ArgumentException(
+                    "The Style state forward-compat smoke does not support a shared automation storage slot.");
+            }
+
+            root = Path.Combine(
+                Path.GetFullPath(Path.GetTempPath()),
+                "photoviewer-wpf-automation",
+                Guid.NewGuid().ToString("N"));
+            _styleStateForwardCompatSmokeStorageRoot = root;
+        }
+        else
+        {
+            root = ResolveAutomationStorageRoot(args);
+        }
         ConfigureAutomationStorageRoot(root);
     }
 
