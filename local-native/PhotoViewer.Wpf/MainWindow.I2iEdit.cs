@@ -454,7 +454,9 @@ public partial class MainWindow
         resolvedSource = "";
         managedOutput = null!;
         catalogAliases = [];
-        if (!(IsI2iMutationSafe(job) || IsI2iV2MutationSafe(job))
+        if (!(IsI2iMutationSafe(job)
+                || IsI2iV2MutationSafe(job)
+                || IsI2iV3MutationSafe(job))
             || !TryBuildManagedEnhancedOutput(
                 job,
                 out resolvedSource,

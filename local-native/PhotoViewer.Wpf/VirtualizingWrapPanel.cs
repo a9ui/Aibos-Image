@@ -480,6 +480,16 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             Math.Max(24, GroupHeaderHeight));
     }
 
+    internal bool UsesVariableItemHeightForSmoke
+        => !double.IsFinite(ItemHeight) || ItemHeight <= 0;
+
+    internal int DistinctItemRowHeightCountForSmoke
+        => _rowHeights
+            .Where((_, index) => index < _rowItemCounts.Count && _rowItemCounts[index] > 0)
+            .Select(static height => Math.Round(height, 3))
+            .Distinct()
+            .Count();
+
     internal void SetPreparedLayout(PreparedVirtualizingLayout? layout)
     {
         _preparedLayout = layout;

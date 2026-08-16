@@ -436,6 +436,13 @@ public partial class App : Application
             return;
         }
 
+        int i2iV3ReaderSmokeIdx = Array.IndexOf(e.Args, "--i2i-v3-reader-smoke");
+        if (i2iV3ReaderSmokeIdx >= 0 && i2iV3ReaderSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureI2iV3ReaderSmoke(e.Args[i2iV3ReaderSmokeIdx + 1]);
+            return;
+        }
+
         int videoV2UiSmokeIdx = Array.IndexOf(e.Args, "--video-v2-ui-smoke");
         if (videoV2UiSmokeIdx >= 0 && videoV2UiSmokeIdx + 1 < e.Args.Length)
         {
@@ -5198,9 +5205,10 @@ public partial class App : Application
                     _ = window.InvokePreviewKeyForSmoke(Key.E, ModifierKeys.None);
                     bool togglePassive = string.Equals(jobsBefore, FileFingerprint(jobsPath), StringComparison.Ordinal);
                     bool i2iShortcutOpened = window.InvokePreviewKeyForSmoke(Key.I, ModifierKeys.None)
-                        && window.I2iV2EditBoardVisibleForSmoke;
+                        && window.I2iV3EditBoardVisibleForSmoke
+                        && window.I2iV3StyleSurfaceForSmoke;
                     bool i2iShortcutClosed = window.InvokePreviewKeyForSmoke(Key.Escape, ModifierKeys.None)
-                        && !window.I2iV2EditBoardVisibleForSmoke;
+                        && !window.I2iV3EditBoardVisibleForSmoke;
                     bool videoShortcutOpened = window.InvokePreviewKeyForSmoke(Key.V, ModifierKeys.None)
                         && window.ModalVideoGenerationBoardVisibleForSmoke;
                     if (window.ModalVideoGenerationBoardVisibleForSmoke)
@@ -9758,6 +9766,32 @@ public partial class App : Application
                 bool originalChanged = first.SetAspectModeForSmoke("original");
                 DisplayStyleMetrics restoredOriginalRuntime = first.DisplayStyleMetricsForSmoke();
 
+                MainWindow.SearchFilterCompletion narrowOriginalSearch =
+                    await first.SetSearchInputForSmokeAsync("alpha-landscape");
+                first.UpdateLayout();
+                await first.Dispatcher.InvokeAsync(
+                    first.UpdateLayout,
+                    DispatcherPriority.Render);
+                int narrowOriginalDistinctRowHeights =
+                    first.GridDistinctItemRowHeightCountForSmoke;
+                bool narrowOriginalLayoutExact = narrowOriginalSearch.Applied
+                    && first.FilteredCountForSmoke == 1
+                    && first.GridUsesVariableItemHeightForSmoke
+                    && narrowOriginalDistinctRowHeights == 1;
+                MainWindow.SearchFilterCompletion clearOriginalSearch =
+                    await first.SetSearchInputForSmokeAsync("");
+                first.UpdateLayout();
+                await first.Dispatcher.InvokeAsync(
+                    first.UpdateLayout,
+                    DispatcherPriority.Render);
+                bool searchClearVariableLayoutRestored = narrowOriginalLayoutExact
+                    && clearOriginalSearch.Applied
+                    && first.FilteredCountForSmoke == filtered
+                    && first.GridUsesVariableItemHeightForSmoke
+                    && first.GridDistinctItemRowHeightCountForSmoke >= 2;
+                int searchClearDistinctRowHeights =
+                    first.GridDistinctItemRowHeightCountForSmoke;
+
                 string statePath = first.StatePathForSmoke;
                 bool persistedTargetSet = first.SetAspectModeForSmoke("portrait");
                 first.Close();
@@ -9768,6 +9802,44 @@ public partial class App : Application
                 DisplayStyleMetrics restored = second.DisplayStyleMetricsForSmoke();
                 List<string> restoredOrder = second.FilteredFileNamesForSmoke(3);
                 second.Close();
+
+                const int searchClearCatalogCount = 174_325;
+                var searchClearWindow = HiddenWindow();
+                searchClearWindow.SuppressStatePersistence();
+                searchClearWindow.Show();
+                searchClearWindow.SeedLargeInteractionCatalogForSmoke(
+                    searchClearCatalogCount);
+                searchClearWindow.UpdateLayout();
+                bool searchClearInitialRealizationSettled =
+                    await searchClearWindow.WaitForGridRealizationIdleForSmokeAsync(
+                        timeoutMilliseconds: 10_000);
+                MainWindow.SearchFilterCompletion largeNarrowSearch =
+                    await searchClearWindow.SetSearchInputForSmokeAsync("needle");
+                bool searchClearNarrowRealizationSettled =
+                    await searchClearWindow.WaitForGridRealizationIdleForSmokeAsync(
+                        timeoutMilliseconds: 10_000);
+                MainWindow.SearchFilterCompletion largeClearSearch =
+                    await searchClearWindow.SetSearchInputForSmokeAsync("");
+                bool searchClearFullRealizationSettled =
+                    await searchClearWindow.WaitForGridRealizationIdleForSmokeAsync(
+                        timeoutMilliseconds: 10_000);
+                int searchClearVisibleUnrealized =
+                    searchClearWindow.GridVisibleUnrealizedCountForSmoke;
+                int searchClearVisiblePlaceholders =
+                    searchClearWindow.GridVisiblePlaceholderCountForSmoke;
+                bool largeSearchClearRealizationRecovered =
+                    searchClearInitialRealizationSettled
+                    && largeNarrowSearch.Applied
+                    && searchClearNarrowRealizationSettled
+                    && largeClearSearch.Applied
+                    && searchClearFullRealizationSettled
+                    && searchClearWindow.FilteredCountForSmoke
+                        == searchClearCatalogCount
+                    && searchClearVisibleUnrealized == 0
+                    && searchClearVisiblePlaceholders == 0
+                    && !searchClearWindow
+                        .GridRealizationContinuationPendingForSmoke;
+                searchClearWindow.Close();
 
                 ViewerState? persisted = ReadPersistedState(statePath);
                 bool squareShape = Math.Abs(square.CardWidth - square.CardHeight) < 0.5
@@ -9821,7 +9893,9 @@ public partial class App : Application
                     && runtimeRestore
                     && persistence
                     && metadataLayoutCoalesced
-                    && metadataSelectionRaceRecovered;
+                    && metadataSelectionRaceRecovered
+                    && searchClearVariableLayoutRestored
+                    && largeSearchClearRealizationRecovered;
 
                 result = new AspectSmokeResult
                 {
@@ -9871,6 +9945,19 @@ public partial class App : Application
                     SelectionStable = selectionStable,
                     ZoomComposes = zoomComposes,
                     Persistence = persistence,
+                    SearchClearVariableLayoutRestored = searchClearVariableLayoutRestored,
+                    SearchNarrowDistinctRowHeights = narrowOriginalDistinctRowHeights,
+                    SearchClearDistinctRowHeights = searchClearDistinctRowHeights,
+                    LargeSearchClearRealizationRecovered =
+                        largeSearchClearRealizationRecovered,
+                    SearchClearInitialRealizationSettled =
+                        searchClearInitialRealizationSettled,
+                    SearchClearNarrowRealizationSettled =
+                        searchClearNarrowRealizationSettled,
+                    SearchClearFullRealizationSettled =
+                        searchClearFullRealizationSettled,
+                    SearchClearVisibleUnrealized = searchClearVisibleUnrealized,
+                    SearchClearVisiblePlaceholders = searchClearVisiblePlaceholders,
                 };
             }
             catch (Exception ex)
@@ -20329,6 +20416,16 @@ public partial class App : Application
                     window.ScrollEnhancementJobsForSmoke(240);
                 bool jobsScrollTopControl = scrollTopProbeOffset > 0
                     && window.ActivateEnhancementJobsScrollTopForSmoke();
+                bool jobsScrollBottomControl =
+                    window.ActivateEnhancementJobsScrollBottomForSmoke();
+                bool jobsFirstQueueControl =
+                    window.ActivateEnhancementJobsFirstJobForSmoke();
+                bool jobsLastQueueControl =
+                    window.ActivateEnhancementJobsLastJobForSmoke();
+                bool jobsFourNavigationControls = jobsScrollTopControl
+                    && jobsScrollBottomControl
+                    && jobsFirstQueueControl
+                    && jobsLastQueueControl;
                 EnhancementJobsPagingSmokeSnapshot firstLargeHistoryPage =
                     PhotoViewer.Wpf.MainWindow
                         .CalculateEnhancementJobsPagingForSmoke(205, 0);
@@ -21213,6 +21310,18 @@ public partial class App : Application
                         "canceled-job",
                         "future-canceled-reader-job");
                 window.SelectEnhancementJobsFilterForSmoke("all");
+                EnhancementJobsWorkspaceSmokeSnapshot beforeCachedReopen =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                window.CloseEnhancementJobsForSmoke();
+                await window.OpenEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot afterCachedReopen =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool cachedReopenAvoidedFullInventory =
+                    afterCachedReopen.GetRequests == beforeCachedReopen.GetRequests
+                    && afterCachedReopen.HealthGetRequests
+                        == beforeCachedReopen.HealthGetRequests + 1
+                    && afterCachedReopen.Total == beforeCachedReopen.Total
+                    && afterCachedReopen.Visible;
                 bool jobsHeaderChromeContract = window.EnhancementJobsHeaderChromeContractForSmoke;
                 bool closeButtonClosedWorkspace = window.ActivateEnhancementJobsCloseForSmoke();
 
@@ -21378,7 +21487,7 @@ public partial class App : Application
                     && initial.Canceled == 3
                     && largeHistoryPaging
                     && thumbnailViewportLoadBounded
-                    && jobsScrollTopControl
+                    && jobsFourNavigationControls
                     && jobsFilterLayoutContract
                     && progressUsesWholePercent
                     && mixedRetryCapabilityPartition
@@ -21492,6 +21601,7 @@ public partial class App : Application
                     && jobsRestoredAfterViewerClose
                     && jobsViewportRestoredAfterViewerClose
                     && jobsThumbMinimumVisible
+                    && cachedReopenAvoidedFullInventory
                     && jobsHeaderChromeContract
                     && closeButtonClosedWorkspace
                     && routesOk
@@ -21526,6 +21636,13 @@ public partial class App : Application
                     thumbnailViewportLoadBounded,
                     visibleThumbnailBatch,
                     jobsScrollTopControl,
+                    jobsScrollBottomControl,
+                    jobsFirstQueueControl,
+                    jobsLastQueueControl,
+                    jobsFourNavigationControls,
+                    cachedReopenAvoidedFullInventory,
+                    beforeCachedReopen,
+                    afterCachedReopen,
                     jobsFilterLayoutContract,
                     terminalHistoryBatchDismissContract,
                     failedBulkConfirmationContract,
@@ -33489,6 +33606,15 @@ public partial class App : Application
         public bool SelectionStable { get; init; }
         public bool ZoomComposes { get; init; }
         public bool Persistence { get; init; }
+        public bool SearchClearVariableLayoutRestored { get; init; }
+        public int SearchNarrowDistinctRowHeights { get; init; }
+        public int SearchClearDistinctRowHeights { get; init; }
+        public bool LargeSearchClearRealizationRecovered { get; init; }
+        public bool SearchClearInitialRealizationSettled { get; init; }
+        public bool SearchClearNarrowRealizationSettled { get; init; }
+        public bool SearchClearFullRealizationSettled { get; init; }
+        public int SearchClearVisibleUnrealized { get; init; }
+        public int SearchClearVisiblePlaceholders { get; init; }
     }
 
     private sealed class SortSmokeResult

@@ -340,6 +340,7 @@ try {
         'moveReflectedImmediately',
         'moveAvoidedFullInventoryReload',
         'healthOnlyPollAvoidedFullInventory',
+        'cachedReopenAvoidedFullInventory',
         'staleQueueRefreshSuppressed',
         'canceledRetryIssued',
         'rerunSettingsContract',

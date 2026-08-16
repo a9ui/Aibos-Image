@@ -1494,9 +1494,42 @@
               <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}" StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
             </Button>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
-              <Button x:Name="EnhancementJobsScrollTopButton" Style="{StaticResource GhostButton}" Content="一番上へ" Click="EnhancementJobsScrollTop_Click"
-                      Height="30" MinWidth="76" Margin="0,0,6,0" AutomationProperties.Name="Scroll AI enhancement jobs to top"
-                      WindowChrome.IsHitTestVisibleInChrome="True"/>
+              <Button x:Name="EnhancementJobsFirstJobButton" Style="{StaticResource IconButton}" Click="EnhancementJobsFirstJob_Click"
+                      Width="30" Height="30" Margin="0,0,3,0" ToolTip="最初のキューへ"
+                      AutomationProperties.Name="最初のAI処理キューへ移動"
+                      WindowChrome.IsHitTestVisibleInChrome="True">
+                <Path Data="M7,5 H17 M12,8 V21 M7,13 L12,8 L17,13"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Stretch="Uniform" Width="15" Height="15"/>
+              </Button>
+              <Button x:Name="EnhancementJobsScrollTopButton" Style="{StaticResource IconButton}" Click="EnhancementJobsScrollTop_Click"
+                      Width="30" Height="30" Margin="0,0,3,0" ToolTip="現在ページの一番上へ"
+                      AutomationProperties.Name="現在のAI処理ページを一番上へスクロール"
+                      WindowChrome.IsHitTestVisibleInChrome="True">
+                <Path Data="M12,5 V20 M7,10 L12,5 L17,10"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Stretch="Uniform" Width="15" Height="15"/>
+              </Button>
+              <Button x:Name="EnhancementJobsScrollBottomButton" Style="{StaticResource IconButton}" Click="EnhancementJobsScrollBottom_Click"
+                      Width="30" Height="30" Margin="0,0,3,0" ToolTip="現在ページの一番下へ"
+                      AutomationProperties.Name="現在のAI処理ページを一番下へスクロール"
+                      WindowChrome.IsHitTestVisibleInChrome="True">
+                <Path Data="M12,5 V20 M7,15 L12,20 L17,15"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Stretch="Uniform" Width="15" Height="15"/>
+              </Button>
+              <Button x:Name="EnhancementJobsLastJobButton" Style="{StaticResource IconButton}" Click="EnhancementJobsLastJob_Click"
+                      Width="30" Height="30" Margin="0,0,6,0" ToolTip="最後のキューへ"
+                      AutomationProperties.Name="最後のAI処理キューへ移動"
+                      WindowChrome.IsHitTestVisibleInChrome="True">
+                <Path Data="M7,21 H17 M12,5 V18 M7,13 L12,18 L17,13"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Stretch="Uniform" Width="15" Height="15"/>
+              </Button>
               <StackPanel x:Name="EnhancementJobsQueuedBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
                 <Button x:Name="EnhancementJobsClearQueuedButton" Style="{StaticResource DangerButton}" Content="待機中をすべて消す"
                         Click="CancelAllQueuedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="126" Margin="0,0,6,0"
@@ -1985,6 +2018,180 @@
                     Style="{StaticResource GhostButton}" Content="入力をリセット"
                     MinWidth="96" Height="32" Click="ResetI2iV2Edit_Click"
                     AutomationProperties.Name="現在の画像のAI編集入力をリセット"/>
+          </DockPanel>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- Unified I2I v3 board. Blank region fields remain structurally locked. -->
+    <Grid x:Name="I2iV3EditDialog" Grid.RowSpan="3" Panel.ZIndex="660"
+          Visibility="Collapsed" Background="#A9000000"
+          MouseLeftButtonDown="I2iV3EditBackdrop_MouseLeftButtonDown"
+          AutomationProperties.Name="統合AI編集ボード">
+      <Border x:Name="I2iV3EditBoardBorder" Width="690" MaxHeight="820" Margin="18"
+              HorizontalAlignment="Center" VerticalAlignment="Center"
+              Padding="18" CornerRadius="8" Background="{StaticResource BgElevated}"
+              BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+              KeyboardNavigation.TabNavigation="Cycle">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+          <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,12">
+            <Button x:Name="I2iV3CloseButton" DockPanel.Dock="Right"
+                    Style="{StaticResource IconButton}" Width="32" Height="32"
+                    Click="CloseI2iV3Edit_Click" ToolTip="閉じる"
+                    AutomationProperties.Name="統合AI編集ボードを閉じる">
+              <Path Data="M18,6 L6,18 M6,6 L18,18" Stroke="{StaticResource TextSecondary}"
+                    StrokeThickness="1.8" Stretch="Uniform" Width="14" Height="14"/>
+            </Button>
+            <StackPanel>
+              <TextBlock Text="AI編集" Foreground="{StaticResource TextPrimary}"
+                         FontSize="18" FontWeight="SemiBold"/>
+              <TextBlock Text="全体・表情・服装・背景・ポーズを1件にまとめて編集  [I]"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.5" Margin="0,3,0,0"/>
+            </StackPanel>
+          </DockPanel>
+          <ScrollViewer x:Name="I2iV3EditScrollViewer" Grid.Row="1"
+                        VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+              <TextBlock Text="入力元" Foreground="{StaticResource TextTertiary}" FontSize="10.5"/>
+              <TextBlock x:Name="I2iV3SourceText" Text="Original"
+                         Foreground="{StaticResource TextPrimary}" FontSize="12.5"
+                         FontWeight="SemiBold" Margin="0,2,0,12"/>
+
+              <TextBlock Text="編集スタイル" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/>
+              <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="2*"/><ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="*"/><ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="Auto"/><ColumnDefinition Width="6"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <ComboBox x:Name="I2iV3StyleComboBox" Grid.Column="0"
+                          Style="{StaticResource PhotorealSettingsComboBox}"
+                          DisplayMemberPath="Label" SelectionChanged="I2iV3Style_SelectionChanged"
+                          AutomationProperties.Name="保存したAI編集スタイル"/>
+                <TextBox x:Name="I2iV3StyleNameTextBox" Grid.Column="2" MaxLength="48"
+                         Padding="7,4" TextChanged="I2iV3EditField_TextChanged"
+                         Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                         CaretBrush="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"
+                         AutomationProperties.Name="AI編集スタイル名"/>
+                <Button x:Name="I2iV3SaveStyleButton" Grid.Column="4" Style="{StaticResource GhostButton}"
+                        Content="保存" MinWidth="58" Click="SaveI2iV3Style_Click"/>
+                <Button x:Name="I2iV3DeleteStyleButton" Grid.Column="6" Style="{StaticResource GhostButton}"
+                        Content="削除" MinWidth="58" Click="DeleteI2iV3Style_Click"/>
+              </Grid>
+              <TextBlock x:Name="I2iV3StyleStatusText" Foreground="{StaticResource TextTertiary}"
+                         FontSize="10.3" TextWrapping="Wrap" Margin="0,5,0,0"/>
+
+              <TextBlock Text="全体（入力すると画像全体を変更）"
+                         Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,12,0,4"/>
+              <TextBox x:Name="I2iV3OverallTextBox" MaxLength="2000" MinHeight="56"
+                       AcceptsReturn="True" TextWrapping="Wrap" Padding="8,6"
+                       TextChanged="I2iV3EditField_TextChanged"
+                       Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"
+                       AutomationProperties.Name="画像全体のAI編集プロンプト"/>
+
+              <Grid Margin="0,12,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="表情" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="I2iV3ExpressionTextBox" MaxLength="2000" MinHeight="66"
+                           AcceptsReturn="True" TextWrapping="Wrap" Padding="8,6"
+                           TextChanged="I2iV3EditField_TextChanged"
+                           Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="服装" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="I2iV3OutfitTextBox" MaxLength="2000" MinHeight="66"
+                           AcceptsReturn="True" TextWrapping="Wrap" Padding="8,6"
+                           TextChanged="I2iV3EditField_TextChanged"
+                           Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"/>
+                </StackPanel>
+              </Grid>
+              <Grid Margin="0,12,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="背景" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="I2iV3BackgroundTextBox" MaxLength="2000" MinHeight="66"
+                           AcceptsReturn="True" TextWrapping="Wrap" Padding="8,6"
+                           TextChanged="I2iV3EditField_TextChanged"
+                           Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="ポーズ" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="I2iV3PoseTextBox" MaxLength="2000" MinHeight="66"
+                           AcceptsReturn="True" TextWrapping="Wrap" Padding="8,6"
+                           TextChanged="I2iV3EditField_TextChanged"
+                           Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderStrong}"/>
+                </StackPanel>
+              </Grid>
+              <TextBlock Text="空欄の領域は変更しません。全体を入力した場合だけ、マスクに限定しない全画面編集になります。"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10.3" TextWrapping="Wrap" Margin="0,6,0,0"/>
+
+              <Grid Margin="0,14,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <DockPanel><TextBlock Text="STEP" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/><TextBlock x:Name="I2iV3StepsValueText" Text="8" DockPanel.Dock="Right" Foreground="{StaticResource Accent}"/></DockPanel>
+                  <Slider x:Name="I2iV3StepsSlider" Minimum="4" Maximum="20" Value="8" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="I2iV3SettingSlider_ValueChanged"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <DockPanel><TextBlock Text="CFG" Foreground="{StaticResource TextPrimary}" FontSize="11.5"/><TextBlock x:Name="I2iV3CfgValueText" Text="1.0" DockPanel.Dock="Right" Foreground="{StaticResource Accent}"/></DockPanel>
+                  <Slider x:Name="I2iV3CfgSlider" Minimum="0.5" Maximum="3" Value="1" TickFrequency="0.1" IsSnapToTickEnabled="True" ValueChanged="I2iV3SettingSlider_ValueChanged"/>
+                </StackPanel>
+              </Grid>
+
+              <TextBlock Text="服装マスクの外側" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,12,0,4"/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <ComboBox x:Name="I2iV3OutfitMaskModeComboBox" Grid.Column="0"
+                          Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0"
+                          SelectionChanged="I2iV3OutfitMaskMode_SelectionChanged">
+                  <ComboBoxItem Content="自動（推奨）" Tag="auto"/><ComboBoxItem Content="手動" Tag="manual"/>
+                </ComboBox>
+                <StackPanel Grid.Column="2">
+                  <DockPanel><TextBlock Text="外縁を広げる量" Foreground="{StaticResource TextSecondary}" FontSize="10.8"/><TextBlock x:Name="I2iV3OutfitMaskExpandValueText" Text="自動 64 px" DockPanel.Dock="Right" Foreground="{StaticResource Accent}"/></DockPanel>
+                  <Slider x:Name="I2iV3OutfitMaskExpandSlider" Minimum="0" Maximum="160" Value="32" TickFrequency="8" IsSnapToTickEnabled="True" IsEnabled="False" ValueChanged="I2iV3SettingSlider_ValueChanged"/>
+                </StackPanel>
+              </Grid>
+
+              <Grid Margin="0,12,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="Seed" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="I2iV3SeedModeComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectedIndex="0" SelectionChanged="I2iV3SeedMode_SelectionChanged">
+                    <ComboBoxItem Content="Random（推奨）" Tag="random"/><ComboBoxItem Content="Fixed" Tag="fixed"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="Fixed値（0〜2147483647）" Foreground="{StaticResource TextPrimary}" FontSize="11.5" Margin="0,0,0,4"/>
+                  <TextBox x:Name="I2iV3SeedValueTextBox" MaxLength="10" IsEnabled="False" Padding="7,4"
+                           TextChanged="I2iV3EditField_TextChanged" Foreground="{StaticResource TextPrimary}"
+                           Background="{StaticResource BgPrimary}" CaretBrush="{StaticResource TextPrimary}"
+                           BorderBrush="{StaticResource BorderStrong}"/>
+                </StackPanel>
+              </Grid>
+              <TextBlock x:Name="I2iV3EditStatusText" Foreground="{StaticResource TextSecondary}"
+                         FontSize="10.8" TextWrapping="Wrap" Margin="0,12,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </ScrollViewer>
+          <DockPanel Grid.Row="2" Margin="0,14,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}" Content="閉じる"
+                    MinWidth="72" Height="32" Margin="8,0,0,0" Click="CloseI2iV3Edit_Click"/>
+            <Button x:Name="I2iV3QueueButton" DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}"
+                    Content="GO  [Ctrl+Enter]" MinWidth="132" Height="32" IsEnabled="False"
+                    Click="QueueI2iV3Edit_Click" AutomationProperties.Name="統合AI編集をキューへ追加"/>
+            <Button x:Name="I2iV3ResetButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                    Content="入力をリセット" MinWidth="96" Height="32" Click="ResetI2iV3Edit_Click"/>
           </DockPanel>
         </Grid>
       </Border>
@@ -2957,7 +3164,7 @@
                   ToolTip="表示中のOriginalまたは実写化版をAI編集"
                   AutomationProperties.Name="実写編集"
                   AutomationProperties.HelpText="表示中の画像を入力に、服装、表情、背景、ポーズの編集画面を開きます。画面を開くだけではジョブを追加しません。"
-                  MinWidth="94" Height="32" Padding="8,0" Click="OpenModalI2iEditV2_Click">
+                  MinWidth="94" Height="32" Padding="8,0" Click="OpenModalI2iEditV3_Click">
             <StackPanel Orientation="Horizontal">
               <TextBlock x:Name="ModalI2iEditButtonLabel" Text="実写編集" FontSize="9.5" FontWeight="SemiBold"/>
               <TextBlock x:Name="ModalI2iEditShortcutHintText" Text="[I]" FontSize="9" Margin="4,0,0,0" Foreground="{StaticResource TextTertiary}"/>
@@ -2972,7 +3179,7 @@
                            AutomationProperties.Name="AI編集の種類">
                 <MenuItem x:Name="ModalI2iHairEditMenuItem" Header="髪色…" Click="OpenModalI2iEdit_Click"
                           AutomationProperties.Name="髪色のAI編集を開く"/>
-                <MenuItem x:Name="ModalI2iMultiTargetEditMenuItem" Header="服装・表情・背景・ポーズ…" Click="OpenModalI2iEditV2_Click"
+                <MenuItem x:Name="ModalI2iMultiTargetEditMenuItem" Header="統合AI編集（全体・表情・服装・背景・ポーズ）…" Click="OpenModalI2iEditV3_Click"
                           AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
               </ContextMenu>
             </Button.ContextMenu>
@@ -3625,7 +3832,7 @@
             <MenuItem Header="表示中の画像を動画化..." Click="ModalContextVideo_Click" AutomationProperties.Name="Open video generation board for displayed image"/>
             <MenuItem x:Name="ModalContextI2iEditMenu" Header="AI編集" AutomationProperties.Name="AI編集の種類を選ぶ">
               <MenuItem x:Name="ModalContextI2iEdit" Header="髪色…" Click="OpenModalI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
-              <MenuItem x:Name="ModalContextI2iV2Edit" Header="服装・表情・背景・ポーズ…" Click="OpenModalI2iEditV2_Click"
+              <MenuItem x:Name="ModalContextI2iV2Edit" Header="統合AI編集（全体・表情・服装・背景・ポーズ）…" Click="OpenModalI2iEditV3_Click"
                         AutomationProperties.Name="複数ターゲットのAI編集を開く"/>
             </MenuItem>
             <Separator/>

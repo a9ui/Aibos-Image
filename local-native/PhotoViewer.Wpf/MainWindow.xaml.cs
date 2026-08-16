@@ -19885,6 +19885,8 @@ public partial class MainWindow : Window
             CloseI2iEditBoard(restoreFocus: false);
         if (I2iV2EditDialog?.Visibility == Visibility.Visible)
             CloseI2iV2EditBoard(restoreFocus: false);
+        if (I2iV3EditDialog?.Visibility == Visibility.Visible)
+            CloseI2iV3EditBoard(restoreFocus: false);
         Modal.Visibility = Visibility.Collapsed;
         ModalBitmap.Source = null;
         ModalBitmap.Visibility = Visibility.Collapsed;
@@ -23312,6 +23314,7 @@ public partial class MainWindow : Window
             RestoreVideoGenerationSettings(null, null, null, null);
             RestoreVideoSeedSettings(null, null);
             RestoreVideoStyles(null, null);
+            RestoreI2iV3Styles(null, null);
             _keyBindings = KeyBindingSettings.CreateDefaults();
             _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
             ApplyKeyBindingTooltips();
@@ -23399,6 +23402,7 @@ public partial class MainWindow : Window
             state.VideoSteps);
         RestoreVideoSeedSettings(state.VideoSeedMode, state.VideoSeedValue);
         RestoreVideoStyles(state.VideoStyles, state.SelectedVideoStyleName);
+        RestoreI2iV3Styles(state.I2iEditStyles, state.SelectedI2iEditStyleName);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -23605,6 +23609,8 @@ public partial class MainWindow : Window
                         : null,
                 VideoStyles = SnapshotVideoStyles(),
                 SelectedVideoStyleName = _selectedVideoStyleName,
+                I2iEditStyles = SnapshotI2iV3Styles(),
+                SelectedI2iEditStyleName = _selectedI2iV3StyleName,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -23995,6 +24001,12 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (I2iV3EditDialog?.Visibility == Visibility.Visible)
+        {
+            CloseI2iV3EditBoard(restoreFocus: true);
+            return true;
+        }
+
         if (I2iV2EditDialog?.Visibility == Visibility.Visible)
         {
             CloseI2iV2EditBoard(restoreFocus: true);
@@ -24034,6 +24046,23 @@ public partial class MainWindow : Window
         if (_galleryAutoScrollSurface is not null && key == Key.Escape)
         {
             StopGalleryAutoScroll();
+            e.Handled = true;
+            return;
+        }
+        if (I2iV3EditDialog?.Visibility == Visibility.Visible
+            && key is Key.Enter or Key.Return
+            && modifiers == ModifierKeys.Control)
+        {
+            if (I2iV3QueueButton.IsEnabled)
+                _ = QueueI2iV3EditAsync();
+            e.Handled = true;
+            return;
+        }
+        if (I2iV3EditDialog?.Visibility == Visibility.Visible
+            && key == Key.Escape
+            && modifiers == ModifierKeys.None)
+        {
+            CloseI2iV3EditBoard(restoreFocus: true);
             e.Handled = true;
             return;
         }
@@ -24108,6 +24137,7 @@ public partial class MainWindow : Window
             || BatchEnhancementDialog.Visibility == Visibility.Visible
             || AppSettingsDialog.Visibility == Visibility.Visible
             || EnhancementJobsDialog.Visibility == Visibility.Visible
+            || I2iV3EditDialog?.Visibility == Visibility.Visible
             || I2iV2EditDialog?.Visibility == Visibility.Visible
             || I2iEditDialog?.Visibility == Visibility.Visible)
         {
@@ -24281,7 +24311,7 @@ public partial class MainWindow : Window
                 && ModalI2iEditButton.Visibility == Visibility.Visible
                 && ModalI2iEditButton.IsEnabled)
             {
-                _ = OpenI2iV2EditBoardAsync();
+                _ = OpenI2iV3EditBoardAsync();
                 return true;
             }
             if (MatchesBinding(ViewerKeyAction.OpenVideoGeneration, key, modifiers)
@@ -26914,6 +26944,10 @@ public partial class MainWindow : Window
     public double GridViewportWidthForSmoke
         => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.ViewportWidth ?? 0;
     public double GridSurfaceWidthForSmoke => CardsList.ActualWidth;
+    public bool GridUsesVariableItemHeightForSmoke
+        => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.UsesVariableItemHeightForSmoke == true;
+    public int GridDistinctItemRowHeightCountForSmoke
+        => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.DistinctItemRowHeightCountForSmoke ?? 0;
     public int GridFirstVisibleIndexForSmoke
         => FindVisualDescendant<VirtualizingWrapPanel>(CardsList)?.FirstVisibleIndex ?? -1;
     public int GridLastVisibleIndexForSmoke
@@ -30633,6 +30667,10 @@ public sealed class ViewerState
     public int? VideoSeedValue { get; set; }
     public List<VideoStyleState>? VideoStyles { get; set; }
     public string? SelectedVideoStyleName { get; set; }
+    // WPF-local request templates for explicit unified AI edits. Loading or
+    // selecting a style never enqueues or wakes the optional companion.
+    public List<I2iEditStyleState>? I2iEditStyles { get; set; }
+    public string? SelectedI2iEditStyleName { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }
     // WPF-local presentation overrides. Null follows the current Windows preference.
