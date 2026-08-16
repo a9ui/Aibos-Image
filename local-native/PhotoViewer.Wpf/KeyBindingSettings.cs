@@ -33,8 +33,11 @@ internal enum ViewerKeyAction
     FlipHorizontal,
     ToggleEnhancedPreview,
     ToggleVideoPlayback,
+    OpenEnhancementJobs,
     EnhanceCurrentImage,
     PhotorealizeCurrentImage,
+    OpenI2iEdit,
+    OpenVideoGeneration,
     GalleryZoomIn,
     GalleryZoomOut,
     GalleryZoomReset,
@@ -359,8 +362,11 @@ internal static class KeyBindingSettings
         Def(ViewerKeyAction.FlipHorizontal, "flipHorizontal", "Flip modal image", "Flip the current modal image horizontally. This does not modify the source file.", ShortcutContext.Modal, Key.H),
         Def(ViewerKeyAction.ToggleEnhancedPreview, "toggleEnhancedPreview", "Toggle Original / Enhanced preview", "Switch only between the original and an already-succeeded managed output. This never creates or starts an enhancement job.", ShortcutContext.Modal, Key.E),
         Def(ViewerKeyAction.ToggleVideoPlayback, "toggleVideoPlayback", "Play / pause generated video", "Play or pause an already-succeeded managed video. Ordinary browsing never creates or starts a video job.", ShortcutContext.Modal, Key.Space),
+        Def(ViewerKeyAction.OpenEnhancementJobs, "openEnhancementJobs", "Open AI Jobs", "Open the passive AI Jobs workspace. Reading Jobs never enqueues, wakes, claims, retries, or starts a worker.", ShortcutContext.Viewer, Key.J),
         Def(ViewerKeyAction.EnhanceCurrentImage, "enhanceCurrentImage", "Enhance current image", "Start the explicit AI enhancement action for the current modal image. Ordinary browsing never starts a job.", ShortcutContext.Modal, Key.A),
         Def(ViewerKeyAction.PhotorealizeCurrentImage, "photorealizeCurrentImage", "Photorealize current image", "Start the explicit AI photorealization action for the current modal image. Ordinary browsing never starts a job.", ShortcutContext.Modal, Key.R),
+        Def(ViewerKeyAction.OpenI2iEdit, "openI2iEdit", "Open AI image edit", "Open the AI image-edit board for the current modal image. Opening the board never starts a job.", ShortcutContext.Modal, Key.I),
+        Def(ViewerKeyAction.OpenVideoGeneration, "openVideoGeneration", "Open video generation", "Open the video-generation board for the current modal image. Opening the board never starts a job.", ShortcutContext.Modal, Key.V),
         Def(ViewerKeyAction.GalleryZoomIn, "galleryZoomIn", "Gallery zoom in", "Increase Grid card size without changing the sidebar, header, or fonts.", ShortcutContext.Gallery, Key.OemPlus, ModifierKeys.Control),
         Def(ViewerKeyAction.GalleryZoomOut, "galleryZoomOut", "Gallery zoom out", "Decrease Grid card size without changing the sidebar, header, or fonts.", ShortcutContext.Gallery, Key.OemMinus, ModifierKeys.Control),
         Def(ViewerKeyAction.GalleryZoomReset, "galleryZoomReset", "Reset gallery zoom", "Reset Grid card size to 200.", ShortcutContext.Gallery, Key.D0, ModifierKeys.Control),
@@ -446,6 +452,9 @@ internal static class KeyBindingSettings
         bool toggleModalFilmstripPersisted = false;
         bool addToAlbumPersisted = false;
         bool photorealizeCurrentImagePersisted = false;
+        bool openEnhancementJobsPersisted = false;
+        bool openI2iEditPersisted = false;
+        bool openVideoGenerationPersisted = false;
         Dictionary<string, JsonElement>? unknown = null;
         var unknownReservedChords = new HashSet<KeyChord>();
         if (persisted is not null)
@@ -475,6 +484,12 @@ internal static class KeyBindingSettings
                         addToAlbumPersisted = true;
                     if (definition.Action == ViewerKeyAction.PhotorealizeCurrentImage)
                         photorealizeCurrentImagePersisted = true;
+                    if (definition.Action == ViewerKeyAction.OpenEnhancementJobs)
+                        openEnhancementJobsPersisted = true;
+                    if (definition.Action == ViewerKeyAction.OpenI2iEdit)
+                        openI2iEditPersisted = true;
+                    if (definition.Action == ViewerKeyAction.OpenVideoGeneration)
+                        openVideoGenerationPersisted = true;
                 }
             }
         }
@@ -485,6 +500,27 @@ internal static class KeyBindingSettings
                 unknownReservedChords,
                 ViewerKeyAction.PhotorealizeCurrentImage,
                 SafeMigrationKeys.Prepend(Key.R));
+
+        if (!openEnhancementJobsPersisted)
+            normalized[ViewerKeyAction.OpenEnhancementJobs] = AllocateMigrationChord(
+                normalized,
+                unknownReservedChords,
+                ViewerKeyAction.OpenEnhancementJobs,
+                SafeMigrationKeys.Prepend(Key.J));
+
+        if (!openI2iEditPersisted)
+            normalized[ViewerKeyAction.OpenI2iEdit] = AllocateMigrationChord(
+                normalized,
+                unknownReservedChords,
+                ViewerKeyAction.OpenI2iEdit,
+                SafeMigrationKeys.Prepend(Key.I));
+
+        if (!openVideoGenerationPersisted)
+            normalized[ViewerKeyAction.OpenVideoGeneration] = AllocateMigrationChord(
+                normalized,
+                unknownReservedChords,
+                ViewerKeyAction.OpenVideoGeneration,
+                SafeMigrationKeys.Prepend(Key.V));
 
         if (!toggleModalFilmstripPersisted)
             normalized[ViewerKeyAction.ToggleModalFilmstrip] = AllocateMigrationChord(

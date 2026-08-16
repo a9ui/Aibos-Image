@@ -1,7 +1,8 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotnetPath = 'dotnet',
-    [string]$TargetFrameworkOverride = ''
+    [string]$TargetFrameworkOverride = '',
+    [switch]$NoRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,15 +23,25 @@ $buildRoot = Join-Path $runRoot 'build'
 $keyRoot = Join-Path $runRoot 'shared-process-state'
 $writeResultPath = Join-Path $runRoot 'write.json'
 $reloadResultPath = Join-Path $runRoot 'reload.json'
+$resolvedDotnetPath = (Get-Command -Name $DotnetPath -ErrorAction Stop).Source
+$verifierDotnetRoot = Split-Path -Parent $resolvedDotnetPath
+$previousDotnetRoot = $env:DOTNET_ROOT
+$previousDotnetRootX64 = $env:DOTNET_ROOT_X64
 
 try {
+    $env:DOTNET_ROOT = $verifierDotnetRoot
+    $env:DOTNET_ROOT_X64 = $verifierDotnetRoot
     New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     if ([string]::IsNullOrWhiteSpace($TargetFrameworkOverride)) {
-        & $DotnetPath build $project -c $Configuration "-p:OutputPath=$buildOutput" --nologo -v:minimal
+        $buildArgs = @('build', $project, '-c', $Configuration, "-p:OutputPath=$buildOutput", '--nologo', '-v:minimal')
+        if ($NoRestore) { $buildArgs += '--no-restore' }
+        & $DotnetPath @buildArgs
     }
     else {
-        & $DotnetPath msbuild $project -restore "-property:TargetFramework=$TargetFrameworkOverride" "-property:OutputPath=$buildOutput" "-property:Configuration=$Configuration" -nologo -verbosity:minimal
+        $msbuildArgs = @('msbuild', $project, "-property:TargetFramework=$TargetFrameworkOverride", "-property:OutputPath=$buildOutput", "-property:Configuration=$Configuration", '-nologo', '-verbosity:minimal')
+        if (-not $NoRestore) { $msbuildArgs += '-restore' }
+        & $DotnetPath @msbuildArgs
     }
     if ($LASTEXITCODE -ne 0) { throw "WPF build failed with exit code $LASTEXITCODE." }
 
@@ -51,7 +62,7 @@ try {
 
     $writeRequired = @(
         'defaultsLoaded', 'persistedInvalidFallback', 'exhaustedMigrationProtected', 'exhaustedMigrationRepairable',
-        'sharedCollisionRepaired', 'sharedCollisionRejected',
+        'sharedCollisionRepaired', 'sharedCollisionRejected', 'newActionsPreserveExistingKeys',
         'surfaceContract', 'settingsWheelSuppressed',
         'modifierRejected', 'reservedRejected', 'winShiftTRejected', 'recordingCanceled',
         'overlappingConflictRejected', 'contextAwareReuseAllowed', 'saved', 'hintsHot', 'sharedBindingsSaved',
@@ -59,7 +70,7 @@ try {
         'oldFavoriteDisabled', 'newFavoriteHot', 'exactFavoriteHot',
         'selectAllHot', 'clearSelectionHot', 'staleHiddenSelectionSuppressed',
         'oldNextDisabled', 'nextHot', 'closeHot',
-        'modalMetadataWheelNative', 'modalImageWheelZooms',
+        'modalWheelReady', 'modalMetadataWheelNative', 'modalImageWheelZooms', 'aiBoardShortcutsHot', 'jobsShortcutHot',
         'oldReorderDisabled', 'reorderHot', 'oldReopenDisabled', 'reopenHot',
         'togglePassive', 'nestedUnknownPreservedExactly', 'externalUnknownDeletionPreserved',
         'externalUnknownAdditionPreserved', 'topLevelUnknownPreserved', 'largeSelectionFast',
@@ -96,6 +107,9 @@ try {
     Assert-True ($state.KeyBindings.favoriteIncrease -eq 'F') 'Reset defaults were not persisted after reload.'
     Assert-True ($state.KeyBindings.nextImage -eq 'Right') 'Default Next binding was not persisted after reset.'
     Assert-True ($state.KeyBindings.photorealizeCurrentImage -eq 'R') 'Default photorealization binding was not persisted after reset.'
+    Assert-True ($state.KeyBindings.openEnhancementJobs -eq 'J') 'Default Jobs binding was not persisted after reset.'
+    Assert-True ($state.KeyBindings.openI2iEdit -eq 'I') 'Default AI image-edit binding was not persisted after reset.'
+    Assert-True ($state.KeyBindings.openVideoGeneration -eq 'V') 'Default video-generation binding was not persisted after reset.'
     Assert-True ($state.KeyBindings.reopenLastClosedPreviewTab -eq 'Ctrl+Shift+T') 'Default reopen-tab binding was not persisted after reset.'
     Assert-True ($null -ne $state.futureTop) 'Top-level unknown state was not preserved.'
     Assert-True ($null -eq $state.KeyBindings.futureAction) 'An externally deleted nested unknown field was resurrected.'
@@ -110,7 +124,7 @@ try {
 
     [pscustomobject]@{
         allPassed = $true
-        message = 'Editable WPF key bindings passed shared Browser settings, collision protection, wheel isolation, 100k selection, hot-apply, two-process reload, reset, rescue-key, and passive-enhancement checks.'
+        message = 'Editable WPF key bindings passed shared Browser settings, existing-key migration, AI board and Jobs routing, wheel isolation, 100k selection, hot-apply, two-process reload, reset, rescue-key, and passive-enhancement checks.'
         writeProcessId = $writeProcess.Id
         reloadProcessId = $reloadProcess.Id
         separateProcesses = $writeProcess.Id -ne $reloadProcess.Id
@@ -119,6 +133,8 @@ try {
     } | ConvertTo-Json -Depth 8
 }
 finally {
+    $env:DOTNET_ROOT = $previousDotnetRoot
+    $env:DOTNET_ROOT_X64 = $previousDotnetRootX64
     if (Test-Path -LiteralPath $runRoot) {
         $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
         if (-not $resolvedRunRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {

@@ -424,9 +424,14 @@
           <Button x:Name="OpenAlbumsButton" Style="{StaticResource IconButton}" Foreground="{StaticResource Success}" ToolTip="Open shared Albums (B)" Click="OpenAlbums_Click" AutomationProperties.Name="Open shared Albums" WindowChrome.IsHitTestVisibleInChrome="True">
             <Path Data="M12,5 v14 M5,12 h14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" Stretch="Uniform" Width="17" Height="17"/>
           </Button>
-          <Button x:Name="OpenEnhancementJobsButton" Style="{StaticResource GhostButton}" Height="32" MinWidth="52" Padding="9,0" Margin="4,0,4,0"
-                  Content="{DynamicResource UiJobs}" Click="OpenEnhancementJobs_Click" ToolTip="Open AI enhancement jobs" AutomationProperties.Name="Open AI enhancement jobs"
-                  WindowChrome.IsHitTestVisibleInChrome="True"/>
+          <Button x:Name="OpenEnhancementJobsButton" Style="{StaticResource GhostButton}" Height="32" MinWidth="70" Padding="9,0" Margin="4,0,4,0"
+                  Click="OpenEnhancementJobs_Click" ToolTip="Open AI enhancement jobs" AutomationProperties.Name="Open AI enhancement jobs"
+                  WindowChrome.IsHitTestVisibleInChrome="True">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="{DynamicResource UiJobs}"/>
+              <TextBlock x:Name="OpenEnhancementJobsShortcutHintText" Text="[J]" Margin="5,0,0,0" Foreground="{StaticResource TextTertiary}"/>
+            </StackPanel>
+          </Button>
           <Button x:Name="ViewerShortcutsButton" Style="{StaticResource GhostButton}" Height="32" MinWidth="72" Padding="9,0" Margin="0,0,4,0"
                   Content="{DynamicResource UiShortcuts}" Click="OpenShortcuts_Click" ToolTip="{DynamicResource UiShortcutsToolTip}" AutomationProperties.Name="Open keyboard shortcuts"
                   WindowChrome.IsHitTestVisibleInChrome="True"/>
@@ -2916,11 +2921,21 @@
                     SelectionChanged="ModalEnhancementVersion_SelectionChanged"
                     AutomationProperties.Name="表示中: Original. 表示版を選択"
                     AutomationProperties.HelpText="Original、高画質化、実写化、AI編集、動画化の全保存版から表示するメディアを選びます。"/>
-          <Button x:Name="ModalEnhanceButton" Style="{StaticResource GhostButton}" ToolTip="表示中の画像を高画質化" AutomationProperties.Name="表示中の画像をHQ高画質化" AutomationProperties.HelpText="このボタンを押した時だけ、表示中の画像から高画質化ジョブを追加します。" MinWidth="58" Height="32" Padding="8,0" Click="StartModalEnhancement_Click"><TextBlock x:Name="ModalEnhanceButtonLabel" Text="HQ" FontSize="9.5" FontWeight="SemiBold"/></Button>
+          <Button x:Name="ModalEnhanceButton" Style="{StaticResource GhostButton}" ToolTip="表示中の画像を高画質化" AutomationProperties.Name="表示中の画像をHQ高画質化" AutomationProperties.HelpText="このボタンを押した時だけ、表示中の画像から高画質化ジョブを追加します。" MinWidth="72" Height="32" Padding="8,0" Click="StartModalEnhancement_Click">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock x:Name="ModalEnhanceButtonLabel" Text="HQ" FontSize="9.5" FontWeight="SemiBold"/>
+              <TextBlock x:Name="ModalEnhanceShortcutHintText" Text="[A]" FontSize="9" Margin="4,0,0,0" Foreground="{StaticResource TextTertiary}"/>
+            </StackPanel>
+          </Button>
           <Button x:Name="ModalUpscaleSettingsButton" Style="{StaticResource IconButton}" ToolTip="HQの設定" AutomationProperties.Name="Open AI upscale settings" Width="24" Height="32" Margin="0,0,4,0" Click="ToggleModalUpscaleSettings_Click">
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE70D;" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
           </Button>
-          <Button x:Name="ModalPhotorealButton" Style="{StaticResource GhostButton}" ToolTip="この画像をローカルAIで実写化" AutomationProperties.Name="実写化" AutomationProperties.HelpText="このボタンを押した時だけ、HQと共通のGPUキューへ実写化ジョブを追加します。" MinWidth="64" Height="32" Padding="8,0" Click="StartModalPhotoreal_Click"><TextBlock x:Name="ModalPhotorealButtonLabel" Text="実写化" FontSize="9.5" FontWeight="SemiBold"/></Button>
+          <Button x:Name="ModalPhotorealButton" Style="{StaticResource GhostButton}" ToolTip="この画像をローカルAIで実写化" AutomationProperties.Name="実写化" AutomationProperties.HelpText="このボタンを押した時だけ、HQと共通のGPUキューへ実写化ジョブを追加します。" MinWidth="82" Height="32" Padding="8,0" Click="StartModalPhotoreal_Click">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock x:Name="ModalPhotorealButtonLabel" Text="実写化" FontSize="9.5" FontWeight="SemiBold"/>
+              <TextBlock x:Name="ModalPhotorealShortcutHintText" Text="[R]" FontSize="9" Margin="4,0,0,0" Foreground="{StaticResource TextTertiary}"/>
+            </StackPanel>
+          </Button>
           <Button x:Name="ModalPhotorealUpscaleButton" Style="{StaticResource GhostButton}" ToolTip="最新または表示中の実写版だけを高画質化" AutomationProperties.Name="AI実写高画質化のみ" AutomationProperties.HelpText="Uses the matching managed photoreal output as input and enqueues only the HQ upscale job." MinWidth="72" Height="32" Padding="8,0" Click="StartModalPhotorealUpscale_Click" Visibility="Collapsed"><TextBlock Text="実写HQ" FontSize="9.5" FontWeight="SemiBold"/></Button>
           <Button x:Name="ModalPhotorealSettingsButton" Style="{StaticResource IconButton}" ToolTip="実写化の設定" AutomationProperties.Name="Open AI photorealization settings" Width="24" Height="32" Margin="0,0,4,0" Click="ToggleModalPhotorealSettings_Click">
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE70D;" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
@@ -2929,8 +2944,11 @@
                   Style="{StaticResource GhostButton}" ToolTip="表示中の画像から動画化ボードを開く"
                   AutomationProperties.Name="動画化"
                   AutomationProperties.HelpText="画像とプロンプトを確認してから、動画化ボード内の実行ボタンでジョブを追加します。"
-                  MinWidth="64" Height="32" Padding="8,0" Click="OpenModalVideoGeneration_Click">
-            <TextBlock Text="動画化" FontSize="9.5" FontWeight="SemiBold"/>
+                  MinWidth="82" Height="32" Padding="8,0" Click="OpenModalVideoGeneration_Click">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock x:Name="ModalVideoGenerateButtonLabel" Text="動画化" FontSize="9.5" FontWeight="SemiBold"/>
+              <TextBlock x:Name="ModalVideoGenerateShortcutHintText" Text="[V]" FontSize="9" Margin="4,0,0,0" Foreground="{StaticResource TextTertiary}"/>
+            </StackPanel>
           </Button>
           <Button x:Name="ModalVideoSettingsButton" Style="{StaticResource IconButton}" ToolTip="この画面で動画化の設定を開く" AutomationProperties.Name="Open video generation settings" Width="24" Height="32" Margin="0,0,4,0" Click="OpenModalVideoSettings_Click">
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE70D;" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
@@ -2939,8 +2957,11 @@
                   ToolTip="表示中のOriginalまたは実写化版をAI編集"
                   AutomationProperties.Name="実写編集"
                   AutomationProperties.HelpText="表示中の画像を入力に、服装、表情、背景、ポーズの編集画面を開きます。画面を開くだけではジョブを追加しません。"
-                  MinWidth="72" Height="32" Padding="8,0" Click="OpenModalI2iEditV2_Click">
-            <TextBlock Text="実写編集" FontSize="9.5" FontWeight="SemiBold"/>
+                  MinWidth="94" Height="32" Padding="8,0" Click="OpenModalI2iEditV2_Click">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock x:Name="ModalI2iEditButtonLabel" Text="実写編集" FontSize="9.5" FontWeight="SemiBold"/>
+              <TextBlock x:Name="ModalI2iEditShortcutHintText" Text="[I]" FontSize="9" Margin="4,0,0,0" Foreground="{StaticResource TextTertiary}"/>
+            </StackPanel>
           </Button>
           <Button x:Name="ModalI2iEditSettingsButton" Style="{StaticResource IconButton}"
                   ToolTip="実写編集の種類を選択" AutomationProperties.Name="Open image edit settings"

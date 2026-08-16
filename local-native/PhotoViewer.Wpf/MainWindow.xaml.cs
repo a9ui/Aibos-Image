@@ -21622,6 +21622,14 @@ public partial class MainWindow : Window
         UpdateModalDisplayedDeletePresentation();
         ModalEnhanceButton.ToolTip = UiLanguageResources.Format("UiEnhanceCurrentFormat", BindingText(ViewerKeyAction.EnhanceCurrentImage));
         ModalPhotorealButton.ToolTip = UiLanguageResources.Format("UiPhotorealizeCurrentFormat", BindingText(ViewerKeyAction.PhotorealizeCurrentImage));
+        OpenEnhancementJobsButton.ToolTip = $"Open AI enhancement jobs ({BindingText(ViewerKeyAction.OpenEnhancementJobs)})";
+        ModalVideoGenerateButton.ToolTip = $"表示中の画像から動画化ボードを開く ({BindingText(ViewerKeyAction.OpenVideoGeneration)})";
+        ModalI2iEditButton.ToolTip = $"表示中のOriginalまたは実写化版を実写編集 ({BindingText(ViewerKeyAction.OpenI2iEdit)})";
+        OpenEnhancementJobsShortcutHintText.Text = $"[{BindingText(ViewerKeyAction.OpenEnhancementJobs)}]";
+        ModalEnhanceShortcutHintText.Text = $"[{BindingText(ViewerKeyAction.EnhanceCurrentImage)}]";
+        ModalPhotorealShortcutHintText.Text = $"[{BindingText(ViewerKeyAction.PhotorealizeCurrentImage)}]";
+        ModalVideoGenerateShortcutHintText.Text = $"[{BindingText(ViewerKeyAction.OpenVideoGeneration)}]";
+        ModalI2iEditShortcutHintText.Text = $"[{BindingText(ViewerKeyAction.OpenI2iEdit)}]";
         ModalZoomOutButton.ToolTip = UiLanguageResources.Format("UiZoomOutFormat", BindingText(ViewerKeyAction.ModalZoomOut));
         ModalZoomResetButton.ToolTip = UiLanguageResources.Format("UiResetFitFormat", BindingText(ViewerKeyAction.ModalZoomReset));
         ModalZoomInButton.ToolTip = UiLanguageResources.Format("UiZoomInFormat", BindingText(ViewerKeyAction.ModalZoomIn));
@@ -24269,6 +24277,20 @@ public partial class MainWindow : Window
                 StartModalPhotoreal_Click(this, new RoutedEventArgs());
                 return true;
             }
+            if (MatchesBinding(ViewerKeyAction.OpenI2iEdit, key, modifiers)
+                && ModalI2iEditButton.Visibility == Visibility.Visible
+                && ModalI2iEditButton.IsEnabled)
+            {
+                _ = OpenI2iV2EditBoardAsync();
+                return true;
+            }
+            if (MatchesBinding(ViewerKeyAction.OpenVideoGeneration, key, modifiers)
+                && ModalVideoGenerateButton.Visibility == Visibility.Visible
+                && ModalVideoGenerateButton.IsEnabled)
+            {
+                OpenVideoGenerationBoard(requestedSource: null);
+                return ModalVideoGenerationPopup.Visibility == Visibility.Visible;
+            }
             if (MatchesBinding(ViewerKeyAction.ModalZoomIn, key, modifiers))
                 return AdjustModalZoom(ModalZoomKeyboardStep);
             if (MatchesBinding(ViewerKeyAction.ModalZoomOut, key, modifiers))
@@ -24290,6 +24312,15 @@ public partial class MainWindow : Window
                 return AdjustCardWidth(-1);
             if (MatchesBinding(ViewerKeyAction.GalleryZoomReset, key, modifiers))
                 return ResetCardWidth();
+        }
+
+        if (MatchesBinding(ViewerKeyAction.OpenEnhancementJobs, key, modifiers)
+            && EnhancementJobsDialog.Visibility != Visibility.Visible)
+        {
+            _ = OpenEnhancementJobsWorkspaceAsync(
+                "all",
+                focusToRestore: OpenEnhancementJobsButton);
+            return true;
         }
 
         if (MatchesBinding(ViewerKeyAction.FavoriteIncrease, key, modifiers))
@@ -25821,6 +25852,14 @@ public partial class MainWindow : Window
             && ModalEnhancedToggleButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.ToggleEnhancedPreview), StringComparison.Ordinal) == true
             && ModalEnhanceButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.EnhanceCurrentImage), StringComparison.Ordinal) == true
             && ModalPhotorealButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.PhotorealizeCurrentImage), StringComparison.Ordinal) == true
+            && OpenEnhancementJobsButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.OpenEnhancementJobs), StringComparison.Ordinal) == true
+            && ModalVideoGenerateButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.OpenVideoGeneration), StringComparison.Ordinal) == true
+            && ModalI2iEditButton.ToolTip?.ToString()?.Contains(BindingText(ViewerKeyAction.OpenI2iEdit), StringComparison.Ordinal) == true
+            && OpenEnhancementJobsShortcutHintText.Text.Contains(BindingText(ViewerKeyAction.OpenEnhancementJobs), StringComparison.Ordinal)
+            && ModalEnhanceShortcutHintText.Text.Contains(BindingText(ViewerKeyAction.EnhanceCurrentImage), StringComparison.Ordinal)
+            && ModalPhotorealShortcutHintText.Text.Contains(BindingText(ViewerKeyAction.PhotorealizeCurrentImage), StringComparison.Ordinal)
+            && ModalVideoGenerateShortcutHintText.Text.Contains(BindingText(ViewerKeyAction.OpenVideoGeneration), StringComparison.Ordinal)
+            && ModalI2iEditShortcutHintText.Text.Contains(BindingText(ViewerKeyAction.OpenI2iEdit), StringComparison.Ordinal)
             && ModalShortcutHintText.Text.Contains(BindingText(ViewerKeyAction.CloseModal), StringComparison.Ordinal);
     public bool KeyBindingRecordingForSmoke => _recordingKeyAction is not null;
     public string KeyBindingStatusForSmoke => KeyBindingsStatusText.Text;
@@ -28500,9 +28539,9 @@ public partial class MainWindow : Window
             && ModalUpscaleSettingsButton.Visibility == Visibility.Visible
             && string.Equals(ModalPhotorealButtonLabel.Text, "実写化", StringComparison.Ordinal)
             && ModalPhotorealSettingsButton.Visibility == Visibility.Visible
-            && ModalVideoGenerateButton.Content is TextBlock { Text: "動画化" }
+            && string.Equals(ModalVideoGenerateButtonLabel.Text, "動画化", StringComparison.Ordinal)
             && ModalVideoSettingsButton.Visibility == Visibility.Visible
-            && ModalI2iEditButton.Content is TextBlock { Text: "実写編集" }
+            && string.Equals(ModalI2iEditButtonLabel.Text, "実写編集", StringComparison.Ordinal)
             && ModalI2iEditSettingsButton.Visibility == Visibility.Visible
             && ModalToolbarActionsPanel.Children.IndexOf(ModalFavoriteControlBorder)
                 < ModalToolbarActionsPanel.Children.IndexOf(ModalEnhanceButton)

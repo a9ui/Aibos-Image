@@ -4924,11 +4924,36 @@ public partial class App : Application
             {
                 await window.LoadFolderAsync(folder);
                 window.SetSortByForSmoke("name");
+                int shortcutApiReads = 0;
+                int shortcutApiMutations = 0;
+                window.ConfigureModalEnhancementForSmoke((request, _) =>
+                {
+                    if (request.Method == HttpMethod.Get)
+                    {
+                        Interlocked.Increment(ref shortcutApiReads);
+                        bool jobsRead = request.RequestUri?.AbsolutePath.EndsWith(
+                            "/api/enhance/jobs",
+                            StringComparison.Ordinal) == true;
+                        return Task.FromResult(new HttpResponseMessage(
+                            jobsRead ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable)
+                        {
+                            Content = jobsRead
+                                ? new StringContent("{\"jobs\":[]}", Encoding.UTF8, "application/json")
+                                : new StringContent("{\"error\":\"synthetic unavailable\"}", Encoding.UTF8, "application/json"),
+                        });
+                    }
+
+                    Interlocked.Increment(ref shortcutApiMutations);
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.MethodNotAllowed));
+                });
                 if (phase == "write")
                 {
                     bool defaultsLoaded = window.KeyBindingTextForSmoke("favoriteIncrease", draft: false) == "F"
                         && window.KeyBindingTextForSmoke("nextImage", draft: false) == "Right"
                         && window.KeyBindingTextForSmoke("photorealizeCurrentImage", draft: false) == "R"
+                        && window.KeyBindingTextForSmoke("openEnhancementJobs", draft: false) == "J"
+                        && window.KeyBindingTextForSmoke("openI2iEdit", draft: false) == "I"
+                        && window.KeyBindingTextForSmoke("openVideoGeneration", draft: false) == "V"
                         && window.KeyBindingTextForSmoke("reopenLastClosedPreviewTab", draft: false) == "Ctrl+Shift+T"
                         && window.KeyBindingTextForSmoke("movePreviewTabLeft", draft: false) == "Alt+Shift+Left";
                     bool persistedInvalidFallback = window.KeyBindingTextForSmoke("favoriteIncrease", draft: false) == "F"
@@ -4995,6 +5020,22 @@ public partial class App : Application
                         },
                         out _,
                         out _);
+                    var existingShortcutFixture = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+                    {
+                        ["favoriteIncrease"] = JsonSerializer.SerializeToElement("J"),
+                        ["toggleEnhancedPreview"] = JsonSerializer.SerializeToElement("I"),
+                        ["flipHorizontal"] = JsonSerializer.SerializeToElement("V"),
+                    };
+                    Dictionary<ViewerKeyAction, KeyChord> migratedExistingShortcuts =
+                        KeyBindingSettings.NormalizePersisted(existingShortcutFixture, out _);
+                    bool newActionsPreserveExistingKeys =
+                        migratedExistingShortcuts[ViewerKeyAction.FavoriteIncrease] == new KeyChord(Key.J, ModifierKeys.None)
+                        && migratedExistingShortcuts[ViewerKeyAction.ToggleEnhancedPreview] == new KeyChord(Key.I, ModifierKeys.None)
+                        && migratedExistingShortcuts[ViewerKeyAction.FlipHorizontal] == new KeyChord(Key.V, ModifierKeys.None)
+                        && migratedExistingShortcuts[ViewerKeyAction.OpenEnhancementJobs] != new KeyChord(Key.J, ModifierKeys.None)
+                        && migratedExistingShortcuts[ViewerKeyAction.OpenI2iEdit] != new KeyChord(Key.I, ModifierKeys.None)
+                        && migratedExistingShortcuts[ViewerKeyAction.OpenVideoGeneration] != new KeyChord(Key.V, ModifierKeys.None)
+                        && KeyBindingSettings.FindConflicts(migratedExistingShortcuts).Count == 0;
                     window.OpenAppSettingsForSmoke();
                     await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Input);
                     bool surfaceContract = window.AppSettingsVisibleForSmoke && window.KeyBindingSurfaceContractForSmoke;
@@ -5146,6 +5187,8 @@ public partial class App : Application
                         && string.Equals(window.SelectedFileNameForSmoke, modalBefore, StringComparison.OrdinalIgnoreCase);
                     bool nextHot = window.InvokePreviewKeyForSmoke(Key.N, ModifierKeys.None)
                         && !string.Equals(window.SelectedFileNameForSmoke, modalBefore, StringComparison.OrdinalIgnoreCase);
+                    bool modalWheelReady = await window.WaitForModalFullDecodeForSmokeAsync();
+                    await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
                     double modalWheelZoomBefore = window.ModalTransformForSmoke().Zoom;
                     bool modalMetadataWheelNative = !window.InvokeModalMetadataMouseWheelForSmoke(120)
                         && Math.Abs(window.ModalTransformForSmoke().Zoom - modalWheelZoomBefore) < 0.0001;
@@ -5154,7 +5197,23 @@ public partial class App : Application
                     _ = window.ResetModalTransformForSmoke();
                     _ = window.InvokePreviewKeyForSmoke(Key.E, ModifierKeys.None);
                     bool togglePassive = string.Equals(jobsBefore, FileFingerprint(jobsPath), StringComparison.Ordinal);
+                    bool i2iShortcutOpened = window.InvokePreviewKeyForSmoke(Key.I, ModifierKeys.None)
+                        && window.I2iV2EditBoardVisibleForSmoke;
+                    bool i2iShortcutClosed = window.InvokePreviewKeyForSmoke(Key.Escape, ModifierKeys.None)
+                        && !window.I2iV2EditBoardVisibleForSmoke;
+                    bool videoShortcutOpened = window.InvokePreviewKeyForSmoke(Key.V, ModifierKeys.None)
+                        && window.ModalVideoGenerationBoardVisibleForSmoke;
+                    if (window.ModalVideoGenerationBoardVisibleForSmoke)
+                        window.CloseVideoGenerationBoardForSmoke();
+                    bool aiBoardShortcutsHot = i2iShortcutOpened
+                        && i2iShortcutClosed
+                        && videoShortcutOpened
+                        && !window.ModalVideoGenerationBoardVisibleForSmoke;
                     bool closeHot = window.InvokePreviewKeyForSmoke(Key.Q, ModifierKeys.None) && !window.ModalVisibleForSmoke;
+                    bool jobsShortcutHot = window.InvokePreviewKeyForSmoke(Key.J, ModifierKeys.None)
+                        && window.EnhancementJobsVisibleForSmoke;
+                    if (window.EnhancementJobsVisibleForSmoke)
+                        window.CloseEnhancementJobsForSmoke();
 
                     bool openedFirst = window.SelectFileNameForSmoke(firstName) && window.OpenSelectedPreviewTabForSmoke();
                     bool openedSecond = window.SelectFileNameForSmoke(secondName) && window.OpenSelectedPreviewTabForSmoke();
@@ -5232,10 +5291,12 @@ public partial class App : Application
                         && window.SelectionVisualItemCountForSmoke == 0
                         && clearAllWatch.ElapsedMilliseconds <= 1_500;
                     bool sourceUntouched = string.Equals(sourceBefore, FolderFingerprint(folder), StringComparison.Ordinal);
-                    bool enhancementPassive = string.Equals(jobsBefore, FileFingerprint(jobsPath), StringComparison.Ordinal);
+                    bool enhancementPassive = shortcutApiReads >= 2
+                        && shortcutApiMutations == 0
+                        && string.Equals(jobsBefore, FileFingerprint(jobsPath), StringComparison.Ordinal);
                     bool residueFree = NoPersistenceResidue(smokeRoot);
                     ok = defaultsLoaded && persistedInvalidFallback && exhaustedMigrationProtected && exhaustedMigrationRepairable
-                        && sharedCollisionRepaired && sharedCollisionRejected
+                        && sharedCollisionRepaired && sharedCollisionRejected && newActionsPreserveExistingKeys
                         && surfaceContract && settingsWheelSuppressed && captureStarted
                         && modifierRejected && reservedRejected && winShiftTRejected && recordingCanceled
                         && overlappingConflictRejected && contextAwareReuseAllowed && saved && hintsHot && sharedBindingsSaved && settingsClosed
@@ -5243,7 +5304,8 @@ public partial class App : Application
                         && selectedFirst && oldFavoriteDisabled && newFavoriteHot && exactFavoriteHot
                         && selectAllHot && clearSelectionHot && staleHiddenSelectionSuppressed
                         && modalSelected && oldNextDisabled && nextHot
-                        && modalMetadataWheelNative && modalImageWheelZooms && togglePassive && closeHot && openedFirst && openedSecond && openedThird
+                        && modalWheelReady && modalMetadataWheelNative && modalImageWheelZooms && togglePassive && aiBoardShortcutsHot
+                        && closeHot && jobsShortcutHot && openedFirst && openedSecond && openedThird
                         && focusedSecond && oldReorderDisabled && reorderHot && closedFirst && cardsFocused
                         && oldReopenDisabled && reopenHot && nestedUnknownPreservedExactly
                         && externalUnknownDeletionPreserved && externalUnknownAdditionPreserved && topLevelUnknownPreserved
@@ -5262,6 +5324,7 @@ public partial class App : Application
                         exhaustedMigrationRepairable,
                         sharedCollisionRepaired,
                         sharedCollisionRejected,
+                        newActionsPreserveExistingKeys,
                         surfaceContract,
                         settingsWheelSuppressed,
                         modifierRejected,
@@ -5290,8 +5353,11 @@ public partial class App : Application
                         staleSourceUntouched,
                         oldNextDisabled,
                         nextHot,
+                        modalWheelReady,
                         modalMetadataWheelNative,
                         modalImageWheelZooms,
+                        aiBoardShortcutsHot,
+                        jobsShortcutHot,
                         closeHot,
                         oldReorderDisabled,
                         reorderHot,
@@ -5318,6 +5384,9 @@ public partial class App : Application
                         && window.KeyBindingTextForSmoke("favoriteLevel3", draft: false) == "Ctrl+L"
                         && window.KeyBindingTextForSmoke("nextImage", draft: false) == "N"
                         && window.KeyBindingTextForSmoke("photorealizeCurrentImage", draft: false) == "R"
+                        && window.KeyBindingTextForSmoke("openEnhancementJobs", draft: false) == "J"
+                        && window.KeyBindingTextForSmoke("openI2iEdit", draft: false) == "I"
+                        && window.KeyBindingTextForSmoke("openVideoGeneration", draft: false) == "V"
                         && window.KeyBindingTextForSmoke("closeModal", draft: false) == "Q"
                         && window.KeyBindingTextForSmoke("recycleSelected", draft: false) == "X"
                         && window.KeyBindingTextForSmoke("reopenLastClosedPreviewTab", draft: false) == "Ctrl+Shift+R"
@@ -5355,6 +5424,9 @@ public partial class App : Application
                     bool resetDraft = window.KeyBindingTextForSmoke("favoriteIncrease", draft: true) == "F"
                         && window.KeyBindingTextForSmoke("nextImage", draft: true) == "Right"
                         && window.KeyBindingTextForSmoke("photorealizeCurrentImage", draft: true) == "R"
+                        && window.KeyBindingTextForSmoke("openEnhancementJobs", draft: true) == "J"
+                        && window.KeyBindingTextForSmoke("openI2iEdit", draft: true) == "I"
+                        && window.KeyBindingTextForSmoke("openVideoGeneration", draft: true) == "V"
                         && window.KeyBindingTextForSmoke("closeModal", draft: true) == "Escape"
                         && window.KeyBindingTextForSmoke("recycleSelected", draft: true) == "Delete"
                         && window.KeyBindingTextForSmoke("reopenLastClosedPreviewTab", draft: true) == "Ctrl+Shift+T"
