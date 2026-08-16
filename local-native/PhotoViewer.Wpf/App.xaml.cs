@@ -18516,8 +18516,7 @@ public partial class App : Application
                     && win.MiniMaxH3SurfaceForSmoke;
                 string[] videoSurfaceIssues =
                     win.VideoGenerationSurfaceIssuesForSmoke.ToArray();
-                bool videoStyleSurface = win.VideoStyleSurfaceForSmoke
-                    && win.OpenVideoStylesFileForSmoke();
+                bool videoStyleSurface = win.VideoStyleSurfaceForSmoke;
                 string videoSurfaceModelId = win.VideoModelIdForSmoke;
                 bool videoQueueSucceeded =
                     await win.QueueVideoGenerationForSmokeAsync();
