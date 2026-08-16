@@ -174,8 +174,8 @@
   <sys:String x:Key="UiVideoH3StatusReady">The candidate is editable. Video generation is not using it yet.</sys:String>
   <sys:String x:Key="UiVideoH3StatusStale">The input, image, model, style, or conversion mode changed. Convert it again.</sys:String>
   <sys:String x:Key="UiVideoH3StatusStaleResponse">The input, image, model, style, or conversion mode changed while conversion was running, so the result was not accepted.</sys:String>
-  <sys:String x:Key="UiVideoH3StatusInvalidCandidate">The candidate is not valid H3 format or exceeds 2,000 characters. It was not applied.</sys:String>
-  <sys:String x:Key="UiVideoH3StatusInputTooLong">The selected conversion guidance would exceed 2,000 characters. Shorten the input. No job or worker was changed.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusInvalidCandidate">The candidate is not valid H3 format or exceeds 8,000 characters. It was not applied.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusInputTooLong">The selected conversion guidance would exceed 8,000 characters. Shorten the input. No job or worker was changed.</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidResponse">The H3 rewrite response was invalid. The input was unchanged and the failure class was written to the operation log.</sys:String>
   <sys:String x:Key="UiVideoH3StatusUnavailable">Local H3 rewriting is unavailable. No job was added and the failure class was written to the operation log.</sys:String>
   <sys:String x:Key="UiVideoH3StatusBusy">Another MiniMax prompt conversion is running. Try again after it finishes.</sys:String>

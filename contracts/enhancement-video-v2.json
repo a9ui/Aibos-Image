@@ -98,7 +98,7 @@
           "steps",
           "maximumPixelArea"
         ],
-        "promptMaximumCharacters": 2000,
+        "promptMaximumCharacters": 8000,
         "steps": {
           "defaultForLegacyRows": 20,
           "minimum": 1,

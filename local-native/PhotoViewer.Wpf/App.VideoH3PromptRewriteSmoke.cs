@@ -515,9 +515,9 @@ public partial class App
                     activeErrorStatus = HttpStatusCode.OK;
 
                     window.SetVideoH3PromptCandidateForSmoke(
-                        new string('z', 2_001));
+                        new string('z', 8_001));
                     bool editorOversizeRejectedWhole =
-                        window.VideoH3PromptCandidateForSmoke.Length == 2_001
+                        window.VideoH3PromptCandidateForSmoke.Length == 8_001
                         && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
                     string candidateEditedCrLf = candidateEdited.Replace(
                         "\n",
@@ -532,7 +532,7 @@ public partial class App
                     string normalizedBoundaryCandidate =
                         PadVideoH3CandidateToLength(
                             CreateVideoH3Candidate("CANDIDATE_BOUNDARY"),
-                            2_000);
+                            8_000);
                     int firstNewlineIndex = normalizedBoundaryCandidate.IndexOf(
                         '\n');
                     string rawOverLimitAfterCrLfNormalization =
@@ -542,7 +542,7 @@ public partial class App
                     window.SetVideoH3PromptCandidateForSmoke(
                         rawOverLimitAfterCrLfNormalization);
                     bool rawUtf16LimitCheckedBeforeNormalization =
-                        rawOverLimitAfterCrLfNormalization.Length == 2_001
+                        rawOverLimitAfterCrLfNormalization.Length == 8_001
                         && !window.VideoH3PromptCandidateApplyEnabledForSmoke
                         && !PhotoViewer.Wpf.MainWindow.TryValidateVideoH3PromptForSmoke(
                             rawOverLimitAfterCrLfNormalization,
@@ -876,7 +876,7 @@ public partial class App
                         window.VideoH3PromptCandidateForSmoke;
                     responseSourceSha256 = Convert.ToHexStringLower(
                         SHA256.HashData(File.ReadAllBytes(sourcePath)));
-                    responseCandidate = new string('x', 2_001);
+                    responseCandidate = new string('x', 8_001);
                     bool oversizeRejected =
                         !await window.RewriteVideoPromptForH3ForSmokeAsync()
                         && string.Equals(
@@ -913,16 +913,16 @@ public partial class App
 
                     int postsBeforeModeOverflow = rewritePostCalls;
                     window.SetAuthoritativeVideoPromptForSmoke(
-                        new string('p', 2_000));
+                        new string('p', 8_000));
                     window.SetVideoH3PromptRewriteModeForSmoke("direction");
                     bool modeOverflowRejectedExplicitly =
                         !await window.RewriteVideoPromptForH3ForSmokeAsync()
                         && rewritePostCalls == postsBeforeModeOverflow
                         && (window.VideoH3PromptRewriteStatusForSmoke.Contains(
-                                "2000",
+                                "8000",
                                 StringComparison.Ordinal)
                             || window.VideoH3PromptRewriteStatusForSmoke.Contains(
-                                "2,000",
+                                "8,000",
                                 StringComparison.Ordinal));
                     window.SetVideoH3PromptRewriteModeForSmoke("polish");
                     window.SetAuthoritativeVideoPromptForSmoke(basePrompt);

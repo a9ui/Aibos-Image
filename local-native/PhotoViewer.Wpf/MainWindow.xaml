@@ -2385,6 +2385,12 @@
                         MinWidth="64"
                         AutomationProperties.Name="Delete selected video generation style"/>
               </Grid>
+              <Button x:Name="OpenAppVideoStylesFileButton"
+                      Style="{StaticResource GhostButton}" Content="Style保存ファイルを開く"
+                      Click="OpenVideoStylesFile_Click"
+                      HorizontalAlignment="Left" Margin="0,6,0,0" Padding="8,3"
+                      AutomationProperties.Name="Open video generation style storage file"
+                      AutomationProperties.HelpText="Save current viewer state, then open the JSON file. External edits are loaded on the next app start."/>
               <TextBlock x:Name="AppVideoStyleSummaryText"
                          Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                          TextWrapping="Wrap" Margin="0,6,0,0"/>
@@ -2562,15 +2568,33 @@
                         AutomationProperties.Name="Reset default video generation settings"/>
                 <TextBlock Text="Default prompt" Foreground="{StaticResource TextSecondary}" FontSize="10.5" VerticalAlignment="Center"/>
               </DockPanel>
-              <TextBox x:Name="AppVideoPromptTextBox"
-                       MinHeight="78" MaxHeight="132" MaxLength="2000"
-                       AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
-                       Padding="8,6" Background="{StaticResource BgPrimary}"
-                       BorderBrush="{StaticResource BorderStrong}" Foreground="{StaticResource TextPrimary}"
-                       SelectionBrush="{StaticResource AccentFill}" CaretBrush="{StaticResource TextPrimary}"
-                       TextChanged="VideoGenerationPrompt_TextChanged"
-                       AutomationProperties.Name="Default video generation prompt"
-                       AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt."/>
+              <Grid>
+                <TextBox x:Name="AppVideoPromptTextBox"
+                         MinHeight="78" MaxHeight="480" MaxLength="8000"
+                         AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                         Padding="8,6,25,6" Background="{StaticResource BgPrimary}"
+                         BorderBrush="{StaticResource BorderStrong}" Foreground="{StaticResource TextPrimary}"
+                         SelectionBrush="{StaticResource AccentFill}" CaretBrush="{StaticResource TextPrimary}"
+                         TextChanged="VideoGenerationPrompt_TextChanged"
+                         AutomationProperties.Name="Default video generation prompt"
+                         AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt. Drag the bottom-right grip to resize the editor vertically."/>
+                <Thumb x:Name="AppVideoPromptResizeThumb" Tag="app"
+                       Width="25" Height="20" Margin="0,0,2,2"
+                       HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                       Cursor="SizeNS" DragDelta="VideoPromptResizeThumb_DragDelta"
+                       AutomationProperties.Name="Resize default video prompt editor"
+                       AutomationProperties.HelpText="Drag vertically to change the prompt editor height.">
+                  <Thumb.Template>
+                    <ControlTemplate TargetType="{x:Type Thumb}">
+                      <Border Background="Transparent">
+                        <TextBlock Text="///" Foreground="{StaticResource TextTertiary}"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Border>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Grid>
               <TextBlock x:Name="AppVideoResolutionHintText"
                          Text="空欄はNormalの既定モーション。選択した画素数上限: 409,600px。元画像比率を保ち、32px単位で上限内に自動調整します。1 worker・GPU推論の並列化なし。"
                          Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,7,0,0"/>
@@ -3532,9 +3556,16 @@
                       Foreground="{StaticResource TextPrimary}"
                       AutomationProperties.Name="Delete selected video generation style"/>
             </Grid>
+            <Button x:Name="OpenModalVideoStylesFileButton"
+                    Style="{StaticResource GhostButton}" Content="Style保存ファイルを開く"
+                    Click="OpenVideoStylesFile_Click"
+                    HorizontalAlignment="Left" Height="27" Padding="7,2" Margin="0,0,0,8"
+                    Foreground="{StaticResource TextPrimary}"
+                    AutomationProperties.Name="Open video generation style storage file"
+                    AutomationProperties.HelpText="Save current viewer state, then open the JSON file. External edits are loaded on the next app start."/>
             <TextBlock x:Name="ModalVideoStyleStatusText"
                        Foreground="{StaticResource TextSecondary}" FontSize="10"
-                       TextWrapping="Wrap" Margin="0,-5,0,8"
+                       TextWrapping="Wrap" Margin="0,0,0,8"
                        AutomationProperties.LiveSetting="Polite"/>
             <TextBlock Text="Model · MiniMax H3" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
             <ComboBox x:Name="ModalVideoModelComboBox"
@@ -3624,16 +3655,34 @@
                       AutomationProperties.Name="Reset video generation settings"/>
               <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" FontSize="11.5" VerticalAlignment="Center"/>
             </DockPanel>
-            <TextBox x:Name="ModalVideoPromptTextBox"
-                     MinHeight="92" MaxHeight="154" MaxLength="2000"
-                     AcceptsReturn="True" TextWrapping="Wrap"
-                     VerticalScrollBarVisibility="Auto"
-                     Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
-                     CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
-                     BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6"
-                     TextChanged="VideoGenerationPrompt_TextChanged"
-                     AutomationProperties.Name="Video generation prompt"
-                     AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt."/>
+            <Grid>
+              <TextBox x:Name="ModalVideoPromptTextBox"
+                       MinHeight="92" MaxHeight="480" MaxLength="8000"
+                       AcceptsReturn="True" TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto"
+                       Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}" SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="8,6,25,6"
+                       TextChanged="VideoGenerationPrompt_TextChanged"
+                       AutomationProperties.Name="Video generation prompt"
+                       AutomationProperties.HelpText="Blank uses the built-in conservative Normal motion prompt. Drag the bottom-right grip to resize the editor vertically."/>
+              <Thumb x:Name="ModalVideoPromptResizeThumb" Tag="modal"
+                     Width="25" Height="20" Margin="0,0,2,2"
+                     HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                     Cursor="SizeNS" DragDelta="VideoPromptResizeThumb_DragDelta"
+                     AutomationProperties.Name="Resize video prompt editor"
+                     AutomationProperties.HelpText="Drag vertically to change the prompt editor height.">
+                <Thumb.Template>
+                  <ControlTemplate TargetType="{x:Type Thumb}">
+                    <Border Background="Transparent">
+                      <TextBlock Text="///" Foreground="{StaticResource TextTertiary}"
+                                 FontSize="12" FontWeight="SemiBold"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                  </ControlTemplate>
+                </Thumb.Template>
+              </Thumb>
+            </Grid>
             <Border x:Name="ModalVideoH3PromptRewritePanel"
                     Visibility="Collapsed" Margin="0,10,0,0" Padding="10"
                     CornerRadius="5" Background="{StaticResource SoftFill}"
@@ -3686,7 +3735,7 @@
                            Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                            Margin="0,0,0,4"/>
                 <TextBox x:Name="ModalVideoH3PromptCandidateTextBox"
-                         MinHeight="112" MaxHeight="190" MaxLength="2001"
+                         MinHeight="112" MaxHeight="190" MaxLength="8001"
                          IsEnabled="False" AcceptsReturn="True" TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto"
                          Foreground="{StaticResource TextPrimary}" Background="{StaticResource BgPrimary}"

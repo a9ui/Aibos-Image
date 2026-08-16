@@ -212,7 +212,7 @@ public partial class MainWindow
                 requested,
                 "prompt",
                 out string? prompt)
-            || prompt!.Length > 2_000
+            || prompt!.Length > MaxVideoPromptLength
             || !effective.TryGetProperty(
                 "frameCount",
                 out JsonElement frameCountElement)
@@ -563,7 +563,7 @@ public partial class MainWindow
                 requested,
                 "prompt",
                 out string? requestedPrompt)
-            || requestedPrompt!.Length > 2_000
+            || requestedPrompt!.Length > MaxVideoPromptLength
             || !string.Equals(
                 requestedPrompt,
                 requestedPrompt.Trim(),

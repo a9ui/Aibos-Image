@@ -58,6 +58,10 @@ try {
         -or $xaml -notmatch 'x:Name="ModalVideoWanTuningPanel"' `
         -or $xaml -notmatch 'x:Name="AppVideoPromptTemplateComboBox"' `
         -or $xaml -notmatch 'x:Name="ModalVideoPromptTemplateComboBox"' `
+        -or $xaml -notmatch 'x:Name="AppVideoPromptResizeThumb"' `
+        -or $xaml -notmatch 'x:Name="ModalVideoPromptResizeThumb"' `
+        -or $xaml -notmatch 'x:Name="OpenAppVideoStylesFileButton"' `
+        -or $xaml -notmatch 'x:Name="OpenModalVideoStylesFileButton"' `
         -or $xaml -notmatch 'x:Name="ModalVideoPromptTextBox"[\s\S]{0,700}Background="\{StaticResource BgPrimary\}"' `
         -or $xaml -notmatch 'x:Name="AppVideoPromptTextBox"[\s\S]{0,700}Foreground="\{StaticResource TextPrimary\}"') {
         throw 'MiniMax H3 UI does not preserve the existing dark resource pattern.'
