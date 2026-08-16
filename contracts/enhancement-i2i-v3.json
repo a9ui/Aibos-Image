@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 3,
+  "contractId": "PV-ENHANCE-I2I-003",
+  "protocol": "aibos.enhancement-i2i/v3",
+  "jobStoreVersion": 1,
+  "operation": "i2i",
+  "mediaKind": "image",
+  "adapterId": "comfyui-flux2-i2i-v3",
+  "presetId": "flux2-i2i-edit-v3",
+  "presetLabel": "FLUX.2 unified guided edit v3",
+  "outputFolder": "Edited",
+  "compatibility": {
+    "v1AndV2": "PV-ENHANCE-I2I-001 and PV-ENHANCE-I2I-002 remain readable and executable by their exact existing writers",
+    "operationEnvelope": "schema v3 is additive inside operation=i2i and uses the existing durable queue",
+    "malformedOrFuture": "reader-only unsupported row; never coerce, execute, retry, reorder, open, or delete as a managed image enhancement",
+    "storeVersionChange": false
+  },
+  "requestV3": {
+    "discriminator": {
+      "i2iSchemaVersion": 3
+    },
+    "fields": {
+      "edits": {
+        "type": "object",
+        "knownFieldsOnly": true,
+        "fields": [
+          "overall",
+          "expression",
+          "outfit",
+          "background",
+          "pose"
+        ],
+        "valueType": "string",
+        "maximumCharactersPerField": 2000,
+        "blankMeaning": "do not unlock or alter that region",
+        "minimumNonblankFields": 1
+      },
+      "steps": {
+        "type": "integer",
+        "minimum": 4,
+        "maximum": 20,
+        "default": 8
+      },
+      "cfgScale": {
+        "type": "number",
+        "minimum": 0.5,
+        "maximum": 3.0,
+        "default": 1.0
+      },
+      "outfitMaskMode": {
+        "acceptedValues": [
+          "auto",
+          "manual"
+        ],
+        "default": "auto"
+      },
+      "outfitMaskExpandPixels": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 160,
+        "default": 32,
+        "autoResolvedValue": 64,
+        "meaning": "work-resolution pixels added around the detected clothing region"
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647,
+        "missing": "choose once at enqueue and persist the resolved integer"
+      }
+    },
+    "normalization": "trim each directive without rewriting its wording",
+    "sourceImagePathField": "forbidden"
+  },
+  "promptV3": {
+    "construction": "persist one compact line per nonblank directive using stable labels; append one short unlisted-region preservation line only when overall is blank",
+    "policyText": "do not append verbose policy or safety prose to the ordinary generation prompt",
+    "maximumCharacters": 8000,
+    "visibility": "the exact persisted directive snapshot and generation settings are local user data and may be shown and copied in the native UI",
+    "hash": "promptSnapshotSha256 is lowercase SHA-256 of the exact prompt UTF-8 bytes"
+  },
+  "snapshotV3": {
+    "container": "preset.options",
+    "requiredFields": [
+      "i2iSchemaVersion",
+      "overallInstruction",
+      "expressionInstruction",
+      "outfitInstruction",
+      "backgroundInstruction",
+      "poseInstruction",
+      "prompt",
+      "negativePrompt",
+      "steps",
+      "cfgScale",
+      "maxDimension",
+      "seed",
+      "outfitMaskMode",
+      "outfitMaskExpandPixels",
+      "workflowRevision",
+      "maskRevision",
+      "promptSnapshotSha256",
+      "loraEnabled"
+    ],
+    "fixedValues": {
+      "i2iSchemaVersion": 3,
+      "negativePrompt": "",
+      "maxDimension": 1280,
+      "workflowRevision": "i2i-flux2-klein9b-unified-v3",
+      "maskRevision": "sam31-mediapipe-multiregion-envelope-v3",
+      "loraEnabled": false
+    },
+    "unknownFields": "preserve when a compatible writer rewrites the row",
+    "retry": "reuse the complete persisted preset, directives, resolved mask expansion, seed, and source provenance without rebuilding from current UI settings"
+  },
+  "executionV3": {
+    "queue": "run exactly one job through the single durable Enhancement queue",
+    "candidate": "generate one full-frame FLUX candidate from all nonblank directives",
+    "overall": "a nonblank overall directive explicitly permits the validated full candidate frame",
+    "expression": "use a bounded full-face envelope rather than a lips-only mask",
+    "outfit": "use clothing segmentation plus the persisted automatic or manual expansion envelope while protecting face and hair",
+    "pose": "use a bounded person envelope while protecting face and hair",
+    "background": "use the outside of the union of source and candidate person masks; require strict alignment unless pose is also requested",
+    "blankRegion": "a blank scoped directive does not apply its composite pass",
+    "publication": "publish one managed output only after source identity, mask bounds, candidate dimensions, cleanup, and changed-pixel checks pass",
+    "source": "never rewrite or delete the selected source image"
+  },
+  "provenanceV3": {
+    "durableAuthority": "the exact preset.options snapshot in the job row",
+    "pngParameters": "include the compact user directive prompt and numeric settings so a copied managed output remains inspectable",
+    "nativeViewer": "show the structured per-field directives and numeric settings from the exact generating job and provide copy actions",
+    "namedStyles": "native UI styles copy request fields only; applying a style never enqueues until the user explicitly starts editing"
+  },
+  "capabilityV3": {
+    "healthPath": "capabilities.i2iV3",
+    "requiredFields": [
+      "contractId",
+      "operation",
+      "schemaVersion",
+      "readerReady",
+      "writerEnabled",
+      "backendConfigured",
+      "ready",
+      "directiveKeys",
+      "steps",
+      "cfgScale",
+      "outfitMask",
+      "backendId",
+      "workflowRevision",
+      "maskRevision",
+      "issueCode"
+    ],
+    "enqueueGate": "all readiness booleans must be exactly true before publishing or waking",
+    "notReady": "return 503 I2I_BACKEND_NOT_READY without writing a job or waking the queue",
+    "passiveRead": "health and Jobs reads never load models or start the worker"
+  }
+}

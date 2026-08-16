@@ -192,7 +192,13 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 
 - I2I is a distinct managed image operation. Its accepted targets, source
   provenance, immutable snapshot, capability gate, and fail-closed vectors are
-  defined by `PV-ENHANCE-I2I-001` and `PV-ENHANCE-I2I-002`.
+  defined by `PV-ENHANCE-I2I-001`, `PV-ENHANCE-I2I-002`, and
+  `PV-ENHANCE-I2I-003`.
+- Unified I2I version 3 snapshots separate overall, expression, outfit,
+  background, and pose directives in one durable job. A blank scoped directive
+  does not unlock that region. STEP, CFG, resolved outfit-mask expansion, and
+  Seed are part of the immutable retry snapshot; opening or applying a named
+  native style remains passive until the user explicitly starts the edit.
 - Video rows are typed media and are never decoded or mutated as still-image
   versions. Wan-compatible version 1 rows remain readable under
   `PV-ENHANCE-VIDEO-001`.

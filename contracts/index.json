@@ -79,6 +79,11 @@
       "scope": "I2I version 2 rows"
     },
     {
+      "contractId": "PV-ENHANCE-I2I-003",
+      "path": "contracts/enhancement-i2i-v3.json",
+      "scope": "Unified multi-region I2I version 3 rows"
+    },
+    {
       "contractId": "PV-ENHANCE-VIDEO-001",
       "path": "contracts/enhancement-video-v1.json",
       "scope": "Video version 1 rows"
