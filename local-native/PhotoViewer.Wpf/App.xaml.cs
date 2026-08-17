@@ -8933,8 +8933,17 @@ public partial class App : Application
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
+        string? previousRecentPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH");
+        string? previousFolderSetFavoritesPath = Environment.GetEnvironmentVariable(
+            "PHOTOVIEWER_WPF_FOLDER_SET_FAVORITES_PATH");
 
         PrepareSharedSeenSmokeEnvironment(smokeRoot);
+        Environment.SetEnvironmentVariable(
+            "PHOTOVIEWER_WPF_RECENT_PATH",
+            Path.Combine(smokeRoot, ".cache", "recent-folders.json"));
+        Environment.SetEnvironmentVariable(
+            "PHOTOVIEWER_WPF_FOLDER_SET_FAVORITES_PATH",
+            Path.Combine(smokeRoot, ".cache", "folder-set-favorites.json"));
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         var win = HiddenWindow();
@@ -8958,6 +8967,10 @@ public partial class App : Application
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", previousSeenPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", previousFavoritesPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", previousStatePath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH", previousRecentPath);
+                Environment.SetEnvironmentVariable(
+                    "PHOTOVIEWER_WPF_FOLDER_SET_FAVORITES_PATH",
+                    previousFolderSetFavoritesPath);
             }
 
             WriteFolderSetSmokeResult(resultFullPath, result);
@@ -8990,10 +9003,55 @@ public partial class App : Application
         int recentCountOnStartup = importWindow.RecentFolderSetCountForSmoke;
         importWindow.Close();
 
+        string folderSetFavoritesPath = win.FolderSetFavoritesPathForSmoke;
+        win.SetLandingFolderSetForSmoke([fullFolder]);
+        bool favoriteSaved = win.SaveCurrentFolderSetFavoriteForSmoke();
+        bool favoriteDuplicateDeduplicated = win.SaveCurrentFolderSetFavoriteForSmoke()
+            && win.FavoriteFolderSetCountForSmoke == 1;
+        string folderSetFavoriteJson = File.ReadAllText(folderSetFavoritesPath);
+        File.WriteAllText(
+            folderSetFavoritesPath,
+            folderSetFavoriteJson.Replace(
+                "\"version\": 1,",
+                "\"version\": 1,\n  \"smokeMarker\": \"keep\",",
+                StringComparison.Ordinal));
+        win.SetLandingFolderSetForSmoke([secondFolder]);
+        bool secondFavoriteSaved = win.SaveCurrentFolderSetFavoriteForSmoke();
+        bool favoriteSelectionRestored = win.SelectFavoriteFolderSetForSmoke(1)
+            && SameFolderSet(win.LandingFolderSetForSmoke, [fullFolder]);
+        bool favoriteRemoved = win.RemoveFavoriteFolderSetForSmoke(0)
+            && win.FavoriteFolderSetCountForSmoke == 1
+            && SameFolderSet(win.FavoriteFolderSetsForSmoke[0], [fullFolder]);
+        bool favoriteUnknownPreserved = File.ReadAllText(folderSetFavoritesPath)
+            .Contains("\"smokeMarker\": \"keep\"", StringComparison.Ordinal);
+        bool favoriteStoreIsolated = Path.GetFullPath(folderSetFavoritesPath)
+            .StartsWith(Path.GetFullPath(smokeRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+        win.SetLandingFolderSetForSmoke([fullFolder, secondFolder]);
+        win.SetLandingFolderSetForSmoke([secondFolder]);
+        bool replaceDiscardedOldDraft = SameFolderSet(win.LandingFolderSetForSmoke, [secondFolder]);
+
+        var scrollFolders = new List<string>();
+        for (int index = 0; index < 10; index++)
+        {
+            string scrollFolder = Path.Combine(smokeRoot, $"scroll-folder-{index:00}");
+            Directory.CreateDirectory(scrollFolder);
+            scrollFolders.Add(scrollFolder);
+        }
+        win.SetLandingFolderSetForSmoke(scrollFolders);
+        win.UpdateLandingFolderNavigationLayoutForSmoke();
+        bool selectedFoldersScrollable = win.LandingFolderSetOverflowForSmoke;
+        bool navigationSurface = win.LandingFolderNavigationSurfaceContractForSmoke;
+
         win.SetLandingFolderSetForSmoke([fullFolder]);
         int pastedAdded = win.AppendPastedFoldersForSmoke(string.Join(Environment.NewLine, [secondFolder, missingFolder, fullFolder]));
         var landingAfterPaste = win.LandingFolderSetForSmoke;
-        await win.LoadFolderSetAsync(landingAfterPaste);
+        win.ConfigureScanPhaseDelaysForSmoke(enumerationMilliseconds: 200, metadataMilliseconds: 0);
+        Task<bool> openTask = win.StartLandingFolderSetOpenForSmokeAsync();
+        bool immediateBusyFeedback = win.LandingFolderOpenBusyForSmoke;
+        bool duplicateOpenBlocked = !await win.StartLandingFolderSetOpenForSmokeAsync();
+        bool openedFromLanding = await openTask;
+        win.ConfigureScanPhaseDelaysForSmoke(enumerationMilliseconds: 0, metadataMilliseconds: 0);
         var currentFolderSet = win.CurrentFolderSetForSmoke;
         int filteredAfterLoad = win.FilteredCountForSmoke;
         string? currentFolder = win.CurrentFolderForSmoke;
@@ -9016,6 +9074,19 @@ public partial class App : Application
         bool ok = string.Equals(Path.GetFullPath(resolvedRecentPath), Path.GetFullPath(sharedRecentPath), StringComparison.OrdinalIgnoreCase)
             && importedSharedLastFolderSet
             && recentCountOnStartup > 0
+            && favoriteSaved
+            && favoriteDuplicateDeduplicated
+            && secondFavoriteSaved
+            && favoriteSelectionRestored
+            && favoriteRemoved
+            && favoriteUnknownPreserved
+            && favoriteStoreIsolated
+            && replaceDiscardedOldDraft
+            && selectedFoldersScrollable
+            && navigationSurface
+            && immediateBusyFeedback
+            && duplicateOpenBlocked
+            && openedFromLanding
             && pastedSecondFolder
             && loadedCurrentFolderSet
             && string.Equals(NormalizeFavoritePath(currentFolder ?? ""), NormalizeFavoritePath(fullFolder), StringComparison.OrdinalIgnoreCase)
@@ -9030,7 +9101,7 @@ public partial class App : Application
         return new FolderSetSmokeResult
         {
             Ok = ok,
-            Message = ok ? "folder-set landing, paste, multi-folder load, shared recent write-through, and state persistence passed" : "folder-set smoke did not meet expected policy",
+            Message = ok ? "folder-set replace, scrolling, favorites, immediate load feedback, multi-folder load, shared recent write-through, and state persistence passed" : "folder-set smoke did not meet expected policy",
             Folder = fullFolder,
             ProjectRoot = smokeRoot,
             SharedRecentPath = sharedRecentPath,
@@ -9048,7 +9119,21 @@ public partial class App : Application
             StateLastFolderSet = stateAfterWrite?.LastFolderSet ?? [],
             SharedLastFolderSet = afterWrite.LastFolderSet,
             RecentFolderSetCountAfterWrite = afterWrite.RecentFolderSets.Count,
+            FolderSetFavoritesPath = folderSetFavoritesPath,
             ImportedSharedLastFolderSet = importedSharedLastFolderSet,
+            FavoriteSaved = favoriteSaved,
+            FavoriteDuplicateDeduplicated = favoriteDuplicateDeduplicated,
+            SecondFavoriteSaved = secondFavoriteSaved,
+            FavoriteSelectionRestored = favoriteSelectionRestored,
+            FavoriteRemoved = favoriteRemoved,
+            FavoriteUnknownPreserved = favoriteUnknownPreserved,
+            FavoriteStoreIsolated = favoriteStoreIsolated,
+            ReplaceDiscardedOldDraft = replaceDiscardedOldDraft,
+            SelectedFoldersScrollable = selectedFoldersScrollable,
+            NavigationSurface = navigationSurface,
+            ImmediateBusyFeedback = immediateBusyFeedback,
+            DuplicateOpenBlocked = duplicateOpenBlocked,
+            OpenedFromLanding = openedFromLanding,
             PastedSecondFolder = pastedSecondFolder,
             LoadedCurrentFolderSet = loadedCurrentFolderSet,
             StateSavedFolderSet = stateSavedFolderSet,
@@ -33662,6 +33747,7 @@ public partial class App : Application
         public string? ProjectRoot { get; init; }
         public string? SharedRecentPath { get; init; }
         public string? ResolvedRecentPath { get; init; }
+        public string? FolderSetFavoritesPath { get; init; }
         public string? SecondFolder { get; init; }
         public string? MissingFolder { get; init; }
         public string? CurrentFolder { get; init; }
@@ -33676,6 +33762,19 @@ public partial class App : Application
         public int ExpectedMinImages { get; init; }
         public int RecentFolderSetCountAfterWrite { get; init; }
         public bool ImportedSharedLastFolderSet { get; init; }
+        public bool FavoriteSaved { get; init; }
+        public bool FavoriteDuplicateDeduplicated { get; init; }
+        public bool SecondFavoriteSaved { get; init; }
+        public bool FavoriteSelectionRestored { get; init; }
+        public bool FavoriteRemoved { get; init; }
+        public bool FavoriteUnknownPreserved { get; init; }
+        public bool FavoriteStoreIsolated { get; init; }
+        public bool ReplaceDiscardedOldDraft { get; init; }
+        public bool SelectedFoldersScrollable { get; init; }
+        public bool NavigationSurface { get; init; }
+        public bool ImmediateBusyFeedback { get; init; }
+        public bool DuplicateOpenBlocked { get; init; }
+        public bool OpenedFromLanding { get; init; }
         public bool PastedSecondFolder { get; init; }
         public bool LoadedCurrentFolderSet { get; init; }
         public bool StateSavedFolderSet { get; init; }

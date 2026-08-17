@@ -203,6 +203,7 @@ public partial class MainWindow : Window
     private readonly ResettableObservableCollection<Tile> _modalFilmstripTiles = new();
     private readonly ObservableCollection<string> _landingFolderSet = new();
     private readonly ObservableCollection<FolderBucketView> _folderBucketViews = new();
+    private readonly ObservableCollection<FolderSetFavoriteView> _favoriteFolderSetViews = new();
     private readonly ObservableCollection<RecentFolderSetView> _recentFolderSetViews = new();
     private readonly ObservableCollection<PreviewTabView> _previewTabs = new();
     private readonly ObservableCollection<SearchHistoryItemView> _searchHistoryEntries = new();
@@ -491,6 +492,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _loadCts;
     private long _loadGeneration;
     private bool _scanCancelable;
+    private bool _landingOpenRequestInProgress;
     private string _loadPhase = "idle";
     private int _scanEnumerationDelayForSmokeMs;
     private int _scanMetadataDelayForSmokeMs;
@@ -760,6 +762,7 @@ public partial class MainWindow : Window
             QueueEnhancedStateRefreshIfChanged();
         LandingFolderSetList.ItemsSource = _landingFolderSet;
         SidebarFolderSetList.ItemsSource = _folderBucketViews;
+        FavoriteFolderSetList.ItemsSource = _favoriteFolderSetViews;
         RecentFolderSetList.ItemsSource = _recentFolderSetViews;
         PreviewTabList.ItemsSource = _previewTabs;
         SearchHistoryList.ItemsSource = _searchHistoryEntries;
@@ -1834,6 +1837,16 @@ public partial class MainWindow : Window
 
     private async void OpenFolder_Click(object sender, RoutedEventArgs e) => await ChooseAndLoadFolderAsync();
 
+    private void ChangeLandingFolderSet_Click(object sender, RoutedEventArgs e)
+    {
+        IReadOnlyList<string> selected = ChooseFolders("Change image folders");
+        if (selected.Count == 0)
+            return;
+
+        SetLandingFolderSet(selected);
+        SetPhase(landing: true);
+    }
+
     private void OpenAlbums_Click(object sender, RoutedEventArgs e) => ShowAlbumLibrary();
 
     private void AddCurrentToAlbum_Click(object sender, RoutedEventArgs e) => ShowAlbumLibrary();
@@ -2146,10 +2159,15 @@ public partial class MainWindow : Window
         _loadPhase = "enumeration";
         CancelScanButton.Visibility = Visibility.Visible;
         CancelScanButton.IsEnabled = true;
+        ScanBar.IsIndeterminate = true;
         ScanBar.Value = 0;
         ScanPercent.Text = "";
         ScanLabel.Text = "Scanning folders...";
         ScanMessage.Text = resolvedFolderSummary;
+
+        // Render the busy state before directory or catalog work can occupy
+        // the UI thread, so a click always has immediate visible feedback.
+        await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
 
         IReadOnlyList<FileInfo> files;
         var scanAccessFailures = new ConcurrentQueue<string>();
@@ -2203,6 +2221,7 @@ public partial class MainWindow : Window
 
         if (!IsCurrentLoad(generation, cts))
             return;
+        ScanBar.IsIndeterminate = false;
         string scanTraversalWarning = BuildScanWarning(
             scanAccessFailures.Count,
             scanBoundarySkips.Count,
@@ -2666,6 +2685,7 @@ public partial class MainWindow : Window
         _loadPhase = "idle";
         CancelScanButton.Visibility = Visibility.Collapsed;
         CancelScanButton.IsEnabled = false;
+        ScanBar.IsIndeterminate = false;
         _loadCts = null;
     }
 
@@ -2676,6 +2696,7 @@ public partial class MainWindow : Window
         if (generation == _loadGeneration && ReferenceEquals(_loadCts, cts))
         {
             _scanCancelable = false;
+            ScanBar.IsIndeterminate = false;
             _loadCts = null;
         }
         cts.Dispose();
@@ -2699,6 +2720,7 @@ public partial class MainWindow : Window
         Landing.Visibility = Visibility.Visible;
         LandingPanel.IsEnabled = true;
         ScanPanel.Visibility = Visibility.Visible;
+        ScanBar.IsIndeterminate = false;
         ScanBar.Value = 0;
         ScanPercent.Text = "";
         ScanLabel.Text = "Scan canceled";
@@ -2818,7 +2840,11 @@ public partial class MainWindow : Window
         }
 
         if (OpenFolderSetButton is not null)
-            OpenFolderSetButton.IsEnabled = _landingFolderSet.Count > 0;
+            OpenFolderSetButton.IsEnabled = _landingFolderSet.Count > 0
+                && !_landingOpenRequestInProgress;
+        if (SaveCurrentFolderSetFavoriteButton is not null)
+            SaveCurrentFolderSetFavoriteButton.IsEnabled = _landingFolderSet.Count > 0
+                && !_landingOpenRequestInProgress;
 
         RefreshFolderBucketViews();
         RefreshRecentFolderSetViews();
@@ -3604,6 +3630,7 @@ public partial class MainWindow : Window
         if (done % 8 != 0 && done != total)
             return;
 
+        ScanBar.IsIndeterminate = false;
         double progress = done * 100.0 / total;
         ScanBar.Value = progress;
         ScanPercent.Text = $"{(int)progress}%";
@@ -3615,6 +3642,7 @@ public partial class MainWindow : Window
         if (total <= 0)
             return;
 
+        ScanBar.IsIndeterminate = false;
         double progress = done * 100.0 / total;
         ScanBar.Value = progress;
         ScanPercent.Text = $"{(int)progress}%";
@@ -17807,11 +17835,52 @@ public partial class MainWindow : Window
         _loadPhase = "idle";
         CancelScanButton.Visibility = Visibility.Collapsed;
         CancelScanButton.IsEnabled = false;
+        ScanBar.IsIndeterminate = false;
         ScanBar.Value = 0;
         Landing.Visibility = landing ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private async void StartScan_Click(object sender, RoutedEventArgs e) => await OpenLandingFolderSetAsync();
+    private async void StartScan_Click(object sender, RoutedEventArgs e)
+        => await StartLandingFolderSetOpenAsync();
+
+    private async Task<bool> StartLandingFolderSetOpenAsync()
+    {
+        if (_landingOpenRequestInProgress || _landingFolderSet.Count == 0)
+            return false;
+
+        int createdBefore = _loadCtsCreatedCount;
+        _landingOpenRequestInProgress = true;
+        LandingPanel.IsEnabled = false;
+        OpenFolderSetButton.IsEnabled = false;
+        SaveCurrentFolderSetFavoriteButton.IsEnabled = false;
+        OpenFolderSetButtonText.SetResourceReference(TextBlock.TextProperty, "UiOpeningFolderSet");
+        ScanPanel.Visibility = Visibility.Visible;
+        ScanBar.IsIndeterminate = true;
+        ScanBar.Value = 0;
+        ScanPercent.Text = "";
+        ScanLabel.Text = "Starting folder scan...";
+        ScanMessage.Text = FormatFolderSetSummary(_landingFolderSet);
+        _loadPhase = "starting";
+
+        try
+        {
+            await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.Render);
+            await OpenLandingFolderSetAsync();
+            return true;
+        }
+        finally
+        {
+            bool loadWasCreated = _loadCtsCreatedCount > createdBefore;
+            _landingOpenRequestInProgress = false;
+            OpenFolderSetButtonText.SetResourceReference(TextBlock.TextProperty, "UiOpenFolderSet");
+            ScanBar.IsIndeterminate = false;
+            if (!loadWasCreated && Landing.Visibility == Visibility.Visible)
+                SetPhase(landing: true);
+            else if (Landing.Visibility == Visibility.Visible && _loadCts is null)
+                LandingPanel.IsEnabled = true;
+            RefreshLandingFolderSetUi();
+        }
+    }
 
     private void CancelScan_Click(object sender, RoutedEventArgs e) => CancelActiveScan();
 
@@ -23303,6 +23372,7 @@ public partial class MainWindow : Window
     {
         var state = ReadState();
         InitializeSplitLocalPersistence(state);
+        RefreshFavoriteFolderSetViews(reportFailure: false);
         SetUiLanguage(state?.UiLanguage, persist: false);
         SetFavoriteChangeNotifications(
             state?.ShowFavoriteChangeNotifications ?? true,

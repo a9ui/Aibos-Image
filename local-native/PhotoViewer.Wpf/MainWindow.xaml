@@ -1225,14 +1225,24 @@
         <!-- folder set panel -->
         <StackPanel x:Name="LandingPanel">
           <Grid Margin="0,0,0,12">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
             <Button Grid.Column="0" Style="{StaticResource BrowseButton}" Margin="0,0,12,0" Click="OpenFolder_Click">
               <StackPanel Orientation="Horizontal">
                 <Path Data="M22,19 a2,2 0 0 1 -2,2 H4 a2,2 0 0 1 -2,-2 V5 a2,2 0 0 1 2,-2 h5 l2,3 h9 a2,2 0 0 1 2,2 z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.8" Stretch="Uniform" Width="17" Height="17" Margin="0,0,8,0"/>
                 <TextBlock Text="{DynamicResource UiAddFolder}" VerticalAlignment="Center"/>
               </StackPanel>
             </Button>
-            <Button Grid.Column="1" x:Name="OpenFolderSetButton" Style="{StaticResource PrimaryButton}" Click="StartScan_Click"><TextBlock Text="{DynamicResource UiOpenFolderSet}" Foreground="{StaticResource SelectionText}"/></Button>
+            <Button Grid.Column="1" x:Name="ChangeLandingFolderSetButton" Style="{StaticResource BrowseButton}" Margin="0,0,12,0" Click="ChangeLandingFolderSet_Click"
+                    ToolTip="{DynamicResource UiChangeFolderSetHelp}">
+              <TextBlock Text="{DynamicResource UiChangeFolder}" VerticalAlignment="Center"/>
+            </Button>
+            <Button Grid.Column="2" x:Name="OpenFolderSetButton" Style="{StaticResource PrimaryButton}" Click="StartScan_Click">
+              <TextBlock x:Name="OpenFolderSetButtonText" Text="{DynamicResource UiOpenFolderSet}" Foreground="{StaticResource SelectionText}"/>
+            </Button>
           </Grid>
 
           <Border CornerRadius="4" Background="{StaticResource BgSecondary}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1" Padding="12,9" Margin="0,0,0,6" Visibility="Collapsed">
@@ -1256,16 +1266,22 @@
                 <TextBlock Text="{DynamicResource UiDropFoldersTitle}" Foreground="{StaticResource TextSecondary}" FontSize="12.5" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                 <TextBlock Text="{DynamicResource UiDropFoldersHelp}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" Margin="0,4,0,0" HorizontalAlignment="Center"/>
               </StackPanel>
-              <ItemsControl x:Name="LandingFolderSetList" MaxHeight="118">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <DockPanel Margin="0,0,0,5">
-                      <Button DockPanel.Dock="Right" Style="{StaticResource StepButton}" Content="x" ToolTip="{DynamicResource UiRemoveFolder}" Tag="{Binding}" Click="RemoveLandingFolder_Click" Margin="8,0,0,0"/>
-                      <TextBlock Text="{Binding}" Foreground="{StaticResource TextPrimary}" FontSize="13" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                    </DockPanel>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+              <ScrollViewer x:Name="LandingFolderSetScrollViewer" MaxHeight="118"
+                            VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                            CanContentScroll="False" PanningMode="VerticalOnly"
+                            AutomationProperties.Name="Selected folder set"
+                            AutomationProperties.HelpText="Scroll to review every selected folder.">
+                <ItemsControl x:Name="LandingFolderSetList" Margin="0,0,4,0">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <DockPanel Margin="0,0,0,5">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource StepButton}" Content="x" ToolTip="{DynamicResource UiRemoveFolder}" Tag="{Binding}" Click="RemoveLandingFolder_Click" Margin="8,0,0,0"/>
+                        <TextBlock Text="{Binding}" Foreground="{StaticResource TextPrimary}" FontSize="13" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                      </DockPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
             </Grid>
           </Border>
 
@@ -1288,19 +1304,64 @@
           </StackPanel>
         </Button>
 
+        <Grid Margin="2,20,0,8">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="{DynamicResource UiFavoriteFolderSets}" Foreground="{StaticResource TextTertiary}" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <Button Grid.Column="1" x:Name="SaveCurrentFolderSetFavoriteButton" Style="{StaticResource GhostButton}" Height="28" Padding="10,0"
+                  Click="SaveCurrentFolderSetFavorite_Click" ToolTip="{DynamicResource UiSaveFavoriteFolderSetHelp}">
+            <TextBlock Text="{DynamicResource UiSaveFavoriteFolderSet}" FontSize="11.5"/>
+          </Button>
+        </Grid>
+        <Grid>
+          <TextBlock x:Name="FavoriteFolderSetEmptyHint" Text="{DynamicResource UiNoFavoriteFolderSets}"
+                     Foreground="{StaticResource TextTertiary}" FontSize="12" Margin="2,4,0,4"/>
+          <ScrollViewer x:Name="FavoriteFolderSetScrollViewer" MaxHeight="132"
+                        VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                        CanContentScroll="False" PanningMode="VerticalOnly"
+                        AutomationProperties.Name="Favorite folder sets"
+                        AutomationProperties.HelpText="Favorite folder sets remain available when recent history changes.">
+            <ItemsControl x:Name="FavoriteFolderSetList" Margin="0,0,4,0">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,0,0,7">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" Style="{StaticResource GhostButton}" Height="30" Padding="10,0" HorizontalContentAlignment="Left"
+                            Tag="{Binding}" Click="FavoriteFolderSet_Click" ToolTip="{Binding Detail}">
+                      <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis"/>
+                    </Button>
+                    <Button Grid.Column="1" Style="{StaticResource StepButton}" Content="x" Margin="7,0,0,0"
+                            Tag="{Binding}" Click="RemoveFavoriteFolderSet_Click"
+                            ToolTip="{DynamicResource UiRemoveFavoriteFolderSet}"/>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Grid>
+
         <TextBlock Text="{DynamicResource UiRecentFolderSets}" Foreground="{StaticResource TextTertiary}" FontSize="10" FontWeight="SemiBold" Margin="2,20,0,8"/>
-        <ItemsControl x:Name="RecentFolderSetList">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Button Style="{StaticResource GhostButton}" Height="30" Margin="0,0,7,7" FontSize="12" Tag="{Binding}" Click="RecentFolderSet_Click">
-                <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis" MaxWidth="220"/>
-              </Button>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <ScrollViewer x:Name="RecentFolderSetScrollViewer" MaxHeight="160"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      CanContentScroll="False" PanningMode="VerticalOnly"
+                      AutomationProperties.Name="Recent folder sets"
+                      AutomationProperties.HelpText="Recent folder sets are shown in one scrollable column.">
+          <ItemsControl x:Name="RecentFolderSetList" Margin="0,0,4,0">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Button Style="{StaticResource GhostButton}" Height="30" Margin="0,0,0,7" Padding="10,0" FontSize="12"
+                        HorizontalContentAlignment="Left" Tag="{Binding}" Click="RecentFolderSet_Click" ToolTip="{Binding Detail}">
+                  <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis"/>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
         <WrapPanel Visibility="Collapsed">
           <WrapPanel.Resources>
             <Style TargetType="Button" BasedOn="{StaticResource GhostButton}">
@@ -1321,13 +1382,44 @@
           <ProgressBar x:Name="ScanBar" Height="6" Minimum="0" Maximum="100" Value="0">
             <ProgressBar.Template>
               <ControlTemplate TargetType="ProgressBar">
-                <Border CornerRadius="3" Background="{StaticResource BgTertiary}">
-                  <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="3">
-                    <Border.Background>
-                      <SolidColorBrush Color="{DynamicResource AccentColor}"/>
-                    </Border.Background>
-                  </Border>
+                <Border CornerRadius="3" Background="{StaticResource BgTertiary}" ClipToBounds="True">
+                  <Grid>
+                    <Border x:Name="PART_Indicator" HorizontalAlignment="Left" CornerRadius="3">
+                      <Border.Background>
+                        <SolidColorBrush Color="{DynamicResource AccentColor}"/>
+                      </Border.Background>
+                    </Border>
+                    <Border x:Name="ScanIndeterminateIndicator" Width="112" HorizontalAlignment="Left" CornerRadius="3" Visibility="Collapsed">
+                      <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                          <GradientStop Color="#00ff467c"/>
+                          <GradientStop Color="#ffff467c" Offset="0.45"/>
+                          <GradientStop Color="#ffc456ff" Offset="0.65"/>
+                          <GradientStop Color="#00c456ff" Offset="1"/>
+                        </LinearGradientBrush>
+                      </Border.Background>
+                      <Border.RenderTransform><TranslateTransform X="-112"/></Border.RenderTransform>
+                    </Border>
+                  </Grid>
                 </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsIndeterminate" Value="True">
+                    <Setter TargetName="PART_Indicator" Property="Visibility" Value="Collapsed"/>
+                    <Setter TargetName="ScanIndeterminateIndicator" Property="Visibility" Value="Visible"/>
+                    <Trigger.EnterActions>
+                      <BeginStoryboard x:Name="ScanIndeterminateStoryboard">
+                        <Storyboard RepeatBehavior="Forever">
+                          <DoubleAnimation Storyboard.TargetName="ScanIndeterminateIndicator"
+                                           Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                           From="-112" To="560" Duration="0:0:1.15"/>
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </Trigger.EnterActions>
+                    <Trigger.ExitActions>
+                      <StopStoryboard BeginStoryboardName="ScanIndeterminateStoryboard"/>
+                    </Trigger.ExitActions>
+                  </Trigger>
+                </ControlTemplate.Triggers>
               </ControlTemplate>
             </ProgressBar.Template>
           </ProgressBar>
