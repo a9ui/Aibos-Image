@@ -1210,12 +1210,41 @@ public partial class MainWindow
     private bool CanRetryAllTerminalEnhancementJobs(string status)
         => _enhancementWorkspaceJobs.Any(job =>
             job.Status == status
-            && job.CanRerunWithCurrentSettings
-            && job.CanDismiss);
+            && job.CanRetry);
 
     private bool CanClearAllTerminalEnhancementJobs(string status)
         => _enhancementWorkspaceJobs.Any(job =>
             job.Status == status && job.CanDismiss);
+
+    private void RefreshTerminalBulkControlPresentation(
+        string status,
+        Button retryButton,
+        Button clearButton,
+        string clearLabel)
+    {
+        EnhancementWorkspaceJobView[] terminalJobs = _enhancementWorkspaceJobs
+            .Where(job => job.Status == status)
+            .ToArray();
+        int retryableCount = terminalJobs.Count(static job => job.CanRetry);
+        int dismissibleCount = terminalJobs.Count(static job => job.CanDismiss);
+        int retryProtectedCount = terminalJobs.Length - retryableCount;
+        int dismissProtectedCount = terminalJobs.Length - dismissibleCount;
+
+        retryButton.Content = $"全部リトライ ({retryableCount:N0})";
+        retryButton.ToolTip = retryableCount > 0
+            ? $"再試行できる{retryableCount:N0}件を、それぞれの保存済みPrompt・設定で待機列の末尾へ追加します。"
+                + (retryProtectedCount > 0
+                    ? $" 保護対象{retryProtectedCount:N0}件は変更しません。"
+                    : "")
+            : "保存済み設定で安全に再試行できるJobはありません。future・malformed・read-only等の保護対象は変更しません。";
+        clearButton.Content = $"{clearLabel} ({dismissibleCount:N0})";
+        clearButton.ToolTip = dismissibleCount > 0
+            ? $"削除可能な履歴{dismissibleCount:N0}件だけを消します。元画像と出力ファイルは変更しません。"
+                + (dismissProtectedCount > 0
+                    ? $" 保護対象{dismissProtectedCount:N0}件は残します。"
+                    : "")
+            : "削除可能な履歴はありません。future・malformed・read-only等の保護対象は残します。";
+    }
 
     private void RefreshEnhancementQueueBulkControls()
     {
@@ -1267,6 +1296,26 @@ public partial class MainWindow
             EnhancementJobsClearCanceledButton.IsEnabled =
                 !_enhancementWorkspaceMutationPending
                 && CanClearAllTerminalEnhancementJobs("canceled");
+        }
+
+        if (EnhancementJobsRetryFailedButton is not null
+            && EnhancementJobsClearFailedButton is not null)
+        {
+            RefreshTerminalBulkControlPresentation(
+                "failed",
+                EnhancementJobsRetryFailedButton,
+                EnhancementJobsClearFailedButton,
+                "失敗を全部消す");
+        }
+
+        if (EnhancementJobsRetryCanceledButton is not null
+            && EnhancementJobsClearCanceledButton is not null)
+        {
+            RefreshTerminalBulkControlPresentation(
+                "canceled",
+                EnhancementJobsRetryCanceledButton,
+                EnhancementJobsClearCanceledButton,
+                "キャンセルを全部消す");
         }
 
         if (EnhancementJobsFailedBulkPanel is not null)
@@ -3651,8 +3700,7 @@ public partial class MainWindow
         EnhancementWorkspaceJobView[] terminalJobs = _enhancementWorkspaceJobs
             .Where(job =>
                 job.Status == terminalStatus
-                && job.CanRerunWithCurrentSettings
-                && job.CanDismiss)
+                && job.CanRetry)
             .OrderBy(static job => job.CreatedAt)
             .ThenBy(static job => job.ApiOrdinal)
             .ToArray();
@@ -3660,11 +3708,6 @@ public partial class MainWindow
             || EnhancementJobsDialog.Visibility != Visibility.Visible
             || terminalJobs.Length == 0)
         {
-            return 0;
-        }
-        if (!TryResolvePhotorealSeed(out int? photorealSeed, out string seedError))
-        {
-            EnhancementJobsStatusText.Text = seedError;
             return 0;
         }
 
@@ -3679,8 +3722,6 @@ public partial class MainWindow
         {
             return 0;
         }
-        ModalPhotorealRequestSettings currentSettings =
-            CurrentModalPhotorealRequestSettings();
         var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
         RefreshEnhancementQueueBulkControls();
@@ -3691,64 +3732,15 @@ public partial class MainWindow
         string? failure = null;
         int? failureStatus = null;
         EnhancementJobsStatusText.Text =
-            $"{terminalLabel}した実写化 {terminalJobs.Length:N0}件を現在設定で再試行しています…";
+            $"{terminalLabel}したJob {terminalJobs.Length:N0}件を保存済み設定で再試行しています…";
         await Dispatcher.Yield(DispatcherPriority.Render);
         try
         {
-            var retryRequests = new List<(EnhancementWorkspaceJobView Job, object Body)>(
-                terminalJobs.Length);
+            DurableEnhancementBatchResponse retryBatch =
+                await TrySendDurableEnhancementRetryBatchAsync(terminalJobs);
             for (int index = 0; index < terminalJobs.Length; index++)
             {
                 EnhancementWorkspaceJobView job = terminalJobs[index];
-                if (generation != _enhancementWorkspaceGeneration
-                    || EnhancementJobsDialog.Visibility != Visibility.Visible)
-                {
-                    return retriedCount;
-                }
-                if (!TryResolveEnhancementWorkspaceInput(
-                        job,
-                        out string sourceIdentity))
-                {
-                    failedCount++;
-                    failure ??= "SOURCE_IDENTITY_INVALID";
-                    continue;
-                }
-
-                ModalPhotorealRequestSettings settings;
-                try
-                {
-                    settings = await ResolvePhotorealRequestSettingsAsync(
-                        currentSettings,
-                        sourceIdentity);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    failedCount++;
-                    failure ??= ex.Message;
-                    continue;
-                }
-
-                retryRequests.Add((
-                    job,
-                    CreatePhotorealRequestBody(
-                        sourceIdentity,
-                        settings,
-                        photorealSeed,
-                        "last")));
-            }
-
-            DurableEnhancementBatchResponse retryBatch =
-                await TrySendDurableEnhancementBatchAsync(
-                    retryRequests.Select(static request => request.Body).ToArray(),
-                    "last",
-                    healthValidator: CreateImageEnhancementHealthValidator(
-                        "photoreal",
-                        enqueueNext: false,
-                        requiresPhotorealSeedControl: photorealSeed.HasValue),
-                    requireExactHealthValidation: true);
-            for (int index = 0; index < retryRequests.Count; index++)
-            {
-                EnhancementWorkspaceJobView job = retryRequests[index].Job;
                 EnhancementApiResponse retry = retryBatch.Responses[index];
                 if (retry.SavedForDelivery)
                 {
@@ -3781,7 +3773,7 @@ public partial class MainWindow
                     && index + 1 < terminalJobs.Length)
                 {
                     EnhancementJobsStatusText.Text =
-                        $"現在設定で再試行中… {index + 1:N0}/{terminalJobs.Length:N0}件";
+                        $"保存済み設定で再試行中… {index + 1:N0}/{terminalJobs.Length:N0}件";
                     await Dispatcher.Yield(DispatcherPriority.Background);
                 }
             }
@@ -3797,12 +3789,12 @@ public partial class MainWindow
                     ? $"確認済み{retriedCount:N0}件の元失敗履歴を消しました。"
                     : $"確認済み{retriedCount:N0}件を新しいジョブとして追加しました。";
                 EnhancementJobsStatusText.Text =
-                    $"{terminalLabel}した実写化を現在設定で{acceptedCount:N0}件受付。{completedDetail}"
+                    $"{terminalLabel}したJobを保存済み設定で{acceptedCount:N0}件受付。{completedDetail}"
                     + (pendingCount > 0
                         ? $" {pendingCount:N0}件は登録確認中なので元履歴を残しています。"
                         : "")
                     + (protectedCount > 0
-                        ? $" 現在設定で再試行できない保護対象 {protectedCount:N0}件は残しました。"
+                        ? $" 安全に再試行できない保護対象 {protectedCount:N0}件は残しました。"
                         : "")
                     + (failedCount > 0
                         ? $" {failedCount:N0}件は失敗しました（{failure}）。"
@@ -3811,7 +3803,7 @@ public partial class MainWindow
             string? operationError = failure
                 ?? (pendingCount > 0 ? "RETRY_SAVED_FOR_DELIVERY" : null);
             AibosOperationLog.Write(
-                $"{terminalStatus}_photoreal_jobs_retry_all_current",
+                $"{terminalStatus}_jobs_retry_all_saved",
                 operationError is null ? "completed" : "partial",
                 operationWatch.ElapsedMilliseconds,
                 failureStatus ?? (pendingCount > 0 ? 202 : null),
@@ -4021,7 +4013,7 @@ public partial class MainWindow
         string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル済み";
         string actionLabel = retry ? "全部リトライ" : "全部消す";
         string detail = retry
-            ? "現在の実写化設定で新しい待機ジョブを追加します。元画像と出力ファイルは変更しません。"
+            ? "各Jobに保存されたPrompt・STEP・CFG・Seed等の設定で、新しい待機ジョブを追加します。元画像と出力ファイルは変更しません。"
             : "対象の履歴だけを消します。元画像と出力ファイルは削除しません。";
         string message =
             $"{terminalLabel}の対象 {actionCount:N0}件を{actionLabel}しますか？\n\n{detail}"
@@ -5661,6 +5653,21 @@ public partial class MainWindow
 
     public bool ClearAllCanceledEnhancementJobsControlForSmoke =>
         EnhancementJobsClearCanceledButton.IsEnabled;
+
+    public string RetryAllFailedEnhancementJobsLabelForSmoke =>
+        Convert.ToString(
+            EnhancementJobsRetryFailedButton.Content,
+            CultureInfo.InvariantCulture) ?? "";
+
+    public string RetryAllFailedEnhancementJobsToolTipForSmoke =>
+        Convert.ToString(
+            EnhancementJobsRetryFailedButton.ToolTip,
+            CultureInfo.InvariantCulture) ?? "";
+
+    public string RetryAllCanceledEnhancementJobsToolTipForSmoke =>
+        Convert.ToString(
+            EnhancementJobsRetryCanceledButton.ToolTip,
+            CultureInfo.InvariantCulture) ?? "";
 
     public bool FailedBulkPanelVisibleForSmoke =>
         EnhancementJobsFailedBulkPanel.Visibility == Visibility.Visible;

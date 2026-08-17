@@ -1540,8 +1540,8 @@
               <StackPanel x:Name="EnhancementJobsFailedBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
                 <Button x:Name="EnhancementJobsRetryFailedButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
                         Click="RetryAllFailedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="92" Margin="0,0,6,0"
-                        AutomationProperties.Name="Retry all failed enhancement jobs with current settings"
-                        ToolTip="再試行できる失敗した実写化を現在設定で待機列へ追加します"
+                        AutomationProperties.Name="Retry all failed enhancement jobs with saved settings"
+                        ToolTip="再試行できる失敗Jobを、それぞれの保存済みPrompt・設定で待機列へ追加します"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
                 <Button x:Name="EnhancementJobsClearFailedButton" Style="{StaticResource DangerButton}" Content="失敗を全部消す"
                         Click="ClearAllFailedEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="108" Margin="0,0,6,0"
@@ -1552,8 +1552,8 @@
               <StackPanel x:Name="EnhancementJobsCanceledBulkPanel" Orientation="Horizontal" Visibility="Collapsed">
                 <Button x:Name="EnhancementJobsRetryCanceledButton" Style="{StaticResource GhostButton}" Content="全部リトライ"
                         Click="RetryAllCanceledEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="92" Margin="0,0,6,0"
-                        AutomationProperties.Name="Retry all canceled enhancement jobs with current settings"
-                        ToolTip="再試行できるキャンセル済みの実写化を現在設定で待機列へ追加します"
+                        AutomationProperties.Name="Retry all canceled enhancement jobs with saved settings"
+                        ToolTip="再試行できるキャンセル済みJobを、それぞれの保存済みPrompt・設定で待機列へ追加します"
                         WindowChrome.IsHitTestVisibleInChrome="True"/>
                 <Button x:Name="EnhancementJobsClearCanceledButton" Style="{StaticResource DangerButton}" Content="キャンセルを全部消す"
                         Click="ClearAllCanceledEnhancementJobs_Click" IsEnabled="False" Height="30" MinWidth="132" Margin="0,0,6,0"
