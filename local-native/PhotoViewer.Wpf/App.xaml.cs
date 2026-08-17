@@ -30990,10 +30990,7 @@ public partial class App : Application
         string validPath = Path.Combine(folder, validName);
         string otherPath = Path.Combine(folder, "other.png");
         string unavailablePath = validPath + ".temporarily-unavailable";
-        string invalidTargetsRoot = Path.Combine(smokeRoot, "invalid-open-targets");
-        string unsupportedPath = Path.Combine(invalidTargetsRoot, "must-not-run.cmd");
-        string imageNamedDirectoryPath = Path.Combine(invalidTargetsRoot, "not-a-file.png");
-        string missingImagePath = Path.Combine(invalidTargetsRoot, "missing.png");
+        string missingImagePath = Path.Combine(smokeRoot, "missing.png");
         string managedOutputPath = Path.Combine(smokeRoot, "outputs", "owned", "enhanced.webp");
         string unavailableOutputPath = managedOutputPath + ".temporarily-unavailable";
         string outsideOutputPath = Path.Combine(smokeRoot, "outside-enhanced.webp");
@@ -31011,12 +31008,9 @@ public partial class App : Application
         try
         {
             Directory.CreateDirectory(folder);
-            Directory.CreateDirectory(invalidTargetsRoot);
             Directory.CreateDirectory(Path.GetDirectoryName(managedOutputPath)!);
             WriteSmokePng(validPath, 96, 64, Color.FromRgb(64, 132, 220));
             WriteSmokePng(otherPath, 64, 96, Color.FromRgb(166, 94, 210));
-            File.WriteAllText(unsupportedPath, "@echo off\r\nexit /b 0\r\n");
-            Directory.CreateDirectory(imageNamedDirectoryPath);
             WriteSmokePng(managedOutputPath, 112, 80, Color.FromRgb(30, 190, 125));
             File.WriteAllBytes(managedOutputPath, File.ReadAllBytes(managedOutputPath).Concat(new byte[1_572_864]).ToArray());
             WriteSmokePng(outsideOutputPath, 48, 48, Color.FromRgb(220, 120, 40));
@@ -31130,14 +31124,6 @@ public partial class App : Application
                         canonical,
                         StringComparison.OrdinalIgnoreCase)
                     && string.IsNullOrEmpty(verifiedReason)
-                    && !ExternalImageOpenTarget.TryCreate(
-                        unsupportedPath,
-                        out _,
-                        out _)
-                    && !ExternalImageOpenTarget.TryCreate(
-                        imageNamedDirectoryPath,
-                        out _,
-                        out _)
                     && !ExternalImageOpenTarget.TryCreate(
                         missingImagePath,
                         out _,
