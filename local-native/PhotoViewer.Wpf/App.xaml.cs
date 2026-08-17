@@ -30496,13 +30496,18 @@ public partial class App : Application
                 string seenBefore = FileFingerprint(seenPath);
                 string recentBefore = FileFingerprint(recentPath);
                 string jobsBefore = FileFingerprint(jobsPath);
+                bool focusEvidenceAvailable = win.FocusModalOpenExternalForSmoke();
 
-                ExternalOpenSmokeSnapshot success = win.ActivateExternalOpenForSmoke("success");
-                string enhancedFileSize = win.ModalFileSizeForSmoke;
-                bool originalToggled = win.ToggleModalEnhancedForSmoke();
-                string originalFileSize = win.ModalFileSizeForSmoke;
+                bool enhancedSelected = win.ModalShowingEnhancedForSmoke
+                    || (win.ToggleModalEnhancedForSmoke() && win.ModalShowingEnhancedForSmoke);
                 ExternalOpenSmokeSnapshot enhancedSuccess = win.ActivateExternalOpenForSmoke("success");
-                bool enhancedRetoggledForStale = win.ToggleModalEnhancedForSmoke();
+                string enhancedFileSize = win.ModalFileSizeForSmoke;
+                bool originalToggled = win.ToggleModalEnhancedForSmoke()
+                    && !win.ModalShowingEnhancedForSmoke;
+                string originalFileSize = win.ModalFileSizeForSmoke;
+                ExternalOpenSmokeSnapshot success = win.ActivateExternalOpenForSmoke("success");
+                bool enhancedRetoggledForStale = win.ToggleModalEnhancedForSmoke()
+                    && win.ModalShowingEnhancedForSmoke;
 
                 byte[] sourceBytes = File.ReadAllBytes(validPath);
                 DateTime sourceMtimeUtc = File.GetLastWriteTimeUtc(validPath);
@@ -30511,7 +30516,8 @@ public partial class App : Application
                 File.WriteAllBytes(validPath, sourceBytes);
                 File.SetLastWriteTimeUtc(validPath, sourceMtimeUtc);
                 win.OpenModalForSmoke();
-                bool retoggledAfterStale = win.ToggleModalEnhancedForSmoke();
+                bool retoggledAfterStale = win.ModalShowingEnhancedForSmoke
+                    || (win.ToggleModalEnhancedForSmoke() && win.ModalShowingEnhancedForSmoke);
                 File.Move(managedOutputPath, unavailableOutputPath);
                 ExternalOpenSmokeSnapshot missingEnhancedFallback;
                 try
@@ -30547,14 +30553,15 @@ public partial class App : Application
                     snapshot.LauncherInvoked
                     && snapshot.Arguments.Count == 0
                     && string.IsNullOrEmpty(snapshot.ArgumentsText));
-                bool successfulLaunch = success.Launched && success.LauncherInvoked
-                    && string.Equals(success.FileName, Path.GetFullPath(managedOutputPath), StringComparison.OrdinalIgnoreCase)
-                    && success.Status.Contains("Enhanced", StringComparison.Ordinal)
-                    && success.UseShellExecute && !success.RetryVisible;
+                bool successfulLaunch = enhancedSelected
+                    && enhancedSuccess.Launched && enhancedSuccess.LauncherInvoked
+                    && string.Equals(enhancedSuccess.FileName, Path.GetFullPath(managedOutputPath), StringComparison.OrdinalIgnoreCase)
+                    && !enhancedSuccess.Status.Contains("Opened the displayed Enhanced", StringComparison.Ordinal)
+                    && enhancedSuccess.UseShellExecute && !enhancedSuccess.RetryVisible;
                 bool enhancedLaunch = originalToggled
-                    && enhancedSuccess.Launched
-                    && string.Equals(enhancedSuccess.FileName, canonical, StringComparison.OrdinalIgnoreCase)
-                    && enhancedSuccess.Status.Contains("Original", StringComparison.Ordinal)
+                    && success.Launched
+                    && string.Equals(success.FileName, canonical, StringComparison.OrdinalIgnoreCase)
+                    && success.Status.Contains("Original", StringComparison.Ordinal)
                     && originalFileSize == PhotoViewer.Wpf.MainWindow.FormatFileSizeMbForSmoke(new FileInfo(validPath).Length)
                     && enhancedFileSize == PhotoViewer.Wpf.MainWindow.FormatFileSizeMbForSmoke(new FileInfo(managedOutputPath).Length)
                     && originalFileSize != enhancedFileSize;
@@ -30578,8 +30585,11 @@ public partial class App : Application
                     && !snapshot.Status.Contains(smokeRoot, StringComparison.OrdinalIgnoreCase));
                 bool currentSourceRevalidated = !missing.Launched && !missing.LauncherInvoked && !missing.RetryVisible
                     && missing.Status.Contains("source no longer exists", StringComparison.OrdinalIgnoreCase);
-                bool interactionStable = new[] { success, enhancedSuccess, staleFallback, missingEnhancedFallback, launcherFailure, win32Failure, ioFailure, accessFailure, pathFailure, missing }
-                    .All(snapshot => snapshot.Focused && snapshot.SelectionStable && snapshot.ModalVisible && snapshot.AutomationReady
+                var interactionSnapshots = new[] { success, enhancedSuccess, staleFallback, missingEnhancedFallback, launcherFailure, win32Failure, ioFailure, accessFailure, pathFailure, missing };
+                bool focusStable = !focusEvidenceAvailable
+                    || interactionSnapshots.All(static snapshot => snapshot.Focused);
+                bool interactionStable = focusStable && interactionSnapshots
+                    .All(snapshot => snapshot.SelectionStable && snapshot.ModalVisible && snapshot.AutomationReady
                         && string.Equals(snapshot.SelectedPath, canonical, StringComparison.OrdinalIgnoreCase));
                 bool sourceUntouched = sourceBefore.All(pair => string.Equals(pair.Value, FileFingerprint(pair.Key), StringComparison.Ordinal));
                 bool mutableStateUntouched = string.Equals(stateBefore, FileFingerprint(statePath), StringComparison.Ordinal)
