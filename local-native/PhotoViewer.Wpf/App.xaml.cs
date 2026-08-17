@@ -21371,46 +21371,17 @@ public partial class App : Application
                     window.FailedBulkPanelVisibleForSmoke
                     &&
                     window.RetryAllFailedEnhancementJobsControlForSmoke
-                    && window.ClearAllFailedEnhancementJobsControlForSmoke;
+                    && window.ClearAllFailedEnhancementJobsControlForSmoke
+                    && window.RetryAllFailedEnhancementJobsLabelForSmoke
+                        .Contains("(2)", StringComparison.Ordinal)
+                    && window.RetryAllFailedEnhancementJobsToolTipForSmoke
+                        .Contains("保存済み", StringComparison.Ordinal)
+                    && window.RetryAllFailedEnhancementJobsToolTipForSmoke
+                        .Contains("保護対象3件", StringComparison.Ordinal);
                 window.SelectEnhancementJobsFilterForSmoke("all");
                 bool receiptOnlyResponseStaysVisible =
                     PhotoViewer.Wpf.MainWindow
                         .ReceiptOnlyDurableResponseIsPendingForSmoke();
-                static bool IsCurrentPhotorealRetryBody(string bodyText)
-                {
-                    try
-                    {
-                        using JsonDocument document = JsonDocument.Parse(bodyText);
-                        JsonElement body = document.RootElement;
-                        return body.GetProperty("operation").GetString()
-                                == "photoreal"
-                            && body.GetProperty("prompt").GetString()
-                                == "workspace rerun prompt, workspace metadata mapped"
-                            && body.GetProperty("negativePrompt").GetString()
-                                == "workspace negative prompt"
-                            && !body.GetProperty("loraEnabled").GetBoolean()
-                            && Math.Abs(
-                                body.GetProperty("strength").GetDouble()
-                                - 0.45) < 0.001
-                            && !body.TryGetProperty("structureStrength", out _)
-                            && Math.Abs(
-                                body.GetProperty("cfgScale").GetDouble()
-                                - 1.4) < 0.001
-                            && body.GetProperty("steps").GetInt32() == 6
-                            && body.GetProperty("maxDimension").GetInt32()
-                                == 1024
-                            && !body.TryGetProperty("seed", out _)
-                            && body.GetProperty("queuePlacement").GetString()
-                                == "last";
-                    }
-                    catch (Exception ex) when (
-                        ex is JsonException
-                            or InvalidOperationException
-                            or KeyNotFoundException)
-                    {
-                        return false;
-                    }
-                }
                 static bool IsTerminalHistoryBatchBody(
                     string bodyText,
                     string expectedStatus,
@@ -21459,12 +21430,15 @@ public partial class App : Application
                         "失敗を全部消す",
                         StringComparison.Ordinal)
                     && rejectedFailedConfirmations.All(static confirmation =>
-                        confirmation.Message.Contains("保護対象", StringComparison.Ordinal));
-                int rerunBodiesBeforeBulkFailed = rerunBodies.Count;
+                        confirmation.Message.Contains("保護対象", StringComparison.Ordinal))
+                    && rejectedFailedConfirmations[0].Message.Contains(
+                        "各Jobに保存された",
+                        StringComparison.Ordinal);
+                int requestsBeforeBulkFailed = requests.Count;
                 int bulkFailedRetried =
                     await window.RetryAllFailedEnhancementJobsForSmokeAsync();
-                string[] bulkFailedCurrentSettingBodies = rerunBodies
-                    .Skip(rerunBodiesBeforeBulkFailed)
+                string[] bulkFailedRequests = requests
+                    .Skip(requestsBeforeBulkFailed)
                     .ToArray();
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkFailedRetry =
                     window.EnhancementJobsWorkspaceForSmoke();
@@ -21476,14 +21450,21 @@ public partial class App : Application
                 bool bulkFailedActionsContract = bulkFailedControlsReady
                     && receiptOnlyResponseStaysVisible
                     && bulkFailedRetried == 1
-                    && bulkFailedCurrentSettingBodies.Length == 1
-                    && IsCurrentPhotorealRetryBody(
-                        bulkFailedCurrentSettingBodies[0])
+                    && bulkFailedRequests.Contains(
+                        "POST /api/enhance/jobs/delivery-failed-job/retry",
+                        StringComparer.Ordinal)
+                    && bulkFailedRequests.Contains(
+                        "POST /api/enhance/jobs/clearable-failed-job/retry",
+                        StringComparer.Ordinal)
+                    && bulkFailedRequests.Contains(
+                        "DELETE /api/enhance/jobs/delivery-failed-job",
+                        StringComparer.Ordinal)
+                    && bulkRetryCreated
                     && !afterBulkFailedRetry.VisibleIds.Contains(
-                        "clearable-failed-job",
+                        "delivery-failed-job",
                         StringComparer.Ordinal)
                     && afterBulkFailedRetry.VisibleIds.Contains(
-                        "rerun-job",
+                        "clearable-failed-job",
                         StringComparer.Ordinal)
                     && bulkFailedCleared == 1
                     && afterBulkFailedClear.Filtered == 3
@@ -21524,12 +21505,20 @@ public partial class App : Application
                         "キャンセル済みを全部消す",
                         StringComparison.Ordinal)
                     && rejectedCanceledConfirmations.All(static confirmation =>
-                        confirmation.Message.Contains("保護対象", StringComparison.Ordinal));
-                int rerunBodiesBeforeBulkCanceled = rerunBodies.Count;
+                        confirmation.Message.Contains("保護対象", StringComparison.Ordinal))
+                    && rejectedCanceledConfirmations[0].Message.Contains(
+                        "各Jobに保存された",
+                        StringComparison.Ordinal);
+                int requestsBeforeBulkCanceled = requests.Count;
                 int bulkCanceledRetried =
                     await window.RetryAllCanceledEnhancementJobsForSmokeAsync();
-                string[] bulkCanceledCurrentSettingBodies = rerunBodies
-                    .Skip(rerunBodiesBeforeBulkCanceled)
+                string[] bulkCanceledRetryRequests = requests
+                    .Skip(requestsBeforeBulkCanceled)
+                    .Where(static request =>
+                        request.StartsWith(
+                            "POST /api/enhance/jobs/",
+                            StringComparison.Ordinal)
+                        && request.EndsWith("/retry", StringComparison.Ordinal))
                     .ToArray();
                 int bulkCanceledCleared =
                     await window.ClearAllCanceledEnhancementJobsForSmokeAsync();
@@ -21537,10 +21526,22 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool bulkCanceledActionsContract = bulkCanceledControlsReady
                     && bulkCanceledRetried > 0
-                    && bulkCanceledCurrentSettingBodies.Length
+                    && bulkCanceledRetryRequests.Length
                         == bulkCanceledRetried
-                    && bulkCanceledCurrentSettingBodies.All(
-                        IsCurrentPhotorealRetryBody)
+                    && bulkCanceledRetryRequests.Contains(
+                        "POST /api/enhance/jobs/queue-later-job/retry",
+                        StringComparer.Ordinal)
+                    && bulkCanceledRetryRequests.Contains(
+                        "POST /api/enhance/jobs/legacy-reader-job/retry",
+                        StringComparer.Ordinal)
+                    && bulkCanceledRetryRequests.Contains(
+                        "POST /api/enhance/jobs/failed-cancel-job/retry",
+                        StringComparer.Ordinal)
+                    && !bulkCanceledRetryRequests.Contains(
+                        "POST /api/enhance/jobs/future-canceled-reader-job/retry",
+                        StringComparer.Ordinal)
+                    && window.RetryAllCanceledEnhancementJobsToolTipForSmoke
+                        .Contains("保存済み", StringComparison.Ordinal)
                     && bulkCanceledCleared >= bulkCanceledRetried
                     && afterBulkCanceledClear.Filtered == 1
                     && afterBulkCanceledClear.VisibleIds.SequenceEqual(
@@ -21553,7 +21554,7 @@ public partial class App : Application
                     && IsTerminalHistoryBatchBody(
                         terminalHistoryBatchBodies[0],
                         "failed",
-                        "delivery-failed-job",
+                        "clearable-failed-job",
                         "video-malformed-provenance-job",
                         "future-reader-job",
                         "null-operation-reader-job")
@@ -21596,11 +21597,11 @@ public partial class App : Application
                     && requests.Contains("POST /api/enhance/jobs/failed-cancel-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-retry-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/failed-retry-job", StringComparer.Ordinal)
-                    && !requests.Contains("POST /api/enhance/jobs/delivery-failed-job/retry", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/delivery-failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/terminal", StringComparer.Ordinal)
-                    && !requests.Contains("DELETE /api/enhance/jobs/delivery-failed-job", StringComparer.Ordinal)
-                    && !requests.Contains("POST /api/enhance/jobs/clearable-failed-job/retry", StringComparer.Ordinal)
-                    && requests.Contains("DELETE /api/enhance/jobs/clearable-failed-job", StringComparer.Ordinal)
+                    && requests.Contains("DELETE /api/enhance/jobs/delivery-failed-job", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/clearable-failed-job/retry", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/clearable-failed-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/video-malformed-provenance-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/future-reader-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/null-operation-reader-job", StringComparer.Ordinal)
