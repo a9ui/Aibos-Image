@@ -20013,6 +20013,20 @@ public partial class App : Application
                             createdAt: "2026-07-23T00:00:09.000Z",
                             queueOrder: 902,
                             adapter: "a1111-photoreal"));
+                        jobs.Insert(0, Job(
+                            "post-snapshot-protected-job",
+                            QueuedStatus("post-snapshot-protected-job"),
+                            0,
+                            operation: "future-motion-v2",
+                            createdAt: "2026-07-23T00:00:09.100Z",
+                            queueOrder: 903));
+                        jobs.Insert(0, Job(
+                            "post-snapshot-running-job",
+                            "running",
+                            37,
+                            operation: "photoreal",
+                            createdAt: "2026-07-23T00:00:09.200Z",
+                            adapter: "a1111-photoreal"));
                     }
                     if (retryCreated)
                         jobs.Insert(0, VideoJob(
@@ -21655,6 +21669,14 @@ public partial class App : Application
                     window.EnhancementJobViewIdentityForSmoke(
                         "post-snapshot-queued-job")
                         as EnhancementWorkspaceJobView;
+                var postSnapshotProtectedView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "post-snapshot-protected-job")
+                        as EnhancementWorkspaceJobView;
+                var postSnapshotRunningView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "post-snapshot-running-job")
+                        as EnhancementWorkspaceJobView;
                 bool queuedCancelSnapshotContract = remainingQueuedClearIssued
                     && !allQueuedCanceled
                     && includePostSnapshotQueuedJob
@@ -21663,12 +21685,26 @@ public partial class App : Application
                         Status: "queued",
                         CanCancel: true,
                     }
+                    && postSnapshotProtectedView is
+                    {
+                        Status: "queued",
+                        CanCancel: false,
+                    }
+                    && postSnapshotRunningView is
+                    {
+                        Status: "running",
+                    }
                     && !individuallyCanceledQueuedJobs.Contains(
                         "post-snapshot-queued-job")
-                    && remainingQueuedClearRequests.Any(static request =>
+                    && !individuallyCanceledQueuedJobs.Contains(
+                        "post-snapshot-protected-job")
+                    && !individuallyCanceledQueuedJobs.Contains(
+                        "post-snapshot-running-job")
+                    && remainingQueuedClearRequests.Count(static request =>
                         request.EndsWith(
                             "/final-safe-queued-job/cancel",
-                            StringComparison.Ordinal))
+                            StringComparison.Ordinal)) == 1
+                    && remainingQueuedClearRequests.Length == 1
                     && remainingQueuedClearRequests.All(static request =>
                         !request.EndsWith(
                             "/api/enhance/jobs/queued",
@@ -22250,7 +22286,7 @@ public partial class App : Application
                     && afterBulkPromptUpdate.Active == afterQueuedPromptUpdate.Active
                     && clearQueuedIssued
                     && queuedCancelSnapshotContract
-                    && afterClearQueued.Active == 1
+                    && afterClearQueued.Active == 3
                     && afterClearQueued.Polling
                     && sourceHiddenFromVisibleGallery
                     && outputOpened

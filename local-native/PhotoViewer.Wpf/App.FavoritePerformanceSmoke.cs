@@ -514,6 +514,7 @@ public partial class App
                 window.ConfigureFavoritePresentationWriterGateForSmoke(
                     presentationWriterEntered,
                     presentationWriterGate);
+                _ = window.SetPhotorealFavoriteFilterLevelsForSmoke(4);
                 window.QueueFavoritePresentationStateForSmoke(
                     closeDrainPath,
                     closeDrainTimestamp);
@@ -526,6 +527,8 @@ public partial class App
                 await closeAfterDrain.WaitAsync(TimeSpan.FromSeconds(5));
                 FavoriteActivityStoreReadResult activityAfterCloseDrain =
                     FavoriteActivityStore.Read(activityPath, activityEntryCount + 10);
+                ViewerState? stateAfterCloseDrain = JsonSerializer.Deserialize<ViewerState>(
+                    File.ReadAllText(statePath));
                 bool closeDrainExact = presentationWriterBlocked
                     && closeWasDeferred
                     && !window.IsLoaded
@@ -534,7 +537,9 @@ public partial class App
                     && activityAfterCloseDrain.Entries.TryGetValue(
                         closeDrainPath,
                         out DateTimeOffset drainedAtUtc)
-                    && drainedAtUtc == closeDrainTimestamp;
+                    && drainedAtUtc == closeDrainTimestamp
+                    && stateAfterCloseDrain?.PhotorealFavoriteFilterLevels
+                        ?.SequenceEqual([4]) == true;
 
                 bool closeFailureRecoveryExact;
                 bool injectedFailureObserved = false;
@@ -553,6 +558,7 @@ public partial class App
                     failureWindow = HiddenWindow();
                     failureWindow.Show();
                     failureWindow.FailNextFavoritePresentationWriterForSmoke();
+                    _ = failureWindow.SetPhotorealFavoriteFilterLevelsForSmoke(3);
                     failureWindow.QueueFavoritePresentationStateForSmoke(
                         closeFailurePath,
                         closeFailureTimestamp);
@@ -579,12 +585,16 @@ public partial class App
                         FavoriteActivityStore.Read(
                             activityPath,
                             activityEntryCount + 10);
+                    ViewerState? stateAfterRetry = JsonSerializer.Deserialize<ViewerState>(
+                        File.ReadAllText(statePath));
                     retryActivityExact = activityAfterRetry.State
                             == FavoriteActivityStoreReadState.Loaded
                         && activityAfterRetry.Entries.TryGetValue(
                             closeFailurePath,
                             out DateTimeOffset retriedAtUtc)
-                        && retriedAtUtc == closeFailureTimestamp;
+                        && retriedAtUtc == closeFailureTimestamp
+                        && stateAfterRetry?.PhotorealFavoriteFilterLevels
+                            ?.SequenceEqual([3]) == true;
                     closeFailureRecoveryExact = failedBatchRetained
                         && retryPersisted
                         && retryWindowClosed
