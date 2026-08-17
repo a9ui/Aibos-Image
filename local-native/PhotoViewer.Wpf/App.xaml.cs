@@ -22663,6 +22663,9 @@ public partial class App : Application
             bool explicitCompanionAutoStart = false;
             bool companionIdentityBusySeparated = false;
             bool companionIdentityBusyReconnected = false;
+            bool idempotentMutationReconnected = false;
+            bool idempotentMutationExactReplay = false;
+            bool idempotentMutationNoDuplicate = false;
             bool untrustedProbeContainedNoSensitiveData = true;
             bool untrustedDurableReservationSuppressed = false;
             int untrustedProbeCount = 0;
@@ -23081,6 +23084,131 @@ public partial class App : Application
                     && !reconnectBusyStarterCalled
                     && reconnectHealthAuthenticated
                     && reconnectRecoveryAuthenticated;
+
+                int mutationIdentityProbeCount = 0;
+                int mutationRequestCount = 0;
+                int mutationApplyCount = 0;
+                var mutationBodies = new List<string>();
+                win.ConfigureEnhancementCompanionAutoStartForSmoke(
+                    async (request, token) =>
+                    {
+                        string route = request.RequestUri?.AbsolutePath ?? "";
+                        if (route.EndsWith(
+                                "/api/enhance/identity",
+                                StringComparison.Ordinal))
+                        {
+                            mutationIdentityProbeCount++;
+                            if (mutationIdentityProbeCount == 2)
+                            {
+                                return JsonResponse(
+                                    HttpStatusCode.ServiceUnavailable,
+                                    new { error = "The local AI companion is busy." });
+                            }
+                            string challenge = request.Headers
+                                .GetValues("X-Aibos-Companion-Challenge")
+                                .Single();
+                            return JsonResponse(
+                                HttpStatusCode.OK,
+                                win.EnhancementCompanionIdentityPayloadForSmoke(
+                                    challenge));
+                        }
+
+                        EnhancementCompanionSecureRequestSmokeSnapshot? inner =
+                            await win.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
+                                request,
+                                token);
+                        if (string.Equals(
+                                inner?.PathAndQuery,
+                                "/api/enhance/health",
+                                StringComparison.Ordinal))
+                        {
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new
+                                {
+                                    version = 1,
+                                    status = "working",
+                                    jobs = new
+                                    {
+                                        counts = new
+                                        {
+                                            queued = 1,
+                                            running = 1,
+                                            succeeded = 0,
+                                            failed = 0,
+                                            canceled = 2,
+                                            deleted = 0,
+                                        },
+                                    },
+                                    worker = new
+                                    {
+                                        pumpRunning = true,
+                                        paused = false,
+                                    },
+                                });
+                        }
+                        if (inner is not null
+                            && string.Equals(
+                                inner.Method,
+                                "DELETE",
+                                StringComparison.Ordinal)
+                            && string.Equals(
+                                inner.PathAndQuery,
+                                "/api/enhance/jobs/terminal",
+                                StringComparison.Ordinal))
+                        {
+                            mutationRequestCount++;
+                            mutationBodies.Add(inner.BodyJson ?? "");
+                            if (mutationApplyCount == 0)
+                            {
+                                mutationApplyCount++;
+                                throw new HttpRequestException(
+                                    "synthetic response lost after durable dismissal");
+                            }
+                            return win.EnhancementCompanionSecureResponseForSmoke(
+                                request,
+                                (int)HttpStatusCode.OK,
+                                new
+                                {
+                                    dismissedCount = 0,
+                                    protectedCount = 0,
+                                    missingCount = 2,
+                                });
+                        }
+                        return JsonResponse(
+                            HttpStatusCode.Unauthorized,
+                            new { error = "missing authentication" });
+                    },
+                    _ => (true, ""));
+                var mutationResponse =
+                    await win.SendIdempotentEnhancementMutationForSmokeAsync(
+                        HttpMethod.Delete,
+                        "api/enhance/jobs/terminal",
+                        new
+                        {
+                            status = "canceled",
+                            ids = new[]
+                            {
+                                "lost-response-canceled-1",
+                                "lost-response-canceled-2",
+                            },
+                        });
+                idempotentMutationReconnected = mutationResponse.Ok
+                    && mutationIdentityProbeCount == 3
+                    && mutationRequestCount == 2;
+                idempotentMutationExactReplay = mutationBodies.Count == 2
+                    && string.Equals(
+                        mutationBodies[0],
+                        mutationBodies[1],
+                        StringComparison.Ordinal);
+                idempotentMutationNoDuplicate = mutationApplyCount == 1
+                    && mutationResponse.Payload is JsonElement mutationPayload
+                    && mutationPayload.TryGetProperty(
+                        "missingCount",
+                        out JsonElement mutationMissing)
+                    && mutationMissing.TryGetInt32(out int mutationMissingCount)
+                    && mutationMissingCount == 2;
 
                 int readinessProbeCount = 0;
                 int readinessJobsRequestCount = 0;
@@ -23863,6 +23991,9 @@ public partial class App : Application
                     && untrustedDurableReservationSuppressed
                     && companionIdentityBusySeparated
                     && companionIdentityBusyReconnected
+                    && idempotentMutationReconnected
+                    && idempotentMutationExactReplay
+                    && idempotentMutationNoDuplicate
                     && explicitCompanionAutoStart
                     && companionAuthenticatedRequestHeaders
                     && companionListenerHandoffEncrypted
@@ -24012,6 +24143,9 @@ public partial class App : Application
                 serverErrorCompanionStartSuppressed,
                 companionIdentityBusySeparated,
                 companionIdentityBusyReconnected,
+                idempotentMutationReconnected,
+                idempotentMutationExactReplay,
+                idempotentMutationNoDuplicate,
                 explicitCompanionAutoStart,
                 companionAuthenticatedRequestHeaders,
                 companionQueueRecoveryAuthenticated,
