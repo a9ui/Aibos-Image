@@ -28273,6 +28273,7 @@ public partial class App : Application
         DateTime originalMutatedCreationUtc = default;
         DateTime originalMutatedWriteUtc = default;
         bool scenarioContractPassed = false;
+        bool pathCapabilityPassed = false;
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         Dispatcher.InvokeAsync(async () =>
@@ -28286,6 +28287,26 @@ public partial class App : Application
                 Directory.CreateDirectory(Path.GetDirectoryName(jobsPath)!);
                 foreach (string folder in folders)
                     Directory.CreateDirectory(folder);
+
+                string capabilityPath = Path.Combine(
+                    indexDirectory,
+                    "capability.sqlite3");
+                string outsideTempPath = Path.Combine(
+                    Path.GetPathRoot(smokeRoot)
+                        ?? throw new InvalidOperationException(
+                            "metadata capability smoke root was unavailable"),
+                    "aibos-metadata-capability.sqlite3");
+                pathCapabilityPassed =
+                    MetadataIndexStorePath.AcceptsManagedTempFixtureForSmoke(
+                        capabilityPath)
+                    && !MetadataIndexStorePath.AcceptsManagedTempFixtureForSmoke(
+                        "relative.sqlite3")
+                    && !MetadataIndexStorePath.AcceptsManagedTempFixtureForSmoke(
+                        "https://example.invalid/cache.sqlite3")
+                    && !MetadataIndexStorePath.AcceptsManagedTempFixtureForSmoke(
+                        Path.Combine(indexDirectory, "must-not-run.cmd"))
+                    && !MetadataIndexStorePath.AcceptsManagedTempFixtureForSmoke(
+                        outsideTempPath);
 
                 Environment.CurrentDirectory = smokeRoot;
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
@@ -29962,7 +29983,9 @@ public partial class App : Application
                 result["decodeFailurePreservation"] = failurePreservation;
                 result["staleEntryPrune"] = staleEntryPrune;
                 result["cancellation"] = cancellation;
+                result["pathCapabilityPassed"] = pathCapabilityPassed;
                 scenarioContractPassed = isolatedProjectRoot
+                    && pathCapabilityPassed
                     && coldPassed
                     && migrationPassed
                     && sqliteV1MigrationPassed

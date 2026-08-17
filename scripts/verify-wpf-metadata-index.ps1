@@ -4,6 +4,7 @@ param(
     [int]$Count = 256,
     [ValidateRange(2, 8)]
     [int]$FolderCount = 4,
+    [string]$ExecutablePath = '',
     [switch]$SkipBuild
 )
 
@@ -16,7 +17,12 @@ function Assert-True {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+$exe = if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+}
+else {
+    (Get-Item -LiteralPath ([IO.Path]::GetFullPath($ExecutablePath))).FullName
+}
 $dotnet = 'dotnet.exe'
 $localDotnet10 = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
 if (Test-Path -LiteralPath $localDotnet10 -PathType Leaf) {
@@ -87,6 +93,7 @@ try {
     Assert-True ($result.count -eq $Count) "Metadata fixture count was $($result.count), expected $Count."
     Assert-True ($result.folderCount -eq $FolderCount) "Metadata folder count was $($result.folderCount), expected $FolderCount."
     Assert-True ($result.isolatedProjectRoot -eq $true) 'Metadata smoke did not resolve its shared project root inside TEMP.'
+    Assert-True ($result.pathCapabilityPassed -eq $true) 'Metadata path capability accepted a relative, URL, non-SQLite, or outside-TEMP fixture.'
 
     Assert-True ($result.cold.passed -eq $true) 'Cold missing-to-write metadata scenario failed.'
     Assert-True ($result.cold.loadState -eq 'Missing') "Cold metadata load state was $($result.cold.loadState), expected Missing."
@@ -355,6 +362,7 @@ try {
         sourceUnchanged = $result.sourceUnchanged
         storesUnchanged = $result.storesUnchanged
         residueFree = $result.residueFree
+        pathCapabilityPassed = $result.pathCapabilityPassed
     } | ConvertTo-Json -Depth 5
 }
 finally {
