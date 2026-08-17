@@ -1440,17 +1440,7 @@ public partial class MainWindow
                     initialOperationFilter);
             if (!restoreReturnViewport)
                 _enhancementWorkspacePageIndex = 0;
-            EnhancementJobsAllFilter.IsChecked = _enhancementWorkspaceStatusFilter == "all";
-            EnhancementJobsQueuedFilter.IsChecked = _enhancementWorkspaceStatusFilter == "queued";
-            EnhancementJobsRunningFilter.IsChecked = _enhancementWorkspaceStatusFilter == "running";
-            EnhancementJobsFailedFilter.IsChecked = _enhancementWorkspaceStatusFilter == "failed";
-            EnhancementJobsCanceledFilter.IsChecked = _enhancementWorkspaceStatusFilter == "canceled";
-            EnhancementJobsCompletedFilter.IsChecked = _enhancementWorkspaceStatusFilter == "completed";
-            EnhancementJobsAllOperationsFilter.IsChecked = _enhancementWorkspaceOperationFilter == "all";
-            EnhancementJobsUpscaleFilter.IsChecked = _enhancementWorkspaceOperationFilter == "upscale";
-            EnhancementJobsPhotorealFilter.IsChecked = _enhancementWorkspaceOperationFilter == "photoreal";
-            EnhancementJobsVideoFilter.IsChecked = _enhancementWorkspaceOperationFilter == "video";
-            EnhancementJobsI2iFilter.IsChecked = _enhancementWorkspaceOperationFilter == "i2i";
+            RefreshEnhancementWorkspaceFilterToggleStates();
             _enhancementWorkspaceHighlightedJobIds.Clear();
             if (highlightedJobIds is not null)
             {
@@ -1904,8 +1894,7 @@ public partial class MainWindow
             {
                 _enhancementWorkspaceStatusFilter = "all";
                 _enhancementWorkspacePageIndex = 0;
-                EnhancementJobsAllFilter.IsChecked = true;
-                EnhancementJobsQueuedFilter.IsChecked = false;
+                RefreshEnhancementWorkspaceFilterToggleStates();
             }
             ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
             int activeCount = jobs.Count(static job => job.IsActive);
@@ -2839,10 +2828,14 @@ public partial class MainWindow
 
     private void EnhancementJobsStatusFilter_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string filter })
+        if (sender is CheckBox { Tag: string filter } toggle)
         {
-            _enhancementWorkspaceStatusFilter =
-                NormalizeEnhancementWorkspaceStatusFilter(filter);
+            string normalized = NormalizeEnhancementWorkspaceStatusFilter(filter);
+            _enhancementWorkspaceStatusFilter = normalized == "all"
+                || toggle.IsChecked != true
+                    ? "all"
+                    : normalized;
+            RefreshEnhancementWorkspaceFilterToggleStates();
             _enhancementWorkspacePageIndex = 0;
             ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
             RefreshEnhancementQueueBulkControls();
@@ -2851,14 +2844,44 @@ public partial class MainWindow
 
     private void EnhancementJobsOperationFilter_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string filter })
+        if (sender is CheckBox { Tag: string filter } toggle)
         {
-            _enhancementWorkspaceOperationFilter =
-                NormalizeEnhancementWorkspaceOperationFilter(filter);
+            string normalized = NormalizeEnhancementWorkspaceOperationFilter(filter);
+            _enhancementWorkspaceOperationFilter = normalized == "all"
+                || toggle.IsChecked != true
+                    ? "all"
+                    : normalized;
+            RefreshEnhancementWorkspaceFilterToggleStates();
             _enhancementWorkspacePageIndex = 0;
             ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
             RefreshEnhancementQueueBulkControls();
         }
+    }
+
+    private void RefreshEnhancementWorkspaceFilterToggleStates()
+    {
+        EnhancementJobsAllFilter.IsChecked =
+            _enhancementWorkspaceStatusFilter == "all";
+        EnhancementJobsQueuedFilter.IsChecked =
+            _enhancementWorkspaceStatusFilter == "queued";
+        EnhancementJobsRunningFilter.IsChecked =
+            _enhancementWorkspaceStatusFilter == "running";
+        EnhancementJobsCompletedFilter.IsChecked =
+            _enhancementWorkspaceStatusFilter == "completed";
+        EnhancementJobsFailedFilter.IsChecked =
+            _enhancementWorkspaceStatusFilter == "failed";
+        EnhancementJobsCanceledFilter.IsChecked =
+            _enhancementWorkspaceStatusFilter == "canceled";
+        EnhancementJobsAllOperationsFilter.IsChecked =
+            _enhancementWorkspaceOperationFilter == "all";
+        EnhancementJobsUpscaleFilter.IsChecked =
+            _enhancementWorkspaceOperationFilter == "upscale";
+        EnhancementJobsPhotorealFilter.IsChecked =
+            _enhancementWorkspaceOperationFilter == "photoreal";
+        EnhancementJobsVideoFilter.IsChecked =
+            _enhancementWorkspaceOperationFilter == "video";
+        EnhancementJobsI2iFilter.IsChecked =
+            _enhancementWorkspaceOperationFilter == "i2i";
     }
 
     private void EnhancementJobsScrollTop_Click(object sender, RoutedEventArgs e)
@@ -5549,6 +5572,7 @@ public partial class MainWindow
 
         _enhancementWorkspaceStatusFilter = "all";
         _enhancementWorkspaceOperationFilter = "all";
+        RefreshEnhancementWorkspaceFilterToggleStates();
         _enhancementWorkspacePageIndex = 0;
         EnhancementJobsDialog.Visibility = Visibility.Visible;
         var filterWatch = Stopwatch.StartNew();
@@ -5660,6 +5684,7 @@ public partial class MainWindow
             NormalizeEnhancementWorkspaceStatusFilter(filter);
         _enhancementWorkspaceOperationFilter =
             NormalizeEnhancementWorkspaceOperationFilter(filter);
+        RefreshEnhancementWorkspaceFilterToggleStates();
         _enhancementWorkspacePageIndex = 0;
         ApplyEnhancementWorkspaceFilter(loadThumbnails: false);
         RefreshEnhancementQueueBulkControls();
@@ -5669,6 +5694,7 @@ public partial class MainWindow
     {
         _enhancementWorkspaceStatusFilter =
             NormalizeEnhancementWorkspaceStatusFilter(filter);
+        RefreshEnhancementWorkspaceFilterToggleStates();
         _enhancementWorkspacePageIndex = 0;
         ApplyEnhancementWorkspaceFilter(loadThumbnails: false);
         RefreshEnhancementQueueBulkControls();
@@ -5678,9 +5704,49 @@ public partial class MainWindow
     {
         _enhancementWorkspaceOperationFilter =
             NormalizeEnhancementWorkspaceOperationFilter(filter);
+        RefreshEnhancementWorkspaceFilterToggleStates();
         _enhancementWorkspacePageIndex = 0;
         ApplyEnhancementWorkspaceFilter(loadThumbnails: false);
         RefreshEnhancementQueueBulkControls();
+    }
+
+    public bool ToggleEnhancementJobsStatusFilterForSmoke(string filter)
+        => ToggleEnhancementJobsFilterForSmoke(
+            EnhancementJobsStatusFiltersPanel,
+            filter,
+            _enhancementWorkspaceStatusFilter);
+
+    public bool ToggleEnhancementJobsOperationFilterForSmoke(string filter)
+        => ToggleEnhancementJobsFilterForSmoke(
+            EnhancementJobsOperationFiltersPanel,
+            filter,
+            _enhancementWorkspaceOperationFilter);
+
+    private static bool ToggleEnhancementJobsFilterForSmoke(
+        Panel panel,
+        string filter,
+        string selectedFilter)
+    {
+        CheckBox? toggle = panel.Children
+            .OfType<CheckBox>()
+            .FirstOrDefault(item => string.Equals(
+                item.Tag as string,
+                filter,
+                StringComparison.Ordinal));
+        if (toggle is null)
+            return false;
+        toggle.IsChecked = toggle.IsChecked != true;
+        toggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, toggle));
+        string expected = string.Equals(selectedFilter, filter, StringComparison.Ordinal)
+            ? "all"
+            : filter;
+        return panel.Children
+                .OfType<CheckBox>()
+                .Count(static item => item.IsChecked == true) == 1
+            && panel.Children
+                .OfType<CheckBox>()
+                .Single(static item => item.IsChecked == true)
+                .Tag as string == expected;
     }
 
     public static EnhancementJobsPagingSmokeSnapshot
