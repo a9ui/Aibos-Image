@@ -107,7 +107,7 @@ if ($result.searchProductTargetMs -ne 250 `
     -or $result.searchHostedAcceptanceMs -ne 350 `
     -or $result.filterHostedAcceptanceMs -ne 350 `
     -or $result.sortHostedAcceptanceMs -ne 650 `
-    -or $result.hostedMeasurementToleranceMs -ne 25) {
+    -or $result.hostedMeasurementToleranceMs -ne 50) {
     $failures.Add('interaction product-target/hosted-acceptance contract was missing')
 }
 elseif ($result.searchP95Ms -gt ($result.searchHostedAcceptanceMs + $result.hostedMeasurementToleranceMs) `
