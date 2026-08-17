@@ -503,6 +503,100 @@ public partial class App
                     && restoreReceipt.RootElement.GetProperty("Success")
                         .GetBoolean()
                     && !File.Exists(restoreFavoritesPath + ".lock");
+
+                string closeDrainPath = Path.GetFullPath(Path.Combine(
+                    historyRoot,
+                    "close-drain.png"));
+                DateTimeOffset closeDrainTimestamp =
+                    new(2026, 8, 12, 12, 0, 0, TimeSpan.Zero);
+                using var presentationWriterEntered = new ManualResetEventSlim(false);
+                using var presentationWriterGate = new ManualResetEventSlim(false);
+                window.ConfigureFavoritePresentationWriterGateForSmoke(
+                    presentationWriterEntered,
+                    presentationWriterGate);
+                window.QueueFavoritePresentationStateForSmoke(
+                    closeDrainPath,
+                    closeDrainTimestamp);
+                bool presentationWriterBlocked = await Task.Run(
+                    () => presentationWriterEntered.Wait(TimeSpan.FromSeconds(5)));
+                Task closeAfterDrain = window.CloseAndWaitForSmokeAsync();
+                bool closeWasDeferred = window.ClosingDrainInProgressForSmoke
+                    && !closeAfterDrain.IsCompleted;
+                presentationWriterGate.Set();
+                await closeAfterDrain.WaitAsync(TimeSpan.FromSeconds(5));
+                FavoriteActivityStoreReadResult activityAfterCloseDrain =
+                    FavoriteActivityStore.Read(activityPath, activityEntryCount + 10);
+                bool closeDrainExact = presentationWriterBlocked
+                    && closeWasDeferred
+                    && !window.IsLoaded
+                    && activityAfterCloseDrain.State
+                        == FavoriteActivityStoreReadState.Loaded
+                    && activityAfterCloseDrain.Entries.TryGetValue(
+                        closeDrainPath,
+                        out DateTimeOffset drainedAtUtc)
+                    && drainedAtUtc == closeDrainTimestamp;
+
+                bool closeFailureRecoveryExact;
+                bool injectedFailureObserved = false;
+                bool failedBatchRetained = false;
+                bool retryPersisted = false;
+                bool retryWindowClosed = false;
+                bool retryActivityExact = false;
+                MainWindow? failureWindow = null;
+                try
+                {
+                    string closeFailurePath = Path.GetFullPath(Path.Combine(
+                        historyRoot,
+                        "close-failure-retry.png"));
+                    DateTimeOffset closeFailureTimestamp =
+                        new(2026, 8, 12, 12, 1, 0, TimeSpan.Zero);
+                    failureWindow = HiddenWindow();
+                    failureWindow.Show();
+                    failureWindow.FailNextFavoritePresentationWriterForSmoke();
+                    failureWindow.QueueFavoritePresentationStateForSmoke(
+                        closeFailurePath,
+                        closeFailureTimestamp);
+                    injectedFailureObserved = !await failureWindow
+                        .WaitForFavoritePresentationStateForSmokeAsync(
+                            TimeSpan.FromSeconds(5));
+                    Task refusedClose = failureWindow.CloseAndWaitForSmokeAsync();
+                    failedBatchRetained = injectedFailureObserved
+                        && failureWindow.FavoritePresentationStateFailedForSmoke
+                        && failureWindow.IsLoaded
+                        && !refusedClose.IsCompleted;
+
+                    failureWindow.RetryFailedFavoritePresentationForSmoke();
+                    retryPersisted = await failureWindow
+                        .WaitForFavoritePresentationStateForSmokeAsync(
+                            TimeSpan.FromSeconds(5));
+                    await failureWindow.CloseAndWaitForSmokeAsync()
+                        .WaitAsync(TimeSpan.FromSeconds(5));
+                    // CloseAndWaitForSmokeAsync completes only from Window.Closed.
+                    // IsLoaded is not a reliable closed-state signal for a window
+                    // whose logical tree is still retained by this smoke fixture.
+                    retryWindowClosed = true;
+                    FavoriteActivityStoreReadResult activityAfterRetry =
+                        FavoriteActivityStore.Read(
+                            activityPath,
+                            activityEntryCount + 10);
+                    retryActivityExact = activityAfterRetry.State
+                            == FavoriteActivityStoreReadState.Loaded
+                        && activityAfterRetry.Entries.TryGetValue(
+                            closeFailurePath,
+                            out DateTimeOffset retriedAtUtc)
+                        && retriedAtUtc == closeFailureTimestamp;
+                    closeFailureRecoveryExact = failedBatchRetained
+                        && retryPersisted
+                        && retryWindowClosed
+                        && retryActivityExact;
+                }
+                finally
+                {
+                    if (failureWindow is not null && failureWindow.IsLoaded)
+                    {
+                        try { failureWindow.Close(); } catch { }
+                    }
+                }
                 bool sourceUnchanged = sourceFingerprintBefore == Convert.ToHexString(
                     SHA256.HashData(File.ReadAllBytes(sourcePath)));
                 bool categoryOrContract = PhotoViewer.Wpf.MainWindow
@@ -516,6 +610,8 @@ public partial class App
                     && boundedUi
                     && writerExact
                     && storesExact
+                    && closeDrainExact
+                    && closeFailureRecoveryExact
                     && completedElapsedVisible
                     && restorationExact
                     && sourceUnchanged;
@@ -534,6 +630,16 @@ public partial class App
                     boundedUi,
                     writerExact,
                     storesExact,
+                    closeDrainExact,
+                    closeFailureRecoveryExact,
+                    closeFailureEvidence = new
+                    {
+                        injectedFailureObserved,
+                        failedBatchRetained,
+                        retryPersisted,
+                        retryWindowClosed,
+                        retryActivityExact,
+                    },
                     stateExtensionPreserved,
                     completedElapsedVisible,
                     restorationExact,

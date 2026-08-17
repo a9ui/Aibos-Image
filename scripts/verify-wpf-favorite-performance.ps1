@@ -101,6 +101,9 @@ try {
         maxFavoriteCallbackMilliseconds = $result.maxFavoriteCallbackMilliseconds
         maxDerivedVisitedTiles = $result.maxDerivedVisitedTiles
         stateWriteCount = $result.stateWriteCount
+        closeDrainExact = $result.closeDrainExact
+        closeFailureRecoveryExact = $result.closeFailureRecoveryExact
+        closeFailureEvidence = $result.closeFailureEvidence
         completedElapsedVisible = $result.completedElapsedVisible
         restorationExact = $result.restorationExact
         sourceUnchanged = $result.sourceUnchanged
@@ -115,6 +118,8 @@ try {
         'boundedUi',
         'writerExact',
         'storesExact',
+        'closeDrainExact',
+        'closeFailureRecoveryExact',
         'stateExtensionPreserved',
         'completedElapsedVisible',
         'restorationExact',
