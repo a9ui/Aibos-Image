@@ -21490,9 +21490,19 @@ public partial class MainWindow : Window
             OpenModal(tile);
         }
 
+        if (!ExternalImageOpenTarget.TryCreate(
+                displayedAsset.Path,
+                out ExternalImageOpenTarget? openTarget,
+                out reason)
+            || openTarget is null)
+        {
+            SetStatusToast($"Open externally unavailable: {reason}.");
+            return false;
+        }
+
         try
         {
-            var startInfo = new ProcessStartInfo(displayedAsset.Path) { UseShellExecute = true };
+            ProcessStartInfo startInfo = openTarget.CreateStartInfo();
             if (!_externalFileLauncher(startInfo))
             {
                 ReportExternalOpenFailure();

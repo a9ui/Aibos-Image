@@ -1,6 +1,10 @@
 param(
     [string]$Configuration = 'Release',
-    [string]$OutputPath = (Join-Path $env:TEMP ('photoviewer-wpf-external-open-' + [guid]::NewGuid().ToString('N') + '.json'))
+    [string]$OutputPath = (Join-Path $env:TEMP ('photoviewer-wpf-external-open-' + [guid]::NewGuid().ToString('N') + '.json')),
+    [string]$ExecutablePath = '',
+    [switch]$SkipBuild,
+    [ValidateRange(10, 120)]
+    [int]$TimeoutSeconds = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,15 +18,32 @@ $OutputPath = $fullOutputPath
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
-$exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
-
-dotnet build $project -c $Configuration --nologo
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $SkipBuild) {
+    dotnet build $project -c $Configuration --nologo
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    $ExecutablePath = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net10.0-windows\PhotoViewer.Wpf.exe"
+}
+$exe = Get-Item -LiteralPath ([IO.Path]::GetFullPath($ExecutablePath))
 
 Remove-Item -LiteralPath $OutputPath -ErrorAction SilentlyContinue
-$process = Start-Process -FilePath $exe `
+$process = Start-Process -FilePath $exe.FullName `
     -ArgumentList @('--external-open-smoke', ('"{0}"' -f $OutputPath)) `
-    -WindowStyle Hidden -Wait -PassThru
+    -WindowStyle Hidden -PassThru
+try {
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        throw "WPF external open smoke timed out after $TimeoutSeconds seconds."
+    }
+    $processExitCode = $process.ExitCode
+}
+finally {
+    if (-not $process.HasExited) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    $process.Dispose()
+}
 
 if (-not (Test-Path -LiteralPath $OutputPath)) {
     throw "WPF external open process exited without producing $OutputPath"
@@ -30,7 +51,7 @@ if (-not (Test-Path -LiteralPath $OutputPath)) {
 
 $result = Get-Content -Raw -LiteralPath $OutputPath | ConvertFrom-Json
 $failures = @()
-if ($process.ExitCode -ne 0) { $failures += "process exit code $($process.ExitCode)" }
+if ($processExitCode -ne 0) { $failures += "process exit code $processExitCode" }
 if ($result.ok -ne $true) { $failures += 'result.ok was false' }
 if ($result.selected -ne $true -or $result.modalOpened -ne $true -or $result.modalDecodeSettled -ne $true) {
     $failures += 'temp fixture was not selected and decoded in the modal'
@@ -54,6 +75,7 @@ if ($result.formatterBoundaries -ne $true) { $failures += '0.00MB formatter boun
 if ($result.outsideOwnershipRejected -ne $true) { $failures += 'managed output ownership guard accepted an outside output' }
 if ($result.expectedFailuresHandled -ne $true) { $failures += 'expected ShellExecute, I/O, access, or path failure escaped the event boundary' }
 if ($result.currentSourceRevalidated -ne $true) { $failures += 'current selected catalog source was not revalidated immediately before launch' }
+if ($result.safeTargetBoundary -ne $true) { $failures += 'external Open accepted an unverified command, missing file, directory, or relative path' }
 if ($result.interactionStable -ne $true) { $failures += 'focus, selection, modal, or Automation state changed during external open' }
 if ($result.sourceUntouched -ne $true -or $result.mutableStateUntouched -ne $true) {
     $failures += 'source, state, favorites, seen, recent, or jobs fingerprint changed'
