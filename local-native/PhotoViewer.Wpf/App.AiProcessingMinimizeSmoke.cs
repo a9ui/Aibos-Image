@@ -145,7 +145,7 @@ public partial class App
                 stateDuring,
                 StringComparison.Ordinal);
 
-            window.RestoreFromAiProcessingMinimizeForSmoke();
+            window.ActivateFromSecondaryInstance();
             bool restoredSameProcess =
                 !window.AiProcessingMinimizedModeForSmoke
                 && !window.AiProcessingTrayVisibleForSmoke
