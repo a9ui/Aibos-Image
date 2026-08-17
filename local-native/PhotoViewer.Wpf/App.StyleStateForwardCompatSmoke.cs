@@ -133,6 +133,50 @@ public partial class App
                     ?.TryGetValue("ConcurrentVideoScalar", out JsonElement videoScalar) == true
                 && videoScalar.GetBoolean();
 
+            AiStyleDocument externallyEdited = ReadAiStyleFixture(stylePath);
+            externallyEdited.VideoStyles![0].Prompt = "externally edited prompt";
+            VideoStyleState externallyAdded = JsonSerializer.Deserialize<VideoStyleState>(
+                    JsonSerializer.Serialize(externallyEdited.VideoStyles[0]))
+                ?? throw new InvalidDataException("Video Style fixture clone failed.");
+            externallyAdded.Name = "Externally added style";
+            externallyAdded.Prompt = "external addition";
+            externallyEdited.VideoStyles.Add(externallyAdded);
+            externallyEdited.SelectedVideoStyleName = "Externally added style";
+            externallyEdited.I2iEditStyles = [];
+            externallyEdited.SelectedI2iEditStyleName = null;
+            File.WriteAllText(
+                stylePath,
+                JsonSerializer.Serialize(
+                    externallyEdited,
+                    new JsonSerializerOptions { WriteIndented = true }));
+            string externalKnownEditBefore = Fingerprint(stylePath);
+            bool styleLockPresentBeforeConflict = File.Exists(stylePath + ".lock");
+            bool localStaleStyleAccepted =
+                window.SaveVideoStyleForSmoke("Local stale save attempt");
+            AiStyleDocument afterExternalKnownConflict = ReadAiStyleFixture(stylePath);
+            bool externalKnownFileUnchanged = string.Equals(
+                    externalKnownEditBefore,
+                    Fingerprint(stylePath),
+                    StringComparison.Ordinal);
+            bool externalKnownConflictDetected =
+                window.AiStyleExternalConflictDetectedForSmoke;
+            bool styleLockPresentAfterConflict = File.Exists(stylePath + ".lock");
+            bool aiStyleWriteBlockedAfterConflict =
+                window.AiStyleWriteBlockedForSmoke;
+            bool externalKnownContentsExact =
+                afterExternalKnownConflict.VideoStyles?.Count == 2
+                && afterExternalKnownConflict.VideoStyles[0].Prompt
+                    == "externally edited prompt"
+                && afterExternalKnownConflict.VideoStyles[1].Name
+                    == "Externally added style"
+                && afterExternalKnownConflict.SelectedVideoStyleName
+                    == "Externally added style"
+                && afterExternalKnownConflict.I2iEditStyles?.Count == 0
+                && afterExternalKnownConflict.SelectedI2iEditStyleName is null;
+            bool externalKnownEditProtected = externalKnownFileUnchanged
+                && externalKnownConflictDetected
+                && externalKnownContentsExact;
+
             AiStyleDocument futureStyles = ReadAiStyleFixture(stylePath);
             futureStyles.Version = 2;
             File.WriteAllText(
@@ -155,6 +199,18 @@ public partial class App
             _ = window.SaveVideoStyleForSmoke("Malformed must stay protected");
             bool malformedStyleProtected = string.Equals(
                 malformedStyleBefore,
+                Fingerprint(stylePath),
+                StringComparison.Ordinal);
+            window.SuppressStatePersistence();
+            window.Close();
+            window = null;
+
+            File.WriteAllBytes(stylePath, new byte[4 * 1024 * 1024 + 1]);
+            string oversizedStyleBefore = Fingerprint(stylePath);
+            window = new MainWindow();
+            _ = window.SaveVideoStyleForSmoke("Oversized must stay protected");
+            bool oversizedStyleProtected = string.Equals(
+                oversizedStyleBefore,
                 Fingerprint(stylePath),
                 StringComparison.Ordinal);
             window.SuppressStatePersistence();
@@ -184,8 +240,10 @@ public partial class App
                 && incrementalActivityWrite
                 && idempotentReplay
                 && concurrentLatestUnknownFieldsPreserved
+                && externalKnownEditProtected
                 && unsupportedFutureStyleProtected
                 && malformedStyleProtected
+                && oversizedStyleProtected
                 && unsupportedFutureActivityProtected
                 && sourceUnchanged;
             result = new
@@ -197,8 +255,20 @@ public partial class App
                 incrementalActivityWrite,
                 idempotentReplay,
                 concurrentLatestUnknownFieldsPreserved,
+                externalKnownEditProtected,
+                externalKnownEvidence = new
+                {
+                    externalKnownFileUnchanged,
+                    externalKnownConflictDetected,
+                    externalKnownContentsExact,
+                    localStaleStyleAccepted,
+                    styleLockPresentBeforeConflict,
+                    styleLockPresentAfterConflict,
+                    aiStyleWriteBlockedAfterConflict,
+                },
                 unsupportedFutureStyleProtected,
                 malformedStyleProtected,
+                oversizedStyleProtected,
                 unsupportedFutureActivityProtected,
                 sourceUnchanged,
                 compactedStateBytes = new FileInfo(statePath).Length,
