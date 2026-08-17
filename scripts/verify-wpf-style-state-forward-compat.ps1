@@ -66,10 +66,15 @@ try {
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 4
     $required = @(
-        'compatibleUnknownFieldsPreserved',
+        'migrationPreserved',
+        'legacyFieldsRemoved',
+        'viewerUnknownPreserved',
+        'incrementalActivityWrite',
+        'idempotentReplay',
         'concurrentLatestUnknownFieldsPreserved',
-        'unsupportedFutureVideoProtected',
-        'unsupportedFutureI2iProtected',
+        'unsupportedFutureStyleProtected',
+        'malformedStyleProtected',
+        'unsupportedFutureActivityProtected',
         'sourceUnchanged'
     )
     $missing = @($required | Where-Object { $result.$_ -ne $true })

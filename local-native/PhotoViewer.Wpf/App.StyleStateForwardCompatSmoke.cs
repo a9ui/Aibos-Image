@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -9,36 +10,21 @@ public partial class App
     private const string StyleStateSmokeTempDirectoryPrefix =
         "photoviewer-wpf-automation-";
 
-    private void CaptureStyleStateForwardCompatSmoke(string resultPath)
+    private async void CaptureStyleStateForwardCompatSmoke(string resultPath)
     {
-        string resultFullPath = RequireStyleStateSmokeTempPath(
-            resultPath,
-            "result");
-        string configuredStorageRoot = _styleStateForwardCompatSmokeStorageRoot
-            ?? throw new InvalidOperationException(
-                "The managed Style state smoke root was not configured.");
-        string storageRoot = Path.GetFullPath(configuredStorageRoot);
-        string tempRoot = Path.GetFullPath(Path.GetTempPath())
-            .TrimEnd(
-                Path.DirectorySeparatorChar,
-                Path.AltDirectorySeparatorChar);
-        string? storageParent = Path.GetDirectoryName(storageRoot);
-        string storageLeaf = Path.GetFileName(storageRoot);
-        if (!string.Equals(
-                storageParent,
-                tempRoot,
-                StringComparison.OrdinalIgnoreCase)
-            || !storageLeaf.StartsWith(
-                StyleStateSmokeTempDirectoryPrefix,
-                StringComparison.Ordinal)
-            || storageLeaf.Length <= StyleStateSmokeTempDirectoryPrefix.Length)
-        {
-            throw new ArgumentException(
-                "The managed Style state smoke root must be one app-created child directly under TEMP.");
-        }
-
+        ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown;
+        string resultFullPath = RequireStyleStateSmokeTempPath(resultPath, "result");
+        string storageRoot = RequireManagedStyleStateSmokeRoot(
+            _styleStateForwardCompatSmokeStorageRoot
+                ?? throw new InvalidOperationException(
+                    "The managed Style state smoke root was not configured."));
         string statePath = Path.Combine(storageRoot, "state.json");
+        string stylePath = Path.Combine(storageRoot, "ai-styles.json");
+        string activityPath = Path.Combine(storageRoot, "favorite-activity.sqlite3");
         string sourcePath = Path.Combine(storageRoot, "fixture-source.bin");
+        string firstFavoritePath = Path.Combine(storageRoot, "first.png");
+        string secondFavoritePath = Path.Combine(storageRoot, "second.png");
+        string thirdFavoritePath = Path.Combine(storageRoot, "third.png");
         MainWindow? window = null;
         object result;
         bool ok = false;
@@ -46,151 +32,183 @@ public partial class App
         {
             Directory.CreateDirectory(storageRoot);
             File.WriteAllBytes(sourcePath, [1, 3, 5, 7, 9, 11]);
-            string sourceBefore = StyleStateSmokeFingerprint(sourcePath);
+            string sourceBefore = Fingerprint(sourcePath);
+            DateTimeOffset firstTime = new(2026, 8, 10, 1, 2, 3, TimeSpan.Zero);
+            DateTimeOffset secondTime = new(2026, 8, 11, 2, 3, 4, TimeSpan.Zero);
+            DateTimeOffset thirdTime = new(2026, 8, 12, 3, 4, 5, TimeSpan.Zero);
 
-            ViewerState compatible = CreateCompatibleStyleStateFixture();
+            ViewerState legacy = CreateCompatibleStyleStateFixture();
+            legacy.FavoriteChangedAtUtcByPath = new Dictionary<string, DateTimeOffset>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                [firstFavoritePath] = firstTime,
+                [secondFavoritePath] = secondTime,
+            };
+            legacy.ExtensionData = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["FutureViewerObject"] = JsonSerializer.SerializeToElement(new { keep = true }),
+            };
             File.WriteAllText(
                 statePath,
-                JsonSerializer.Serialize(
-                    compatible,
-                    new JsonSerializerOptions { WriteIndented = true }));
+                JsonSerializer.Serialize(legacy, new JsonSerializerOptions { WriteIndented = true }));
 
             window = new MainWindow();
-            window.FlushStateForSmoke();
-            ViewerState? roundTripped = ReadStyleStateFixture(statePath);
-            JsonElement videoObject = default;
-            JsonElement videoArray = default;
-            JsonElement i2iScalar = default;
-            bool compatibleUnknownFieldsPreserved =
-                roundTripped?.VideoStyles?.SingleOrDefault()?.ExtensionData
-                    ?.TryGetValue("FutureVideoObject", out videoObject) == true
-                && videoObject.ValueKind == JsonValueKind.Object
+            AiStyleDocument migratedStyles = ReadAiStyleFixture(stylePath);
+            FavoriteActivityStoreReadResult migratedActivity = FavoriteActivityStore.Read(
+                activityPath,
+                20_000);
+            long migratedStyleDocumentBytes = new FileInfo(stylePath).Length;
+            using JsonDocument compactedState = JsonDocument.Parse(File.ReadAllText(statePath));
+            bool legacyFieldsRemoved =
+                !compactedState.RootElement.TryGetProperty("FavoriteChangedAtUtcByPath", out _)
+                && !compactedState.RootElement.TryGetProperty("PhotorealStyles", out _)
+                && !compactedState.RootElement.TryGetProperty("SelectedPhotorealStyleName", out _)
+                && !compactedState.RootElement.TryGetProperty("VideoStyles", out _)
+                && !compactedState.RootElement.TryGetProperty("SelectedVideoStyleName", out _)
+                && !compactedState.RootElement.TryGetProperty("I2iEditStyles", out _)
+                && !compactedState.RootElement.TryGetProperty("SelectedI2iEditStyleName", out _);
+            bool viewerUnknownPreserved =
+                compactedState.RootElement.TryGetProperty("FutureViewerObject", out JsonElement viewerUnknown)
+                && viewerUnknown.GetProperty("keep").GetBoolean();
+            bool migrationPreserved = window.SplitLocalPersistenceReadyForSmoke
+                && migratedActivity.State == FavoriteActivityStoreReadState.Loaded
+                && migratedActivity.Entries.Count == 2
+                && migratedActivity.Entries[firstFavoritePath] == firstTime
+                && migratedActivity.Entries[secondFavoritePath] == secondTime
+                && migratedStyles.VideoStyles?.SingleOrDefault()?.ExtensionData
+                    ?.TryGetValue("FutureVideoObject", out JsonElement videoObject) == true
                 && videoObject.GetProperty("mode").GetString() == "cinematic"
-                && roundTripped.VideoStyles[0].ExtensionData
-                    ?.TryGetValue("FutureVideoArray", out videoArray) == true
-                && videoArray.ValueKind == JsonValueKind.Array
-                && videoArray.GetArrayLength() == 3
-                && roundTripped.I2iEditStyles?.SingleOrDefault()?.ExtensionData
-                    ?.TryGetValue("FutureI2iScalar", out i2iScalar) == true
-                && i2iScalar.ValueKind == JsonValueKind.Number
-                && i2iScalar.GetInt32() == 17;
+                && migratedStyles.I2iEditStyles?.SingleOrDefault()?.ExtensionData
+                    ?.TryGetValue("FutureI2iScalar", out JsonElement i2iScalar) == true
+                && i2iScalar.GetInt32() == 17
+                && legacyFieldsRemoved
+                && viewerUnknownPreserved;
 
-            ViewerState latest = roundTripped
-                ?? throw new InvalidOperationException(
-                    "The compatible Style state did not round-trip.");
-            VideoStyleState latestVideoStyle = latest.VideoStyles
-                ?.SingleOrDefault()
-                ?? throw new InvalidOperationException(
-                    "The compatible Video Style was unavailable.");
-            latestVideoStyle.ExtensionData ??=
+            string stateBeforeActivity = Fingerprint(statePath);
+            bool activityWriteCompleted = await window.PersistFavoriteActivityForSmokeAsync(
+                thirdFavoritePath,
+                thirdTime,
+                TimeSpan.FromSeconds(10));
+            string stateAfterActivity = Fingerprint(statePath);
+            FavoriteActivityStoreReadResult afterActivity = FavoriteActivityStore.Read(
+                activityPath,
+                20_000);
+            bool incrementalActivityWrite = activityWriteCompleted
+                && string.Equals(stateBeforeActivity, stateAfterActivity, StringComparison.Ordinal)
+                && afterActivity.State == FavoriteActivityStoreReadState.Loaded
+                && afterActivity.Entries.Count == 3
+                && afterActivity.Entries[thirdFavoritePath] == thirdTime;
+
+            bool replayCompleted = await window.PersistFavoriteActivityForSmokeAsync(
+                thirdFavoritePath,
+                thirdTime,
+                TimeSpan.FromSeconds(10));
+            FavoriteActivityStoreReadResult afterReplay = FavoriteActivityStore.Read(
+                activityPath,
+                20_000);
+            bool idempotentReplay = replayCompleted
+                && afterReplay.State == FavoriteActivityStoreReadState.Loaded
+                && afterReplay.Entries.Count == 3
+                && afterReplay.Entries[thirdFavoritePath] == thirdTime;
+
+            AiStyleDocument concurrent = ReadAiStyleFixture(stylePath);
+            concurrent.ExtensionData = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                ["ConcurrentRootObject"] = JsonSerializer.SerializeToElement(new { revision = 7 }),
+            };
+            concurrent.VideoStyles![0].ExtensionData ??=
                 new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-            latestVideoStyle.ExtensionData["ConcurrentVideoScalar"] =
+            concurrent.VideoStyles[0].ExtensionData!["ConcurrentVideoScalar"] =
                 JsonSerializer.SerializeToElement(true);
-            I2iEditStyleState latestI2iStyle = latest.I2iEditStyles
-                ?.SingleOrDefault()
-                ?? throw new InvalidOperationException(
-                    "The compatible I2I Style was unavailable.");
-            latestI2iStyle.ExtensionData ??=
-                new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-            latestI2iStyle.ExtensionData["ConcurrentI2iObject"] =
-                JsonSerializer.SerializeToElement(new
-                {
-                    mode = "semantic-v2",
-                    weights = new[] { 0.25, 0.75 },
-                });
             File.WriteAllText(
-                statePath,
-                JsonSerializer.Serialize(
-                    latest,
-                    new JsonSerializerOptions { WriteIndented = true }));
-            window.FlushStateForSmoke();
+                stylePath,
+                JsonSerializer.Serialize(concurrent, new JsonSerializerOptions { WriteIndented = true }));
+            bool styleSaved = window.SaveVideoStyleForSmoke("Cinematic motion");
+            AiStyleDocument afterConcurrentSave = ReadAiStyleFixture(stylePath);
+            bool concurrentLatestUnknownFieldsPreserved = styleSaved
+                && afterConcurrentSave.ExtensionData
+                    ?.TryGetValue("ConcurrentRootObject", out JsonElement rootObject) == true
+                && rootObject.GetProperty("revision").GetInt32() == 7
+                && afterConcurrentSave.VideoStyles?[0].ExtensionData
+                    ?.TryGetValue("ConcurrentVideoScalar", out JsonElement videoScalar) == true
+                && videoScalar.GetBoolean();
 
-            ViewerState? afterConcurrentSave = ReadStyleStateFixture(statePath);
-            JsonElement concurrentVideoScalar = default;
-            JsonElement concurrentI2iObject = default;
-            bool concurrentLatestUnknownFieldsPreserved =
-                afterConcurrentSave?.VideoStyles?[0].ExtensionData
-                    ?.TryGetValue(
-                        "ConcurrentVideoScalar",
-                        out concurrentVideoScalar) == true
-                && concurrentVideoScalar.ValueKind == JsonValueKind.True
-                && afterConcurrentSave.I2iEditStyles?[0].ExtensionData
-                    ?.TryGetValue(
-                        "ConcurrentI2iObject",
-                        out concurrentI2iObject) == true
-                && concurrentI2iObject.ValueKind == JsonValueKind.Object
-                && concurrentI2iObject.GetProperty("mode").GetString()
-                    == "semantic-v2"
-                && concurrentI2iObject.GetProperty("weights").GetArrayLength()
-                    == 2;
-
-            ViewerState futureVideo = CreateCompatibleStyleStateFixture();
-            futureVideo.VideoStyles![0].ModelId = "future-video-v4";
+            AiStyleDocument futureStyles = ReadAiStyleFixture(stylePath);
+            futureStyles.Version = 2;
             File.WriteAllText(
-                statePath,
-                JsonSerializer.Serialize(
-                    futureVideo,
-                    new JsonSerializerOptions { WriteIndented = true }));
-            byte[] futureVideoBefore = File.ReadAllBytes(statePath);
-            DateTime futureVideoWriteTimeBefore = File.GetLastWriteTimeUtc(
-                statePath);
-            window.FlushStateForSmoke();
-            bool unsupportedFutureVideoProtected =
-                File.ReadAllBytes(statePath).SequenceEqual(futureVideoBefore)
-                && File.GetLastWriteTimeUtc(statePath)
-                    == futureVideoWriteTimeBefore;
-            window.SuppressStatePersistence();
-            window.Close();
-            window = null;
-
-            ViewerState futureI2i = CreateCompatibleStyleStateFixture();
-            futureI2i.I2iEditStyles![0].OutfitMaskMode = "semantic-v4";
-            File.WriteAllText(
-                statePath,
-                JsonSerializer.Serialize(
-                    futureI2i,
-                    new JsonSerializerOptions { WriteIndented = true }));
-            byte[] futureI2iBefore = File.ReadAllBytes(statePath);
-            DateTime futureI2iWriteTimeBefore = File.GetLastWriteTimeUtc(
-                statePath);
-            window = new MainWindow();
-            window.FlushStateForSmoke();
-            bool unsupportedFutureI2iProtected =
-                File.ReadAllBytes(statePath).SequenceEqual(futureI2iBefore)
-                && File.GetLastWriteTimeUtc(statePath)
-                    == futureI2iWriteTimeBefore;
-            string sourceAfter = StyleStateSmokeFingerprint(sourcePath);
-            bool sourceUnchanged = string.Equals(
-                sourceBefore,
-                sourceAfter,
+                stylePath,
+                JsonSerializer.Serialize(futureStyles, new JsonSerializerOptions { WriteIndented = true }));
+            string futureStyleBefore = Fingerprint(stylePath);
+            _ = window.SaveVideoStyleForSmoke("Future must stay protected");
+            bool unsupportedFutureStyleProtected = string.Equals(
+                futureStyleBefore,
+                Fingerprint(stylePath),
                 StringComparison.Ordinal);
 
             window.SuppressStatePersistence();
             window.Close();
             window = null;
 
-            ok = compatibleUnknownFieldsPreserved
+            File.WriteAllText(stylePath, "{ malformed-style-document");
+            string malformedStyleBefore = Fingerprint(stylePath);
+            window = new MainWindow();
+            _ = window.SaveVideoStyleForSmoke("Malformed must stay protected");
+            bool malformedStyleProtected = string.Equals(
+                malformedStyleBefore,
+                Fingerprint(stylePath),
+                StringComparison.Ordinal);
+            window.SuppressStatePersistence();
+            window.Close();
+            window = null;
+
+            SetSqliteUserVersion(activityPath, 2);
+            string futureActivityBefore = Fingerprint(activityPath);
+            window = new MainWindow();
+            bool fallbackActivityCompleted = await window.PersistFavoriteActivityForSmokeAsync(
+                Path.Combine(storageRoot, "future-fallback.png"),
+                thirdTime.AddMinutes(1),
+                TimeSpan.FromSeconds(10));
+            bool unsupportedFutureActivityProtected = fallbackActivityCompleted
+                && string.Equals(
+                    futureActivityBefore,
+                    Fingerprint(activityPath),
+                    StringComparison.Ordinal);
+            string sourceAfter = Fingerprint(sourcePath);
+            bool sourceUnchanged = string.Equals(sourceBefore, sourceAfter, StringComparison.Ordinal);
+
+            window.SuppressStatePersistence();
+            window.Close();
+            window = null;
+
+            ok = migrationPreserved
+                && incrementalActivityWrite
+                && idempotentReplay
                 && concurrentLatestUnknownFieldsPreserved
-                && unsupportedFutureVideoProtected
-                && unsupportedFutureI2iProtected
+                && unsupportedFutureStyleProtected
+                && malformedStyleProtected
+                && unsupportedFutureActivityProtected
                 && sourceUnchanged;
             result = new
             {
                 ok,
-                compatibleUnknownFieldsPreserved,
+                migrationPreserved,
+                legacyFieldsRemoved,
+                viewerUnknownPreserved,
+                incrementalActivityWrite,
+                idempotentReplay,
                 concurrentLatestUnknownFieldsPreserved,
-                unsupportedFutureVideoProtected,
-                unsupportedFutureI2iProtected,
+                unsupportedFutureStyleProtected,
+                malformedStyleProtected,
+                unsupportedFutureActivityProtected,
                 sourceUnchanged,
+                compactedStateBytes = new FileInfo(statePath).Length,
+                styleDocumentBytes = migratedStyleDocumentBytes,
+                migratedActivityCount = migratedActivity.Entries.Count,
             };
         }
         catch (Exception ex)
         {
-            result = new
-            {
-                ok = false,
-                message = ex.ToString(),
-            };
+            result = new { ok = false, message = ex.ToString() };
         }
         finally
         {
@@ -204,9 +222,7 @@ public partial class App
         Directory.CreateDirectory(Path.GetDirectoryName(resultFullPath)!);
         File.WriteAllText(
             resultFullPath,
-            JsonSerializer.Serialize(
-                result,
-                new JsonSerializerOptions { WriteIndented = true }));
+            JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
         TryDeleteStyleStateSmokeStorage(storageRoot);
         Shutdown(ok ? 0 : 1);
     }
@@ -215,6 +231,13 @@ public partial class App
         => new()
         {
             Version = 2,
+            VideoDurationSeconds = 5,
+            VideoPlaybackFps = 12,
+            VideoMaximumPixelArea = 307200,
+            VideoSteps = 20,
+            VideoPrompt = "subtle natural motion",
+            VideoModelId = "minimax-h3",
+            VideoQualityId = "wan22-ti2v-5b-high-v1",
             VideoStyles =
             [
                 new VideoStyleState
@@ -227,17 +250,9 @@ public partial class App
                     MaximumPixelArea = 307200,
                     Steps = 20,
                     Prompt = "subtle natural motion",
-                    ExtensionData = new Dictionary<string, JsonElement>(
-                        StringComparer.Ordinal)
+                    ExtensionData = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
                     {
-                        ["FutureVideoObject"] =
-                            JsonSerializer.SerializeToElement(new
-                            {
-                                mode = "cinematic",
-                            }),
-                        ["FutureVideoArray"] =
-                            JsonSerializer.SerializeToElement(
-                                new[] { "slow", "stable", "locked" }),
+                        ["FutureVideoObject"] = JsonSerializer.SerializeToElement(new { mode = "cinematic" }),
                     },
                 },
             ],
@@ -258,21 +273,36 @@ public partial class App
                     OutfitMaskExpandPixels = 64,
                     SeedMode = "fixed",
                     Seed = 123456789,
-                    ExtensionData = new Dictionary<string, JsonElement>(
-                        StringComparer.Ordinal)
+                    ExtensionData = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
                     {
-                        ["FutureI2iScalar"] =
-                            JsonSerializer.SerializeToElement(17),
+                        ["FutureI2iScalar"] = JsonSerializer.SerializeToElement(17),
                     },
                 },
             ],
             SelectedI2iEditStyleName = "Wardrobe edit",
         };
 
-    private static ViewerState? ReadStyleStateFixture(string path)
-        => JsonSerializer.Deserialize<ViewerState>(File.ReadAllText(path));
+    private static AiStyleDocument ReadAiStyleFixture(string path)
+        => JsonSerializer.Deserialize<AiStyleDocument>(File.ReadAllText(path))
+            ?? throw new InvalidDataException("AI Style fixture was unavailable.");
 
-    private static string StyleStateSmokeFingerprint(string path)
+    private static void SetSqliteUserVersion(string path, int version)
+    {
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadWrite,
+                Cache = SqliteCacheMode.Private,
+                Pooling = false,
+            }.ToString());
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA user_version={version};";
+        command.ExecuteNonQuery();
+    }
+
+    private static string Fingerprint(string path)
     {
         FileInfo info = new(path);
         return string.Join(
@@ -282,29 +312,30 @@ public partial class App
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))));
     }
 
+    private static string RequireManagedStyleStateSmokeRoot(string candidate)
+    {
+        string storageRoot = Path.GetFullPath(candidate);
+        string tempRoot = Path.GetFullPath(Path.GetTempPath())
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string? storageParent = Path.GetDirectoryName(storageRoot);
+        string storageLeaf = Path.GetFileName(storageRoot);
+        if (!string.Equals(storageParent, tempRoot, StringComparison.OrdinalIgnoreCase)
+            || !storageLeaf.StartsWith(StyleStateSmokeTempDirectoryPrefix, StringComparison.Ordinal)
+            || storageLeaf.Length <= StyleStateSmokeTempDirectoryPrefix.Length)
+        {
+            throw new ArgumentException(
+                "The managed Style state smoke root must be one app-created child directly under TEMP.");
+        }
+        return storageRoot;
+    }
+
     private static void TryDeleteStyleStateSmokeStorage(string storageRoot)
     {
         try
         {
-            string tempRoot = Path.GetFullPath(Path.GetTempPath())
-                .TrimEnd(
-                    Path.DirectorySeparatorChar,
-                    Path.AltDirectorySeparatorChar);
-            string fullStorageRoot = Path.GetFullPath(storageRoot);
-            string? storageParent = Path.GetDirectoryName(fullStorageRoot);
-            string storageLeaf = Path.GetFileName(fullStorageRoot);
-            if (string.Equals(
-                    storageParent,
-                    tempRoot,
-                    StringComparison.OrdinalIgnoreCase)
-                && storageLeaf.StartsWith(
-                    StyleStateSmokeTempDirectoryPrefix,
-                    StringComparison.Ordinal)
-                && storageLeaf.Length > StyleStateSmokeTempDirectoryPrefix.Length
-                && Directory.Exists(fullStorageRoot))
-            {
+            string fullStorageRoot = RequireManagedStyleStateSmokeRoot(storageRoot);
+            if (Directory.Exists(fullStorageRoot))
                 Directory.Delete(fullStorageRoot, recursive: true);
-            }
         }
         catch
         {
@@ -312,24 +343,17 @@ public partial class App
         }
     }
 
-    private static string RequireStyleStateSmokeTempPath(
-        string candidate,
-        string description)
+    private static string RequireStyleStateSmokeTempPath(string candidate, string description)
     {
         string fullPath = Path.GetFullPath(candidate);
         string tempRoot = Path.GetFullPath(Path.GetTempPath())
-            .TrimEnd(
-                Path.DirectorySeparatorChar,
-                Path.AltDirectorySeparatorChar);
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         string tempPrefix = tempRoot + Path.DirectorySeparatorChar;
-        if (!fullPath.StartsWith(
-                tempPrefix,
-                StringComparison.OrdinalIgnoreCase))
+        if (!fullPath.StartsWith(tempPrefix, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
                 $"The Style state smoke {description} path must stay under TEMP.");
         }
-
         return fullPath;
     }
 }

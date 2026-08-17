@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$DotnetPath = "",
+    [switch]$NoRestore,
     [ValidateRange(30, 300)]
     [int]$OverallTimeoutSeconds = 120
 )
@@ -33,21 +34,37 @@ if (-not $runRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)
 try {
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $env:NUGET_SCRATCH = Join-Path $runRoot 'nuget-scratch'
-    & $DotnetPath build $project `
-        -c $Configuration `
-        --artifacts-path $artifactsRoot `
-        --nologo `
-        -v:minimal
+    if ($NoRestore) {
+        $buildOutput = (Join-Path $runRoot 'build').TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        & $DotnetPath build $project `
+            -c $Configuration `
+            --no-restore `
+            "-p:OutputPath=$buildOutput" `
+            --nologo `
+            -v:minimal
+    }
+    else {
+        & $DotnetPath build $project `
+            -c $Configuration `
+            --artifacts-path $artifactsRoot `
+            --nologo `
+            -v:minimal
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "WPF build failed with exit code $LASTEXITCODE."
     }
 
-    $dll = Get-ChildItem -LiteralPath $artifactsRoot `
-        -Filter 'PhotoViewer.Wpf.dll' `
-        -File `
-        -Recurse |
-        Where-Object { $_.FullName -match '[\\/]bin[\\/]' } |
-        Select-Object -First 1
+    $dll = if ($NoRestore) {
+        Get-Item -LiteralPath (Join-Path $buildOutput 'PhotoViewer.Wpf.dll')
+    }
+    else {
+        Get-ChildItem -LiteralPath $artifactsRoot `
+            -Filter 'PhotoViewer.Wpf.dll' `
+            -File `
+            -Recurse |
+            Where-Object { $_.FullName -match '[\\/]bin[\\/]' } |
+            Select-Object -First 1
+    }
     if ($null -eq $dll) {
         throw "WPF assembly was not found under the TEMP artifacts root."
     }
