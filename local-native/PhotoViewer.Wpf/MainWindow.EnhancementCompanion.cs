@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 
 namespace PhotoViewer.Wpf;
 
@@ -47,8 +48,6 @@ public partial class MainWindow
         "api/enhance/inbox/wake";
     private const string EnhancementCompanionQueueRecoveryRoute =
         "api/enhance/queue/recover";
-    private const string EnhancementCompanionAuthFileName =
-        "companion-auth-v1.key";
     private const string EnhancementCompanionChallengeHeader =
         "X-Aibos-Companion-Challenge";
     private const string EnhancementCompanionTimestampHeader =
@@ -1834,12 +1833,6 @@ public partial class MainWindow
             SavedForDelivery: true,
             DeliveryRequestId: item.RequestId);
 
-    private static string EnhancementCompanionAuthPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "PhotoViewer.Wpf",
-        "companion-auth-v1",
-        EnhancementCompanionAuthFileName);
-
     private bool TryGetOrCreateEnhancementCompanionAuthToken(
         out string authToken,
         out string error)
@@ -1852,68 +1845,170 @@ public partial class MainWindow
             return true;
         }
 
-        string path = EnhancementCompanionAuthPath;
-        string directory = Path.GetDirectoryName(path)!;
+        if (!EnhancementCompanionAuthStoragePath.TryForCurrentUser(
+                out EnhancementCompanionAuthStoragePath? storage))
+        {
+            authToken = "";
+            error = "The local AI companion authentication root is unavailable.";
+            return false;
+        }
+        bool ok = TryGetOrCreateEnhancementCompanionAuthTokenForStorage(
+            storage!,
+            out authToken,
+            out error);
+        if (ok)
+        {
+            _enhancementCompanionAuthToken = authToken;
+        }
+        return ok;
+    }
+
+    private static bool TryGetOrCreateEnhancementCompanionAuthTokenForStorage(
+        EnhancementCompanionAuthStoragePath storage,
+        out string authToken,
+        out string error,
+        bool failAfterCreateForSmoke = false)
+    {
+        if (!TryAcquireEnhancementCompanionAuthDirectoryLease(
+                storage,
+                out EnhancementCompanionAuthDirectoryLease? directoryLease))
+        {
+            authToken = "";
+            error = "The local AI companion authentication directory is not trusted.";
+            return false;
+        }
+        using (directoryLease)
+        {
+            return TryGetOrCreateEnhancementCompanionAuthTokenUnderLease(
+                storage,
+                directoryLease!,
+                out authToken,
+                out error,
+                failAfterCreateForSmoke);
+        }
+    }
+
+    private static bool TryGetOrCreateEnhancementCompanionAuthTokenUnderLease(
+        EnhancementCompanionAuthStoragePath storage,
+        EnhancementCompanionAuthDirectoryLease directoryLease,
+        out string authToken,
+        out string error,
+        bool failAfterCreateForSmoke)
+    {
+        authToken = "";
+        error = "";
         bool createdFile = false;
+        bool acceptedCreatedFile = false;
+        FileStream? stream = null;
         try
         {
-            bool directoryExisted = Directory.Exists(directory);
-            Directory.CreateDirectory(directory);
-            if (!TryValidateEnhancementCompanionAuthDirectory(
-                    directory,
-                    allowAclInitialization: !directoryExisted))
+            if (!directoryLease.IsStillBound())
             {
-                error = "The local AI companion authentication directory is not trusted.";
+                error = "The local AI companion authentication directory changed during validation.";
+                return false;
+            }
+            try
+            {
+                // The three directory leases retain the validated identities.
+                // Their final paths are rechecked around this exclusive open.
+                // codeql[cs/path-injection]
+                stream = new FileStream(
+                    storage.FilePath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.None,
+                    1024,
+                    FileOptions.SequentialScan);
+            }
+            catch (FileNotFoundException)
+            {
+                try
+                {
+                    FileSecurity security = BuildCurrentUserOnlyAuthFileSecurity();
+                    // CreateNew applies the protected DACL atomically and
+                    // FullControl gives this same handle DELETE for safe
+                    // delete-on-close if provisioning later fails.
+                    // codeql[cs/path-injection]
+                    stream = FileSystemAclExtensions.Create(
+                        new FileInfo(storage.FilePath),
+                        FileMode.CreateNew,
+                        FileSystemRights.FullControl,
+                        FileShare.None,
+                        4096,
+                        FileOptions.WriteThrough,
+                        security);
+                    createdFile = true;
+                }
+                catch (IOException)
+                {
+                    // Another Aibos process may have won CreateNew. Do not
+                    // inspect or replace it by name; open the winner once and
+                    // validate that exact exclusive handle below.
+                    // codeql[cs/path-injection]
+                    stream = new FileStream(
+                        storage.FilePath,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.None,
+                        1024,
+                        FileOptions.SequentialScan);
+                }
+            }
+
+            if (stream is null
+                || !directoryLease.IsStillBound()
+                || !IsTrustedEnhancementCompanionAuthFileHandleShape(
+                    stream,
+                    storage))
+            {
+                error = "The local AI companion authentication file changed during validation.";
                 return false;
             }
 
-            if (!File.Exists(path))
+            if (createdFile)
             {
-                string generated = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
-                try
+                if (failAfterCreateForSmoke)
                 {
-                    using var stream = new FileStream(
-                        path,
-                        FileMode.CreateNew,
-                        FileAccess.ReadWrite,
-                        FileShare.None,
-                        4096,
-                        FileOptions.WriteThrough);
-                    createdFile = true;
-                    byte[] bytes = Encoding.ASCII.GetBytes(Convert.ToBase64String(
-                        ProtectedData.Protect(
-                            Encoding.ASCII.GetBytes(generated),
-                            EnhancementCompanionAuthEntropy,
-                            DataProtectionScope.CurrentUser)));
-                    stream.Write(bytes);
-                    stream.Flush(flushToDisk: true);
-                    ApplyCurrentUserOnlyAuthFileAcl(path);
+                    throw new IOException(
+                        "Synthetic failure after companion auth file creation.");
                 }
-                catch (IOException) when (File.Exists(path))
+                string generated = Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+                byte[] bytes = Encoding.ASCII.GetBytes(Convert.ToBase64String(
+                    ProtectedData.Protect(
+                        Encoding.ASCII.GetBytes(generated),
+                        EnhancementCompanionAuthEntropy,
+                        DataProtectionScope.CurrentUser)));
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+                if (!directoryLease.IsStillBound()
+                    || !IsTrustedEnhancementCompanionAuthFileHandleShape(
+                        stream,
+                        storage))
                 {
-                    // Another Aibos window won the CreateNew race. Read the
-                    // completed user-only file below.
+                    error = "The local AI companion authentication path changed during creation.";
+                    return false;
                 }
             }
 
             if (!TryReadTrustedEnhancementCompanionAuthToken(
-                    path,
-                    directory,
+                    stream,
+                    storage,
                     out string candidate))
             {
-                if (createdFile)
-                    TryDeleteFailedEnhancementCompanionAuthFile(path, directory);
                 error = "The local AI companion authentication file is not user-only.";
                 return false;
             }
             if (!IsValidEnhancementCompanionAuthToken(candidate))
             {
-                if (createdFile)
-                    TryDeleteFailedEnhancementCompanionAuthFile(path, directory);
                 error = "The local AI companion authentication file is invalid.";
                 return false;
             }
-            _enhancementCompanionAuthToken = candidate;
+            if (!directoryLease.IsStillBound())
+            {
+                error = "The local AI companion authentication directory changed during reading.";
+                return false;
+            }
+            acceptedCreatedFile = true;
             authToken = candidate;
             return true;
         }
@@ -1922,57 +2017,190 @@ public partial class MainWindow
             UnauthorizedAccessException or
             System.Security.SecurityException or
             CryptographicException or
+            FormatException or
             ArgumentException or
             NotSupportedException)
         {
-            if (createdFile)
-                TryDeleteFailedEnhancementCompanionAuthFile(path, directory);
             error = $"Aibos could not establish user-only local AI authentication: {ex.Message}";
             return false;
         }
+        finally
+        {
+            if (createdFile && !acceptedCreatedFile && stream is not null)
+            {
+                // Delete only the exact newly-created handle. Never reopen an
+                // unknown current occupant by name during failure cleanup.
+                _ = WindowsPathIdentity.TryDeleteOpenRegularFile(
+                    stream.SafeFileHandle);
+            }
+            stream?.Dispose();
+        }
     }
 
-    private static bool TryValidateEnhancementCompanionAuthDirectory(
-        string directory,
-        bool allowAclInitialization)
+    private static bool TryAcquireEnhancementCompanionAuthDirectoryLease(
+        EnhancementCompanionAuthStoragePath storage,
+        out EnhancementCompanionAuthDirectoryLease? lease)
     {
-        SecurityIdentifier? currentUser = WindowsIdentity.GetCurrent().User;
-        if (currentUser is null)
-            return false;
-        string localAppData = Path.GetFullPath(Environment.GetFolderPath(
-            Environment.SpecialFolder.LocalApplicationData));
-        string expected = Path.GetFullPath(directory);
-        if (!WindowsPathIdentity.TryResolveExistingDirectory(
-                localAppData,
-                out string canonicalLocalAppData)
-            || !WindowsPathIdentity.TryResolveExistingDirectory(
-                expected,
-                out string canonicalDirectory)
-            || !string.Equals(expected, canonicalDirectory, StringComparison.OrdinalIgnoreCase)
-            || !canonicalDirectory.StartsWith(
-                canonicalLocalAppData + Path.DirectorySeparatorChar,
-                StringComparison.OrdinalIgnoreCase)
-            || (File.GetAttributes(canonicalDirectory) & FileAttributes.ReparsePoint) != 0)
+        lease = null;
+        SafeFileHandle? rootLease = null;
+        SafeFileHandle? applicationLease = null;
+        SafeFileHandle? authLease = null;
+        try
         {
-            return false;
-        }
+            if (!WindowsPathIdentity.TryOpenDirectoryLease(
+                    storage.RootPath,
+                    out rootLease))
+            {
+                return false;
+            }
 
-        DirectoryInfo info = new(canonicalDirectory);
-        DirectorySecurity security = info.GetAccessControl(
-            AccessControlSections.Owner | AccessControlSections.Access);
-        if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner
-            || !owner.Equals(currentUser))
-            return false;
-        if (allowAclInitialization)
-        {
-            ApplyCurrentUserOnlyAuthDirectoryAcl(canonicalDirectory);
-            security = info.GetAccessControl(
-                AccessControlSections.Owner | AccessControlSections.Access);
+            if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    rootLease,
+                    storage.RootPath))
+            {
+                return false;
+            }
+
+            // Windows can rename an open directory. Recheck the retained root
+            // identity around every path-based child operation and fail closed
+            // if its final path changes.
+            // codeql[cs/path-injection]
+            if (!Directory.Exists(storage.ApplicationDirectoryPath))
+            {
+                if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                        rootLease,
+                        storage.RootPath))
+                {
+                    return false;
+                }
+                // codeql[cs/path-injection]
+                Directory.CreateDirectory(storage.ApplicationDirectoryPath);
+            }
+            if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    rootLease,
+                    storage.RootPath))
+            {
+                return false;
+            }
+            if (!WindowsPathIdentity.TryOpenDirectoryLease(
+                    storage.ApplicationDirectoryPath,
+                    out applicationLease))
+            {
+                return false;
+            }
+            if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    rootLease,
+                    storage.RootPath)
+                || !WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    applicationLease,
+                    storage.ApplicationDirectoryPath))
+            {
+                return false;
+            }
+
+            // Existing unknown state is never rewritten. For a missing final
+            // directory, apply the protected DACL atomically at creation.
+            // codeql[cs/path-injection]
+            if (!Directory.Exists(storage.DirectoryPath))
+            {
+                if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                        rootLease,
+                        storage.RootPath)
+                    || !WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                        applicationLease,
+                        storage.ApplicationDirectoryPath))
+                {
+                    return false;
+                }
+                DirectorySecurity directorySecurity =
+                    BuildCurrentUserOnlyAuthDirectorySecurity();
+                // codeql[cs/path-injection]
+                FileSystemAclExtensions.Create(
+                    new DirectoryInfo(storage.DirectoryPath),
+                    directorySecurity);
+            }
+            if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    rootLease,
+                    storage.RootPath)
+                || !WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    applicationLease,
+                    storage.ApplicationDirectoryPath))
+            {
+                return false;
+            }
+            if (!WindowsPathIdentity.TryOpenDirectoryLease(
+                    storage.DirectoryPath,
+                    out authLease))
+            {
+                return false;
+            }
+            if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    rootLease,
+                    storage.RootPath)
+                || !WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    applicationLease,
+                    storage.ApplicationDirectoryPath)
+                || !WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    authLease,
+                    storage.DirectoryPath))
+            {
+                return false;
+            }
+
+            SecurityIdentifier? currentUser = WindowsIdentity.GetCurrent().User;
+            if (currentUser is null)
+                return false;
+            // The path-based directory ACL API is read-only. The retained
+            // identities are checked both before and after it so a rename is
+            // detected before any child file operation is allowed.
+            // codeql[cs/path-injection]
+            DirectorySecurity actualSecurity = new DirectoryInfo(
+                    storage.DirectoryPath)
+                .GetAccessControl(
+                    AccessControlSections.Owner | AccessControlSections.Access);
+            if (!HasCurrentUserOnlyAuthAcl(actualSecurity, currentUser))
+                return false;
+            if (!WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    rootLease,
+                    storage.RootPath)
+                || !WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    applicationLease,
+                    storage.ApplicationDirectoryPath)
+                || !WindowsPathIdentity.IsDirectoryLeaseBoundTo(
+                    authLease,
+                    storage.DirectoryPath))
+            {
+                return false;
+            }
+
+            lease = new EnhancementCompanionAuthDirectoryLease(
+                storage,
+                rootLease,
+                applicationLease,
+                authLease);
+            rootLease = null;
+            applicationLease = null;
+            authLease = null;
+            return true;
         }
-        return HasCurrentUserOnlyAuthAcl(security, currentUser);
+        catch (Exception ex) when (ex is
+            IOException or
+            UnauthorizedAccessException or
+            System.Security.SecurityException or
+            ArgumentException or
+            NotSupportedException)
+        {
+            return false;
+        }
+        finally
+        {
+            authLease?.Dispose();
+            applicationLease?.Dispose();
+            rootLease?.Dispose();
+        }
     }
 
-    private static void ApplyCurrentUserOnlyAuthDirectoryAcl(string path)
+    private static DirectorySecurity BuildCurrentUserOnlyAuthDirectorySecurity()
     {
         SecurityIdentifier currentUser = WindowsIdentity.GetCurrent().User
             ?? throw new System.Security.SecurityException(
@@ -1992,10 +2220,10 @@ public partial class MainWindow
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None,
             AccessControlType.Allow));
-        new DirectoryInfo(path).SetAccessControl(security);
+        return security;
     }
 
-    private static void ApplyCurrentUserOnlyAuthFileAcl(string path)
+    private static FileSecurity BuildCurrentUserOnlyAuthFileSecurity()
     {
         SecurityIdentifier currentUser = WindowsIdentity.GetCurrent().User
             ?? throw new System.Security.SecurityException(
@@ -2011,47 +2239,28 @@ public partial class MainWindow
             new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             FileSystemRights.FullControl,
             AccessControlType.Allow));
-        new FileInfo(path).SetAccessControl(security);
+        return security;
     }
 
     private static bool TryReadTrustedEnhancementCompanionAuthToken(
-        string path,
-        string trustedDirectory,
+        FileStream stream,
+        EnhancementCompanionAuthStoragePath storage,
         out string candidate)
     {
         candidate = "";
         SecurityIdentifier? currentUser = WindowsIdentity.GetCurrent().User;
         if (currentUser is null)
             return false;
-        using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.None,
-            1024,
-            FileOptions.SequentialScan);
-        string expectedPath = Path.GetFullPath(path);
-        string expectedDirectory = Path.GetFullPath(trustedDirectory);
-        if (!WindowsPathIdentity.TryGetFinalPath(
-                stream.SafeFileHandle,
-                out string finalPath)
-            || !string.Equals(expectedPath, finalPath, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(
-                Path.GetDirectoryName(finalPath),
-                expectedDirectory,
-                StringComparison.OrdinalIgnoreCase)
+        if (!IsTrustedEnhancementCompanionAuthFileHandleShape(stream, storage)
             || stream.Length is <= 0 or > 1024)
         {
             return false;
         }
-        FileAttributes attributes = File.GetAttributes(finalPath);
-        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
-            return false;
-        FileSecurity security = new FileInfo(finalPath).GetAccessControl(
-            AccessControlSections.Owner | AccessControlSections.Access);
+        FileSecurity security = stream.GetAccessControl();
         if (!HasCurrentUserOnlyAuthAcl(security, currentUser))
             return false;
 
+        stream.Position = 0;
         using var reader = new StreamReader(
             stream,
             Encoding.ASCII,
@@ -2063,9 +2272,43 @@ public partial class MainWindow
             Convert.FromBase64String(protectedToken),
             EnhancementCompanionAuthEntropy,
             DataProtectionScope.CurrentUser);
-        candidate = Encoding.ASCII.GetString(plaintext);
-        CryptographicOperations.ZeroMemory(plaintext);
+        try
+        {
+            candidate = Encoding.ASCII.GetString(plaintext);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+        }
         return stream.Length is > 0 and <= 1024;
+    }
+
+    private static bool IsTrustedEnhancementCompanionAuthFileHandleShape(
+        FileStream stream,
+        EnhancementCompanionAuthStoragePath storage)
+    {
+        if (!WindowsPathIdentity.TryGetFinalPath(
+                stream.SafeFileHandle,
+                out string finalPath)
+            || !string.Equals(
+                storage.FilePath,
+                finalPath,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                Path.GetDirectoryName(finalPath),
+                storage.DirectoryPath,
+                StringComparison.OrdinalIgnoreCase)
+            || (File.GetAttributes(stream.SafeFileHandle)
+                & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0
+            || !WindowsPathIdentity.TryGetHardLinkCount(
+                stream.SafeFileHandle,
+                out uint linkCount)
+            || linkCount != 1)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static bool HasCurrentUserOnlyAuthAcl(
@@ -2109,27 +2352,6 @@ public partial class MainWindow
             return false;
         }
         return currentUserFullControl && localSystemFullControl;
-    }
-
-    private static void TryDeleteFailedEnhancementCompanionAuthFile(
-        string path,
-        string trustedDirectory)
-    {
-        try
-        {
-            string fullPath = Path.GetFullPath(path);
-            if (string.Equals(
-                    Path.GetDirectoryName(fullPath),
-                    Path.GetFullPath(trustedDirectory),
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                File.Delete(fullPath);
-            }
-        }
-        catch
-        {
-            // Fail closed. A failed newly-created token is never accepted.
-        }
     }
 
     private async Task<EnhancementCompanionOwnershipProbe>
@@ -3497,8 +3719,361 @@ public partial class MainWindow
         => HasEnhancementCapability(
             payload,
             RecoveredPhotorealSourceUpscaleCapability);
+    public static EnhancementCompanionAuthStorageSmokeSnapshot
+        EnhancementCompanionAuthStorageContractForSmoke(
+            string fixtureRoot,
+            string junctionFixtureRoot)
+    {
+        string PrepareRoot(string name)
+        {
+            string root = Path.Combine(fixtureRoot, name);
+            // fixtureRoot is a managed TEMP root from the smoke harness.
+            // codeql[cs/path-injection]
+            Directory.CreateDirectory(root);
+            return root;
+        }
+
+        void WriteSyntheticFile(
+            EnhancementCompanionAuthStoragePath storage,
+            byte[] bytes,
+            bool foreignAllow)
+        {
+            if (!TryAcquireEnhancementCompanionAuthDirectoryLease(
+                    storage,
+                    out EnhancementCompanionAuthDirectoryLease? lease))
+            {
+                throw new InvalidDataException(
+                    "The synthetic companion authentication directory was rejected.");
+            }
+            using (lease)
+            {
+                FileSecurity security = BuildCurrentUserOnlyAuthFileSecurity();
+                if (foreignAllow)
+                {
+                    security.AddAccessRule(new FileSystemAccessRule(
+                        new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                        FileSystemRights.ReadData,
+                        AccessControlType.Allow));
+                }
+                // The synthetic storage capability is handle-bound below TEMP.
+                // codeql[cs/path-injection]
+                using FileStream stream = FileSystemAclExtensions.Create(
+                    new FileInfo(storage.FilePath),
+                    FileMode.CreateNew,
+                    FileSystemRights.FullControl,
+                    FileShare.None,
+                    4096,
+                    FileOptions.WriteThrough,
+                    security);
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
+        }
+
+        string primaryRoot = PrepareRoot("auth-primary");
+        EnhancementCompanionAuthStoragePath primary =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                primaryRoot);
+        bool firstCreated = TryGetOrCreateEnhancementCompanionAuthTokenForStorage(
+            primary,
+            out string firstToken,
+            out _);
+        // The synthetic capability owns this fixed leaf below TEMP.
+        // codeql[cs/path-injection]
+        byte[] primaryBytes = firstCreated
+            ? File.ReadAllBytes(primary.FilePath)
+            : Array.Empty<byte>();
+        // codeql[cs/path-injection]
+        DateTime primaryWriteUtc = firstCreated
+            ? File.GetLastWriteTimeUtc(primary.FilePath)
+            : DateTime.MinValue;
+        bool secondRead = TryGetOrCreateEnhancementCompanionAuthTokenForStorage(
+            primary,
+            out string secondToken,
+            out _);
+        // codeql[cs/path-injection]
+        byte[] primaryBytesAfter = secondRead
+            ? File.ReadAllBytes(primary.FilePath)
+            : Array.Empty<byte>();
+        // codeql[cs/path-injection]
+        DateTime primaryWriteUtcAfter = secondRead
+            ? File.GetLastWriteTimeUtc(primary.FilePath)
+            : DateTime.MaxValue;
+        bool createAndStableReread = firstCreated
+            && secondRead
+            && IsValidEnhancementCompanionAuthToken(firstToken)
+            && string.Equals(firstToken, secondToken, StringComparison.Ordinal)
+            && primaryBytes.AsSpan().SequenceEqual(primaryBytesAfter)
+            && primaryWriteUtc == primaryWriteUtcAfter
+            && !Encoding.ASCII.GetString(primaryBytes).Contains(
+                firstToken,
+                StringComparison.Ordinal);
+
+        string malformedRoot = PrepareRoot("auth-malformed");
+        EnhancementCompanionAuthStoragePath malformed =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                malformedRoot);
+        byte[] malformedSeed = Encoding.ASCII.GetBytes("not-a-dpapi-envelope");
+        WriteSyntheticFile(malformed, malformedSeed, foreignAllow: false);
+        // codeql[cs/path-injection]
+        DateTime malformedWriteUtc = File.GetLastWriteTimeUtc(malformed.FilePath);
+        bool malformedRejected =
+            !TryGetOrCreateEnhancementCompanionAuthTokenForStorage(
+                malformed,
+                out _,
+                out _)
+            // codeql[cs/path-injection]
+            && File.ReadAllBytes(malformed.FilePath).AsSpan()
+                .SequenceEqual(malformedSeed)
+            // codeql[cs/path-injection]
+            && File.GetLastWriteTimeUtc(malformed.FilePath) == malformedWriteUtc;
+
+        string foreignFileRoot = PrepareRoot("auth-foreign-file");
+        EnhancementCompanionAuthStoragePath foreignFile =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                foreignFileRoot);
+        byte[] foreignFileSeed = primaryBytes;
+        WriteSyntheticFile(foreignFile, foreignFileSeed, foreignAllow: true);
+        // codeql[cs/path-injection]
+        DateTime foreignFileWriteUtc = File.GetLastWriteTimeUtc(foreignFile.FilePath);
+        // The synthetic capability owns this fixed leaf below TEMP.
+        // codeql[cs/path-injection]
+        string foreignFileSddl = new FileInfo(foreignFile.FilePath)
+            .GetAccessControl(
+                AccessControlSections.Owner | AccessControlSections.Access)
+            .GetSecurityDescriptorSddlForm(
+                AccessControlSections.Owner | AccessControlSections.Access);
+        bool foreignFileRejected =
+            !TryGetOrCreateEnhancementCompanionAuthTokenForStorage(
+                foreignFile,
+                out _,
+                out _)
+            // codeql[cs/path-injection]
+            && File.ReadAllBytes(foreignFile.FilePath).AsSpan()
+                .SequenceEqual(foreignFileSeed)
+            // codeql[cs/path-injection]
+            && File.GetLastWriteTimeUtc(foreignFile.FilePath)
+                == foreignFileWriteUtc
+            // codeql[cs/path-injection]
+            && string.Equals(
+                foreignFileSddl,
+                new FileInfo(foreignFile.FilePath)
+                    .GetAccessControl(
+                        AccessControlSections.Owner | AccessControlSections.Access)
+                    .GetSecurityDescriptorSddlForm(
+                        AccessControlSections.Owner | AccessControlSections.Access),
+                StringComparison.Ordinal);
+
+        string oversizedRoot = PrepareRoot("auth-oversized");
+        EnhancementCompanionAuthStoragePath oversized =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                oversizedRoot);
+        byte[] oversizedSeed = Enumerable.Repeat((byte)'A', 1025).ToArray();
+        WriteSyntheticFile(oversized, oversizedSeed, foreignAllow: false);
+        // codeql[cs/path-injection]
+        DateTime oversizedWriteUtc = File.GetLastWriteTimeUtc(oversized.FilePath);
+        bool oversizedRejected =
+            !TryGetOrCreateEnhancementCompanionAuthTokenForStorage(
+                oversized,
+                out _,
+                out _)
+            // codeql[cs/path-injection]
+            && File.ReadAllBytes(oversized.FilePath).AsSpan()
+                .SequenceEqual(oversizedSeed)
+            // codeql[cs/path-injection]
+            && File.GetLastWriteTimeUtc(oversized.FilePath) == oversizedWriteUtc;
+
+        string foreignDirectoryRoot = PrepareRoot("auth-foreign-directory");
+        EnhancementCompanionAuthStoragePath foreignDirectory =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                foreignDirectoryRoot);
+        // Both names are fixed children of a managed TEMP capability.
+        // codeql[cs/path-injection]
+        Directory.CreateDirectory(foreignDirectory.ApplicationDirectoryPath);
+        DirectorySecurity foreignDirectorySecurity =
+            BuildCurrentUserOnlyAuthDirectorySecurity();
+        foreignDirectorySecurity.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.ReadData,
+            InheritanceFlags.None,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        // codeql[cs/path-injection]
+        FileSystemAclExtensions.Create(
+            new DirectoryInfo(foreignDirectory.DirectoryPath),
+            foreignDirectorySecurity);
+        // codeql[cs/path-injection]
+        DirectorySecurity foreignDirectoryBefore = new DirectoryInfo(
+                foreignDirectory.DirectoryPath)
+            .GetAccessControl(
+                AccessControlSections.Owner | AccessControlSections.Access);
+        string foreignDirectorySddl = foreignDirectoryBefore
+            .GetSecurityDescriptorSddlForm(
+                AccessControlSections.Owner | AccessControlSections.Access);
+        bool directoryAccepted = TryAcquireEnhancementCompanionAuthDirectoryLease(
+            foreignDirectory,
+            out EnhancementCompanionAuthDirectoryLease? unexpectedDirectoryLease);
+        unexpectedDirectoryLease?.Dispose();
+        // codeql[cs/path-injection]
+        string foreignDirectorySddlAfter = new DirectoryInfo(
+                foreignDirectory.DirectoryPath)
+            .GetAccessControl(
+                AccessControlSections.Owner | AccessControlSections.Access)
+            .GetSecurityDescriptorSddlForm(
+                AccessControlSections.Owner | AccessControlSections.Access);
+        bool foreignDirectoryRejected = !directoryAccepted
+            && string.Equals(
+                foreignDirectorySddl,
+                foreignDirectorySddlAfter,
+                StringComparison.Ordinal);
+
+        string failureRoot = PrepareRoot("auth-failed-create");
+        EnhancementCompanionAuthStoragePath failedCreate =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                failureRoot);
+        bool injectedFailureRejected =
+            !TryGetOrCreateEnhancementCompanionAuthTokenForStorage(
+                failedCreate,
+                out _,
+                out _,
+                failAfterCreateForSmoke: true)
+            // codeql[cs/path-injection]
+            && !File.Exists(failedCreate.FilePath);
+
+        byte[] junctionSentinel = Encoding.ASCII.GetBytes(
+            "outside-companion-auth-sentinel");
+        EnhancementCompanionAuthStoragePath junctionFixture =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                junctionFixtureRoot);
+        string validatedJunctionFixtureRoot = junctionFixture.RootPath;
+        string applicationJunctionRoot = Path.Combine(
+            validatedJunctionFixtureRoot,
+            "auth-app-junction");
+        EnhancementCompanionAuthStoragePath applicationJunction =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                applicationJunctionRoot);
+        string applicationJunctionOutside =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                Path.Combine(
+                    validatedJunctionFixtureRoot,
+                    "auth-app-junction-outside"))
+            .RootPath;
+        string applicationJunctionSentinel = Path.Combine(
+            applicationJunctionOutside,
+            "sentinel.bin");
+        bool applicationJunctionAccepted =
+            TryAcquireEnhancementCompanionAuthDirectoryLease(
+                applicationJunction,
+                out EnhancementCompanionAuthDirectoryLease?
+                    unexpectedApplicationJunctionLease);
+        unexpectedApplicationJunctionLease?.Dispose();
+        bool applicationJunctionRejected = !applicationJunctionAccepted
+            // The PowerShell verifier owns this TEMP-only junction fixture.
+            // codeql[cs/path-injection]
+            && (File.GetAttributes(applicationJunction.ApplicationDirectoryPath)
+                & FileAttributes.ReparsePoint) != 0
+            // codeql[cs/path-injection]
+            && File.ReadAllBytes(applicationJunctionSentinel).AsSpan()
+                .SequenceEqual(junctionSentinel)
+            // codeql[cs/path-injection]
+            && !Directory.Exists(Path.Combine(
+                applicationJunctionOutside,
+                "companion-auth-v1"));
+
+        string authJunctionRoot = Path.Combine(
+            validatedJunctionFixtureRoot,
+            "auth-directory-junction");
+        EnhancementCompanionAuthStoragePath authJunction =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                authJunctionRoot);
+        string authJunctionOutside =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                Path.Combine(
+                    validatedJunctionFixtureRoot,
+                    "auth-directory-junction-outside"))
+            .RootPath;
+        string authJunctionSentinel = Path.Combine(
+            authJunctionOutside,
+            "sentinel.bin");
+        bool authJunctionAccepted =
+            TryAcquireEnhancementCompanionAuthDirectoryLease(
+                authJunction,
+                out EnhancementCompanionAuthDirectoryLease?
+                    unexpectedAuthJunctionLease);
+        unexpectedAuthJunctionLease?.Dispose();
+        bool authJunctionRejected = !authJunctionAccepted
+            // The PowerShell verifier owns this TEMP-only junction fixture.
+            // codeql[cs/path-injection]
+            && (File.GetAttributes(authJunction.DirectoryPath)
+                & FileAttributes.ReparsePoint) != 0
+            // codeql[cs/path-injection]
+            && File.ReadAllBytes(authJunctionSentinel).AsSpan()
+                .SequenceEqual(junctionSentinel)
+            // codeql[cs/path-injection]
+            && !File.Exists(Path.Combine(
+                authJunctionOutside,
+                "companion-auth-v1.key"));
+
+        string leaseRoot = PrepareRoot("auth-directory-lease");
+        EnhancementCompanionAuthStoragePath leased =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                leaseRoot);
+        bool leaseAcquired = TryAcquireEnhancementCompanionAuthDirectoryLease(
+            leased,
+            out EnhancementCompanionAuthDirectoryLease? activeLease);
+        string movedDirectory = leased.DirectoryPath + "-moved";
+        bool moveBlocked = false;
+        bool moveSucceeded = false;
+        bool renameDetected = false;
+        if (leaseAcquired && activeLease is not null)
+        {
+            using (activeLease)
+            {
+                try
+                {
+                    // Windows normally permits this rename. The retained
+                    // identity must then report that its final path changed.
+                    // codeql[cs/path-injection]
+                    Directory.Move(leased.DirectoryPath, movedDirectory);
+                    moveSucceeded = true;
+                    renameDetected = !activeLease.IsStillBound();
+                }
+                catch (Exception ex) when (ex is
+                    IOException or
+                    UnauthorizedAccessException)
+                {
+                    moveBlocked = true;
+                }
+            }
+        }
+        // codeql[cs/path-injection]
+        bool originalExists = Directory.Exists(leased.DirectoryPath);
+        // codeql[cs/path-injection]
+        bool movedExists = Directory.Exists(movedDirectory);
+        bool directoryRenameContained = leaseAcquired
+            && ((moveBlocked && originalExists && !movedExists)
+                || (moveSucceeded
+                    && renameDetected
+                    && !originalExists
+                    && movedExists));
+
+        return new EnhancementCompanionAuthStorageSmokeSnapshot(
+            createAndStableReread,
+            malformedRejected,
+            foreignFileRejected,
+            oversizedRejected,
+            foreignDirectoryRejected,
+            injectedFailureRejected,
+            applicationJunctionRejected,
+            authJunctionRejected,
+            directoryRenameContained,
+            leaseAcquired,
+            moveBlocked,
+            moveSucceeded,
+            renameDetected);
+    }
     public static EnhancementCompanionAuthAclSmokeSnapshot
-        EnhancementCompanionAuthAclContractForSmoke()
+        EnhancementCompanionAuthAclContractForSmoke(string fixtureRoot)
     {
         SecurityIdentifier currentUser = WindowsIdentity.GetCurrent().User
             ?? throw new System.Security.SecurityException(
@@ -3527,10 +4102,39 @@ public partial class MainWindow
             }
             return security;
         }
+        EnhancementCompanionAuthStoragePath pathCapability =
+            EnhancementCompanionAuthStoragePath.ForManagedTempFixtureRoot(
+                fixtureRoot);
+        string fullFixtureRoot = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(fixtureRoot));
+        string expectedDirectory = Path.Combine(
+            fullFixtureRoot,
+            "PhotoViewer.Wpf",
+            "companion-auth-v1");
+        string expectedFile = Path.Combine(
+            expectedDirectory,
+            "companion-auth-v1.key");
+        string outsideTemp = Path.GetPathRoot(fullFixtureRoot)
+            ?? throw new InvalidDataException(
+                "The companion authentication smoke root had no volume root.");
         return new EnhancementCompanionAuthAclSmokeSnapshot(
             HasCurrentUserOnlyAuthAcl(Build(currentUser, foreignAllow: false), currentUser),
             !HasCurrentUserOnlyAuthAcl(Build(foreign, foreignAllow: false), currentUser),
-            !HasCurrentUserOnlyAuthAcl(Build(currentUser, foreignAllow: true), currentUser));
+            !HasCurrentUserOnlyAuthAcl(Build(currentUser, foreignAllow: true), currentUser),
+            string.Equals(
+                pathCapability.DirectoryPath,
+                expectedDirectory,
+                StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    pathCapability.FilePath,
+                    expectedFile,
+                    StringComparison.OrdinalIgnoreCase),
+            !EnhancementCompanionAuthStoragePath
+                .AcceptsManagedTempFixtureRootForSmoke("relative-auth-root"),
+            !EnhancementCompanionAuthStoragePath
+                .AcceptsManagedTempFixtureRootForSmoke(outsideTemp),
+            EnhancementCompanionAuthStoragePath
+                .RejectsUnavailableProductRootsForSmoke());
     }
 }
 
@@ -3544,7 +4148,26 @@ public sealed record EnhancementCompanionSecureRequestSmokeSnapshot(
 public sealed record EnhancementCompanionAuthAclSmokeSnapshot(
     bool CanonicalCurrentUserAclAccepted,
     bool ForeignOwnerRejected,
-    bool ForeignAllowRejected);
+    bool ForeignAllowRejected,
+    bool FixedCapabilityShape,
+    bool RelativeFixtureRootRejected,
+    bool OutsideTempFixtureRootRejected,
+    bool UnavailableProductRootRejected);
+
+public sealed record EnhancementCompanionAuthStorageSmokeSnapshot(
+    bool CreateAndStableReread,
+    bool MalformedPreservedAndRejected,
+    bool ForeignFileAclPreservedAndRejected,
+    bool OversizedPreservedAndRejected,
+    bool ForeignDirectoryAclPreservedAndRejected,
+    bool FailedCreateExactHandleRemoved,
+    bool ApplicationDirectoryJunctionRejectedOutsidePreserved,
+    bool AuthDirectoryJunctionRejectedOutsidePreserved,
+    bool DirectoryRenameContained,
+    bool LeaseAcquired,
+    bool LeaseMoveBlocked,
+    bool LeaseMoveSucceeded,
+    bool LeaseRenameDetected);
 
 internal sealed record ValidatedEnhancementCompanionRoot(
     string RootPath,

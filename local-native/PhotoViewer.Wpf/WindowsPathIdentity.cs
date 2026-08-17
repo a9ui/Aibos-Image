@@ -12,6 +12,7 @@ internal static class WindowsPathIdentity
     private const uint FileShareWrite = 0x00000002;
     private const uint FileShareDelete = 0x00000004;
     private const uint DeleteAccess = 0x00010000;
+    private const uint ReadControl = 0x00020000;
     private const uint FileReadAttributes = 0x00000080;
     private const uint OpenExisting = 3;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
@@ -164,6 +165,83 @@ internal static class WindowsPathIdentity
         }
     }
 
+    internal static bool TryOpenDirectoryLease(
+        string? candidate,
+        out SafeFileHandle lease)
+    {
+        lease = new SafeFileHandle(IntPtr.Zero, ownsHandle: true);
+        if (!SharedDataRootLocator.TryNormalizeAbsolutePath(
+                candidate,
+                out string normalized))
+        {
+            return false;
+        }
+
+        SafeFileHandle? handle = null;
+        try
+        {
+            // OPEN_REPARSE_POINT rejects a junction/symlink at the selected
+            // directory itself. The caller retains this identity handle and
+            // rechecks its final path at every path-based mutation boundary;
+            // Windows permits directory renames even without DELETE sharing.
+            // codeql[cs/path-injection]
+            handle = CreateFile(
+                ToExtendedPath(normalized),
+                FileReadAttributes | ReadControl,
+                FileShareRead | FileShareWrite,
+                securityAttributes: 0,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                templateFile: 0);
+            if (handle.IsInvalid
+                || !IsDirectoryLeaseBoundTo(handle, normalized))
+            {
+                return false;
+            }
+
+            lease.Dispose();
+            lease = handle;
+            handle = null;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            handle?.Dispose();
+        }
+    }
+
+    internal static bool IsDirectoryLeaseBoundTo(
+        SafeFileHandle handle,
+        string expectedPath)
+    {
+        if (handle.IsInvalid || handle.IsClosed)
+            return false;
+        try
+        {
+            string normalized = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(expectedPath));
+            if (!TryGetFinalPath(handle, out string finalPath)
+                || !string.Equals(
+                    normalized,
+                    finalPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            FileAttributes attributes = File.GetAttributes(handle);
+            return (attributes & FileAttributes.Directory) != 0
+                && (attributes & FileAttributes.ReparsePoint) == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     internal static bool TryGetHardLinkCount(
         SafeFileHandle handle,
         out uint linkCount)
@@ -186,6 +264,34 @@ internal static class WindowsPathIdentity
         catch
         {
             linkCount = 0;
+            return false;
+        }
+    }
+
+    internal static bool TryDeleteOpenRegularFile(SafeFileHandle handle)
+    {
+        if (handle.IsInvalid || handle.IsClosed)
+            return false;
+
+        try
+        {
+            FileAttributes attributes = File.GetAttributes(handle);
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0
+                || !TryGetHardLinkCount(handle, out uint linkCount)
+                || linkCount != 1)
+            {
+                return false;
+            }
+
+            var disposition = new FileDispositionInformation { DeleteFile = true };
+            return SetFileInformation(
+                handle,
+                FileDispositionInfo,
+                ref disposition,
+                checked((uint)Marshal.SizeOf<FileDispositionInformation>()));
+        }
+        catch
+        {
             return false;
         }
     }

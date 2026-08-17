@@ -51,6 +51,12 @@ $sentinelContents = @{
 }
 $metadataSentinelDirectory = Join-Path $sentinelRoot 'metadata-index'
 $metadataSentinelPath = Join-Path $metadataSentinelDirectory 'sentinel.txt'
+$authJunctionFixtureRoot = Join-Path $runRoot 'companion-auth-junction-fixtures'
+$authApplicationJunctionRoot = Join-Path $authJunctionFixtureRoot 'auth-app-junction'
+$authApplicationJunctionOutside = Join-Path $authJunctionFixtureRoot 'auth-app-junction-outside'
+$authDirectoryJunctionRoot = Join-Path $authJunctionFixtureRoot 'auth-directory-junction'
+$authDirectoryJunctionOutside = Join-Path $authJunctionFixtureRoot 'auth-directory-junction-outside'
+$authJunctionSentinel = 'outside-companion-auth-sentinel'
 $previousEnvironment = @{}
 $sentinelHashesBefore = @{}
 $childExitCode = $null
@@ -76,6 +82,27 @@ try {
     $metadataSentinelHashBefore = (Get-FileHash -LiteralPath $metadataSentinelPath -Algorithm SHA256).Hash
     [Environment]::SetEnvironmentVariable('PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY', $metadataSentinelDirectory, 'Process')
 
+    New-Item -ItemType Directory -Path $authApplicationJunctionRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $authApplicationJunctionOutside -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $authDirectoryJunctionRoot 'PhotoViewer.Wpf') -Force | Out-Null
+    New-Item -ItemType Directory -Path $authDirectoryJunctionOutside -Force | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $authApplicationJunctionOutside 'sentinel.bin'),
+        $authJunctionSentinel,
+        [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText(
+        (Join-Path $authDirectoryJunctionOutside 'sentinel.bin'),
+        $authJunctionSentinel,
+        [Text.Encoding]::ASCII)
+    New-Item -ItemType Junction `
+        -Path (Join-Path $authApplicationJunctionRoot 'PhotoViewer.Wpf') `
+        -Target $authApplicationJunctionOutside `
+        -ErrorAction Stop | Out-Null
+    New-Item -ItemType Junction `
+        -Path (Join-Path $authDirectoryJunctionRoot 'PhotoViewer.Wpf\companion-auth-v1') `
+        -Target $authDirectoryJunctionOutside `
+        -ErrorAction Stop | Out-Null
+
     [Environment]::SetEnvironmentVariable('PHOTOVIEWER_BROWSER_BASE_URL', 'http://127.0.0.1:65534/', 'Process')
 
     $buildOutput = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
@@ -96,7 +123,9 @@ try {
     $dll = Join-Path $buildRoot 'PhotoViewer.Wpf.dll'
     Assert-True (Test-Path -LiteralPath $dll -PathType Leaf) "WPF build output was not found: $dll"
 
-    & $DotnetPath $dll --modal-enhancement-actions-smoke $resultPath
+    & $DotnetPath $dll `
+        --modal-enhancement-actions-smoke $resultPath `
+        --companion-auth-junction-fixture-root $authJunctionFixtureRoot
     $childExitCode = $LASTEXITCODE
     Assert-True (Test-Path -LiteralPath $resultPath -PathType Leaf) 'Modal enhancement smoke did not produce JSON.'
 

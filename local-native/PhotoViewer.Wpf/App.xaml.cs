@@ -1134,7 +1134,9 @@ public partial class App : Application
         int modalEnhancementActionsSmokeIdx = Array.IndexOf(e.Args, "--modal-enhancement-actions-smoke");
         if (modalEnhancementActionsSmokeIdx >= 0 && modalEnhancementActionsSmokeIdx + 1 < e.Args.Length)
         {
-            CaptureModalEnhancementActionsSmoke(e.Args[modalEnhancementActionsSmokeIdx + 1]);
+            CaptureModalEnhancementActionsSmoke(
+                e.Args[modalEnhancementActionsSmokeIdx + 1],
+                e.Args);
             return;
         }
 
@@ -22725,9 +22727,22 @@ public partial class App : Application
         }, DispatcherPriority.ContextIdle);
     }
 
-    private void CaptureModalEnhancementActionsSmoke(string resultPath)
+    private void CaptureModalEnhancementActionsSmoke(
+        string resultPath,
+        string[] args)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
+        int companionAuthJunctionFixtureIdx = Array.IndexOf(
+            args,
+            "--companion-auth-junction-fixture-root");
+        if (companionAuthJunctionFixtureIdx < 0
+            || companionAuthJunctionFixtureIdx + 1 >= args.Length)
+        {
+            throw new InvalidDataException(
+                "The companion authentication junction fixture root was not supplied.");
+        }
+        string companionAuthJunctionFixtureRoot =
+            args[companionAuthJunctionFixtureIdx + 1];
         string smokeRoot = Directory.CreateTempSubdirectory("photoviewer-wpf-modal-enhancement-actions-").FullName;
         string folder = Path.Combine(smokeRoot, "images");
         string sourcePath = Path.Combine(folder, "enhance-source.png");
@@ -22864,6 +22879,8 @@ public partial class App : Application
             bool durableLegacyWakeFallback = false;
             bool durableRecoveryRequestsCoalesced = false;
             bool companionAuthAclProvenanceContract = false;
+            bool companionAuthStorageContract = false;
+            EnhancementCompanionAuthStorageSmokeSnapshot? companionAuthStorage = null;
             bool companionPrimaryRootSettingPrecedence = false;
             bool companionCompatibilityRootSettingFallback = false;
             bool companionConfiguredRootExact = false;
@@ -24150,11 +24167,30 @@ public partial class App : Application
 
                 EnhancementCompanionAuthAclSmokeSnapshot authAcl =
                     PhotoViewer.Wpf.MainWindow
-                        .EnhancementCompanionAuthAclContractForSmoke();
+                        .EnhancementCompanionAuthAclContractForSmoke(smokeRoot);
                 companionAuthAclProvenanceContract =
                     authAcl.CanonicalCurrentUserAclAccepted
                     && authAcl.ForeignOwnerRejected
-                    && authAcl.ForeignAllowRejected;
+                    && authAcl.ForeignAllowRejected
+                    && authAcl.FixedCapabilityShape
+                    && authAcl.RelativeFixtureRootRejected
+                    && authAcl.OutsideTempFixtureRootRejected
+                    && authAcl.UnavailableProductRootRejected;
+                companionAuthStorage =
+                    PhotoViewer.Wpf.MainWindow
+                        .EnhancementCompanionAuthStorageContractForSmoke(
+                            smokeRoot,
+                            companionAuthJunctionFixtureRoot);
+                companionAuthStorageContract =
+                    companionAuthStorage.CreateAndStableReread
+                    && companionAuthStorage.MalformedPreservedAndRejected
+                    && companionAuthStorage.ForeignFileAclPreservedAndRejected
+                    && companionAuthStorage.OversizedPreservedAndRejected
+                    && companionAuthStorage.ForeignDirectoryAclPreservedAndRejected
+                    && companionAuthStorage.FailedCreateExactHandleRemoved
+                    && companionAuthStorage.ApplicationDirectoryJunctionRejectedOutsidePreserved
+                    && companionAuthStorage.AuthDirectoryJunctionRejectedOutsidePreserved
+                    && companionAuthStorage.DirectoryRenameContained;
                 functionalOk = selected && opened && refreshedEmpty && started && queuedUi && canceled && canceledUi
                     && refreshedSucceeded && outputAvailable && toggledEnhanced && deletedOutput
                     && originalPreserved && outputRemoved && createContract && routesOk
@@ -24185,6 +24221,7 @@ public partial class App : Application
                     && durableLegacyWakeFallback
                     && durableRecoveryRequestsCoalesced
                     && companionAuthAclProvenanceContract
+                    && companionAuthStorageContract
                     && companionIdentityFieldTamperRejected
                     && companionPrimaryRootSettingPrecedence
                     && companionCompatibilityRootSettingFallback
@@ -24341,6 +24378,8 @@ public partial class App : Application
                 durableLegacyWakeFallback,
                 durableRecoveryRequestsCoalesced,
                 companionAuthAclProvenanceContract,
+                companionAuthStorageContract,
+                companionAuthStorage,
                 companionIdentityFieldTamperRejected,
                 companionPrimaryRootSettingPrecedence,
                 companionCompatibilityRootSettingFallback,
