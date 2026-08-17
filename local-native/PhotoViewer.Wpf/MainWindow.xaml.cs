@@ -766,6 +766,7 @@ public partial class MainWindow : Window
         RecentFolderSetList.ItemsSource = _recentFolderSetViews;
         PreviewTabList.ItemsSource = _previewTabs;
         SearchHistoryList.ItemsSource = _searchHistoryEntries;
+        SearchSuggestionList.ItemsSource = _searchSuggestionEntries;
         // Keep the two normally hidden filmstrips off the complete catalog.
         // Otherwise every search reset is observed by four ItemControls and a
         // 100k catalog can retain large generator/view state for an invisible UI.
@@ -817,6 +818,7 @@ public partial class MainWindow : Window
                 app.AccessibilityPaletteChanged -= App_AccessibilityPaletteChanged;
             Interlocked.Increment(ref _activeAlbumAsyncGeneration);
             Interlocked.Exchange(ref _activeAlbumAvailabilityCts, null)?.Cancel();
+            CancelSearchSuggestionIndexBuild();
             _enhancedStateRefreshGeneration++;
             CancellationTokenSource? enhancedStateRefreshCts =
                 Interlocked.Exchange(ref _enhancedStateRefreshCts, null);
@@ -8900,6 +8902,7 @@ public partial class MainWindow : Window
                     return;
 
                 DrainDecodedImageMetadata(decoded);
+                InvalidateSearchSuggestionIndex();
                 UpdateMetadataIndexProgress(completed, tiles.Count, cacheHits, cacheMisses, saving: true);
                 // Prompt-only matches become available after the background
                 // index is complete. Filename/date/favorite filtering was
@@ -8914,7 +8917,7 @@ public partial class MainWindow : Window
                     _metadataOriginalAspectLayoutPublishCount++;
                     _ = PublishCompletedMetadataLayoutAsync(viewportAnchor, _cardLayoutRevision);
                 }
-                else if (!string.IsNullOrWhiteSpace(SearchInput.Text))
+                else if (!string.IsNullOrWhiteSpace(CurrentSearchQuery))
                 {
                     _ = QueueCatalogProjection(
                         debounce: false,
@@ -11037,7 +11040,7 @@ public partial class MainWindow : Window
         if (normalizedTag.Length == 0)
             return false;
 
-        List<string> queryTags = ParsePromptTags(SearchInput.Text);
+        List<string> queryTags = ParsePromptTags(CurrentSearchQuery);
         if (!queryTags.Contains(normalizedTag, StringComparer.OrdinalIgnoreCase))
             queryTags.Add(normalizedTag);
 
@@ -11401,6 +11404,7 @@ public partial class MainWindow : Window
         if (_suppressSearchHistoryFocusOpen)
             return;
         await OpenSearchHistoryPopupAsync();
+        _ = EnsureSearchSuggestionIndexAsync();
     }
 
     private void SearchInput_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -11424,17 +11428,48 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Key.Back && SearchInput.Text.Length == 0 && RemoveLastCommittedSearchTerm())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key is Key.Down or Key.Up)
         {
             await OpenSearchHistoryPopupAsync();
-            int index = e.Key == Key.Down ? 0 : _searchHistoryEntries.Count - 1;
-            _ = FocusSearchHistoryIndex(index);
+            if (_searchSuggestionEntries.Count > 0 && SearchInput.Text.Length > 0)
+            {
+                int index = e.Key == Key.Down ? 0 : _searchSuggestionEntries.Count - 1;
+                _ = FocusSearchSuggestionIndex(index);
+            }
+            else
+            {
+                int index = e.Key == Key.Down ? 0 : _searchHistoryEntries.Count - 1;
+                _ = FocusSearchHistoryIndex(index);
+            }
             e.Handled = true;
             return;
         }
 
         if (e.Key == Key.Enter)
         {
+            SearchSuggestionItemView? suggestion = SearchInput.Text.Length > 0
+                ? SearchSuggestionList.SelectedItem as SearchSuggestionItemView
+                    ?? _searchSuggestionEntries.FirstOrDefault()
+                : null;
+            if (suggestion is not null)
+            {
+                e.Handled = true;
+                _ = CommitSearchSuggestion(suggestion);
+                return;
+            }
+            if (SearchInput.Text.Length > 0)
+            {
+                e.Handled = true;
+                _ = CommitSearchDraftAsTerm();
+                CloseSearchSuggestionAndFocusInput(keepPopupOpen: true);
+                return;
+            }
             if (SearchHistoryPopup.IsOpen && SearchHistoryList.SelectedItem is SearchHistoryItemView selected)
                 await UseSearchHistoryQueryAsync(selected.Query);
             else
@@ -11465,6 +11500,7 @@ public partial class MainWindow : Window
         _searchHistoryReadCts = cts;
         SearchHistoryPopup.IsOpen = true;
         SearchHistoryAnnouncementText.Text = "Loading recent searches.";
+        _ = EnsureSearchSuggestionIndexAsync();
 
         try
         {
@@ -11506,14 +11542,15 @@ public partial class MainWindow : Window
         SearchHistoryAnnouncementText.Text = supported
             ? $"{entries.Count} recent search{(entries.Count == 1 ? "" : "es")}."
             : "Shared search history is unavailable.";
+        RefreshSearchSuggestionSurface();
     }
 
     private async Task<bool> CommitCurrentSearchHistoryAsync()
     {
-        string query = SearchHistoryStore.NormalizeQuery(SearchInput.Text);
+        string query = SearchHistoryStore.NormalizeQuery(CurrentSearchQuery);
         if (query.Length == 0)
             return false;
-        string rawQuery = SearchInput.Text;
+        string rawQuery = CurrentSearchQuery;
         return await RunSearchHistoryMutationAsync(() => SearchHistoryStore.Commit(
             SearchHistoryStore.ResolvePath(),
             rawQuery));
@@ -11638,19 +11675,25 @@ public partial class MainWindow : Window
 
     private void SearchInput_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (SearchWatermark is not null)
-            SearchWatermark.Visibility = string.IsNullOrEmpty(SearchInput.Text) ? Visibility.Visible : Visibility.Collapsed;
-        if (ClearSearchInputButton is not null)
-            ClearSearchInputButton.Visibility = string.IsNullOrEmpty(SearchInput.Text) ? Visibility.Collapsed : Visibility.Visible;
-        SyncSearchTermChips(SearchInput.Text);
+        if (NormalizeCompletedSearchDraftTerms())
+            return;
+        UpdateSearchComposerPresentation();
+        SyncSearchTermChips();
+        RefreshSearchSuggestionSurface();
+        if (SearchInput.IsKeyboardFocusWithin && SearchInput.Text.Length > 0)
+        {
+            SearchHistoryPopup.IsOpen = true;
+            _ = EnsureSearchSuggestionIndexAsync();
+        }
         if (_initializing || _settingSearchQuery) return;
-        ScheduleSearchFilter();
-        ScheduleSearchStateSave();
+        NotifySearchComposerChanged();
     }
 
     private void ClearSearchInput_Click(object sender, RoutedEventArgs e)
     {
-        SearchInput.Clear();
+        SetSearchComposerQuery("");
+        if (!_initializing && !_settingSearchQuery)
+            NotifySearchComposerChanged();
         SearchInput.Focus();
         CloseSearchHistoryAndFocusInput();
     }
@@ -14306,7 +14349,7 @@ public partial class MainWindow : Window
         try
         {
             _settingSearchQuery = true;
-            SearchInput.Text = query;
+            SetSearchComposerQuery(query);
             ApplyFilters();
         }
         finally
@@ -14331,7 +14374,7 @@ public partial class MainWindow : Window
         try
         {
             _settingSearchQuery = true;
-            SearchInput.Text = query;
+            SetSearchComposerQuery(query);
         }
         finally
         {
@@ -14353,6 +14396,7 @@ public partial class MainWindow : Window
 
     public Task<SearchFilterCompletion> SetSearchInputForSmokeAsync(string query)
     {
+        SetSearchComposerQuery("");
         SearchInput.Text = query;
         return _pendingSearchFilterCompletion?.Task
             ?? Task.FromResult(new SearchFilterCompletion(false, false, "search input did not schedule a filter"));
@@ -14464,7 +14508,7 @@ public partial class MainWindow : Window
         int? selectionFallbackIndex = null)
     {
         AttachGalleryVirtualizationPanel();
-        string query = SearchInput?.Text?.Trim() ?? "";
+        string query = CurrentSearchQuery;
         IReadOnlyList<Tile> catalogSource = request?.RestrictToCurrentProjection == true
             ? _tiles
             : _allTiles;
@@ -23546,7 +23590,7 @@ public partial class MainWindow : Window
         _previewTabsPersistenceReady = _restoredPreviewTabPaths.Count == 0;
 
         if (!string.IsNullOrWhiteSpace(state.SearchQuery))
-            SearchInput.Text = state.SearchQuery;
+            SetSearchComposerQuery(state.SearchQuery);
 
         _restoredSelectedPath = state.SelectedPath;
         ApplyKeyBindingTooltips();
@@ -23717,7 +23761,7 @@ public partial class MainWindow : Window
                 Version = 2,
                 LastFolder = _currentFolder,
                 LastFolderSet = _currentFolderSet.Count > 0 ? _currentFolderSet : null,
-                SearchQuery = SearchInput.Text,
+                SearchQuery = CurrentSearchQuery,
                 CardWidth = SizeSlider.Value,
                 SidebarWidth = _sidebarWidth,
                 RightPanelOpen = RightPanel.Visibility == Visibility.Visible,
@@ -25364,7 +25408,7 @@ public partial class MainWindow : Window
         => BuildScanWarning(accessFailureCount, boundarySkipCount, unavailableRootCount, decodeFailureCount);
     public static List<string> SupportedImageExtensionsForSmoke
         => SupportedImageExtensions.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase).ToList();
-    public string SearchQueryForSmoke => SearchInput.Text;
+    public string SearchQueryForSmoke => CurrentSearchQuery;
     public bool IsEditableTextInputFocusedForSmoke => Keyboard.FocusedElement is TextBoxBase;
     public string StatePathForSmoke => ResolvedStatePath;
     public string FavoritesPathForSmoke => ResolvedFavoritesPath;
@@ -25391,7 +25435,7 @@ public partial class MainWindow : Window
     public void CloseSearchHistoryForSmoke() => SearchHistoryPopup.IsOpen = false;
     public async Task<bool> CommitSearchHistoryForSmokeAsync(string query)
     {
-        SearchInput.Text = query;
+        SetSearchComposerQuery(query);
         return await CommitCurrentSearchHistoryAsync();
     }
     public async Task<bool> SelectSearchHistoryForSmokeAsync(string query)
@@ -27196,19 +27240,21 @@ public partial class MainWindow : Window
     {
         get
         {
+            SetSearchComposerQuery("");
             SearchInput.Text = "clear-me";
             bool revealed = ClearSearchInputButton.Visibility == Visibility.Visible
                 && string.Equals(AutomationProperties.GetName(ClearSearchInputButton), "Clear search input", StringComparison.Ordinal);
             ClearSearchInputButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, ClearSearchInputButton));
             return revealed
                 && string.IsNullOrEmpty(SearchInput.Text)
+                && _activeSearchTerms.Count == 0
                 && ClearSearchInputButton.Visibility == Visibility.Collapsed
                 && SearchInput.IsKeyboardFocusWithin;
         }
     }
     public bool SearchAutomationHelpTextForSmoke => string.Equals(
         AutomationProperties.GetHelpText(SearchInput),
-        "Search filenames and prompts. Separate terms with commas. Focus or click to show shared search history.",
+        "Search filenames and prompts. Choose a suggestion or press Enter to add a colored search term. Backspace removes the last term when the input is empty.",
         StringComparison.Ordinal);
     public bool DatePickerAutomationNamesForSmoke => string.Equals(AutomationProperties.GetName(DateFromInput), "From date", StringComparison.Ordinal)
         && string.Equals(AutomationProperties.GetName(DateToInput), "To date", StringComparison.Ordinal);
@@ -30744,7 +30790,7 @@ public partial class MainWindow : Window
         return new PromptTagSearchSmokeSnapshot(
             applied,
             chips,
-            SearchInput.Text,
+            CurrentSearchQuery,
             Modal.Visibility == Visibility.Visible,
             SearchInput.IsKeyboardFocusWithin,
             accessibilityReady,
