@@ -12,9 +12,9 @@ public partial class App
     private void CaptureVideoH3PromptRewriteSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string smokeRoot = Path.Combine(
-            Path.GetTempPath(),
-            "aibos-wpf-video-h3-prompt-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = Directory.CreateTempSubdirectory(
+                "aibos-wpf-video-h3-prompt-")
+            .FullName;
         string sourceFolder = Path.Combine(smokeRoot, "source");
         string storeRoot = Path.Combine(smokeRoot, "stores");
         string sourcePath = Path.Combine(

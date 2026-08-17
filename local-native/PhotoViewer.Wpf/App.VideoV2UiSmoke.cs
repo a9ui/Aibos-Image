@@ -647,8 +647,19 @@ public partial class App
                     "PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH")
                 ?? throw new InvalidDataException(
                     "The isolated Enhancement jobs path is required.");
+            string jobsDirectory = Path.GetDirectoryName(
+                    Path.GetFullPath(jobsPath))
+                ?? throw new InvalidDataException(
+                    "The isolated Enhancement jobs directory is invalid.");
+            if (!WindowsPathIdentity.TryResolveExistingDirectory(
+                    jobsDirectory,
+                    out string resolvedJobsDirectory))
+            {
+                throw new InvalidDataException(
+                    "The isolated Enhancement jobs directory is unavailable.");
+            }
             string pendingInboxPath = Path.Combine(
-                Path.GetDirectoryName(Path.GetFullPath(jobsPath))!,
+                resolvedJobsDirectory,
                 "enqueue-inbox",
                 "v1",
                 "pending");

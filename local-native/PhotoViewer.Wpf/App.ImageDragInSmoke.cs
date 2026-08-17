@@ -11,9 +11,9 @@ public partial class App
     private void CaptureImageDragInSmoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
-        string smokeRoot = Path.Combine(
-            Path.GetTempPath(),
-            "aibos-wpf-image-drag-in-" + Guid.NewGuid().ToString("N"));
+        string smokeRoot = Directory.CreateTempSubdirectory(
+                "aibos-wpf-image-drag-in-")
+            .FullName;
         string catalogFolder = Path.Combine(smokeRoot, "catalog");
         string externalFolder = Path.Combine(smokeRoot, "external");
         string storeRoot = Path.Combine(smokeRoot, "stores");
