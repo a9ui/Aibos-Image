@@ -28415,7 +28415,14 @@ public partial class App : Application
                             catalogDigest)
                     && !MetadataIndexStorePath
                         .AcceptsManagedTempCatalogDirectoryForSmoke(
-                            Path.Combine(smokeRoot, "missing-index-directory"),
+                            Path.Combine(
+                                smokeRoot,
+                                "missing-index-directory",
+                                "metadata-index"),
+                            catalogDigest)
+                    && MetadataIndexStorePath
+                        .AcceptsManagedTempCatalogDirectoryForSmoke(
+                            Path.Combine(smokeRoot, "new-metadata-index"),
                             catalogDigest)
                     && !MetadataIndexStorePath
                         .AcceptsManagedTempCatalogDirectoryForSmoke(

@@ -60,7 +60,7 @@ internal sealed class MetadataIndexStorePath
                 out string canonicalDirectory))
         {
             throw new InvalidDataException(
-                "Synthetic metadata cache directories must exist below TEMP.");
+                "Synthetic metadata cache directories must have a trusted parent below TEMP.");
         }
 
         return ForCatalogIdentityInDirectory(
@@ -211,25 +211,47 @@ internal sealed class MetadataIndexStorePath
         if (!lexicalInside)
             return false;
 
-        // This is the synthetic validation boundary. Both roots must already
-        // exist so their final handle identities can be compared before the
-        // capability is issued.
-        // codeql[cs/path-injection]
-        if (!Directory.Exists(fullDirectory)
-            || !WindowsPathIdentity.TryResolveExistingDirectory(
+        if (!WindowsPathIdentity.TryResolveExistingDirectory(
                 tempRoot,
-                out string canonicalTempRoot)
-            || !WindowsPathIdentity.TryResolveExistingDirectory(
-                fullDirectory,
-                out canonicalDirectory))
+                out string canonicalTempRoot))
         {
-            canonicalDirectory = "";
             return false;
         }
 
         string canonicalPrefix = Path.TrimEndingDirectorySeparator(
                 canonicalTempRoot)
             + Path.DirectorySeparatorChar;
+        // Existing synthetic directories are bound by their final identity.
+        // A missing direct child is also allowed because many WPF smoke
+        // fixtures create their handle-validated TEMP root first and let the
+        // cache writer create only this derived-cache child later.
+        // codeql[cs/path-injection]
+        if (Directory.Exists(fullDirectory))
+        {
+            if (!WindowsPathIdentity.TryResolveExistingDirectory(
+                    fullDirectory,
+                    out canonicalDirectory))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            string? parent = Path.GetDirectoryName(fullDirectory);
+            string leaf = Path.GetFileName(fullDirectory);
+            if (string.IsNullOrWhiteSpace(parent)
+                || string.IsNullOrWhiteSpace(leaf)
+                || !Directory.Exists(parent)
+                || !WindowsPathIdentity.TryResolveExistingDirectory(
+                    parent,
+                    out string canonicalParent))
+            {
+                return false;
+            }
+
+            canonicalDirectory = FixedChild(canonicalParent, leaf);
+        }
+
         bool canonicalInside = canonicalDirectory.StartsWith(
             canonicalPrefix,
             StringComparison.OrdinalIgnoreCase);
