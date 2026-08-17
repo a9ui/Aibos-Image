@@ -181,6 +181,11 @@
       <Setter Property="Margin" Value="1,0"/>
       <Setter Property="FocusVisualStyle" Value="{StaticResource CommonButtonFocusVisual}"/>
     </Style>
+    <Style x:Key="EnhancementJobsFilterPill" TargetType="{x:Type CheckBox}" BasedOn="{StaticResource FavoriteLevelPill}">
+      <Setter Property="FontSize" Value="11.5"/>
+      <Setter Property="Margin" Value="2"/>
+      <Setter Property="ToolTipService.ShowDuration" Value="12000"/>
+    </Style>
   </Window.Resources>
 
   <Grid>
@@ -1707,23 +1712,23 @@
               <StackPanel>
                 <TextBlock Text="FILTER" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="4,0,0,8"/>
                 <TextBlock Text="状態" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,0,0,4"/>
-                <StackPanel x:Name="EnhancementJobsStatusFiltersPanel">
-                  <RadioButton x:Name="EnhancementJobsAllFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsStatusFilter" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsStatusFilter_Click"/>
-                  <RadioButton x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsStatusFilter" Content="待機中" Tag="queued" Click="EnhancementJobsStatusFilter_Click"/>
-                  <RadioButton x:Name="EnhancementJobsRunningFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsStatusFilter" Content="処理中" Tag="running" Click="EnhancementJobsStatusFilter_Click"/>
-                  <RadioButton x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsStatusFilter" Content="完成" Tag="completed" Click="EnhancementJobsStatusFilter_Click"/>
-                  <RadioButton x:Name="EnhancementJobsFailedFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsStatusFilter" Content="失敗" Tag="failed" Click="EnhancementJobsStatusFilter_Click"/>
-                  <RadioButton x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsStatusFilter" Content="キャンセル済み" Tag="canceled" Click="EnhancementJobsStatusFilter_Click"/>
-                </StackPanel>
+                <UniformGrid x:Name="EnhancementJobsStatusFiltersPanel" Columns="2">
+                  <CheckBox x:Name="EnhancementJobsAllFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsStatusFilter_Click" ToolTip="すべての状態を表示"/>
+                  <CheckBox x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="待機中" Tag="queued" Click="EnhancementJobsStatusFilter_Click" ToolTip="待機中だけを表示。実行中は含みません"/>
+                  <CheckBox x:Name="EnhancementJobsRunningFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="処理中" Tag="running" Click="EnhancementJobsStatusFilter_Click" ToolTip="現在処理中のJobだけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="完成" Tag="completed" Click="EnhancementJobsStatusFilter_Click" ToolTip="完成または出力削除済みの履歴を表示"/>
+                  <CheckBox x:Name="EnhancementJobsFailedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="失敗" Tag="failed" Click="EnhancementJobsStatusFilter_Click" ToolTip="失敗したJobだけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="キャンセル" Tag="canceled" Click="EnhancementJobsStatusFilter_Click" ToolTip="キャンセル済みのJobだけを表示"/>
+                </UniformGrid>
                 <TextBlock Text="AI処理の種類" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
-                <StackPanel x:Name="EnhancementJobsOperationFiltersPanel">
-                  <RadioButton x:Name="EnhancementJobsAllOperationsFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsOperationFilter" Content="すべての処理" Tag="all" IsChecked="True" Click="EnhancementJobsOperationFilter_Click"/>
-                  <RadioButton x:Name="EnhancementJobsUpscaleFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsOperationFilter" Content="高画質化" Tag="upscale" Click="EnhancementJobsOperationFilter_Click"/>
-                  <RadioButton x:Name="EnhancementJobsPhotorealFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsOperationFilter" Content="実写化" Tag="photoreal" Click="EnhancementJobsOperationFilter_Click"/>
-                  <RadioButton x:Name="EnhancementJobsVideoFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsOperationFilter" Content="動画化" Tag="video" Click="EnhancementJobsOperationFilter_Click"
-                               AutomationProperties.Name="Show video generation jobs"/>
-                  <RadioButton x:Name="EnhancementJobsI2iFilter" Style="{StaticResource SettingsNavItem}" GroupName="EnhancementJobsOperationFilter" Content="AI編集" Tag="i2i" Click="EnhancementJobsOperationFilter_Click"/>
-                </StackPanel>
+                <UniformGrid x:Name="EnhancementJobsOperationFiltersPanel" Columns="2">
+                  <CheckBox x:Name="EnhancementJobsAllOperationsFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsOperationFilter_Click" ToolTip="すべてのAI処理を表示"/>
+                  <CheckBox x:Name="EnhancementJobsUpscaleFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="高画質化" Tag="upscale" Click="EnhancementJobsOperationFilter_Click" ToolTip="高画質化Jobだけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsPhotorealFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="実写化" Tag="photoreal" Click="EnhancementJobsOperationFilter_Click" ToolTip="実写化Jobだけを表示"/>
+                  <CheckBox x:Name="EnhancementJobsVideoFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="動画化" Tag="video" Click="EnhancementJobsOperationFilter_Click" ToolTip="動画化Jobだけを表示"
+                            AutomationProperties.Name="Show video generation jobs"/>
+                  <CheckBox x:Name="EnhancementJobsI2iFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="AI編集" Tag="i2i" Click="EnhancementJobsOperationFilter_Click" ToolTip="AI編集Jobだけを表示"/>
+                </UniformGrid>
                 <Button x:Name="EnhancementJobsPauseResumeButton" Style="{StaticResource GhostButton}" Content="一時停止"
                         Click="ToggleEnhancementQueuePaused_Click" IsEnabled="False" MinHeight="30" Margin="0,12,0,0"
                         AutomationProperties.Name="Pause enhancement queue"

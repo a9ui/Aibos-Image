@@ -20895,6 +20895,25 @@ public partial class App : Application
                     && queuedVideoOnly.VisibleOperationLabels.All(static label =>
                         string.Equals(label, "VIDEO  動画化", StringComparison.Ordinal))
                     && window.QueuedBulkPanelVisibleForSmoke;
+                window.SelectEnhancementJobsStatusFilterForSmoke("all");
+                window.SelectEnhancementJobsOperationFilterForSmoke("all");
+                bool statusPillTurnedOn =
+                    window.ToggleEnhancementJobsStatusFilterForSmoke("queued");
+                bool statusPillTurnedOff =
+                    window.ToggleEnhancementJobsStatusFilterForSmoke("queued");
+                bool operationPillTurnedOn =
+                    window.ToggleEnhancementJobsOperationFilterForSmoke("video");
+                EnhancementJobsWorkspaceSmokeSnapshot toggledVideo =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool operationPillTurnedOff =
+                    window.ToggleEnhancementJobsOperationFilterForSmoke("video");
+                bool jobsFilterPillToggleContract = statusPillTurnedOn
+                    && statusPillTurnedOff
+                    && operationPillTurnedOn
+                    && operationPillTurnedOff
+                    && toggledVideo.Filtered > 0
+                    && toggledVideo.VisibleOperationLabels.All(static label =>
+                        string.Equals(label, "VIDEO  動画化", StringComparison.Ordinal));
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot failed = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("completed");
@@ -21914,6 +21933,7 @@ public partial class App : Application
                     && jobsFourNavigationControls
                     && jobsFilterLayoutContract
                     && combinedJobsFiltersContract
+                    && jobsFilterPillToggleContract
                     && progressUsesWholePercent
                     && mixedRetryCapabilityPartition
                     && initial.Polling
