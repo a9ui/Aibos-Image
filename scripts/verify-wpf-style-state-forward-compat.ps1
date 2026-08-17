@@ -66,6 +66,7 @@ try {
     $result = Get-Content -Raw -LiteralPath $fullOutputPath | ConvertFrom-Json
     $result | ConvertTo-Json -Depth 4
     $required = @(
+        'localPersistencePathCapabilities',
         'migrationPreserved',
         'legacyFieldsRemoved',
         'viewerUnknownPreserved',

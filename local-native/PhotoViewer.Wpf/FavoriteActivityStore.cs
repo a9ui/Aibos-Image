@@ -34,9 +34,14 @@ internal static class FavoriteActivityStore
     private const long MaximumFamilyBytes = 128L * 1024 * 1024;
     private static readonly string[] SidecarSuffixes = ["-wal", "-shm", "-journal"];
 
-    public static FavoriteActivityStoreReadResult Read(string path, int maximumEntries)
+    public static FavoriteActivityStoreReadResult Read(
+        LocalPersistenceStorePath path,
+        int maximumEntries)
     {
-        string fullPath = Path.GetFullPath(path);
+        string fullPath = path.FullPath;
+        // This capability fixes the leaf to favorite-activity.sqlite3 beside
+        // the Viewer state store or inside an explicitly TEMP-only fixture.
+        // codeql[cs/path-injection]
         if (!File.Exists(fullPath))
         {
             string? orphan = SidecarSuffixes
@@ -51,7 +56,7 @@ internal static class FavoriteActivityStore
 
         try
         {
-            EnsureFamilyWithinBudget(fullPath);
+            EnsureFamilyWithinBudget(path);
             using SqliteConnection connection = Open(fullPath, SqliteOpenMode.ReadOnly);
             Execute(connection, "PRAGMA query_only=ON; PRAGMA trusted_schema=OFF;");
             ValidateSchema(connection);
@@ -100,12 +105,12 @@ internal static class FavoriteActivityStore
     }
 
     public static FavoriteActivityStoreWriteResult Upsert(
-        string path,
+        LocalPersistenceStorePath path,
         IReadOnlyDictionary<string, DateTimeOffset> activity,
         int maximumEntries)
     {
-        string fullPath = Path.GetFullPath(path);
-        FavoriteActivityStoreReadResult existing = Read(fullPath, maximumEntries);
+        string fullPath = path.FullPath;
+        FavoriteActivityStoreReadResult existing = Read(path, maximumEntries);
         if (existing.State == FavoriteActivityStoreReadState.Protected)
         {
             return new FavoriteActivityStoreWriteResult(
@@ -192,7 +197,7 @@ internal static class FavoriteActivityStore
             }
 
             transaction.Commit();
-            EnsureFamilyWithinBudget(fullPath);
+            EnsureFamilyWithinBudget(path);
             return new FavoriteActivityStoreWriteResult(
                 Saved: true,
                 Protected: false,
@@ -290,11 +295,17 @@ internal static class FavoriteActivityStore
             throw new InvalidDataException("favorite activity schema contained unsupported objects");
     }
 
-    private static void EnsureFamilyWithinBudget(string path)
+    private static void EnsureFamilyWithinBudget(LocalPersistenceStorePath path)
     {
+        string fullPath = path.FullPath;
         long total = 0;
-        foreach (string candidate in new[] { path }.Concat(SidecarSuffixes.Select(suffix => path + suffix)))
+        foreach (string candidate in new[] { fullPath }.Concat(
+                     SidecarSuffixes.Select(suffix => fullPath + suffix)))
         {
+            // Candidate names are the fixed SQLite store capability plus
+            // SQLite's three fixed sidecar suffixes; no row or UI value can
+            // select a filesystem target.
+            // codeql[cs/path-injection]
             if (File.Exists(candidate))
                 total = checked(total + new FileInfo(candidate).Length);
         }

@@ -23,17 +23,21 @@ public partial class MainWindow
         "PhotoViewer.Wpf",
         "ai-styles.json");
 
+    private static LocalPersistenceStorePath ResolvedAiStyleStorePath
+        => LocalPersistenceStorePath.ForStateSibling(
+            ResolvedStatePath,
+            LocalPersistenceStoreKind.AiStyles);
+
     private static string ResolvedAiStylePath
-        => Path.Combine(
-            Path.GetDirectoryName(Path.GetFullPath(ResolvedStatePath))
-                ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ai-styles.json");
+        => ResolvedAiStyleStorePath.FullPath;
+
+    private static LocalPersistenceStorePath ResolvedFavoriteActivityStorePath
+        => LocalPersistenceStorePath.ForStateSibling(
+            ResolvedStatePath,
+            LocalPersistenceStoreKind.FavoriteActivity);
 
     private static string ResolvedFavoriteActivityPath
-        => Path.Combine(
-            Path.GetDirectoryName(Path.GetFullPath(ResolvedStatePath))
-                ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "favorite-activity.sqlite3");
+        => ResolvedFavoriteActivityStorePath.FullPath;
 
     private void InitializeSplitLocalPersistence(ViewerState? legacyState)
     {
@@ -43,7 +47,7 @@ public partial class MainWindow
 
     private AiStyleDocument? LoadOrMigrateAiStyleDocument(ViewerState? legacyState)
     {
-        AiStyleReadResult read = ReadAiStyleDocument(ResolvedAiStylePath);
+        AiStyleReadResult read = ReadAiStyleDocument(ResolvedAiStyleStorePath);
         if (read.State == AiStyleReadState.Loaded)
         {
             _aiStyleStoreReady = true;
@@ -69,7 +73,7 @@ public partial class MainWindow
         }
 
         if (!TryCreateAiStyleDocument(
-                ResolvedAiStylePath,
+                ResolvedAiStyleStorePath,
                 legacyDocument,
                 out AiStyleDocument? created,
                 out bool protectedFile))
@@ -94,7 +98,7 @@ public partial class MainWindow
         Dictionary<string, DateTimeOffset> normalizedLegacy =
             NormalizeFavoriteActivity(legacyActivity);
         FavoriteActivityStoreReadResult before = FavoriteActivityStore.Read(
-            ResolvedFavoriteActivityPath,
+            ResolvedFavoriteActivityStorePath,
             MaxPersistedFavoriteActivityEntries);
         if (before.State == FavoriteActivityStoreReadState.Protected)
         {
@@ -111,7 +115,7 @@ public partial class MainWindow
             MergeFavoriteActivity(expected, normalizedLegacy);
             TrimFavoriteActivity(expected);
             FavoriteActivityStoreWriteResult migrated = FavoriteActivityStore.Upsert(
-                ResolvedFavoriteActivityPath,
+                ResolvedFavoriteActivityStorePath,
                 normalizedLegacy,
                 MaxPersistedFavoriteActivityEntries);
             if (!migrated.Saved)
@@ -122,7 +126,7 @@ public partial class MainWindow
             }
 
             FavoriteActivityStoreReadResult after = FavoriteActivityStore.Read(
-                ResolvedFavoriteActivityPath,
+                ResolvedFavoriteActivityStorePath,
                 MaxPersistedFavoriteActivityEntries);
             if (after.State != FavoriteActivityStoreReadState.Loaded
                 || !FavoriteActivityEquals(expected, after.Entries))
@@ -232,7 +236,7 @@ public partial class MainWindow
 
         AiStyleDocument snapshot = CreateCurrentAiStyleDocument();
         if (!TrySaveAiStyleDocument(
-                ResolvedAiStylePath,
+                ResolvedAiStyleStorePath,
                 snapshot,
                 _aiStyleKnownFingerprint,
                 out AiStyleDocument? saved,
@@ -304,11 +308,16 @@ public partial class MainWindow
             || !string.IsNullOrWhiteSpace(document.SelectedI2iEditStyleName)
             || document.ExtensionData is { Count: > 0 };
 
-    private static AiStyleReadResult ReadAiStyleDocument(string path)
+    private static AiStyleReadResult ReadAiStyleDocument(
+        LocalPersistenceStorePath path)
     {
-        string fullPath = Path.GetFullPath(path);
+        string fullPath = path.FullPath;
         try
         {
+            // The typed path fixes the leaf to ai-styles.json beside the
+            // already-selected Viewer state store. File bytes remain bounded
+            // and untrusted after the handle is opened.
+            // codeql[cs/path-injection]
             using FileStream stream = new(
                 fullPath,
                 FileMode.Open,
@@ -366,7 +375,7 @@ public partial class MainWindow
     }
 
     private static bool TryCreateAiStyleDocument(
-        string path,
+        LocalPersistenceStorePath path,
         AiStyleDocument legacy,
         out AiStyleDocument? saved,
         out bool protectedFile)
@@ -375,7 +384,7 @@ public partial class MainWindow
         saved = null;
         protectedFile = false;
         bool malformed = false;
-        bool result = TryWithPersistenceLock(path, () =>
+        bool result = TryWithPersistenceLock(path.FullPath, () =>
         {
             AiStyleReadResult latest = ReadAiStyleDocument(path);
             if (latest.State == AiStyleReadState.Protected)
@@ -391,7 +400,7 @@ public partial class MainWindow
             string json = JsonSerializer.Serialize(
                 legacy,
                 new JsonSerializerOptions { WriteIndented = true });
-            if (!TryWriteAtomicText(path, json))
+            if (!LocalPersistenceStoreFile.TryWriteAtomicText(path, json))
                 return false;
             AiStyleReadResult verification = ReadAiStyleDocument(path);
             savedDocument = verification.Document;
@@ -403,7 +412,7 @@ public partial class MainWindow
     }
 
     private static bool TrySaveAiStyleDocument(
-        string path,
+        LocalPersistenceStorePath path,
         AiStyleDocument current,
         string? expectedKnownFingerprint,
         out AiStyleDocument? saved,
@@ -418,7 +427,7 @@ public partial class MainWindow
         protectedFile = false;
         bool malformed = false;
         bool conflict = false;
-        bool result = TryWithPersistenceLock(path, () =>
+        bool result = TryWithPersistenceLock(path.FullPath, () =>
         {
             AiStyleReadResult latest = ReadAiStyleDocument(path);
             if (latest.State == AiStyleReadState.Protected)
@@ -443,7 +452,7 @@ public partial class MainWindow
                 new JsonSerializerOptions { WriteIndented = true });
             if (System.Text.Encoding.UTF8.GetByteCount(json) > MaximumAiStyleDocumentBytes)
                 return false;
-            if (!TryWriteAtomicText(path, json))
+            if (!LocalPersistenceStoreFile.TryWriteAtomicText(path, json))
                 return false;
             AiStyleReadResult verification = ReadAiStyleDocument(path);
             savedDocument = verification.Document;

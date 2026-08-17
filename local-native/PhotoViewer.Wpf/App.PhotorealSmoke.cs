@@ -112,6 +112,7 @@ public partial class App
             {
                 string imageRoot = Path.Combine(smokeRoot, "images");
                 string storesRoot = Path.Combine(smokeRoot, "stores");
+                string aiStylePath = Path.Combine(storesRoot, "ai-styles.json");
                 string sourcePath = Path.Combine(imageRoot, "source.png");
                 string recoveredSourcePath = Path.Combine(
                     imageRoot,
@@ -817,10 +818,17 @@ public partial class App
                 window.FlushStateForSmoke();
                 AiStyleDocument? persistedStyleState =
                     JsonSerializer.Deserialize<AiStyleDocument>(
-                        File.ReadAllText(window.AiStylePathForSmoke));
+                        // aiStylePath is a fixed child of this smoke's
+                        // app-created TEMP store root.
+                        // codeql[cs/path-injection]
+                        File.ReadAllText(aiStylePath));
                 PhotorealStyleState? persistedStyle =
                     persistedStyleState?.PhotorealStyles?.SingleOrDefault();
-                stylePersistenceContract = persistedStyle is not null
+                stylePersistenceContract = string.Equals(
+                        window.AiStylePathForSmoke,
+                        aiStylePath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && persistedStyle is not null
                     && persistedStyle.Name == styleName
                     && persistedStyle.LoraEnabled == false
                     && Math.Abs(persistedStyle.Strength - 0.4) < 0.001
@@ -839,8 +847,11 @@ public partial class App
                     {
                         [futureStyleField] = JsonSerializer.SerializeToElement("future-mode"),
                     };
+                    // The fixture path is the fixed AI Style child already
+                    // proven above to be the window's resolved store.
+                    // codeql[cs/path-injection]
                     File.WriteAllText(
-                        window.AiStylePathForSmoke,
+                        aiStylePath,
                         JsonSerializer.Serialize(persistedStyleState));
                 }
                 var reloadedStyleWindow = new MainWindow();
@@ -851,14 +862,21 @@ public partial class App
                         reloadedStyleWindow.SavePhotorealStyleForSmoke(styleName);
                     AiStyleDocument? roundTrippedStyleState =
                         JsonSerializer.Deserialize<AiStyleDocument>(
-                            File.ReadAllText(reloadedStyleWindow.AiStylePathForSmoke));
+                            // The reloaded window must resolve this same fixed
+                            // app-created TEMP child before the assertion passes.
+                            // codeql[cs/path-injection]
+                            File.ReadAllText(aiStylePath));
                     JsonElement futureStyleValue = default;
                     bool futureStyleFieldPreserved = roundTrippedStyleState?.PhotorealStyles?
                         .SingleOrDefault()?.ExtensionData?
                         .TryGetValue(futureStyleField, out futureStyleValue) == true
                         && futureStyleValue.GetString() == "future-mode";
                     reloadedStyleWindow.SuppressStatePersistence();
-                    styleReloadContract = reloadedStyleWindow.PhotorealStyleNamesForSmoke.Contains(
+                    styleReloadContract = string.Equals(
+                            reloadedStyleWindow.AiStylePathForSmoke,
+                            aiStylePath,
+                            StringComparison.OrdinalIgnoreCase)
+                        && reloadedStyleWindow.PhotorealStyleNamesForSmoke.Contains(
                             styleName,
                             StringComparer.OrdinalIgnoreCase)
                         && Math.Abs(reloadedStyleSettings.Strength - 0.4) < 0.001
