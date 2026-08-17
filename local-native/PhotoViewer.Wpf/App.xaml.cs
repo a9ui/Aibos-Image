@@ -6009,6 +6009,8 @@ public partial class App : Application
 
         win.Dispatcher.InvokeAsync(async () =>
         {
+            try
+            {
             bool captureRootArranged = false;
             int folderIdx = Array.IndexOf(args, "--folder");
             if (folderIdx >= 0 && folderIdx + 1 < args.Length)
@@ -6207,6 +6209,24 @@ public partial class App : Application
 
             win.Close();
             Shutdown();
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    string errorPath = Path.GetFullPath(path) + ".error.txt";
+                    Directory.CreateDirectory(Path.GetDirectoryName(errorPath)!);
+                    // The explicit screenshot automation target owns this
+                    // adjacent diagnostic just as it owns the PNG itself.
+                    // codeql[cs/path-injection]
+                    File.WriteAllText(errorPath, ex.ToString());
+                }
+                catch
+                {
+                }
+                try { win.Close(); } catch { }
+                Shutdown(1);
+            }
         }, DispatcherPriority.ContextIdle);
     }
 

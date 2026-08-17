@@ -13,13 +13,14 @@ $exe = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\bin\$Configuration\net1
 $resultPath = [IO.Path]::GetFullPath($OutputPath)
 $fallbackResultPath = [IO.Path]::GetFullPath($FallbackOutputPath)
 $shotPath = [IO.Path]::GetFullPath($ScreenshotPath)
+$shotErrorPath = $shotPath + '.error.txt'
 
 if (-not $SkipBuild) {
     dotnet build $project -c $Configuration
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-foreach ($path in @($resultPath, $fallbackResultPath, $shotPath)) {
+foreach ($path in @($resultPath, $fallbackResultPath, $shotPath, $shotErrorPath)) {
     $directory = Split-Path -Parent $path
     if (-not [string]::IsNullOrWhiteSpace($directory)) {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
@@ -81,7 +82,13 @@ $capture = Start-Process -FilePath $exe -ArgumentList @(
     '--shot-height', '820'
 ) -WindowStyle Hidden -PassThru -Wait
 if ($capture.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $shotPath -PathType Leaf)) {
-    throw "High-contrast screenshot failed with exit code $($capture.ExitCode)."
+    $diagnostic = if (Test-Path -LiteralPath $shotErrorPath -PathType Leaf) {
+        Get-Content -Raw -LiteralPath $shotErrorPath
+    }
+    else {
+        'No managed screenshot diagnostic was produced.'
+    }
+    throw "High-contrast screenshot failed with exit code $($capture.ExitCode). $diagnostic"
 }
 $bytes = [IO.File]::ReadAllBytes($shotPath)
 if ($bytes.Length -lt 8 -or $bytes[0] -ne 0x89 -or $bytes[1] -ne 0x50 -or $bytes[2] -ne 0x4e -or $bytes[3] -ne 0x47) {
