@@ -18442,8 +18442,12 @@ public partial class App : Application
                     smokeRoot,
                     ".cache",
                     "state.json");
-                ViewerState? persistedVideoStyleState = JsonSerializer.Deserialize<ViewerState>(
-                    File.ReadAllText(videoStatePath));
+                AiStyleDocument? persistedVideoStyleState =
+                    JsonSerializer.Deserialize<AiStyleDocument>(
+                        File.ReadAllText(win.AiStylePathForSmoke));
+                ViewerState? persistedVideoSettingState =
+                    JsonSerializer.Deserialize<ViewerState>(
+                        File.ReadAllText(videoStatePath));
                 VideoStyleState? persistedVideoStyle =
                     persistedVideoStyleState?.VideoStyles?.SingleOrDefault();
                 bool videoStylePersistence = persistedVideoStyle is not null
@@ -18456,8 +18460,8 @@ public partial class App : Application
                     && persistedVideoStyle.Prompt == "pan left slowly"
                     && persistedVideoStyleState?.SelectedVideoStyleName
                         == videoStyleName
-                    && persistedVideoStyleState.VideoSeedMode == "random"
-                    && persistedVideoStyleState.VideoSeedValue == 0;
+                    && persistedVideoSettingState?.VideoSeedMode == "random"
+                    && persistedVideoSettingState.VideoSeedValue == 0;
                 win.ConfigureVideoGenerationForSmoke(
                     10,
                     16,
