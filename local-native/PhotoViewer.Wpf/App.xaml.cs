@@ -19645,6 +19645,8 @@ public partial class App : Application
                 TaskCompletionSource<bool>? jobsGetGate = null;
                 string jobsResponseMode = "normal";
                 bool allQueuedCanceled = false;
+                bool includeProtectedQueuedJob = false;
+                bool includeFinalSafeQueuedJob = false;
                 var individuallyCanceledQueuedJobs = new HashSet<string>(
                     StringComparer.Ordinal);
                 bool outputDeleted = false;
@@ -19967,6 +19969,27 @@ public partial class App : Application
                             error: "future canceled operation",
                             operation: "future-motion-v2"),
                     };
+                    if (includeProtectedQueuedJob)
+                    {
+                        jobs.Insert(0, Job(
+                            "protected-queued-job",
+                            QueuedStatus("protected-queued-job"),
+                            0,
+                            operation: "future-motion-v2",
+                            createdAt: "2026-07-23T00:00:07.000Z",
+                            queueOrder: 900));
+                    }
+                    if (includeFinalSafeQueuedJob)
+                    {
+                        jobs.Insert(0, Job(
+                            "final-safe-queued-job",
+                            QueuedStatus("final-safe-queued-job"),
+                            0,
+                            operation: "photoreal",
+                            createdAt: "2026-07-23T00:00:08.000Z",
+                            queueOrder: 901,
+                            adapter: "a1111-photoreal"));
+                    }
                     if (retryCreated)
                         jobs.Insert(0, VideoJob(
                             "retry-job",
@@ -21457,9 +21480,36 @@ public partial class App : Application
                         || request.Contains("rerun-job", StringComparison.Ordinal)
                         || request.EndsWith("/api/enhance/jobs/queued", StringComparison.Ordinal));
                 window.SelectEnhancementJobsOperationFilterForSmoke("all");
+                includeProtectedQueuedJob = true;
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                int requestsBeforeProtectedQueuedClear = requests.Count;
+                bool protectedQueuedClearIssued =
+                    await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
+                string[] protectedQueuedClearRequests = requests
+                    .Skip(requestsBeforeProtectedQueuedClear)
+                    .Where(static request => request.Contains(
+                        "/api/enhance/jobs/",
+                        StringComparison.Ordinal))
+                    .ToArray();
+                bool protectedQueuedClearContract = protectedQueuedClearIssued
+                    && protectedQueuedClearRequests.Length > 0
+                    && protectedQueuedClearRequests.All(static request =>
+                        request.StartsWith("POST ", StringComparison.Ordinal)
+                        && request.EndsWith("/cancel", StringComparison.Ordinal))
+                    && !protectedQueuedClearRequests.Any(static request =>
+                        request.Contains(
+                            "protected-queued-job",
+                            StringComparison.Ordinal)
+                        || request.EndsWith(
+                            "/api/enhance/jobs/queued",
+                            StringComparison.Ordinal));
+                includeProtectedQueuedJob = false;
+                includeFinalSafeQueuedJob = true;
+                await window.RefreshEnhancementJobsForSmokeAsync();
                 bool remainingQueuedClearIssued =
                     await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
                 bool clearQueuedIssued = filteredVideoClearContract
+                    && protectedQueuedClearContract
                     && remainingQueuedClearIssued;
                 EnhancementJobsWorkspaceSmokeSnapshot afterClearQueued =
                     window.EnhancementJobsWorkspaceForSmoke();

@@ -1238,16 +1238,10 @@ public partial class MainWindow
         => $"{_enhancementWorkspaceStatusFilter}:{_enhancementWorkspaceOperationFilter}";
 
     private bool CanCancelAllQueuedEnhancementJobs()
-    {
-        EnhancementWorkspaceJobView[] queued = _enhancementWorkspaceJobs
-            .Where(job =>
-                job.Status == "queued"
-                && MatchesEnhancementWorkspaceOperationFilter(job))
-            .ToArray();
-        return queued.Length > 0
-            && queued.All(static job =>
-                job.IsSupportedMutationOperation && job.CanCancel);
-    }
+        => _enhancementWorkspaceJobs.Any(job =>
+            job.Status == "queued"
+            && MatchesEnhancementWorkspaceOperationFilter(job)
+            && job.CanCancel);
 
     private bool CanUpdateAllQueuedPhotorealPrompts()
         => _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported
@@ -1302,14 +1296,22 @@ public partial class MainWindow
     {
         if (EnhancementJobsClearQueuedButton is not null)
         {
-            int queuedCount = _enhancementWorkspaceJobs.Count(job =>
-                job.Status == "queued"
-                && MatchesEnhancementWorkspaceOperationFilter(job));
+            EnhancementWorkspaceJobView[] queuedJobs = _enhancementWorkspaceJobs
+                .Where(job =>
+                    job.Status == "queued"
+                    && MatchesEnhancementWorkspaceOperationFilter(job))
+                .ToArray();
+            int cancelableCount = queuedJobs.Count(static job => job.CanCancel);
+            int protectedCount = queuedJobs.Length - cancelableCount;
             string operationLabel = EnhancementWorkspaceOperationFilterLabel();
             EnhancementJobsClearQueuedButton.Content =
-                $"待機中をすべて消す ({queuedCount:N0})";
-            EnhancementJobsClearQueuedButton.ToolTip =
-                $"現在の種類フィルター「{operationLabel}」に表示される待機中だけをキャンセルします。実行中のジョブは変えません。";
+                $"待機中をすべて消す ({cancelableCount:N0})";
+            EnhancementJobsClearQueuedButton.ToolTip = cancelableCount > 0
+                ? $"現在の種類フィルター「{operationLabel}」で安全にキャンセルできる待機中 {cancelableCount:N0}件だけを消します。実行中のジョブは変えません。"
+                    + (protectedCount > 0
+                        ? $" future・malformed・read-only等の保護対象 {protectedCount:N0}件は残します。"
+                        : "")
+                : "安全にキャンセルできる待機中Jobはありません。future・malformed・read-only等の保護対象は残します。";
             EnhancementJobsClearQueuedButton.IsEnabled =
                 !_enhancementWorkspaceMutationPending
                 && CanCancelAllQueuedEnhancementJobs();
@@ -3738,14 +3740,18 @@ public partial class MainWindow
 
     private async void CancelAllQueuedEnhancementJobs_Click(object sender, RoutedEventArgs e)
     {
-        EnhancementWorkspaceJobView[] queuedJobs = _enhancementWorkspaceJobs
+        EnhancementWorkspaceJobView[] matchingQueuedJobs = _enhancementWorkspaceJobs
             .Where(job =>
                 job.Status == "queued"
                 && MatchesEnhancementWorkspaceOperationFilter(job))
+            .ToArray();
+        EnhancementWorkspaceJobView[] queuedJobs = matchingQueuedJobs
+            .Where(static job => job.CanCancel)
             .OrderBy(static job => job.QueueOrder ?? int.MaxValue)
             .ThenBy(static job => job.CreatedAt)
             .ThenBy(static job => job.ApiOrdinal)
             .ToArray();
+        int protectedCount = matchingQueuedJobs.Length - queuedJobs.Length;
         if (_enhancementWorkspaceMutationPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible
             || queuedJobs.Length == 0
@@ -3762,7 +3768,8 @@ public partial class MainWindow
             int canceledCount = 0;
             int failedCount = 0;
             string? firstError = null;
-            if (_enhancementWorkspaceOperationFilter == "all")
+            if (_enhancementWorkspaceOperationFilter == "all"
+                && protectedCount == 0)
             {
                 EnhancementApiResponse response = await SendEnhancementApiAsync(
                     HttpMethod.Delete,
@@ -3814,6 +3821,9 @@ public partial class MainWindow
             string operationFilterLabel = EnhancementWorkspaceOperationFilterLabel();
             EnhancementJobsStatusText.Text =
                 $"現在の種類フィルター「{operationFilterLabel}」で表示された待機中 {canceledCount:N0}件をキャンセルしました。実行中のジョブは変更していません。"
+                + (protectedCount > 0
+                    ? $" 保護対象 {protectedCount:N0}件は残しました。"
+                    : "")
                 + (failedCount > 0
                     ? $" {failedCount:N0}件は失敗しました。{firstError}"
                     : "");
