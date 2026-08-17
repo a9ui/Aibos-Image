@@ -200,6 +200,14 @@ public partial class MainWindow
         }
 
         nint handle = new WindowInteropHelper(this).Handle;
+        if (handle == 0)
+        {
+            Hide();
+            ShowInTaskbar = true;
+            Show();
+            handle = new WindowInteropHelper(this).Handle;
+            _ = Activate();
+        }
         if (handle != 0)
             _ = SetForegroundWindow(handle);
     }
