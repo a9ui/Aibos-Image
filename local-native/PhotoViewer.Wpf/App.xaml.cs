@@ -1334,6 +1334,7 @@ public partial class App : Application
 
         var mainWindow = new MainWindow();
         mainWindow.Show();
+        mainWindow.ActivateFromSecondaryInstance();
         _singleInstanceCoordinator?.StartListening(() =>
             Dispatcher.BeginInvoke(
                 mainWindow.ActivateFromSecondaryInstance,
