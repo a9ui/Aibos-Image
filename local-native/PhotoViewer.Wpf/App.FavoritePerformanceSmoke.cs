@@ -63,6 +63,7 @@ public partial class App
                 string activityPath = Path.Combine(
                     storeRoot,
                     "favorite-activity.sqlite3");
+                Directory.CreateDirectory(storeRoot);
                 LocalPersistenceStorePath activityStorePath =
                     LocalPersistenceStorePath.ForManagedTempFixture(
                         activityPath,
