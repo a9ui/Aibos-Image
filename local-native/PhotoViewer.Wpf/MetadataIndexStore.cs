@@ -103,25 +103,10 @@ internal static class MetadataIndexStore
         """;
 
     public static MetadataIndexStorePath ResolvePath(
-        IReadOnlyList<string> folderSet,
-        string viewerStatePath)
+        IReadOnlyList<string> folderSet)
     {
         ArgumentNullException.ThrowIfNull(folderSet);
         string? overrideDirectory = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY");
-        string directory;
-        if (!string.IsNullOrWhiteSpace(overrideDirectory))
-        {
-            directory = Path.GetFullPath(overrideDirectory);
-        }
-        else
-        {
-            string stateFullPath = Path.GetFullPath(viewerStatePath);
-            directory = Path.Combine(
-                Path.GetDirectoryName(stateFullPath)
-                    ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "metadata-index-v1");
-        }
-
         string identity = string.Join(
             '\n',
             folderSet
@@ -129,7 +114,11 @@ internal static class MetadataIndexStore
                 .OrderBy(static folder => folder, StringComparer.OrdinalIgnoreCase)
                 .Select(static folder => folder.ToUpperInvariant()));
         string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
-        return MetadataIndexStorePath.ForCatalogIdentity(directory, digest);
+        return !string.IsNullOrWhiteSpace(overrideDirectory)
+            ? MetadataIndexStorePath.ForManagedTempCatalogIdentity(
+                overrideDirectory,
+                digest)
+            : MetadataIndexStorePath.ForCurrentUserCatalogIdentity(digest);
     }
 
     public static MetadataIndexLoadResult Load(

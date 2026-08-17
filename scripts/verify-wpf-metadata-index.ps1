@@ -93,7 +93,7 @@ try {
     Assert-True ($result.count -eq $Count) "Metadata fixture count was $($result.count), expected $Count."
     Assert-True ($result.folderCount -eq $FolderCount) "Metadata folder count was $($result.folderCount), expected $FolderCount."
     Assert-True ($result.isolatedProjectRoot -eq $true) 'Metadata smoke did not resolve its shared project root inside TEMP.'
-    Assert-True ($result.pathCapabilityPassed -eq $true) 'Metadata path capability accepted a relative, URL, non-SQLite, or outside-TEMP fixture.'
+    Assert-True ($result.pathCapabilityPassed -eq $true) 'Metadata path capability did not keep product storage fixed or accepted an unsafe synthetic root.'
 
     Assert-True ($result.cold.passed -eq $true) 'Cold missing-to-write metadata scenario failed.'
     Assert-True ($result.cold.loadState -eq 'Missing') "Cold metadata load state was $($result.cold.loadState), expected Missing."

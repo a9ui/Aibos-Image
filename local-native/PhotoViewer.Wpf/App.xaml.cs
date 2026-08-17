@@ -28374,9 +28374,53 @@ public partial class App : Application
                         ?? throw new InvalidOperationException(
                             "metadata capability smoke root was unavailable"),
                     "aibos-metadata-capability.sqlite3");
+                string catalogDigest = new('a', 64);
+                MetadataIndexStorePath managedCatalogPath =
+                    MetadataIndexStorePath.ForManagedTempCatalogIdentity(
+                        indexDirectory,
+                        catalogDigest);
+                MetadataIndexStorePath productCatalogPath =
+                    MetadataIndexStorePath.ForCurrentUserCatalogIdentity(
+                        catalogDigest);
+                string expectedProductCatalogPath = Path.Combine(
+                    Environment.GetFolderPath(
+                        Environment.SpecialFolder.LocalApplicationData),
+                    "PhotoViewer.Wpf",
+                    "metadata-index-v1",
+                    catalogDigest + ".sqlite3");
                 pathCapabilityPassed =
                     MetadataIndexStorePath.AcceptsManagedTempFixtureForSmoke(
                         capabilityPath)
+                    && string.Equals(
+                        managedCatalogPath.FullPath,
+                        Path.Combine(
+                            Path.GetFullPath(indexDirectory),
+                            catalogDigest + ".sqlite3"),
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        productCatalogPath.FullPath,
+                        Path.GetFullPath(expectedProductCatalogPath),
+                        StringComparison.OrdinalIgnoreCase)
+                    && MetadataIndexStorePath
+                        .AcceptsManagedTempCatalogDirectoryForSmoke(
+                            indexDirectory,
+                            catalogDigest)
+                    && !MetadataIndexStorePath
+                        .AcceptsManagedTempCatalogDirectoryForSmoke(
+                            "relative-metadata-index",
+                            catalogDigest)
+                    && !MetadataIndexStorePath
+                        .AcceptsManagedTempCatalogDirectoryForSmoke(
+                            Path.GetPathRoot(smokeRoot)!,
+                            catalogDigest)
+                    && !MetadataIndexStorePath
+                        .AcceptsManagedTempCatalogDirectoryForSmoke(
+                            Path.Combine(smokeRoot, "missing-index-directory"),
+                            catalogDigest)
+                    && !MetadataIndexStorePath
+                        .AcceptsManagedTempCatalogDirectoryForSmoke(
+                            indexDirectory,
+                            "not-a-catalog-digest")
                     && !MetadataIndexStorePath.AcceptsManagedTempFixtureForSmoke(
                         "relative.sqlite3")
                     && !MetadataIndexStorePath.AcceptsManagedTempFixtureForSmoke(
