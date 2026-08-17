@@ -36,6 +36,8 @@
   <sys:String x:Key="UiAppSettings">App Settings</sys:String>
   <sys:String x:Key="UiLandingTagline">Index and search Stable Diffusion PNG metadata locally</sys:String>
   <sys:String x:Key="UiOpenFolderSet">Open folder set</sys:String>
+  <sys:String x:Key="UiOpeningFolderSet">Loading…</sys:String>
+  <sys:String x:Key="UiChangeFolderSetHelp">Replace the current selection with newly chosen folders.</sys:String>
   <sys:String x:Key="UiRemoveFolder">Remove folder</sys:String>
   <sys:String x:Key="UiPasteFolderHint">Paste one absolute path per line…</sys:String>
   <sys:String x:Key="UiAddPasted">Add pasted</sys:String>
@@ -43,6 +45,11 @@
   <sys:String x:Key="UiUsableSelectedFoldersFormat">{0:N0} usable / {1:N0} selected folder(s)</sys:String>
   <sys:String x:Key="UiOpenLastFolderSet">Open last folder set</sys:String>
   <sys:String x:Key="UiNoSavedFolderSet">  No saved folder set</sys:String>
+  <sys:String x:Key="UiFavoriteFolderSets">FAVORITE FOLDER SETS</sys:String>
+  <sys:String x:Key="UiSaveFavoriteFolderSet">★ Save current set</sys:String>
+  <sys:String x:Key="UiSaveFavoriteFolderSetHelp">Pin the selected folder set separately from recent history.</sys:String>
+  <sys:String x:Key="UiRemoveFavoriteFolderSet">Remove from favorite folder sets</sys:String>
+  <sys:String x:Key="UiNoFavoriteFolderSets">No favorite folder sets yet.</sys:String>
   <sys:String x:Key="UiRecentFolderSets">RECENT FOLDER SETS</sys:String>
   <sys:String x:Key="UiScanningFiles">Scanning files…</sys:String>
   <sys:String x:Key="UiCancelScan">Cancel scan</sys:String>
