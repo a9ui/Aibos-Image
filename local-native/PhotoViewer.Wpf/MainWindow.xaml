@@ -1712,7 +1712,7 @@
               <StackPanel>
                 <TextBlock Text="FILTER" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="4,0,0,8"/>
                 <TextBlock Text="状態" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,0,0,4"/>
-                <UniformGrid x:Name="EnhancementJobsStatusFiltersPanel" Columns="2">
+                <UniformGrid x:Name="EnhancementJobsStatusFiltersPanel" Columns="1">
                   <CheckBox x:Name="EnhancementJobsAllFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsStatusFilter_Click" ToolTip="すべての状態を表示"/>
                   <CheckBox x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="待機中" Tag="queued" Click="EnhancementJobsStatusFilter_Click" ToolTip="待機中だけを表示。実行中は含みません"/>
                   <CheckBox x:Name="EnhancementJobsRunningFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="処理中" Tag="running" Click="EnhancementJobsStatusFilter_Click" ToolTip="現在処理中のJobだけを表示"/>
@@ -1721,7 +1721,7 @@
                   <CheckBox x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="キャンセル" Tag="canceled" Click="EnhancementJobsStatusFilter_Click" ToolTip="キャンセル済みのJobだけを表示"/>
                 </UniformGrid>
                 <TextBlock Text="AI処理の種類" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
-                <UniformGrid x:Name="EnhancementJobsOperationFiltersPanel" Columns="2">
+                <UniformGrid x:Name="EnhancementJobsOperationFiltersPanel" Columns="1">
                   <CheckBox x:Name="EnhancementJobsAllOperationsFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsOperationFilter_Click" ToolTip="すべてのAI処理を表示"/>
                   <CheckBox x:Name="EnhancementJobsUpscaleFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="高画質化" Tag="upscale" Click="EnhancementJobsOperationFilter_Click" ToolTip="高画質化Jobだけを表示"/>
                   <CheckBox x:Name="EnhancementJobsPhotorealFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="実写化" Tag="photoreal" Click="EnhancementJobsOperationFilter_Click" ToolTip="実写化Jobだけを表示"/>
