@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -14,6 +15,8 @@ public partial class MainWindow
     private bool _localPersistenceCompactionPending;
     private Dictionary<string, JsonElement>? _aiStyleExtensionData;
     private AiStyleDocument? _restoredAiStyleDocument;
+    private string? _aiStyleKnownFingerprint;
+    private bool _aiStyleExternalConflictDetected;
 
     private static string AiStylePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -45,6 +48,7 @@ public partial class MainWindow
         {
             _aiStyleStoreReady = true;
             _aiStyleExtensionData = CloneExtensionData(read.Document?.ExtensionData);
+            _aiStyleKnownFingerprint = ComputeAiStyleKnownFingerprint(read.Document!);
             if (HasLegacyAiStyleFields(legacyState))
                 _localPersistenceCompactionPending = true;
             return read.Document;
@@ -60,6 +64,7 @@ public partial class MainWindow
         if (!HasAiStyleContent(legacyDocument))
         {
             _aiStyleStoreReady = true;
+            _aiStyleKnownFingerprint = null;
             return legacyDocument;
         }
 
@@ -76,6 +81,9 @@ public partial class MainWindow
 
         _aiStyleStoreReady = true;
         _aiStyleExtensionData = CloneExtensionData(created?.ExtensionData);
+        _aiStyleKnownFingerprint = created is null
+            ? null
+            : ComputeAiStyleKnownFingerprint(created);
         _localPersistenceCompactionPending = true;
         return created ?? legacyDocument;
     }
@@ -226,10 +234,20 @@ public partial class MainWindow
         if (!TrySaveAiStyleDocument(
                 ResolvedAiStylePath,
                 snapshot,
+                _aiStyleKnownFingerprint,
                 out AiStyleDocument? saved,
-                out bool protectedFile))
+                out string? savedKnownFingerprint,
+                out bool protectedFile,
+                out bool externalConflict))
         {
             _aiStyleWriteBlocked = protectedFile;
+            _aiStyleExternalConflictDetected = externalConflict;
+            if (externalConflict)
+            {
+                SetStatusToast(
+                    "AI Styles changed outside Aibos Image. The external file was kept unchanged. Restart Aibos Image to reload it before saving Styles again.");
+                return;
+            }
             ReportPersistenceRefusal(
                 "AI Styles",
                 ResolvedAiStylePath,
@@ -238,6 +256,8 @@ public partial class MainWindow
             return;
         }
 
+        _aiStyleExternalConflictDetected = false;
+        _aiStyleKnownFingerprint = savedKnownFingerprint;
         _aiStyleExtensionData = CloneExtensionData(saved?.ExtensionData);
         ApplySavedAiStyleExtensionData(saved);
     }
@@ -287,13 +307,8 @@ public partial class MainWindow
     private static AiStyleReadResult ReadAiStyleDocument(string path)
     {
         string fullPath = Path.GetFullPath(path);
-        if (!File.Exists(fullPath))
-            return AiStyleReadResult.Missing();
         try
         {
-            var info = new FileInfo(fullPath);
-            if (info.Length is <= 0 or > MaximumAiStyleDocumentBytes)
-                return AiStyleReadResult.Protected("AI Style file size was outside the supported bounds");
             using FileStream stream = new(
                 fullPath,
                 FileMode.Open,
@@ -301,6 +316,8 @@ public partial class MainWindow
                 FileShare.Read,
                 64 * 1024,
                 FileOptions.SequentialScan);
+            if (stream.Length is <= 0 or > MaximumAiStyleDocumentBytes)
+                return AiStyleReadResult.Protected("AI Style file size was outside the supported bounds");
             using var document = JsonDocument.Parse(
                 stream,
                 new JsonDocumentOptions { MaxDepth = 64 });
@@ -315,6 +332,14 @@ public partial class MainWindow
                 return AiStyleReadResult.Protected("AI Style version or content was unsupported");
             }
             return AiStyleReadResult.Loaded(value);
+        }
+        catch (FileNotFoundException)
+        {
+            return AiStyleReadResult.Missing();
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return AiStyleReadResult.Missing();
         }
         catch (Exception error)
         {
@@ -380,19 +405,36 @@ public partial class MainWindow
     private static bool TrySaveAiStyleDocument(
         string path,
         AiStyleDocument current,
+        string? expectedKnownFingerprint,
         out AiStyleDocument? saved,
-        out bool protectedFile)
+        out string? savedKnownFingerprint,
+        out bool protectedFile,
+        out bool externalConflict)
     {
         AiStyleDocument? savedDocument = null;
+        string? resultingKnownFingerprint = null;
         saved = null;
+        savedKnownFingerprint = null;
         protectedFile = false;
         bool malformed = false;
+        bool conflict = false;
         bool result = TryWithPersistenceLock(path, () =>
         {
             AiStyleReadResult latest = ReadAiStyleDocument(path);
             if (latest.State == AiStyleReadState.Protected)
             {
                 malformed = true;
+                return false;
+            }
+            string? latestKnownFingerprint = latest.Document is null
+                ? null
+                : ComputeAiStyleKnownFingerprint(latest.Document);
+            if (!string.Equals(
+                    expectedKnownFingerprint,
+                    latestKnownFingerprint,
+                    StringComparison.Ordinal))
+            {
+                conflict = true;
                 return false;
             }
             MergeLatestAiStyleExtensionData(current, latest.Document);
@@ -405,11 +447,38 @@ public partial class MainWindow
                 return false;
             AiStyleReadResult verification = ReadAiStyleDocument(path);
             savedDocument = verification.Document;
+            resultingKnownFingerprint = savedDocument is null
+                ? null
+                : ComputeAiStyleKnownFingerprint(savedDocument);
             return verification.State == AiStyleReadState.Loaded;
         });
         saved = savedDocument;
+        savedKnownFingerprint = resultingKnownFingerprint;
         protectedFile = malformed;
+        externalConflict = conflict;
         return result;
+    }
+
+    private static string ComputeAiStyleKnownFingerprint(AiStyleDocument document)
+    {
+        byte[] serialized = JsonSerializer.SerializeToUtf8Bytes(
+            document,
+            new JsonSerializerOptions { MaxDepth = 64 });
+        AiStyleDocument clone = JsonSerializer.Deserialize<AiStyleDocument>(
+                serialized,
+                new JsonSerializerOptions { MaxDepth = 64 })
+            ?? throw new InvalidDataException("AI Style document could not be fingerprinted.");
+        clone.ExtensionData = null;
+        foreach (PhotorealStyleState style in clone.PhotorealStyles ?? [])
+            style.ExtensionData = null;
+        foreach (VideoStyleState style in clone.VideoStyles ?? [])
+            style.ExtensionData = null;
+        foreach (I2iEditStyleState style in clone.I2iEditStyles ?? [])
+            style.ExtensionData = null;
+        byte[] knownBytes = JsonSerializer.SerializeToUtf8Bytes(
+            clone,
+            new JsonSerializerOptions { MaxDepth = 64 });
+        return Convert.ToHexString(SHA256.HashData(knownBytes));
     }
 
     private static void MergeLatestAiStyleExtensionData(
@@ -483,6 +552,9 @@ public partial class MainWindow
     }
 
     public string AiStylePathForSmoke => ResolvedAiStylePath;
+    public bool AiStyleExternalConflictDetectedForSmoke
+        => _aiStyleExternalConflictDetected;
+    public bool AiStyleWriteBlockedForSmoke => _aiStyleWriteBlocked;
     public string FavoriteActivityPathForSmoke => ResolvedFavoriteActivityPath;
     public bool SplitLocalPersistenceReadyForSmoke
         => _aiStyleStoreReady && _favoriteActivityStoreReady;

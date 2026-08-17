@@ -72,8 +72,10 @@ try {
         'incrementalActivityWrite',
         'idempotentReplay',
         'concurrentLatestUnknownFieldsPreserved',
+        'externalKnownEditProtected',
         'unsupportedFutureStyleProtected',
         'malformedStyleProtected',
+        'oversizedStyleProtected',
         'unsupportedFutureActivityProtected',
         'sourceUnchanged'
     )
