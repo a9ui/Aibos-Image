@@ -21365,11 +21365,13 @@ public partial class MainWindow : Window
                 return false;
             }
 
-            SetStatusToast(displayedAsset.FallbackReason is not null
-                ? $"{displayedAsset.FallbackReason} Opened Original externally."
-                : displayedAsset.Enhanced
-                    ? "Opened the displayed Enhanced image externally."
-                    : "Opened the displayed Original image externally.");
+            // A successful Enhanced open already has immediate feedback from
+            // the external application itself. Keep fallback and Original
+            // messages because they explain which asset was actually opened.
+            if (displayedAsset.FallbackReason is not null)
+                SetStatusToast($"{displayedAsset.FallbackReason} Opened Original externally.");
+            else if (!displayedAsset.Enhanced)
+                SetStatusToast("Opened the displayed Original image externally.");
             return true;
         }
         catch (Exception ex) when (ex is Win32Exception
@@ -25849,11 +25851,12 @@ public partial class MainWindow : Window
     public ExternalOpenSmokeSnapshot ActivateExternalOpenForSmoke(string launcherBehavior)
     {
         ProcessStartInfo? captured = null;
+        bool launcherAccepted = false;
         Func<ProcessStartInfo, bool> previous = _externalFileLauncher;
         _externalFileLauncher = info =>
         {
             captured = info;
-            return launcherBehavior switch
+            launcherAccepted = launcherBehavior switch
             {
                 "success" => true,
                 "failure" => false,
@@ -25863,15 +25866,14 @@ public partial class MainWindow : Window
                 "path" => throw new ArgumentException("injected shell path failure"),
                 _ => throw new ArgumentOutOfRangeException(nameof(launcherBehavior)),
             };
+            return launcherAccepted;
         };
         try
         {
             string? selectedBefore = SelectedTile()?.Path;
             bool focused = ModalOpenExternalButton.Focus();
             ModalOpenExternalButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            bool launched = captured is not null
-                && _deleteStatus.Contains("Opened", StringComparison.Ordinal)
-                && _deleteStatus.Contains("externally", StringComparison.Ordinal);
+            bool launched = captured is not null && launcherAccepted;
             return new ExternalOpenSmokeSnapshot(
                 launched,
                 captured is not null,
@@ -25893,6 +25895,10 @@ public partial class MainWindow : Window
             _externalFileLauncher = previous;
         }
     }
+
+    public bool FocusModalOpenExternalForSmoke()
+        => ModalOpenExternalButton.Focus()
+            && ModalOpenExternalButton.IsKeyboardFocused;
 
     public ExplorerRevealSmokeSnapshot ShowSelectedInFolderForSmoke()
         => ActivateExplorerRevealForSmoke("right-preview", "success");
