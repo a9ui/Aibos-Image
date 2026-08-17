@@ -329,7 +329,7 @@
                          TextChanged="SearchInput_TextChanged" GotKeyboardFocus="SearchInput_GotKeyboardFocus"
                          PreviewMouseLeftButtonDown="SearchInput_PreviewMouseLeftButtonDown"
                          PreviewKeyDown="SearchInput_PreviewKeyDown" LostKeyboardFocus="SearchInput_LostKeyboardFocus"
-                         AutomationProperties.Name="Search images" AutomationProperties.HelpText="Search filenames and prompts. Separate terms with commas. Each active term appears below with a remove button."/>
+                         AutomationProperties.Name="Search images" AutomationProperties.HelpText="Search filenames and prompts. Choose a suggestion or press Enter to add a colored search term. Backspace removes the last term when the input is empty."/>
                 <TextBlock x:Name="SearchWatermark" Text="{DynamicResource UiSearchPlaceholder}" Foreground="{StaticResource TextTertiary}" FontSize="12.5" VerticalAlignment="Center" IsHitTestVisible="False" TextTrimming="CharacterEllipsis"/>
               </Grid>
             </DockPanel>
@@ -349,6 +349,43 @@
                   Background="{StaticResource BgElevated}" BorderBrush="{StaticResource GlassBorder}" BorderThickness="1"
                   CornerRadius="6" Padding="0,6,0,6">
             <DockPanel LastChildFill="True">
+              <StackPanel x:Name="SearchSuggestionSection" DockPanel.Dock="Top" Visibility="Collapsed">
+                <TextBlock Text="{DynamicResource UiSearchSuggestions}" Margin="12,0,12,5"
+                           Foreground="{StaticResource TextTertiary}" FontSize="11.5" FontWeight="SemiBold"/>
+                <ListBox x:Name="SearchSuggestionList" MaxHeight="156" Margin="6,0,6,6"
+                         AutomationProperties.Name="Search term suggestions"
+                         Background="Transparent" BorderThickness="0" Padding="0" SelectionMode="Single"
+                         SelectionChanged="SearchSuggestionList_SelectionChanged"
+                         PreviewKeyDown="SearchSuggestionList_PreviewKeyDown">
+                  <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                      <Setter Property="Padding" Value="0"/>
+                      <Setter Property="Background" Value="Transparent"/>
+                      <Setter Property="BorderThickness" Value="0"/>
+                    </Style>
+                  </ListBox.ItemContainerStyle>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Button Style="{StaticResource TransparentButton}" Tag="{Binding}" Click="SearchSuggestionSelect_Click"
+                              Margin="0,1" Padding="8,5" HorizontalContentAlignment="Stretch"
+                              Background="{Binding Background}" Foreground="{Binding Foreground}"
+                              BorderBrush="{Binding Foreground}" BorderThickness="1"
+                              ToolTip="{Binding Tag}" AutomationProperties.Name="{Binding Tag, StringFormat={}Add search term {0}}"
+                              AutomationProperties.HelpText="Add this suggestion as one complete search term.">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
+                          <TextBlock Text="{Binding Tag}" TextTrimming="CharacterEllipsis" FontSize="12.5" FontWeight="SemiBold"/>
+                          <TextBlock Grid.Column="1" Text="{Binding UsageText}" Margin="8,0,0,0" Opacity="0.76" FontSize="10.5"/>
+                        </Grid>
+                      </Button>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
               <Grid DockPanel.Dock="Top" Margin="12,0,6,5">
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="*"/>

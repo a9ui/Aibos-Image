@@ -29972,12 +29972,14 @@ public partial class App : Application
         string statePath = Path.Combine(smokeRoot, "state.json");
         string seenPath = Path.Combine(smokeRoot, "seen.json");
         string favoritesPath = Path.Combine(smokeRoot, "favorites.json");
+        string searchHistoryPath = Path.Combine(smokeRoot, "search-history.json");
         string taggedName = "tagged.png";
         string otherName = "other.png";
         string taggedPath = Path.Combine(folder, taggedName);
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousSeenPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH");
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
+        string? previousSearchHistoryPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH");
 
         try
         {
@@ -29985,12 +29987,13 @@ public partial class App : Application
             WritePngTextFixture(
                 taggedPath,
                 "parameters",
-                "studio portrait, soft light, ((fresh_tag:1.2)), Studio Portrait, ,   \nNegative prompt: lowres\nSteps: 12, Sampler: Euler",
+                "studio portrait, soft light, 1girl, ((fresh_tag:1.2)), Studio Portrait, ,   \nNegative prompt: lowres\nSteps: 12, Sampler: Euler",
                 Color.FromRgb(52, 152, 219));
             WriteSmokePng(Path.Combine(folder, otherName), 64, 48, Color.FromRgb(46, 204, 113));
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", seenPath);
             Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", favoritesPath);
+            Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH", searchHistoryPath);
         }
         catch (Exception ex)
         {
@@ -30041,6 +30044,27 @@ public partial class App : Application
                     && string.Equals(win.SearchQueryForSmoke, "soft light", StringComparison.Ordinal)
                     && win.ActiveSearchTermsForSmoke.SequenceEqual(["soft light"], StringComparer.Ordinal);
                 win.SetSearchQuery("", persist: false);
+                await win.OpenSearchHistoryForSmokeAsync();
+                await win.RebuildSearchSuggestionsForSmokeAsync();
+                win.SetSearchDraftForSmoke("1");
+                List<string> numericPrefixSuggestions = win.SearchSuggestionTagsForSmoke;
+                bool numericPrefixVisible = win.SearchSuggestionPopupVisibleForSmoke;
+                bool enterCommittedSuggestion = win.CommitTopSearchSuggestionWithKeyForSmoke(Key.Enter)
+                    && string.Equals(win.SearchQueryForSmoke, "1girl", StringComparison.Ordinal)
+                    && win.ActiveSearchTermsForSmoke.SequenceEqual(["1girl"], StringComparer.Ordinal);
+                win.SetSearchDraftForSmoke("soft");
+                List<string> softPrefixSuggestions = win.SearchSuggestionTagsForSmoke;
+                bool clickCommittedSuggestion = win.ClickSearchSuggestionForSmoke("soft light")
+                    && string.Equals(win.SearchQueryForSmoke, "1girl, soft light", StringComparison.Ordinal)
+                    && win.ActiveSearchTermsForSmoke.SequenceEqual(["1girl", "soft light"], StringComparer.Ordinal);
+                bool backspaceRemovedWholeTerm = win.RemoveLastSearchTermWithBackspaceForSmoke()
+                    && string.Equals(win.SearchQueryForSmoke, "1girl", StringComparison.Ordinal)
+                    && win.ActiveSearchTermsForSmoke.SequenceEqual(["1girl"], StringComparer.Ordinal);
+                bool coloredSearchTerms = win.ActiveSearchTermColorsReadyForSmoke;
+                bool outsideClickDismissesPopup = win.SearchPopupOutsideDismissContractForSmoke;
+                win.CloseSearchHistoryForSmoke();
+                bool popupClosed = !win.SearchHistoryPopupOpenForSmoke;
+                win.SetSearchQuery("", persist: false);
                 PngMetadataSmokeSnapshot missingMetadata = await win.SelectPngMetadataForSmokeAsync(otherName);
                 bool missingModalOpened = win.OpenModalForSmoke();
                 bool missingSidebarVisible = win.ToggleModalMetadataSidebarForSmoke().SidebarVisible;
@@ -30061,7 +30085,7 @@ public partial class App : Application
                     && opened && sidebarVisible && reopened
                     && appended.Applied && deduped.Applied
                     && refreshedMetadata.MetadataApplied
-                    && initialTags.SequenceEqual(["studio portrait", "soft light", "fresh_tag:1.2"], StringComparer.OrdinalIgnoreCase)
+                    && initialTags.SequenceEqual(["studio portrait", "soft light", "1girl", "fresh_tag:1.2"], StringComparer.OrdinalIgnoreCase)
                     && string.Equals(appended.SearchQuery, "studio portrait, soft light", StringComparison.Ordinal)
                     && string.Equals(deduped.SearchQuery, appended.SearchQuery, StringComparison.Ordinal)
                     && !appended.ModalVisible && !deduped.ModalVisible
@@ -30071,6 +30095,11 @@ public partial class App : Application
                     && activeSearchTerms.SequenceEqual(["studio portrait", "soft light"], StringComparer.Ordinal)
                     && activeSearchTermsAccessibilityReady
                     && removedWholeSearchTerm
+                    && numericPrefixSuggestions.Contains("1girl", StringComparer.OrdinalIgnoreCase)
+                    && numericPrefixVisible && enterCommittedSuggestion
+                    && softPrefixSuggestions.Contains("soft light", StringComparer.OrdinalIgnoreCase)
+                    && clickCommittedSuggestion && backspaceRemovedWholeTerm
+                    && coloredSearchTerms && outsideClickDismissesPopup && popupClosed
                     && appended.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && deduped.FilteredNames.SequenceEqual([taggedName], StringComparer.OrdinalIgnoreCase)
                     && sourceUntouched && searchPersisted
@@ -30100,6 +30129,15 @@ public partial class App : Application
                     ActiveSearchTerms = activeSearchTerms,
                     ActiveSearchTermsAccessibilityReady = activeSearchTermsAccessibilityReady,
                     RemovedWholeSearchTerm = removedWholeSearchTerm,
+                    NumericPrefixSuggestions = numericPrefixSuggestions,
+                    NumericPrefixVisible = numericPrefixVisible,
+                    EnterCommittedSuggestion = enterCommittedSuggestion,
+                    SoftPrefixSuggestions = softPrefixSuggestions,
+                    ClickCommittedSuggestion = clickCommittedSuggestion,
+                    BackspaceRemovedWholeTerm = backspaceRemovedWholeTerm,
+                    ColoredSearchTerms = coloredSearchTerms,
+                    OutsideClickDismissesPopup = outsideClickDismissesPopup,
+                    PopupClosed = popupClosed,
                     SourceUntouched = sourceUntouched,
                     SearchPersisted = searchPersisted,
                     ReloadedQuery = reloadedQuery,
@@ -30122,6 +30160,7 @@ public partial class App : Application
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", previousStatePath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", previousSeenPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", previousFavoritesPath);
+                Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEARCH_HISTORY_PATH", previousSearchHistoryPath);
             }
 
             WritePromptTagSearchSmokeResult(resultPath, result);
@@ -33062,6 +33101,15 @@ public partial class App : Application
         public List<string> ActiveSearchTerms { get; init; } = [];
         public bool ActiveSearchTermsAccessibilityReady { get; init; }
         public bool RemovedWholeSearchTerm { get; init; }
+        public List<string> NumericPrefixSuggestions { get; init; } = [];
+        public bool NumericPrefixVisible { get; init; }
+        public bool EnterCommittedSuggestion { get; init; }
+        public List<string> SoftPrefixSuggestions { get; init; } = [];
+        public bool ClickCommittedSuggestion { get; init; }
+        public bool BackspaceRemovedWholeTerm { get; init; }
+        public bool ColoredSearchTerms { get; init; }
+        public bool OutsideClickDismissesPopup { get; init; }
+        public bool PopupClosed { get; init; }
         public bool SourceUntouched { get; init; }
         public bool SearchPersisted { get; init; }
         public string? ReloadedQuery { get; init; }

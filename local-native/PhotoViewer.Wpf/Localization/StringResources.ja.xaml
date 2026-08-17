@@ -2,7 +2,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
-  <sys:String x:Key="UiSearchPlaceholder">ファイル名とPromptを検索。複数条件はカンマで区切ります。</sys:String>
+  <sys:String x:Key="UiSearchPlaceholder">ファイル名とPromptを検索。候補を選ぶかEnterでタグ化。</sys:String>
+  <sys:String x:Key="UiSearchSuggestions">入力候補</sys:String>
   <sys:String x:Key="UiRecentSearches">最近の検索</sys:String>
   <sys:String x:Key="UiClearAll">すべて消去</sys:String>
   <sys:String x:Key="UiNoRecentSearches">検索履歴はありません</sys:String>
