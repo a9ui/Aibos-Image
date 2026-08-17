@@ -21,10 +21,57 @@ public partial class App
         string statePath = Path.Combine(storageRoot, "state.json");
         string stylePath = Path.Combine(storageRoot, "ai-styles.json");
         string activityPath = Path.Combine(storageRoot, "favorite-activity.sqlite3");
+        LocalPersistenceStorePath activityStorePath =
+            LocalPersistenceStorePath.ForManagedTempFixture(
+                activityPath,
+                LocalPersistenceStoreKind.FavoriteActivity);
         string sourcePath = Path.Combine(storageRoot, "fixture-source.bin");
         string firstFavoritePath = Path.Combine(storageRoot, "first.png");
         string secondFavoritePath = Path.Combine(storageRoot, "second.png");
         string thirdFavoritePath = Path.Combine(storageRoot, "third.png");
+        LocalPersistenceStorePath styleStorePath =
+            LocalPersistenceStorePath.ForManagedTempFixture(
+                stylePath,
+                LocalPersistenceStoreKind.AiStyles);
+        LocalPersistenceStorePath stateSiblingStylePath =
+            LocalPersistenceStorePath.ForStateSibling(
+                statePath,
+                LocalPersistenceStoreKind.AiStyles);
+        static bool RejectsInvalidStoreCapability(Func<LocalPersistenceStorePath> create)
+        {
+            try
+            {
+                _ = create();
+                return false;
+            }
+            catch (InvalidDataException)
+            {
+                return true;
+            }
+        }
+        string volumeRoot = Path.GetPathRoot(storageRoot)
+            ?? throw new InvalidOperationException(
+                "The Style state fixture volume root was unavailable.");
+        bool localPersistencePathCapabilities = string.Equals(
+                styleStorePath.FullPath,
+                stylePath,
+                StringComparison.OrdinalIgnoreCase)
+            && string.Equals(
+                stateSiblingStylePath.FullPath,
+                stylePath,
+                StringComparison.OrdinalIgnoreCase)
+            && RejectsInvalidStoreCapability(() =>
+                LocalPersistenceStorePath.ForManagedTempFixture(
+                    Path.Combine(storageRoot, "caller-selected-name.json"),
+                    LocalPersistenceStoreKind.AiStyles))
+            && RejectsInvalidStoreCapability(() =>
+                LocalPersistenceStorePath.ForManagedTempFixture(
+                    Path.Combine(volumeRoot, "ai-styles.json"),
+                    LocalPersistenceStoreKind.AiStyles))
+            && RejectsInvalidStoreCapability(() =>
+                LocalPersistenceStorePath.ForStateSibling(
+                    Path.Combine(volumeRoot, "state.json"),
+                    LocalPersistenceStoreKind.AiStyles));
         MainWindow? window = null;
         object result;
         bool ok = false;
@@ -55,7 +102,7 @@ public partial class App
             window = new MainWindow();
             AiStyleDocument migratedStyles = ReadAiStyleFixture(stylePath);
             FavoriteActivityStoreReadResult migratedActivity = FavoriteActivityStore.Read(
-                activityPath,
+                activityStorePath,
                 20_000);
             long migratedStyleDocumentBytes = new FileInfo(stylePath).Length;
             using JsonDocument compactedState = JsonDocument.Parse(File.ReadAllText(statePath));
@@ -91,7 +138,7 @@ public partial class App
                 TimeSpan.FromSeconds(10));
             string stateAfterActivity = Fingerprint(statePath);
             FavoriteActivityStoreReadResult afterActivity = FavoriteActivityStore.Read(
-                activityPath,
+                activityStorePath,
                 20_000);
             bool incrementalActivityWrite = activityWriteCompleted
                 && string.Equals(stateBeforeActivity, stateAfterActivity, StringComparison.Ordinal)
@@ -104,7 +151,7 @@ public partial class App
                 thirdTime,
                 TimeSpan.FromSeconds(10));
             FavoriteActivityStoreReadResult afterReplay = FavoriteActivityStore.Read(
-                activityPath,
+                activityStorePath,
                 20_000);
             bool idempotentReplay = replayCompleted
                 && afterReplay.State == FavoriteActivityStoreReadState.Loaded
@@ -236,7 +283,8 @@ public partial class App
             window.Close();
             window = null;
 
-            ok = migrationPreserved
+            ok = localPersistencePathCapabilities
+                && migrationPreserved
                 && incrementalActivityWrite
                 && idempotentReplay
                 && concurrentLatestUnknownFieldsPreserved
@@ -249,6 +297,7 @@ public partial class App
             result = new
             {
                 ok,
+                localPersistencePathCapabilities,
                 migrationPreserved,
                 legacyFieldsRemoved,
                 viewerUnknownPreserved,

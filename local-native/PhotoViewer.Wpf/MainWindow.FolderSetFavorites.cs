@@ -20,26 +20,18 @@ public partial class MainWindow
         MaxDepth = 32,
     };
 
-    private static string ResolvedFolderSetFavoritesPath
-    {
-        get
-        {
-            string? overridePath = Environment.GetEnvironmentVariable(
-                "PHOTOVIEWER_WPF_FOLDER_SET_FAVORITES_PATH");
-            if (!string.IsNullOrWhiteSpace(overridePath))
-                return Path.GetFullPath(overridePath);
+    private static LocalPersistenceStorePath ResolvedFolderSetFavoritesStorePath
+        => LocalPersistenceStorePath.ForStateSibling(
+            ResolvedStatePath,
+            LocalPersistenceStoreKind.FolderSetFavorites);
 
-            return Path.Combine(
-                Path.GetDirectoryName(Path.GetFullPath(ResolvedStatePath))
-                    ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "folder-set-favorites.json");
-        }
-    }
+    private static string ResolvedFolderSetFavoritesPath
+        => ResolvedFolderSetFavoritesStorePath.FullPath;
 
     private void RefreshFavoriteFolderSetViews(bool reportFailure = true)
     {
         FolderSetFavoriteReadResult read = ReadFolderSetFavoriteDocument(
-            ResolvedFolderSetFavoritesPath);
+            ResolvedFolderSetFavoritesStorePath);
         if (read.State == FolderSetFavoriteReadState.Protected)
         {
             if (reportFailure)
@@ -71,21 +63,16 @@ public partial class MainWindow
         }
     }
 
-    private static FolderSetFavoriteReadResult ReadFolderSetFavoriteDocument(string path)
+    private static FolderSetFavoriteReadResult ReadFolderSetFavoriteDocument(
+        LocalPersistenceStorePath path)
     {
-        string fullPath = Path.GetFullPath(path);
-        if (!File.Exists(fullPath))
-            return FolderSetFavoriteReadResult.Missing();
-
+        string fullPath = path.FullPath;
         try
         {
-            var info = new FileInfo(fullPath);
-            if (info.Length is <= 0 or > MaximumFolderSetFavoriteDocumentBytes)
-            {
-                return FolderSetFavoriteReadResult.Protected(
-                    "favorite folder set file size was outside the supported bounds");
-            }
-
+            // The typed path fixes the leaf to folder-set-favorites.json beside
+            // the Viewer state store; content is validated from this same
+            // bounded handle so a pre-check cannot race the read.
+            // codeql[cs/path-injection]
             using FileStream stream = new(
                 fullPath,
                 FileMode.Open,
@@ -93,6 +80,11 @@ public partial class MainWindow
                 FileShare.Read,
                 32 * 1024,
                 FileOptions.SequentialScan);
+            if (stream.Length is <= 0 or > MaximumFolderSetFavoriteDocumentBytes)
+            {
+                return FolderSetFavoriteReadResult.Protected(
+                    "favorite folder set file size was outside the supported bounds");
+            }
             using JsonDocument parsed = JsonDocument.Parse(
                 stream,
                 new JsonDocumentOptions { MaxDepth = 32 });
@@ -141,6 +133,14 @@ public partial class MainWindow
             document.FolderSets = normalizedSets;
             return FolderSetFavoriteReadResult.Loaded(document);
         }
+        catch (FileNotFoundException)
+        {
+            return FolderSetFavoriteReadResult.Missing();
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return FolderSetFavoriteReadResult.Missing();
+        }
         catch (Exception error)
         {
             return FolderSetFavoriteReadResult.Protected(error.Message);
@@ -187,9 +187,9 @@ public partial class MainWindow
         Func<List<List<string>>, List<List<string>>> mutation,
         Action retryAction)
     {
-        string path = ResolvedFolderSetFavoritesPath;
+        LocalPersistenceStorePath path = ResolvedFolderSetFavoritesStorePath;
         bool protectedFile = false;
-        bool saved = TryWithPersistenceLock(path, () =>
+        bool saved = TryWithPersistenceLock(path.FullPath, () =>
         {
             FolderSetFavoriteReadResult latest = ReadFolderSetFavoriteDocument(path);
             if (latest.State == FolderSetFavoriteReadState.Protected)
@@ -211,7 +211,7 @@ public partial class MainWindow
             };
             string json = JsonSerializer.Serialize(next, FolderSetFavoriteJsonOptions);
             if (Encoding.UTF8.GetByteCount(json) > MaximumFolderSetFavoriteDocumentBytes
-                || !TryWriteAtomicText(path, json))
+                || !LocalPersistenceStoreFile.TryWriteAtomicText(path, json))
             {
                 return false;
             }
@@ -224,7 +224,7 @@ public partial class MainWindow
         {
             ReportPersistenceRefusal(
                 "Favorite folder sets",
-                path,
+                path.FullPath,
                 protectedFile,
                 protectedFile ? null : retryAction);
             return false;

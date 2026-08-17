@@ -63,6 +63,10 @@ public partial class App
                 string activityPath = Path.Combine(
                     storeRoot,
                     "favorite-activity.sqlite3");
+                LocalPersistenceStorePath activityStorePath =
+                    LocalPersistenceStorePath.ForManagedTempFixture(
+                        activityPath,
+                        LocalPersistenceStoreKind.FavoriteActivity);
                 string jobsPath = Path.Combine(enhancementRoot, "jobs.json");
                 Directory.CreateDirectory(imageRoot);
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
@@ -251,7 +255,9 @@ public partial class App
                 ViewerState? persistedState = JsonSerializer.Deserialize<ViewerState>(
                     File.ReadAllText(statePath));
                 FavoriteActivityStoreReadResult persistedActivity =
-                    FavoriteActivityStore.Read(activityPath, activityEntryCount);
+                    FavoriteActivityStore.Read(
+                        activityStorePath,
+                        activityEntryCount);
                 bool stateExtensionPreserved = persistedState?.ExtensionData is { } extension
                     && extension.TryGetValue("smokeMarker", out JsonElement marker)
                     && marker.ValueKind == JsonValueKind.String
@@ -526,7 +532,9 @@ public partial class App
                 presentationWriterGate.Set();
                 await closeAfterDrain.WaitAsync(TimeSpan.FromSeconds(5));
                 FavoriteActivityStoreReadResult activityAfterCloseDrain =
-                    FavoriteActivityStore.Read(activityPath, activityEntryCount + 10);
+                    FavoriteActivityStore.Read(
+                        activityStorePath,
+                        activityEntryCount + 10);
                 ViewerState? stateAfterCloseDrain = JsonSerializer.Deserialize<ViewerState>(
                     File.ReadAllText(statePath));
                 bool closeDrainExact = presentationWriterBlocked
@@ -583,7 +591,7 @@ public partial class App
                     retryWindowClosed = true;
                     FavoriteActivityStoreReadResult activityAfterRetry =
                         FavoriteActivityStore.Read(
-                            activityPath,
+                            activityStorePath,
                             activityEntryCount + 10);
                     ViewerState? stateAfterRetry = JsonSerializer.Deserialize<ViewerState>(
                         File.ReadAllText(statePath));

@@ -4621,7 +4621,7 @@ public partial class MainWindow : Window
                 {
                     result = PersistFavoritePresentationStateBatch(
                         ResolvedStatePath,
-                        ResolvedFavoriteActivityPath,
+                        ResolvedFavoriteActivityStorePath,
                         _favoriteActivityStoreReady,
                         batch);
                 }
@@ -4694,7 +4694,7 @@ public partial class MainWindow : Window
 
     private static FavoritePresentationStatePersistResult PersistFavoritePresentationStateBatch(
         string statePath,
-        string favoriteActivityPath,
+        LocalPersistenceStorePath favoriteActivityPath,
         bool useFavoriteActivityStore,
         FavoritePresentationStateBatch batch)
     {
@@ -4715,7 +4715,7 @@ public partial class MainWindow : Window
                     evicted,
                     activityResult.Error,
                     "Favorite activity",
-                    favoriteActivityPath);
+                    favoriteActivityPath.FullPath);
             }
             foreach ((string evictedPath, DateTimeOffset evictedTime)
                      in activityResult.EvictedEntries)

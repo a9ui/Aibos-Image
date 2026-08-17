@@ -8937,16 +8937,11 @@ public partial class App : Application
         string? previousFavoritesPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH");
         string? previousStatePath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH");
         string? previousRecentPath = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH");
-        string? previousFolderSetFavoritesPath = Environment.GetEnvironmentVariable(
-            "PHOTOVIEWER_WPF_FOLDER_SET_FAVORITES_PATH");
 
         PrepareSharedSeenSmokeEnvironment(smokeRoot);
         Environment.SetEnvironmentVariable(
             "PHOTOVIEWER_WPF_RECENT_PATH",
             Path.Combine(smokeRoot, ".cache", "recent-folders.json"));
-        Environment.SetEnvironmentVariable(
-            "PHOTOVIEWER_WPF_FOLDER_SET_FAVORITES_PATH",
-            Path.Combine(smokeRoot, ".cache", "folder-set-favorites.json"));
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         var win = HiddenWindow();
@@ -8971,9 +8966,6 @@ public partial class App : Application
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", previousFavoritesPath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", previousStatePath);
                 Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH", previousRecentPath);
-                Environment.SetEnvironmentVariable(
-                    "PHOTOVIEWER_WPF_FOLDER_SET_FAVORITES_PATH",
-                    previousFolderSetFavoritesPath);
             }
 
             WriteFolderSetSmokeResult(resultFullPath, result);
@@ -9006,12 +8998,19 @@ public partial class App : Application
         int recentCountOnStartup = importWindow.RecentFolderSetCountForSmoke;
         importWindow.Close();
 
-        string folderSetFavoritesPath = win.FolderSetFavoritesPathForSmoke;
+        string folderSetFavoritesPath = Path.Combine(
+            cacheRoot,
+            "folder-set-favorites.json");
         win.SetLandingFolderSetForSmoke([fullFolder]);
         bool favoriteSaved = win.SaveCurrentFolderSetFavoriteForSmoke();
         bool favoriteDuplicateDeduplicated = win.SaveCurrentFolderSetFavoriteForSmoke()
             && win.FavoriteFolderSetCountForSmoke == 1;
+        // This is the fixed favorite-set child of CreateManagedAutomationRoot.
+        // codeql[cs/path-injection]
         string folderSetFavoriteJson = File.ReadAllText(folderSetFavoritesPath);
+        // The same fixed TEMP fixture is modified to exercise preservation of
+        // an unknown JSON field; no user-selected media path is written.
+        // codeql[cs/path-injection]
         File.WriteAllText(
             folderSetFavoritesPath,
             folderSetFavoriteJson.Replace(
@@ -9025,9 +9024,15 @@ public partial class App : Application
         bool favoriteRemoved = win.RemoveFavoriteFolderSetForSmoke(0)
             && win.FavoriteFolderSetCountForSmoke == 1
             && SameFolderSet(win.FavoriteFolderSetsForSmoke[0], [fullFolder]);
+        // See the fixed managed-TEMP fixture invariant above.
+        // codeql[cs/path-injection]
         bool favoriteUnknownPreserved = File.ReadAllText(folderSetFavoritesPath)
             .Contains("\"smokeMarker\": \"keep\"", StringComparison.Ordinal);
-        bool favoriteStoreIsolated = Path.GetFullPath(folderSetFavoritesPath)
+        bool favoriteStoreIsolated = string.Equals(
+                win.FolderSetFavoritesPathForSmoke,
+                folderSetFavoritesPath,
+                StringComparison.OrdinalIgnoreCase)
+            && Path.GetFullPath(folderSetFavoritesPath)
             .StartsWith(Path.GetFullPath(smokeRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
         win.SetLandingFolderSetForSmoke([fullFolder, secondFolder]);
@@ -9038,6 +9043,9 @@ public partial class App : Application
         for (int index = 0; index < 10; index++)
         {
             string scrollFolder = Path.Combine(smokeRoot, $"scroll-folder-{index:00}");
+            // smokeRoot is created by CreateManagedAutomationRoot and the
+            // child name is generated entirely by this fixture.
+            // codeql[cs/path-injection]
             Directory.CreateDirectory(scrollFolder);
             scrollFolders.Add(scrollFolder);
         }
@@ -18442,15 +18450,26 @@ public partial class App : Application
                     smokeRoot,
                     ".cache",
                     "state.json");
+                string videoAiStylePath = Path.Combine(
+                    smokeRoot,
+                    ".cache",
+                    "ai-styles.json");
                 AiStyleDocument? persistedVideoStyleState =
                     JsonSerializer.Deserialize<AiStyleDocument>(
-                        File.ReadAllText(win.AiStylePathForSmoke));
+                        // This is the fixed AI Style child of the app-created
+                        // TEMP smoke root.
+                        // codeql[cs/path-injection]
+                        File.ReadAllText(videoAiStylePath));
                 ViewerState? persistedVideoSettingState =
                     JsonSerializer.Deserialize<ViewerState>(
                         File.ReadAllText(videoStatePath));
                 VideoStyleState? persistedVideoStyle =
                     persistedVideoStyleState?.VideoStyles?.SingleOrDefault();
-                bool videoStylePersistence = persistedVideoStyle is not null
+                bool videoStylePersistence = string.Equals(
+                        win.AiStylePathForSmoke,
+                        videoAiStylePath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && persistedVideoStyle is not null
                     && persistedVideoStyle.Name == videoStyleName
                     && persistedVideoStyle.ModelId == "minimax-h3"
                     && persistedVideoStyle.QualityId == "wan22-ti2v-5b-high-v1"
