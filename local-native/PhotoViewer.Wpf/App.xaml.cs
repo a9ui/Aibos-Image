@@ -3592,8 +3592,12 @@ public partial class App : Application
         string? resultDirectory = Path.GetDirectoryName(fullResultPath);
         if (string.IsNullOrWhiteSpace(resultDirectory))
             throw new ArgumentException("The video v2 reader result path is invalid.");
-        ConfigureAutomationStorageRoot(
-            Path.Combine(resultDirectory, "automation-storage"));
+        if (!Directory.Exists(resultDirectory))
+        {
+            throw new ArgumentException(
+                "The video v2 reader result directory must already exist.");
+        }
+        ConfigureAutomationStorageRoot(resultDirectory);
     }
 
     private static void ConfigureAutomationStorageRoot(string root)
@@ -3614,10 +3618,9 @@ public partial class App : Application
         string? requestedSlot = ArgValue(args.ToArray(), "--automation-storage-slot");
         if (string.IsNullOrWhiteSpace(requestedSlot))
         {
-            return Path.Combine(
-                Path.GetTempPath(),
-                "photoviewer-wpf-automation",
-                Guid.NewGuid().ToString("N"));
+            return Directory.CreateTempSubdirectory(
+                    "photoviewer-wpf-automation-")
+                .FullName;
         }
 
         if (!string.Equals(
@@ -3642,9 +3645,8 @@ public partial class App : Application
     // build located inside a source checkout does not place fixtures inside the
     // product's protected project roots.
     private static string CreateManagedAutomationRoot()
-        => Path.Combine(
-            Path.GetFullPath(Path.GetTempPath()),
-            "photoviewer-wpf-automation-" + Guid.NewGuid().ToString("N"));
+        => Directory.CreateTempSubdirectory(
+            "photoviewer-wpf-automation-").FullName;
 
     private static string ResolveLegacySharedDataRootForActivation()
     {
@@ -9005,12 +9007,7 @@ public partial class App : Application
         bool favoriteSaved = win.SaveCurrentFolderSetFavoriteForSmoke();
         bool favoriteDuplicateDeduplicated = win.SaveCurrentFolderSetFavoriteForSmoke()
             && win.FavoriteFolderSetCountForSmoke == 1;
-        // This is the fixed favorite-set child of CreateManagedAutomationRoot.
-        // codeql[cs/path-injection]
         string folderSetFavoriteJson = File.ReadAllText(folderSetFavoritesPath);
-        // The same fixed TEMP fixture is modified to exercise preservation of
-        // an unknown JSON field; no user-selected media path is written.
-        // codeql[cs/path-injection]
         File.WriteAllText(
             folderSetFavoritesPath,
             folderSetFavoriteJson.Replace(
@@ -9024,8 +9021,6 @@ public partial class App : Application
         bool favoriteRemoved = win.RemoveFavoriteFolderSetForSmoke(0)
             && win.FavoriteFolderSetCountForSmoke == 1
             && SameFolderSet(win.FavoriteFolderSetsForSmoke[0], [fullFolder]);
-        // See the fixed managed-TEMP fixture invariant above.
-        // codeql[cs/path-injection]
         bool favoriteUnknownPreserved = File.ReadAllText(folderSetFavoritesPath)
             .Contains("\"smokeMarker\": \"keep\"", StringComparison.Ordinal);
         bool favoriteStoreIsolated = string.Equals(
@@ -9043,9 +9038,6 @@ public partial class App : Application
         for (int index = 0; index < 10; index++)
         {
             string scrollFolder = Path.Combine(smokeRoot, $"scroll-folder-{index:00}");
-            // smokeRoot is created by CreateManagedAutomationRoot and the
-            // child name is generated entirely by this fixture.
-            // codeql[cs/path-injection]
             Directory.CreateDirectory(scrollFolder);
             scrollFolders.Add(scrollFolder);
         }
