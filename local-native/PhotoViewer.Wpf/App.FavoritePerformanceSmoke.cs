@@ -60,6 +60,9 @@ public partial class App
                     "favorite-performance-output.png");
                 string favoritesPath = Path.Combine(storeRoot, "favorites.json");
                 string statePath = Path.Combine(storeRoot, "state.json");
+                string activityPath = Path.Combine(
+                    storeRoot,
+                    "favorite-activity.sqlite3");
                 string jobsPath = Path.Combine(enhancementRoot, "jobs.json");
                 Directory.CreateDirectory(imageRoot);
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
@@ -247,6 +250,8 @@ public partial class App
                         File.ReadAllText(favoritesPath));
                 ViewerState? persistedState = JsonSerializer.Deserialize<ViewerState>(
                     File.ReadAllText(statePath));
+                FavoriteActivityStoreReadResult persistedActivity =
+                    FavoriteActivityStore.Read(activityPath, activityEntryCount);
                 bool stateExtensionPreserved = persistedState?.ExtensionData is { } extension
                     && extension.TryGetValue("smokeMarker", out JsonElement marker)
                     && marker.ValueKind == JsonValueKind.String
@@ -256,10 +261,13 @@ public partial class App
                         Path.GetFullPath(outputPath),
                         out int persistedLevel)
                     && persistedLevel == 2
-                    && persistedState?.FavoriteChangedAtUtcByPath?.Count
-                        == activityEntryCount
-                    && persistedState.FavoriteChangedAtUtcByPath.ContainsKey(
+                    && persistedActivity.State
+                        == FavoriteActivityStoreReadState.Loaded
+                    && persistedActivity.Entries.Count == activityEntryCount
+                    && persistedActivity.Entries.ContainsKey(
                         Path.GetFullPath(outputPath))
+                    && persistedState is not null
+                    && persistedState.FavoriteChangedAtUtcByPath is null
                     && persistedState.PhotorealFavoriteFilterLevels is null
                     && stateExtensionPreserved;
                 bool targetedPresentation =
