@@ -815,8 +815,9 @@ public partial class App
                     loraEnabled: false);
                 bool styleSaved = window.SavePhotorealStyleForSmoke(styleName);
                 window.FlushStateForSmoke();
-                ViewerState? persistedStyleState = JsonSerializer.Deserialize<ViewerState>(
-                    File.ReadAllText(environment["PHOTOVIEWER_WPF_STATE_PATH"]));
+                AiStyleDocument? persistedStyleState =
+                    JsonSerializer.Deserialize<AiStyleDocument>(
+                        File.ReadAllText(window.AiStylePathForSmoke));
                 PhotorealStyleState? persistedStyle =
                     persistedStyleState?.PhotorealStyles?.SingleOrDefault();
                 stylePersistenceContract = persistedStyle is not null
@@ -839,16 +840,18 @@ public partial class App
                         [futureStyleField] = JsonSerializer.SerializeToElement("future-mode"),
                     };
                     File.WriteAllText(
-                        environment["PHOTOVIEWER_WPF_STATE_PATH"],
+                        window.AiStylePathForSmoke,
                         JsonSerializer.Serialize(persistedStyleState));
                 }
                 var reloadedStyleWindow = new MainWindow();
                 try
                 {
                     var reloadedStyleSettings = reloadedStyleWindow.ModalPhotorealSettingsForSmoke;
-                    reloadedStyleWindow.FlushStateForSmoke();
-                    ViewerState? roundTrippedStyleState = JsonSerializer.Deserialize<ViewerState>(
-                        File.ReadAllText(environment["PHOTOVIEWER_WPF_STATE_PATH"]));
+                    bool styleResaved =
+                        reloadedStyleWindow.SavePhotorealStyleForSmoke(styleName);
+                    AiStyleDocument? roundTrippedStyleState =
+                        JsonSerializer.Deserialize<AiStyleDocument>(
+                            File.ReadAllText(reloadedStyleWindow.AiStylePathForSmoke));
                     JsonElement futureStyleValue = default;
                     bool futureStyleFieldPreserved = roundTrippedStyleState?.PhotorealStyles?
                         .SingleOrDefault()?.ExtensionData?
@@ -866,6 +869,7 @@ public partial class App
                         && reloadedStyleSettings.Prompt == stylePrompt
                         && reloadedStyleSettings.EmptyPrompt == styleEmptyPrompt
                         && reloadedStyleSettings.NegativePrompt == styleNegativePrompt
+                        && styleResaved
                         && futureStyleFieldPreserved;
                 }
                 finally
