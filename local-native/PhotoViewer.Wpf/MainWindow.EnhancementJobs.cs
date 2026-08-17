@@ -6330,6 +6330,37 @@ public partial class MainWindow
         return true;
     }
 
+    public static bool TryReadEnhancementJobCancellationForSmoke(
+        JsonElement job,
+        out bool fullMutationSafe,
+        out bool canCancel,
+        out bool cancelVisible,
+        out bool cancelEnabled,
+        out string cancelLabel)
+    {
+        fullMutationSafe = false;
+        canCancel = false;
+        cancelVisible = false;
+        cancelEnabled = false;
+        cancelLabel = "";
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(
+            job,
+            0,
+            static _ => false);
+        if (view is null)
+            return false;
+
+        EnhancementJobActionPresentation action = view.Status == "queued"
+            ? view.Action5
+            : view.Action1;
+        fullMutationSafe = view.IsSupportedMutationOperation;
+        canCancel = view.CanCancel;
+        cancelVisible = action.Visible && action.Kind == "cancel";
+        cancelEnabled = action.Enabled;
+        cancelLabel = action.Label;
+        return true;
+    }
+
     public static bool TryReadEnhancementJobRequestDetailsForSmoke(
         JsonElement job,
         out string requestDetails)
@@ -6495,6 +6526,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool IsActive => Status is "queued" or "running";
     public bool IsImageOperation => Operation is "upscale" or "photoreal" or "i2i";
     public bool IsVideoOperation => Operation == "video";
+    public bool IsKnownOperation =>
+        Operation is "upscale" or "photoreal" or "i2i" or "video";
     public bool IsSupportedMutationOperation =>
         Operation is "upscale" or "photoreal"
         || (Operation == "i2i" && I2iMutationSafe)
@@ -6504,8 +6537,22 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool CanCancel =>
         !_isBusy
         && !CancelRequested
-        && IsSupportedMutationOperation
-        && Status is "queued" or "running" or "failed";
+        && (Status is "queued" or "running"
+            ? IsKnownOperation
+            : Status == "failed" && IsSupportedMutationOperation);
+    public bool ShowCancelAction =>
+        Status is "queued" or "running"
+            ? IsKnownOperation
+            : Status == "failed" && IsSupportedMutationOperation;
+    public string CancelToolTip => CanCancel
+        ? Status == "queued"
+            ? "この待機Jobだけをキャンセルします。実行中のJobは変更しません"
+            : "この処理へ中断要求を送ります。現在の安全な境界で停止します"
+        : CancelRequested
+            ? "中断要求を受付済みです"
+            : _isBusy
+                ? "このJobの別操作が完了するまで待ってください"
+                : "このJobは安全にキャンセルできないため保護されています";
     public bool CanRetry =>
         !_isBusy
         && IsSupportedMutationOperation
@@ -6627,8 +6674,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         "running" or "failed" => JobAction(
             "cancel",
             CancelLabel,
-            "",
-            CanCancel,
+            CancelToolTip,
+            ShowCancelAction,
             CanCancel,
             76),
         "canceled" => JobAction(
@@ -6759,8 +6806,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? JobAction(
             "cancel",
             CancelLabel,
-            "",
-            CanCancel,
+            CancelToolTip,
+            ShowCancelAction,
             CanCancel,
             76)
         : EnhancementJobActionPresentation.Hidden;
@@ -6834,7 +6881,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             expected.Add("move-next");
         if (CanUpdatePhotorealPrompts)
             expected.Add("update-prompts");
-        if (CanCancel)
+        if (ShowCancelAction)
             expected.Add("cancel");
         if (CanRetry)
             expected.Add("retry");

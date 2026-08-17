@@ -19971,6 +19971,13 @@ public partial class App : Application
                     };
                     if (includeProtectedQueuedJob)
                     {
+                        jobs.Insert(0, VideoJob(
+                            "legacy-unsafe-video-queued-job",
+                            QueuedStatus("legacy-unsafe-video-queued-job"),
+                            0,
+                            createdAt: "2026-07-23T00:00:06.500Z",
+                            queueOrder: 899,
+                            sourceProducerJobId: 42));
                         jobs.Insert(0, Job(
                             "protected-queued-job",
                             QueuedStatus("protected-queued-job"),
@@ -21015,6 +21022,27 @@ public partial class App : Application
                     && !sourceCurrentMutationSafe
                     && queueReorderSafe
                     && reorderControlsVisible;
+                using JsonDocument unsafeRunningVideoDocument =
+                    JsonSerializer.SerializeToDocument(
+                        VideoJob(
+                            "unsafe-running-video-cancel",
+                            "running",
+                            17,
+                            sourceProducerJobId: 42));
+                bool activeCancellationDecoupledFromRetryProvenance =
+                    PhotoViewer.Wpf.MainWindow
+                        .TryReadEnhancementJobCancellationForSmoke(
+                            unsafeRunningVideoDocument.RootElement,
+                            out bool unsafeVideoFullMutationSafe,
+                            out bool unsafeVideoCanCancel,
+                            out bool unsafeVideoCancelVisible,
+                            out bool unsafeVideoCancelEnabled,
+                            out string unsafeVideoCancelLabel)
+                    && !unsafeVideoFullMutationSafe
+                    && unsafeVideoCanCancel
+                    && unsafeVideoCancelVisible
+                    && unsafeVideoCancelEnabled
+                    && unsafeVideoCancelLabel == "動画化を中止";
                 using JsonDocument photorealDetailsDocument =
                     JsonSerializer.SerializeToDocument(new
                     {
@@ -21482,6 +21510,22 @@ public partial class App : Application
                 window.SelectEnhancementJobsOperationFilterForSmoke("all");
                 includeProtectedQueuedJob = true;
                 await window.RefreshEnhancementJobsForSmokeAsync();
+                var unsafeQueuedVideoView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "legacy-unsafe-video-queued-job")
+                        as EnhancementWorkspaceJobView;
+                bool unsafeQueuedVideoCancelAvailable =
+                    unsafeQueuedVideoView is
+                    {
+                        VideoMutationSafe: false,
+                        CanCancel: true,
+                    }
+                    && unsafeQueuedVideoView.Action5 is
+                    {
+                        Kind: "cancel",
+                        Visible: true,
+                        Enabled: true,
+                    };
                 int requestsBeforeProtectedQueuedClear = requests.Count;
                 bool protectedQueuedClearIssued =
                     await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
@@ -21492,10 +21536,14 @@ public partial class App : Application
                         StringComparison.Ordinal))
                     .ToArray();
                 bool protectedQueuedClearContract = protectedQueuedClearIssued
+                    && unsafeQueuedVideoCancelAvailable
                     && protectedQueuedClearRequests.Length > 0
                     && protectedQueuedClearRequests.All(static request =>
                         request.StartsWith("POST ", StringComparison.Ordinal)
                         && request.EndsWith("/cancel", StringComparison.Ordinal))
+                    && protectedQueuedClearRequests.Contains(
+                        "POST /api/enhance/jobs/legacy-unsafe-video-queued-job/cancel",
+                        StringComparer.Ordinal)
                     && !protectedQueuedClearRequests.Any(static request =>
                         request.Contains(
                             "protected-queued-job",
@@ -22017,6 +22065,7 @@ public partial class App : Application
                     && operationLabelsVisible
                     && videoActionsEnabled
                     && currentSourceIndependentQueueReorder
+                    && activeCancellationDecoupledFromRetryProvenance
                     && reorderLabelsVisible
                     && savedPromptDetailsContract
                     && photorealPromptDetailsContract
@@ -22190,6 +22239,7 @@ public partial class App : Application
                     queuedPromptUpdateContract,
                     bulkQueuedPromptUpdateContract,
                     afterQueuedPromptUpdate,
+                    protectedQueuedClearContract,
                     clearQueuedIssued,
                     afterClearQueued,
                     whileOutputViewerOpen,
@@ -22220,6 +22270,7 @@ public partial class App : Application
                     operationLabelsVisible,
                     videoActionsEnabled,
                     currentSourceIndependentQueueReorder,
+                    activeCancellationDecoupledFromRetryProvenance,
                     reorderLabelsVisible,
                     savedPromptDetailsContract,
                     photorealPromptDetailsContract,
