@@ -19373,7 +19373,9 @@ public partial class App : Application
                     && snapshot.ActionPresentationContract
                     && snapshot.RealizedContainerPeak > 0
                     && snapshot.RealizedContainerPeak <= 8
-                    && snapshot.RealizedButtonPeak <= snapshot.RealizedContainerPeak * 7
+                    // Seven action/source buttons plus the passive Details
+                    // toggle and its collapsed Copy button per realized row.
+                    && snapshot.RealizedButtonPeak <= snapshot.RealizedContainerPeak * 9
                     && snapshot.ThumbnailBatchSize == 0;
                 result = new
                 {
@@ -20826,6 +20828,113 @@ public partial class App : Application
                 var completedPhotorealView =
                     window.EnhancementJobViewIdentityForSmoke("done-job")
                         as EnhancementWorkspaceJobView;
+                using JsonDocument reorderSafetyDocument =
+                    JsonSerializer.SerializeToDocument(
+                        VideoJob(
+                            "source-stale-but-structurally-valid",
+                            "queued",
+                            0,
+                            queueOrder: 1));
+                bool currentSourceIndependentQueueReorder = PhotoViewer.Wpf.MainWindow
+                    .TryReadEnhancementJobQueueReorderSafetyForSmoke(
+                        reorderSafetyDocument.RootElement,
+                        out bool sourceCurrentMutationSafe,
+                        out bool queueReorderSafe,
+                        out bool reorderControlsVisible)
+                    && !sourceCurrentMutationSafe
+                    && queueReorderSafe
+                    && reorderControlsVisible;
+                using JsonDocument photorealDetailsDocument =
+                    JsonSerializer.SerializeToDocument(new
+                    {
+                        id = "photoreal-details-job",
+                        sourceId = sourcePath,
+                        sourcePath,
+                        presetId = "photoreal-balanced",
+                        adapterId = "comfyui-flux2-photoreal",
+                        operation = "photoreal",
+                        status = "queued",
+                        progress = 0,
+                        queueOrder = 0,
+                        createdAt = "2026-07-23T00:00:00.000Z",
+                        updatedAt = "2026-07-23T00:00:01.000Z",
+                        secret = "must-not-be-displayed",
+                        preset = new
+                        {
+                            denoise = 0.45,
+                            options = new
+                            {
+                                prompt = "saved photoreal prompt",
+                                negativePrompt = "saved photoreal negative",
+                                loraEnabled = false,
+                                strength = 0.45,
+                                steps = 6,
+                                cfgScale = 1.4,
+                                maxDimension = 1024,
+                                seed = 123456789,
+                                privateToken = "must-not-be-displayed",
+                            },
+                        },
+                    });
+                bool photorealPromptDetailsContract = PhotoViewer.Wpf.MainWindow
+                    .TryReadEnhancementJobRequestDetailsForSmoke(
+                        photorealDetailsDocument.RootElement,
+                        out string photorealRequestDetails)
+                    && photorealRequestDetails.Contains(
+                        "saved photoreal prompt",
+                        StringComparison.Ordinal)
+                    && photorealRequestDetails.Contains(
+                        "saved photoreal negative",
+                        StringComparison.Ordinal)
+                    && photorealRequestDetails.Contains(
+                        "Strength: 0.45",
+                        StringComparison.Ordinal)
+                    && photorealRequestDetails.Contains(
+                        "CFG: 1.4",
+                        StringComparison.Ordinal)
+                    && photorealRequestDetails.Contains(
+                        "最大辺: 1024",
+                        StringComparison.Ordinal)
+                    && !photorealRequestDetails.Contains(
+                        "must-not-be-displayed",
+                        StringComparison.Ordinal);
+                bool savedPromptDetailsContract = failedVideoView is not null
+                    && failedVideoView.RequestDetailsText.Contains(
+                        "髪を揺らす",
+                        StringComparison.Ordinal)
+                    && failedVideoView.RequestDetailsText.Contains(
+                        "Negative Prompt:",
+                        StringComparison.Ordinal)
+                    && failedVideoView.RequestDetailsText.Contains(
+                        "STEP: 20",
+                        StringComparison.Ordinal)
+                    && failedVideoView.RequestDetailsText.Contains(
+                        "Seed: 123456789",
+                        StringComparison.Ordinal)
+                    && !failedVideoView.RequestDetailsExpanded;
+                if (failedVideoView is not null)
+                {
+                    failedVideoView.RequestDetailsExpanded = true;
+                    savedPromptDetailsContract &=
+                        failedVideoView.RequestDetailsExpanded
+                        && failedVideoView.RequestDetailsButtonLabel == "詳細を閉じる";
+                    failedVideoView.RequestDetailsExpanded = false;
+                    savedPromptDetailsContract &=
+                        failedVideoView.RequestDetailsButtonLabel == "詳細";
+                }
+                bool reorderLabelsVisible = queuedVideoView is not null
+                    && queuedVideoView.Action1 is
+                    {
+                        Kind: "move-up",
+                        Label: "↑ 上へ",
+                        Visible: true,
+                    }
+                    && queuedVideoView.Action2 is
+                    {
+                        Kind: "move-down",
+                        Label: "↓ 下へ",
+                        Visible: true,
+                    };
                 int requestsBeforeUnsupportedActions = requests.Count;
                 bool legacyVideoMutationSafe = activeVideoView is
                     {
@@ -21662,6 +21771,10 @@ public partial class App : Application
                     && canceled.Filtered == 3
                     && operationLabelsVisible
                     && videoActionsEnabled
+                    && currentSourceIndependentQueueReorder
+                    && reorderLabelsVisible
+                    && savedPromptDetailsContract
+                    && photorealPromptDetailsContract
                     && legacyVideoMutationSafe
                     && deliveryVideoMutationSafe
                     && readerOnlyVideoSafe
@@ -21861,6 +21974,10 @@ public partial class App : Application
                     queueInventoryOrdered,
                     operationLabelsVisible,
                     videoActionsEnabled,
+                    currentSourceIndependentQueueReorder,
+                    reorderLabelsVisible,
+                    savedPromptDetailsContract,
+                    photorealPromptDetailsContract,
                     legacyVideoMutationSafe,
                     deliveryVideoMutationSafe,
                     readerOnlyVideoSafe,

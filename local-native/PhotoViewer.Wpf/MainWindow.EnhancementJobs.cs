@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -24,6 +25,7 @@ public partial class MainWindow
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private const int EnhancementJobsPageSize = 100;
     private const int EnhancementTerminalHistoryBatchLimit = 1_000;
+    private const int EnhancementJobRequestDetailsMaximumLength = 32_768;
     private static readonly TimeSpan EnhancementJobsThumbnailViewportDebounce =
         TimeSpan.FromMilliseconds(140);
     private const string UnsupportedEnhancementOperation = "unsupported";
@@ -832,6 +834,268 @@ public partial class MainWindow
         return requestedPrompt.Length == 0
             ? $"{VideoPreservationPreamble} {VideoBlankPromptMotion}"
             : $"{VideoPreservationPreamble} Follow this motion direction: {requestedPrompt}";
+    }
+
+    private static string BuildEnhancementJobRequestDetails(
+        JsonElement job,
+        string operation,
+        string id,
+        string sourcePath,
+        string presetId,
+        string adapterId,
+        I2iV3WorkspaceSnapshot? i2iV3Snapshot)
+    {
+        var builder = new StringBuilder();
+        AppendEnhancementJobDetailLine(builder, "処理", operation switch
+        {
+            "upscale" => "高画質化",
+            "photoreal" => "実写化",
+            "i2i" => "AI編集",
+            "video" => "動画化",
+            _ => "未対応",
+        });
+        AppendEnhancementJobDetailLine(builder, "Job ID", id);
+        AppendEnhancementJobDetailLine(
+            builder,
+            "元画像",
+            string.IsNullOrWhiteSpace(sourcePath)
+                ? "不明"
+                : Path.GetFileName(sourcePath));
+        AppendEnhancementJobDetailLine(builder, "Preset", presetId);
+        AppendEnhancementJobDetailLine(builder, "Adapter", adapterId);
+
+        bool promptWritten = false;
+        if (operation == "video"
+            && job.TryGetProperty("video", out JsonElement video)
+            && video.ValueKind == JsonValueKind.Object)
+        {
+            if (video.TryGetProperty("requested", out JsonElement requested)
+                && requested.ValueKind == JsonValueKind.Object)
+            {
+                promptWritten |= AppendEnhancementJobDetailText(
+                    builder,
+                    "Prompt",
+                    requested,
+                    "prompt",
+                    includeEmpty: true);
+                AppendEnhancementJobDetailValue(builder, "Profile", requested, "profileId");
+                AppendEnhancementJobDetailValue(builder, "長さ（秒）", requested, "durationSeconds");
+                AppendEnhancementJobDetailValue(builder, "再生FPS", requested, "playbackFps");
+                AppendEnhancementJobDetailValue(builder, "最大Pixel面積", requested, "maximumPixelArea");
+                AppendEnhancementJobDetailValue(builder, "STEP", requested, "steps");
+            }
+            if (video.TryGetProperty("effective", out JsonElement effective)
+                && effective.ValueKind == JsonValueKind.Object)
+            {
+                promptWritten |= AppendEnhancementJobDetailText(
+                    builder,
+                    "実効Prompt",
+                    effective,
+                    "positivePrompt",
+                    includeEmpty: false);
+                AppendEnhancementJobDetailText(
+                    builder,
+                    "Negative Prompt",
+                    effective,
+                    "negativePrompt",
+                    includeEmpty: true);
+                AppendEnhancementJobDetailValue(builder, "幅", effective, "width");
+                AppendEnhancementJobDetailValue(builder, "高さ", effective, "height");
+                AppendEnhancementJobDetailValue(builder, "Frame数", effective, "frameCount");
+                AppendEnhancementJobDetailValue(builder, "再生FPS", effective, "playbackFps");
+                AppendEnhancementJobDetailValue(builder, "STEP", effective, "steps");
+                AppendEnhancementJobDetailValue(builder, "CFG", effective, "cfg");
+                AppendEnhancementJobDetailValue(builder, "Sampler", effective, "sampler");
+                AppendEnhancementJobDetailValue(builder, "Scheduler", effective, "scheduler");
+            }
+            AppendEnhancementJobDetailValue(builder, "Seed", video, "seed");
+        }
+        else
+        {
+            if (i2iV3Snapshot is not null)
+            {
+                promptWritten |= AppendEnhancementJobDetailText(
+                    builder,
+                    "全体",
+                    i2iV3Snapshot.Overall,
+                    includeEmpty: true);
+                promptWritten |= AppendEnhancementJobDetailText(
+                    builder,
+                    "表情",
+                    i2iV3Snapshot.Expression,
+                    includeEmpty: true);
+                promptWritten |= AppendEnhancementJobDetailText(
+                    builder,
+                    "服装",
+                    i2iV3Snapshot.Outfit,
+                    includeEmpty: true);
+                promptWritten |= AppendEnhancementJobDetailText(
+                    builder,
+                    "背景",
+                    i2iV3Snapshot.Background,
+                    includeEmpty: true);
+                promptWritten |= AppendEnhancementJobDetailText(
+                    builder,
+                    "ポーズ",
+                    i2iV3Snapshot.Pose,
+                    includeEmpty: true);
+            }
+
+            if (job.TryGetProperty("preset", out JsonElement preset)
+                && preset.ValueKind == JsonValueKind.Object)
+            {
+                AppendEnhancementJobDetailValue(builder, "Denoise", preset, "denoise");
+                if (preset.TryGetProperty("options", out JsonElement options)
+                    && options.ValueKind == JsonValueKind.Object)
+                {
+                    if (i2iV3Snapshot is null)
+                    {
+                        promptWritten |= AppendEnhancementJobDetailText(
+                            builder,
+                            "全体",
+                            options,
+                            "overallInstruction",
+                            includeEmpty: true);
+                        promptWritten |= AppendEnhancementJobDetailText(
+                            builder,
+                            "表情",
+                            options,
+                            "expressionInstruction",
+                            includeEmpty: true);
+                        promptWritten |= AppendEnhancementJobDetailText(
+                            builder,
+                            "服装",
+                            options,
+                            "outfitInstruction",
+                            includeEmpty: true);
+                        promptWritten |= AppendEnhancementJobDetailText(
+                            builder,
+                            "背景",
+                            options,
+                            "backgroundInstruction",
+                            includeEmpty: true);
+                        promptWritten |= AppendEnhancementJobDetailText(
+                            builder,
+                            "ポーズ",
+                            options,
+                            "poseInstruction",
+                            includeEmpty: true);
+                    }
+                    promptWritten |= AppendEnhancementJobDetailText(
+                        builder,
+                        i2iV3Snapshot is null ? "Prompt" : "合成Prompt",
+                        options,
+                        "prompt",
+                        includeEmpty: true);
+                    AppendEnhancementJobDetailText(
+                        builder,
+                        "Negative Prompt",
+                        options,
+                        "negativePrompt",
+                        includeEmpty: true);
+                    AppendEnhancementJobDetailValue(builder, "LoRA", options, "loraEnabled");
+                    AppendEnhancementJobDetailValue(builder, "Strength", options, "strength");
+                    AppendEnhancementJobDetailValue(builder, "STEP", options, "steps");
+                    AppendEnhancementJobDetailValue(builder, "CFG", options, "cfgScale");
+                    AppendEnhancementJobDetailValue(builder, "最大辺", options, "maxDimension");
+                    AppendEnhancementJobDetailValue(builder, "Seed", options, "seed");
+                    AppendEnhancementJobDetailValue(builder, "服装マスク", options, "outfitMaskMode");
+                    AppendEnhancementJobDetailValue(builder, "マスク外縁", options, "outfitMaskExpandPixels", " px");
+                }
+            }
+
+            if (!promptWritten)
+            {
+                promptWritten |= AppendEnhancementJobDetailText(
+                    builder,
+                    "Prompt",
+                    job,
+                    "prompt",
+                    includeEmpty: true);
+                AppendEnhancementJobDetailText(
+                    builder,
+                    "Negative Prompt",
+                    job,
+                    "negativePrompt",
+                    includeEmpty: true);
+            }
+        }
+
+        if (!promptWritten)
+            AppendEnhancementJobDetailLine(builder, "Prompt", "このJobには保存されていません");
+
+        string details = builder.ToString().TrimEnd();
+        if (details.Length <= EnhancementJobRequestDetailsMaximumLength)
+            return details;
+        return details[..(EnhancementJobRequestDetailsMaximumLength - 2)] + "\n…";
+    }
+
+    private static bool AppendEnhancementJobDetailText(
+        StringBuilder builder,
+        string label,
+        JsonElement parent,
+        string propertyName,
+        bool includeEmpty)
+    {
+        if (!parent.TryGetProperty(propertyName, out JsonElement value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+        return AppendEnhancementJobDetailText(
+            builder,
+            label,
+            value.GetString() ?? "",
+            includeEmpty);
+    }
+
+    private static bool AppendEnhancementJobDetailText(
+        StringBuilder builder,
+        string label,
+        string value,
+        bool includeEmpty)
+    {
+        string normalized = value.Trim();
+        if (normalized.Length == 0 && !includeEmpty)
+            return false;
+        if (normalized.Length > MaxVideoPromptLength)
+            normalized = normalized[..MaxVideoPromptLength] + "…";
+        builder.Append(label).AppendLine(":");
+        builder.AppendLine(normalized.Length == 0 ? "（空欄）" : normalized);
+        return true;
+    }
+
+    private static void AppendEnhancementJobDetailValue(
+        StringBuilder builder,
+        string label,
+        JsonElement parent,
+        string propertyName,
+        string suffix = "")
+    {
+        if (!parent.TryGetProperty(propertyName, out JsonElement value))
+            return;
+        string? text = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.GetRawText(),
+            JsonValueKind.Null => "ランダム",
+            _ => null,
+        };
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+        AppendEnhancementJobDetailLine(builder, label, text + suffix);
+    }
+
+    private static void AppendEnhancementJobDetailLine(
+        StringBuilder builder,
+        string label,
+        string value)
+    {
+        const int maximumValueLength = 1_024;
+        string bounded = value.Length <= maximumValueLength
+            ? value
+            : value[..maximumValueLength] + "…";
+        builder.Append(label).Append(": ").AppendLine(bounded);
     }
 
     private static bool HasExactInt32(
@@ -2202,7 +2466,7 @@ public partial class MainWindow
             .ThenBy(static candidate => candidate.ApiOrdinal)
             .ToArray();
         bool queueMutationScopeSafe =
-            queued.All(static candidate => candidate.IsSupportedMutationOperation);
+            queued.All(static candidate => candidate.QueueReorderSafe);
         foreach (EnhancementWorkspaceJobView job in queued)
         {
             job.QueuePosition = position++;
@@ -2316,17 +2580,26 @@ public partial class MainWindow
             && (IsI2iMutationSafe(element)
                 || i2iV2Info is not null
                 || i2iV3Info is not null);
+        bool structurallySafeVideo = operation == "video"
+            && IsStructurallyVideoMutationSafe(element);
+        bool videoMutationSafe = operation == "video"
+            && (videoMutationValidator?.Invoke(element)
+                ?? structurallySafeVideo);
+        bool queueReorderSafe = operation is "upscale" or "photoreal"
+            || (operation == "i2i" && i2iMutationSafe)
+            || structurallySafeVideo;
+        string resolvedPresetId = presetId ?? "Default preset";
+        string resolvedAdapterId = adapterId ?? "local companion";
         return new EnhancementWorkspaceJobView(
             id!,
             sourceId ?? "",
             sourcePath ?? "",
             sourceProducerJobId,
-            presetId ?? "Default preset",
-            adapterId ?? "local companion",
+            resolvedPresetId,
+            resolvedAdapterId,
             operation,
-            operation == "video"
-                && (videoMutationValidator?.Invoke(element)
-                    ?? IsStructurallyVideoMutationSafe(element)),
+            videoMutationSafe,
+            queueReorderSafe,
             i2iMutationSafe,
             i2iV3Info is not null
                 ? 3
@@ -2351,6 +2624,14 @@ public partial class MainWindow
             sourceMtimeMs,
             queueOrder,
             apiOrdinal,
+            BuildEnhancementJobRequestDetails(
+                element,
+                operation,
+                id!,
+                sourcePath ?? "",
+                resolvedPresetId,
+                resolvedAdapterId,
+                i2iV3Info?.Snapshot),
             i2iV3Info?.Snapshot);
     }
 
@@ -2880,6 +3161,39 @@ public partial class MainWindow
             case "delete-output":
                 DeleteEnhancementOutput_Click(sender, e);
                 break;
+        }
+    }
+
+    private void ToggleEnhancementJobDetails_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: EnhancementWorkspaceJobView job })
+            job.RequestDetailsExpanded = !job.RequestDetailsExpanded;
+    }
+
+    private void CopyEnhancementJobDetails_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: EnhancementWorkspaceJobView job } button
+            || string.IsNullOrWhiteSpace(job.RequestDetailsText))
+        {
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(job.RequestDetailsText);
+            EnhancementJobsStatusText.Text =
+                $"{job.SourceName} のPrompt・設定をコピーしました。";
+        }
+        catch (Exception ex) when (
+            ex is ExternalException or InvalidOperationException)
+        {
+            button.ToolTip = $"コピーできませんでした: {ex.Message}";
+            EnhancementJobsStatusText.Text =
+                "Clipboardを使用中です。少し待ってからもう一度試してください。";
         }
     }
 
@@ -5065,6 +5379,7 @@ public partial class MainWindow
                     : "synthetic-adapter",
                 operation,
                 videoMutationSafe: operation == "video",
+                queueReorderSafe: true,
                 i2iMutationSafe: operation == "i2i",
                 i2iSchemaVersion: operation == "i2i" ? 2 : null,
                 i2iTarget: operation == "i2i" ? "hair_color" : null,
@@ -5086,7 +5401,9 @@ public partial class MainWindow
                 sourceSize: 1_024,
                 sourceMtimeMs: createdAt.ToUnixTimeMilliseconds(),
                 queueOrder: status == "queued" ? index : null,
-                apiOrdinal: index);
+                apiOrdinal: index,
+                requestDetailsText:
+                    $"処理: {operation}\nJob ID: synthetic-job-{index:D5}\nPrompt:\nsynthetic");
             if (status == "queued")
             {
                 int queuePosition = index / 5 + 1;
@@ -5748,6 +6065,40 @@ public partial class MainWindow
         return true;
     }
 
+    public static bool TryReadEnhancementJobQueueReorderSafetyForSmoke(
+        JsonElement job,
+        out bool supportedMutation,
+        out bool queueReorderSafe,
+        out bool reorderControlsVisible)
+    {
+        supportedMutation = false;
+        queueReorderSafe = false;
+        reorderControlsVisible = false;
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(
+            job,
+            0,
+            static _ => false);
+        if (view is null)
+            return false;
+        view.ApplyQueuePresentation(queuePosition: 2, queueCount: 3, queueOrder: 1);
+        supportedMutation = view.IsSupportedMutationOperation;
+        queueReorderSafe = view.QueueReorderSafe;
+        reorderControlsVisible = view.ShowReorderControls;
+        return true;
+    }
+
+    public static bool TryReadEnhancementJobRequestDetailsForSmoke(
+        JsonElement job,
+        out string requestDetails)
+    {
+        requestDetails = "";
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(job, 0);
+        if (view is null)
+            return false;
+        requestDetails = view.RequestDetailsText;
+        return true;
+    }
+
     public static bool IsMiniMaxH3VideoMutationSafeForSmoke(JsonElement job)
         => IsMiniMaxH3VideoMutationSafe(job);
 
@@ -5801,6 +6152,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     private BitmapSource? _thumbnail;
     private bool _isBusy;
     private bool _isHighlighted;
+    private bool _requestDetailsExpanded;
+    private string _requestDetailsText;
     private bool _queuedPhotorealPromptUpdateCapabilitySafe;
     private bool _photorealEnqueueNextCapabilitySafe;
 
@@ -5813,6 +6166,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         string adapterId,
         string operation,
         bool videoMutationSafe,
+        bool queueReorderSafe,
         bool i2iMutationSafe,
         int? i2iSchemaVersion,
         string? i2iTarget,
@@ -5831,6 +6185,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         double? sourceMtimeMs,
         int? queueOrder,
         int apiOrdinal,
+        string requestDetailsText,
         I2iV3WorkspaceSnapshot? i2iV3Snapshot = null)
     {
         Id = id;
@@ -5841,6 +6196,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         AdapterId = adapterId;
         Operation = operation;
         VideoMutationSafe = videoMutationSafe;
+        QueueReorderSafe = queueReorderSafe;
         I2iMutationSafe = i2iMutationSafe;
         I2iSchemaVersion = i2iSchemaVersion;
         I2iTarget = i2iTarget;
@@ -5860,6 +6216,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         SourceMtimeMs = sourceMtimeMs;
         QueueOrder = queueOrder;
         ApiOrdinal = apiOrdinal;
+        _requestDetailsText = requestDetailsText;
     }
 
     public string Id { get; }
@@ -5870,6 +6227,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string AdapterId { get; }
     public string Operation { get; }
     public bool VideoMutationSafe { get; }
+    public bool QueueReorderSafe { get; }
     public bool I2iMutationSafe { get; }
     public int? I2iSchemaVersion { get; }
     public string? I2iTarget { get; }
@@ -5920,7 +6278,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && IsSupportedMutationOperation
         && Status is "failed" or "canceled" or "deleted";
     public bool ShowReorderControls =>
-        IsSupportedMutationOperation
+        QueueReorderSafe
         && QueueMutationScopeSafe
         && Status == "queued";
     public bool CanReorder => !_isBusy && ShowReorderControls;
@@ -5989,6 +6347,23 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && Status == "succeeded"
         && !string.IsNullOrWhiteSpace(OutputPath);
     public bool CanDeleteOutput => CanUseOutput && !OutputDependencyProtected;
+    public string RequestDetailsText => _requestDetailsText;
+    public bool RequestDetailsExpanded
+    {
+        get => _requestDetailsExpanded;
+        set
+        {
+            if (_requestDetailsExpanded == value)
+                return;
+            _requestDetailsExpanded = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+                nameof(RequestDetailsExpanded)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+                nameof(RequestDetailsButtonLabel)));
+        }
+    }
+    public string RequestDetailsButtonLabel =>
+        RequestDetailsExpanded ? "詳細を閉じる" : "詳細";
     public EnhancementJobActionPresentation Action1 => CanRerunI2iV3
         ? JobAction(
             "i2i-v3-rerun",
@@ -6001,11 +6376,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         "queued" => JobAction(
             "move-up",
-            "↑",
+            "↑ 上へ",
             "待機順を1つ上へ",
             ShowMoveUp,
             CanMoveUp,
-            32),
+            58),
         "running" or "failed" => JobAction(
             "cancel",
             CancelLabel,
@@ -6041,11 +6416,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         "queued" => JobAction(
             "move-down",
-            "↓",
+            "↓ 下へ",
             "待機順を1つ下へ",
             ShowMoveDown,
             CanMoveDown,
-            32),
+            58),
         "failed" => JobAction(
             "retry",
             RetryLabel,
@@ -6397,6 +6772,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             && string.Equals(AdapterId, candidate.AdapterId, StringComparison.Ordinal)
             && string.Equals(Operation, candidate.Operation, StringComparison.Ordinal)
             && VideoMutationSafe == candidate.VideoMutationSafe
+            && QueueReorderSafe == candidate.QueueReorderSafe
             && I2iMutationSafe == candidate.I2iMutationSafe
             && I2iSchemaVersion == candidate.I2iSchemaVersion
             && string.Equals(I2iTarget, candidate.I2iTarget, StringComparison.Ordinal)
@@ -6427,6 +6803,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             QueueMutationScopeSafe != candidate.QueueMutationScopeSafe;
         bool outputDependencyChanged =
             OutputDependencyProtected != candidate.OutputDependencyProtected;
+        bool requestDetailsChanged = !string.Equals(
+            _requestDetailsText,
+            candidate._requestDetailsText,
+            StringComparison.Ordinal);
 
         Status = candidate.Status;
         CancelRequested = candidate.CancelRequested;
@@ -6441,7 +6821,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         QueueCount = candidate.QueueCount;
         QueueMutationScopeSafe = candidate.QueueMutationScopeSafe;
         OutputDependencyProtected = candidate.OutputDependencyProtected;
+        _requestDetailsText = candidate._requestDetailsText;
         IsHighlighted = candidate.IsHighlighted;
+
+        if (requestDetailsChanged)
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+                nameof(RequestDetailsText)));
 
         if (progressChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));
