@@ -19642,6 +19642,8 @@ public partial class App : Application
                 TaskCompletionSource<bool>? jobsGetGate = null;
                 string jobsResponseMode = "normal";
                 bool allQueuedCanceled = false;
+                var individuallyCanceledQueuedJobs = new HashSet<string>(
+                    StringComparer.Ordinal);
                 bool outputDeleted = false;
                 bool videoOutputDeleted = false;
                 bool reverseJobsForReturn = false;
@@ -19829,17 +19831,22 @@ public partial class App : Application
 
                 object[] CurrentJobs()
                 {
+                    string QueuedStatus(string id)
+                        => allQueuedCanceled
+                            || individuallyCanceledQueuedJobs.Contains(id)
+                                ? "canceled"
+                                : "queued";
                     var jobs = new List<object>
                     {
                         VideoJob(
                             "queue-later-job",
-                            allQueuedCanceled ? "canceled" : "queued",
+                            QueuedStatus("queue-later-job"),
                             0,
                             createdAt: "2026-07-23T00:00:03.000Z",
                             queueOrder: queueLaterFirst ? 0 : 1),
                         VideoJob(
                             "delivery-queue-job",
-                            allQueuedCanceled ? "canceled" : "queued",
+                            QueuedStatus("delivery-queue-job"),
                             0,
                             createdAt: "2026-07-23T00:00:03.500Z",
                             queueOrder: 2,
@@ -19889,7 +19896,7 @@ public partial class App : Application
                             createdAt: "2026-07-23T00:00:01.000Z"),
                         Job(
                             "queue-first-job",
-                            allQueuedCanceled ? "canceled" : "queued",
+                            QueuedStatus("queue-first-job"),
                             0,
                             operation: "photoreal",
                             createdAt: "2026-07-23T00:00:02.000Z",
@@ -19960,7 +19967,7 @@ public partial class App : Application
                     if (retryCreated)
                         jobs.Insert(0, VideoJob(
                             "retry-job",
-                            allQueuedCanceled ? "canceled" : "queued",
+                            QueuedStatus("retry-job"),
                             0,
                             createdAt: "2026-07-23T00:00:04.000Z",
                             queueOrder: 3));
@@ -19973,7 +19980,7 @@ public partial class App : Application
                     if (canceledRetryCreated)
                         jobs.Insert(0, Job(
                             "canceled-retry-job",
-                            allQueuedCanceled ? "canceled" : "queued",
+                            QueuedStatus("canceled-retry-job"),
                             0,
                             operation: "photoreal",
                             createdAt: "2026-07-23T00:00:05.000Z",
@@ -19981,7 +19988,7 @@ public partial class App : Application
                     if (rerunCreated)
                         jobs.Insert(0, Job(
                             "rerun-job",
-                            allQueuedCanceled ? "canceled" : "queued",
+                            QueuedStatus("rerun-job"),
                             0,
                             operation: "photoreal",
                             createdAt: "2026-07-23T00:00:06.000Z",
@@ -19989,7 +19996,7 @@ public partial class App : Application
                     if (bulkRetryCreated)
                         jobs.Insert(0, VideoJob(
                             "bulk-retry-job",
-                            allQueuedCanceled ? "canceled" : "queued",
+                            QueuedStatus("bulk-retry-job"),
                             0,
                             createdAt: "2026-07-23T00:00:07.000Z",
                             queueOrder: 6,
@@ -20291,7 +20298,21 @@ public partial class App : Application
                                 "canceled",
                                 18,
                                 operation: "photoreal"),
-                        }));
+                            }));
+                    }
+                    if (request.Method == HttpMethod.Post
+                        && route.EndsWith("/cancel", StringComparison.Ordinal))
+                    {
+                        string[] segments = route.Split(
+                            '/',
+                            StringSplitOptions.RemoveEmptyEntries);
+                        string jobId = segments.Length >= 2
+                            ? segments[^2]
+                            : "unknown-job";
+                        individuallyCanceledQueuedJobs.Add(jobId);
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.Accepted,
+                            new { canceled = true, id = jobId }));
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/failed-retry-job/retry", StringComparison.Ordinal))
                     {
@@ -20843,17 +20864,37 @@ public partial class App : Application
                 object? viewAfterRefresh = window.EnhancementJobViewIdentityForSmoke("active-job");
                 bool stableJobViews = viewBeforeRefresh is not null
                     && ReferenceEquals(viewBeforeRefresh, viewAfterRefresh);
-                window.SelectEnhancementJobsFilterForSmoke("queued");
+                window.SelectEnhancementJobsStatusFilterForSmoke("queued");
+                window.SelectEnhancementJobsOperationFilterForSmoke("all");
                 EnhancementJobsWorkspaceSmokeSnapshot queued = window.EnhancementJobsWorkspaceForSmoke();
                 bool jobsFilterLayoutContract =
-                    window.EnhancementJobsFilterOrderForSmoke.SequenceEqual(
-                        ["all", "queued", "completed", "video", "failed", "canceled"],
+                    window.EnhancementJobsStatusFilterOrderForSmoke.SequenceEqual(
+                        ["all", "queued", "running", "completed", "failed", "canceled"],
+                        StringComparer.Ordinal)
+                    && window.EnhancementJobsOperationFilterOrderForSmoke.SequenceEqual(
+                        ["all", "upscale", "photoreal", "video", "i2i"],
                         StringComparer.Ordinal)
                     && queued.VisibleIds.Length > 0
-                    && queued.VisibleIds[0] == "active-job"
+                    && queued.VisibleIds[0] == "queue-first-job"
+                    && !queued.VisibleIds.Contains("active-job", StringComparer.Ordinal)
                     && window.QueuedBulkPanelVisibleForSmoke
                     && !window.FailedBulkPanelVisibleForSmoke
                     && !window.CanceledBulkPanelVisibleForSmoke;
+                window.SelectEnhancementJobsStatusFilterForSmoke("running");
+                EnhancementJobsWorkspaceSmokeSnapshot running = window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsStatusFilterForSmoke("queued");
+                window.SelectEnhancementJobsOperationFilterForSmoke("video");
+                EnhancementJobsWorkspaceSmokeSnapshot queuedVideoOnly =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool combinedJobsFiltersContract = running.VisibleIds.SequenceEqual(
+                        ["active-job"],
+                        StringComparer.Ordinal)
+                    && queuedVideoOnly.VisibleIds.SequenceEqual(
+                        ["queue-later-job", "delivery-queue-job"],
+                        StringComparer.Ordinal)
+                    && queuedVideoOnly.VisibleOperationLabels.All(static label =>
+                        string.Equals(label, "VIDEO  動画化", StringComparison.Ordinal))
+                    && window.QueuedBulkPanelVisibleForSmoke;
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot failed = window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsFilterForSmoke("completed");
@@ -21365,10 +21406,43 @@ public partial class App : Application
                 window.ConfigurePhotorealSeedForSmoke(
                     fixedMode: false,
                     value: "975310");
-                bool clearQueuedIssued =
+                window.SelectEnhancementJobsStatusFilterForSmoke("queued");
+                window.SelectEnhancementJobsOperationFilterForSmoke("video");
+                int requestsBeforeFilteredVideoClear = requests.Count;
+                bool filteredVideoClearIssued =
                     await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
+                string[] filteredVideoClearRequests = requests
+                    .Skip(requestsBeforeFilteredVideoClear)
+                    .Where(static request => request.Contains(
+                        "/api/enhance/jobs/",
+                        StringComparison.Ordinal))
+                    .ToArray();
+                bool filteredVideoClearContract = filteredVideoClearIssued
+                    && filteredVideoClearRequests.Count(static request =>
+                        request.EndsWith("/cancel", StringComparison.Ordinal)) == 3
+                    && filteredVideoClearRequests.Contains(
+                        "POST /api/enhance/jobs/queue-later-job/cancel",
+                        StringComparer.Ordinal)
+                    && filteredVideoClearRequests.Contains(
+                        "POST /api/enhance/jobs/delivery-queue-job/cancel",
+                        StringComparer.Ordinal)
+                    && filteredVideoClearRequests.Contains(
+                        "POST /api/enhance/jobs/retry-job/cancel",
+                        StringComparer.Ordinal)
+                    && !filteredVideoClearRequests.Any(static request =>
+                        request.Contains("queue-first-job", StringComparison.Ordinal)
+                        || request.Contains("canceled-retry-job", StringComparison.Ordinal)
+                        || request.Contains("rerun-job", StringComparison.Ordinal)
+                        || request.EndsWith("/api/enhance/jobs/queued", StringComparison.Ordinal));
+                window.SelectEnhancementJobsOperationFilterForSmoke("all");
+                bool remainingQueuedClearIssued =
+                    await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
+                bool clearQueuedIssued = filteredVideoClearContract
+                    && remainingQueuedClearIssued;
                 EnhancementJobsWorkspaceSmokeSnapshot afterClearQueued =
                     window.EnhancementJobsWorkspaceForSmoke();
+                window.SelectEnhancementJobsStatusFilterForSmoke("all");
+                window.SelectEnhancementJobsOperationFilterForSmoke("all");
                 await window.SetSearchInputForSmokeAsync("__jobs_source_hidden_from_gallery__");
                 bool sourceHiddenFromVisibleGallery = window.FilteredCountForSmoke == 0;
                 double jobsAnchorBeforeViewer =
@@ -21451,7 +21525,19 @@ public partial class App : Application
                 window.CloseModalForSmoke();
                 await window.WaitForEnhancementJobsReturnForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterSourceOpen = window.EnhancementJobsWorkspaceForSmoke();
-                window.SelectEnhancementJobsFilterForSmoke("failed");
+                window.SelectEnhancementJobsStatusFilterForSmoke("failed");
+                window.SelectEnhancementJobsOperationFilterForSmoke("video");
+                EnhancementJobsWorkspaceSmokeSnapshot filteredFailedVideo =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool filteredTerminalBulkControls =
+                    filteredFailedVideo.VisibleIds.SequenceEqual(
+                        ["delivery-failed-job", "video-malformed-provenance-job"],
+                        StringComparer.Ordinal)
+                    && window.RetryAllFailedEnhancementJobsLabelForSmoke
+                        .Contains("(1)", StringComparison.Ordinal)
+                    && window.RetryAllFailedEnhancementJobsToolTipForSmoke
+                        .Contains("保護対象1件", StringComparison.Ordinal);
+                window.SelectEnhancementJobsOperationFilterForSmoke("all");
                 bool bulkFailedControlsReady =
                     window.FailedBulkPanelVisibleForSmoke
                     &&
@@ -21532,7 +21618,8 @@ public partial class App : Application
                 window.SelectEnhancementJobsFilterForSmoke("failed");
                 EnhancementJobsWorkspaceSmokeSnapshot afterBulkFailedClear =
                     window.EnhancementJobsWorkspaceForSmoke();
-                bool bulkFailedActionsContract = bulkFailedControlsReady
+                bool bulkFailedActionsContract = filteredTerminalBulkControls
+                    && bulkFailedControlsReady
                     && receiptOnlyResponseStaysVisible
                     && bulkFailedRetried == 1
                     && bulkFailedRequests.Contains(
@@ -21709,16 +21796,14 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && queued.VisibleIds.SequenceEqual(
                         [
-                            "active-job",
                             "queue-first-job",
                             "queue-later-job",
                             "delivery-queue-job",
                         ],
                         StringComparer.Ordinal)
-                    && queued.VisibleStatusLabels[0].Contains("Running", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[1].Contains("待ち順 1", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[2].Contains("待ち順 2", StringComparison.Ordinal)
-                    && queued.VisibleStatusLabels[3].Contains("待ち順 3", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[0].Contains("待ち順 1", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[1].Contains("待ち順 2", StringComparison.Ordinal)
+                    && queued.VisibleStatusLabels[2].Contains("待ち順 3", StringComparison.Ordinal)
                     && afterMove.VisibleIds.Take(4).SequenceEqual(
                         [
                             "active-job",
@@ -21828,6 +21913,7 @@ public partial class App : Application
                     && thumbnailViewportLoadBounded
                     && jobsFourNavigationControls
                     && jobsFilterLayoutContract
+                    && combinedJobsFiltersContract
                     && progressUsesWholePercent
                     && mixedRetryCapabilityPartition
                     && initial.Polling
@@ -21850,7 +21936,7 @@ public partial class App : Application
                     && healthRecovered
                     && queuePauseContract
                     && stableJobViews
-                    && queued.Filtered == 4
+                    && queued.Filtered == 3
                     && queueInventoryOrdered
                     && failed.Filtered == 7
                     && completed.Filtered == 4
