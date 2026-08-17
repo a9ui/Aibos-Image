@@ -1812,8 +1812,11 @@ public partial class MainWindow
 
             if (!response.Ok || response.Payload is not JsonElement payload)
             {
-                EnhancementJobsStatusText.Text = response.Error;
-                _enhancementWorkspacePollTimer.Stop();
+                string failure = string.IsNullOrWhiteSpace(response.Error)
+                    ? "Jobs could not be refreshed."
+                    : response.Error.Trim();
+                PreserveEnhancementWorkspaceAfterRefreshFailure(
+                    $"{failure} The last valid snapshot is still shown; retrying.");
                 return;
             }
 
@@ -3768,47 +3771,31 @@ public partial class MainWindow
             int canceledCount = 0;
             int failedCount = 0;
             string? firstError = null;
-            if (_enhancementWorkspaceOperationFilter == "all"
-                && protectedCount == 0)
+            string operationLabel = EnhancementWorkspaceOperationFilterLabel();
+            EnhancementJobsStatusText.Text =
+                $"待機中の{operationLabel} {queuedJobs.Length:N0}件をキャンセルしています…";
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            for (int index = 0; index < queuedJobs.Length; index++)
             {
+                EnhancementWorkspaceJobView job = queuedJobs[index];
                 EnhancementApiResponse response = await SendEnhancementApiAsync(
-                    HttpMethod.Delete,
-                    "api/enhance/jobs/queued");
-                if (!response.Ok)
+                    HttpMethod.Post,
+                    $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel");
+                if (response.Ok)
                 {
-                    EnhancementJobsStatusText.Text = response.Error;
-                    return;
+                    canceledCount++;
                 }
-                canceledCount = queuedJobs.Length;
-            }
-            else
-            {
-                string operationLabel = EnhancementWorkspaceOperationFilterLabel();
-                EnhancementJobsStatusText.Text =
-                    $"待機中の{operationLabel} {queuedJobs.Length:N0}件をキャンセルしています…";
-                await Dispatcher.Yield(DispatcherPriority.Render);
-                for (int index = 0; index < queuedJobs.Length; index++)
+                else
                 {
-                    EnhancementWorkspaceJobView job = queuedJobs[index];
-                    EnhancementApiResponse response = await SendEnhancementApiAsync(
-                        HttpMethod.Post,
-                        $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel");
-                    if (response.Ok)
-                    {
-                        canceledCount++;
-                    }
-                    else
-                    {
-                        failedCount++;
-                        firstError ??= response.Error;
-                    }
-                    if ((index + 1) % 25 == 0
-                        && index + 1 < queuedJobs.Length)
-                    {
-                        EnhancementJobsStatusText.Text =
-                            $"待機中の{operationLabel}をキャンセル中… {index + 1:N0}/{queuedJobs.Length:N0}件";
-                        await Dispatcher.Yield(DispatcherPriority.Background);
-                    }
+                    failedCount++;
+                    firstError ??= response.Error;
+                }
+                if ((index + 1) % 25 == 0
+                    && index + 1 < queuedJobs.Length)
+                {
+                    EnhancementJobsStatusText.Text =
+                        $"待機中の{operationLabel}をキャンセル中… {index + 1:N0}/{queuedJobs.Length:N0}件";
+                    await Dispatcher.Yield(DispatcherPriority.Background);
                 }
             }
             if (generation != _enhancementWorkspaceGeneration
