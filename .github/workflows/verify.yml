@@ -90,22 +90,7 @@ jobs:
 
       - name: Large catalog interaction smoke
         shell: pwsh
-        run: |
-          $arguments = @(
-            '-NoProfile',
-            '-ExecutionPolicy', 'Bypass',
-            '-File', '.\scripts\verify-wpf-catalog-interaction.ps1',
-            '-SkipBuild',
-            '-Count', '100000'
-          )
-          & powershell @arguments
-          $firstExitCode = $LASTEXITCODE
-          if ($firstExitCode -ne 0) {
-            Write-Warning "Large catalog smoke failed once with exit code $firstExitCode; retrying once in a fresh process."
-            Start-Sleep -Seconds 2
-            & powershell @arguments
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-catalog-interaction.ps1 -SkipBuild -Count 100000
 
       - name: Compact and high-DPI work-area smoke
         shell: pwsh
@@ -125,21 +110,7 @@ jobs:
 
       - name: Accessibility and high-contrast smoke
         shell: pwsh
-        run: |
-          $arguments = @(
-            '-NoProfile',
-            '-ExecutionPolicy', 'Bypass',
-            '-File', '.\scripts\verify-wpf-accessibility.ps1',
-            '-SkipBuild'
-          )
-          & powershell @arguments
-          $firstExitCode = $LASTEXITCODE
-          if ($firstExitCode -ne 0) {
-            Write-Warning "Accessibility smoke failed once with exit code $firstExitCode; retrying once in a fresh process."
-            Start-Sleep -Seconds 2
-            & powershell @arguments
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-accessibility.ps1 -SkipBuild
 
       - name: Color contrast smoke
         shell: pwsh

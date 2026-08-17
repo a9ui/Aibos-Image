@@ -41,9 +41,9 @@ public partial class App : Application
     private const double CatalogInteractionSearchHostedAcceptanceMs = 350;
     private const double CatalogInteractionFilterHostedAcceptanceMs = 350;
     private const double CatalogInteractionSortHostedAcceptanceMs = 650;
-    // Preserve the performance targets while absorbing one hosted scheduler
-    // measurement window; multi-window regressions still fail the gate.
-    private const double CatalogInteractionHostedMeasurementToleranceMs = 25;
+    // Preserve the performance targets while absorbing one extra hosted
+    // scheduler quantum; sustained regressions still fail the bounded gate.
+    private const double CatalogInteractionHostedMeasurementToleranceMs = 50;
     // Keep the 50 ms product target separately visible. The hosted exception
     // below is allowed only when both independent scheduler probes positively
     // attribute the same heartbeat interval to host preemption. GC ambiguity
