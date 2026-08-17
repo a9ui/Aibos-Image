@@ -312,9 +312,8 @@ public partial class MainWindow
 
     private async Task StartEnhancementCompanionApiForApplicationLaunchAsync()
     {
-        if (Environment.GetCommandLineArgs().Any(static argument =>
-                argument.StartsWith("--", StringComparison.Ordinal)
-                && argument.Contains("smoke", StringComparison.OrdinalIgnoreCase)))
+        if (ShouldSuppressEnhancementCompanionStartup(
+                Environment.GetCommandLineArgs()))
         {
             return;
         }
@@ -344,6 +343,14 @@ public partial class MainWindow
                 ClassifyEnhancementCompanionStartupError(response.Error));
         }
     }
+
+    private static bool ShouldSuppressEnhancementCompanionStartup(
+        IReadOnlyList<string> args)
+        => App.IsAutomationInvocation(args);
+
+    internal static bool EnhancementCompanionStartupSuppressedForSmoke(
+        IReadOnlyList<string> args)
+        => ShouldSuppressEnhancementCompanionStartup(args);
 
     private async Task<EnhancementApiResponse> SendPassiveEnhancementReadAsync(
         string relativePath,
