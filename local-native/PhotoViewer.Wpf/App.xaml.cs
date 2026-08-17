@@ -1926,7 +1926,7 @@ public partial class App : Application
             ? brush.Color
             : throw new InvalidOperationException($"Theme brush resource is unavailable: {key}");
 
-    private static bool IsAutomationInvocation(IReadOnlyList<string> args)
+    internal static bool IsAutomationInvocation(IReadOnlyList<string> args)
         => args.Any(static arg => arg.StartsWith("--", StringComparison.Ordinal)
             && (string.Equals(arg, "--shot", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(arg, "--album-library-shot", StringComparison.OrdinalIgnoreCase)
@@ -3718,7 +3718,24 @@ public partial class App : Application
         ]);
         bool knownSmokeIsIsolated = IsAutomationInvocation(["PhotoViewer.Wpf.exe", "--p1a-smoke", "result.json"]);
         bool screenshotIsIsolated = IsAutomationInvocation(["PhotoViewer.Wpf.exe", "--shot", "shot.png"]);
-        bool ok = positionalFolderRemainsInteractive && knownSmokeIsIsolated && screenshotIsIsolated;
+        bool screenshotCompanionStartupSuppressed =
+            PhotoViewer.Wpf.MainWindow
+                .EnhancementCompanionStartupSuppressedForSmoke([
+                "PhotoViewer.Wpf.exe",
+                "--shot",
+                "shot.png",
+            ]);
+        bool interactiveCompanionStartupAllowed =
+            !PhotoViewer.Wpf.MainWindow
+                .EnhancementCompanionStartupSuppressedForSmoke([
+                "PhotoViewer.Wpf.exe",
+                syntheticPositionalFolder,
+            ]);
+        bool ok = positionalFolderRemainsInteractive
+            && knownSmokeIsIsolated
+            && screenshotIsIsolated
+            && screenshotCompanionStartupSuppressed
+            && interactiveCompanionStartupAllowed;
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(resultPath))!);
         File.WriteAllText(resultPath, JsonSerializer.Serialize(new
         {
@@ -3726,6 +3743,8 @@ public partial class App : Application
             positionalFolderRemainsInteractive,
             knownSmokeIsIsolated,
             screenshotIsIsolated,
+            screenshotCompanionStartupSuppressed,
+            interactiveCompanionStartupAllowed,
         }));
         Shutdown(ok ? 0 : 1);
     }
