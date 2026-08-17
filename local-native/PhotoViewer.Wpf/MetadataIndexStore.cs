@@ -102,7 +102,9 @@ internal static class MetadataIndexStore
         ) WITHOUT ROWID;
         """;
 
-    public static string ResolvePath(IReadOnlyList<string> folderSet, string viewerStatePath)
+    public static MetadataIndexStorePath ResolvePath(
+        IReadOnlyList<string> folderSet,
+        string viewerStatePath)
     {
         ArgumentNullException.ThrowIfNull(folderSet);
         string? overrideDirectory = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY");
@@ -127,27 +129,46 @@ internal static class MetadataIndexStore
                 .OrderBy(static folder => folder, StringComparer.OrdinalIgnoreCase)
                 .Select(static folder => folder.ToUpperInvariant()));
         string digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
-        return Path.Combine(directory, $"{digest}.sqlite3");
+        return MetadataIndexStorePath.ForCatalogIdentity(directory, digest);
     }
 
-    public static MetadataIndexLoadResult Load(string path, CancellationToken token)
+    public static MetadataIndexLoadResult Load(
+        MetadataIndexStorePath path,
+        CancellationToken token)
         => LoadCore(path, token, MaximumSqliteFamilyBytes, MaximumSqliteAggregateBytes);
+
+    internal static MetadataIndexLoadResult Load(
+        string path,
+        CancellationToken token)
+        => LoadCore(
+            MetadataIndexStorePath.ForManagedTempFixture(path),
+            token,
+            MaximumSqliteFamilyBytes,
+            MaximumSqliteAggregateBytes);
 
     internal static MetadataIndexLoadResult LoadWithBudgetForSmoke(
         string path,
         CancellationToken token,
         long maximumFamilyBytes,
         long maximumAggregateBytes)
-        => LoadCore(path, token, maximumFamilyBytes, maximumAggregateBytes);
+        => LoadCore(
+            MetadataIndexStorePath.ForManagedTempFixture(path),
+            token,
+            maximumFamilyBytes,
+            maximumAggregateBytes);
 
     private static MetadataIndexLoadResult LoadCore(
-        string path,
+        MetadataIndexStorePath path,
         CancellationToken token,
         long maximumFamilyBytes,
         long maximumAggregateBytes)
     {
-        string fullPath = Path.GetFullPath(path);
+        string fullPath = path.FullPath;
         ValidateBudgets(maximumFamilyBytes, maximumAggregateBytes);
+        // `path` is a typed cache capability whose product leaf is the
+        // application-generated catalog SHA-256. String fixtures are issued
+        // only after their parent is handle-resolved below TEMP.
+        // codeql[cs/path-injection]
         if (!File.Exists(fullPath))
         {
             string? orphanSidecar = FindExistingSqliteSidecar(fullPath);
@@ -158,7 +179,10 @@ internal static class MetadataIndexStore
                     $"metadata cache main file was absent while orphan sidecar {Path.GetFileName(orphanSidecar)} was preserved");
             }
 
-            string legacyPath = Path.ChangeExtension(fullPath, ".pvmi");
+            string legacyPath = path.LegacyPath;
+            // The legacy probe changes only the fixed capability extension
+            // from .sqlite3 to the application-owned .pvmi migration leaf.
+            // codeql[cs/path-injection]
             if (!File.Exists(legacyPath))
                 return MetadataIndexLoadResult.Missing(fullPath);
 
@@ -293,10 +317,21 @@ internal static class MetadataIndexStore
     }
 
     public static MetadataIndexSaveResult Save(
-        string path,
+        MetadataIndexStorePath path,
         IReadOnlyCollection<MetadataIndexEntry> entries,
         CancellationToken token)
         => SaveCore(path, entries, token, MaximumSqliteFamilyBytes, MaximumSqliteAggregateBytes);
+
+    internal static MetadataIndexSaveResult Save(
+        string path,
+        IReadOnlyCollection<MetadataIndexEntry> entries,
+        CancellationToken token)
+        => SaveCore(
+            MetadataIndexStorePath.ForManagedTempFixture(path),
+            entries,
+            token,
+            MaximumSqliteFamilyBytes,
+            MaximumSqliteAggregateBytes);
 
     internal static MetadataIndexSaveResult SaveWithBudgetForSmoke(
         string path,
@@ -304,16 +339,21 @@ internal static class MetadataIndexStore
         CancellationToken token,
         long maximumFamilyBytes,
         long maximumAggregateBytes)
-        => SaveCore(path, entries, token, maximumFamilyBytes, maximumAggregateBytes);
+        => SaveCore(
+            MetadataIndexStorePath.ForManagedTempFixture(path),
+            entries,
+            token,
+            maximumFamilyBytes,
+            maximumAggregateBytes);
 
     private static MetadataIndexSaveResult SaveCore(
-        string path,
+        MetadataIndexStorePath path,
         IReadOnlyCollection<MetadataIndexEntry> entries,
         CancellationToken token,
         long maximumFamilyBytes,
         long maximumAggregateBytes)
     {
-        string fullPath = Path.GetFullPath(path);
+        string fullPath = path.FullPath;
         ValidateBudgets(maximumFamilyBytes, maximumAggregateBytes);
         if (entries.Count > MaximumEntryCount)
             return MetadataIndexSaveResult.Failed(fullPath, $"entry count {entries.Count} exceeds the safe bound");
@@ -334,6 +374,9 @@ internal static class MetadataIndexStore
         {
             Directory.CreateDirectory(directory);
             lockStream = AcquireWriterLock(lockPath, token);
+            // fullPath comes from MetadataIndexStorePath; no database row,
+            // image metadata, or UI value can select this filesystem target.
+            // codeql[cs/path-injection]
             if (File.Exists(fullPath))
             {
                 EnsureSqliteFamilyWithinBudget(fullPath, maximumFamilyBytes);
@@ -484,6 +527,8 @@ internal static class MetadataIndexStore
             // The target was absent while holding the writer lock. Do not
             // publish into a namespace where either a main file or SQLite
             // sidecar appeared unexpectedly after that check.
+            // Both probes consume the same typed target capability.
+            // codeql[cs/path-injection]
             if (File.Exists(fullPath) || Directory.Exists(fullPath))
                 throw new IOException("metadata cache target appeared before publication and was preserved");
             orphanSidecar = FindExistingSqliteSidecar(fullPath);
@@ -514,7 +559,7 @@ internal static class MetadataIndexStore
     }
 
     public static MetadataIndexSaveResult ApplyChanges(
-        string path,
+        MetadataIndexStorePath path,
         IReadOnlyCollection<MetadataIndexEntry> upserts,
         IReadOnlyCollection<string> removedPaths,
         int expectedEntryCount,
@@ -523,6 +568,26 @@ internal static class MetadataIndexStore
     {
         return ApplyChangesCore(
             path,
+            upserts,
+            removedPaths,
+            expectedEntryCount,
+            expectedRevision,
+            token,
+            MaximumSqliteFamilyBytes,
+            MaximumSqliteAggregateBytes,
+            out _);
+    }
+
+    internal static MetadataIndexSaveResult ApplyChanges(
+        string path,
+        IReadOnlyCollection<MetadataIndexEntry> upserts,
+        IReadOnlyCollection<string> removedPaths,
+        int expectedEntryCount,
+        long expectedRevision,
+        CancellationToken token)
+    {
+        return ApplyChangesCore(
+            MetadataIndexStorePath.ForManagedTempFixture(path),
             upserts,
             removedPaths,
             expectedEntryCount,
@@ -544,7 +609,7 @@ internal static class MetadataIndexStore
         long maximumAggregateBytes)
     {
         return ApplyChangesCore(
-            path,
+            MetadataIndexStorePath.ForManagedTempFixture(path),
             upserts,
             removedPaths,
             expectedEntryCount,
@@ -564,7 +629,7 @@ internal static class MetadataIndexStore
         CancellationToken token)
     {
         MetadataIndexSaveResult result = ApplyChangesCore(
-            path,
+            MetadataIndexStorePath.ForManagedTempFixture(path),
             upserts,
             removedPaths,
             expectedEntryCount,
@@ -577,7 +642,7 @@ internal static class MetadataIndexStore
     }
 
     private static MetadataIndexSaveResult ApplyChangesCore(
-        string path,
+        MetadataIndexStorePath path,
         IReadOnlyCollection<MetadataIndexEntry> upserts,
         IReadOnlyCollection<string> removedPaths,
         int expectedEntryCount,
@@ -588,7 +653,7 @@ internal static class MetadataIndexStore
         out MetadataIndexApplyDiagnostics diagnostics)
     {
         diagnostics = MetadataIndexApplyDiagnostics.Empty;
-        string fullPath = Path.GetFullPath(path);
+        string fullPath = path.FullPath;
         ValidateBudgets(maximumFamilyBytes, maximumAggregateBytes);
         if (expectedEntryCount < 0 || expectedEntryCount > MaximumEntryCount)
             return MetadataIndexSaveResult.Failed(fullPath, $"entry count {expectedEntryCount} exceeds the safe bound");
@@ -1391,6 +1456,9 @@ internal static class MetadataIndexStore
 
     private static int ReadExistingSchemaVersion(string path)
     {
+        // Every caller supplies either MetadataIndexStorePath.FullPath or the
+        // generated sibling used for an isolated atomic rebuild.
+        // codeql[cs/path-injection]
         if (!File.Exists(path))
             throw new InvalidDataException("metadata cache disappeared before the incremental commit");
         using SqliteConnection connection = OpenConnection(path, SqliteOpenMode.ReadOnly);
@@ -1446,8 +1514,13 @@ internal static class MetadataIndexStore
         long totalBytes = 0;
         foreach (string member in EnumerateSqliteFamily(path))
         {
+            // member is the typed cache target (or generated temporary
+            // sibling) plus one of SQLite's three fixed sidecar suffixes.
+            // codeql[cs/path-injection]
             if (Directory.Exists(member))
                 throw new InvalidDataException($"metadata cache family member {Path.GetFileName(member)} was not a file");
+            // See the fixed-family invariant above.
+            // codeql[cs/path-injection]
             if (!File.Exists(member))
                 continue;
 
@@ -1475,6 +1548,9 @@ internal static class MetadataIndexStore
         foreach (string suffix in SqliteSidecarSuffixes)
         {
             string sidecar = path + suffix;
+            // suffix is selected only from SqliteSidecarSuffixes and path is
+            // the typed target or the application-generated temporary sibling.
+            // codeql[cs/path-injection]
             if (File.Exists(sidecar) || Directory.Exists(sidecar))
                 return sidecar;
         }
@@ -1498,6 +1574,9 @@ internal static class MetadataIndexStore
         string fullPath = Path.GetFullPath(path);
         try
         {
+            // path is MetadataIndexStorePath.LegacyPath: a fixed .pvmi sibling
+            // of the typed catalog cache capability.
+            // codeql[cs/path-injection]
             using var stream = new FileStream(
                 fullPath,
                 FileMode.Open,

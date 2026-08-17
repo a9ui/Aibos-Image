@@ -8865,8 +8865,10 @@ public partial class MainWindow : Window
             return ImageMetadataLoadMetrics.Empty;
 
         long sourceRecycleGenerationAtStart = _sourceRecycleGeneration;
-        string metadataIndexPath = MetadataIndexStore.ResolvePath(_currentFolderSet, ResolvedStatePath);
-        _metadataIndexPath = metadataIndexPath;
+        MetadataIndexStorePath metadataIndexPath = MetadataIndexStore.ResolvePath(
+            _currentFolderSet,
+            ResolvedStatePath);
+        _metadataIndexPath = metadataIndexPath.FullPath;
         BeginMetadataIndexProgress(tiles.Count);
 
         // Give the first visible thumbnail batch a short uncontended head
@@ -9048,7 +9050,7 @@ public partial class MainWindow : Window
         if (index.State == MetadataIndexLoadState.Unsupported)
         {
             save = MetadataIndexSaveResult.Preserved(
-                metadataIndexPath,
+                metadataIndexPath.FullPath,
                 refreshedEntries.Count,
                 "a newer metadata index version was preserved",
                 MetadataIndexSaveDisposition.Protected);
@@ -9056,7 +9058,7 @@ public partial class MainWindow : Window
         else if (catalogChanged)
         {
             save = MetadataIndexSaveResult.Preserved(
-                metadataIndexPath,
+                metadataIndexPath.FullPath,
                 index.Entries.Count,
                 "the catalog changed during indexing; the last complete index was preserved",
                 MetadataIndexSaveDisposition.CatalogChanged);
@@ -9064,7 +9066,7 @@ public partial class MainWindow : Window
         else if (decodeFailures > 0 || refreshedEntries.Count != tiles.Count)
         {
             save = MetadataIndexSaveResult.Preserved(
-                metadataIndexPath,
+                metadataIndexPath.FullPath,
                 index.Entries.Count,
                 $"{decodeFailures:N0} source metadata read(s) failed; the last complete index was preserved",
                 MetadataIndexSaveDisposition.Incomplete);
@@ -9080,7 +9082,7 @@ public partial class MainWindow : Window
             // its bytes and timestamp unchanged makes restart reuse observable
             // and avoids an unnecessary 100k-entry rewrite.
             save = MetadataIndexSaveResult.Preserved(
-                metadataIndexPath,
+                metadataIndexPath.FullPath,
                 refreshedEntries.Count,
                 "the complete index was reused byte-for-byte");
         }
