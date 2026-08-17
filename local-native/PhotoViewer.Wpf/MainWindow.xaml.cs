@@ -844,7 +844,9 @@ public partial class MainWindow : Window
         SetPhase(landing: true);
         _initializing = false;
         ApplyAccessibilityPreferencesToPresentation();
-        if (_dateFilterMigrationPending || _cardWidthMigrationPending)
+        if (_dateFilterMigrationPending
+            || _cardWidthMigrationPending
+            || _localPersistenceCompactionPending)
             SaveState();
     }
 
@@ -4384,7 +4386,8 @@ public partial class MainWindow : Window
     {
         if (_initializing || _suppressStateSave)
             return;
-        if (_stateWriteBlocked)
+        if (_stateWriteBlocked
+            && (includeFilterState || !_favoriteActivityStoreReady))
         {
             ReportPersistenceRefusal(
                 "Viewer settings",
@@ -4502,6 +4505,8 @@ public partial class MainWindow : Window
             {
                 result = PersistFavoritePresentationStateBatch(
                     ResolvedStatePath,
+                    ResolvedFavoriteActivityPath,
+                    _favoriteActivityStoreReady,
                     batch);
             }
             catch (Exception error)
@@ -4537,19 +4542,27 @@ public partial class MainWindow : Window
 
                 await Dispatcher.InvokeAsync(() =>
                 {
+                    string targetName = result.StoreName ?? "Viewer settings";
+                    string targetPath = result.StorePath ?? ResolvedStatePath;
                     if (result.Protected)
                     {
-                        _stateWriteBlocked = true;
+                        if (string.Equals(
+                                targetPath,
+                                ResolvedStatePath,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            _stateWriteBlocked = true;
+                        }
                         ReportPersistenceRefusal(
-                            "Viewer settings",
-                            ResolvedStatePath,
+                            targetName,
+                            targetPath,
                             protectedFile: true);
                     }
                     else
                     {
                         ReportPersistenceRefusal(
-                            "Viewer settings",
-                            ResolvedStatePath,
+                            targetName,
+                            targetPath,
                             retryAction: RetryFailedFavoritePresentationStateSave);
                     }
                 }, DispatcherPriority.Background);
@@ -4563,15 +4576,49 @@ public partial class MainWindow : Window
     }
 
     private static FavoritePresentationStatePersistResult PersistFavoritePresentationStateBatch(
-        string path,
+        string statePath,
+        string favoriteActivityPath,
+        bool useFavoriteActivityStore,
         FavoritePresentationStateBatch batch)
     {
-        bool malformed = false;
         var evicted = new Dictionary<string, DateTimeOffset>(
             StringComparer.OrdinalIgnoreCase);
-        bool saved = TryWithPersistenceLock(path, () =>
+        if (useFavoriteActivityStore && batch.Activity.Count > 0)
         {
-            if (!TryReadViewerStateFile(path, out ViewerState? state))
+            FavoriteActivityStoreWriteResult activityResult =
+                FavoriteActivityStore.Upsert(
+                    favoriteActivityPath,
+                    batch.Activity,
+                    MaxPersistedFavoriteActivityEntries);
+            if (!activityResult.Saved)
+            {
+                return new FavoritePresentationStatePersistResult(
+                    Saved: false,
+                    activityResult.Protected,
+                    evicted,
+                    activityResult.Error,
+                    "Favorite activity",
+                    favoriteActivityPath);
+            }
+            foreach ((string evictedPath, DateTimeOffset evictedTime)
+                     in activityResult.EvictedEntries)
+            {
+                evicted[evictedPath] = evictedTime;
+            }
+        }
+
+        if (useFavoriteActivityStore && batch.FilterState is null)
+        {
+            return new FavoritePresentationStatePersistResult(
+                Saved: true,
+                Protected: false,
+                evicted);
+        }
+
+        bool malformed = false;
+        bool saved = TryWithPersistenceLock(statePath, () =>
+        {
+            if (!TryReadViewerStateFile(statePath, out ViewerState? state))
             {
                 malformed = true;
                 return false;
@@ -4594,7 +4641,7 @@ public partial class MainWindow : Window
                     : filter.VideoFavoriteLevels.ToList();
             }
 
-            if (batch.Activity.Count > 0)
+            if (!useFavoriteActivityStore && batch.Activity.Count > 0)
             {
                 state.FavoriteChangedAtUtcByPath ??=
                     new Dictionary<string, DateTimeOffset>(
@@ -4633,7 +4680,7 @@ public partial class MainWindow : Window
             string json = JsonSerializer.Serialize(
                 state,
                 new JsonSerializerOptions { WriteIndented = true });
-            return TryWriteAtomicText(path, json);
+            return TryWriteAtomicText(statePath, json);
         });
 
         return new FavoritePresentationStatePersistResult(
@@ -4641,7 +4688,10 @@ public partial class MainWindow : Window
             Protected: malformed,
             saved
                 ? evicted
-                : new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase));
+                : new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase),
+            Error: null,
+            StoreName: "Viewer settings",
+            StorePath: statePath);
     }
 
     private void ApplyFavoritePresentationStatePersistResult(
@@ -6334,7 +6384,9 @@ public partial class MainWindow : Window
         bool Saved,
         bool Protected,
         Dictionary<string, DateTimeOffset> EvictedActivity,
-        string? Error = null);
+        string? Error = null,
+        string? StoreName = null,
+        string? StorePath = null);
     private sealed record SeenPendingMutation(bool DurableSeen, bool WasUnseen, bool ShowedUnseenDot, long Generation);
     private enum SharedStoreKind { Favorite, Seen }
 
@@ -23250,21 +23302,7 @@ public partial class MainWindow : Window
     private void RestoreState()
     {
         var state = ReadState();
-        _favoriteChangedAtUtcByPath.Clear();
-        if (state?.FavoriteChangedAtUtcByPath is { Count: > 0 } favoriteActivity)
-        {
-            foreach ((string path, DateTimeOffset changedAtUtc) in favoriteActivity)
-            {
-                if (string.IsNullOrWhiteSpace(path)
-                    || changedAtUtc == default)
-                {
-                    continue;
-                }
-                _favoriteChangedAtUtcByPath[NormalizeFavoritePath(path)] =
-                    changedAtUtc.ToUniversalTime();
-            }
-            TrimFavoriteActivity(_favoriteChangedAtUtcByPath);
-        }
+        InitializeSplitLocalPersistence(state);
         SetUiLanguage(state?.UiLanguage, persist: false);
         SetFavoriteChangeNotifications(
             state?.ShowFavoriteChangeNotifications ?? true,
@@ -23307,14 +23345,12 @@ public partial class MainWindow : Window
             SyncFoldersSectionControls();
             RestoreModalPhotorealSettings(null, null, null, null, null);
             RestorePhotorealSeedSettings(null, null);
-            RestorePhotorealStyles(null, null);
+            RestoreAiStyles(null);
             RestorePhotorealPromptMappings(
                 null,
                 CurrentPhotorealPromptMappingDefaultsRevision);
             RestoreVideoGenerationSettings(null, null, null, null);
             RestoreVideoSeedSettings(null, null);
-            RestoreVideoStyles(null, null);
-            RestoreI2iV3Styles(null, null);
             _keyBindings = KeyBindingSettings.CreateDefaults();
             _draftKeyBindings = new Dictionary<ViewerKeyAction, KeyChord>(_keyBindings);
             ApplyKeyBindingTooltips();
@@ -23388,7 +23424,6 @@ public partial class MainWindow : Window
         RestorePhotorealSeedSettings(
             state.PhotorealSeedMode,
             state.PhotorealSeedValue);
-        RestorePhotorealStyles(state.PhotorealStyles, state.SelectedPhotorealStyleName);
         RestorePhotorealPromptMappings(
             state.PhotorealPromptMappings,
             state.PhotorealPromptMappingDefaultsRevision ?? 0);
@@ -23401,8 +23436,7 @@ public partial class MainWindow : Window
             state.VideoQualityId,
             state.VideoSteps);
         RestoreVideoSeedSettings(state.VideoSeedMode, state.VideoSeedValue);
-        RestoreVideoStyles(state.VideoStyles, state.SelectedVideoStyleName);
-        RestoreI2iV3Styles(state.I2iEditStyles, state.SelectedI2iEditStyleName);
+        RestoreAiStyles(state);
         SyncFoldersSectionControls();
         if (ConfirmBeforeDeleteCheckBox is not null) ConfirmBeforeDeleteCheckBox.IsChecked = _confirmBeforeDelete;
         SetShowUnseenDots(_showUnseenDots, persist: false);
@@ -23646,7 +23680,8 @@ public partial class MainWindow : Window
                 UpscaleBackendVersion = CurrentUpscaleBackendVersion,
                 UpscaleScale = _modalEnhancementScale,
                 UpscaleOutputFormat = _upscaleOutputFormat,
-                FavoriteChangedAtUtcByPath = _favoriteChangedAtUtcByPath.Count == 0
+                FavoriteChangedAtUtcByPath = _favoriteActivityStoreReady
+                    || _favoriteChangedAtUtcByPath.Count == 0
                     ? null
                     : _favoriteChangedAtUtcByPath
                         .OrderBy(static item => item.Key, StringComparer.OrdinalIgnoreCase)
@@ -23676,11 +23711,15 @@ public partial class MainWindow : Window
                     out int photorealSeedValue)
                         ? photorealSeedValue
                         : null,
-                PhotorealStyles = SnapshotPhotorealStyles(),
+                PhotorealStyles = _aiStyleStoreReady
+                    ? null
+                    : SnapshotPhotorealStyles(),
                 PhotorealPromptMappings = SnapshotPhotorealPromptMappings(),
                 PhotorealPromptMappingDefaultsRevision =
                     _photorealPromptMappingDefaultsRevision,
-                SelectedPhotorealStyleName = _selectedPhotorealStyleName,
+                SelectedPhotorealStyleName = _aiStyleStoreReady
+                    ? null
+                    : _selectedPhotorealStyleName,
                 VideoDurationSeconds = _videoDurationSeconds,
                 VideoPlaybackFps = _videoPlaybackFps,
                 VideoMaximumPixelArea = _videoMaximumPixelArea,
@@ -23696,10 +23735,18 @@ public partial class MainWindow : Window
                     out int videoSeedValue)
                         ? videoSeedValue
                         : null,
-                VideoStyles = SnapshotVideoStyles(),
-                SelectedVideoStyleName = _selectedVideoStyleName,
-                I2iEditStyles = SnapshotI2iV3Styles(),
-                SelectedI2iEditStyleName = _selectedI2iV3StyleName,
+                VideoStyles = _aiStyleStoreReady
+                    ? null
+                    : SnapshotVideoStyles(),
+                SelectedVideoStyleName = _aiStyleStoreReady
+                    ? null
+                    : _selectedVideoStyleName,
+                I2iEditStyles = _aiStyleStoreReady
+                    ? null
+                    : SnapshotI2iV3Styles(),
+                SelectedI2iEditStyleName = _aiStyleStoreReady
+                    ? null
+                    : _selectedI2iV3StyleName,
                 UiLanguage = _uiLanguage,
                 ReducedMotionOverride = _reducedMotionOverride,
                 ReducedTransparencyOverride = _reducedTransparencyOverride,
@@ -23730,8 +23777,10 @@ public partial class MainWindow : Window
                 state.KeyBindings = KeyBindingSettings.ToPersisted(
                     _keyBindings,
                     latest is null ? _keyBindingUnknownEntries : latestUnknownKeyBindings);
-                MergeLatestStyleExtensionData(state, latest);
-                if (latest?.FavoriteChangedAtUtcByPath is { Count: > 0 } latestFavoriteActivity)
+                if (!_aiStyleStoreReady)
+                    MergeLatestStyleExtensionData(state, latest);
+                if (!_favoriteActivityStoreReady
+                    && latest?.FavoriteChangedAtUtcByPath is { Count: > 0 } latestFavoriteActivity)
                 {
                     state.FavoriteChangedAtUtcByPath ??=
                         new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
@@ -23770,7 +23819,9 @@ public partial class MainWindow : Window
             _enhancementNotificationStateExtensionData = CloneExtensionData(
                 state.EnhancementNotifications?.ExtensionData);
             _ = KeyBindingSettings.NormalizePersisted(state.KeyBindings, out _keyBindingUnknownEntries);
-            ApplySavedStyleExtensionData(state);
+            if (!_aiStyleStoreReady)
+                ApplySavedStyleExtensionData(state);
+            _localPersistenceCompactionPending = false;
         }
         catch
         {
@@ -30715,6 +30766,7 @@ public sealed class ViewerState
     public string? UpscaleOutputFormat { get; set; }
     // WPF-local activity history used by the "Fav touched" sort. Level 0
     // entries are retained so clearing a favorite is still an interaction.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, DateTimeOffset>? FavoriteChangedAtUtcByPath { get; set; }
     // Defaults to true for both fresh and pre-P0C state files.
     public bool ConfirmBeforeDelete { get; set; } = true;
@@ -30741,9 +30793,11 @@ public sealed class ViewerState
     public string? PhotorealSeedMode { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? PhotorealSeedValue { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public List<PhotorealStyleState>? PhotorealStyles { get; set; }
     public List<PhotorealPromptMappingState>? PhotorealPromptMappings { get; set; }
     public int? PhotorealPromptMappingDefaultsRevision { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? SelectedPhotorealStyleName { get; set; }
     // WPF-local request defaults for the explicit managed-video action.
     public int? VideoDurationSeconds { get; set; }
@@ -30756,11 +30810,15 @@ public sealed class ViewerState
     public string? VideoSeedMode { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? VideoSeedValue { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public List<VideoStyleState>? VideoStyles { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? SelectedVideoStyleName { get; set; }
     // WPF-local request templates for explicit unified AI edits. Loading or
     // selecting a style never enqueues or wakes the optional companion.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public List<I2iEditStyleState>? I2iEditStyles { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? SelectedI2iEditStyleName { get; set; }
     // WPF-only presentation language. Browser settings.json remains untouched.
     public string? UiLanguage { get; set; }

@@ -605,6 +605,8 @@ public partial class MainWindow
         RefreshI2iV3StyleControls(updateName: true);
         _syncingI2iV3Controls = false;
         UpdateI2iV3BoardPresentation();
+        if (!_initializing)
+            SaveAiStyles();
         I2iV3OverallTextBox.Focus();
     }
 
@@ -840,6 +842,8 @@ public partial class MainWindow
             _selectedI2iV3StyleName = null;
             RefreshI2iV3StyleControls(updateName: false);
             I2iV3StyleStatusText.Text = "現在の未保存設定です。";
+            if (!_initializing)
+                SaveAiStyles();
             return;
         }
         _syncingI2iV3Controls = true;
@@ -853,7 +857,10 @@ public partial class MainWindow
         I2iV3StyleStatusText.Text = $"「{style.Name}」を反映しました。GOを押すまで追加されません。";
         UpdateI2iV3BoardPresentation();
         if (!_initializing)
+        {
+            SaveAiStyles();
             SaveState();
+        }
     }
 
     private void SaveI2iV3Style_Click(object sender, RoutedEventArgs e)
@@ -899,7 +906,7 @@ public partial class MainWindow
             ? $"「{saved.Name}」を現在の入力と設定で上書きしました。"
             : $"「{saved.Name}」を保存しました。";
         if (!_initializing)
-            SaveState();
+            SaveAiStyles();
     }
 
     private void DeleteI2iV3Style_Click(object sender, RoutedEventArgs e)
@@ -915,7 +922,7 @@ public partial class MainWindow
         RefreshI2iV3StyleControls(updateName: true);
         I2iV3StyleStatusText.Text = $"「{style.Name}」を削除しました。現在の入力は残ります。";
         if (!_initializing)
-            SaveState();
+            SaveAiStyles();
     }
 
     private void MarkI2iV3StyleAsCustom()
@@ -925,6 +932,8 @@ public partial class MainWindow
         _selectedI2iV3StyleName = null;
         RefreshI2iV3StyleControls(updateName: false);
         I2iV3StyleStatusText.Text = "設定を変更しました。保存済みStyleは上書きされていません。";
+        if (!_initializing)
+            SaveAiStyles();
     }
 
     private void RefreshI2iV3StyleControls(bool updateName)

@@ -1592,7 +1592,10 @@ public partial class MainWindow
         SetVideoGenerationSettingsStatus(
             "MiniMax H3の5.167秒・24fps・高画質414,720px・20 STEP既定へ戻しました。準備確認後に実行できます。");
         if (!_initializing)
+        {
+            SaveAiStyles();
             SaveState();
+        }
     }
 
     private void SetVideoGenerationSettingsStatus(string message)
@@ -1717,7 +1720,10 @@ public partial class MainWindow
             RefreshVideoStyleControls(updateNameFields: false);
             SetVideoStyleStatus("現在の設定を使用します。Styleにはまだ保存されていません。");
             if (!_initializing)
+            {
+                SaveAiStyles();
                 SaveState();
+            }
             return;
         }
 
@@ -1739,7 +1745,10 @@ public partial class MainWindow
         RefreshVideoStyleControls(updateNameFields: true);
         SetVideoStyleStatus($"「{style.Name}」を反映しました。次に追加する動画ジョブから使われます。");
         if (!_initializing)
+        {
+            SaveAiStyles();
             SaveState();
+        }
     }
 
     private void SaveVideoStyle_Click(object sender, RoutedEventArgs e)
@@ -1783,7 +1792,7 @@ public partial class MainWindow
                 ? $"「{style.Name}」を現在の設定で上書きしました。"
                 : $"「{style.Name}」を保存しました。");
         if (!_initializing)
-            SaveState();
+            SaveAiStyles();
     }
 
     private void DeleteVideoStyle_Click(object sender, RoutedEventArgs e)
@@ -1801,7 +1810,7 @@ public partial class MainWindow
         RefreshVideoStyleControls(updateNameFields: true);
         SetVideoStyleStatus($"「{style.Name}」を削除しました。現在の設定値はそのまま残ります。");
         if (!_initializing)
-            SaveState();
+            SaveAiStyles();
     }
 
     private void OpenVideoStylesFile_Click(object sender, RoutedEventArgs e)
@@ -1811,9 +1820,9 @@ public partial class MainWindow
     {
         try
         {
-            string path = Path.GetFullPath(StatePath);
+            string path = Path.GetFullPath(AiStylePath);
             if (!string.Equals(
-                    Path.GetFullPath(ResolvedStatePath),
+                    Path.GetFullPath(ResolvedAiStylePath),
                     path,
                     StringComparison.OrdinalIgnoreCase))
             {
@@ -1821,7 +1830,7 @@ public partial class MainWindow
                 return false;
             }
 
-            SaveState();
+            SaveAiStyles();
             if (!File.Exists(path))
             {
                 SetVideoStyleStatus("Style保存ファイルを作成できませんでした。保存エラーを確認してください。");
@@ -1840,7 +1849,7 @@ public partial class MainWindow
                 return false;
             }
 
-            SetVideoStyleStatus("Styleを含む保存JSONを開きました。外部編集はAibos Imageの次回起動で読み込みます。");
+            SetVideoStyleStatus("AI Style専用JSONを開きました。外部編集はAibos Imageの次回起動で読み込みます。");
             return true;
         }
         catch (Exception error) when (error is IOException
@@ -1994,6 +2003,8 @@ public partial class MainWindow
         {
             RefreshVideoStyleControls(updateNameFields: false);
             SetVideoStyleStatus("設定を変更しました。保存済みStyleは上書きされていません。");
+            if (!_initializing)
+                SaveAiStyles();
         }
         else
         {

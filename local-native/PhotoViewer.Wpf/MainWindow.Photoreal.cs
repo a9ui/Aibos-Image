@@ -1764,7 +1764,10 @@ public partial class MainWindow
             RefreshPhotorealStyleControls(updateNameFields: false);
             SetPhotorealStyleStatus("現在の設定を使用します。Styleにはまだ保存されていません。");
             if (!_initializing)
+            {
+                SaveAiStyles();
                 SaveState();
+            }
             return;
         }
 
@@ -1785,7 +1788,10 @@ public partial class MainWindow
         RefreshPhotorealStyleControls(updateNameFields: true);
         SetPhotorealStyleStatus($"「{style.Name}」を反映しました。次に追加するAI実写化ジョブから使われます。");
         if (!_initializing)
+        {
+            SaveAiStyles();
             SaveState();
+        }
     }
 
     private void SavePhotorealStyle_Click(object sender, RoutedEventArgs e)
@@ -1826,7 +1832,7 @@ public partial class MainWindow
                 ? $"「{style.Name}」を現在の設定で上書きしました。"
                 : $"「{style.Name}」を保存しました。");
         if (!_initializing)
-            SaveState();
+            SaveAiStyles();
     }
 
     private void DeletePhotorealStyle_Click(object sender, RoutedEventArgs e)
@@ -1843,7 +1849,7 @@ public partial class MainWindow
         RefreshPhotorealStyleControls(updateNameFields: true);
         SetPhotorealStyleStatus($"「{style.Name}」を削除しました。現在の設定値はそのまま残ります。");
         if (!_initializing)
-            SaveState();
+            SaveAiStyles();
     }
 
     private void RestorePhotorealStyles(
@@ -1974,6 +1980,8 @@ public partial class MainWindow
         {
             RefreshPhotorealStyleControls(updateNameFields: false);
             SetPhotorealStyleStatus("設定を変更しました。保存済みStyleは上書きされていません。");
+            if (!_initializing)
+                SaveAiStyles();
         }
         else
         {
@@ -2235,7 +2243,10 @@ public partial class MainWindow
         RefreshPhotorealStyleControls(updateNameFields: true);
         SetPhotorealSettingsStatus("実写化設定を既定値に戻しました。");
         if (!_initializing)
+        {
+            SaveAiStyles();
             SaveState();
+        }
     }
 
     private void SetPhotorealSettingsStatus(string message)
