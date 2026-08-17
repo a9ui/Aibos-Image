@@ -132,6 +132,14 @@ jobs:
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-enhancement-jobs-workspace.ps1
 
+      - name: Favorite presentation close-drain smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-favorite-performance.ps1 -NoRestore -OverallTimeoutSeconds 180
+
+      - name: Local AI Style forward-compatibility smoke
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-style-state-forward-compat.ps1 -NoRestore -OverallTimeoutSeconds 120
+
       - name: Selected batch enhancement smoke
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-wpf-selected-batch-enhancement.ps1 -SkipBuild
