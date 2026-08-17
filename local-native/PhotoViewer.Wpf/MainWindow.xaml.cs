@@ -8866,8 +8866,7 @@ public partial class MainWindow : Window
 
         long sourceRecycleGenerationAtStart = _sourceRecycleGeneration;
         MetadataIndexStorePath metadataIndexPath = MetadataIndexStore.ResolvePath(
-            _currentFolderSet,
-            ResolvedStatePath);
+            _currentFolderSet);
         _metadataIndexPath = metadataIndexPath.FullPath;
         BeginMetadataIndexProgress(tiles.Count);
 
