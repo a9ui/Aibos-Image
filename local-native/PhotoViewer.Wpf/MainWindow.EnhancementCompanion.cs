@@ -376,7 +376,7 @@ public partial class MainWindow
             timeoutMilliseconds: timeoutMilliseconds,
             maxResponseBytes: maxResponseBytes,
             timeoutError: timeoutError);
-        if (!ShouldReverifyEnhancementCompanionAfterPassiveRead(response))
+        if (!ShouldReverifyEnhancementCompanionAfterAuthenticatedRequest(response))
             return response;
 
         verificationFailure =
@@ -444,11 +444,56 @@ public partial class MainWindow
         }
     }
 
-    private static bool ShouldReverifyEnhancementCompanionAfterPassiveRead(
+    private static bool ShouldReverifyEnhancementCompanionAfterAuthenticatedRequest(
         EnhancementApiResponse response)
         => !response.Ok
             && !response.InnerStatusAuthoritative
             && response.StatusCode is 0 or 401 or 403;
+
+    // Only use this for operations whose exact request can be replayed after a
+    // lost response without applying the logical mutation twice.
+    private async Task<EnhancementApiResponse>
+        SendIdempotentEnhancementMutationAsync(
+            HttpMethod method,
+            string relativePath,
+            object? body = null,
+            CancellationToken token = default)
+    {
+        string? exactBodyJson = body is null
+            ? null
+            : JsonSerializer.Serialize(body);
+        if (_usingDefaultModalEnhancementSender
+            && !_enhancementCompanionOwnershipVerified)
+        {
+            EnhancementApiResponse readiness =
+                await EnsureEnhancementCompanionApiReadyAsync(token: token);
+            if (!readiness.Ok)
+                return readiness;
+        }
+
+        EnhancementApiResponse response = await SendEnhancementApiAsync(
+            method,
+            relativePath,
+            token: token,
+            exactBodyJson: exactBodyJson);
+        if (!_usingDefaultModalEnhancementSender
+            || token.IsCancellationRequested
+            || !ShouldReverifyEnhancementCompanionAfterAuthenticatedRequest(response))
+        {
+            return response;
+        }
+
+        EnhancementApiResponse reconnect =
+            await EnsureEnhancementCompanionApiReadyAsync(token: token);
+        if (!reconnect.Ok)
+            return reconnect;
+
+        return await SendEnhancementApiAsync(
+            method,
+            relativePath,
+            token: token,
+            exactBodyJson: exactBodyJson);
+    }
 
     private void InvalidateEnhancementCompanionOwnershipIfCurrent(
         string? requestInstanceId,
@@ -3036,6 +3081,30 @@ public partial class MainWindow
         // smoke-provided HTTP sender with the production authenticated path.
         _startEnhancementCompanionForSmoke = starter;
     }
+
+    public async Task<IdempotentEnhancementMutationSmokeSnapshot>
+        SendIdempotentEnhancementMutationForSmokeAsync(
+            HttpMethod method,
+            string relativePath,
+            object? body = null)
+    {
+        EnhancementApiResponse response =
+            await SendIdempotentEnhancementMutationAsync(
+            method,
+            relativePath,
+            body);
+        return new(
+            response.Ok,
+            response.StatusCode,
+            response.Payload,
+            response.Error);
+    }
+
+    public sealed record IdempotentEnhancementMutationSmokeSnapshot(
+        bool Ok,
+        int StatusCode,
+        JsonElement? Payload,
+        string Error);
 
     public void KickDurableEnqueueRecoveryForSmoke(string requestId)
         => KickEnhancementCompanionRecoveryAfterDurablePublish(

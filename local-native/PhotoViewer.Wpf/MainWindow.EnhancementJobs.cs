@@ -4046,7 +4046,8 @@ public partial class MainWindow
                 foreach (string[] ids in dismissibleIds.Chunk(
                     EnhancementTerminalHistoryBatchLimit))
                 {
-                    EnhancementApiResponse remove = await SendEnhancementApiAsync(
+                    EnhancementApiResponse remove =
+                        await SendIdempotentEnhancementMutationAsync(
                         HttpMethod.Delete,
                         "api/enhance/jobs/terminal",
                         new { status = terminalStatus, ids });
@@ -4107,8 +4108,11 @@ public partial class MainWindow
                 await RefreshEnhancementJobsWorkspaceAsync(
                     generation,
                     isPoll: false);
+                string resultSummary = clearedCount == 0 && failedCount > 0
+                    ? $"{terminalLabel}履歴を削除できませんでした。元画像と出力ファイルは変更していません。"
+                    : $"{terminalLabel}履歴 {clearedCount:N0}件を消しました。元画像と出力ファイルは変更していません。";
                 EnhancementJobsStatusText.Text =
-                    $"{terminalLabel}履歴 {clearedCount:N0}件を消しました。元画像と出力ファイルは変更していません。"
+                    resultSummary
                     + (protectedCount > 0
                         ? $" 保護対象 {protectedCount:N0}件は残しました。"
                         : "")
@@ -4489,6 +4493,17 @@ public partial class MainWindow
             && TryGetStringProperty(payload, "code", out string? code)
             && !string.IsNullOrWhiteSpace(code)
                 ? code!
+                : response.StatusCode == 503
+                    && response.Payload is JsonElement busyPayload
+                    && TryGetStringProperty(
+                        busyPayload,
+                        "error",
+                        out string? busyError)
+                    && string.Equals(
+                        busyError,
+                        "The local AI companion is busy.",
+                        StringComparison.Ordinal)
+                    ? "COMPANION_BUSY"
                 : response.StatusCode == 0
                     ? "COMPANION_UNAVAILABLE"
                     : "API_ERROR";

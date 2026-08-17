@@ -137,6 +137,9 @@ try {
         'startupCompanionAutoStart',
         'companionIdentityBusySeparated',
         'companionIdentityBusyReconnected',
+        'idempotentMutationReconnected',
+        'idempotentMutationExactReplay',
+        'idempotentMutationNoDuplicate',
         'explicitCompanionAutoStart',
         'companionQueueRecoveryAuthenticated',
         'durableListenerHandoffSavedForDelivery',
@@ -241,7 +244,7 @@ try {
     $appTempStoresRemoved = @($appStorePaths | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0
     Assert-True $appTempStoresRemoved 'The modal enhancement smoke left its internal TEMP stores behind.'
 
-    $allPassed = $requiredTrue.Count -eq 54 `
+    $allPassed = $requiredTrue.Count -eq 57 `
         -and $recoveryAllPassed `
         -and $callerStoresUnchanged `
         -and $metadataSentinelUnchanged `
@@ -266,6 +269,9 @@ try {
         outputOwnership = [bool]$result.lexicalOutputRejected -and [bool]$result.canonicalOutputRejected
         staleResponseDiscarded = [bool]$result.staleResponseDiscarded
         navigationDuringResponse = [bool]$result.navigatedDuringResponse
+        idempotentMutationReconnected = [bool]$result.idempotentMutationReconnected
+        idempotentMutationExactReplay = [bool]$result.idempotentMutationExactReplay
+        idempotentMutationNoDuplicate = [bool]$result.idempotentMutationNoDuplicate
         closeCompleted = [bool]$result.closeCompleted
         environmentRestored = [bool]$result.environmentRestored
         fingerprintsCaptured = [bool]$result.fingerprintsCaptured
