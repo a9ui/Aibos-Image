@@ -374,6 +374,9 @@ public partial class MainWindow : Window
     private Task _favoritePresentationStateWriteTask = Task.CompletedTask;
     private int _favoritePresentationStatePumpRunning;
     private int _favoritePresentationStateWriteCount;
+    private ManualResetEventSlim? _favoritePresentationWriterEnteredForSmoke;
+    private ManualResetEventSlim? _favoritePresentationWriterGateForSmoke;
+    private int _failNextFavoritePresentationWriterForSmoke;
     private long _lastFavoriteWriteApplyMilliseconds;
     private long _maxFavoriteWriteApplyMilliseconds;
     private int _lastDerivedFavoriteVisitedTileCount;
@@ -1334,7 +1337,7 @@ public partial class MainWindow : Window
         {
             e.Cancel = true;
             SetStatusToast(
-                "Favorite or Seen changes still need Retry. The window stayed open so the recovery intent is not lost.",
+                "Favorite, Seen, or local filter changes still need Retry. The window stayed open so the recovery intent is not lost.",
                 RetryFailedSharedBatches);
             return;
         }
@@ -1352,17 +1355,35 @@ public partial class MainWindow : Window
 
     private bool HasPendingSharedWrites()
         => _favoriteWriter?.HasPendingOrInFlight == true
-            || _seenWriter?.HasPendingOrInFlight == true;
+            || _seenWriter?.HasPendingOrInFlight == true
+            || HasPendingFavoritePresentationWrites();
+
+    private bool HasPendingFavoritePresentationWrites()
+    {
+        lock (_favoritePresentationStateQueueGate)
+        {
+            return _favoritePresentationStatePumpRunning != 0
+                || _pendingFavoritePresentationActivity.Count > 0
+                || _pendingFavoriteFilterState is not null;
+        }
+    }
+
+    private bool HasFailedFavoritePresentationWrite()
+    {
+        lock (_favoritePresentationStateQueueGate)
+            return _failedFavoritePresentationStateBatch is not null;
+    }
 
     private bool HasUnresolvedSharedFailures
         => _failedFavoriteBatch is { Count: > 0 }
-            || _failedSeenBatch is { Count: > 0 };
+            || _failedSeenBatch is { Count: > 0 }
+            || HasFailedFavoritePresentationWrite();
 
     private async Task DrainThenCloseAsync()
     {
         _closingDrainInProgress = true;
         _sharedActionsDisabled = true;
-        SetStatusToast("Saving Favorite and Seen changes before closing...");
+        SetStatusToast("Saving Favorite, Seen, and local filter changes before closing...");
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2.5));
         try
         {
@@ -1372,7 +1393,12 @@ public partial class MainWindow : Window
             Task<SharedWriteStatus> seen = _seenWriter is { } seenWriter
                 ? seenWriter.DrainAsync(timeout.Token)
                 : Task.FromResult(SharedWriteStatus.Succeeded);
-            SharedWriteStatus[] statuses = await Task.WhenAll(favorite, seen);
+            Task<SharedWriteStatus> presentation =
+                DrainFavoritePresentationStateWriterAsync(timeout.Token);
+            SharedWriteStatus[] statuses = await Task.WhenAll(
+                favorite,
+                seen,
+                presentation);
             if (statuses.All(static status => status == SharedWriteStatus.Succeeded) && !HasPendingSharedWrites())
             {
                 _allowCloseAfterSharedDrain = true;
@@ -1382,12 +1408,18 @@ public partial class MainWindow : Window
                 return;
             }
 
-            SetStatusToast("Favorite or Seen changes could not finish saving. The window stayed open; use Retry after fixing the local store.",
+            SetStatusToast("Favorite, Seen, or local filter changes could not finish saving. The window stayed open; use Retry after fixing the local store.",
                 RetryFailedSharedBatches);
         }
         catch (OperationCanceledException)
         {
-            SetStatusToast("Favorite or Seen changes are still saving. The window stayed open; close again after the save finishes.");
+            SetStatusToast("Favorite, Seen, or local filter changes are still saving. The window stayed open; close again after the save finishes.");
+        }
+        catch (Exception)
+        {
+            SetStatusToast(
+                "Favorite, Seen, or local filter changes could not finish saving. The window stayed open; use Retry after fixing the local store.",
+                RetryFailedSharedBatches);
         }
         finally
         {
@@ -1396,6 +1428,36 @@ public partial class MainWindow : Window
                 _sharedActionsDisabled = false;
                 _closingDrainInProgress = false;
             }
+        }
+    }
+
+    private async Task<SharedWriteStatus> DrainFavoritePresentationStateWriterAsync(
+        CancellationToken token)
+    {
+        while (true)
+        {
+            Task activeWrite;
+            lock (_favoritePresentationStateQueueGate)
+            {
+                if (_failedFavoritePresentationStateBatch is not null)
+                    return SharedWriteStatus.Failed;
+                if (_favoritePresentationStatePumpRunning == 0
+                    && _pendingFavoritePresentationActivity.Count == 0
+                    && _pendingFavoriteFilterState is null)
+                {
+                    return SharedWriteStatus.Succeeded;
+                }
+
+                if (_favoritePresentationStatePumpRunning == 0)
+                {
+                    _favoritePresentationStatePumpRunning = 1;
+                    _favoritePresentationStateWriteTask = Task.Run(
+                        PumpFavoritePresentationStateSavesAsync);
+                }
+                activeWrite = _favoritePresentationStateWriteTask;
+            }
+
+            await activeWrite.WaitAsync(token);
         }
     }
 
@@ -4533,11 +4595,36 @@ public partial class MainWindow : Window
             FavoritePresentationStatePersistResult result;
             try
             {
-                result = PersistFavoritePresentationStateBatch(
-                    ResolvedStatePath,
-                    ResolvedFavoriteActivityPath,
-                    _favoriteActivityStoreReady,
-                    batch);
+                _favoritePresentationWriterEnteredForSmoke?.Set();
+                if (_favoritePresentationWriterGateForSmoke is { } gate
+                    && !gate.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    result = new FavoritePresentationStatePersistResult(
+                        Saved: false,
+                        Protected: false,
+                        new Dictionary<string, DateTimeOffset>(
+                            StringComparer.OrdinalIgnoreCase),
+                        "favorite presentation smoke gate timed out");
+                }
+                else if (Interlocked.Exchange(
+                             ref _failNextFavoritePresentationWriterForSmoke,
+                             0) != 0)
+                {
+                    result = new FavoritePresentationStatePersistResult(
+                        Saved: false,
+                        Protected: false,
+                        new Dictionary<string, DateTimeOffset>(
+                            StringComparer.OrdinalIgnoreCase),
+                        "injected Favorite presentation write failure");
+                }
+                else
+                {
+                    result = PersistFavoritePresentationStateBatch(
+                        ResolvedStatePath,
+                        ResolvedFavoriteActivityPath,
+                        _favoriteActivityStoreReady,
+                        batch);
+                }
             }
             catch (Exception error)
             {
@@ -6880,7 +6967,8 @@ public partial class MainWindow : Window
 
         bool retryFavorite = _failedFavoriteBatch is { Count: > 0 };
         bool retrySeen = _failedSeenBatch is { Count: > 0 };
-        if (!retryFavorite && !retrySeen)
+        bool retryPresentation = HasFailedFavoritePresentationWrite();
+        if (!retryFavorite && !retrySeen && !retryPresentation)
         {
             SetStatusToast("Shared-state retry is no longer available.");
             return;
@@ -6890,6 +6978,8 @@ public partial class MainWindow : Window
             RetryFailedFavoriteBatch();
         if (retrySeen)
             RetryFailedSeenBatch();
+        if (retryPresentation)
+            RetryFailedFavoritePresentationStateSave();
     }
 
     private void SetTileFavoriteLevel(
@@ -23245,7 +23335,7 @@ public partial class MainWindow : Window
             // the only reachable route to either retained failed batch.
             retryAction = RetryFailedSharedBatches;
             if (!status.Contains("Retry", StringComparison.OrdinalIgnoreCase))
-                status = $"{status} Favorite or Seen changes still need Retry.";
+                status = $"{status} Favorite, Seen, or local filter changes still need Retry.";
         }
         _deleteStatus = status;
         _statusRetryAction = retryAction;
@@ -30196,6 +30286,9 @@ public partial class MainWindow : Window
             }
         }
     }
+    public bool FavoritePresentationStateFailedForSmoke
+        => HasFailedFavoritePresentationWrite();
+    public bool ClosingDrainInProgressForSmoke => _closingDrainInProgress;
     public int PendingFavoriteMutationCountForSmoke => _pendingFavoriteMutations.Count;
     public int PendingSeenMutationCountForSmoke => _pendingSeenMutations.Count;
     public bool FavoritesWriteBlockedForSmoke => _favoritesWriteBlocked;
@@ -30218,6 +30311,14 @@ public partial class MainWindow : Window
         _seenWriterGateForSmoke = gate;
     }
 
+    public void ConfigureFavoritePresentationWriterGateForSmoke(
+        ManualResetEventSlim? entered,
+        ManualResetEventSlim? gate)
+    {
+        _favoritePresentationWriterEnteredForSmoke = entered;
+        _favoritePresentationWriterGateForSmoke = gate;
+    }
+
     public void ConfigureReloadDrainStartedForSmoke(
         ManualResetEventSlim? favoriteStarted,
         ManualResetEventSlim? seenStarted)
@@ -30228,8 +30329,25 @@ public partial class MainWindow : Window
 
     public void FailNextFavoriteWriterForSmoke() => Interlocked.Exchange(ref _failNextFavoriteWriterForSmoke, 1);
     public void FailNextSeenWriterForSmoke() => Interlocked.Exchange(ref _failNextSeenWriterForSmoke, 1);
+    public void FailNextFavoritePresentationWriterForSmoke()
+        => Interlocked.Exchange(ref _failNextFavoritePresentationWriterForSmoke, 1);
     public void RetryFailedFavoriteForSmoke() => RetryFailedFavoriteBatch();
     public void RetryFailedSeenForSmoke() => RetryFailedSeenBatch();
+    public void RetryFailedFavoritePresentationForSmoke()
+        => RetryFailedFavoritePresentationStateSave();
+
+    public void QueueFavoritePresentationStateForSmoke(
+        string path,
+        DateTimeOffset changedAtUtc,
+        bool includeFilterState = true)
+    {
+        ScheduleFavoritePresentationStateSave(
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase)
+            {
+                [path] = changedAtUtc,
+            },
+            includeFilterState);
+    }
 
     internal async Task<SharedWriteStatus[]> DrainSharedStoreWritersForSmokeAsync()
     {
