@@ -19651,6 +19651,8 @@ public partial class App : Application
                 bool allQueuedCanceled = false;
                 bool includeProtectedQueuedJob = false;
                 bool includeFinalSafeQueuedJob = false;
+                bool includePostSnapshotQueuedJob = false;
+                bool insertQueuedJobOnNextCancel = false;
                 var individuallyCanceledQueuedJobs = new HashSet<string>(
                     StringComparer.Ordinal);
                 bool outputDeleted = false;
@@ -20001,6 +20003,17 @@ public partial class App : Application
                             queueOrder: 901,
                             adapter: "a1111-photoreal"));
                     }
+                    if (includePostSnapshotQueuedJob)
+                    {
+                        jobs.Insert(0, Job(
+                            "post-snapshot-queued-job",
+                            QueuedStatus("post-snapshot-queued-job"),
+                            0,
+                            operation: "photoreal",
+                            createdAt: "2026-07-23T00:00:09.000Z",
+                            queueOrder: 902,
+                            adapter: "a1111-photoreal"));
+                    }
                     if (retryCreated)
                         jobs.Insert(0, VideoJob(
                             "retry-job",
@@ -20292,7 +20305,23 @@ public partial class App : Application
                             else
                                 activeCancelPendingJobReads--;
                         }
-                        return CurrentJobsResponseAsync();
+                        return jobsResponseMode switch
+                        {
+                            "transport-error" => Task.FromException<HttpResponseMessage>(
+                                new HttpRequestException("synthetic jobs transport interruption")),
+                            "outer-401" => Task.FromResult(JsonResponse(
+                                HttpStatusCode.Unauthorized,
+                                new { error = "synthetic outer authorization loss" })),
+                            "outer-403" => Task.FromResult(JsonResponse(
+                                HttpStatusCode.Forbidden,
+                                new { error = "synthetic outer authorization rejection" })),
+                            "busy-503" => Task.FromResult(JsonResponse(
+                                HttpStatusCode.ServiceUnavailable,
+                                new { error = "The local AI companion is busy." })),
+                            "missing-payload" => Task.FromResult(
+                                new HttpResponseMessage(HttpStatusCode.OK)),
+                            _ => CurrentJobsResponseAsync(),
+                        };
                     }
                     if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/health", StringComparison.Ordinal))
                     {
@@ -20346,6 +20375,11 @@ public partial class App : Application
                         string jobId = segments.Length >= 2
                             ? segments[^2]
                             : "unknown-job";
+                        if (insertQueuedJobOnNextCancel)
+                        {
+                            insertQueuedJobOnNextCancel = false;
+                            includePostSnapshotQueuedJob = true;
+                        }
                         individuallyCanceledQueuedJobs.Add(jobId);
                         return Task.FromResult(JsonResponse(
                             HttpStatusCode.Accepted,
@@ -20742,6 +20776,55 @@ public partial class App : Application
                     && await InvalidJobsSnapshotRejectedAsync("missing-id")
                     && await InvalidJobsSnapshotRejectedAsync("missing-status")
                     && await InvalidJobsSnapshotRejectedAsync("unknown-status");
+
+                async Task<bool> StructuredJobsReadFailurePreservedAsync(
+                    string mode,
+                    string healthSignatureTime)
+                {
+                    int requestsBeforeFailure = requests.Count;
+                    jobsResponseMode = mode;
+                    healthLastTerminalAt = healthSignatureTime;
+                    try
+                    {
+                        await window.PollEnhancementJobsForSmokeAsync();
+                        EnhancementJobsWorkspaceSmokeSnapshot preserved =
+                            window.EnhancementJobsWorkspaceForSmoke();
+                        return preserved.Total == initial.Total
+                            && preserved.Active == initial.Active
+                            && preserved.VisibleIds.SequenceEqual(
+                                validSnapshotIds,
+                                StringComparer.Ordinal)
+                            && preserved.Polling
+                            && preserved.Status.Contains(
+                                "last valid snapshot",
+                                StringComparison.OrdinalIgnoreCase)
+                            && requests.Skip(requestsBeforeFailure)
+                                .All(static request => request.StartsWith(
+                                    "GET ",
+                                    StringComparison.Ordinal));
+                    }
+                    finally
+                    {
+                        jobsResponseMode = "normal";
+                    }
+                }
+
+                bool structuredJobsReadFailuresPreserved =
+                    await StructuredJobsReadFailurePreservedAsync(
+                        "transport-error",
+                        "2026-07-30T13:30:31.000Z")
+                    && await StructuredJobsReadFailurePreservedAsync(
+                        "outer-401",
+                        "2026-07-30T13:30:32.000Z")
+                    && await StructuredJobsReadFailurePreservedAsync(
+                        "outer-403",
+                        "2026-07-30T13:30:33.000Z")
+                    && await StructuredJobsReadFailurePreservedAsync(
+                        "busy-503",
+                        "2026-07-30T13:30:34.000Z")
+                    && await StructuredJobsReadFailurePreservedAsync(
+                        "missing-payload",
+                        "2026-07-30T13:30:35.000Z");
                 healthLastTerminalAt = null;
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterInvalidRecovery =
@@ -20754,7 +20837,7 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && afterInvalidRecovery.Polling
                     && !afterInvalidRecovery.Status.Contains(
-                        "preserved",
+                        "last valid snapshot",
                         StringComparison.OrdinalIgnoreCase);
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterHealthOnlyPoll =
@@ -21558,11 +21641,44 @@ public partial class App : Application
                 includeProtectedQueuedJob = false;
                 includeFinalSafeQueuedJob = true;
                 await window.RefreshEnhancementJobsForSmokeAsync();
+                int requestsBeforeRemainingQueuedClear = requests.Count;
+                insertQueuedJobOnNextCancel = true;
                 bool remainingQueuedClearIssued =
                     await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
+                string[] remainingQueuedClearRequests = requests
+                    .Skip(requestsBeforeRemainingQueuedClear)
+                    .Where(static request => request.Contains(
+                        "/api/enhance/jobs/",
+                        StringComparison.Ordinal))
+                    .ToArray();
+                var postSnapshotQueuedView =
+                    window.EnhancementJobViewIdentityForSmoke(
+                        "post-snapshot-queued-job")
+                        as EnhancementWorkspaceJobView;
+                bool queuedCancelSnapshotContract = remainingQueuedClearIssued
+                    && !allQueuedCanceled
+                    && includePostSnapshotQueuedJob
+                    && postSnapshotQueuedView is
+                    {
+                        Status: "queued",
+                        CanCancel: true,
+                    }
+                    && !individuallyCanceledQueuedJobs.Contains(
+                        "post-snapshot-queued-job")
+                    && remainingQueuedClearRequests.Any(static request =>
+                        request.EndsWith(
+                            "/final-safe-queued-job/cancel",
+                            StringComparison.Ordinal))
+                    && remainingQueuedClearRequests.All(static request =>
+                        !request.EndsWith(
+                            "/api/enhance/jobs/queued",
+                            StringComparison.Ordinal)
+                        && !request.Contains(
+                            "post-snapshot-queued-job",
+                            StringComparison.Ordinal));
                 bool clearQueuedIssued = filteredVideoClearContract
                     && protectedQueuedClearContract
-                    && remainingQueuedClearIssued;
+                    && queuedCancelSnapshotContract;
                 EnhancementJobsWorkspaceSmokeSnapshot afterClearQueued =
                     window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsStatusFilterForSmoke("all");
@@ -21907,7 +22023,7 @@ public partial class App : Application
                     && requests.Contains("POST /api/enhance/jobs/queue-later-job/queue", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/rerun-job/prompts", StringComparer.Ordinal)
-                    && requests.Contains("DELETE /api/enhance/jobs/queued", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/queued", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/video-reader-job/output", StringComparer.Ordinal);
                 bool queueInventoryOrdered = initial.VisibleIds.Take(4).SequenceEqual(
@@ -22048,6 +22164,7 @@ public partial class App : Application
                     && healthPassive
                     && duplicateJobsSnapshotRejected
                     && malformedJobsSnapshotsRejected
+                    && structuredJobsReadFailuresPreserved
                     && invalidJobsSnapshotRecovery
                     && healthOnlyPollAvoidedFullInventory
                     && terminalSignatureRefreshesSameCountInventory
@@ -22132,8 +22249,9 @@ public partial class App : Application
                     && afterBulkPromptUpdate.Total == afterQueuedPromptUpdate.Total
                     && afterBulkPromptUpdate.Active == afterQueuedPromptUpdate.Active
                     && clearQueuedIssued
-                    && afterClearQueued.Active == 0
-                    && !afterClearQueued.Polling
+                    && queuedCancelSnapshotContract
+                    && afterClearQueued.Active == 1
+                    && afterClearQueued.Polling
                     && sourceHiddenFromVisibleGallery
                     && outputOpened
                     && string.Equals(openedOutput, outputPath, StringComparison.OrdinalIgnoreCase)
@@ -22174,6 +22292,7 @@ public partial class App : Application
                     healthPassive,
                     duplicateJobsSnapshotRejected,
                     malformedJobsSnapshotsRejected,
+                    structuredJobsReadFailuresPreserved,
                     invalidJobsSnapshotRecovery,
                     afterInvalidRecovery,
                     healthOnlyPollAvoidedFullInventory,
@@ -22244,6 +22363,7 @@ public partial class App : Application
                     bulkQueuedPromptUpdateContract,
                     afterQueuedPromptUpdate,
                     protectedQueuedClearContract,
+                    queuedCancelSnapshotContract,
                     clearQueuedIssued,
                     afterClearQueued,
                     whileOutputViewerOpen,
