@@ -17,10 +17,34 @@ internal static class OperationLogSecuritySmokeRunner
                 return 2;
             }
 
+            if (MainWindow.ClassifyEnhancementCompanionExitForSmoke(
+                    expectedStop: false,
+                    exitCode: -1)
+                    != "terminated_or_aborted"
+                || MainWindow.ClassifyEnhancementCompanionExitForSmoke(
+                    expectedStop: false,
+                    exitCode: 0)
+                    != "self_exit_zero"
+                || MainWindow.ClassifyEnhancementCompanionExitForSmoke(
+                    expectedStop: true,
+                    exitCode: -1)
+                    != "wpf_requested"
+                || MainWindow.ClassifyEnhancementCompanionExitForSmoke(
+                    expectedStop: false,
+                    exitCode: null)
+                    != "exit_code_unavailable")
+            {
+                return 3;
+            }
+
+            string batch = string.Join(
+                Environment.NewLine,
+                MarkerLine,
+                AibosOperationLog.CompanionLifecycleLineForSecuritySmoke());
             bool wrote = AibosOperationLog.TryWriteBatchForSecuritySmoke(
                 fixtureRoot,
                 DateTime.UtcNow,
-                MarkerLine);
+                batch);
             return wrote == string.Equals(
                 expectation,
                 "accept",
