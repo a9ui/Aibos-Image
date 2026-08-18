@@ -18636,12 +18636,53 @@ public partial class App : Application
                 bool displayedPhotorealVideoSource =
                     displayedPhotorealSelected
                     && win.MarkDisplayedPhotorealAsRecoveredForSmoke()
-                    && await win.OpenDisplayedModalVideoGenerationBoardForSmokeAsync(
-                        "photoreal-ok")
+                    && win.OpenDisplayedModalVideoGenerationBoardForSmoke()
                     && win.VideoSourceForSmoke is
                     {
-                        ProducerJobId: "photoreal-ok",
-                    };
+                        ProducerJobId: null,
+                    } displayedFileSource
+                    && displayedFileSource.Label.Contains(
+                        "表示中の実写版",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        win.VideoSourceIdentityForSmoke,
+                        photorealOutput,
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        win.VideoDisplayPathForSmoke,
+                        photorealOutput,
+                        StringComparison.OrdinalIgnoreCase);
+                int postsBeforeDisplayedPhotorealVideo =
+                    enhancementMutationRequestCount;
+                bool displayedPhotorealVideoQueued =
+                    displayedPhotorealVideoSource
+                    && await win.QueueVideoGenerationForSmokeAsync();
+                bool displayedPhotorealVideoRequestExact = false;
+                if (displayedPhotorealVideoQueued
+                    && enhancementMutationRequestCount
+                        == postsBeforeDisplayedPhotorealVideo + 1
+                    && !string.IsNullOrWhiteSpace(videoRequestJson))
+                {
+                    using JsonDocument displayedVideoDocument =
+                        JsonDocument.Parse(videoRequestJson);
+                    JsonElement displayedVideoRequest =
+                        displayedVideoDocument.RootElement;
+                    displayedPhotorealVideoRequestExact =
+                        displayedVideoRequest.TryGetProperty(
+                            "sourceId",
+                            out JsonElement displayedSourceId)
+                        && string.Equals(
+                            displayedSourceId.GetString(),
+                            photorealOutput,
+                            StringComparison.OrdinalIgnoreCase)
+                        && !displayedVideoRequest.TryGetProperty(
+                            "sourceProducerJobId",
+                            out _);
+                }
+                displayedPhotorealVideoSource =
+                    displayedPhotorealVideoSource
+                    && displayedPhotorealVideoQueued
+                    && displayedPhotorealVideoRequestExact;
                 bool videoBoardDefaultsToOriginal =
                     win.OpenVideoGenerationBoardForSmoke()
                     && win.VideoSourceForSmoke is
