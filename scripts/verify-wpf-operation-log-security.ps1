@@ -18,8 +18,12 @@ $appDirectory = Join-Path $localAppData 'Aibos Image'
 $logsDirectory = Join-Path $appDirectory 'Logs'
 $sentinel = Join-Path $outside 'sentinel.txt'
 $markerLine = '{"operation":"security_smoke","outcome":"accepted"}'
-$oldLog = Join-Path $logsDirectory 'operations-2000-01-01.jsonl'
-$recentLog = Join-Path $logsDirectory 'operations-2099-01-01.jsonl'
+$utcToday = [DateTime]::UtcNow.Date
+$seededLogs = @(1..8 | ForEach-Object {
+    Join-Path $logsDirectory ('operations-{0:yyyy-MM-dd}.jsonl' -f $utcToday.AddDays(-$_))
+})
+$oldestLogs = @($seededLogs | Select-Object -Last 2)
+$retainedLog = $seededLogs[0]
 $dotnet10 = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet10\dotnet.exe'
 $dotnet = if (Test-Path -LiteralPath $dotnet10 -PathType Leaf) { $dotnet10 } else { 'dotnet' }
 $previousDotnetRoot = $env:DOTNET_ROOT
@@ -108,9 +112,10 @@ try {
     }
     [IO.File]::Delete($dailyLog)
 
-    [IO.File]::WriteAllText($oldLog, 'expired')
-    [IO.File]::SetLastWriteTimeUtc($oldLog, [DateTime]::UtcNow.AddDays(-30))
-    [IO.File]::WriteAllText($recentLog, 'preserve')
+    foreach ($seededLog in $seededLogs) {
+        [IO.File]::WriteAllText($seededLog, 'seeded')
+        [IO.File]::SetLastWriteTimeUtc($seededLog, [DateTime]::UtcNow)
+    }
     Invoke-OperationLogSmoke $localAppData 'accept'
 
     if (-not (Test-Path -LiteralPath $dailyLog -PathType Leaf)) {
@@ -139,11 +144,18 @@ try {
     if ($forbiddenLifecycleFields.Count -ne 0) {
         throw "The companion lifecycle entry exposed forbidden fields: $($forbiddenLifecycleFields -join ', ')."
     }
-    if (Test-Path -LiteralPath $oldLog) {
-        throw 'The expired direct log was not removed.'
+    foreach ($oldestLog in $oldestLogs) {
+        if (Test-Path -LiteralPath $oldestLog) {
+            throw "An excess daily log was not removed: $oldestLog"
+        }
     }
-    if (-not (Test-Path -LiteralPath $recentLog -PathType Leaf)) {
-        throw 'The recent direct log was removed unexpectedly.'
+    if (-not (Test-Path -LiteralPath $retainedLog -PathType Leaf)) {
+        throw 'A log within the newest seven recorded days was removed.'
+    }
+    $remainingDailyLogs = @(Get-ChildItem -LiteralPath $logsDirectory `
+        -Filter 'operations-????-??-??.jsonl' -File)
+    if ($remainingDailyLogs.Count -ne 7) {
+        throw "Expected seven retained daily logs, found $($remainingDailyLogs.Count)."
     }
     if ([IO.File]::ReadAllText($sentinel) -ne 'outside-sentinel') {
         throw 'The outside sentinel changed.'
@@ -158,8 +170,9 @@ try {
         trustedAppendSucceeded = $true
         companionLifecycleRecorded = $true
         companionLifecycleSensitiveFields = 0
-        expiredDirectLogRemoved = $true
-        recentDirectLogPreserved = $true
+        excessDailyLogsRemoved = $true
+        newestSevenLogDaysPreserved = $true
+        retainedDailyLogCount = $remainingDailyLogs.Count
     } | ConvertTo-Json
 }
 finally {
