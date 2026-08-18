@@ -119,6 +119,26 @@ try {
     if ([IO.File]::ReadAllText($dailyLog).IndexOf($markerLine, [StringComparison]::Ordinal) -lt 0) {
         throw 'The trusted daily operation log did not contain the expected marker.'
     }
+    $entries = @(Get-Content -LiteralPath $dailyLog | ForEach-Object {
+        $_ | ConvertFrom-Json
+    })
+    $lifecycle = @($entries | Where-Object {
+        $_.Operation -eq 'companion.process' -and $_.Outcome -eq 'unexpected_exit'
+    })
+    if ($lifecycle.Count -ne 1) {
+        throw "Expected one companion lifecycle entry, found $($lifecycle.Count)."
+    }
+    if ($lifecycle[0].RelatedProcessId -ne 4321 `
+        -or $lifecycle[0].ExitCode -ne -1 `
+        -or $lifecycle[0].ErrorCode -ne 'terminated_or_aborted') {
+        throw 'The companion lifecycle entry did not preserve the bounded numeric diagnostics.'
+    }
+    $forbiddenLifecycleFields = @($lifecycle[0].PSObject.Properties.Name | Where-Object {
+        $_ -match 'prompt|source|path|secret|token|job'
+    })
+    if ($forbiddenLifecycleFields.Count -ne 0) {
+        throw "The companion lifecycle entry exposed forbidden fields: $($forbiddenLifecycleFields -join ', ')."
+    }
     if (Test-Path -LiteralPath $oldLog) {
         throw 'The expired direct log was not removed.'
     }
@@ -136,6 +156,8 @@ try {
         dailyHardLinkRejected = $true
         outsideWriteCount = 0
         trustedAppendSucceeded = $true
+        companionLifecycleRecorded = $true
+        companionLifecycleSensitiveFields = 0
         expiredDirectLogRemoved = $true
         recentDirectLogPreserved = $true
     } | ConvertTo-Json

@@ -77,6 +77,8 @@ public partial class MainWindow
     private readonly CancellationTokenSource _enhancementCompanionLifetimeCts = new();
     private readonly object _enhancementCompanionDurableRecoverySync = new();
     private Process? _ownedEnhancementCompanion;
+    private EnhancementCompanionProcessObservation?
+        _ownedEnhancementCompanionObservation;
     private string? _enhancementCompanionLaunchError;
     private int _enhancementCompanionLaunchAttemptCount;
     private Func<Uri, (bool Started, string Error)>? _startEnhancementCompanionForSmoke;
@@ -89,6 +91,31 @@ public partial class MainWindow
     private bool _enhancementCompanionDurableRecoveryRunning;
     private string? _enhancementCompanionDurableRecoveryRequestId;
     private string? _enhancementCompanionDurableRecoverySourceIdentity;
+    private sealed class EnhancementCompanionProcessObservation(
+        int processId,
+        long startedTimestamp)
+    {
+        internal const int Running = 0;
+        internal const int StopRequested = 1;
+        internal const int OwnershipReleased = 2;
+        private int _disposition = Running;
+
+        internal int ProcessId { get; } = processId;
+        internal long StartedTimestamp { get; } = startedTimestamp;
+        internal int Disposition => Volatile.Read(ref _disposition);
+
+        internal void MarkStopRequested()
+            => Interlocked.CompareExchange(
+                ref _disposition,
+                StopRequested,
+                Running);
+
+        internal void MarkOwnershipReleased()
+            => Interlocked.CompareExchange(
+                ref _disposition,
+                OwnershipReleased,
+                Running);
+    }
     private sealed record EnhancementEnqueueProbe(
         EnhancementEnqueueBackendMode Mode,
         JsonElement? HealthPayload,
@@ -2939,7 +2966,37 @@ public partial class MainWindow
                 return false;
             }
 
+            var observation = new EnhancementCompanionProcessObservation(
+                process.Id,
+                Stopwatch.GetTimestamp());
             _ownedEnhancementCompanion = process;
+            _ownedEnhancementCompanionObservation = observation;
+            AibosOperationLog.Write(
+                "companion.process",
+                "started",
+                mode: "owned",
+                relatedProcessId: observation.ProcessId);
+            try
+            {
+                process.Exited += (_, _) =>
+                    LogEnhancementCompanionProcessExit(process, observation);
+                process.EnableRaisingEvents = true;
+            }
+            catch (Exception ex) when (ex is
+                InvalidOperationException or
+                Win32Exception or
+                NotSupportedException)
+            {
+                // Diagnostics are best-effort. A listener that started
+                // successfully must not be torn down only because Windows
+                // process-exit observation is unavailable.
+                AibosOperationLog.Write(
+                    "companion.process",
+                    "monitor_failed",
+                    errorCode: "exit_monitor_unavailable",
+                    mode: "owned",
+                    relatedProcessId: observation.ProcessId);
+            }
             _enhancementCompanionLaunchAttemptCount++;
             return true;
         }
@@ -3194,6 +3251,10 @@ public partial class MainWindow
     {
         _enhancementCompanionOwnershipVerified = false;
         _ownedEnhancementCompanionInstanceId = null;
+        EnhancementCompanionProcessObservation? observation =
+            Interlocked.Exchange(
+                ref _ownedEnhancementCompanionObservation,
+                null);
         Process? process = Interlocked.Exchange(ref _ownedEnhancementCompanion, null);
         if (process is null)
             return;
@@ -3201,7 +3262,16 @@ public partial class MainWindow
         try
         {
             if (!process.HasExited)
+            {
+                observation?.MarkStopRequested();
+                AibosOperationLog.Write(
+                    "companion.process",
+                    "stop_requested",
+                    errorCode: "wpf_requested",
+                    mode: "owned",
+                    relatedProcessId: observation?.ProcessId ?? process.Id);
                 process.Kill(entireProcessTree: true);
+            }
         }
         catch
         {
@@ -3218,7 +3288,94 @@ public partial class MainWindow
         // Disposing a Process wrapper does not stop the OS process. Once the
         // loopback companion is ready, it is an independent durable worker so
         // queued/running jobs continue while Aibos is closed.
-        Interlocked.Exchange(ref _ownedEnhancementCompanion, null)?.Dispose();
+        EnhancementCompanionProcessObservation? observation =
+            Interlocked.Exchange(
+                ref _ownedEnhancementCompanionObservation,
+                null);
+        Process? process = Interlocked.Exchange(
+            ref _ownedEnhancementCompanion,
+            null);
+        if (observation is not null)
+        {
+            observation.MarkOwnershipReleased();
+            AibosOperationLog.Write(
+                "companion.process",
+                "ownership_released",
+                elapsedMilliseconds: (long)Stopwatch.GetElapsedTime(
+                    observation.StartedTimestamp).TotalMilliseconds,
+                errorCode: "wpf_closed",
+                mode: "released",
+                relatedProcessId: observation.ProcessId);
+        }
+        process?.Dispose();
+    }
+
+    private static void LogEnhancementCompanionProcessExit(
+        Process process,
+        EnhancementCompanionProcessObservation observation)
+    {
+        int? exitCode = null;
+        try
+        {
+            exitCode = process.ExitCode;
+        }
+        catch (Exception ex) when (ex is
+            InvalidOperationException or
+            Win32Exception or
+            NotSupportedException)
+        {
+        }
+
+        int disposition = observation.Disposition;
+        bool expectedStop = disposition ==
+            EnhancementCompanionProcessObservation.StopRequested;
+        string outcome = disposition switch
+        {
+            EnhancementCompanionProcessObservation.StopRequested
+                => "expected_exit",
+            EnhancementCompanionProcessObservation.OwnershipReleased
+                => "exit_after_release",
+            _ => "unexpected_exit",
+        };
+        string errorCode = disposition ==
+                EnhancementCompanionProcessObservation.OwnershipReleased
+            ? "ownership_released"
+            : ClassifyEnhancementCompanionExit(expectedStop, exitCode);
+        string mode = disposition ==
+                EnhancementCompanionProcessObservation.OwnershipReleased
+            ? "released"
+            : "owned";
+        AibosOperationLog.Write(
+            "companion.process",
+            outcome,
+            elapsedMilliseconds: (long)Stopwatch.GetElapsedTime(
+                observation.StartedTimestamp).TotalMilliseconds,
+            errorCode: errorCode,
+            mode: mode,
+            relatedProcessId: observation.ProcessId,
+            exitCode: exitCode);
+    }
+
+    private static string ClassifyEnhancementCompanionExit(
+        bool expectedStop,
+        int? exitCode)
+    {
+        if (expectedStop)
+            return "wpf_requested";
+        if (exitCode is null)
+            return "exit_code_unavailable";
+        if (exitCode == 0)
+            return "self_exit_zero";
+        if (exitCode == -1)
+            return "terminated_or_aborted";
+
+        uint nativeExitCode = unchecked((uint)exitCode.Value);
+        return nativeExitCode switch
+        {
+            0xC000013A => "console_or_shutdown",
+            0xC0000005 => "access_violation",
+            _ => "abnormal_or_forced",
+        };
     }
 
     private void CancelOwnedEnhancementCompanionLifetime()
@@ -3234,6 +3391,10 @@ public partial class MainWindow
 
     public int EnhancementCompanionLaunchAttemptCountForSmoke => _enhancementCompanionLaunchAttemptCount;
     public string? EnhancementCompanionLaunchErrorForSmoke => _enhancementCompanionLaunchError;
+    public static string ClassifyEnhancementCompanionExitForSmoke(
+        bool expectedStop,
+        int? exitCode)
+        => ClassifyEnhancementCompanionExit(expectedStop, exitCode);
     public static string? ResolveEnhancementCompanionRootForSmoke()
         => ResolveEnhancementCompanionRoot()?.RootPath;
     public static string? SelectEnhancementCompanionRootSettingForSmoke(

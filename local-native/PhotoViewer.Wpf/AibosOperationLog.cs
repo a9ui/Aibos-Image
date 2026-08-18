@@ -9,6 +9,8 @@ namespace PhotoViewer.Wpf;
 /// <summary>
 /// Small, best-effort operational log for explicit user actions and failures.
 /// It never records prompts, source paths, job ids, response bodies, or secrets.
+/// Process lifecycle entries may include only a numeric related process id and
+/// exit code so an unexpected local companion stop can be diagnosed.
 /// File I/O is drained on a background thread so UI actions only enqueue one
 /// bounded JSON line.
 /// </summary>
@@ -39,7 +41,9 @@ internal static partial class AibosOperationLog
         string? mode = null,
         int? durationSeconds = null,
         double? inferenceMilliseconds = null,
-        int? itemCount = null)
+        int? itemCount = null,
+        int? relatedProcessId = null,
+        int? exitCode = null)
     {
         if (!Enabled)
             return;
@@ -66,7 +70,11 @@ internal static partial class AibosOperationLog
                             : null,
                 ItemCount: itemCount is >= 0 and <= 1_000_000
                     ? itemCount
-                    : null);
+                    : null,
+                RelatedProcessId: relatedProcessId is > 0
+                    ? relatedProcessId
+                    : null,
+                ExitCode: exitCode);
             string line = JsonSerializer.Serialize(entry);
             if (Utf8NoBom.GetByteCount(line) > 2_048)
                 return;
@@ -147,6 +155,22 @@ internal static partial class AibosOperationLog
         batch.AppendLine(line);
         return AppendBounded(trustedDirectory, utcNow, batch);
     }
+
+    internal static string CompanionLifecycleLineForSecuritySmoke()
+        => JsonSerializer.Serialize(new OperationLogEntry(
+            TimestampUtc: DateTimeOffset.UnixEpoch,
+            ProcessId: 1234,
+            Operation: "companion.process",
+            Outcome: "unexpected_exit",
+            ElapsedMilliseconds: 15_000,
+            StatusCode: null,
+            ErrorCode: "terminated_or_aborted",
+            Mode: "owned",
+            DurationSeconds: null,
+            InferenceMilliseconds: null,
+            ItemCount: null,
+            RelatedProcessId: 4321,
+            ExitCode: -1));
 
     private static bool TryPrepareTrustedLogDirectory(
         string localAppDataRoot,
@@ -353,5 +377,7 @@ internal static partial class AibosOperationLog
         string? Mode,
         int? DurationSeconds,
         double? InferenceMilliseconds,
-        int? ItemCount);
+        int? ItemCount,
+        int? RelatedProcessId,
+        int? ExitCode);
 }
