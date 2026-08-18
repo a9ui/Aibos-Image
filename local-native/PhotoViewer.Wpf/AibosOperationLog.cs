@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -18,12 +19,12 @@ internal static partial class AibosOperationLog
 {
     private const long MaximumDailyBytes = 4L * 1024 * 1024;
     private const int MaximumPendingLines = 256;
-    private const int RetentionDays = 7;
+    private const int MaximumRetainedLogDays = 7;
     private static readonly ConcurrentQueue<string> Pending = new();
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static int _pendingCount;
     private static int _drainScheduled;
-    private static int _cleanupAttempted;
+    private static int _lastCleanupUtcDateKey;
 
     public static bool Enabled { get; set; } = true;
 
@@ -110,20 +111,22 @@ internal static partial class AibosOperationLog
                 return;
 
             DateTime utcNow = DateTime.UtcNow;
-            CleanupExpiredLogsOnce(trustedDirectory, utcNow);
             var batch = new StringBuilder(8 * 1024);
+            bool wroteAny = false;
             while (Pending.TryDequeue(out string? line))
             {
                 Interlocked.Decrement(ref _pendingCount);
                 batch.AppendLine(line);
                 if (batch.Length >= 8 * 1024)
                 {
-                    AppendBounded(trustedDirectory, utcNow, batch);
+                    wroteAny |= AppendBounded(trustedDirectory, utcNow, batch);
                     batch.Clear();
                 }
             }
             if (batch.Length > 0)
-                AppendBounded(trustedDirectory, utcNow, batch);
+                wroteAny |= AppendBounded(trustedDirectory, utcNow, batch);
+            if (wroteAny)
+                CleanupExcessDailyLogsOnce(trustedDirectory, utcNow);
         }
         catch
         {
@@ -150,10 +153,12 @@ internal static partial class AibosOperationLog
             return false;
         }
 
-        CleanupExpiredLogsOnce(trustedDirectory, utcNow);
         var batch = new StringBuilder(line.Length + Environment.NewLine.Length);
         batch.AppendLine(line);
-        return AppendBounded(trustedDirectory, utcNow, batch);
+        bool wrote = AppendBounded(trustedDirectory, utcNow, batch);
+        if (wrote)
+            CleanupExcessDailyLogsOnce(trustedDirectory, utcNow);
+        return wrote;
     }
 
     internal static string CompanionLifecycleLineForSecuritySmoke()
@@ -315,17 +320,26 @@ internal static partial class AibosOperationLog
         return true;
     }
 
-    private static void CleanupExpiredLogsOnce(
+    private static void CleanupExcessDailyLogsOnce(
         string trustedDirectory,
         DateTime utcNow)
     {
-        if (Interlocked.Exchange(ref _cleanupAttempted, 1) != 0)
+        int utcDateKey = (utcNow.Year * 10_000)
+            + (utcNow.Month * 100)
+            + utcNow.Day;
+        if (Interlocked.Exchange(
+                ref _lastCleanupUtcDateKey,
+                utcDateKey) == utcDateKey)
+        {
             return;
+        }
 
         if (!IsTrustedLogDirectory(trustedDirectory))
             return;
 
-        DateTime cutoffUtc = utcNow.AddDays(-RetentionDays);
+        const string prefix = "operations-";
+        const string suffix = ".jsonl";
+        var dailyLogs = new List<(string Path, DateOnly Date)>();
         // trustedDirectory is a direct, handle-resolved application child and
         // enumeration is limited to the fixed daily-log pattern at top level.
         // codeql[cs/path-injection]
@@ -336,16 +350,43 @@ internal static partial class AibosOperationLog
         {
             try
             {
-                if (!IsTrustedLogDirectory(trustedDirectory))
-                    return;
-                WindowsPathIdentity.TryDeleteDirectFileOlderThan(
-                    candidate,
-                    trustedDirectory,
-                    cutoffUtc);
+                string name = Path.GetFileName(candidate);
+                if (name.Length != prefix.Length + 10 + suffix.Length
+                    || !name.StartsWith(prefix, StringComparison.Ordinal)
+                    || !name.EndsWith(suffix, StringComparison.Ordinal)
+                    || !DateOnly.TryParseExact(
+                        name.AsSpan(prefix.Length, 10),
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out DateOnly logDate))
+                {
+                    continue;
+                }
+                dailyLogs.Add((candidate, logDate));
             }
             catch
             {
             }
+        }
+
+        foreach ((string candidate, _) in dailyLogs
+                     .OrderByDescending(static entry => entry.Date)
+                     .ThenByDescending(
+                         static entry => entry.Path,
+                         StringComparer.OrdinalIgnoreCase)
+                     .Skip(MaximumRetainedLogDays))
+        {
+            if (!IsTrustedLogDirectory(trustedDirectory))
+                return;
+            // The selected excess files are based on their validated fixed
+            // daily names, not their mutable LastWriteTime. MaxValue lets the
+            // existing handle-bound deletion helper remove only that selected
+            // direct file while preserving its reparse/hard-link checks.
+            WindowsPathIdentity.TryDeleteDirectFileOlderThan(
+                candidate,
+                trustedDirectory,
+                DateTime.MaxValue);
         }
     }
 
