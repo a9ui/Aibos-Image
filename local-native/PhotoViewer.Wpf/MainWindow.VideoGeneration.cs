@@ -123,7 +123,8 @@ public partial class MainWindow
         string SourceIdentity,
         string DisplayPath,
         string? ProducerJobId,
-        string Label);
+        string Label,
+        bool UsesDisplayedFileDirectly);
 
     private static bool VideoSourceChoicesReferToSameInput(
         VideoSourceChoice left,
@@ -139,7 +140,9 @@ public partial class MainWindow
             && string.Equals(
                 left.ProducerJobId,
                 right.ProducerJobId,
-                StringComparison.Ordinal);
+                StringComparison.Ordinal)
+            && left.UsesDisplayedFileDirectly
+                == right.UsesDisplayedFileDirectly;
 
     private sealed record VideoStyleChoice(string Label, string? StyleName);
 
@@ -754,18 +757,45 @@ public partial class MainWindow
         if (requestedSource is null
             && CurrentModalEnhancementVersionIsPhotoreal())
         {
-            if (!TryGetExactDurableCurrentModalEnhancementVersion(
+            if (TryGetExactDurableCurrentModalEnhancementVersion(
                     tile,
                     out ManagedEnhancementVersion current)
-                || !string.Equals(
+                && string.Equals(
                     current.Operation,
                     "photoreal",
                     StringComparison.Ordinal))
             {
+                photorealVersion = current;
+            }
+            else if (TryGetCurrentModalEnhancementVersion(
+                         tile,
+                         out ManagedEnhancementVersion displayed)
+                     && string.Equals(
+                         displayed.Operation,
+                         "photoreal",
+                         StringComparison.Ordinal)
+                     && TryResolveEnhancementSourceIdentity(
+                         displayed.Output.OutputPath,
+                         out string displayedIdentity)
+                     && string.Equals(
+                         displayedIdentity,
+                         displayed.Output.OutputPath,
+                         StringComparison.OrdinalIgnoreCase)
+                     && File.Exists(displayedIdentity))
+            {
+                source = new VideoSourceChoice(
+                    displayedIdentity,
+                    displayedIdentity,
+                    null,
+                    $"表示中の実写版 · {Path.GetFileName(displayedIdentity)}",
+                    UsesDisplayedFileDirectly: true);
+                return true;
+            }
+            else
+            {
                 error = "表示中の実写版が古いか、Jobを一意に特定できません。実写版を選び直してください。";
                 return false;
             }
-            photorealVersion = current;
         }
         else if (requestedPhotorealJobId is not null
             || string.Equals(
@@ -834,7 +864,8 @@ public partial class MainWindow
                 sourceIdentity,
                 photorealVersion.Output.OutputPath,
                 photorealVersion.JobId,
-                $"実写版 · {Path.GetFileName(photorealVersion.Output.OutputPath)}");
+                $"実写版 · {Path.GetFileName(photorealVersion.Output.OutputPath)}",
+                UsesDisplayedFileDirectly: false);
             return true;
         }
 
@@ -846,7 +877,8 @@ public partial class MainWindow
             sourceIdentity,
             sourceIdentity,
             null,
-            label);
+            label,
+            UsesDisplayedFileDirectly: false);
         return true;
     }
 
@@ -862,9 +894,11 @@ public partial class MainWindow
             return false;
         }
 
-        string requestedSource = captured.ProducerJobId is null
-            ? "original"
-            : PhotorealVideoSourceRequestPrefix + captured.ProducerJobId;
+        string? requestedSource = captured.UsesDisplayedFileDirectly
+            ? null
+            : captured.ProducerJobId is null
+                ? "original"
+                : PhotorealVideoSourceRequestPrefix + captured.ProducerJobId;
         if (!TryCaptureVideoSource(
                 tile,
                 requestedSource,
@@ -2608,6 +2642,9 @@ public partial class MainWindow
     public string? VideoSourceIdentityForSmoke
         => _videoSourceChoice?.SourceIdentity;
 
+    public string? VideoDisplayPathForSmoke
+        => _videoSourceChoice?.DisplayPath;
+
     public bool OpenDisplayedModalVideoGenerationBoardForSmoke()
     {
         OpenModalVideoGeneration_Click(this, new RoutedEventArgs());
@@ -2749,7 +2786,8 @@ public partial class MainWindow
             "C:/synthetic/source.png",
             "C:/synthetic/source.png",
             null,
-            "Original");
+            "Original",
+            UsesDisplayedFileDirectly: false);
         var settings = new VideoGenerationRequestSettings(
             MiniMaxH3VideoPresetId,
             MiniMaxH3VideoBackendId,
