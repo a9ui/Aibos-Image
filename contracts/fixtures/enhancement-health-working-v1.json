@@ -63,6 +63,7 @@
         "terminalHistoryBatchDismissV1": true,
         "photorealPromptControlsV2": true,
         "atomicImageEnqueueNext": true,
+        "displayedManagedVideoSourceV1": true,
         "videoH3StepsV1": {
           "contractId": "PV-ENHANCE-VIDEO-H3-STEPS-001",
           "protocol": "aibos.enhancement-video-h3-steps/v1",

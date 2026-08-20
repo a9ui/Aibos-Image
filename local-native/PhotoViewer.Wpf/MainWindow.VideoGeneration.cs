@@ -144,6 +144,47 @@ public partial class MainWindow
             && left.UsesDisplayedFileDirectly
                 == right.UsesDisplayedFileDirectly;
 
+    private bool TryResolveDisplayedManagedVideoSourcePath(
+        string path,
+        out string canonicalPath)
+    {
+        canonicalPath = "";
+        if (!TryResolveManagedEnhancementOutputPath(path, out string resolved))
+            return false;
+
+        try
+        {
+            string root = Path.GetFullPath(
+                _resolveFinalPath(ResolvedManagedEnhancementOutputsRoot));
+            string relative = Path.GetRelativePath(root, resolved);
+            string[] parts = relative.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries);
+            bool supportedFolder = parts.Length >= 1
+                && (string.Equals(parts[0], "Upscaled", StringComparison.Ordinal)
+                    || string.Equals(parts[0], "Photorealized", StringComparison.Ordinal)
+                    || string.Equals(parts[0], "Edited", StringComparison.Ordinal));
+            bool supportedLayout = parts.Length == 2
+                || (parts.Length == 3
+                    && DateTime.TryParseExact(
+                        parts[1],
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out _));
+            if (!supportedFolder || !supportedLayout)
+                return false;
+
+            canonicalPath = resolved;
+            return true;
+        }
+        catch
+        {
+            canonicalPath = "";
+            return false;
+        }
+    }
+
     private sealed record VideoStyleChoice(string Label, string? StyleName);
 
     private sealed record VideoPromptTemplateChoice(
@@ -731,14 +772,10 @@ public partial class MainWindow
     {
         source = null!;
         error = "";
-        if (!TryResolveEnhancementSourceIdentity(
+        bool hasCurrentOriginal = TryResolveEnhancementSourceIdentity(
                 tile.Path,
                 out string sourceIdentity)
-            || !File.Exists(sourceIdentity))
-        {
-            error = "元画像が見つからないため動画化できません。";
-            return false;
-        }
+            && File.Exists(sourceIdentity);
 
         string? requestedPhotorealJobId = requestedSource is not null
             && requestedSource.StartsWith(
@@ -754,50 +791,67 @@ public partial class MainWindow
         }
 
         ManagedEnhancementVersion? photorealVersion = null;
-        if (requestedSource is null
-            && CurrentModalEnhancementVersionIsPhotoreal())
+        if (requestedSource is null && _modalShowingEnhanced)
         {
-            if (TryGetExactDurableCurrentModalEnhancementVersion(
-                    tile,
-                    out ManagedEnhancementVersion current)
-                && string.Equals(
-                    current.Operation,
-                    "photoreal",
-                    StringComparison.Ordinal))
+            bool matchingModalSource = string.Equals(
+                    _modalEnhancementVersionsSourcePath,
+                    tile.Path,
+                    StringComparison.OrdinalIgnoreCase)
+                && _modalEnhancementVersionIndex >= 1
+                && _modalEnhancementVersionIndex
+                    <= _modalEnhancementVersions.Count;
+            ManagedEnhancementVersion? displayed = matchingModalSource
+                ? _modalEnhancementVersions[_modalEnhancementVersionIndex - 1]
+                : null;
+            if (displayed is not null
+                && TryResolveDisplayedManagedVideoSourcePath(
+                    displayed.Output.OutputPath,
+                    out string displayedPath))
             {
-                photorealVersion = current;
-            }
-            else if (TryGetCurrentModalEnhancementVersion(
-                         tile,
-                         out ManagedEnhancementVersion displayed)
-                     && string.Equals(
-                         displayed.Operation,
-                         "photoreal",
-                         StringComparison.Ordinal)
-                     && TryResolveEnhancementSourceIdentity(
-                         displayed.Output.OutputPath,
-                         out string displayedIdentity)
-                     && string.Equals(
-                         displayedIdentity,
-                         displayed.Output.OutputPath,
-                         StringComparison.OrdinalIgnoreCase)
-                     && File.Exists(displayedIdentity))
-            {
+                string kind = displayed.Operation switch
+                {
+                    "upscale" => "高画質版",
+                    "photoreal" => "実写版",
+                    "i2i" => "AI編集版",
+                    _ => "生成画像",
+                };
                 source = new VideoSourceChoice(
-                    displayedIdentity,
-                    displayedIdentity,
+                    hasCurrentOriginal ? sourceIdentity : displayedPath,
+                    displayedPath,
                     null,
-                    $"表示中の実写版 · {Path.GetFileName(displayedIdentity)}",
+                    $"表示中の{kind} · {Path.GetFileName(displayedPath)}",
                     UsesDisplayedFileDirectly: true);
                 return true;
             }
             else
             {
-                error = "表示中の実写版が古いか、Jobを一意に特定できません。実写版を選び直してください。";
+                error = "表示中の生成画像が移動・変更されたため動画化できません。画像を選び直してください。";
                 return false;
             }
         }
-        else if (requestedPhotorealJobId is not null
+
+        if (requestedSource is null
+            && !hasCurrentOriginal
+            && TryResolveDisplayedManagedVideoSourcePath(
+                tile.Path,
+                out string openedManagedPath))
+        {
+            source = new VideoSourceChoice(
+                openedManagedPath,
+                openedManagedPath,
+                null,
+                $"表示中の生成画像 · {Path.GetFileName(openedManagedPath)}",
+                UsesDisplayedFileDirectly: true);
+            return true;
+        }
+
+        if (!hasCurrentOriginal)
+        {
+            error = "表示中の画像ファイルが見つからないため動画化できません。";
+            return false;
+        }
+
+        if (requestedPhotorealJobId is not null
             || string.Equals(
                 requestedSource,
                 "photoreal",
@@ -869,15 +923,25 @@ public partial class MainWindow
             return true;
         }
 
-        string label = requestedSource is null
-            && _modalShowingEnhanced
-                ? "Original（高画質化表示は入力対象外）"
-                : "Original";
+        if (requestedSource is null
+            && TryResolveDisplayedManagedVideoSourcePath(
+                sourceIdentity,
+                out string managedDisplayPath))
+        {
+            source = new VideoSourceChoice(
+                managedDisplayPath,
+                managedDisplayPath,
+                null,
+                $"表示中の生成画像 · {Path.GetFileName(managedDisplayPath)}",
+                UsesDisplayedFileDirectly: true);
+            return true;
+        }
+
         source = new VideoSourceChoice(
             sourceIdentity,
             sourceIdentity,
             null,
-            label,
+            "Original",
             UsesDisplayedFileDirectly: false);
         return true;
     }
@@ -2466,7 +2530,9 @@ public partial class MainWindow
         try
         {
             Func<JsonElement, string?>? healthValidator = h3Selected
-                ? CreateMiniMaxH3VideoHealthValidator()
+                ? CreateMiniMaxH3VideoHealthValidator(
+                    requireDisplayedManagedSource:
+                        source.UsesDisplayedFileDirectly)
                 : seed.HasValue
                     ? CreateEnhancementCapabilityHealthValidator(
                         VideoSeedControlCapability,
@@ -2624,6 +2690,8 @@ public partial class MainWindow
         };
         if (!string.IsNullOrWhiteSpace(source.ProducerJobId))
             requestBody["sourceProducerJobId"] = source.ProducerJobId;
+        if (source.UsesDisplayedFileDirectly)
+            requestBody["sourceManagedOutputPath"] = source.DisplayPath;
         if (!h3Selected && seed is int fixedSeed)
             requestBody["seed"] = fixedSeed;
         return requestBody;

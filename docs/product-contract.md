@@ -153,7 +153,11 @@ The executable cases for these meanings are routed by
 - Every job snapshots the effective request needed for deterministic retry.
   Later settings changes do not silently rewrite queued or running jobs.
 - A request that uses a managed producer refers to its durable job identity.
-  Clients do not submit an arbitrary managed output path.
+  A video request may instead name the exact managed still currently displayed,
+  but only through the advertised displayed-source capability and after both
+  WPF and companion validate its canonical managed-root ownership, supported
+  operation folder, current file identity, decoded bounds, and content hash.
+  No other client-supplied managed output path is accepted.
 - Original and managed output identities remain distinct. Enhancement never
   overwrites the source.
 

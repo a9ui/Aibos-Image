@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-002-MANAGED-SOURCE-FIXTURE",
+  "forContractId": "PV-ENHANCE-VIDEO-002",
+  "capability": {
+    "field": "capabilities.displayedManagedVideoSourceV1",
+    "value": true
+  },
+  "requestFixture": {
+    "sourceId": "${ORIGINAL_OR_MANAGED_SOURCE_ID}",
+    "sourceManagedOutputPath": "${OUTPUT_ROOT}/Edited/2026-08-20/displayed-edit.png",
+    "operation": "video",
+    "mediaKind": "video",
+    "presetId": "minimax-h3-i2v-preview-v1",
+    "adapterId": "minimax-h3-local-v1",
+    "video": {
+      "requested": {
+        "profileId": "minimax-h3-hq-5s-v1",
+        "prompt": "slow push-in",
+        "steps": 20,
+        "maximumPixelArea": 414720
+      }
+    }
+  },
+  "expectedPersistence": {
+    "sourcePath": "${CANONICAL_MANAGED_OUTPUT_PATH}",
+    "sourceSignature": "pinned from the managed still",
+    "sourceSha256": "pinned from the managed still",
+    "sourceProducerJobId": "absent",
+    "sourceManagedOutputPath": "request-only and absent from the job",
+    "sourceRegistration": "managed-displayed-output"
+  },
+  "acceptedOperationFolders": [
+    "Upscaled",
+    "Photorealized",
+    "Edited"
+  ],
+  "acceptedLayouts": [
+    "<operation>/<file>",
+    "<operation>/<YYYY-MM-DD>/<file>"
+  ],
+  "missingOriginalRule": "if sourceId no longer exists but the managed still is valid, persist the canonical managed path as sourceId",
+  "rejected": [
+    "outside managed output root",
+    "Videos folder",
+    "nested path deeper than the accepted layouts",
+    "unsupported or non-regular image",
+    "sourceProducerJobId supplied together with sourceManagedOutputPath"
+  ]
+}

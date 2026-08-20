@@ -70,6 +70,7 @@
     "missingTerminalHistoryBatchDismissV1": "keep health and jobs readable and fall back to protected per-job terminal history dismissal",
     "missingPhotorealPromptControlsV2": "keep health and jobs readable but block new photoreal submissions so an older companion cannot silently ignore Negative, LoRA OFF, or the removal of legacy hidden prompt text",
     "missingAtomicImageEnqueueNext": "keep health and jobs readable but hide or block enqueue-next actions so an older companion cannot silently append the job to the tail",
+    "missingDisplayedManagedVideoSourceV1": "keep health and jobs readable but block video enqueue from a displayed managed still so an older companion cannot reinterpret it as an Original source",
     "missingStoreBackendGeneration": "treat the store as a compatible legacy backend and keep the existing jobs API behavior",
     "missingStoreRevisions": "keep health and jobs readable; readers must not invent revision values",
     "inventoryRevision": "an optional monotonic commit revision; it may advance for progress or heartbeat writes and is not by itself a signal to reload the full jobs inventory",

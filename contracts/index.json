@@ -136,6 +136,11 @@
       "path": "contracts/fixtures/enhancement-video-v2-health-v1.json"
     },
     {
+      "fixtureId": "PV-ENHANCE-VIDEO-002-MANAGED-SOURCE-FIXTURE",
+      "forContractId": "PV-ENHANCE-VIDEO-002",
+      "path": "contracts/fixtures/enhancement-video-managed-source-v1.json"
+    },
+    {
       "fixtureId": "PV-ENHANCE-VIDEO-002-READER-FIXTURES",
       "forContractId": "PV-ENHANCE-VIDEO-002",
       "path": "contracts/fixtures/enhancement-video-v2-reader-v1.json"
@@ -170,6 +175,7 @@
       "fixtures": [
         "contracts/fixtures/enhancement-video-h3-prompt-rewrite-v1.json",
         "contracts/fixtures/enhancement-video-v2-health-v1.json",
+        "contracts/fixtures/enhancement-video-managed-source-v1.json",
         "contracts/fixtures/enhancement-video-v2-reader-v1.json"
       ]
     }

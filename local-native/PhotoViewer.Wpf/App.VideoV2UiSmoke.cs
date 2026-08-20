@@ -988,6 +988,7 @@ public partial class App
                     protocolVersion = 1,
                     backendGeneration = "json-v1",
                 },
+                displayedManagedVideoSourceV1 = true,
                 videoV2 = new
                 {
                     contractId = "PV-ENHANCE-VIDEO-002",
