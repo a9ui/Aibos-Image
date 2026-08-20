@@ -413,6 +413,70 @@ public partial class App
             JsonElement selectedStepsJob =
                 selectedStepsJobDocument.RootElement.Clone();
 
+            string legacyManagedSourcePath = Path.Combine(
+                outputRoot,
+                "Edited",
+                "legacy-managed-source.png");
+            Directory.CreateDirectory(Path.GetDirectoryName(
+                legacyManagedSourcePath)!);
+            File.WriteAllBytes(legacyManagedSourcePath, sourceBytes);
+            File.SetLastWriteTimeUtc(
+                legacyManagedSourcePath,
+                DateTimeOffset.FromUnixTimeMilliseconds(sourceMtimeMs + 2_000L)
+                    .UtcDateTime);
+            var legacyManagedSourceInfo = new FileInfo(
+                legacyManagedSourcePath);
+            long legacyManagedSourceMtimeMs = new DateTimeOffset(
+                    legacyManagedSourceInfo.LastWriteTimeUtc)
+                .ToUnixTimeMilliseconds();
+            const string legacyManagedJobId = "valid-h3-legacy-managed-source";
+            JsonObject legacyManagedJobNode = JsonNode.Parse(
+                    validJob.GetRawText())!
+                .AsObject();
+            legacyManagedJobNode["id"] = legacyManagedJobId;
+            legacyManagedJobNode["sourceId"] = Path.Combine(
+                sourceRoot,
+                "missing-original.png");
+            legacyManagedJobNode["sourcePath"] = legacyManagedSourcePath;
+            legacyManagedJobNode["sourceSignature"] = new JsonObject
+            {
+                ["size"] = legacyManagedSourceInfo.Length,
+                ["mtimeMs"] = legacyManagedSourceMtimeMs,
+            };
+            string legacyManagedOutputFileName = PhotoViewer.Wpf.MainWindow
+                .BuildVideoOutputFileNameForSmoke(
+                    legacyManagedJobId,
+                    legacyManagedSourcePath,
+                    sourceSha,
+                    validJob.GetProperty("presetId").GetString()!,
+                    validPresetHash);
+            string legacyManagedOutputPath = Path.Combine(
+                outputRoot,
+                "Videos",
+                "2026-08-20",
+                legacyManagedOutputFileName);
+            legacyManagedJobNode["outputPath"] = legacyManagedOutputPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(
+                legacyManagedOutputPath)!);
+            File.WriteAllBytes(legacyManagedOutputPath, mediaFixtureBytes);
+            using JsonDocument legacyManagedJobDocument = JsonDocument.Parse(
+                legacyManagedJobNode.ToJsonString());
+            JsonElement legacyManagedJob =
+                legacyManagedJobDocument.RootElement.Clone();
+            JsonObject staleProducerManagedJobNode = JsonNode.Parse(
+                    legacyManagedJob.GetRawText())!
+                .AsObject();
+            staleProducerManagedJobNode["sourceProducerJobId"] =
+                "missing-producer-job";
+            using JsonDocument staleProducerManagedJobDocument =
+                JsonDocument.Parse(staleProducerManagedJobNode.ToJsonString());
+            JsonElement staleProducerManagedJob =
+                staleProducerManagedJobDocument.RootElement.Clone();
+            byte[] legacyManagedSourceBefore = File.ReadAllBytes(
+                legacyManagedSourcePath);
+            byte[] legacyManagedOutputBefore = File.ReadAllBytes(
+                legacyManagedOutputPath);
+
             const int exifStoredWidth = 96;
             const int exifStoredHeight = 64;
             (int exifWriterWidth, int exifWriterHeight) =
@@ -619,6 +683,204 @@ public partial class App
                     HttpStatusCode.NotFound));
             });
 
+            bool rerunPresentationExact = window
+                .TryBuildMiniMaxH3VideoRerunForSmoke(
+                    validJob,
+                    out string[] rerunActionKinds,
+                    out string rerunProfileId,
+                    out int rerunNominalDurationSeconds,
+                    out int rerunMaximumPixelArea,
+                    out int rerunSteps,
+                    out string rerunPrompt,
+                    out string rerunSourceIdentity,
+                    out string rerunDisplayPath,
+                    out bool rerunUsesDisplayedFileDirectly,
+                    out string rerunRequestJson)
+                && rerunActionKinds.SequenceEqual(
+                    new[]
+                    {
+                        "video-rerun-saved",
+                        "video-edit-prompt",
+                        "open-output",
+                        "delete-output",
+                    },
+                    StringComparer.Ordinal)
+                && rerunProfileId == "minimax-h3-hq-5s-v1"
+                && rerunNominalDurationSeconds == 5
+                && rerunMaximumPixelArea == 414720
+                && rerunSteps == 20
+                && rerunPrompt == "A gentle head turn in dawn light."
+                && string.Equals(
+                    rerunSourceIdentity,
+                    sourcePath,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    rerunDisplayPath,
+                    sourcePath,
+                    StringComparison.OrdinalIgnoreCase)
+                && !rerunUsesDisplayedFileDirectly;
+            bool rerunRequestExact = false;
+            if (rerunPresentationExact)
+            {
+                using JsonDocument rerunRequest = JsonDocument.Parse(
+                    rerunRequestJson);
+                JsonElement root = rerunRequest.RootElement;
+                JsonElement requested = root
+                    .GetProperty("video")
+                    .GetProperty("requested");
+                rerunRequestExact = HasExactJsonProperties(
+                        root,
+                        "sourceId",
+                        "operation",
+                        "mediaKind",
+                        "presetId",
+                        "adapterId",
+                        "video")
+                    && HasExactJsonString(
+                        root,
+                        "sourceId",
+                        sourcePath)
+                    && HasExactJsonString(root, "operation", "video")
+                    && HasExactJsonString(root, "mediaKind", "video")
+                    && HasExactJsonString(
+                        root,
+                        "presetId",
+                        "minimax-h3-i2v-preview-v1")
+                    && HasExactJsonString(
+                        root,
+                        "adapterId",
+                        "minimax-h3-local-v1")
+                    && HasExactJsonProperties(
+                        root.GetProperty("video"),
+                        "requested")
+                    && HasExactJsonProperties(
+                        requested,
+                        "profileId",
+                        "prompt",
+                        "steps",
+                        "maximumPixelArea")
+                    && HasExactJsonString(
+                        requested,
+                        "profileId",
+                        rerunProfileId)
+                    && HasExactJsonString(
+                        requested,
+                        "prompt",
+                        rerunPrompt)
+                    && HasExactJsonInt32(requested, "steps", rerunSteps)
+                    && HasExactJsonInt32(
+                        requested,
+                        "maximumPixelArea",
+                        rerunMaximumPixelArea);
+            }
+
+            bool legacyManagedRerunExact = window
+                .TryBuildMiniMaxH3VideoRerunForSmoke(
+                    legacyManagedJob,
+                    out string[] legacyManagedActionKinds,
+                    out string legacyManagedProfileId,
+                    out int legacyManagedNominalDurationSeconds,
+                    out int legacyManagedMaximumPixelArea,
+                    out int legacyManagedSteps,
+                    out string legacyManagedPrompt,
+                    out string legacyManagedSourceIdentity,
+                    out string legacyManagedDisplayPath,
+                    out bool legacyManagedUsesDisplayedFileDirectly,
+                    out string legacyManagedRequestJson)
+                && legacyManagedActionKinds.SequenceEqual(
+                    rerunActionKinds,
+                    StringComparer.Ordinal)
+                && legacyManagedProfileId == rerunProfileId
+                && legacyManagedNominalDurationSeconds
+                    == rerunNominalDurationSeconds
+                && legacyManagedMaximumPixelArea == rerunMaximumPixelArea
+                && legacyManagedSteps == rerunSteps
+                && legacyManagedPrompt == rerunPrompt
+                && legacyManagedUsesDisplayedFileDirectly
+                && string.Equals(
+                    legacyManagedSourceIdentity,
+                    legacyManagedSourcePath,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    legacyManagedDisplayPath,
+                    legacyManagedSourcePath,
+                    StringComparison.OrdinalIgnoreCase)
+                && !File.Exists(legacyManagedJob
+                    .GetProperty("sourceId")
+                    .GetString()!);
+            bool legacyManagedRerunRequestExact = false;
+            if (legacyManagedRerunExact)
+            {
+                using JsonDocument legacyManagedRequest = JsonDocument.Parse(
+                    legacyManagedRequestJson);
+                JsonElement root = legacyManagedRequest.RootElement;
+                JsonElement requested = root
+                    .GetProperty("video")
+                    .GetProperty("requested");
+                legacyManagedRerunRequestExact = HasExactJsonProperties(
+                        root,
+                        "sourceId",
+                        "operation",
+                        "mediaKind",
+                        "presetId",
+                        "adapterId",
+                        "video",
+                        "sourceManagedOutputPath")
+                    && HasExactJsonString(
+                        root,
+                        "sourceId",
+                        legacyManagedSourcePath)
+                    && HasExactJsonString(
+                        root,
+                        "sourceManagedOutputPath",
+                        legacyManagedSourcePath)
+                    && HasExactJsonProperties(
+                        requested,
+                        "profileId",
+                        "prompt",
+                        "steps",
+                        "maximumPixelArea")
+                    && HasExactJsonString(
+                        requested,
+                        "profileId",
+                        rerunProfileId)
+                    && HasExactJsonString(
+                        requested,
+                        "prompt",
+                        rerunPrompt)
+                    && HasExactJsonInt32(requested, "steps", rerunSteps)
+                    && HasExactJsonInt32(
+                        requested,
+                        "maximumPixelArea",
+                        rerunMaximumPixelArea);
+            }
+            bool staleManagedProducerIgnoredExact = window
+                .TryBuildMiniMaxH3VideoRerunForSmoke(
+                    staleProducerManagedJob,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out string staleManagedSourceIdentity,
+                    out string staleManagedDisplayPath,
+                    out bool staleManagedUsesDisplayedFileDirectly,
+                    out string staleManagedRequestJson)
+                && staleManagedUsesDisplayedFileDirectly
+                && string.Equals(
+                    staleManagedSourceIdentity,
+                    legacyManagedSourcePath,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    staleManagedDisplayPath,
+                    legacyManagedSourcePath,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    staleManagedRequestJson,
+                    legacyManagedRequestJson,
+                    StringComparison.Ordinal);
+
             bool exifWorkspaceReaderExact = exifValidJobs.All(job =>
                 PhotoViewer.Wpf.MainWindow
                     .IsMiniMaxH3VideoMutationSafeForSmoke(job)
@@ -753,6 +1015,22 @@ public partial class App
                 && validMutationSafe
                 && validCanUseOutput
                 && validSummary.Contains("MiniMax H3 Preview", StringComparison.Ordinal);
+            bool protectedRerunActionsHidden = jobs
+                .Where(job => !string.Equals(
+                    job.GetProperty("id").GetString(),
+                    "valid-h3-video",
+                    StringComparison.Ordinal))
+                .All(job =>
+                {
+                    string[] actionKinds = window
+                        .ReadMiniMaxH3VideoActionKindsForSmoke(job);
+                    return !actionKinds.Contains(
+                            "video-rerun-saved",
+                            StringComparer.Ordinal)
+                        && !actionKinds.Contains(
+                            "video-edit-prompt",
+                            StringComparer.Ordinal);
+                });
             bool sourceAspectPolicyProtected = observedProtected.Contains(
                     canvasMutationId,
                     StringComparer.Ordinal)
@@ -918,6 +1196,10 @@ public partial class App
                 && File.Exists(selectedStepsOutputPath)
                 && File.ReadAllBytes(selectedStepsOutputPath)
                     .SequenceEqual(mediaFixtureBytes)
+                && File.ReadAllBytes(legacyManagedSourcePath)
+                    .SequenceEqual(legacyManagedSourceBefore)
+                && File.ReadAllBytes(legacyManagedOutputPath)
+                    .SequenceEqual(legacyManagedOutputBefore)
                 && exifFixturesReadOnly
                 && mutationRequests == readerFixture
                     .GetProperty("expectedMutationRequestsDuringRead")
@@ -927,6 +1209,8 @@ public partial class App
                     sourcePath,
                     resolvedValidOutputPath,
                     selectedStepsOutputPath,
+                    legacyManagedSourcePath,
+                    legacyManagedOutputPath,
                     corruptVideoPath,
                     jobsPath,
                     statePath,
@@ -964,6 +1248,12 @@ public partial class App
                 && operationsExact
                 && labelsExact
                 && validWorkspace
+                && rerunPresentationExact
+                && rerunRequestExact
+                && legacyManagedRerunExact
+                && legacyManagedRerunRequestExact
+                && staleManagedProducerIgnoredExact
+                && protectedRerunActionsHidden
                 && validPlayback
                 && selectedStepsPlayback
                 && invalidPlaybackProtected
@@ -1012,6 +1302,12 @@ public partial class App
                 operationsExact,
                 labelsExact,
                 validWorkspace,
+                rerunPresentationExact,
+                rerunRequestExact,
+                legacyManagedRerunExact,
+                legacyManagedRerunRequestExact,
+                staleManagedProducerIgnoredExact,
+                protectedRerunActionsHidden,
                 validPlayback,
                 selectedStepsPlayback,
                 invalidPlaybackProtected,
@@ -1261,5 +1557,38 @@ public partial class App
         ReadOnlySpan<byte> pattern = Encoding.ASCII.GetBytes(value);
         return bytes.AsSpan().IndexOf(pattern) >= 0;
     }
+
+    private static bool HasExactJsonProperties(
+        JsonElement element,
+        params string[] expectedNames)
+        => element.ValueKind == JsonValueKind.Object
+            && element.EnumerateObject()
+                .Select(static property => property.Name)
+                .OrderBy(static name => name, StringComparer.Ordinal)
+                .SequenceEqual(
+                    expectedNames.OrderBy(
+                        static name => name,
+                        StringComparer.Ordinal),
+                    StringComparer.Ordinal);
+
+    private static bool HasExactJsonString(
+        JsonElement element,
+        string propertyName,
+        string expectedValue)
+        => element.TryGetProperty(propertyName, out JsonElement value)
+            && value.ValueKind == JsonValueKind.String
+            && string.Equals(
+                value.GetString(),
+                expectedValue,
+                StringComparison.Ordinal);
+
+    private static bool HasExactJsonInt32(
+        JsonElement element,
+        string propertyName,
+        int expectedValue)
+        => element.TryGetProperty(propertyName, out JsonElement value)
+            && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out int actualValue)
+            && actualValue == expectedValue;
 
 }
