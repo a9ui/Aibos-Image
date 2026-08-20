@@ -4063,9 +4063,10 @@ public partial class MainWindow
                 for (int index = 0; index < dismissibleIds.Length; index++)
                 {
                     string id = dismissibleIds[index];
-                    EnhancementApiResponse remove = await SendEnhancementApiAsync(
-                        HttpMethod.Delete,
-                        $"api/enhance/jobs/{Uri.EscapeDataString(id)}");
+                    EnhancementApiResponse remove =
+                        await SendIdempotentEnhancementMutationAsync(
+                            HttpMethod.Delete,
+                            $"api/enhance/jobs/{Uri.EscapeDataString(id)}");
                     if (!remove.Ok)
                     {
                         failedCount++;
@@ -4521,7 +4522,12 @@ public partial class MainWindow
                     StringComparison.Ordinal);
             EnhancementApiResponse response = isRetryEnqueue
                 ? await SendEnhancementWorkspaceRetryAsync(job)
-                : await SendEnhancementApiAsync(method, route, body);
+                : method == HttpMethod.Delete
+                    ? await SendIdempotentEnhancementMutationAsync(
+                        method,
+                        route,
+                        body)
+                    : await SendEnhancementApiAsync(method, route, body);
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
             {
                 AibosOperationLog.Write(
@@ -4560,7 +4566,7 @@ public partial class MainWindow
             if (removeFailedOriginalAfterSuccess)
             {
                 EnhancementApiResponse removeResponse =
-                    await SendEnhancementApiAsync(
+                    await SendIdempotentEnhancementMutationAsync(
                         HttpMethod.Delete,
                         $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}");
                 if (!removeResponse.Ok)
