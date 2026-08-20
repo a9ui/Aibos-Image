@@ -3615,6 +3615,7 @@ public partial class App : Application
 
     private static void ConfigureAutomationStorageRoot(string root)
     {
+        Directory.CreateDirectory(Path.Combine(root, "enhance"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", Path.Combine(root, "state.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", Path.Combine(root, "favorites.json"));
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", Path.Combine(root, "seen.json"));
@@ -18097,8 +18098,16 @@ public partial class App : Application
         string upscaleSource = Path.Combine(fullFolder, fixtureNames[0]);
         string photorealSource = Path.Combine(fullFolder, fixtureNames[1]);
         string invalidSource = Path.Combine(fullFolder, fixtureNames[2]);
-        string upscaleOutput = Path.Combine(outputRoot, "upscale-" + Path.GetFileName(upscaleSource));
-        string photorealOutput = Path.Combine(outputRoot, "photoreal-" + Path.GetFileName(photorealSource));
+        string upscaleOutput = Path.Combine(
+            outputRoot,
+            "Upscaled",
+            "2026-08-20",
+            "upscale-" + Path.GetFileName(upscaleSource));
+        string photorealOutput = Path.Combine(
+            outputRoot,
+            "Photorealized",
+            "2026-08-20",
+            "photoreal-" + Path.GetFileName(photorealSource));
         string videoOutputDirectory = Path.GetFullPath(Path.Combine(outputRoot, "Videos"));
         string managedOutputPrefix =
             Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputRoot))
@@ -18129,6 +18138,8 @@ public partial class App : Application
         }
         string missingOutput = Path.Combine(outputRoot, "missing-output.png");
         string missingSource = Path.Combine(smokeRoot, "missing-source.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(upscaleOutput)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(photorealOutput)!);
         File.Copy(upscaleSource, upscaleOutput, overwrite: true);
         File.Copy(photorealSource, photorealOutput, overwrite: true);
         // These smoke-only paths are normalized and proven above to stay
@@ -18646,7 +18657,7 @@ public partial class App : Application
                         StringComparison.Ordinal)
                     && string.Equals(
                         win.VideoSourceIdentityForSmoke,
-                        photorealOutput,
+                        photorealSource,
                         StringComparison.OrdinalIgnoreCase)
                     && string.Equals(
                         win.VideoDisplayPathForSmoke,
@@ -18673,6 +18684,13 @@ public partial class App : Application
                             out JsonElement displayedSourceId)
                         && string.Equals(
                             displayedSourceId.GetString(),
+                            photorealSource,
+                            StringComparison.OrdinalIgnoreCase)
+                        && displayedVideoRequest.TryGetProperty(
+                            "sourceManagedOutputPath",
+                            out JsonElement displayedManagedOutputPath)
+                        && string.Equals(
+                            displayedManagedOutputPath.GetString(),
                             photorealOutput,
                             StringComparison.OrdinalIgnoreCase)
                         && !displayedVideoRequest.TryGetProperty(
@@ -18683,8 +18701,71 @@ public partial class App : Application
                     displayedPhotorealVideoSource
                     && displayedPhotorealVideoQueued
                     && displayedPhotorealVideoRequestExact;
+
+                win.CloseModalForSmoke();
+                bool displayedUpscaleVideoSource =
+                    win.SelectFileNameForSmoke(Path.GetFileName(upscaleSource))
+                    && win.OpenModalForSmoke()
+                    && win.SelectModalEnhancementJobVersionForSmoke(
+                        "legacy-upscale-ok")
+                    && win.OpenDisplayedModalVideoGenerationBoardForSmoke()
+                    && win.VideoSourceForSmoke is
+                    {
+                        ProducerJobId: null,
+                    } displayedUpscaleSource
+                    && displayedUpscaleSource.Label.Contains(
+                        "表示中の高画質版",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        win.VideoSourceIdentityForSmoke,
+                        upscaleSource,
+                        StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(
+                        win.VideoDisplayPathForSmoke,
+                        upscaleOutput,
+                        StringComparison.OrdinalIgnoreCase);
+                int postsBeforeDisplayedUpscaleVideo =
+                    enhancementMutationRequestCount;
+                bool displayedUpscaleVideoQueued = displayedUpscaleVideoSource
+                    && await win.QueueVideoGenerationForSmokeAsync();
+                bool displayedUpscaleVideoRequestExact = false;
+                if (displayedUpscaleVideoQueued
+                    && enhancementMutationRequestCount
+                        == postsBeforeDisplayedUpscaleVideo + 1
+                    && !string.IsNullOrWhiteSpace(videoRequestJson))
+                {
+                    using JsonDocument displayedUpscaleDocument =
+                        JsonDocument.Parse(videoRequestJson);
+                    JsonElement displayedUpscaleRequest =
+                        displayedUpscaleDocument.RootElement;
+                    displayedUpscaleVideoRequestExact =
+                        displayedUpscaleRequest.TryGetProperty(
+                            "sourceId",
+                            out JsonElement upscaleSourceId)
+                        && string.Equals(
+                            upscaleSourceId.GetString(),
+                            upscaleSource,
+                            StringComparison.OrdinalIgnoreCase)
+                        && displayedUpscaleRequest.TryGetProperty(
+                            "sourceManagedOutputPath",
+                            out JsonElement upscaleManagedOutputPath)
+                        && string.Equals(
+                            upscaleManagedOutputPath.GetString(),
+                            upscaleOutput,
+                            StringComparison.OrdinalIgnoreCase)
+                        && !displayedUpscaleRequest.TryGetProperty(
+                            "sourceProducerJobId",
+                            out _);
+                }
+                displayedUpscaleVideoSource = displayedUpscaleVideoSource
+                    && displayedUpscaleVideoQueued
+                    && displayedUpscaleVideoRequestExact;
+                win.CloseModalForSmoke();
+                bool photorealSourceRestored = win.SelectFileNameForSmoke(
+                    Path.GetFileName(photorealSource));
                 bool videoBoardDefaultsToOriginal =
-                    win.OpenVideoGenerationBoardForSmoke()
+                    photorealSourceRestored
+                    && win.OpenVideoGenerationBoardForSmoke()
                     && win.VideoSourceForSmoke is
                     {
                         ProducerJobId: null,
@@ -19143,6 +19224,7 @@ public partial class App : Application
                     && galleryVideoSourceVersions
                     && videoBoardModalOpened
                     && displayedPhotorealVideoSource
+                    && displayedUpscaleVideoSource
                     && videoBoardDefaultsToOriginal
                     && videoBoardOpened
                     && videoBoardPhotorealSource
@@ -19266,6 +19348,8 @@ public partial class App : Application
                     VideoBoardOpened = videoBoardOpened,
                     DisplayedPhotorealVideoSource =
                         displayedPhotorealVideoSource,
+                    DisplayedUpscaleVideoSource =
+                        displayedUpscaleVideoSource,
                     VideoSurface = videoSurface,
                     VideoSurfaceIssues = videoSurfaceIssues,
                     VideoStyleSurface = videoStyleSurface,
@@ -36571,6 +36655,7 @@ public partial class App : Application
         public bool VideoBoardDefaultsToOriginal { get; init; }
         public bool VideoBoardOpened { get; init; }
         public bool DisplayedPhotorealVideoSource { get; init; }
+        public bool DisplayedUpscaleVideoSource { get; init; }
         public bool VideoSurface { get; init; }
         public string[] VideoSurfaceIssues { get; init; } = [];
         public bool VideoStyleSurface { get; init; }

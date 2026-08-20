@@ -19,15 +19,18 @@
       "playbackFps"
     ],
     "optionalFields": [
-      "sourceProducerJobId"
+      "sourceProducerJobId",
+      "sourceManagedOutputPath"
     ],
+    "managedSourceSelectors": "sourceProducerJobId and sourceManagedOutputPath are mutually exclusive; the latter follows PV-ENHANCE-VIDEO-002 displayedManagedSource validation and does not require a durable producer row",
     "unknownOrDuplicateFields": "reject before resolving or reading the source",
     "fixedValues": {
       "frameCount": 124,
       "playbackFps": 24
     },
     "sourceIdMaximumUtf16CodeUnits": 32768,
-    "sourceProducerJobIdMaximumUtf16CodeUnits": 128
+    "sourceProducerJobIdMaximumUtf16CodeUnits": 128,
+    "sourceManagedOutputPathMaximumUtf16CodeUnits": 32768
   },
   "response": {
     "requiredFields": [

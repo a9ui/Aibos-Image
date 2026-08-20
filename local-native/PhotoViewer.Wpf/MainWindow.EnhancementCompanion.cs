@@ -28,6 +28,8 @@ public partial class MainWindow
     private const string PhotorealSeedControlCapability =
         "photorealSeedControlV1";
     private const string VideoSeedControlCapability = "videoSeedControlV1";
+    private const string DisplayedManagedVideoSourceCapability =
+        "displayedManagedVideoSourceV1";
     private const int DurableEnqueueActionDeadlineMilliseconds = 2_000;
     private const int DurableEnqueueRecoveryAttempts = 3;
     private const string EnhancementCompanionAuthProtocol =
@@ -999,7 +1001,8 @@ public partial class MainWindow
             _ => false,
         };
 
-    private static Func<JsonElement, string?> CreateMiniMaxH3VideoHealthValidator()
+    private static Func<JsonElement, string?> CreateMiniMaxH3VideoHealthValidator(
+        bool requireDisplayedManagedSource = false)
         => payload => !TryParseMiniMaxH3VideoCapability(payload, out _)
             ? "The Aibos Image local AI service cannot prove the exact MiniMax H3 protocol. No job was added."
             : !TryParseMiniMaxH3VideoProfilesCapability(payload)
@@ -1008,7 +1011,12 @@ public partial class MainWindow
                     ? "The Aibos Image local AI service does not expose bounded MiniMax H3 STEP control. Restart the local AI service first; no job was added."
                     : !TryParseMiniMaxH3VideoCanvasTiersCapability(payload)
                         ? "The Aibos Image local AI service does not expose bounded MiniMax H3 video-size tiers. Restart the local AI service first; no job was added."
-                        : null;
+                        : requireDisplayedManagedSource
+                            && !HasEnhancementCapability(
+                                payload,
+                                DisplayedManagedVideoSourceCapability)
+                            ? "The Aibos Image local AI service cannot use the displayed generated image as a video source. Restart the local AI service first; no job was added."
+                            : null;
 
     private static bool TryParseMiniMaxH3VideoProfilesCapability(
         JsonElement payload)

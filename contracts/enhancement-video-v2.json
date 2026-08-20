@@ -132,6 +132,27 @@
       ]
     },
     "optionalSourceField": "sourceProducerJobId",
+    "optionalDisplayedSourceField": "sourceManagedOutputPath",
+    "displayedManagedSource": {
+      "capability": "capabilities.displayedManagedVideoSourceV1",
+      "mutuallyExclusiveWith": [
+        "sourceProducerJobId",
+        "sourceRecoveredOutputPath"
+      ],
+      "allowedOperationFolders": [
+        "Upscaled",
+        "Photorealized",
+        "Edited"
+      ],
+      "allowedLayouts": [
+        "<operation>/<file>",
+        "<operation>/<YYYY-MM-DD>/<file>"
+      ],
+      "validation": "resolve the configured managed output root and selected file through lexical and canonical containment checks, require one supported regular still image, and pin size, mtime, decoded bounds, and SHA-256 before persisting",
+      "sourceIdentity": "retain the validated Original sourceId when available; when the managed file itself is the opened catalog item, sourceId and sourcePath are its canonical managed path",
+      "persistence": "persist the normal video sourceId, canonical sourcePath, sourceSignature, and sourceSha256; do not persist the request-only sourceManagedOutputPath field",
+      "retry": "revalidate the persisted sourcePath, sourceSignature, and sourceSha256 without requiring the historical producer job"
+    },
     "seed": {
       "ownedByServer": true,
       "minimum": 0,
@@ -148,6 +169,7 @@
   "passiveHealthGate": {
     "route": "GET /api/enhance/health",
     "field": "capabilities.videoV2",
+    "displayedManagedSourceField": "capabilities.displayedManagedVideoSourceV1",
     "sideEffects": "none; opening the board, hydrating settings, and refreshing health never enqueue, launch, wake, claim, or reorder work",
     "requiredFields": [
       "contractId",
@@ -181,7 +203,7 @@
       "MINIMAX_H3_BACKEND_CONFIG_INVALID"
     ],
     "unknownOrMalformed": "H3 enqueue is disabled and WPF displays a bounded health-unavailable reason; Wan v1 and passive Jobs reading remain usable",
-    "enqueueRule": "H3 can be queued only after a fresh exact ready shape observed by the enqueue helper"
+    "enqueueRule": "H3 can be queued only after a fresh exact ready shape observed by the enqueue helper; sourceManagedOutputPath additionally requires displayedManagedVideoSourceV1=true"
   },
   "persistedSnapshot": {
     "discriminator": "video.schemaVersion, video.presetId, and video.backendId",
@@ -225,7 +247,7 @@
     "exactKnownValues": "effective.width and effective.height must satisfy profile.canvasPolicy and their product must not exceed requested.maximumPixelArea; legacy rows without that field use 414720. All other values are exactly those in profile except the independently selected requested.steps; effective.positivePrompt follows promptPolicy; seed is an integer from 0 through 2147483647",
     "unknownFields": "preserve at the job-store boundary; an H3 row containing unknown nested fields is protected rather than rewritten by the v2 mutation client",
     "malformedKnownOrUnknownNestedField": "reader-only protected row; never cancel, retry, reorder, open, play, or delete through a managed-video mutation path",
-    "retry": "reuse the complete persisted exact H3 snapshot, prompt, source provenance, and seed after a fresh exact health validation"
+    "retry": "reuse the complete persisted exact H3 snapshot, prompt, pinned source identity, and seed after a fresh exact health validation; displayed managed stills retry from their persisted sourcePath and hashes without a producer lookup"
   },
   "readerFirst": {
     "writerRule": "enable a v2 writer only after every active reader accepts v2 rows",

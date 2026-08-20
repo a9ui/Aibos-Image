@@ -256,6 +256,8 @@ public partial class MainWindow
             };
             if (!string.IsNullOrWhiteSpace(source.ProducerJobId))
                 requestBody["sourceProducerJobId"] = source.ProducerJobId;
+            if (source.UsesDisplayedFileDirectly)
+                requestBody["sourceManagedOutputPath"] = source.DisplayPath;
 
             EnhancementApiResponse response = await SendEnhancementApiAsync(
                 HttpMethod.Post,
