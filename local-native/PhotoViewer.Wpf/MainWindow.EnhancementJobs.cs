@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -26,6 +27,14 @@ public partial class MainWindow
     private const int EnhancementJobsPageSize = 100;
     private const int EnhancementTerminalHistoryBatchLimit = 1_000;
     private const int EnhancementJobRequestDetailsMaximumLength = 32_768;
+    private const int EnhancementJobsWorkspaceMaximumRows = 100_000;
+    private const int EnhancementJobsWorkspaceMaximumPayloadBytesPerRow =
+        1024 * 1024;
+    private const long EnhancementJobsWorkspaceMaximumTotalPayloadBytes =
+        512L * 1024 * 1024;
+    private const int EnhancementJobsSqliteMaximumValueBytes =
+        EnhancementJobsWorkspaceMaximumPayloadBytesPerRow + 64 * 1024;
+    private const int EnhancementJobsSqliteMaximumSqlBytes = 64 * 1024;
     private static readonly TimeSpan EnhancementJobsThumbnailViewportDebounce =
         TimeSpan.FromMilliseconds(140);
     private const string UnsupportedEnhancementOperation = "unsupported";
@@ -40,6 +49,21 @@ public partial class MainWindow
         "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark";
     private const string MiniMaxH3DefaultPositivePrompt =
         "Animate the supplied image with subtle natural motion. Keep the camera stable and preserve the exact subject, composition, lighting, and scene. Do not add new objects or cut to another scene. Use only quiet ambient sound, with no speech and no music.";
+    private sealed record EnhancementWorkspaceSqliteVideoProbe(
+        int ApiOrdinal,
+        JsonElement Payload);
+    private sealed record EnhancementWorkspaceSqliteSnapshot(
+        List<EnhancementWorkspaceJobView> Jobs,
+        List<EnhancementWorkspaceSqliteVideoProbe> VideoProbes);
+    private sealed record EnhancementWorkspaceJobDetailIdentity(
+        string Id,
+        string Status,
+        string Operation,
+        string SourceId,
+        string SourcePath,
+        string PresetId,
+        string AdapterId,
+        int ApiOrdinal);
     private static readonly JsonSerializerOptions VideoStableJsonOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -50,6 +74,9 @@ public partial class MainWindow
     private DispatcherTimer _enhancementWorkspacePollTimer = null!;
     private DispatcherTimer _enhancementWorkspaceThumbnailViewportTimer = null!;
     private CancellationTokenSource? _enhancementWorkspaceThumbnailCts;
+    private CancellationTokenSource? _enhancementWorkspaceInventoryCts;
+    private readonly SemaphoreSlim _enhancementWorkspaceSqliteReadGate =
+        new(1, 1);
     private bool _enhancementWorkspaceThumbnailViewportLoadPending;
     private bool _suppressEnhancementWorkspaceThumbnailLoadsForSmoke;
     private int _enhancementWorkspaceLastThumbnailBatchSize;
@@ -1593,6 +1620,7 @@ public partial class MainWindow
         StopEnhancementWorkspaceThumbnailViewportDebounce();
         _enhancementWorkspaceThumbnailViewportLoadPending = false;
         Volatile.Read(ref _enhancementWorkspaceThumbnailCts)?.Cancel();
+        Volatile.Read(ref _enhancementWorkspaceInventoryCts)?.Cancel();
         EnhancementJobsDialog.Visibility = Visibility.Collapsed;
         if (restoreFocus)
             RestoreOverlayFocus(_enhancementWorkspaceFocusBeforeDialog);
@@ -1861,32 +1889,40 @@ public partial class MainWindow
             }
 
             _enhancementWorkspaceGetCount++;
-            EnhancementApiResponse response = await SendPassiveEnhancementReadAsync(
-                "api/enhance/jobs");
+            using var inventoryCts = new CancellationTokenSource();
+            CancellationTokenSource? previousInventoryCts = Interlocked.Exchange(
+                ref _enhancementWorkspaceInventoryCts,
+                inventoryCts);
+            previousInventoryCts?.Cancel();
+            bool parsed;
+            List<EnhancementWorkspaceJobView> jobs;
+            string? error;
+            try
+            {
+                (parsed, jobs, error) = await ReadEnhancementWorkspaceInventoryAsync(
+                    inventoryCts.Token);
+            }
+            catch (OperationCanceledException) when (inventoryCts.IsCancellationRequested)
+            {
+                return;
+            }
+            finally
+            {
+                Interlocked.CompareExchange(
+                    ref _enhancementWorkspaceInventoryCts,
+                    null,
+                    inventoryCts);
+            }
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
                 return;
 
-            if (!response.Ok || response.Payload is not JsonElement payload)
-            {
-                string failure = string.IsNullOrWhiteSpace(response.Error)
-                    ? "Jobs could not be refreshed."
-                    : response.Error.Trim();
-                PreserveEnhancementWorkspaceAfterRefreshFailure(
-                    $"{failure} The last valid snapshot is still shown; retrying.");
-                return;
-            }
-
-            (bool parsed, List<EnhancementWorkspaceJobView> jobs, string? error) =
-                await ParseEnhancementWorkspaceJobsAsync(payload);
-            if (generation != _enhancementWorkspaceGeneration
-                || EnhancementJobsDialog.Visibility != Visibility.Visible)
-            {
-                return;
-            }
             if (!parsed)
             {
+                string failure = string.IsNullOrWhiteSpace(error)
+                    ? "Jobs could not be refreshed."
+                    : error.Trim();
                 PreserveEnhancementWorkspaceAfterRefreshFailure(
-                    error ?? "The companion returned an invalid jobs response. The last valid snapshot is still shown; retrying.");
+                    $"{failure} The last valid snapshot is still shown; retrying.");
                 return;
             }
 
@@ -2524,8 +2560,563 @@ public partial class MainWindow
     }
 
     private async Task<(bool Parsed, List<EnhancementWorkspaceJobView> Jobs, string? Error)>
-        ParseEnhancementWorkspaceJobsAsync(JsonElement payload)
+        ReadEnhancementWorkspaceInventoryAsync(CancellationToken token)
     {
+        if (_usingDefaultModalEnhancementSender)
+        {
+            string jobsPath;
+            try
+            {
+                jobsPath = ResolvedEnhancementJobsPath;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                return (
+                    false,
+                    [],
+                    "The local Jobs database path could not be resolved safely.");
+            }
+
+            if (IsEnhancementSqliteStore(jobsPath))
+                return await ReadEnhancementJobsWorkspaceSqliteAsync(
+                    jobsPath,
+                    token);
+        }
+
+        EnhancementApiResponse response = await SendPassiveEnhancementReadAsync(
+            "api/enhance/jobs",
+            token);
+        if (!response.Ok || response.Payload is not JsonElement payload)
+        {
+            return (
+                false,
+                [],
+                string.IsNullOrWhiteSpace(response.Error)
+                    ? "Jobs could not be refreshed."
+                    : response.Error.Trim());
+        }
+        return await ParseEnhancementWorkspaceJobsAsync(payload, token);
+    }
+
+    private static EnhancementWorkspaceSqliteSnapshot
+        ReadEnhancementJobsWorkspaceSqliteSnapshot(
+            string path,
+            CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        string fullPath = Path.GetFullPath(path);
+        if (!IsEnhancementSqliteStore(fullPath))
+        {
+            throw new InvalidDataException(
+                "The Jobs workspace direct reader requires a SQLite store.");
+        }
+
+        using SqliteConnection connection = OpenEnhancementSqliteReadConnection(fullPath);
+        using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
+        _ = ReadEnhancementCatalogRevision(connection, transaction);
+
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT position, id, status, reader_payload_json
+            FROM enhancement_jobs
+            ORDER BY position ASC
+            """;
+        using SqliteDataReader reader = command.ExecuteReader();
+        var jobs = new List<EnhancementWorkspaceJobView>();
+        var videoProbes = new List<EnhancementWorkspaceSqliteVideoProbe>();
+        var jobIds = new HashSet<string>(StringComparer.Ordinal);
+        long? previousPosition = null;
+        long totalPayloadBytes = 0;
+        int apiOrdinal = 0;
+        while (reader.Read())
+        {
+            token.ThrowIfCancellationRequested();
+            if (apiOrdinal >= EnhancementJobsWorkspaceMaximumRows)
+            {
+                throw new InvalidDataException(
+                    "The Jobs workspace SQLite inventory exceeds the safe row limit.");
+            }
+
+            long position = ReadRequiredSqliteInteger(reader, 0, "job position");
+            if (position < 0
+                || previousPosition.HasValue && position <= previousPosition.Value)
+            {
+                throw new InvalidDataException(
+                    "Enhancement SQLite job positions must be unique, non-negative, and strictly increasing.");
+            }
+            previousPosition = position;
+
+            string id = ReadRequiredSqliteText(reader, 1, "job id");
+            if (string.IsNullOrWhiteSpace(id) || !jobIds.Add(id))
+            {
+                throw new InvalidDataException(
+                    "Enhancement SQLite job ids must be non-empty and unique.");
+            }
+
+            string status = ReadRequiredSqliteText(reader, 2, "job status");
+            if (status is not ("queued" or "running" or "succeeded" or "failed" or "canceled" or "deleted"))
+            {
+                throw new InvalidDataException(
+                    $"Enhancement SQLite job {id} has an unsupported Jobs workspace status.");
+            }
+
+            string payloadText = ReadRequiredSqliteText(
+                reader,
+                3,
+                "Jobs workspace projection");
+            int payloadBytes = Encoding.UTF8.GetByteCount(payloadText);
+            if (payloadBytes > EnhancementJobsWorkspaceMaximumPayloadBytesPerRow)
+            {
+                throw new InvalidDataException(
+                    $"Enhancement SQLite job {id} exceeds the safe per-job payload limit.");
+            }
+            if (totalPayloadBytes
+                > EnhancementJobsWorkspaceMaximumTotalPayloadBytes - payloadBytes)
+            {
+                throw new InvalidDataException(
+                    "The Jobs workspace SQLite inventory exceeds the safe total payload limit.");
+            }
+            totalPayloadBytes += payloadBytes;
+
+            JsonDocument payload;
+            try
+            {
+                payload = JsonDocument.Parse(payloadText);
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidDataException(
+                    $"Enhancement SQLite job {id} has malformed Jobs workspace projection JSON.",
+                    ex);
+            }
+
+            using (payload)
+            {
+                JsonElement root = payload.RootElement;
+                bool idMatches = root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty("id", out JsonElement payloadId)
+                    && payloadId.ValueKind == JsonValueKind.String
+                    && string.Equals(payloadId.GetString(), id, StringComparison.Ordinal);
+                bool statusMatches = root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty("status", out JsonElement payloadStatus)
+                    && payloadStatus.ValueKind == JsonValueKind.String
+                    && string.Equals(
+                        payloadStatus.GetString(),
+                        status,
+                        StringComparison.Ordinal);
+                if (!idMatches || !statusMatches)
+                {
+                    throw new InvalidDataException(
+                        $"Enhancement SQLite job {id} Jobs workspace projection does not match its row.");
+                }
+                if (!HasRequiredEnhancementWorkspaceProjectionIdentity(root))
+                {
+                    throw new InvalidDataException(
+                        $"Enhancement SQLite job {id} is missing its Jobs workspace identity projection.");
+                }
+
+                EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(
+                    root,
+                    apiOrdinal,
+                    buildRequestDetails: false);
+                if (job is null)
+                {
+                    throw new InvalidDataException(
+                        $"Enhancement SQLite job {id} is not a valid Jobs workspace row.");
+                }
+                if (root.TryGetProperty("operation", out JsonElement declaredOperation)
+                    && declaredOperation.ValueKind == JsonValueKind.String
+                    && declaredOperation.GetString() is
+                        "upscale" or "photoreal" or "i2i" or "video"
+                    && !string.Equals(
+                        declaredOperation.GetString(),
+                        job.Operation,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        $"Enhancement SQLite job {id} has an invalid operation projection.");
+                }
+                jobs.Add(job);
+                if (job.Operation == "video")
+                {
+                    videoProbes.Add(new EnhancementWorkspaceSqliteVideoProbe(
+                        apiOrdinal,
+                        root.Clone()));
+                }
+            }
+            apiOrdinal++;
+        }
+
+        reader.Close();
+        transaction.Commit();
+        return new EnhancementWorkspaceSqliteSnapshot(jobs, videoProbes);
+    }
+
+    private static bool HasRequiredEnhancementWorkspaceProjectionIdentity(
+        JsonElement root)
+    {
+        if (!TryGetStringProperty(root, "sourceId", out _)
+            || !TryGetStringProperty(root, "sourcePath", out _)
+            || !TryGetStringProperty(root, "presetId", out _)
+            || !TryGetStringProperty(root, "adapterId", out _)
+            || !TryGetStringProperty(root, "createdAt", out string? createdAtText)
+            || !TryGetStringProperty(root, "updatedAt", out string? updatedAtText)
+            || !DateTimeOffset.TryParse(
+                createdAtText,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out _)
+            || !DateTimeOffset.TryParse(
+                updatedAtText,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out _))
+        {
+            return false;
+        }
+
+        return !root.TryGetProperty("operation", out JsonElement operation)
+            || operation.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(operation.GetString());
+    }
+
+    private async Task<(bool Parsed, List<EnhancementWorkspaceJobView> Jobs, string? Error)>
+        ReadEnhancementJobsWorkspaceSqliteAsync(
+            string path,
+            CancellationToken token = default)
+    {
+        var operationWatch = Stopwatch.StartNew();
+        bool gateEntered = false;
+        try
+        {
+            await _enhancementWorkspaceSqliteReadGate.WaitAsync(token);
+            gateEntered = true;
+            EnhancementWorkspaceSqliteSnapshot snapshot = await Task.Run(
+                () => ReadEnhancementJobsWorkspaceSqliteSnapshot(path, token),
+                token);
+            Dictionary<int, EnhancementWorkspaceJobView> jobsByOrdinal =
+                snapshot.Jobs.ToDictionary(static job => job.ApiOrdinal);
+            foreach (EnhancementWorkspaceSqliteVideoProbe videoProbe in snapshot.VideoProbes)
+            {
+                token.ThrowIfCancellationRequested();
+                if (!jobsByOrdinal.TryGetValue(
+                        videoProbe.ApiOrdinal,
+                        out EnhancementWorkspaceJobView? job))
+                {
+                    throw new InvalidDataException(
+                        "Enhancement SQLite lost a video Jobs workspace projection.");
+                }
+                job.ApplyVideoMutationSafetyForWorkspaceRead(
+                    IsVideoMutationSafe(videoProbe.Payload));
+            }
+
+            await Task.Run(
+                () => FinalizeEnhancementWorkspaceJobs(snapshot.Jobs),
+                token);
+            AibosOperationLog.Write(
+                "jobs_sqlite_read",
+                "completed",
+                operationWatch.ElapsedMilliseconds,
+                mode: "workspace",
+                itemCount: snapshot.Jobs.Count);
+            return (true, snapshot.Jobs, null);
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or InvalidDataException
+            or JsonException
+            or SqliteException)
+        {
+            AibosOperationLog.Write(
+                "jobs_sqlite_read",
+                "failed",
+                operationWatch.ElapsedMilliseconds,
+                errorCode: ex.GetType().Name,
+                mode: "workspace");
+            return (
+                false,
+                [],
+                "Jobs could not be read safely from the local queue database.");
+        }
+        finally
+        {
+            if (gateEntered)
+                _enhancementWorkspaceSqliteReadGate.Release();
+        }
+    }
+
+    private static string ReadEnhancementJobRequestDetailsSqliteSnapshot(
+        string path,
+        EnhancementWorkspaceJobDetailIdentity expected,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        string fullPath = Path.GetFullPath(path);
+        if (!IsEnhancementSqliteStore(fullPath))
+        {
+            throw new InvalidDataException(
+                "Job details require a SQLite Jobs store.");
+        }
+
+        using SqliteConnection connection = OpenEnhancementSqliteReadConnection(fullPath);
+        using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
+        _ = ReadEnhancementCatalogRevision(connection, transaction);
+
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT id, status, payload_json
+            FROM enhancement_jobs
+            WHERE id = $id
+            LIMIT 2
+            """;
+        command.Parameters.AddWithValue("$id", expected.Id);
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            throw new InvalidDataException(
+                "The selected Job no longer exists in the local queue database.");
+        }
+
+        token.ThrowIfCancellationRequested();
+        string rowId = ReadRequiredSqliteText(reader, 0, "job id");
+        string rowStatus = ReadRequiredSqliteText(reader, 1, "job status");
+        string payloadText = ReadRequiredSqliteText(reader, 2, "job detail payload");
+        if (reader.Read())
+        {
+            throw new InvalidDataException(
+                "The selected Job id is not unique in the local queue database.");
+        }
+        reader.Close();
+
+        if (!string.Equals(rowId, expected.Id, StringComparison.Ordinal)
+            || !string.Equals(rowStatus, expected.Status, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "The selected Job changed while its details were being read.");
+        }
+        int payloadBytes = Encoding.UTF8.GetByteCount(payloadText);
+        if (payloadBytes > EnhancementJobsWorkspaceMaximumPayloadBytesPerRow)
+        {
+            throw new InvalidDataException(
+                "The selected Job detail exceeds the safe per-job payload limit.");
+        }
+
+        JsonDocument payload;
+        try
+        {
+            payload = JsonDocument.Parse(payloadText);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(
+                "The selected Job detail payload is malformed.",
+                ex);
+        }
+
+        using (payload)
+        {
+            EnhancementWorkspaceJobView? detailed = ParseEnhancementWorkspaceJob(
+                payload.RootElement,
+                expected.ApiOrdinal);
+            if (detailed is null
+                || !string.Equals(detailed.Id, expected.Id, StringComparison.Ordinal)
+                || !string.Equals(detailed.Status, expected.Status, StringComparison.Ordinal)
+                || !string.Equals(detailed.Operation, expected.Operation, StringComparison.Ordinal)
+                || !string.Equals(detailed.SourceId, expected.SourceId, StringComparison.Ordinal)
+                || !string.Equals(detailed.SourcePath, expected.SourcePath, StringComparison.Ordinal)
+                || !string.Equals(detailed.PresetId, expected.PresetId, StringComparison.Ordinal)
+                || !string.Equals(detailed.AdapterId, expected.AdapterId, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "The selected Job detail does not match the displayed Jobs row.");
+            }
+
+            transaction.Commit();
+            return detailed.RequestDetailsText;
+        }
+    }
+
+    private async Task<string?> ReadEnhancementJobRequestDetailsSqliteAsync(
+        string path,
+        EnhancementWorkspaceJobDetailIdentity expected,
+        CancellationToken token)
+    {
+        var operationWatch = Stopwatch.StartNew();
+        bool gateEntered = false;
+        try
+        {
+            await _enhancementWorkspaceSqliteReadGate.WaitAsync(token);
+            gateEntered = true;
+            string details = await Task.Run(
+                () => ReadEnhancementJobRequestDetailsSqliteSnapshot(
+                    path,
+                    expected,
+                    token),
+                token);
+            AibosOperationLog.Write(
+                "jobs_sqlite_detail_read",
+                "completed",
+                operationWatch.ElapsedMilliseconds,
+                mode: expected.Operation,
+                itemCount: 1);
+            return details;
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or InvalidDataException
+            or JsonException
+            or SqliteException)
+        {
+            AibosOperationLog.Write(
+                "jobs_sqlite_detail_read",
+                "failed",
+                operationWatch.ElapsedMilliseconds,
+                errorCode: ex.GetType().Name,
+                mode: expected.Operation);
+            return null;
+        }
+        finally
+        {
+            if (gateEntered)
+                _enhancementWorkspaceSqliteReadGate.Release();
+        }
+    }
+
+    private async Task<bool> EnsureEnhancementJobRequestDetailsLoadedAsync(
+        EnhancementWorkspaceJobView job,
+        bool forceReload = false,
+        string? jobsPathOverride = null,
+        CancellationToken token = default)
+    {
+        if (!forceReload && job.RequestDetailsLoaded)
+            return true;
+        if (!_usingDefaultModalEnhancementSender && jobsPathOverride is null)
+            return job.RequestDetailsLoaded;
+
+        string jobsPath;
+        try
+        {
+            jobsPath = jobsPathOverride is null
+                ? ResolvedEnhancementJobsPath
+                : Path.GetFullPath(jobsPathOverride);
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or NotSupportedException)
+        {
+            return false;
+        }
+        if (!IsEnhancementSqliteStore(jobsPath))
+            return job.RequestDetailsLoaded;
+
+        var expected = new EnhancementWorkspaceJobDetailIdentity(
+            job.Id,
+            job.Status,
+            job.Operation,
+            job.SourceId,
+            job.SourcePath,
+            job.PresetId,
+            job.AdapterId,
+            job.ApiOrdinal);
+        string? details = await ReadEnhancementJobRequestDetailsSqliteAsync(
+            jobsPath,
+            expected,
+            token);
+        if (details is null)
+            return false;
+        job.ApplyRequestDetails(details);
+        return true;
+    }
+
+    internal async Task<(bool ReadOk, int JobCount, bool DetailsLazyLoaded, bool FullPayloadPreserved)>
+        ReadEnhancementJobsWorkspaceSqliteForSmokeAsync(string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        (bool parsed, List<EnhancementWorkspaceJobView> jobs, string? _) =
+            string.Equals(
+                fullPath,
+                ResolvedEnhancementJobsPath,
+                StringComparison.OrdinalIgnoreCase)
+                ? await ReadEnhancementWorkspaceInventoryAsync(CancellationToken.None)
+                : await ReadEnhancementJobsWorkspaceSqliteAsync(fullPath);
+        EnhancementWorkspaceJobView? target = jobs.FirstOrDefault(static job =>
+            job.Id == "enhanced-ok");
+        bool detailsStartedLazy = target is { RequestDetailsLoaded: false }
+            && string.IsNullOrEmpty(target.RequestDetailsText);
+        bool detailRead = target is not null
+            && await EnsureEnhancementJobRequestDetailsLoadedAsync(
+                target,
+                jobsPathOverride: path);
+        bool detailsLazyLoaded = detailsStartedLazy
+            && detailRead
+            && target is { RequestDetailsLoaded: true };
+        bool fullPayloadPreserved = detailsLazyLoaded
+            && target!.RequestDetailsText.Contains(
+                "sqlite workspace full payload prompt",
+                StringComparison.Ordinal)
+            && target.RequestDetailsText.Contains(
+                "sqlite workspace full payload negative",
+                StringComparison.Ordinal)
+            && target.RequestDetailsText.Contains(
+                "CFG: 1.4",
+                StringComparison.Ordinal)
+            && !target.RequestDetailsText.Contains(
+                "must-not-be-displayed",
+                StringComparison.Ordinal);
+        return (parsed, jobs.Count, detailsLazyLoaded, fullPayloadPreserved);
+    }
+
+    internal async Task<(bool ReadOk, int JobCount, bool DetailsLazyLoaded, bool OversizedDetailRejected)>
+        ReadLargeEnhancementJobsWorkspaceSqliteForSmokeAsync(
+            string path,
+            string targetId,
+            string detailMarker,
+            string oversizedTargetId)
+    {
+        (bool parsed, List<EnhancementWorkspaceJobView> jobs, string? _) =
+            await ReadEnhancementJobsWorkspaceSqliteAsync(Path.GetFullPath(path));
+        bool allDetailsStartedLazy = jobs.All(static job =>
+            !job.RequestDetailsLoaded
+            && string.IsNullOrEmpty(job.RequestDetailsText));
+        EnhancementWorkspaceJobView? target = jobs.FirstOrDefault(job =>
+            string.Equals(job.Id, targetId, StringComparison.Ordinal));
+        bool detailRead = target is not null
+            && await EnsureEnhancementJobRequestDetailsLoadedAsync(
+                target,
+                jobsPathOverride: path);
+        bool detailsLazyLoaded = allDetailsStartedLazy
+            && detailRead
+            && target is { RequestDetailsLoaded: true }
+            && target.RequestDetailsText.Contains(
+                detailMarker,
+                StringComparison.Ordinal);
+        EnhancementWorkspaceJobView? oversized = jobs.FirstOrDefault(job =>
+            string.Equals(job.Id, oversizedTargetId, StringComparison.Ordinal));
+        bool oversizedDetailRejected = oversized is { RequestDetailsLoaded: false }
+            && !await EnsureEnhancementJobRequestDetailsLoadedAsync(
+                oversized,
+                jobsPathOverride: path)
+            && !oversized.RequestDetailsLoaded
+            && string.IsNullOrEmpty(oversized.RequestDetailsText);
+        return (parsed, jobs.Count, detailsLazyLoaded, oversizedDetailRejected);
+    }
+
+    internal static void ValidateEnhancementJobsWorkspaceSqliteForSmoke(
+        string path)
+        => _ = ReadEnhancementJobsWorkspaceSqliteSnapshot(
+            Path.GetFullPath(path),
+            CancellationToken.None);
+
+    private async Task<(bool Parsed, List<EnhancementWorkspaceJobView> Jobs, string? Error)>
+        ParseEnhancementWorkspaceJobsAsync(
+            JsonElement payload,
+            CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
         // H3 canvas validation touches the current source identity and image
         // dimensions, so keep that small, stateful check on the UI thread.
         // The potentially large JSON walk, view-model creation, dependency
@@ -2537,6 +3128,7 @@ public partial class MainWindow
         {
             foreach (JsonElement element in jobsElement.EnumerateArray())
             {
+                token.ThrowIfCancellationRequested();
                 if (element.ValueKind != JsonValueKind.Object
                     || !TryGetStringProperty(element, "id", out _)
                     || !TryGetStringProperty(element, "status", out string? rawStatus)
@@ -2561,16 +3153,18 @@ public partial class MainWindow
                 payload,
                 out List<EnhancementWorkspaceJobView> jobs,
                 out string? error,
-                VideoMutationValidator);
+                VideoMutationValidator,
+                token);
             return (parsed, jobs, error);
-        });
+        }, token);
     }
 
     private static bool TryParseEnhancementWorkspaceJobs(
         JsonElement payload,
         out List<EnhancementWorkspaceJobView> jobs,
         out string? error,
-        Func<JsonElement, bool>? videoMutationValidator = null)
+        Func<JsonElement, bool>? videoMutationValidator = null,
+        CancellationToken token = default)
     {
         jobs = [];
         error = null;
@@ -2586,6 +3180,7 @@ public partial class MainWindow
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (JsonElement element in jobsElement.EnumerateArray())
         {
+            token.ThrowIfCancellationRequested();
             EnhancementWorkspaceJobView? job = ParseEnhancementWorkspaceJob(
                 element,
                 apiOrdinal++,
@@ -2605,6 +3200,13 @@ public partial class MainWindow
             jobs.Add(job);
         }
 
+        FinalizeEnhancementWorkspaceJobs(jobs);
+        return true;
+    }
+
+    private static void FinalizeEnhancementWorkspaceJobs(
+        List<EnhancementWorkspaceJobView> jobs)
+    {
         HashSet<string> protectedPhotorealJobIds = jobs
             .Where(static job => job.Operation == "i2i"
                 && job.I2iMutationSafe
@@ -2620,7 +3222,6 @@ public partial class MainWindow
 
         AssignEnhancementWorkspaceQueuePositions(jobs);
         jobs.Sort(CompareEnhancementWorkspaceInventory);
-        return true;
     }
 
     private static void AssignEnhancementWorkspaceQueuePositions(
@@ -2672,7 +3273,8 @@ public partial class MainWindow
     private static EnhancementWorkspaceJobView? ParseEnhancementWorkspaceJob(
         JsonElement element,
         int apiOrdinal,
-        Func<JsonElement, bool>? videoMutationValidator = null)
+        Func<JsonElement, bool>? videoMutationValidator = null,
+        bool buildRequestDetails = true)
     {
         if (element.ValueKind != JsonValueKind.Object
             || !TryGetStringProperty(element, "id", out string? id)
@@ -2799,14 +3401,17 @@ public partial class MainWindow
             sourceMtimeMs,
             queueOrder,
             apiOrdinal,
-            BuildEnhancementJobRequestDetails(
-                element,
-                operation,
-                id!,
-                sourcePath ?? "",
-                resolvedPresetId,
-                resolvedAdapterId,
-                i2iV3Info?.Snapshot),
+            buildRequestDetails
+                ? BuildEnhancementJobRequestDetails(
+                    element,
+                    operation,
+                    id!,
+                    sourcePath ?? "",
+                    resolvedPresetId,
+                    resolvedAdapterId,
+                    i2iV3Info?.Snapshot)
+                : "",
+            buildRequestDetails,
             i2iV3Info?.Snapshot,
             miniMaxH3VideoSnapshot);
     }
@@ -3386,26 +3991,65 @@ public partial class MainWindow
         }
     }
 
-    private void ToggleEnhancementJobDetails_Click(
+    private async void ToggleEnhancementJobDetails_Click(
         object sender,
         RoutedEventArgs e)
     {
-        if (sender is Button { Tag: EnhancementWorkspaceJobView job })
-            job.RequestDetailsExpanded = !job.RequestDetailsExpanded;
-    }
-
-    private void CopyEnhancementJobDetails_Click(
-        object sender,
-        RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: EnhancementWorkspaceJobView job } button
-            || string.IsNullOrWhiteSpace(job.RequestDetailsText))
+        if (sender is not Button { Tag: EnhancementWorkspaceJobView job } button)
+            return;
+        if (job.RequestDetailsExpanded)
         {
+            job.RequestDetailsExpanded = false;
+            if (_usingDefaultModalEnhancementSender)
+                job.ClearRequestDetails();
             return;
         }
 
+        button.IsEnabled = false;
         try
         {
+            if (await EnsureEnhancementJobRequestDetailsLoadedAsync(
+                    job,
+                    token: _enhancementCompanionLifetimeCts.Token))
+            {
+                job.RequestDetailsExpanded = true;
+            }
+            else
+            {
+                EnhancementJobsStatusText.Text =
+                    "Jobの詳細が更新されています。Jobsを更新して選び直してください。";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Closing the app cancels optional detail reads without changing Jobs.
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
+
+    private async void CopyEnhancementJobDetails_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: EnhancementWorkspaceJobView job } button)
+            return;
+
+        button.IsEnabled = false;
+        try
+        {
+            if (!await EnsureEnhancementJobRequestDetailsLoadedAsync(
+                    job,
+                    forceReload: true,
+                    token: _enhancementCompanionLifetimeCts.Token)
+                || string.IsNullOrWhiteSpace(job.RequestDetailsText))
+            {
+                EnhancementJobsStatusText.Text =
+                    "Jobの詳細が更新されています。Jobsを更新して選び直してください。";
+                return;
+            }
             Clipboard.SetText(job.RequestDetailsText);
             EnhancementJobsStatusText.Text =
                 $"{job.SourceName} のPrompt・設定をコピーしました。";
@@ -3416,6 +4060,14 @@ public partial class MainWindow
             button.ToolTip = $"コピーできませんでした: {ex.Message}";
             EnhancementJobsStatusText.Text =
                 "Clipboardを使用中です。少し待ってからもう一度試してください。";
+        }
+        catch (OperationCanceledException)
+        {
+            // Closing the app cancels optional detail reads without changing Jobs.
+        }
+        finally
+        {
+            button.IsEnabled = true;
         }
     }
 
@@ -6940,6 +7592,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     private bool _isHighlighted;
     private bool _requestDetailsExpanded;
     private string _requestDetailsText;
+    private bool _requestDetailsLoaded;
     private bool _queuedPhotorealPromptUpdateCapabilitySafe;
     private bool _photorealEnqueueNextCapabilitySafe;
 
@@ -6972,6 +7625,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         int? queueOrder,
         int apiOrdinal,
         string requestDetailsText,
+        bool requestDetailsLoaded = true,
         I2iV3WorkspaceSnapshot? i2iV3Snapshot = null,
         MiniMaxH3VideoWorkspaceSnapshot? miniMaxH3VideoSnapshot = null)
     {
@@ -7005,6 +7659,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         QueueOrder = queueOrder;
         ApiOrdinal = apiOrdinal;
         _requestDetailsText = requestDetailsText;
+        _requestDetailsLoaded = requestDetailsLoaded;
     }
 
     public string Id { get; }
@@ -7014,7 +7669,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string PresetId { get; }
     public string AdapterId { get; }
     public string Operation { get; }
-    public bool VideoMutationSafe { get; }
+    public bool VideoMutationSafe { get; private set; }
     public bool QueueReorderSafe { get; }
     public bool I2iMutationSafe { get; }
     public int? I2iSchemaVersion { get; }
@@ -7161,6 +7816,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && !string.IsNullOrWhiteSpace(OutputPath);
     public bool CanDeleteOutput => CanUseOutput && !OutputDependencyProtected;
     public string RequestDetailsText => _requestDetailsText;
+    public bool RequestDetailsLoaded => _requestDetailsLoaded;
     public bool RequestDetailsExpanded
     {
         get => _requestDetailsExpanded;
@@ -7177,6 +7833,43 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     }
     public string RequestDetailsButtonLabel =>
         RequestDetailsExpanded ? "詳細を閉じる" : "詳細";
+
+    internal void ApplyVideoMutationSafetyForWorkspaceRead(bool safe)
+        => VideoMutationSafe = safe;
+
+    internal void ApplyRequestDetails(string details)
+    {
+        string next = details ?? "";
+        bool detailsChanged = !string.Equals(
+            _requestDetailsText,
+            next,
+            StringComparison.Ordinal);
+        bool loadedChanged = !_requestDetailsLoaded;
+        _requestDetailsText = next;
+        _requestDetailsLoaded = true;
+        if (detailsChanged)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+                nameof(RequestDetailsText)));
+        }
+        if (loadedChanged)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+                nameof(RequestDetailsLoaded)));
+        }
+    }
+
+    internal void ClearRequestDetails()
+    {
+        if (!_requestDetailsLoaded && _requestDetailsText.Length == 0)
+            return;
+        _requestDetailsText = "";
+        _requestDetailsLoaded = false;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+            nameof(RequestDetailsText)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+            nameof(RequestDetailsLoaded)));
+    }
     public EnhancementJobActionPresentation Action1 =>
         CanRerunMiniMaxH3VideoWithSavedPrompt
         ? JobAction(
@@ -7638,10 +8331,18 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             QueueMutationScopeSafe != candidate.QueueMutationScopeSafe;
         bool outputDependencyChanged =
             OutputDependencyProtected != candidate.OutputDependencyProtected;
-        bool requestDetailsChanged = !string.Equals(
-            _requestDetailsText,
-            candidate._requestDetailsText,
-            StringComparison.Ordinal);
+        bool requestDetailsChanged = candidate._requestDetailsLoaded
+            && (!_requestDetailsLoaded
+                || !string.Equals(
+                    _requestDetailsText,
+                    candidate._requestDetailsText,
+                    StringComparison.Ordinal));
+        bool requestDetailsInvalidated = _requestDetailsLoaded
+            && !candidate._requestDetailsLoaded
+            && (statusChanged
+                || updatedChanged
+                || outputChanged
+                || errorChanged);
 
         Status = candidate.Status;
         CancelRequested = candidate.CancelRequested;
@@ -7656,12 +8357,33 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         QueueCount = candidate.QueueCount;
         QueueMutationScopeSafe = candidate.QueueMutationScopeSafe;
         OutputDependencyProtected = candidate.OutputDependencyProtected;
-        _requestDetailsText = candidate._requestDetailsText;
+        if (candidate._requestDetailsLoaded)
+        {
+            _requestDetailsText = candidate._requestDetailsText;
+            _requestDetailsLoaded = true;
+        }
+        else if (requestDetailsInvalidated)
+        {
+            _requestDetailsText = "";
+            _requestDetailsLoaded = false;
+            _requestDetailsExpanded = false;
+        }
         IsHighlighted = candidate.IsHighlighted;
 
-        if (requestDetailsChanged)
+        if (requestDetailsChanged || requestDetailsInvalidated)
+        {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
                 nameof(RequestDetailsText)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+                nameof(RequestDetailsLoaded)));
+        }
+        if (requestDetailsInvalidated)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+                nameof(RequestDetailsExpanded)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(
+                nameof(RequestDetailsButtonLabel)));
+        }
 
         if (progressChanged)
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Progress)));

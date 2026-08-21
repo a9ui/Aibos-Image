@@ -34,22 +34,66 @@
         "reader_payload_json": "UTF-8 JSON object"
       },
       "ordering": "position ascending",
-      "fullPayloadStatuses": [
-        "queued",
-        "running",
-        "succeeded"
-      ],
-      "minimalPayloadStatuses": [
-        "failed",
-        "canceled",
-        "deleted",
-        "unknown"
-      ],
-      "minimalPayloadFields": [
+      "projectionCommonFields": [
         "id",
-        "status"
-      ]
+        "sourceId",
+        "sourcePath",
+        "presetId",
+        "adapterId",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "operation": "a non-empty string when present; absence is the legacy upscale representation",
+      "operationSpecificProjection": "i2i retains preset and video retains video so WPF can classify the operation and gate mutations without reading payload_json",
+      "catalogConsumer": "the managed-media catalog may ignore fields beyond id and status for failed, canceled, deleted, or unknown rows; this does not permit the writer to omit the common Jobs projection"
     }
+  },
+  "jobsWorkspaceSurface": {
+    "purpose": "render the complete Jobs inventory from compact per-job projections without transporting or eagerly materializing every full job payload",
+    "enhancement_jobs": {
+      "requiredColumns": {
+        "position": "unique non-negative integer",
+        "id": "non-empty unique string",
+        "status": "queued, running, succeeded, failed, canceled, or deleted",
+        "reader_payload_json": "UTF-8 JSON object containing the compact WPF-visible job projection"
+      },
+      "ordering": "position ascending",
+      "rowBinding": "reader_payload_json id and status must exactly match the relational row",
+      "requiredProjectionFields": [
+        "id",
+        "sourceId",
+        "sourcePath",
+        "presetId",
+        "adapterId",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "legacyOperationDefault": "absence of operation means upscale; a present known operation must parse as that same operation"
+    },
+    "jobDetailSurface": {
+      "selection": "payload_json is queried only for the exact selected id after an explicit Details or Copy action",
+      "requiredColumns": {
+        "id": "must exactly match the selected Jobs row",
+        "status": "must still exactly match the selected Jobs row",
+        "payload_json": "UTF-8 JSON object containing the complete durable job payload"
+      },
+      "identityBinding": "payload_json id, status, operation, source identity, preset id, and adapter id must exactly match the displayed compact projection",
+      "retention": "a loaded detail string may be released when Details closes and is refreshed before Copy"
+    },
+    "snapshot": "one deferred transaction on a read-only query_only connection",
+    "payloadHandling": "validate and project reader_payload_json one row at a time; do not read all payload_json values or construct one aggregate all-jobs response",
+    "resourceBounds": {
+      "maximumRows": 100000,
+      "maximumProjectionBytesPerRow": 1048576,
+      "maximumTotalProjectionBytesPerSnapshot": 536870912,
+      "maximumDetailPayloadBytesPerRow": 1048576,
+      "sqliteMaximumValueBytes": 1114112,
+      "sqliteMaximumSqlBytes": 65536
+    },
+    "failure": "malformed, unsupported, or over-limit state fails closed and preserves the last validated Jobs view",
+    "mutations": "enqueue, retry, cancel, reorder, dismiss, output deletion, pause, resume, wake, claim, and recovery remain authenticated companion API operations"
   },
   "catalogRevision": {
     "incrementsFor": "changes to the WPF-visible managed-media projection, including add, remove, source identity, status, and managed-output identity",
@@ -80,9 +124,32 @@
         "status": "running",
         "reader_payload_json": {
           "id": "fixture-running",
+          "sourceId": "X:\\synthetic\\source.png",
+          "sourcePath": "X:\\synthetic\\source.png",
+          "presetId": "photoreal-balanced",
+          "adapterId": "comfyui-flux2-photoreal",
           "status": "running",
           "operation": "photoreal",
-          "progress": 42
+          "progress": 42,
+          "createdAt": "2026-08-22T00:00:00.000Z",
+          "updatedAt": "2026-08-22T00:00:01.000Z"
+        },
+        "payload_json": {
+          "id": "fixture-running",
+          "sourceId": "X:\\synthetic\\source.png",
+          "sourcePath": "X:\\synthetic\\source.png",
+          "presetId": "photoreal-balanced",
+          "adapterId": "comfyui-flux2-photoreal",
+          "status": "running",
+          "operation": "photoreal",
+          "progress": 42,
+          "createdAt": "2026-08-22T00:00:00.000Z",
+          "updatedAt": "2026-08-22T00:00:01.000Z",
+          "preset": {
+            "options": {
+              "prompt": "fixture full prompt"
+            }
+          }
         }
       },
       {
@@ -91,9 +158,30 @@
         "status": "succeeded",
         "reader_payload_json": {
           "id": "fixture-succeeded",
+          "sourceId": "X:\\synthetic\\source.png",
+          "sourcePath": "X:\\synthetic\\source.png",
+          "presetId": "photo-detail-x4",
+          "adapterId": "realesrgan-ncnn",
           "status": "succeeded",
           "operation": "upscale",
           "progress": 100,
+          "createdAt": "2026-08-22T00:00:00.000Z",
+          "updatedAt": "2026-08-22T00:00:01.000Z",
+          "output": {
+            "path": "X:\\synthetic\\Upscaled\\2026-08-11\\fixture.png"
+          }
+        },
+        "payload_json": {
+          "id": "fixture-succeeded",
+          "sourceId": "X:\\synthetic\\source.png",
+          "sourcePath": "X:\\synthetic\\source.png",
+          "presetId": "photo-detail-x4",
+          "adapterId": "realesrgan-ncnn",
+          "status": "succeeded",
+          "operation": "upscale",
+          "progress": 100,
+          "createdAt": "2026-08-22T00:00:00.000Z",
+          "updatedAt": "2026-08-22T00:00:01.000Z",
           "output": {
             "path": "X:\\synthetic\\Upscaled\\2026-08-11\\fixture.png"
           }
@@ -105,6 +193,10 @@
         "fixture-running",
         "fixture-succeeded"
       ],
+      "jobsWorkspaceDetailsStartLazy": true,
+      "jobsWorkspaceSelectedFullPayloadPreserved": true,
+      "aggregateFullPayloadOver32MiBStillLists": true,
+      "oversizedSelectedDetailRejectedWithoutBreakingInventory": true,
       "mainDatabaseBytesChangedByWpf": false,
       "queueMutationCount": 0
     }

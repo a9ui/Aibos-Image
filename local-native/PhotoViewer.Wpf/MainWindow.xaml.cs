@@ -4897,20 +4897,81 @@ public partial class MainWindow : Window
                 DefaultTimeout = 5,
             }.ToString());
         connection.Open();
-        using var queryOnly = connection.CreateCommand();
-        queryOnly.CommandText = "PRAGMA query_only = ON;";
-        queryOnly.ExecuteNonQuery();
-        using var version = connection.CreateCommand();
-        version.CommandText = "SELECT sqlite_version();";
-        string? versionText = version.ExecuteScalar() as string;
-        if (!Version.TryParse(versionText, out Version? sqliteVersion)
-            || sqliteVersion < new Version(3, 50, 2))
+        try
+        {
+            _ = SQLitePCL.raw.sqlite3_limit(
+                connection.Handle,
+                SQLitePCL.raw.SQLITE_LIMIT_LENGTH,
+                EnhancementJobsSqliteMaximumValueBytes);
+            int valueLengthLimit = SQLitePCL.raw.sqlite3_limit(
+                connection.Handle,
+                SQLitePCL.raw.SQLITE_LIMIT_LENGTH,
+                -1);
+            if (valueLengthLimit <= 0
+                || valueLengthLimit > EnhancementJobsSqliteMaximumValueBytes)
+            {
+                throw new InvalidDataException(
+                    "Enhancement SQLite could not bound value length.");
+            }
+
+            _ = SQLitePCL.raw.sqlite3_limit(
+                connection.Handle,
+                SQLitePCL.raw.SQLITE_LIMIT_SQL_LENGTH,
+                EnhancementJobsSqliteMaximumSqlBytes);
+            int sqlLengthLimit = SQLitePCL.raw.sqlite3_limit(
+                connection.Handle,
+                SQLitePCL.raw.SQLITE_LIMIT_SQL_LENGTH,
+                -1);
+            if (sqlLengthLimit <= 0
+                || sqlLengthLimit > EnhancementJobsSqliteMaximumSqlBytes)
+            {
+                throw new InvalidDataException(
+                    "Enhancement SQLite could not bound SQL statement length.");
+            }
+
+            using (var safety = connection.CreateCommand())
+            {
+                safety.CommandText =
+                    "PRAGMA query_only = ON; PRAGMA trusted_schema = OFF;";
+                safety.ExecuteNonQuery();
+            }
+            using (var queryOnly = connection.CreateCommand())
+            {
+                queryOnly.CommandText = "PRAGMA query_only;";
+                if (queryOnly.ExecuteScalar() is not long queryOnlyValue
+                    || queryOnlyValue != 1)
+                {
+                    throw new InvalidDataException(
+                        "Enhancement SQLite could not enable query_only.");
+                }
+            }
+            using (var trustedSchema = connection.CreateCommand())
+            {
+                trustedSchema.CommandText = "PRAGMA trusted_schema;";
+                if (trustedSchema.ExecuteScalar() is not long trustedSchemaValue
+                    || trustedSchemaValue != 0)
+                {
+                    throw new InvalidDataException(
+                        "Enhancement SQLite could not disable trusted_schema.");
+                }
+            }
+
+            using var version = connection.CreateCommand();
+            version.CommandText = "SELECT sqlite_version();";
+            string? versionText = version.ExecuteScalar() as string;
+            if (!Version.TryParse(versionText, out Version? sqliteVersion)
+                || sqliteVersion < new Version(3, 50, 2))
+            {
+                throw new InvalidDataException(
+                    $"Windows SQLite 3.50.2 or newer is required; found {versionText ?? "unknown"}.");
+            }
+            return connection;
+        }
+        catch
         {
             connection.Dispose();
-            throw new InvalidDataException(
-                $"Windows SQLite 3.50.2 or newer is required; found {versionText ?? "unknown"}.");
+            throw;
         }
-        return connection;
     }
 
     private static long ReadRequiredSqliteInteger(
