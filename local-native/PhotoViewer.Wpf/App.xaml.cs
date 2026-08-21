@@ -19475,6 +19475,45 @@ public partial class App : Application
             ModalEnhancedSmokeResult result;
             try
             {
+                bool jobsWorkspaceReadOk = true;
+                int jobsWorkspaceJobCount = 0;
+                bool jobsDetailsLazyLoaded = true;
+                bool jobsFullPayloadPreserved = true;
+                bool largeJobsWorkspaceReadOk = true;
+                int largeJobsWorkspaceJobCount = 0;
+                bool largeJobsDetailsLazyLoaded = true;
+                bool largeJobsOversizedDetailRejected = true;
+                bool largeJobsStateUnchanged = true;
+                long largeJobsFullPayloadBytes = 0;
+                if (sqliteJobs)
+                {
+                    (jobsWorkspaceReadOk, jobsWorkspaceJobCount,
+                        jobsDetailsLazyLoaded, jobsFullPayloadPreserved) =
+                        await win.ReadEnhancementJobsWorkspaceSqliteForSmokeAsync(
+                            jobsPath);
+                    string largeJobsPath = Path.Combine(
+                        Path.GetDirectoryName(jobsPath)!,
+                        "jobs-over-32mib.sqlite3");
+                    const string largeTargetId = "large-job-000";
+                    const string largeDetailMarker = "large lazy detail marker";
+                    const string oversizedDetailTargetId = "large-job-039";
+                    largeJobsFullPayloadBytes = WriteLargeEnhancementJobsSqliteFixture(
+                        largeJobsPath,
+                        largeTargetId,
+                        largeDetailMarker);
+                    byte[] largeBefore = File.ReadAllBytes(largeJobsPath);
+                    (largeJobsWorkspaceReadOk, largeJobsWorkspaceJobCount,
+                        largeJobsDetailsLazyLoaded,
+                        largeJobsOversizedDetailRejected) =
+                        await win.ReadLargeEnhancementJobsWorkspaceSqliteForSmokeAsync(
+                            largeJobsPath,
+                            largeTargetId,
+                            largeDetailMarker,
+                            oversizedDetailTargetId);
+                    byte[] largeAfter = File.ReadAllBytes(largeJobsPath);
+                    largeJobsStateUnchanged = largeBefore.AsSpan().SequenceEqual(
+                        largeAfter);
+                }
                 await win.LoadFolderAsync(fullFolder);
                 bool selectedValid = win.SelectFileNameForSmoke(Path.GetFileName(validSource));
                 win.ShowModalForShot();
@@ -19537,7 +19576,17 @@ public partial class App : Application
                     && !string.Equals(nextPath, validSource, StringComparison.OrdinalIgnoreCase)
                     && navigationResetToOriginal
                     && enhancementStateUnchanged
-                    && malformedSqliteCasesRejected;
+                    && malformedSqliteCasesRejected
+                    && jobsWorkspaceReadOk
+                    && jobsWorkspaceJobCount == 5
+                    && jobsDetailsLazyLoaded
+                    && jobsFullPayloadPreserved
+                    && largeJobsWorkspaceReadOk
+                    && largeJobsWorkspaceJobCount == 40
+                    && largeJobsDetailsLazyLoaded
+                    && largeJobsOversizedDetailRejected
+                    && largeJobsStateUnchanged
+                    && largeJobsFullPayloadBytes > 32L * 1024 * 1024;
 
                 result = new ModalEnhancedSmokeResult
                 {
@@ -19569,6 +19618,17 @@ public partial class App : Application
                     ReadError = win.EnhancementReadErrorForSmoke,
                     MalformedSqliteCasesRejected = malformedSqliteCasesRejected,
                     MalformedSqliteCaseCount = malformedSqliteCaseCount,
+                    JobsWorkspaceReadOk = jobsWorkspaceReadOk,
+                    JobsWorkspaceJobCount = jobsWorkspaceJobCount,
+                    JobsDetailsLazyLoaded = jobsDetailsLazyLoaded,
+                    JobsFullPayloadPreserved = jobsFullPayloadPreserved,
+                    LargeJobsWorkspaceReadOk = largeJobsWorkspaceReadOk,
+                    LargeJobsWorkspaceJobCount = largeJobsWorkspaceJobCount,
+                    LargeJobsDetailsLazyLoaded = largeJobsDetailsLazyLoaded,
+                    LargeJobsOversizedDetailRejected =
+                        largeJobsOversizedDetailRejected,
+                    LargeJobsStateUnchanged = largeJobsStateUnchanged,
+                    LargeJobsFullPayloadBytes = largeJobsFullPayloadBytes,
                 };
             }
             catch (Exception ex)
@@ -32142,6 +32202,67 @@ public partial class App : Application
                     ["sourceId"] = validSourcePath,
                     ["sourcePath"] = validSourcePath,
                     ["sourceSignature"] = SourceSignature(validSourcePath),
+                    ["presetId"] = "photoreal-balanced",
+                    ["adapterId"] = "comfyui-flux2-photoreal",
+                    ["operation"] = "photoreal",
+                    ["status"] = "succeeded",
+                    ["progress"] = 100,
+                    ["outputPath"] = validOutputPath,
+                    ["createdAt"] = DateTime.UtcNow.ToString("o"),
+                    ["updatedAt"] = DateTime.UtcNow.ToString("o"),
+                    ["secret"] = "must-not-be-displayed",
+                    ["preset"] = new Dictionary<string, object?>
+                    {
+                        ["denoise"] = 0.45,
+                        ["options"] = new Dictionary<string, object?>
+                        {
+                            ["prompt"] = "sqlite workspace full payload prompt",
+                            ["negativePrompt"] = "sqlite workspace full payload negative",
+                            ["loraEnabled"] = false,
+                            ["strength"] = 0.45,
+                            ["steps"] = 6,
+                            ["cfgScale"] = 1.4,
+                            ["maxDimension"] = 1024,
+                            ["seed"] = 123456789,
+                            ["privateToken"] = "must-not-be-displayed",
+                        },
+                    },
+                },
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "stale-output",
+                    ["sourceId"] = staleSourcePath,
+                    ["sourcePath"] = staleSourcePath,
+                    ["sourceSignature"] = SourceSignature(staleSourcePath),
+                    ["presetId"] = "photo-detail-x4",
+                    ["adapterId"] = "realesrgan-ncnn",
+                    ["status"] = "succeeded",
+                    ["progress"] = 100,
+                    ["outputPath"] = missingOutputPath,
+                    ["createdAt"] = DateTime.UtcNow.ToString("o"),
+                    ["updatedAt"] = DateTime.UtcNow.ToString("o"),
+                },
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "failed-job",
+                    ["sourceId"] = failedSourcePath,
+                    ["sourcePath"] = failedSourcePath,
+                    ["presetId"] = "photo-detail-x4",
+                    ["adapterId"] = "realesrgan-ncnn",
+                    ["status"] = "failed",
+                    ["progress"] = 100,
+                    ["outputPath"] = validOutputPath,
+                    ["createdAt"] = DateTime.UtcNow.ToString("o"),
+                    ["updatedAt"] = DateTime.UtcNow.ToString("o"),
+                },
+                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = "missing-source",
+                    ["sourceId"] = missingSourcePath,
+                    ["sourcePath"] = missingSourcePath,
+                    ["sourceSignature"] = SourceSignature(missingSourcePath),
+                    ["presetId"] = "photo-detail-x4",
+                    ["adapterId"] = "realesrgan-ncnn",
                     ["status"] = "succeeded",
                     ["progress"] = 100,
                     ["outputPath"] = validOutputPath,
@@ -32150,41 +32271,16 @@ public partial class App : Application
                 },
                 new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["id"] = "stale-output",
-                    ["sourceId"] = staleSourcePath,
-                    ["sourcePath"] = staleSourcePath,
-                    ["sourceSignature"] = SourceSignature(staleSourcePath),
-                    ["status"] = "succeeded",
-                    ["progress"] = 100,
-                    ["outputPath"] = missingOutputPath,
-                },
-                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["id"] = "failed-job",
-                    ["sourceId"] = failedSourcePath,
-                    ["sourcePath"] = failedSourcePath,
-                    ["status"] = "failed",
-                    ["progress"] = 100,
-                    ["outputPath"] = validOutputPath,
-                },
-                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["id"] = "missing-source",
-                    ["sourceId"] = missingSourcePath,
-                    ["sourcePath"] = missingSourcePath,
-                    ["sourceSignature"] = SourceSignature(missingSourcePath),
-                    ["status"] = "succeeded",
-                    ["progress"] = 100,
-                    ["outputPath"] = validOutputPath,
-                },
-                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                {
                     ["id"] = "missing-output-field",
                     ["sourceId"] = failedSourcePath,
                     ["sourcePath"] = failedSourcePath,
                     ["sourceSignature"] = SourceSignature(failedSourcePath),
+                    ["presetId"] = "photo-detail-x4",
+                    ["adapterId"] = "realesrgan-ncnn",
                     ["status"] = "succeeded",
                     ["progress"] = 100,
+                    ["createdAt"] = DateTime.UtcNow.ToString("o"),
+                    ["updatedAt"] = DateTime.UtcNow.ToString("o"),
                 },
                 "unsupported-entry",
             },
@@ -32197,6 +32293,31 @@ public partial class App : Application
         string databasePath,
         string jobsJsonPath)
     {
+        static string ReaderPayloadForFixture(JsonElement job)
+        {
+            if (!job.TryGetProperty("id", out JsonElement id)
+                || id.ValueKind != JsonValueKind.String
+                || id.GetString() != "enhanced-ok")
+            {
+                return job.GetRawText();
+            }
+
+            using var output = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(output))
+            {
+                writer.WriteStartObject();
+                foreach (JsonProperty property in job.EnumerateObject())
+                {
+                    if (property.Name is "preset" or "secret")
+                        continue;
+                    property.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+                writer.Flush();
+            }
+            return System.Text.Encoding.UTF8.GetString(output.ToArray());
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
         using JsonDocument source = JsonDocument.Parse(File.ReadAllText(jobsJsonPath));
         using var connection = new SqliteConnection(
@@ -32224,7 +32345,8 @@ public partial class App : Application
                     position INTEGER NOT NULL UNIQUE,
                     id TEXT PRIMARY KEY,
                     status TEXT,
-                    reader_payload_json TEXT NOT NULL
+                    reader_payload_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
                 );
                 """;
             schema.ExecuteNonQuery();
@@ -32235,12 +32357,15 @@ public partial class App : Application
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO enhancement_jobs
-                    (position, id, status, reader_payload_json)
-                VALUES ($position, $id, $status, $payload)
+                    (position, id, status, reader_payload_json, payload_json)
+                VALUES ($position, $id, $status, $readerPayload, $payload)
                 """;
             SqliteParameter position = insert.Parameters.Add("$position", SqliteType.Integer);
             SqliteParameter id = insert.Parameters.Add("$id", SqliteType.Text);
             SqliteParameter status = insert.Parameters.Add("$status", SqliteType.Text);
+            SqliteParameter readerPayload = insert.Parameters.Add(
+                "$readerPayload",
+                SqliteType.Text);
             SqliteParameter payload = insert.Parameters.Add("$payload", SqliteType.Text);
             int nextPosition = 0;
             foreach (JsonElement job in source.RootElement.GetProperty("jobs").EnumerateArray())
@@ -32257,6 +32382,7 @@ public partial class App : Application
                     && statusElement.ValueKind == JsonValueKind.String
                         ? statusElement.GetString()!
                         : "";
+                readerPayload.Value = ReaderPayloadForFixture(job);
                 payload.Value = job.GetRawText();
                 insert.ExecuteNonQuery();
             }
@@ -32265,6 +32391,129 @@ public partial class App : Application
         using var checkpoint = connection.CreateCommand();
         checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
         checkpoint.ExecuteNonQuery();
+    }
+
+    private static long WriteLargeEnhancementJobsSqliteFixture(
+        string databasePath,
+        string targetId,
+        string detailMarker)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Pooling = false,
+            }.ToString());
+        connection.Open();
+        using (var schema = connection.CreateCommand())
+        {
+            schema.CommandText = """
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = FULL;
+                CREATE TABLE enhancement_store_metadata (
+                    singleton INTEGER PRIMARY KEY,
+                    store_version INTEGER NOT NULL,
+                    catalog_revision INTEGER NOT NULL
+                );
+                INSERT INTO enhancement_store_metadata
+                    (singleton, store_version, catalog_revision)
+                VALUES (1, 1, 1);
+                CREATE TABLE enhancement_jobs (
+                    position INTEGER NOT NULL UNIQUE,
+                    id TEXT PRIMARY KEY,
+                    status TEXT,
+                    reader_payload_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                """;
+            schema.ExecuteNonQuery();
+        }
+
+        string largePromptSuffix = new('p', 850_000);
+        long totalFullPayloadBytes = 0;
+        using (SqliteTransaction transaction = connection.BeginTransaction())
+        using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO enhancement_jobs
+                    (position, id, status, reader_payload_json, payload_json)
+                VALUES ($position, $id, $status, $readerPayload, $payload)
+                """;
+            SqliteParameter position = insert.Parameters.Add("$position", SqliteType.Integer);
+            SqliteParameter id = insert.Parameters.Add("$id", SqliteType.Text);
+            SqliteParameter status = insert.Parameters.Add("$status", SqliteType.Text);
+            SqliteParameter readerPayload = insert.Parameters.Add(
+                "$readerPayload",
+                SqliteType.Text);
+            SqliteParameter payload = insert.Parameters.Add("$payload", SqliteType.Text);
+            for (int index = 0; index < 40; index++)
+            {
+                string jobId = index == 0
+                    ? targetId
+                    : $"large-job-{index:000}";
+                var projection = new
+                {
+                    id = jobId,
+                    sourceId = $"X:\\synthetic\\source-{index:000}.png",
+                    sourcePath = $"X:\\synthetic\\source-{index:000}.png",
+                    presetId = "photoreal-balanced",
+                    adapterId = "comfyui-flux2-photoreal",
+                    operation = "photoreal",
+                    status = "succeeded",
+                    progress = 100,
+                    outputPath = $"X:\\synthetic\\output-{index:000}.png",
+                    createdAt = "2026-08-22T00:00:00.000Z",
+                    updatedAt = "2026-08-22T00:00:01.000Z",
+                };
+                string readerJson = JsonSerializer.Serialize(projection);
+                string prompt = index switch
+                {
+                    0 => detailMarker + " " + largePromptSuffix,
+                    39 => new string('q', 1_200_000),
+                    _ => largePromptSuffix,
+                };
+                string fullJson = JsonSerializer.Serialize(new
+                {
+                    projection.id,
+                    projection.sourceId,
+                    projection.sourcePath,
+                    projection.presetId,
+                    projection.adapterId,
+                    projection.operation,
+                    projection.status,
+                    projection.progress,
+                    projection.outputPath,
+                    projection.createdAt,
+                    projection.updatedAt,
+                    preset = new
+                    {
+                        options = new
+                        {
+                            prompt,
+                            negativePrompt = "synthetic negative",
+                            steps = 6,
+                            cfgScale = 1.4,
+                        },
+                    },
+                });
+                totalFullPayloadBytes += Encoding.UTF8.GetByteCount(fullJson);
+                position.Value = index;
+                id.Value = jobId;
+                status.Value = projection.status;
+                readerPayload.Value = readerJson;
+                payload.Value = fullJson;
+                insert.ExecuteNonQuery();
+            }
+            transaction.Commit();
+        }
+
+        using var checkpoint = connection.CreateCommand();
+        checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        checkpoint.ExecuteNonQuery();
+        return totalFullPayloadBytes;
     }
 
     private static bool VerifyMalformedEnhancementSqliteFixtures(
@@ -32286,6 +32535,8 @@ public partial class App : Application
             "duplicate-position",
             "negative-position",
             "duplicate-metadata",
+            "oversized-payload",
+            "terminal-minimal-projection",
         ];
         caseCount = cases.Length;
         foreach (string caseName in cases)
@@ -32293,18 +32544,31 @@ public partial class App : Application
             string path = Path.Combine(malformedRoot, caseName + ".sqlite3");
             WriteMalformedEnhancementSqliteFixture(path, caseName);
             byte[] before = File.ReadAllBytes(path);
-            bool rejected = false;
+            bool catalogRejected = false;
             try
             {
                 global::PhotoViewer.Wpf.MainWindow
                     .ValidateEnhancementSqliteStoreForSmoke(path);
             }
-            catch (InvalidDataException)
+            catch (Exception ex) when (ex is InvalidDataException or SqliteException)
             {
-                rejected = true;
+                catalogRejected = true;
+            }
+            bool workspaceRejected = false;
+            try
+            {
+                global::PhotoViewer.Wpf.MainWindow
+                    .ValidateEnhancementJobsWorkspaceSqliteForSmoke(path);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or SqliteException)
+            {
+                workspaceRejected = true;
             }
             byte[] after = File.ReadAllBytes(path);
-            if (!rejected || !before.AsSpan().SequenceEqual(after))
+            bool catalogShouldReject = caseName != "terminal-minimal-projection";
+            if (catalogRejected != catalogShouldReject
+                || !workspaceRejected
+                || !before.AsSpan().SequenceEqual(after))
                 return false;
         }
         return true;
@@ -32338,7 +32602,8 @@ public partial class App : Application
                     position INTEGER,
                     id TEXT,
                     status TEXT,
-                    reader_payload_json TEXT
+                    reader_payload_json TEXT,
+                    payload_json TEXT
                 );
                 """;
             schema.ExecuteNonQuery();
@@ -32356,9 +32621,30 @@ public partial class App : Application
                 metadata.ExecuteNonQuery();
         }
 
+        static string ValidWorkspacePayload(
+            string id,
+            string status,
+            string? padding = null)
+        {
+            var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["id"] = id,
+                ["sourceId"] = "X:\\synthetic\\source.png",
+                ["sourcePath"] = "X:\\synthetic\\source.png",
+                ["presetId"] = "photo-detail-x4",
+                ["adapterId"] = "realesrgan-ncnn",
+                ["status"] = status,
+                ["createdAt"] = "2026-08-22T00:00:00.000Z",
+                ["updatedAt"] = "2026-08-22T00:00:01.000Z",
+            };
+            if (padding is not null)
+                payload["padding"] = padding;
+            return JsonSerializer.Serialize(payload);
+        }
+
         var rows = new List<(long Position, string Id, string? Status, string Payload)>
         {
-            (0, "job-A", "succeeded", "{\"id\":\"job-A\",\"status\":\"succeeded\"}"),
+            (0, "job-A", "succeeded", ValidWorkspacePayload("job-A", "succeeded")),
         };
         switch (caseName)
         {
@@ -32366,21 +32652,54 @@ public partial class App : Application
                 rows[0] = (0, "job-A", "succeeded", "[]");
                 break;
             case "id-mismatch":
-                rows[0] = (0, "job-A", "succeeded", "{\"id\":\"job-B\",\"status\":\"succeeded\"}");
+                rows[0] = (
+                    0,
+                    "job-A",
+                    "succeeded",
+                    ValidWorkspacePayload("job-B", "succeeded"));
                 break;
             case "status-mismatch":
-                rows[0] = (0, "job-A", "succeeded", "{\"id\":\"job-A\",\"status\":\"running\"}");
+                rows[0] = (
+                    0,
+                    "job-A",
+                    "succeeded",
+                    ValidWorkspacePayload("job-A", "running"));
                 break;
             case "duplicate-id":
-                rows.Add((1, "job-A", "succeeded", "{\"id\":\"job-A\",\"status\":\"succeeded\"}"));
+                rows.Add((
+                    1,
+                    "job-A",
+                    "succeeded",
+                    ValidWorkspacePayload("job-A", "succeeded")));
                 break;
             case "duplicate-position":
-                rows.Add((0, "job-B", "succeeded", "{\"id\":\"job-B\",\"status\":\"succeeded\"}"));
+                rows.Add((
+                    0,
+                    "job-B",
+                    "succeeded",
+                    ValidWorkspacePayload("job-B", "succeeded")));
                 break;
             case "negative-position":
                 rows[0] = (-1, "job-A", "succeeded", "{\"id\":\"job-A\",\"status\":\"succeeded\"}");
                 break;
             case "duplicate-metadata":
+                break;
+            case "oversized-payload":
+                rows[0] = (
+                    0,
+                    "job-A",
+                    "succeeded",
+                    ValidWorkspacePayload(
+                        "job-A",
+                        "succeeded",
+                        new string('x', 1_200_000)));
+                break;
+            case "terminal-minimal-projection":
+                rows[0] = (
+                    0,
+                    "job-A",
+                    "failed",
+                    "{\"id\":\"job-A\",\"status\":\"failed\"}");
                 break;
             default:
                 throw new InvalidOperationException(
@@ -32390,8 +32709,8 @@ public partial class App : Application
         using var insert = connection.CreateCommand();
         insert.CommandText = """
             INSERT INTO enhancement_jobs
-                (position, id, status, reader_payload_json)
-            VALUES ($position, $id, $status, $payload)
+                (position, id, status, reader_payload_json, payload_json)
+            VALUES ($position, $id, $status, $payload, $payload)
             """;
         SqliteParameter position = insert.Parameters.Add("$position", SqliteType.Integer);
         SqliteParameter id = insert.Parameters.Add("$id", SqliteType.Text);
@@ -36715,6 +37034,16 @@ public partial class App : Application
         public string? ReadError { get; init; }
         public bool MalformedSqliteCasesRejected { get; init; }
         public int MalformedSqliteCaseCount { get; init; }
+        public bool JobsWorkspaceReadOk { get; init; }
+        public int JobsWorkspaceJobCount { get; init; }
+        public bool JobsDetailsLazyLoaded { get; init; }
+        public bool JobsFullPayloadPreserved { get; init; }
+        public bool LargeJobsWorkspaceReadOk { get; init; }
+        public int LargeJobsWorkspaceJobCount { get; init; }
+        public bool LargeJobsDetailsLazyLoaded { get; init; }
+        public bool LargeJobsOversizedDetailRejected { get; init; }
+        public bool LargeJobsStateUnchanged { get; init; }
+        public long LargeJobsFullPayloadBytes { get; init; }
     }
 
     private sealed record StartupSmokeResult(
