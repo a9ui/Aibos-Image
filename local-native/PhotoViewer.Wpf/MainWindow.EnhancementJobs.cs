@@ -49,12 +49,8 @@ public partial class MainWindow
         "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark";
     private const string MiniMaxH3DefaultPositivePrompt =
         "Animate the supplied image with subtle natural motion. Keep the camera stable and preserve the exact subject, composition, lighting, and scene. Do not add new objects or cut to another scene. Use only quiet ambient sound, with no speech and no music.";
-    private sealed record EnhancementWorkspaceSqliteVideoProbe(
-        int ApiOrdinal,
-        JsonElement Payload);
     private sealed record EnhancementWorkspaceSqliteSnapshot(
-        List<EnhancementWorkspaceJobView> Jobs,
-        List<EnhancementWorkspaceSqliteVideoProbe> VideoProbes);
+        List<EnhancementWorkspaceJobView> Jobs);
     private sealed record EnhancementWorkspaceJobDetailIdentity(
         string Id,
         string Status,
@@ -144,6 +140,21 @@ public partial class MainWindow
         => IsWanV1VideoMutationSafe(job)
             || (IsMiniMaxH3VideoMutationSafe(job)
                 && IsMiniMaxH3SourceCanvasCurrent(job));
+
+    private bool IsVideoMutationSafeForExplicitAction(
+        EnhancementWorkspaceJobView job)
+    {
+        if (!job.IsVideoOperation)
+            return true;
+
+        // The direct SQLite inventory keeps list opening independent of media
+        // file I/O. Re-check the selected source only when the user asks to
+        // create another job. API fallback rows were already checked while
+        // parsing and therefore have no deferred probe.
+        return job.TryGetVideoMutationProbe(out JsonElement payload)
+            ? IsVideoMutationSafe(payload)
+            : job.VideoMutationSafe;
+    }
 
     private static bool IsWanV1VideoMutationSafe(JsonElement job)
     {
@@ -2624,7 +2635,6 @@ public partial class MainWindow
             """;
         using SqliteDataReader reader = command.ExecuteReader();
         var jobs = new List<EnhancementWorkspaceJobView>();
-        var videoProbes = new List<EnhancementWorkspaceSqliteVideoProbe>();
         var jobIds = new HashSet<string>(StringComparer.Ordinal);
         long? previousPosition = null;
         long totalPayloadBytes = 0;
@@ -2739,18 +2749,14 @@ public partial class MainWindow
                 }
                 jobs.Add(job);
                 if (job.Operation == "video")
-                {
-                    videoProbes.Add(new EnhancementWorkspaceSqliteVideoProbe(
-                        apiOrdinal,
-                        root.Clone()));
-                }
+                    job.AttachVideoMutationProbe(root);
             }
             apiOrdinal++;
         }
 
         reader.Close();
         transaction.Commit();
-        return new EnhancementWorkspaceSqliteSnapshot(jobs, videoProbes);
+        return new EnhancementWorkspaceSqliteSnapshot(jobs);
     }
 
     private static bool HasRequiredEnhancementWorkspaceProjectionIdentity(
@@ -2795,22 +2801,6 @@ public partial class MainWindow
             EnhancementWorkspaceSqliteSnapshot snapshot = await Task.Run(
                 () => ReadEnhancementJobsWorkspaceSqliteSnapshot(path, token),
                 token);
-            Dictionary<int, EnhancementWorkspaceJobView> jobsByOrdinal =
-                snapshot.Jobs.ToDictionary(static job => job.ApiOrdinal);
-            foreach (EnhancementWorkspaceSqliteVideoProbe videoProbe in snapshot.VideoProbes)
-            {
-                token.ThrowIfCancellationRequested();
-                if (!jobsByOrdinal.TryGetValue(
-                        videoProbe.ApiOrdinal,
-                        out EnhancementWorkspaceJobView? job))
-                {
-                    throw new InvalidDataException(
-                        "Enhancement SQLite lost a video Jobs workspace projection.");
-                }
-                job.ApplyVideoMutationSafetyForWorkspaceRead(
-                    IsVideoMutationSafe(videoProbe.Payload));
-            }
-
             await Task.Run(
                 () => FinalizeEnhancementWorkspaceJobs(snapshot.Jobs),
                 token);
@@ -4075,6 +4065,12 @@ public partial class MainWindow
     {
         if (sender is Button { Tag: EnhancementWorkspaceJobView job } && job.CanRetry)
         {
+            if (!IsVideoMutationSafeForExplicitAction(job))
+            {
+                EnhancementJobsStatusText.Text =
+                    "この動画Jobの入力画像が変わったか見つからないため、同じ設定では再試行できません。";
+                return;
+            }
             await RunEnhancementWorkspaceMutationAsync(
                 job,
                 HttpMethod.Post,
@@ -4570,7 +4566,8 @@ public partial class MainWindow
             .Where(job =>
                 job.Status == terminalStatus
                 && MatchesEnhancementWorkspaceOperationFilter(job)
-                && job.CanRetry)
+                && job.CanRetry
+                && IsVideoMutationSafeForExplicitAction(job))
             .OrderBy(static job => job.CreatedAt)
             .ThenBy(static job => job.ApiOrdinal)
             .ToArray();
@@ -7595,6 +7592,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     private bool _requestDetailsLoaded;
     private bool _queuedPhotorealPromptUpdateCapabilitySafe;
     private bool _photorealEnqueueNextCapabilitySafe;
+    private JsonElement? _videoMutationProbe;
 
     public EnhancementWorkspaceJobView(
         string id,
@@ -7834,8 +7832,20 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string RequestDetailsButtonLabel =>
         RequestDetailsExpanded ? "詳細を閉じる" : "詳細";
 
-    internal void ApplyVideoMutationSafetyForWorkspaceRead(bool safe)
-        => VideoMutationSafe = safe;
+    internal void AttachVideoMutationProbe(JsonElement payload)
+        => _videoMutationProbe = payload.Clone();
+
+    internal bool TryGetVideoMutationProbe(out JsonElement payload)
+    {
+        if (_videoMutationProbe is JsonElement stored)
+        {
+            payload = stored;
+            return true;
+        }
+
+        payload = default;
+        return false;
+    }
 
     internal void ApplyRequestDetails(string details)
     {
