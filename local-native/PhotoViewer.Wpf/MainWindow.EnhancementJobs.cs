@@ -3187,6 +3187,8 @@ public partial class MainWindow
                 error = "The companion returned duplicate job identifiers. The last valid snapshot was preserved.";
                 return false;
             }
+            if (job.Operation == "video")
+                job.AttachVideoMutationProbe(element);
             jobs.Add(job);
         }
 
@@ -5119,6 +5121,7 @@ public partial class MainWindow
         string sourceError = "";
         if (_enhancementWorkspaceMutationPending
             || !job.CanRerunMiniMaxH3VideoWithSavedPrompt
+            || !IsVideoMutationSafeForExplicitAction(job)
             || job.MiniMaxH3VideoSnapshot is not { } snapshot
             || !TryBuildMiniMaxH3VideoSourceChoice(
                 job,
@@ -5272,6 +5275,7 @@ public partial class MainWindow
     {
         if (_enhancementWorkspaceMutationPending
             || !job.CanEditMiniMaxH3VideoPrompt
+            || !IsVideoMutationSafeForExplicitAction(job)
             || job.MiniMaxH3VideoSnapshot is not { } snapshot)
         {
             return;
@@ -5292,6 +5296,7 @@ public partial class MainWindow
         string sourceError = "";
         if (EnhancementJobsDialog.Visibility != Visibility.Visible
             || !job.CanEditMiniMaxH3VideoPrompt
+            || !IsVideoMutationSafeForExplicitAction(job)
             || !TryBuildMiniMaxH3VideoSourceChoice(
                 job,
                 out source,
