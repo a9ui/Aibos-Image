@@ -19952,6 +19952,8 @@ public partial class App : Application
                 var dismissedCanceledJobs = new HashSet<string>(
                     StringComparer.Ordinal);
                 var terminalHistoryBatchBodies = new List<string>();
+                var terminalHistoryTargetBodies = new List<string>();
+                var queuedJobsBatchBodies = new List<string>();
                 var jobsBulkConfirmations = new List<(string Title, string Message)>();
                 bool acceptJobsBulkConfirmation = true;
                 bool canceledRetryCreated = false;
@@ -20467,6 +20469,8 @@ public partial class App : Application
                     capabilities["photorealPromptControlsV2"] = true;
                     capabilities["atomicImageEnqueueNext"] = true;
                     capabilities["terminalHistoryBatchDismissV1"] = true;
+                    capabilities["queuedJobsBatchCancelV1"] = true;
+                    capabilities["terminalHistoryTargetsV1"] = true;
                     capabilities["durableEnqueueInboxV1"] = new
                     {
                         ready = true,
@@ -20772,6 +20776,65 @@ public partial class App : Application
                                 missingCount = 0,
                             }));
                     }
+                    if (request.Method == HttpMethod.Post
+                        && route.EndsWith(
+                            "/api/enhance/jobs/terminal/targets",
+                            StringComparison.Ordinal))
+                    {
+                        string body = request.Content?.ReadAsStringAsync()
+                            .GetAwaiter().GetResult() ?? "";
+                        terminalHistoryTargetBodies.Add(body);
+                        using JsonDocument targetDocument = JsonDocument.Parse(body);
+                        string requestedStatus = targetDocument.RootElement
+                            .GetProperty("status").GetString() ?? "";
+                        string requestedOperation = targetDocument.RootElement
+                            .GetProperty("operation").GetString() ?? "all";
+                        string[] protectedTargetIds =
+                        [
+                            "video-malformed-provenance-job",
+                            "future-reader-job",
+                            "null-operation-reader-job",
+                            "future-canceled-reader-job",
+                            "protected-queued-job",
+                            "post-snapshot-protected-job",
+                            "legacy-unsafe-video-queued-job",
+                        ];
+                        var selectedIds = new List<string>();
+                        int selectedProtectedCount = 0;
+                        foreach (object job in CurrentJobs())
+                        {
+                            using JsonDocument jobDocument = JsonDocument.Parse(
+                                JsonSerializer.Serialize(job));
+                            JsonElement root = jobDocument.RootElement;
+                            string status = root.GetProperty("status").GetString() ?? "";
+                            string id = root.GetProperty("id").GetString() ?? "";
+                            string operation = !root.TryGetProperty(
+                                    "operation",
+                                    out JsonElement operationElement)
+                                ? "upscale"
+                                : operationElement.ValueKind == JsonValueKind.String
+                                    ? operationElement.GetString() ?? "unsupported"
+                                    : "unsupported";
+                            if (status != requestedStatus
+                                || requestedOperation != "all"
+                                    && operation != requestedOperation)
+                            {
+                                continue;
+                            }
+                            if (protectedTargetIds.Contains(id, StringComparer.Ordinal))
+                                selectedProtectedCount++;
+                            else
+                                selectedIds.Add(id);
+                        }
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.OK,
+                            new
+                            {
+                                targetCount = selectedIds.Count,
+                                protectedCount = selectedProtectedCount,
+                                ids = selectedIds,
+                            }));
+                    }
                     if (request.Method == HttpMethod.Delete
                         && route.EndsWith("/failed-retry-job", StringComparison.Ordinal))
                     {
@@ -20915,8 +20978,34 @@ public partial class App : Application
                                 queueOrder: 5),
                         }));
                     }
-                    if (request.Method == HttpMethod.Delete && route.EndsWith("/api/enhance/jobs/queued", StringComparison.Ordinal))
+                    if (request.Method == HttpMethod.Delete
+                        && route.EndsWith(
+                            "/api/enhance/jobs/queued/batch",
+                            StringComparison.Ordinal))
                     {
+                        string body = request.Content?.ReadAsStringAsync()
+                            .GetAwaiter().GetResult() ?? "";
+                        if (!string.IsNullOrWhiteSpace(body))
+                        {
+                            queuedJobsBatchBodies.Add(body);
+                            using JsonDocument cancelDocument = JsonDocument.Parse(body);
+                            string[] ids = cancelDocument.RootElement.GetProperty("ids")
+                                .EnumerateArray()
+                                .Select(static element => element.GetString() ?? "")
+                                .ToArray();
+                            if (insertQueuedJobOnNextCancel)
+                            {
+                                insertQueuedJobOnNextCancel = false;
+                                includePostSnapshotQueuedJob = true;
+                            }
+                            individuallyCanceledQueuedJobs.UnionWith(ids);
+                            return Task.FromResult(JsonResponse(HttpStatusCode.OK, new
+                            {
+                                canceledCount = ids.Length,
+                                protectedCount = 0,
+                                missingCount = 0,
+                            }));
+                        }
                         allQueuedCanceled = true;
                         return Task.FromResult(JsonResponse(HttpStatusCode.OK, new
                         {
@@ -21933,6 +22022,7 @@ public partial class App : Application
                 window.SelectEnhancementJobsStatusFilterForSmoke("queued");
                 window.SelectEnhancementJobsOperationFilterForSmoke("video");
                 int requestsBeforeFilteredVideoClear = requests.Count;
+                int batchesBeforeFilteredVideoClear = queuedJobsBatchBodies.Count;
                 bool filteredVideoClearIssued =
                     await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
                 string[] filteredVideoClearRequests = requests
@@ -21941,23 +22031,17 @@ public partial class App : Application
                         "/api/enhance/jobs/",
                         StringComparison.Ordinal))
                     .ToArray();
+                string[] filteredVideoBatchIds =
+                    queuedJobsBatchBodies.Count == batchesBeforeFilteredVideoClear + 1
+                        ? ReadBatchIds(queuedJobsBatchBodies[^1])
+                        : [];
                 bool filteredVideoClearContract = filteredVideoClearIssued
-                    && filteredVideoClearRequests.Count(static request =>
-                        request.EndsWith("/cancel", StringComparison.Ordinal)) == 3
-                    && filteredVideoClearRequests.Contains(
-                        "POST /api/enhance/jobs/queue-later-job/cancel",
+                    && filteredVideoClearRequests.SequenceEqual(
+                        ["DELETE /api/enhance/jobs/queued/batch"],
                         StringComparer.Ordinal)
-                    && filteredVideoClearRequests.Contains(
-                        "POST /api/enhance/jobs/delivery-queue-job/cancel",
-                        StringComparer.Ordinal)
-                    && filteredVideoClearRequests.Contains(
-                        "POST /api/enhance/jobs/retry-job/cancel",
-                        StringComparer.Ordinal)
-                    && !filteredVideoClearRequests.Any(static request =>
-                        request.Contains("queue-first-job", StringComparison.Ordinal)
-                        || request.Contains("canceled-retry-job", StringComparison.Ordinal)
-                        || request.Contains("rerun-job", StringComparison.Ordinal)
-                        || request.EndsWith("/api/enhance/jobs/queued", StringComparison.Ordinal));
+                    && filteredVideoBatchIds.ToHashSet(StringComparer.Ordinal).SetEquals(
+                        ["queue-later-job", "delivery-queue-job", "retry-job"])
+                    && filteredVideoBatchIds.Length == 3;
                 window.SelectEnhancementJobsOperationFilterForSmoke("all");
                 includeProtectedQueuedJob = true;
                 await window.RefreshEnhancementJobsForSmokeAsync();
@@ -21978,6 +22062,7 @@ public partial class App : Application
                         Enabled: true,
                     };
                 int requestsBeforeProtectedQueuedClear = requests.Count;
+                int batchesBeforeProtectedQueuedClear = queuedJobsBatchBodies.Count;
                 bool protectedQueuedClearIssued =
                     await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
                 string[] protectedQueuedClearRequests = requests
@@ -21986,26 +22071,28 @@ public partial class App : Application
                         "/api/enhance/jobs/",
                         StringComparison.Ordinal))
                     .ToArray();
+                string[] protectedQueuedBatchIds =
+                    queuedJobsBatchBodies.Count == batchesBeforeProtectedQueuedClear + 1
+                        ? ReadBatchIds(queuedJobsBatchBodies[^1])
+                        : [];
                 bool protectedQueuedClearContract = protectedQueuedClearIssued
                     && unsafeQueuedVideoCancelAvailable
-                    && protectedQueuedClearRequests.Length > 0
-                    && protectedQueuedClearRequests.All(static request =>
-                        request.StartsWith("POST ", StringComparison.Ordinal)
-                        && request.EndsWith("/cancel", StringComparison.Ordinal))
-                    && protectedQueuedClearRequests.Contains(
-                        "POST /api/enhance/jobs/legacy-unsafe-video-queued-job/cancel",
+                    && protectedQueuedClearRequests.SequenceEqual(
+                        ["DELETE /api/enhance/jobs/queued/batch"],
                         StringComparer.Ordinal)
-                    && !protectedQueuedClearRequests.Any(static request =>
-                        request.Contains(
-                            "protected-queued-job",
-                            StringComparison.Ordinal)
-                        || request.EndsWith(
-                            "/api/enhance/jobs/queued",
-                            StringComparison.Ordinal));
+                    && protectedQueuedBatchIds.Contains(
+                        "legacy-unsafe-video-queued-job",
+                        StringComparer.Ordinal)
+                    && !protectedQueuedBatchIds.Contains(
+                        "protected-queued-job",
+                        StringComparer.Ordinal)
+                    && protectedQueuedBatchIds.Distinct(StringComparer.Ordinal).Count()
+                        == protectedQueuedBatchIds.Length;
                 includeProtectedQueuedJob = false;
                 includeFinalSafeQueuedJob = true;
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 int requestsBeforeRemainingQueuedClear = requests.Count;
+                int batchesBeforeRemainingQueuedClear = queuedJobsBatchBodies.Count;
                 insertQueuedJobOnNextCancel = true;
                 bool remainingQueuedClearIssued =
                     await window.CancelAllQueuedEnhancementJobsForSmokeAsync();
@@ -22015,6 +22102,10 @@ public partial class App : Application
                         "/api/enhance/jobs/",
                         StringComparison.Ordinal))
                     .ToArray();
+                string[] remainingQueuedBatchIds =
+                    queuedJobsBatchBodies.Count == batchesBeforeRemainingQueuedClear + 1
+                        ? ReadBatchIds(queuedJobsBatchBodies[^1])
+                        : [];
                 var postSnapshotQueuedView =
                     window.EnhancementJobViewIdentityForSmoke(
                         "post-snapshot-queued-job")
@@ -22050,18 +22141,17 @@ public partial class App : Application
                         "post-snapshot-protected-job")
                     && !individuallyCanceledQueuedJobs.Contains(
                         "post-snapshot-running-job")
-                    && remainingQueuedClearRequests.Count(static request =>
-                        request.EndsWith(
-                            "/final-safe-queued-job/cancel",
-                            StringComparison.Ordinal)) == 1
-                    && remainingQueuedClearRequests.Length == 1
-                    && remainingQueuedClearRequests.All(static request =>
-                        !request.EndsWith(
-                            "/api/enhance/jobs/queued",
-                            StringComparison.Ordinal)
-                        && !request.Contains(
-                            "post-snapshot-queued-job",
-                            StringComparison.Ordinal));
+                    && remainingQueuedClearRequests.SequenceEqual(
+                        ["DELETE /api/enhance/jobs/queued/batch"],
+                        StringComparer.Ordinal)
+                    && remainingQueuedBatchIds.SequenceEqual(
+                        ["final-safe-queued-job"],
+                        StringComparer.Ordinal);
+                bool queuedJobsBatchCancelContract =
+                    queuedJobsBatchBodies.Count == 3
+                    && filteredVideoClearContract
+                    && protectedQueuedClearContract
+                    && queuedCancelSnapshotContract;
                 bool clearQueuedIssued = filteredVideoClearContract
                     && protectedQueuedClearContract
                     && queuedCancelSnapshotContract;
@@ -22179,6 +22269,14 @@ public partial class App : Application
                 bool receiptOnlyResponseStaysVisible =
                     PhotoViewer.Wpf.MainWindow
                         .ReceiptOnlyDurableResponseIsPendingForSmoke();
+                static string[] ReadBatchIds(string bodyText)
+                {
+                    using JsonDocument document = JsonDocument.Parse(bodyText);
+                    return document.RootElement.GetProperty("ids")
+                        .EnumerateArray()
+                        .Select(static element => element.GetString() ?? "")
+                        .ToArray();
+                }
                 static bool IsTerminalHistoryBatchBody(
                     string bodyText,
                     string expectedStatus,
@@ -22206,8 +22304,32 @@ public partial class App : Application
                         return false;
                     }
                 }
+                static bool IsTerminalHistoryTargetBody(
+                    string bodyText,
+                    string expectedStatus,
+                    string expectedOperation)
+                {
+                    try
+                    {
+                        using JsonDocument document = JsonDocument.Parse(bodyText);
+                        JsonElement body = document.RootElement;
+                        return body.GetProperty("status").GetString() == expectedStatus
+                            && body.GetProperty("operation").GetString()
+                                == expectedOperation
+                            && body.GetProperty("action").GetString() == "dismiss";
+                    }
+                    catch (Exception ex) when (
+                        ex is JsonException
+                            or InvalidOperationException
+                            or KeyNotFoundException)
+                    {
+                        return false;
+                    }
+                }
                 int failedConfirmationsBefore = jobsBulkConfirmations.Count;
                 int requestsBeforeRejectedFailedActions = requests.Count;
+                int failedTargetsBefore = terminalHistoryTargetBodies.Count;
+                int failedDismissBatchesBefore = terminalHistoryBatchBodies.Count;
                 acceptJobsBulkConfirmation = false;
                 int rejectedFailedRetry =
                     await window.RetryAllFailedEnhancementJobsForSmokeAsync();
@@ -22218,7 +22340,11 @@ public partial class App : Application
                     jobsBulkConfirmations.Skip(failedConfirmationsBefore).ToArray();
                 bool failedBulkConfirmationContract = rejectedFailedRetry == 0
                     && rejectedFailedClear == 0
-                    && requests.Count == requestsBeforeRejectedFailedActions
+                    && requests.Skip(requestsBeforeRejectedFailedActions).SequenceEqual(
+                        ["POST /api/enhance/jobs/terminal/targets"],
+                        StringComparer.Ordinal)
+                    && terminalHistoryTargetBodies.Count == failedTargetsBefore + 1
+                    && terminalHistoryBatchBodies.Count == failedDismissBatchesBefore
                     && rejectedFailedConfirmations.Length == 2
                     && rejectedFailedConfirmations[0].Title.Contains(
                         "失敗を全部リトライ",
@@ -22276,7 +22402,7 @@ public partial class App : Application
                         "null-operation-reader-job",
                         StringComparer.Ordinal)
                     && !window.RetryAllFailedEnhancementJobsControlForSmoke
-                    && !window.ClearAllFailedEnhancementJobsControlForSmoke;
+                    && window.ClearAllFailedEnhancementJobsControlForSmoke;
                 window.SelectEnhancementJobsFilterForSmoke("canceled");
                 bool bulkCanceledControlsReady =
                     window.CanceledBulkPanelVisibleForSmoke
@@ -22284,6 +22410,8 @@ public partial class App : Application
                     && window.ClearAllCanceledEnhancementJobsControlForSmoke;
                 int canceledConfirmationsBefore = jobsBulkConfirmations.Count;
                 int requestsBeforeRejectedCanceledActions = requests.Count;
+                int canceledTargetsBefore = terminalHistoryTargetBodies.Count;
+                int canceledDismissBatchesBefore = terminalHistoryBatchBodies.Count;
                 acceptJobsBulkConfirmation = false;
                 int rejectedCanceledRetry =
                     await window.RetryAllCanceledEnhancementJobsForSmokeAsync();
@@ -22294,7 +22422,11 @@ public partial class App : Application
                     jobsBulkConfirmations.Skip(canceledConfirmationsBefore).ToArray();
                 bool canceledBulkConfirmationContract = rejectedCanceledRetry == 0
                     && rejectedCanceledClear == 0
-                    && requests.Count == requestsBeforeRejectedCanceledActions
+                    && requests.Skip(requestsBeforeRejectedCanceledActions).SequenceEqual(
+                        ["POST /api/enhance/jobs/terminal/targets"],
+                        StringComparer.Ordinal)
+                    && terminalHistoryTargetBodies.Count == canceledTargetsBefore + 1
+                    && terminalHistoryBatchBodies.Count == canceledDismissBatchesBefore
                     && rejectedCanceledConfirmations.Length == 2
                     && rejectedCanceledConfirmations[0].Title.Contains(
                         "キャンセル済みを全部リトライ",
@@ -22346,7 +22478,7 @@ public partial class App : Application
                         ["future-canceled-reader-job"],
                         StringComparer.Ordinal)
                     && !window.RetryAllCanceledEnhancementJobsControlForSmoke
-                    && !window.ClearAllCanceledEnhancementJobsControlForSmoke;
+                    && window.ClearAllCanceledEnhancementJobsControlForSmoke;
                 bool terminalHistoryBatchDismissContract =
                     terminalHistoryBatchBodies.Count == 2
                     && IsTerminalHistoryBatchBody(
@@ -22361,6 +22493,24 @@ public partial class App : Application
                         "canceled",
                         "canceled-job",
                         "future-canceled-reader-job");
+                bool terminalHistoryTargetPlanContract =
+                    terminalHistoryTargetBodies.Count == 4
+                    && IsTerminalHistoryTargetBody(
+                        terminalHistoryTargetBodies[0],
+                        "failed",
+                        "all")
+                    && IsTerminalHistoryTargetBody(
+                        terminalHistoryTargetBodies[1],
+                        "failed",
+                        "all")
+                    && IsTerminalHistoryTargetBody(
+                        terminalHistoryTargetBodies[2],
+                        "canceled",
+                        "all")
+                    && IsTerminalHistoryTargetBody(
+                        terminalHistoryTargetBodies[3],
+                        "canceled",
+                        "all");
                 window.SelectEnhancementJobsFilterForSmoke("all");
                 EnhancementJobsWorkspaceSmokeSnapshot beforeCachedReopen =
                     window.EnhancementJobsWorkspaceForSmoke();
@@ -22409,7 +22559,13 @@ public partial class App : Application
                     && requests.Contains("POST /api/enhance/jobs/queue-later-job/queue", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/rerun-job/prompts", StringComparer.Ordinal)
-                    && !requests.Contains("DELETE /api/enhance/jobs/queued", StringComparer.Ordinal)
+                    && requests.Count(static request =>
+                        request == "DELETE /api/enhance/jobs/queued/batch") == 3
+                    && !requests.Contains(
+                        "DELETE /api/enhance/jobs/queued",
+                        StringComparer.Ordinal)
+                    && requests.Count(static request =>
+                        request == "POST /api/enhance/jobs/terminal/targets") == 4
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/video-reader-job/output", StringComparer.Ordinal);
                 bool queueInventoryOrdered = initial.VisibleIds.Take(4).SequenceEqual(
@@ -22591,7 +22747,9 @@ public partial class App : Application
                     && bulkCanceledActionsContract
                     && failedBulkConfirmationContract
                     && canceledBulkConfirmationContract
+                    && queuedJobsBatchCancelContract
                     && terminalHistoryBatchDismissContract
+                    && terminalHistoryTargetPlanContract
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
                     && moveNextIssued
@@ -22716,7 +22874,9 @@ public partial class App : Application
                     beforeCachedReopen,
                     afterCachedReopen,
                     jobsFilterLayoutContract,
+                    queuedJobsBatchCancelContract,
                     terminalHistoryBatchDismissContract,
+                    terminalHistoryTargetPlanContract,
                     failedBulkConfirmationContract,
                     canceledBulkConfirmationContract,
                     progressUsesWholePercent,

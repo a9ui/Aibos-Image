@@ -186,8 +186,14 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   reader surface and does not invent a second writer.
 - Jobs loads every running and queued row, but only the most recently updated
   terminal history selected by the WPF-local 100, 500, or 1000 row limit. The
-  default is 500. Database totals and operations labelled all are not narrowed
-  by this presentation window.
+  default is 500. Database totals and terminal-history dismissal labelled all
+  are not narrowed by this presentation window. WPF freezes queued ids from its
+  complete validated active snapshot; the companion freezes exact ids for
+  presentation-bounded terminal history, so rows created after that plan are
+  not included. Exact queued cancellation uses a dedicated batch route; it
+  never overloads the legacy bodyless cancel-all route. Until the companion
+  advertises authoritative terminal batch retry, WPF disables retry-all when
+  terminal history is outside the loaded presentation window.
 - Queue ordering, pause, claim, retry, cancellation, and queued-setting updates
   share the locks and idempotency rules in `PV-ENHANCE-QUEUE-001`.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
