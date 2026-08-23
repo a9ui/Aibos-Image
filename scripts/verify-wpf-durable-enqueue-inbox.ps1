@@ -142,6 +142,10 @@ JsonElement createVector = vectors.Single(vector =>
     vector.GetProperty("id").GetString() == "synthetic-create-last").GetProperty("item");
 JsonElement retryVector = vectors.Single(vector =>
     vector.GetProperty("id").GetString() == "synthetic-retry-last").GetProperty("item");
+string retrySourceDismissal = contract
+    .GetProperty("consumer")
+    .GetProperty("failedRetrySourceDismissal")
+    .GetString() ?? "";
 bool contractOk = contract.GetProperty("schemaVersion").GetInt32()
         == EnhancementEnqueueInboxStore.ProtocolVersion
     && capability.GetProperty("protocolVersion").GetInt32()
@@ -154,6 +158,12 @@ bool contractOk = contract.GetProperty("schemaVersion").GetInt32()
         == EnhancementEnqueueInboxStore.MaximumItemsPerEnvelope
     && bounds.GetProperty("maximumBodyJsonUtf8Bytes").GetInt32()
         == EnhancementEnqueueInboxStore.MaximumBodyJsonBytes
+    && retrySourceDismissal.Contains(
+        "failed or canceled history row",
+        StringComparison.Ordinal)
+    && !retrySourceDismissal.Contains(
+        "canceled source history remains visible",
+        StringComparison.Ordinal)
     && createVector.GetProperty("requestHash").GetString()
         == EnhancementEnqueueInboxStore.ComputeRequestHash(
             createVector.GetProperty("kind").GetString()!,

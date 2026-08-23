@@ -96,7 +96,7 @@
     "claim": "atomic pending-to-processing move",
     "dispatch": "fixed route with exact bodyJson and Idempotency-Key=requestId",
     "success": "matching receipt for the same requestId and jobId",
-    "failedRetrySourceDismissal": "after a matching retry receipt, dismiss the original failed history row before deleting the envelope; matching replay repeats this cleanup idempotently, while canceled source history remains visible",
+    "failedRetrySourceDismissal": "after a matching retry receipt, dismiss the original failed or canceled history row before deleting the envelope; matching replay repeats this cleanup idempotently; validation rejection, conflict, pending delivery, ambiguous transport, malformed receipt, or writer failure preserves the source history row",
     "retryable": [
       "transport failure",
       "timeout or lost response",
