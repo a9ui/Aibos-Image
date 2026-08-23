@@ -88,6 +88,43 @@
     "normalization": "persist contiguous queueOrder values from zero after insertion",
     "whilePaused": "allow insertion but do not claim it until the queue resumes"
   },
+  "queuedJobsBatchReorderV1": {
+    "capability": "capabilities.queuedJobsBatchReorderV1 is exactly true",
+    "route": "POST /api/enhance/jobs/queued/order",
+    "request": {
+      "ids": "the complete current queued-job id order; 1 to 10000 unique strings, each 1 to 255 characters",
+      "orderRequestId": "a canonical bounded idempotency key from 1 to 255 characters",
+      "unknownFields": "reject with HTTP 400",
+      "maximumUtf8JsonBytes": 524288
+    },
+    "snapshotRule": "under the same write lock used by claim, enqueue, and cancellation, require ids to be an exact set match for every currently queued job that has not been cancel-requested before writing",
+    "snapshotConflict": "return HTTP 409 with code QUEUED_ORDER_SNAPSHOT_CHANGED, orderRequestId, requestedCount, and currentCount; write nothing",
+    "readerOnlyConflict": "if any requested queued row has a malformed, unknown, or future operation, return HTTP 409 with code READER_ONLY_ENHANCEMENT_OPERATION and write nothing",
+    "write": "persist the requested contiguous queueOrder values and the matching idempotency receipt in one store write",
+    "preserves": [
+      "running and terminal jobs",
+      "queue pause state",
+      "job payloads and unknown additive fields"
+    ],
+    "workerWake": false,
+    "success": {
+      "status": 200,
+      "fields": [
+        "orderRequestId",
+        "queueOrderRevision",
+        "orderedCount",
+        "changedCount",
+        "replayed"
+      ]
+    },
+    "idempotency": {
+      "sameRequestIdAndBody": "return the durable original compact result with replayed true and do not write again",
+      "sameRequestIdChangedBody": "return HTTP 409 with code QUEUED_ORDER_IDEMPOTENCY_CONFLICT and write nothing",
+      "receiptStorage": "preserve compatible unknown receipt fields; retain a rolling maximum of 128 receipts and 256 KiB, evicting oldest receipts first",
+      "queueOrderRevision": "a persisted non-negative monotonic safe integer dedicated to successful queued-order commits"
+    },
+    "wpf": "when every queued row is reorder-safe, apply each valid move to the in-memory presentation immediately, coalesce a short burst to its latest complete order, use a fresh orderRequestId per transmitted order, and fall back to the protected per-job route when the capability, row safety, or request bounds are unavailable"
+  },
   "readerOrdering": [
     "running job first without changing it",
     "queued jobs with a valid queueOrder by ascending queueOrder",

@@ -19956,12 +19956,15 @@ public partial class App : Application
                 var terminalHistoryTargetBodies = new List<string>();
                 var terminalHistoryRetryBodies = new List<string>();
                 var queuedJobsBatchBodies = new List<string>();
+                var queuedOrderBatchBodies = new List<string>();
                 var jobsBulkConfirmations = new List<(string Title, string Message)>();
                 bool acceptJobsBulkConfirmation = true;
                 bool canceledRetryCreated = false;
                 bool rerunCreated = false;
                 bool queueLaterFirst = false;
                 TaskCompletionSource<bool>? queueMoveGate = null;
+                TaskCompletionSource<bool>? queueOrderRequestEntered = null;
+                long queueOrderRevision = 0;
                 TaskCompletionSource<bool>? jobsGetEntered = null;
                 TaskCompletionSource<bool>? jobsGetGate = null;
                 string jobsResponseMode = "normal";
@@ -20472,6 +20475,7 @@ public partial class App : Application
                     capabilities["atomicImageEnqueueNext"] = true;
                     capabilities["terminalHistoryBatchDismissV1"] = true;
                     capabilities["queuedJobsBatchCancelV1"] = true;
+                    capabilities["queuedJobsBatchReorderV1"] = true;
                     capabilities["terminalHistoryTargetsV1"] = true;
                     capabilities["terminalHistoryBatchRetryV1"] = true;
                     capabilities["durableEnqueueInboxV1"] = new
@@ -20527,7 +20531,11 @@ public partial class App : Application
                             serverStartedAtUtc = healthServerStartedAtUtc,
                             processId = healthProcessId,
                         },
-                        store = new { version = 1 },
+                        store = new
+                        {
+                            version = 1,
+                            queueOrderRevision,
+                        },
                         jobs = new
                         {
                             counts = new
@@ -20585,6 +20593,14 @@ public partial class App : Application
                 {
                     await gate.Task;
                     return CurrentQueueMoveResponse();
+                }
+
+                static async Task<HttpResponseMessage> WaitForResponseAsync(
+                    TaskCompletionSource<bool> gate,
+                    HttpResponseMessage response)
+                {
+                    await gate.Task;
+                    return response;
                 }
 
                 async Task<HttpResponseMessage> CurrentJobsResponseAsync()
@@ -21020,6 +21036,46 @@ public partial class App : Application
                             HttpStatusCode.OK,
                             new { dismissed = true }));
                     }
+                    if (request.Method == HttpMethod.Post
+                        && route.EndsWith(
+                            "/api/enhance/jobs/queued/order",
+                            StringComparison.Ordinal))
+                    {
+                        string body = request.Content?.ReadAsStringAsync()
+                            .GetAwaiter().GetResult() ?? "";
+                        queuedOrderBatchBodies.Add(body);
+                        using JsonDocument orderDocument = JsonDocument.Parse(body);
+                        JsonElement root = orderDocument.RootElement;
+                        string[] ids = root.GetProperty("ids")
+                            .EnumerateArray()
+                            .Select(static element => element.GetString() ?? "")
+                            .ToArray();
+                        string orderRequestId = root.GetProperty("orderRequestId")
+                            .GetString() ?? "";
+                        bool wasQueueLaterFirst = queueLaterFirst;
+                        queueLaterFirst = ids.Length > 0
+                            && string.Equals(
+                                ids[0],
+                                "queue-later-job",
+                                StringComparison.Ordinal);
+                        long persistedQueueOrderRevision = ++queueOrderRevision;
+                        HttpResponseMessage response = JsonResponse(
+                            HttpStatusCode.OK,
+                            new
+                            {
+                                orderRequestId,
+                                queueOrderRevision = persistedQueueOrderRevision,
+                                orderedCount = ids.Length,
+                                changedCount = wasQueueLaterFirst == queueLaterFirst
+                                    ? 0
+                                    : 2,
+                                replayed = false,
+                            });
+                        queueOrderRequestEntered?.TrySetResult(true);
+                        return queueMoveGate is null
+                            ? Task.FromResult(response)
+                            : WaitForResponseAsync(queueMoveGate, response);
+                    }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/queue-later-job/queue", StringComparison.Ordinal))
                     {
                         string body = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult() ?? "";
@@ -21359,17 +21415,29 @@ public partial class App : Application
                     && afterHealthOnlyPoll.PollRequests
                         == afterInvalidRecovery.PollRequests + 1
                     && afterHealthOnlyPoll.Total == afterInvalidRecovery.Total;
+                queueOrderRevision++;
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot
+                    afterQueueOrderRevisionPoll =
+                        window.EnhancementJobsWorkspaceForSmoke();
+                bool queueOrderRevisionRefreshesSameCountInventory =
+                    afterQueueOrderRevisionPoll.GetRequests
+                        == afterHealthOnlyPoll.GetRequests + 1
+                    && afterQueueOrderRevisionPoll.HealthGetRequests
+                        == afterHealthOnlyPoll.HealthGetRequests + 2
+                    && afterQueueOrderRevisionPoll.Total
+                        == afterHealthOnlyPoll.Total;
                 healthLastTerminalAt = "2026-07-30T13:31:00.000Z";
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterTerminalSignaturePoll =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool terminalSignatureRefreshesSameCountInventory =
                     afterTerminalSignaturePoll.GetRequests
-                        == afterHealthOnlyPoll.GetRequests + 1
+                        == afterQueueOrderRevisionPoll.GetRequests + 1
                     && afterTerminalSignaturePoll.HealthGetRequests
-                        == afterHealthOnlyPoll.HealthGetRequests + 2
+                        == afterQueueOrderRevisionPoll.HealthGetRequests + 2
                     && afterTerminalSignaturePoll.Total
-                        == afterHealthOnlyPoll.Total;
+                        == afterQueueOrderRevisionPoll.Total;
                 healthServerStartedAtUtc = "2026-07-30T13:32:00.000Z";
                 healthProcessId = 5678;
                 healthBuildId = "aibos-health-smoke-restarted";
@@ -22050,8 +22118,21 @@ public partial class App : Application
 
                 int jobsGetsBeforeMove =
                     window.EnhancementJobsWorkspaceForSmoke().GetRequests;
+                int queuedOrderBatchesBeforeMove = queuedOrderBatchBodies.Count;
                 queueMoveGate = new TaskCompletionSource<bool>(
                     TaskCreationOptions.RunContinuationsAsynchronously);
+                queueOrderRequestEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                bool firstBurstMoveIssued =
+                    await window.MoveEnhancementJobForSmokeAsync(
+                        "queue-later-job",
+                        "next",
+                        waitForWorkspaceIdle: false);
+                bool secondBurstMoveIssued =
+                    await window.MoveEnhancementJobForSmokeAsync(
+                        "queue-later-job",
+                        "down",
+                        waitForWorkspaceIdle: false);
                 Task<bool> moveNextTask = window.MoveEnhancementJobForSmokeAsync(
                     "queue-later-job",
                     "next");
@@ -22067,11 +22148,43 @@ public partial class App : Application
                         ],
                         StringComparer.Ordinal)
                     && whileMoveSaving.Status.Contains(
-                        "保存しています",
+                        "まとめて保存",
                         StringComparison.Ordinal);
+                await queueOrderRequestEntered.Task.WaitAsync(
+                    TimeSpan.FromSeconds(3));
+                string firstOrderBatchBody =
+                    queuedOrderBatchBodies.Count
+                        == queuedOrderBatchesBeforeMove + 1
+                        ? queuedOrderBatchBodies[^1]
+                        : "";
+                string[] firstOrderBatchIds = string.IsNullOrWhiteSpace(
+                    firstOrderBatchBody)
+                        ? []
+                        : ReadBatchIds(firstOrderBatchBody);
+                string firstOrderRequestId = string.IsNullOrWhiteSpace(
+                    firstOrderBatchBody)
+                        ? ""
+                        : ReadBatchStringProperty(
+                            firstOrderBatchBody,
+                            "orderRequestId");
+                bool firstOrderBatchContract =
+                    firstOrderBatchIds.SequenceEqual(
+                        [
+                            "queue-later-job",
+                            "queue-first-job",
+                            "delivery-queue-job",
+                        ],
+                        StringComparer.Ordinal)
+                    && Guid.TryParseExact(
+                        firstOrderRequestId,
+                        "D",
+                        out _);
                 queueMoveGate.SetResult(true);
-                bool moveNextIssued = await moveNextTask;
+                bool moveNextIssued = firstBurstMoveIssued
+                    && secondBurstMoveIssued
+                    && await moveNextTask;
                 queueMoveGate = null;
+                queueOrderRequestEntered = null;
                 EnhancementJobsWorkspaceSmokeSnapshot afterMove =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool moveAvoidedFullInventoryReload =
@@ -22082,15 +22195,16 @@ public partial class App : Application
                     TaskCreationOptions.RunContinuationsAsynchronously);
                 Task staleRefresh = window.RefreshEnhancementJobsForSmokeAsync();
                 await jobsGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
-                bool moveDuringStaleRefresh =
-                    await window.MoveEnhancementJobForSmokeAsync(
+                Task<bool> moveDuringStaleRefreshTask =
+                    window.MoveEnhancementJobForSmokeAsync(
                         "queue-later-job",
-                        "down",
-                        waitForWorkspaceIdle: false);
+                        "down");
                 EnhancementJobsWorkspaceSmokeSnapshot afterMoveDuringRefresh =
                     window.EnhancementJobsWorkspaceForSmoke();
                 jobsGetGate.SetResult(true);
                 await staleRefresh;
+                bool moveDuringStaleRefresh =
+                    await moveDuringStaleRefreshTask;
                 jobsGetGate = null;
                 jobsGetEntered = null;
                 EnhancementJobsWorkspaceSmokeSnapshot afterStaleRefresh =
@@ -22107,6 +22221,36 @@ public partial class App : Application
                     && afterStaleRefresh.VisibleIds.Take(4).SequenceEqual(
                         afterMoveDuringRefresh.VisibleIds.Take(4),
                         StringComparer.Ordinal);
+                string secondOrderBatchBody = queuedOrderBatchBodies.Count
+                        == queuedOrderBatchesBeforeMove + 2
+                    ? queuedOrderBatchBodies[^1]
+                    : "";
+                string secondOrderRequestId = string.IsNullOrWhiteSpace(
+                    secondOrderBatchBody)
+                        ? ""
+                        : ReadBatchStringProperty(
+                            secondOrderBatchBody,
+                            "orderRequestId");
+                bool queuedOrderBatchContract = firstOrderBatchContract
+                    && !string.Equals(
+                        firstOrderRequestId,
+                        secondOrderRequestId,
+                        StringComparison.Ordinal)
+                    && Guid.TryParseExact(
+                        secondOrderRequestId,
+                        "D",
+                        out _)
+                    && ReadBatchIds(secondOrderBatchBody).SequenceEqual(
+                        [
+                            "queue-first-job",
+                            "queue-later-job",
+                            "delivery-queue-job",
+                        ],
+                        StringComparer.Ordinal)
+                    && requests.Count(static entry => string.Equals(
+                        entry,
+                        "POST /api/enhance/jobs/queued/order",
+                        StringComparison.Ordinal)) == 2;
                 bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterCancel = window.EnhancementJobsWorkspaceForSmoke();
                 var cancelPendingVideoView =
@@ -22476,6 +22620,14 @@ public partial class App : Application
                         .EnumerateArray()
                         .Select(static element => element.GetString() ?? "")
                         .ToArray();
+                }
+                static string ReadBatchStringProperty(
+                    string bodyText,
+                    string propertyName)
+                {
+                    using JsonDocument document = JsonDocument.Parse(bodyText);
+                    return document.RootElement.GetProperty(propertyName)
+                        .GetString() ?? "";
                 }
                 static bool IsTerminalHistoryBatchBody(
                     string bodyText,
@@ -22863,7 +23015,7 @@ public partial class App : Application
                     && !requests.Contains("POST /api/enhance/jobs/future-canceled-reader-job/retry", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/future-canceled-reader-job", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/canceled-job/retry", StringComparer.Ordinal)
-                    && requests.Contains("POST /api/enhance/jobs/queue-later-job/queue", StringComparer.Ordinal)
+                    && requests.Contains("POST /api/enhance/jobs/queued/order", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/rerun-job/prompts", StringComparer.Ordinal)
                     && requests.Count(static request =>
@@ -23019,6 +23171,7 @@ public partial class App : Application
                     && structuredJobsReadFailuresPreserved
                     && invalidJobsSnapshotRecovery
                     && healthOnlyPollAvoidedFullInventory
+                    && queueOrderRevisionRefreshesSameCountInventory
                     && terminalSignatureRefreshesSameCountInventory
                     && companionRestartRefreshesInventory
                     && healthSignatureNeverBoundToStaleInventory
@@ -23066,6 +23219,7 @@ public partial class App : Application
                     && moveNextIssued
                     && moveReflectedImmediately
                     && moveAvoidedFullInventoryReload
+                    && queuedOrderBatchContract
                     && staleQueueRefreshSuppressed
                     && cancelIssued
                     && afterCancel.Total == 18
@@ -23157,6 +23311,8 @@ public partial class App : Application
                     afterInvalidRecovery,
                     healthOnlyPollAvoidedFullInventory,
                     afterHealthOnlyPoll,
+                    queueOrderRevisionRefreshesSameCountInventory,
+                    afterQueueOrderRevisionPoll,
                     terminalSignatureRefreshesSameCountInventory,
                     afterTerminalSignaturePoll,
                     companionRestartRefreshesInventory,
@@ -23205,6 +23361,7 @@ public partial class App : Application
                     moveNextIssued,
                     moveReflectedImmediately,
                     moveAvoidedFullInventoryReload,
+                    queuedOrderBatchContract,
                     staleQueueRefreshSuppressed,
                     afterStaleRefresh,
                     afterMove,

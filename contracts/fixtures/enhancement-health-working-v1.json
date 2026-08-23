@@ -21,7 +21,8 @@
         "version": 1,
         "backendGeneration": "sqlite-v1",
         "inventoryRevision": 42,
-        "catalogRevision": 7
+        "catalogRevision": 7,
+        "queueOrderRevision": 8
       },
       "jobs": {
         "counts": {
@@ -62,6 +63,7 @@
         "queuedPhotorealSettingsUpdateV1": true,
         "terminalHistoryBatchDismissV1": true,
         "queuedJobsBatchCancelV1": true,
+        "queuedJobsBatchReorderV1": true,
         "terminalHistoryTargetsV1": true,
         "terminalHistoryBatchRetryV1": true,
         "photorealPromptControlsV2": true,
