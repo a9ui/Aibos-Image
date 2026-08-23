@@ -5241,6 +5241,7 @@ public partial class MainWindow : Window
         {
             _enhancementReadOk = false;
             _enhancementReadError = result.Error;
+            _activeVideoDependencySnapshotComplete = false;
             return false;
         }
 
@@ -5330,9 +5331,6 @@ public partial class MainWindow : Window
                 if (job.ValueKind != JsonValueKind.Object)
                     continue;
                 nextJobsRead++;
-                if (!TryGetStringProperty(job, "status", out string? status))
-                    continue;
-                string operation = ReadEnhancementOperation(job);
                 bool claimsVideo = job.EnumerateObject().Any(property =>
                     property.NameEquals("operation")
                     && property.Value.ValueKind == JsonValueKind.String
@@ -5340,6 +5338,15 @@ public partial class MainWindow : Window
                         property.Value.GetString(),
                         "video",
                         StringComparison.Ordinal));
+                if (!HasSingleProperty(job, "status")
+                    || !TryGetStringProperty(job, "status", out string? status))
+                {
+                    if (claimsVideo)
+                        activeVideoDependencySnapshotComplete = false;
+                    continue;
+                }
+
+                string operation = ReadEnhancementOperation(job);
                 TryGetStringProperty(job, "id", out string? notificationJobId);
                 if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(status, "running", StringComparison.OrdinalIgnoreCase))
@@ -5410,13 +5417,20 @@ public partial class MainWindow : Window
                     }
                     continue;
                 }
+                bool terminalStatus = status!.Equals(
+                        "succeeded",
+                        StringComparison.OrdinalIgnoreCase)
+                    || status.Equals("failed", StringComparison.OrdinalIgnoreCase)
+                    || status.Equals("canceled", StringComparison.OrdinalIgnoreCase)
+                    || status.Equals("deleted", StringComparison.OrdinalIgnoreCase);
+                if (claimsVideo && !terminalStatus)
+                {
+                    activeVideoDependencySnapshotComplete = false;
+                    continue;
+                }
                 if (!string.IsNullOrWhiteSpace(notificationJobId)
                     && terminalNotificationJobIds.Contains(notificationJobId!)
-                    && status is not null
-                    && (status.Equals("succeeded", StringComparison.OrdinalIgnoreCase)
-                        || status.Equals("failed", StringComparison.OrdinalIgnoreCase)
-                        || status.Equals("canceled", StringComparison.OrdinalIgnoreCase)
-                        || status.Equals("deleted", StringComparison.OrdinalIgnoreCase))
+                    && terminalStatus
                     && terminalNotificationJobs.Count
                         < MaxTrackedEnhancementNotificationJobs)
                 {
@@ -5868,12 +5882,14 @@ public partial class MainWindow : Window
             if (!changed)
                 return false;
 
+            _activeVideoDependencySnapshotComplete = false;
             // Passive disk hydration only. This never contacts the Browser API,
             // starts Node, enqueues a job, or writes shared state.
             return ReloadEnhancedOutputsForVisibleCatalog();
         }
         catch
         {
+            _activeVideoDependencySnapshotComplete = false;
             // The existing validated state remains usable if another process is
             // replacing jobs.json at the instant the modal opens.
             return false;
@@ -5905,6 +5921,7 @@ public partial class MainWindow : Window
             if (!changed || alreadyQueued)
                 return;
 
+            _activeVideoDependencySnapshotComplete = false;
             _enhancedStateQueuedWriteTimeUtc = writeTimeUtc;
             _enhancedStateQueuedLength = length;
             _enhancedStateQueuedCatalogRevision = probe.CatalogRevision;
@@ -5930,6 +5947,7 @@ public partial class MainWindow : Window
         }
         catch
         {
+            _activeVideoDependencySnapshotComplete = false;
             // Keep the validated in-memory state if the worker is replacing
             // jobs.json at the exact instant the modal opens.
         }
@@ -5974,6 +5992,7 @@ public partial class MainWindow : Window
             {
                 _enhancementReadOk = false;
                 _enhancementReadError = result.Error;
+                _activeVideoDependencySnapshotComplete = false;
                 return;
             }
 
@@ -27034,6 +27053,8 @@ public partial class MainWindow : Window
     public int EnhancedCandidateCountForSmoke => _enhancedCandidateCount;
     public bool EnhancementReadOkForSmoke => _enhancementReadOk;
     public string? EnhancementReadErrorForSmoke => _enhancementReadError;
+    public bool ActiveVideoDependencySnapshotCompleteForSmoke
+        => _activeVideoDependencySnapshotComplete;
     public int PreviewTabCountForSmoke => _previewTabs.Count;
     public int ClosedPreviewTabCountForSmoke => _closedPreviewTabs.Count;
     public string? ActivePreviewTabNameForSmoke => _previewTabs.FirstOrDefault(tab => tab.IsActive)?.FileName;

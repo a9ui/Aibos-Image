@@ -101,6 +101,8 @@ try {
         'browserSharedEnhancedReloaded',
         'enhancedToolbarClarity',
         'enhancementLastKnownGood',
+        'enhancementDeleteDependencyFailClosed',
+        'enhancementDependencyRefreshFailClosed',
         'enhancementLargeCatalogRefreshBounded',
         'enhancementRefreshDoesNotBlockModal',
         'enhancementBackgroundRefreshCompleted',

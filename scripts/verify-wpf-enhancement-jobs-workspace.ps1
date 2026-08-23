@@ -380,6 +380,7 @@ try {
         'healthOnlyPollAvoidedFullInventory',
         'queueOrderRevisionRefreshesSameCountInventory',
         'catalogRevisionRefreshesSameCountInventory',
+        'mutationRefreshDebtContract',
         'cachedReopenAvoidedFullInventory',
         'staleQueueRefreshSuppressed',
         'healthAfterInventoryReorderSuppressed',

@@ -19966,6 +19966,7 @@ public partial class App : Application
                 TaskCompletionSource<bool>? queueOrderRequestEntered = null;
                 long catalogRevision = 0;
                 long queueOrderRevision = 0;
+                long? healthInventoryRevision = null;
                 TaskCompletionSource<bool>? jobsGetEntered = null;
                 TaskCompletionSource<bool>? jobsGetGate = null;
                 TaskCompletionSource<bool>? healthGetEntered = null;
@@ -20539,6 +20540,7 @@ public partial class App : Application
                         store = new
                         {
                             version = 1,
+                            inventoryRevision = healthInventoryRevision,
                             catalogRevision,
                             queueOrderRevision,
                         },
@@ -20680,6 +20682,8 @@ public partial class App : Application
 
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
+                bool mutationRefreshDebtContract =
+                    window.EnhancementWorkspaceMutationDebtContractForSmoke();
                 window.ConfigureEnhancementJobsBulkConfirmationForSmoke(
                     (title, message) =>
                     {
@@ -23274,6 +23278,7 @@ public partial class App : Application
                     && terminalSignatureRefreshesSameCountInventory
                     && companionRestartRefreshesInventory
                     && healthSignatureNeverBoundToStaleInventory
+                    && mutationRefreshDebtContract
                     && legacyPromptUpdateCapabilitySafe
                     && legacyPauseCapabilitySafe
                     && legacyHealthFallback
@@ -23420,6 +23425,7 @@ public partial class App : Application
                     companionRestartRefreshesInventory,
                     afterRestartSignaturePoll,
                     healthSignatureNeverBoundToStaleInventory,
+                    mutationRefreshDebtContract,
                     afterHealthInventoryRaceReconcile,
                     legacyPromptUpdateCapabilitySafe,
                     legacyPauseCapabilitySafe,
@@ -26524,6 +26530,11 @@ public partial class App : Application
                     && win.ModalEnhancedToggleAvailableForSmoke;
                 bool enhancedToolbarClarity =
                     win.ModalEnhancedToolbarClarityContractForSmoke;
+                bool managedDeleteInitiallyAvailable =
+                    browserSharedEnhancedReloaded
+                    && win.ReinitializeModalEnhancementVersionsForSmoke()
+                    && win.ToggleModalEnhancedForSmoke()
+                    && win.DisplayedManagedImageDeleteVerifiedForSmoke;
 
                 string lastKnownGoodJobs = File.ReadAllText(jobsPath);
                 File.WriteAllText(jobsPath, "{\"version\":1,\"jobs\":[");
@@ -26532,14 +26543,44 @@ public partial class App : Application
                 bool lastKnownGoodPreserved = malformedJobsRejected
                     && win.EnhancedForFileForSmoke(secondName)
                     && win.ModalEnhancedToggleAvailableForSmoke
-                    && !win.EnhancementReadOkForSmoke;
+                    && !win.EnhancementReadOkForSmoke
+                    && !win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                System.Text.Json.Nodes.JsonNode missingStatusVideoJobs =
+                    System.Text.Json.Nodes.JsonNode.Parse(lastKnownGoodJobs)!;
+                missingStatusVideoJobs["jobs"]!.AsArray().Add(
+                    new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["id"] = "video-missing-status",
+                        ["operation"] = "video",
+                        ["sourcePath"] = browserSharedOutputPath,
+                        ["sourceProducerJobId"] = "stale-output",
+                    });
+                File.WriteAllText(
+                    jobsPath,
+                    missingStatusVideoJobs.ToJsonString());
+                File.SetLastWriteTimeUtc(jobsPath, DateTime.UtcNow.AddSeconds(5));
+                bool missingVideoStatusFailedClosed =
+                    win.RefreshEnhancedStateIfChangedForSmoke()
+                    && win.EnhancementReadOkForSmoke
+                    && !win.DisplayedManagedImageDeleteVerifiedForSmoke;
                 File.WriteAllText(jobsPath, lastKnownGoodJobs);
                 File.SetLastWriteTimeUtc(jobsPath, DateTime.UtcNow.AddSeconds(6));
                 bool validJobsRecovered = win.RefreshEnhancedStateIfChangedForSmoke()
                     && win.EnhancedForFileForSmoke(secondName)
                     && win.ModalEnhancedToggleAvailableForSmoke
-                    && win.EnhancementReadOkForSmoke;
-                bool enhancementLastKnownGood = lastKnownGoodPreserved && validJobsRecovered;
+                    && win.EnhancementReadOkForSmoke
+                    && win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                bool restoredOriginalAfterDependencyChecks =
+                    win.ToggleModalEnhancedForSmoke()
+                    && !win.ModalShowingEnhancedForSmoke;
+                bool enhancementDeleteDependencyFailClosed =
+                    managedDeleteInitiallyAvailable
+                    && lastKnownGoodPreserved
+                    && missingVideoStatusFailedClosed
+                    && validJobsRecovered
+                    && restoredOriginalAfterDependencyChecks;
+                bool enhancementLastKnownGood =
+                    lastKnownGoodPreserved && validJobsRecovered;
 
                 largeCatalogProbe = HiddenWindow();
                 largeCatalogProbe.SuppressStatePersistence();
@@ -26577,8 +26618,14 @@ public partial class App : Application
                 bool nonBlockingOpenReturned = win.OpenModalForSmoke();
                 nonBlockingOpenWatch.Stop();
                 long nonBlockingOpenElapsedMs = nonBlockingOpenWatch.ElapsedMilliseconds;
+                bool backgroundDependencySnapshotInvalidated =
+                    !win.ActiveVideoDependencySnapshotCompleteForSmoke;
                 bool backgroundRefreshCompleted =
                     await win.WaitForEnhancedStateRefreshForSmokeAsync();
+                bool enhancementDependencyRefreshFailClosed =
+                    backgroundDependencySnapshotInvalidated
+                    && backgroundRefreshCompleted
+                    && win.ActiveVideoDependencySnapshotCompleteForSmoke;
                 bool enhancementRefreshDoesNotBlockModal = nonBlockingOpenReturned
                     && nonBlockingOpenElapsedMs < 1_500
                     && backgroundRefreshCompleted
@@ -27014,6 +27061,8 @@ public partial class App : Application
                     && settingsBackdropDismissedOnly
                     && browserSharedEnhancedReloaded && enhancedToolbarClarity
                     && enhancementLastKnownGood
+                    && enhancementDeleteDependencyFailClosed
+                    && enhancementDependencyRefreshFailClosed
                     && enhancementLargeCatalogRefreshBounded
                     && enhancementRefreshDoesNotBlockModal
                     && windowCaptionControls && edgeChrome
@@ -27061,6 +27110,10 @@ public partial class App : Application
                     BrowserSharedEnhancedReloaded = browserSharedEnhancedReloaded,
                     EnhancedToolbarClarity = enhancedToolbarClarity,
                     EnhancementLastKnownGood = enhancementLastKnownGood,
+                    EnhancementDeleteDependencyFailClosed =
+                        enhancementDeleteDependencyFailClosed,
+                    EnhancementDependencyRefreshFailClosed =
+                        enhancementDependencyRefreshFailClosed,
                     EnhancementLargeCatalogRefreshBounded = enhancementLargeCatalogRefreshBounded,
                     EnhancementLargeCatalogCanonicalResolveCount = largeCatalogCanonicalResolveCount,
                     EnhancementLargeCatalogRefreshElapsedMs = largeCatalogRefreshElapsedMs,
@@ -35446,6 +35499,8 @@ public partial class App : Application
         public bool BrowserSharedEnhancedReloaded { get; init; }
         public bool EnhancedToolbarClarity { get; init; }
         public bool EnhancementLastKnownGood { get; init; }
+        public bool EnhancementDeleteDependencyFailClosed { get; init; }
+        public bool EnhancementDependencyRefreshFailClosed { get; init; }
         public bool EnhancementLargeCatalogRefreshBounded { get; init; }
         public int EnhancementLargeCatalogCanonicalResolveCount { get; init; }
         public long EnhancementLargeCatalogRefreshElapsedMs { get; init; }

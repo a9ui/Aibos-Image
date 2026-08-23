@@ -138,6 +138,11 @@ public partial class MainWindow
     private int _enhancementWorkspaceHealthGetCount;
     private bool? _enhancementWorkspaceHealthEndpointSupported;
     private string? _enhancementWorkspaceHealthInventorySignature;
+    private bool? _enhancementWorkspaceHealthInventoryRevisionSupported;
+    private long? _enhancementWorkspaceLastHealthInventoryRevision;
+    private long _enhancementWorkspaceMutationDebtEpoch;
+    private long _enhancementWorkspaceReconciledMutationDebtEpoch;
+    private long? _enhancementWorkspaceMutationDebtMinimumInventoryRevision;
     private bool? _enhancementWorkspaceQueuePaused;
     private bool _enhancementWorkspaceQueueRecoveryRequired;
     private bool _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
@@ -1927,10 +1932,13 @@ public partial class MainWindow
         long generation = _enhancementWorkspaceGeneration;
         try
         {
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Post,
-                "api/enhance/queue",
-                new { paused });
+            EnhancementApiResponse response =
+                await SendTrackedEnhancementWorkspaceMutationAsync(
+                    () => SendEnhancementApiAsync(
+                        HttpMethod.Post,
+                        "api/enhance/queue",
+                        new { paused }),
+                    requireInventoryRevisionAdvanceOnAmbiguous: false);
             if (generation != _enhancementWorkspaceGeneration
                 || EnhancementJobsDialog.Visibility != Visibility.Visible)
             {
@@ -2059,6 +2067,7 @@ public partial class MainWindow
 
             string? observedSignature = health?.InventorySignature;
             if (observedSignature is not null
+                && !HasEnhancementWorkspaceMutationDebt
                 && string.Equals(
                     observedSignature,
                     _enhancementWorkspaceHealthInventorySignature,
@@ -2075,7 +2084,8 @@ public partial class MainWindow
                 generation,
                 isPoll: true,
                 refreshHealth: false,
-                observedHealthInventorySignature: observedSignature);
+                observedHealthInventorySignature: observedSignature,
+                observedHealthInventoryRevision: health?.InventoryRevision);
         }
         finally
         {
@@ -2088,6 +2098,7 @@ public partial class MainWindow
         bool isPoll,
         bool refreshHealth = true,
         string? observedHealthInventorySignature = null,
+        long? observedHealthInventoryRevision = null,
         int healthInventoryCoalesceAttemptsRemaining = 1)
     {
         if ((_enhancementWorkspaceRefreshPending && _enhancementWorkspaceRefreshGeneration == generation)
@@ -2099,7 +2110,14 @@ public partial class MainWindow
         long queuePresentationRevision =
             _enhancementWorkspaceQueuePresentationRevision;
         string? coalescedHealthInventorySignature = null;
+        long? coalescedHealthInventoryRevision = null;
         bool forceHealthPollAfterInventory = false;
+        long mutationDebtEpochAtReadStart =
+            _enhancementWorkspaceMutationDebtEpoch;
+        long? mutationDebtMinimumInventoryRevisionAtReadStart =
+            _enhancementWorkspaceMutationDebtMinimumInventoryRevision;
+        bool mutationDebtAtReadStart = mutationDebtEpochAtReadStart
+            > _enhancementWorkspaceReconciledMutationDebtEpoch;
         EnhancementJobsRefreshButton.IsEnabled = false;
         RefreshEnhancementQueuePauseControl();
         if (!isPoll)
@@ -2121,6 +2139,8 @@ public partial class MainWindow
                 }
                 observedHealthInventorySignature =
                     healthBeforeInventory?.InventorySignature;
+                observedHealthInventoryRevision =
+                    healthBeforeInventory?.InventoryRevision;
             }
 
             _enhancementWorkspaceGetCount++;
@@ -2183,11 +2203,16 @@ public partial class MainWindow
 
                 string? healthAfterInventorySignature =
                     healthAfterInventory?.InventorySignature;
+                long? healthAfterInventoryRevision =
+                    healthAfterInventory?.InventoryRevision;
                 if (healthAfterInventorySignature is not null
-                    && !string.Equals(
-                        healthAfterInventorySignature,
-                        observedHealthInventorySignature,
-                        StringComparison.Ordinal))
+                    && (!string.Equals(
+                            healthAfterInventorySignature,
+                            observedHealthInventorySignature,
+                            StringComparison.Ordinal)
+                        || mutationDebtAtReadStart
+                            && healthAfterInventoryRevision
+                                != observedHealthInventoryRevision))
                 {
                     if (healthInventoryCoalesceAttemptsRemaining > 0)
                     {
@@ -2197,6 +2222,8 @@ public partial class MainWindow
                         // snapshot read after this single-flight section exits.
                         coalescedHealthInventorySignature =
                             healthAfterInventorySignature;
+                        coalescedHealthInventoryRevision =
+                            healthAfterInventoryRevision;
                     }
                     else
                     {
@@ -2205,6 +2232,7 @@ public partial class MainWindow
                         // without accepting a mismatched signature and keep one
                         // compact-health poll alive for the next reconciliation.
                         observedHealthInventorySignature = null;
+                        observedHealthInventoryRevision = null;
                         forceHealthPollAfterInventory = true;
                     }
                 }
@@ -2227,6 +2255,11 @@ public partial class MainWindow
                 jobs);
             ApplyEnhancementWorkspaceHighlights(jobs);
             ReconcileEnhancementWorkspaceJobs(jobs);
+            ReconcileEnhancementWorkspaceMutationDebt(
+                mutationDebtAtReadStart,
+                mutationDebtEpochAtReadStart,
+                mutationDebtMinimumInventoryRevisionAtReadStart,
+                observedHealthInventoryRevision);
             if (!isPoll || activeMembershipChanged)
                 QueueEnhancedStateRefreshIfChanged();
             bool highlightedBatchAlreadyTerminal = _enhancementWorkspaceStatusFilter == "queued"
@@ -2263,12 +2296,15 @@ public partial class MainWindow
             if (highlightedBatchAlreadyTerminal)
                 EnhancementJobsStatusText.Text += " The new batch already finished, so all highlighted jobs are shown.";
             if (!_aiProcessingMinimizedMode
-                && (activeCount > 0 || forceHealthPollAfterInventory))
+                && (activeCount > 0
+                    || forceHealthPollAfterInventory
+                    || HasEnhancementWorkspaceMutationDebt))
                 _enhancementWorkspacePollTimer.Start();
             else
                 _enhancementWorkspacePollTimer.Stop();
 
-            if (observedHealthInventorySignature is not null)
+            if (observedHealthInventorySignature is not null
+                && !HasEnhancementWorkspaceMutationDebt)
             {
                 _enhancementWorkspaceHealthInventorySignature =
                     observedHealthInventorySignature;
@@ -2296,6 +2332,8 @@ public partial class MainWindow
                 refreshHealth: false,
                 observedHealthInventorySignature:
                     coalescedHealthInventorySignature,
+                observedHealthInventoryRevision:
+                    coalescedHealthInventoryRevision,
                 healthInventoryCoalesceAttemptsRemaining:
                     healthInventoryCoalesceAttemptsRemaining - 1);
         }
@@ -2320,6 +2358,8 @@ public partial class MainWindow
         if (response.StatusCode == 404)
         {
             _enhancementWorkspaceHealthEndpointSupported = false;
+            _enhancementWorkspaceHealthInventoryRevisionSupported = false;
+            _enhancementWorkspaceLastHealthInventoryRevision = null;
             ApplyEnhancementQueueHealthUnavailable(
                 "Update the local companion to show queue health.");
             return null;
@@ -2487,10 +2527,27 @@ public partial class MainWindow
         }
         string catalogRevisionSignature = "-";
         string queueOrderRevisionSignature = "-";
+        long? inventoryRevision = null;
         if (payload.TryGetProperty("store", out JsonElement storeElement))
         {
             if (storeElement.ValueKind != JsonValueKind.Object)
                 return false;
+            if (storeElement.TryGetProperty(
+                    "inventoryRevision",
+                    out JsonElement inventoryRevisionElement))
+            {
+                if (inventoryRevisionElement.ValueKind != JsonValueKind.Null)
+                {
+                    if (!inventoryRevisionElement.TryGetInt64(
+                            out long parsedInventoryRevision)
+                        || parsedInventoryRevision
+                            is < 0 or > 9_007_199_254_740_991)
+                    {
+                        return false;
+                    }
+                    inventoryRevision = parsedInventoryRevision;
+                }
+            }
             if (storeElement.TryGetProperty(
                     "catalogRevision",
                     out JsonElement catalogRevisionElement))
@@ -2742,6 +2799,7 @@ public partial class MainWindow
             terminalHistoryTargets,
             terminalHistoryBatchRetry,
             inventorySignature,
+            inventoryRevision,
             currentJobId,
             currentProgress,
             currentUpdatedAt);
@@ -2822,6 +2880,10 @@ public partial class MainWindow
 
     private void ApplyEnhancementQueueHealth(EnhancementQueueHealthView health)
     {
+        _enhancementWorkspaceHealthInventoryRevisionSupported =
+            health.InventoryRevision is not null;
+        _enhancementWorkspaceLastHealthInventoryRevision =
+            health.InventoryRevision;
         _enhancementWorkspaceQueuePaused = health.Paused;
         _enhancementWorkspaceQueueRecoveryRequired = health.QueueRecoveryRequired;
         ApplyQueuedPhotorealPromptUpdateCapability(
@@ -4960,10 +5022,12 @@ public partial class MainWindow
             : "待機順へすぐ反映しました。キューへ保存しています…";
         try
         {
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Post,
-                $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/queue",
-                new { move });
+            EnhancementApiResponse response =
+                await SendTrackedEnhancementWorkspaceMutationAsync(
+                    () => SendEnhancementApiAsync(
+                        HttpMethod.Post,
+                        $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/queue",
+                        new { move }));
             if (generation != _enhancementWorkspaceGeneration
                 || EnhancementJobsDialog.Visibility != Visibility.Visible)
             {
@@ -5105,14 +5169,15 @@ public partial class MainWindow
 
                 string orderRequestId = Guid.NewGuid().ToString("D");
                 EnhancementApiResponse response =
-                    await SendIdempotentEnhancementMutationAsync(
-                        HttpMethod.Post,
-                        "api/enhance/jobs/queued/order",
-                        new
-                        {
-                            ids = requestedOrder,
-                            orderRequestId,
-                        });
+                    await SendTrackedEnhancementWorkspaceMutationAsync(
+                        () => SendIdempotentEnhancementMutationAsync(
+                            HttpMethod.Post,
+                            "api/enhance/jobs/queued/order",
+                            new
+                            {
+                                ids = requestedOrder,
+                                orderRequestId,
+                            }));
                 _enhancementWorkspaceQueuePresentationRevision++;
                 if (!response.Ok
                     || !TryParseQueuedJobsBatchReorderResponse(
@@ -5500,10 +5565,14 @@ public partial class MainWindow
                     continue;
                 }
 
-                EnhancementApiResponse response = await SendEnhancementApiAsync(
-                    HttpMethod.Post,
-                    $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/prompts",
-                    CreateQueuedPhotorealSettingsUpdateBody(settings, seed));
+                EnhancementApiResponse response =
+                    await SendTrackedEnhancementWorkspaceMutationAsync(
+                        () => SendEnhancementApiAsync(
+                            HttpMethod.Post,
+                            $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/prompts",
+                            CreateQueuedPhotorealSettingsUpdateBody(
+                                settings,
+                                seed)));
                 if (response.Ok)
                 {
                     updatedCount++;
@@ -5586,10 +5655,11 @@ public partial class MainWindow
                 {
                     attemptedCount += ids.Length;
                     EnhancementApiResponse response =
-                        await SendIdempotentEnhancementMutationAsync(
-                             HttpMethod.Delete,
-                            "api/enhance/jobs/queued/batch",
-                             new { ids });
+                        await SendTrackedEnhancementWorkspaceMutationAsync(
+                            () => SendIdempotentEnhancementMutationAsync(
+                                HttpMethod.Delete,
+                                "api/enhance/jobs/queued/batch",
+                                new { ids }));
                     if (!response.Ok
                         || !TryParseQueuedJobsBatchCancelResponse(
                             response.Payload,
@@ -5616,9 +5686,11 @@ public partial class MainWindow
                 {
                     EnhancementWorkspaceJobView job = queuedJobs[index];
                     attemptedCount++;
-                    EnhancementApiResponse response = await SendEnhancementApiAsync(
-                        HttpMethod.Post,
-                        $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel");
+                    EnhancementApiResponse response =
+                        await SendTrackedEnhancementWorkspaceMutationAsync(
+                            () => SendEnhancementApiAsync(
+                                HttpMethod.Post,
+                                $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel"));
                     if (response.Ok)
                     {
                         canceledCount++;
@@ -5787,8 +5859,18 @@ public partial class MainWindow
         await Dispatcher.Yield(DispatcherPriority.Render);
         try
         {
+            long? retryBatchInventoryRevisionBeforeMutation =
+                _enhancementWorkspaceLastHealthInventoryRevision;
             DurableEnhancementBatchResponse retryBatch =
                 await TrySendDurableEnhancementRetryBatchAsync(terminalJobs);
+            EnhancementApiResponse? retryBatchMutation = retryBatch.Responses
+                .FirstOrDefault(EnhancementWorkspaceMutationMayHaveCommitted);
+            if (retryBatchMutation is EnhancementApiResponse trackedRetry)
+            {
+                NoteEnhancementWorkspaceMutationDebt(
+                    trackedRetry,
+                    retryBatchInventoryRevisionBeforeMutation);
+            }
             for (int index = 0; index < terminalJobs.Length; index++)
             {
                 EnhancementWorkspaceJobView job = terminalJobs[index];
@@ -5809,9 +5891,11 @@ public partial class MainWindow
                 if (removeOriginalAfterSuccess
                     && !_usingDefaultModalEnhancementSender)
                 {
-                    EnhancementApiResponse remove = await SendEnhancementApiAsync(
-                        HttpMethod.Delete,
-                        $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}");
+                    EnhancementApiResponse remove =
+                        await SendTrackedEnhancementWorkspaceMutationAsync(
+                            () => SendEnhancementApiAsync(
+                                HttpMethod.Delete,
+                                $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}"));
                     if (!remove.Ok)
                     {
                         failedCount++;
@@ -5979,15 +6063,16 @@ public partial class MainWindow
                 attemptedCount += ids.Length;
                 string batchRequestId = Guid.NewGuid().ToString("N");
                 EnhancementApiResponse retry =
-                    await SendIdempotentEnhancementMutationAsync(
-                        HttpMethod.Post,
-                        "api/enhance/jobs/terminal/retry",
-                        new
-                        {
-                            status = terminalStatus,
-                            ids,
-                            batchRequestId,
-                        });
+                    await SendTrackedEnhancementWorkspaceMutationAsync(
+                        () => SendIdempotentEnhancementMutationAsync(
+                            HttpMethod.Post,
+                            "api/enhance/jobs/terminal/retry",
+                            new
+                            {
+                                status = terminalStatus,
+                                ids,
+                                batchRequestId,
+                            }));
                 if (retry.SavedForDelivery)
                 {
                     pendingCount += ids.Length;
@@ -6221,10 +6306,11 @@ public partial class MainWindow
                 {
                     attemptedCount += ids.Length;
                     EnhancementApiResponse remove =
-                        await SendIdempotentEnhancementMutationAsync(
-                        HttpMethod.Delete,
-                        "api/enhance/jobs/terminal",
-                        new { status = terminalStatus, ids });
+                        await SendTrackedEnhancementWorkspaceMutationAsync(
+                            () => SendIdempotentEnhancementMutationAsync(
+                                HttpMethod.Delete,
+                                "api/enhance/jobs/terminal",
+                                new { status = terminalStatus, ids }));
                     if (!remove.Ok
                         || !TryParseTerminalHistoryBatchDismissResponse(
                             remove.Payload,
@@ -6253,9 +6339,10 @@ public partial class MainWindow
                     string id = dismissibleIds[index];
                     attemptedCount++;
                     EnhancementApiResponse remove =
-                        await SendIdempotentEnhancementMutationAsync(
-                            HttpMethod.Delete,
-                            $"api/enhance/jobs/{Uri.EscapeDataString(id)}");
+                        await SendTrackedEnhancementWorkspaceMutationAsync(
+                            () => SendIdempotentEnhancementMutationAsync(
+                                HttpMethod.Delete,
+                                $"api/enhance/jobs/{Uri.EscapeDataString(id)}"));
                     if (!remove.Ok)
                     {
                         failedCount++;
@@ -7774,6 +7861,193 @@ public partial class MainWindow
                     ? "COMPANION_UNAVAILABLE"
                     : "API_ERROR";
 
+    private bool HasEnhancementWorkspaceMutationDebt
+        => _enhancementWorkspaceMutationDebtEpoch
+            > _enhancementWorkspaceReconciledMutationDebtEpoch;
+
+    private static bool EnhancementWorkspaceMutationMayHaveCommitted(
+        EnhancementApiResponse response)
+        => response.Ok
+            || response.SavedForDelivery
+            || !response.InnerStatusAuthoritative
+            || response.StatusCode is 408 or 425 or 429
+            || response.StatusCode >= 500;
+
+    private void NoteEnhancementWorkspaceMutationDebt(
+        EnhancementApiResponse response,
+        long? inventoryRevisionBeforeMutation)
+    {
+        if (!EnhancementWorkspaceMutationMayHaveCommitted(response))
+            return;
+
+        _enhancementWorkspaceMutationDebtEpoch++;
+        if ((response.SavedForDelivery || !response.Ok)
+            && inventoryRevisionBeforeMutation is long previousRevision
+            && previousRevision < 9_007_199_254_740_991)
+        {
+            long requiredRevision = previousRevision + 1;
+            _enhancementWorkspaceMutationDebtMinimumInventoryRevision =
+                _enhancementWorkspaceMutationDebtMinimumInventoryRevision
+                    is long existingRevision
+                    ? Math.Max(existingRevision, requiredRevision)
+                    : requiredRevision;
+        }
+        _enhancementWorkspaceHealthInventorySignature = null;
+        if (!_aiProcessingMinimizedMode
+            && EnhancementJobsDialog.Visibility == Visibility.Visible)
+        {
+            _enhancementWorkspacePollTimer.Start();
+        }
+    }
+
+    private void ReconcileEnhancementWorkspaceMutationDebt(
+        bool mutationDebtAtReadStart,
+        long mutationDebtEpochAtReadStart,
+        long? mutationDebtMinimumInventoryRevisionAtReadStart,
+        long? observedHealthInventoryRevision)
+    {
+        if (!mutationDebtAtReadStart
+            || mutationDebtMinimumInventoryRevisionAtReadStart is long
+                minimumInventoryRevision
+                && _enhancementWorkspaceHealthInventoryRevisionSupported == true
+                && (observedHealthInventoryRevision is not long inventoryRevision
+                    || inventoryRevision < minimumInventoryRevision))
+        {
+            return;
+        }
+
+        _enhancementWorkspaceReconciledMutationDebtEpoch = Math.Max(
+            _enhancementWorkspaceReconciledMutationDebtEpoch,
+            mutationDebtEpochAtReadStart);
+        if (!HasEnhancementWorkspaceMutationDebt)
+            _enhancementWorkspaceMutationDebtMinimumInventoryRevision = null;
+    }
+
+    private async Task<EnhancementApiResponse>
+        SendTrackedEnhancementWorkspaceMutationAsync(
+            Func<Task<EnhancementApiResponse>> send,
+            bool requireInventoryRevisionAdvanceOnAmbiguous = true)
+    {
+        long? inventoryRevisionBeforeMutation =
+            requireInventoryRevisionAdvanceOnAmbiguous
+                ? _enhancementWorkspaceLastHealthInventoryRevision
+                : null;
+        EnhancementApiResponse response = await send();
+        NoteEnhancementWorkspaceMutationDebt(
+            response,
+            inventoryRevisionBeforeMutation);
+        return response;
+    }
+
+    public bool EnhancementWorkspaceMutationDebtContractForSmoke()
+    {
+        long previousDebtEpoch = _enhancementWorkspaceMutationDebtEpoch;
+        long previousReconciledEpoch =
+            _enhancementWorkspaceReconciledMutationDebtEpoch;
+        bool? previousRevisionSupported =
+            _enhancementWorkspaceHealthInventoryRevisionSupported;
+        long? previousMinimumRevision =
+            _enhancementWorkspaceMutationDebtMinimumInventoryRevision;
+        string? previousSignature =
+            _enhancementWorkspaceHealthInventorySignature;
+        try
+        {
+            _enhancementWorkspaceMutationDebtEpoch = 0;
+            _enhancementWorkspaceReconciledMutationDebtEpoch = 0;
+            _enhancementWorkspaceMutationDebtMinimumInventoryRevision = null;
+            _enhancementWorkspaceHealthInventoryRevisionSupported = true;
+            _enhancementWorkspaceHealthInventorySignature = "cached";
+            var lostResponse = new EnhancementApiResponse(
+                false,
+                0,
+                null,
+                "synthetic lost response");
+            NoteEnhancementWorkspaceMutationDebt(lostResponse, 41);
+            long firstDebtEpoch = _enhancementWorkspaceMutationDebtEpoch;
+            bool lostResponseStayedSticky = HasEnhancementWorkspaceMutationDebt
+                && _enhancementWorkspaceHealthInventorySignature is null
+                && _enhancementWorkspaceMutationDebtMinimumInventoryRevision
+                    == 42;
+
+            ReconcileEnhancementWorkspaceMutationDebt(
+                mutationDebtAtReadStart: true,
+                firstDebtEpoch,
+                mutationDebtMinimumInventoryRevisionAtReadStart: 42,
+                observedHealthInventoryRevision: 41);
+            bool staleInventoryDidNotClearDebt =
+                HasEnhancementWorkspaceMutationDebt;
+
+            long olderReadEpoch = _enhancementWorkspaceMutationDebtEpoch;
+            NoteEnhancementWorkspaceMutationDebt(
+                new EnhancementApiResponse(
+                    true,
+                    200,
+                    null,
+                    "",
+                    InnerStatusAuthoritative: true),
+                41);
+            long currentDebtEpoch = _enhancementWorkspaceMutationDebtEpoch;
+            ReconcileEnhancementWorkspaceMutationDebt(
+                mutationDebtAtReadStart: true,
+                olderReadEpoch,
+                mutationDebtMinimumInventoryRevisionAtReadStart: 42,
+                observedHealthInventoryRevision: 42);
+            bool olderReadDidNotClearNewDebt =
+                HasEnhancementWorkspaceMutationDebt
+                && _enhancementWorkspaceReconciledMutationDebtEpoch
+                    == olderReadEpoch;
+            ReconcileEnhancementWorkspaceMutationDebt(
+                mutationDebtAtReadStart: true,
+                currentDebtEpoch,
+                mutationDebtMinimumInventoryRevisionAtReadStart: 42,
+                observedHealthInventoryRevision: 42);
+            bool authoritativeInventoryClearedDebt =
+                !HasEnhancementWorkspaceMutationDebt;
+
+            long epochBeforeDefinitiveRejection =
+                _enhancementWorkspaceMutationDebtEpoch;
+            NoteEnhancementWorkspaceMutationDebt(
+                new EnhancementApiResponse(
+                    false,
+                    409,
+                    null,
+                    "synthetic conflict",
+                    InnerStatusAuthoritative: true),
+                42);
+            bool definitiveRejectionAddedNoDebt =
+                _enhancementWorkspaceMutationDebtEpoch
+                    == epochBeforeDefinitiveRejection
+                && !HasEnhancementWorkspaceMutationDebt;
+            _enhancementWorkspaceHealthInventoryRevisionSupported = false;
+            NoteEnhancementWorkspaceMutationDebt(lostResponse, null);
+            long legacyDebtEpoch = _enhancementWorkspaceMutationDebtEpoch;
+            ReconcileEnhancementWorkspaceMutationDebt(
+                mutationDebtAtReadStart: true,
+                legacyDebtEpoch,
+                mutationDebtMinimumInventoryRevisionAtReadStart: null,
+                observedHealthInventoryRevision: null);
+            bool legacyInventoryWithoutRevisionClearedDebt =
+                !HasEnhancementWorkspaceMutationDebt;
+            return lostResponseStayedSticky
+                && staleInventoryDidNotClearDebt
+                && olderReadDidNotClearNewDebt
+                && authoritativeInventoryClearedDebt
+                && definitiveRejectionAddedNoDebt
+                && legacyInventoryWithoutRevisionClearedDebt;
+        }
+        finally
+        {
+            _enhancementWorkspaceMutationDebtEpoch = previousDebtEpoch;
+            _enhancementWorkspaceReconciledMutationDebtEpoch =
+                previousReconciledEpoch;
+            _enhancementWorkspaceMutationDebtMinimumInventoryRevision =
+                previousMinimumRevision;
+            _enhancementWorkspaceHealthInventoryRevisionSupported =
+                previousRevisionSupported;
+            _enhancementWorkspaceHealthInventorySignature = previousSignature;
+        }
+    }
+
     private async Task<bool> RunEnhancementWorkspaceMutationAsync(
         EnhancementWorkspaceJobView job,
         HttpMethod method,
@@ -7807,14 +8081,16 @@ public partial class MainWindow
                     route,
                     $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
                     StringComparison.Ordinal);
-            EnhancementApiResponse response = isRetryEnqueue
-                ? await SendEnhancementWorkspaceRetryAsync(job)
-                : method == HttpMethod.Delete
-                    ? await SendIdempotentEnhancementMutationAsync(
-                        method,
-                        route,
-                        body)
-                    : await SendEnhancementApiAsync(method, route, body);
+            EnhancementApiResponse response =
+                await SendTrackedEnhancementWorkspaceMutationAsync(
+                    () => isRetryEnqueue
+                        ? SendEnhancementWorkspaceRetryAsync(job)
+                        : method == HttpMethod.Delete
+                            ? SendIdempotentEnhancementMutationAsync(
+                                method,
+                                route,
+                                body)
+                            : SendEnhancementApiAsync(method, route, body));
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
             {
                 AibosOperationLog.Write(
@@ -7854,9 +8130,10 @@ public partial class MainWindow
                 && !_usingDefaultModalEnhancementSender)
             {
                 EnhancementApiResponse removeResponse =
-                    await SendIdempotentEnhancementMutationAsync(
-                        HttpMethod.Delete,
-                        $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}");
+                    await SendTrackedEnhancementWorkspaceMutationAsync(
+                        () => SendIdempotentEnhancementMutationAsync(
+                            HttpMethod.Delete,
+                            $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}"));
                 if (!removeResponse.Ok)
                 {
                     EnhancementJobsStatusText.Text =
@@ -8629,9 +8906,11 @@ public partial class MainWindow
         long generation = _enhancementWorkspaceGeneration;
         try
         {
-            EnhancementApiResponse response = await SendEnhancementApiAsync(
-                HttpMethod.Delete,
-                $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/output");
+            EnhancementApiResponse response =
+                await SendTrackedEnhancementWorkspaceMutationAsync(
+                    () => SendEnhancementApiAsync(
+                        HttpMethod.Delete,
+                        $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/output"));
             if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
                 return;
             if (!response.Ok)
@@ -11123,6 +11402,7 @@ internal readonly record struct EnhancementQueueHealthView(
     bool TerminalHistoryTargets,
     bool TerminalHistoryBatchRetry,
     string InventorySignature,
+    long? InventoryRevision,
     string? CurrentJobId,
     int? CurrentProgress,
     DateTimeOffset? CurrentUpdatedAt);
