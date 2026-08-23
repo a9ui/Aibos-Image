@@ -237,6 +237,12 @@ bool contractOk = contract.GetProperty("schemaVersion").GetInt32()
         .Contains("exact source handle", StringComparison.Ordinal)
     && managedVideoSourceReservation.GetProperty("writerInterlock").GetString()!
         .Contains("jobs.json", StringComparison.Ordinal)
+    && managedVideoSourceReservation.GetProperty("scope").GetString()!
+        .Contains("sourceVideoJobId", StringComparison.Ordinal)
+    && managedVideoSourceReservation.GetProperty("authoritativeDeleteGuard").GetString()!
+        .Contains("managed video-output DELETE", StringComparison.Ordinal)
+    && managedVideoSourceReservation.GetProperty("publicationTransfer").GetString()!
+        .Contains("Video Tools create", StringComparison.Ordinal)
     && createVector.GetProperty("requestHash").GetString()
         == EnhancementEnqueueInboxStore.ComputeRequestHash(
             createVector.GetProperty("kind").GetString()!,
