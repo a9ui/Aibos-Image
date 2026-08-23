@@ -150,6 +150,9 @@ public partial class MainWindow
     private bool _returnToEnhancementJobsAfterModalClose;
     private Tile? _enhancementJobsTemporaryVisibleTile;
     private string? _enhancementJobsTrustedModalSourcePath;
+    private long? _enhancementJobsTrustedModalSourceSizeBytes;
+    private string? _enhancementJobsTrustedModalOutputPath;
+    private long? _enhancementJobsTrustedModalOutputSizeBytes;
     private readonly List<string> _enhancementJobsPreviousSelectionPaths = [];
     private string? _enhancementJobsPreviousPrimaryPath;
     private bool _enhancementJobsModalSelectionCaptured;
@@ -185,24 +188,6 @@ public partial class MainWindow
         => IsWanV1VideoMutationSafe(job)
             || (IsMiniMaxH3VideoMutationSafe(job)
                 && IsMiniMaxH3SourceCanvasCurrent(job));
-
-    private bool IsVideoMutationSafeForExplicitAction(
-        EnhancementWorkspaceJobView job)
-    {
-        if (!job.IsVideoOperation)
-            return true;
-
-        // Both SQLite and API inventory reads are deliberately limited to
-        // structural JSON validation. Touch the selected source only after an
-        // explicit user action, using the compact immutable probe captured
-        // from that exact inventory row.
-        return job.VideoMutationSafe
-            && job.TryGetVideoMutationProbe(
-                out EnhancementVideoMutationProbe? probe)
-            && probe is not null
-            && (!probe.RequiresCurrentCanvasValidation
-                || IsMiniMaxH3SourceCanvasCurrent(probe));
-    }
 
     private static bool IsWanV1VideoMutationSafe(JsonElement job)
     {
@@ -4854,12 +4839,10 @@ public partial class MainWindow
     {
         if (sender is Button { Tag: EnhancementWorkspaceJobView job } && job.CanRetry)
         {
-            if (!IsVideoMutationSafeForExplicitAction(job))
-            {
-                EnhancementJobsStatusText.Text =
-                    "この動画Jobの入力画像が変わったか見つからないため、同じ設定では再試行できません。";
-                return;
-            }
+            // Retry is an exact persisted-job mutation. The authenticated
+            // companion revalidates the pinned source path, signature, hash,
+            // and producer before it commits the replacement child. Avoid a
+            // duplicate media read on the WPF dispatcher.
             await RunEnhancementWorkspaceMutationAsync(
                 job,
                 HttpMethod.Post,
@@ -5738,8 +5721,7 @@ public partial class MainWindow
             .Where(job =>
                 job.Status == terminalStatus
                 && MatchesEnhancementWorkspaceOperationFilter(job)
-                && job.CanRetry
-                && IsVideoMutationSafeForExplicitAction(job))
+                && job.CanRetry)
             .OrderBy(static job => job.CreatedAt)
             .ThenBy(static job => job.ApiOrdinal)
             .ToArray();
@@ -6722,89 +6704,519 @@ public partial class MainWindow
         }
     }
 
-    private bool TryBuildMiniMaxH3VideoSourceChoice(
-        EnhancementWorkspaceJobView job,
-        out VideoSourceChoice? source,
-        out string error)
+    private sealed record MiniMaxH3VideoExplicitActionContext(
+        long WorkspaceGeneration,
+        EnhancementWorkspaceJobView Job,
+        EnhancementVideoMutationProbe Probe,
+        MiniMaxH3VideoWorkspaceSnapshot Snapshot,
+        string ManagedOutputRoot,
+        ExternalFileDropPrePublishGuard? SourcePathExternalGuard,
+        ExternalFileDropPrePublishGuard? SourceIdExternalGuard);
+
+    private sealed record MiniMaxH3VideoExplicitActionValidation(
+        VideoSourceChoice? Source,
+        long SourceIdentitySizeBytes,
+        long DisplayPathSizeBytes,
+        DateTime SourceIdentityLastWriteUtc,
+        DateTime DisplayPathLastWriteUtc,
+        string Error)
     {
-        source = null;
-        error = "この動画が使った入力画像を再確認できません。";
-        if (job.MiniMaxH3VideoSnapshot is null)
+        internal bool IsValid => Source is not null
+            && string.IsNullOrWhiteSpace(Error);
+    }
+
+    private static MiniMaxH3VideoExplicitActionValidation
+        InvalidMiniMaxH3VideoExplicitAction(string error)
+        => new(
+            null,
+            0,
+            0,
+            default,
+            default,
+            error);
+
+    private bool TryCaptureMiniMaxH3VideoExplicitActionContext(
+        EnhancementWorkspaceJobView job,
+        out MiniMaxH3VideoExplicitActionContext? context)
+    {
+        context = null;
+        if (EnhancementJobsDialog.Visibility != Visibility.Visible
+            || !_enhancementWorkspaceJobs.Any(candidate =>
+                ReferenceEquals(candidate, job))
+            || job.Operation != "video"
+            || job.Status != "succeeded"
+            || !job.VideoMutationSafe
+            || job.MiniMaxH3VideoSnapshot is not { } snapshot
+            || !job.TryGetVideoMutationProbe(
+                out EnhancementVideoMutationProbe? probe)
+            || probe is null)
         {
             return false;
         }
 
-        if (TryResolveEnhancementSourceIdentity(
-                job.SourcePath,
-                out string managedCandidate)
-            && TryResolveDisplayedManagedVideoSourcePath(
-                managedCandidate,
-                out string managedInput))
+        if (!TryCaptureMiniMaxH3VideoExternalSourceGuard(
+                probe.SourcePath,
+                out ExternalFileDropPrePublishGuard? sourcePathGuard)
+            || !TryCaptureMiniMaxH3VideoExternalSourceGuard(
+                probe.SourceId,
+                out ExternalFileDropPrePublishGuard? sourceIdGuard))
+        {
+            return false;
+        }
+
+        context = new MiniMaxH3VideoExplicitActionContext(
+            _enhancementWorkspaceGeneration,
+            job,
+            probe,
+            snapshot,
+            ResolvedManagedEnhancementOutputsRoot,
+            sourcePathGuard,
+            sourceIdGuard);
+        return true;
+    }
+
+    private bool TryCaptureMiniMaxH3VideoExternalSourceGuard(
+        string path,
+        out ExternalFileDropPrePublishGuard? guard)
+    {
+        guard = null;
+        if (!TryGetExternalFileDropSessionTile(path, out Tile externalTile))
+            return true;
+        if (!TryCaptureExternalFileDropPrePublishGuard(
+                externalTile,
+                out ExternalFileDropPrePublishGuard captured))
+        {
+            return false;
+        }
+        guard = captured;
+        return true;
+    }
+
+    private bool IsMiniMaxH3VideoExternalSourceGuardCurrent(
+        string path,
+        ExternalFileDropPrePublishGuard? guard)
+        => guard is ExternalFileDropPrePublishGuard captured
+            ? IsExternalFileDropPrePublishGuardCurrent(captured)
+            : !TryGetExternalFileDropSessionTile(path, out _);
+
+    private bool IsMiniMaxH3VideoExplicitActionContextCurrent(
+        MiniMaxH3VideoExplicitActionContext context)
+        => context.WorkspaceGeneration == _enhancementWorkspaceGeneration
+            && EnhancementJobsDialog.Visibility == Visibility.Visible
+            && _enhancementWorkspaceJobs.Any(candidate =>
+                ReferenceEquals(candidate, context.Job))
+            && context.Job.Operation == "video"
+            && context.Job.Status == "succeeded"
+            && context.Job.VideoMutationSafe
+            && Equals(
+                context.Snapshot,
+                context.Job.MiniMaxH3VideoSnapshot)
+            && context.Job.TryGetVideoMutationProbe(
+                out EnhancementVideoMutationProbe? currentProbe)
+            && Equals(context.Probe, currentProbe)
+            && IsMiniMaxH3VideoExternalSourceGuardCurrent(
+                context.Probe.SourcePath,
+                context.SourcePathExternalGuard)
+            && IsMiniMaxH3VideoExternalSourceGuardCurrent(
+                context.Probe.SourceId,
+                context.SourceIdExternalGuard);
+
+    private async Task<MiniMaxH3VideoExplicitActionValidation>
+        ValidateMiniMaxH3VideoExplicitActionAsync(
+            MiniMaxH3VideoExplicitActionContext context,
+            CancellationToken token = default)
+    {
+        MiniMaxH3VideoExplicitActionValidation validation = await Task.Run(
+            () => ValidateMiniMaxH3VideoExplicitActionOnWorker(
+                context,
+                validateContentHash: true,
+                validateCurrentCanvas: true),
+            token);
+        if (!IsMiniMaxH3VideoExplicitActionContextCurrent(context))
+        {
+            return InvalidMiniMaxH3VideoExplicitAction(
+                "確認中にJobsの内容が更新されました。もう一度選び直してください。");
+        }
+        return validation;
+    }
+
+    private MiniMaxH3VideoExplicitActionValidation
+        ValidateMiniMaxH3VideoExplicitActionOnWorker(
+            MiniMaxH3VideoExplicitActionContext context,
+            bool validateContentHash,
+            bool validateCurrentCanvas)
+    {
+        try
+        {
+            if (!TryResolveMiniMaxH3VideoActionPathOnWorker(
+                    context.Probe.SourcePath,
+                    context.SourcePathExternalGuard,
+                    out string canonicalInput)
+                || !TryValidateMiniMaxH3VideoActionInputOnWorker(
+                    context.Probe,
+                    canonicalInput,
+                    validateContentHash,
+                    validateCurrentCanvas,
+                    out long inputSizeBytes,
+                    out DateTime inputLastWriteUtc))
+            {
+                return InvalidMiniMaxH3VideoExplicitAction(
+                    "この動画Jobの入力画像が変わったか見つからないため、同じ設定では再生成できません。");
+            }
+
+            if (!TryResolveMiniMaxH3ManagedOutputRootsOnWorker(
+                    context.ManagedOutputRoot,
+                    out string lexicalManagedRoot,
+                    out string canonicalManagedRoot))
+            {
+                return InvalidMiniMaxH3VideoExplicitAction(
+                    "この動画が使った入力画像を再確認できません。");
+            }
+
+            if (IsMiniMaxH3DisplayedManagedSourceOnWorker(
+                    context.Probe.SourcePath,
+                    canonicalInput,
+                    lexicalManagedRoot,
+                    canonicalManagedRoot))
+            {
+                return new MiniMaxH3VideoExplicitActionValidation(
+                    new VideoSourceChoice(
+                        canonicalInput,
+                        canonicalInput,
+                        null,
+                        "生成画像",
+                        UsesDisplayedFileDirectly: true),
+                    inputSizeBytes,
+                    inputSizeBytes,
+                    inputLastWriteUtc,
+                    inputLastWriteUtc,
+                    "");
+            }
+
+            if (!TryResolveMiniMaxH3VideoActionPathOnWorker(
+                    context.Probe.SourceId,
+                    context.SourceIdExternalGuard,
+                    out string canonicalSource)
+                || !TryReadMiniMaxH3VideoActionSourceMetadataOnWorker(
+                    canonicalSource,
+                    out long sourceSizeBytes,
+                    out DateTime sourceLastWriteUtc))
+            {
+                return InvalidMiniMaxH3VideoExplicitAction(
+                    "この動画が使った元画像を再確認できません。");
+            }
+
+            if (!string.IsNullOrWhiteSpace(
+                    context.Probe.SourceProducerJobId))
+            {
+                string lexicalInput = Path.GetFullPath(
+                    context.Probe.SourcePath);
+                if (!IsPathInside(lexicalInput, lexicalManagedRoot)
+                    || !IsPathInside(canonicalInput, canonicalManagedRoot))
+                {
+                    return InvalidMiniMaxH3VideoExplicitAction(
+                        "この動画が使った生成画像の所有範囲を確認できません。");
+                }
+                return new MiniMaxH3VideoExplicitActionValidation(
+                    new VideoSourceChoice(
+                        canonicalSource,
+                        canonicalInput,
+                        context.Probe.SourceProducerJobId,
+                        "実写版",
+                        UsesDisplayedFileDirectly: false),
+                    sourceSizeBytes,
+                    inputSizeBytes,
+                    sourceLastWriteUtc,
+                    inputLastWriteUtc,
+                    "");
+            }
+
+            if (!EnhancementSourceIdentityComparer.Equals(
+                    canonicalInput,
+                    canonicalSource))
+            {
+                return InvalidMiniMaxH3VideoExplicitAction(
+                    "この動画が使った元画像のidentityが変わりました。");
+            }
+
+            return new MiniMaxH3VideoExplicitActionValidation(
+                new VideoSourceChoice(
+                    canonicalInput,
+                    canonicalInput,
+                    null,
+                    "Original",
+                    UsesDisplayedFileDirectly: false),
+                inputSizeBytes,
+                inputSizeBytes,
+                inputLastWriteUtc,
+                inputLastWriteUtc,
+                "");
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or NotSupportedException
+                or ArgumentException
+                or InvalidOperationException)
+        {
+            return InvalidMiniMaxH3VideoExplicitAction(
+                "この動画が使った入力画像を再確認できません。");
+        }
+    }
+
+    private bool TryResolveMiniMaxH3VideoActionPathOnWorker(
+        string path,
+        ExternalFileDropPrePublishGuard? externalGuard,
+        out string canonicalPath)
+    {
+        canonicalPath = "";
+        if (string.IsNullOrWhiteSpace(path)
+            || !Path.IsPathFullyQualified(path))
+        {
+            return false;
+        }
+
+        if (externalGuard is ExternalFileDropPrePublishGuard guard)
         {
             try
             {
-                if (job.SourceSize is null || job.SourceMtimeMs is null)
+                string resolved = Path.GetFullPath(
+                    _resolveFinalPath(Path.GetFullPath(path)));
+                if (!string.Equals(
+                        resolved,
+                        guard.CanonicalPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
                     return false;
-                var info = new FileInfo(managedInput);
-                double currentMtimeMs = new DateTimeOffset(
-                    info.LastWriteTimeUtc).ToUnixTimeMilliseconds();
-                if (info.Length != job.SourceSize.Value
-                    || Math.Abs(currentMtimeMs - job.SourceMtimeMs.Value) > 1)
+                }
+                using var stream = new FileStream(
+                    resolved,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    bufferSize: 4_096,
+                    FileOptions.RandomAccess);
+                if (!WindowsPathIdentity.TryGetFinalPath(
+                        stream.SafeFileHandle,
+                        out string openedCanonical)
+                    || !string.Equals(
+                        openedCanonical,
+                        guard.CanonicalPath,
+                        StringComparison.OrdinalIgnoreCase)
+                    || !TryReadExternalFileDropSourceVersion(
+                        stream.SafeFileHandle,
+                        out ExternalFileDropSourceVersion current)
+                    || !guard.SourceVersion.SameFileVersion(current))
+                {
+                    return false;
+                }
+                canonicalPath = openedCanonical;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        try
+        {
+            string lexicalPath = Path.GetFullPath(path);
+            canonicalPath = Path.GetFullPath(_resolveFinalPath(lexicalPath));
+            return Path.IsPathFullyQualified(canonicalPath);
+        }
+        catch
+        {
+            canonicalPath = "";
+            return false;
+        }
+    }
+
+    private static bool TryReadMiniMaxH3VideoActionSourceMetadataOnWorker(
+        string canonicalPath,
+        out long sizeBytes,
+        out DateTime lastWriteUtc)
+    {
+        sizeBytes = 0;
+        lastWriteUtc = default;
+        try
+        {
+            if (!SupportedImageExtensions.Contains(
+                    Path.GetExtension(canonicalPath)))
+            {
+                return false;
+            }
+            var info = new FileInfo(canonicalPath);
+            if (!info.Exists || info.Length <= 0)
+                return false;
+            sizeBytes = info.Length;
+            lastWriteUtc = info.LastWriteTimeUtc;
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or NotSupportedException
+                or ArgumentException)
+        {
+            sizeBytes = 0;
+            lastWriteUtc = default;
+            return false;
+        }
+    }
+
+    private static bool TryValidateMiniMaxH3VideoActionInputOnWorker(
+        EnhancementVideoMutationProbe probe,
+        string canonicalInput,
+        bool validateContentHash,
+        bool validateCurrentCanvas,
+        out long sizeBytes,
+        out DateTime lastWriteUtc)
+    {
+        sizeBytes = 0;
+        lastWriteUtc = default;
+        if (probe.SourceSize is not long expectedSize
+            || probe.SourceMtimeMs is not double expectedMtimeMs
+            || !TryReadMiniMaxH3VideoActionSourceMetadataOnWorker(
+                canonicalInput,
+                out long observedSize,
+                out lastWriteUtc))
+        {
+            return false;
+        }
+
+        try
+        {
+            double currentMtimeMs = new DateTimeOffset(
+                lastWriteUtc).ToUnixTimeMilliseconds();
+            if (observedSize != expectedSize
+                || Math.Abs(currentMtimeMs - expectedMtimeMs) > 1)
+            {
+                return false;
+            }
+            if (!validateContentHash)
+            {
+                sizeBytes = observedSize;
+                return true;
+            }
+
+            using (var stream = new FileStream(
+                canonicalInput,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 128 * 1024,
+                FileOptions.SequentialScan))
+            {
+                string currentSha256 = Convert.ToHexString(
+                        SHA256.HashData(stream))
+                    .ToLowerInvariant();
+                if (!string.Equals(
+                        currentSha256,
+                        probe.SourceSha256,
+                        StringComparison.Ordinal))
                 {
                     return false;
                 }
             }
-            catch (Exception ex) when (
-                ex is IOException
-                    or UnauthorizedAccessException
-                    or NotSupportedException
-                    or ArgumentException)
+
+            if (!validateCurrentCanvas)
+            {
+                sizeBytes = observedSize;
+                return true;
+            }
+
+            if (probe.EffectiveWidth is not int width
+                || probe.EffectiveHeight is not int height
+                || !TryReadMiniMaxH3SourceDimensions(
+                    canonicalInput,
+                    out int sourceWidth,
+                    out int sourceHeight))
             {
                 return false;
             }
-            source = new VideoSourceChoice(
-                managedInput,
-                managedInput,
-                null,
-                "生成画像",
-                UsesDisplayedFileDirectly: true);
-            error = "";
-            return true;
-        }
+            (int expectedWidth, int expectedHeight) =
+                NormalizeMiniMaxH3VideoCanvas(sourceWidth, sourceHeight);
+            if (width != expectedWidth || height != expectedHeight)
+                return false;
 
-        if (!TryResolveEnhancementWorkspaceInput(
-                job,
-                out string canonicalInput))
+            var after = new FileInfo(canonicalInput);
+            double finalMtimeMs = new DateTimeOffset(
+                after.LastWriteTimeUtc).ToUnixTimeMilliseconds();
+            sizeBytes = after.Length;
+            lastWriteUtc = after.LastWriteTimeUtc;
+            return sizeBytes == expectedSize
+                && Math.Abs(finalMtimeMs - expectedMtimeMs) <= 1;
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or NotSupportedException
+                or ArgumentException)
+        {
+            sizeBytes = 0;
+            lastWriteUtc = default;
+            return false;
+        }
+    }
+
+    private bool TryResolveMiniMaxH3ManagedOutputRootsOnWorker(
+        string managedOutputRoot,
+        out string lexicalRoot,
+        out string canonicalRoot)
+    {
+        lexicalRoot = "";
+        canonicalRoot = "";
+        try
+        {
+            lexicalRoot = Path.GetFullPath(managedOutputRoot);
+            canonicalRoot = Path.GetFullPath(_resolveFinalPath(lexicalRoot));
+            return Path.IsPathFullyQualified(canonicalRoot);
+        }
+        catch
+        {
+            lexicalRoot = "";
+            canonicalRoot = "";
+            return false;
+        }
+    }
+
+    private static bool IsMiniMaxH3DisplayedManagedSourceOnWorker(
+        string lexicalSourcePath,
+        string canonicalSourcePath,
+        string lexicalManagedRoot,
+        string canonicalManagedRoot)
+    {
+        try
+        {
+            string lexicalSource = Path.GetFullPath(lexicalSourcePath);
+            if (!IsPathInside(lexicalSource, lexicalManagedRoot)
+                || !IsPathInside(canonicalSourcePath, canonicalManagedRoot))
+            {
+                return false;
+            }
+            string relative = Path.GetRelativePath(
+                canonicalManagedRoot,
+                canonicalSourcePath);
+            string[] parts = relative.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries);
+            bool supportedFolder = parts.Length >= 1
+                && parts[0] is "Upscaled" or "Photorealized" or "Edited";
+            bool supportedLayout = parts.Length == 2
+                || (parts.Length == 3
+                    && DateTime.TryParseExact(
+                        parts[1],
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out _));
+            return supportedFolder && supportedLayout;
+        }
+        catch
         {
             return false;
         }
-
-        if (!string.IsNullOrWhiteSpace(job.SourceProducerJobId))
-        {
-            if (!TryResolveEnhancementWorkspaceCatalogSource(
-                    job,
-                    out string canonicalSource))
-            {
-                return false;
-            }
-            source = new VideoSourceChoice(
-                canonicalSource,
-                canonicalInput,
-                job.SourceProducerJobId,
-                "実写版",
-                UsesDisplayedFileDirectly: false);
-            error = "";
-            return true;
-        }
-
-        source = new VideoSourceChoice(
-            canonicalInput,
-            canonicalInput,
-            null,
-            "Original",
-            UsesDisplayedFileDirectly: false);
-        error = "";
-        return true;
     }
 
     private static VideoGenerationRequestSettings
@@ -6820,20 +7232,31 @@ public partial class MainWindow
             snapshot.Steps,
             snapshot.Prompt);
 
-    private string? ValidateMiniMaxH3VideoRerunSourceBeforePublish(
-        EnhancementWorkspaceJobView job,
-        VideoSourceChoice expectedSource)
+    private async Task<string?>
+        ValidateMiniMaxH3VideoRerunSourceBeforePublishAsync(
+            MiniMaxH3VideoExplicitActionContext context,
+            VideoSourceChoice expectedSource,
+            CancellationToken token)
     {
-        if (!TryBuildMiniMaxH3VideoSourceChoice(
-                job,
-                out VideoSourceChoice? currentSource,
-                out string error)
-            || currentSource is null)
+        if (!IsMiniMaxH3VideoExplicitActionContextCurrent(context))
+            return "確認中にJobsの内容が更新されました。ジョブは追加していません。";
+
+        MiniMaxH3VideoExplicitActionValidation validation = await Task.Run(
+            () => ValidateMiniMaxH3VideoExplicitActionOnWorker(
+                context,
+                validateContentHash: true,
+                validateCurrentCanvas: false),
+            token);
+        if (!IsMiniMaxH3VideoExplicitActionContextCurrent(context))
+            return "確認中にJobsの内容が更新されました。ジョブは追加していません。";
+        if (!validation.IsValid || validation.Source is null)
         {
-            return error;
+            return string.IsNullOrWhiteSpace(validation.Error)
+                ? "この動画が使った入力画像を再確認できません。"
+                : validation.Error;
         }
         return VideoSourceChoicesReferToSameInput(
-                currentSource,
+                validation.Source,
                 expectedSource)
             ? null
             : "動画化の入力画像が確認中に変わりました。ジョブは追加していません。";
@@ -6842,32 +7265,36 @@ public partial class MainWindow
     private async Task RerunMiniMaxH3VideoWithSavedPromptAsync(
         EnhancementWorkspaceJobView job)
     {
-        VideoSourceChoice? source = null;
-        string sourceError = "";
         if (_enhancementWorkspaceMutationPending
             || !job.CanRerunMiniMaxH3VideoWithSavedPrompt
-            || !IsVideoMutationSafeForExplicitAction(job)
-            || job.MiniMaxH3VideoSnapshot is not { } snapshot
-            || !TryBuildMiniMaxH3VideoSourceChoice(
+            || !TryCaptureMiniMaxH3VideoExplicitActionContext(
                 job,
-                out source,
-                out sourceError)
-            || source is null)
+                out MiniMaxH3VideoExplicitActionContext? context)
+            || context is null)
         {
-            EnhancementJobsStatusText.Text = string.IsNullOrWhiteSpace(sourceError)
-                ? "保存済みの動画Promptまたは入力画像を再確認できません。"
-                : sourceError;
+            EnhancementJobsStatusText.Text =
+                "保存済みの動画Promptまたは入力画像を再確認できません。";
             return;
         }
 
         _enhancementWorkspaceMutationPending = true;
         job.IsBusy = true;
-        long generation = _enhancementWorkspaceGeneration;
+        long generation = context.WorkspaceGeneration;
         var operationWatch = Stopwatch.StartNew();
         try
         {
+            EnhancementJobsStatusText.Text =
+                "保存済みの動画Promptと入力画像を確認しています…";
+            MiniMaxH3VideoExplicitActionValidation validation =
+                await ValidateMiniMaxH3VideoExplicitActionAsync(context);
+            if (!validation.IsValid || validation.Source is null)
+            {
+                EnhancementJobsStatusText.Text = validation.Error;
+                return;
+            }
+            VideoSourceChoice source = validation.Source;
             VideoGenerationRequestSettings settings =
-                MiniMaxH3VideoRerunRequestSettings(snapshot);
+                MiniMaxH3VideoRerunRequestSettings(context.Snapshot);
             EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
                 BuildVideoGenerationRequestBody(
                     source,
@@ -6881,9 +7308,14 @@ public partial class MainWindow
                 requireExactHealthValidation: true,
                 recoverySourceIdentity: source.SourceIdentity,
                 prePublishValidator: () =>
-                    ValidateMiniMaxH3VideoRerunSourceBeforePublish(
-                        job,
-                        source));
+                    IsMiniMaxH3VideoExplicitActionContextCurrent(context)
+                        ? null
+                        : "確認中にJobsの内容が更新されました。ジョブは追加していません。",
+                asyncPrePublishValidator: token =>
+                    ValidateMiniMaxH3VideoRerunSourceBeforePublishAsync(
+                        context,
+                        source,
+                        token));
             if (generation != _enhancementWorkspaceGeneration
                 || EnhancementJobsDialog.Visibility != Visibility.Visible)
             {
@@ -6940,22 +7372,30 @@ public partial class MainWindow
 
     private bool TryOpenMiniMaxH3VideoRerunSourceInViewer(
         EnhancementWorkspaceJobView job,
-        VideoSourceChoice source)
+        VideoSourceChoice source,
+        MiniMaxH3VideoExplicitActionValidation validation)
     {
         if (!source.UsesDisplayedFileDirectly)
         {
             return TryOpenEnhancementJobInViewer(
                 job,
-                preferredOutput: null);
+                preferredOutput: null,
+                validatedCanonicalSource: source.SourceIdentity,
+                validatedSourceSizeBytes:
+                    validation.SourceIdentitySizeBytes,
+                validatedSourceModifiedUtc:
+                    validation.SourceIdentityLastWriteUtc,
+                validatedOutputPath:
+                    source.ProducerJobId is null
+                        ? null
+                        : source.DisplayPath,
+                validatedOutputSizeBytes:
+                    source.ProducerJobId is null
+                        ? null
+                        : validation.DisplayPathSizeBytes);
         }
 
         string canonicalSource = source.DisplayPath;
-        if (!File.Exists(canonicalSource))
-        {
-            EnhancementJobsStatusText.Text =
-                "動画化に使った生成画像が見つかりません。";
-            return false;
-        }
         Tile? tile = _allTiles.FirstOrDefault(candidate =>
             candidate.IsRealFile
             && string.Equals(
@@ -6964,19 +7404,21 @@ public partial class MainWindow
                 StringComparison.OrdinalIgnoreCase));
         if (tile is null)
         {
-            var sourceInfo = new FileInfo(canonicalSource);
             tile = new Tile
             {
                 Path = canonicalSource,
                 FileName = Path.GetFileName(canonicalSource),
                 IsRealFile = true,
-                ModifiedUtc = sourceInfo.LastWriteTimeUtc,
+                ModifiedUtc = validation.DisplayPathLastWriteUtc,
                 Fav = FavoriteLevelForPath(canonicalSource),
             };
         }
 
         CaptureEnhancementJobsReturnViewport(job.Id);
-        PrepareEnhancementJobsModalTile(tile, canonicalSource);
+        PrepareEnhancementJobsModalTile(
+            tile,
+            canonicalSource,
+            validation.DisplayPathSizeBytes);
         _returnToEnhancementJobsAfterModalClose = true;
         CloseEnhancementJobsWorkspace(restoreFocus: false);
         SelectTile(tile);
@@ -6999,9 +7441,7 @@ public partial class MainWindow
         EnhancementWorkspaceJobView job)
     {
         if (_enhancementWorkspaceMutationPending
-            || !job.CanEditMiniMaxH3VideoPrompt
-            || !IsVideoMutationSafeForExplicitAction(job)
-            || job.MiniMaxH3VideoSnapshot is not { } snapshot)
+            || !job.CanEditMiniMaxH3VideoPrompt)
         {
             return;
         }
@@ -7017,65 +7457,82 @@ public partial class MainWindow
         {
             return;
         }
-        VideoSourceChoice? source = null;
-        string sourceError = "";
-        if (EnhancementJobsDialog.Visibility != Visibility.Visible
+        if (_enhancementWorkspaceMutationPending
             || !job.CanEditMiniMaxH3VideoPrompt
-            || !IsVideoMutationSafeForExplicitAction(job)
-            || !TryBuildMiniMaxH3VideoSourceChoice(
+            || !TryCaptureMiniMaxH3VideoExplicitActionContext(
                 job,
-                out source,
-                out sourceError)
-            || source is null
-            || !TryOpenMiniMaxH3VideoRerunSourceInViewer(job, source))
+                out MiniMaxH3VideoExplicitActionContext? context)
+            || context is null)
         {
-            if (!string.IsNullOrWhiteSpace(sourceError))
-                EnhancementJobsStatusText.Text = sourceError;
             return;
         }
 
-        if (!source.UsesDisplayedFileDirectly
-            && !string.IsNullOrWhiteSpace(job.SourceProducerJobId))
+        job.IsBusy = true;
+        try
         {
-            int producerIndex = _modalEnhancementVersions.FindIndex(candidate =>
-                string.Equals(
-                    candidate.JobId,
-                    job.SourceProducerJobId,
-                    StringComparison.Ordinal)
-                && candidate.Operation == "photoreal");
-            if (producerIndex < 0)
+            EnhancementJobsStatusText.Text =
+                "動画化に使った入力画像を確認しています…";
+            MiniMaxH3VideoExplicitActionValidation validation =
+                await ValidateMiniMaxH3VideoExplicitActionAsync(context);
+            if (!validation.IsValid || validation.Source is null)
             {
-                SetStatusToast(
-                    "この動画が使った実写版を確認できません。Jobsを更新してから再度お試しください。");
+                EnhancementJobsStatusText.Text = validation.Error;
                 return;
             }
-            _modalEnhancementVersionIndex = producerIndex + 1;
-            _modalShowingEnhanced = true;
-            ManagedEnhancementVersion producer =
-                _modalEnhancementVersions[producerIndex];
-            if (TryGetModalSourceTile(out Tile sourceTile))
-            {
-                RememberModalDisplayPreference(
-                    sourceTile,
-                    ModalDisplayVersionKind.Photoreal,
-                    producer.JobId);
-            }
-            OpenModal();
-        }
+            VideoSourceChoice source = validation.Source;
+            if (!TryOpenMiniMaxH3VideoRerunSourceInViewer(
+                    job,
+                    source,
+                    validation))
+                return;
 
-        RestoreVideoGenerationSettings(
-            snapshot.NominalDurationSeconds,
-            MiniMaxH3VideoPlaybackFps,
-            snapshot.MaximumPixelArea,
-            snapshot.Prompt,
-            modelId: MiniMaxH3VideoModelId,
-            qualityId: MiniMaxH3VideoPresetId,
-            steps: snapshot.Steps);
-        OpenVideoGenerationBoard(requestedSource: null);
-        if (ModalVideoGenerationPopup.Visibility == Visibility.Visible)
+            if (!source.UsesDisplayedFileDirectly
+                && !string.IsNullOrWhiteSpace(job.SourceProducerJobId))
+            {
+                int producerIndex = _modalEnhancementVersions.FindIndex(candidate =>
+                    string.Equals(
+                        candidate.JobId,
+                        job.SourceProducerJobId,
+                        StringComparison.Ordinal)
+                    && candidate.Operation == "photoreal");
+                if (producerIndex < 0)
+                {
+                    SetStatusToast(
+                        "この動画が使った実写版を確認できません。Jobsを更新してから再度お試しください。");
+                    return;
+                }
+                _modalEnhancementVersionIndex = producerIndex + 1;
+                _modalShowingEnhanced = true;
+                ManagedEnhancementVersion producer =
+                    _modalEnhancementVersions[producerIndex];
+                if (TryGetModalSourceTile(out Tile sourceTile))
+                {
+                    RememberModalDisplayPreference(
+                        sourceTile,
+                        ModalDisplayVersionKind.Photoreal,
+                        producer.JobId);
+                }
+                OpenModal();
+            }
+
+            RestoreVideoGenerationSettings(
+                context.Snapshot.NominalDurationSeconds,
+                MiniMaxH3VideoPlaybackFps,
+                context.Snapshot.MaximumPixelArea,
+                context.Snapshot.Prompt,
+                modelId: MiniMaxH3VideoModelId,
+                qualityId: MiniMaxH3VideoPresetId,
+                steps: context.Snapshot.Steps);
+            OpenVideoGenerationBoard(requestedSource: null);
+            if (ModalVideoGenerationPopup.Visibility == Visibility.Visible)
+            {
+                SetVideoGenerationSettingsStatus(
+                    "このJobの入力画像・長さ・STEP・解像度・Promptを読み込みました。Promptを変更してからキューへ追加してください。開いただけでは追加されません。");
+            }
+        }
+        finally
         {
-            SetVideoGenerationSettingsStatus(
-                "このJobの入力画像・長さ・STEP・解像度・Promptを読み込みました。Promptを変更してからキューへ追加してください。開いただけでは追加されません。");
+            job.IsBusy = false;
         }
     }
 
@@ -7657,15 +8114,45 @@ public partial class MainWindow
     private bool TryOpenEnhancementJobInViewer(
         EnhancementWorkspaceJobView job,
         ManagedEnhancedOutput? preferredOutput,
-        ManagedVideoVersion? preferredVideo = null)
+        ManagedVideoVersion? preferredVideo = null,
+        string? validatedCanonicalSource = null,
+        long? validatedSourceSizeBytes = null,
+        DateTime? validatedSourceModifiedUtc = null,
+        string? validatedOutputPath = null,
+        long? validatedOutputSizeBytes = null)
     {
-        if (!TryResolveEnhancementWorkspaceCatalogSource(
-                job,
-                out string canonicalSource)
-            || !File.Exists(canonicalSource))
+        string canonicalSource;
+        long sourceSizeBytes;
+        DateTime sourceModifiedUtc;
+        if (validatedCanonicalSource is not null)
+        {
+            if (!Path.IsPathFullyQualified(validatedCanonicalSource)
+                || !SupportedImageExtensions.Contains(
+                    Path.GetExtension(validatedCanonicalSource))
+                || validatedSourceSizeBytes is not > 0
+                || validatedSourceModifiedUtc is null)
+            {
+                EnhancementJobsStatusText.Text =
+                    "元画像を安全に確認できないため、ビューワーで開けません。";
+                return false;
+            }
+            canonicalSource = validatedCanonicalSource;
+            sourceSizeBytes = validatedSourceSizeBytes.Value;
+            sourceModifiedUtc = validatedSourceModifiedUtc.Value;
+        }
+        else if (!TryResolveEnhancementWorkspaceCatalogSource(
+                     job,
+                     out canonicalSource)
+                 || !File.Exists(canonicalSource))
         {
             EnhancementJobsStatusText.Text = "元画像が見つからないため、ビューワーで開けません。";
             return false;
+        }
+        else
+        {
+            var sourceInfo = new FileInfo(canonicalSource);
+            sourceSizeBytes = sourceInfo.Length;
+            sourceModifiedUtc = sourceInfo.LastWriteTimeUtc;
         }
 
         Tile? tile = _allTiles.FirstOrDefault(candidate =>
@@ -7673,19 +8160,23 @@ public partial class MainWindow
             && string.Equals(candidate.Path, canonicalSource, StringComparison.OrdinalIgnoreCase));
         if (tile is null)
         {
-            var sourceInfo = new FileInfo(canonicalSource);
             tile = new Tile
             {
                 Path = canonicalSource,
                 FileName = Path.GetFileName(canonicalSource),
                 IsRealFile = true,
-                ModifiedUtc = sourceInfo.LastWriteTimeUtc,
+                ModifiedUtc = sourceModifiedUtc,
                 Fav = FavoriteLevelForPath(canonicalSource),
             };
         }
 
         CaptureEnhancementJobsReturnViewport(job.Id);
-        PrepareEnhancementJobsModalTile(tile, canonicalSource);
+        PrepareEnhancementJobsModalTile(
+            tile,
+            canonicalSource,
+            sourceSizeBytes,
+            validatedOutputPath,
+            validatedOutputSizeBytes);
         if (preferredVideo is not null)
         {
             RememberModalDisplayPreference(
@@ -7781,13 +8272,22 @@ public partial class MainWindow
         return opened;
     }
 
-    private void PrepareEnhancementJobsModalTile(Tile tile, string canonicalSource)
+    private void PrepareEnhancementJobsModalTile(
+        Tile tile,
+        string canonicalSource,
+        long sourceSizeBytes,
+        string? validatedOutputPath = null,
+        long? validatedOutputSizeBytes = null)
     {
         RestoreEnhancementJobsModalSelection();
         _enhancementJobsPreviousSelectionPaths.AddRange(_selectedPaths);
         _enhancementJobsPreviousPrimaryPath = _primarySelectedPath;
         _enhancementJobsModalSelectionCaptured = true;
         _enhancementJobsTrustedModalSourcePath = canonicalSource;
+        _enhancementJobsTrustedModalSourceSizeBytes = sourceSizeBytes;
+        _enhancementJobsTrustedModalOutputPath = validatedOutputPath;
+        _enhancementJobsTrustedModalOutputSizeBytes =
+            validatedOutputSizeBytes;
         if (!_tiles.Contains(tile))
         {
             _tiles.Add(tile);
@@ -7797,6 +8297,7 @@ public partial class MainWindow
 
     private bool IsEnhancementJobsTrustedModalSource(Tile tile)
         => !string.IsNullOrWhiteSpace(_enhancementJobsTrustedModalSourcePath)
+            && _enhancementJobsTrustedModalSourceSizeBytes is > 0
             && string.Equals(
                 tile.Path,
                 _enhancementJobsTrustedModalSourcePath,
@@ -7805,9 +8306,11 @@ public partial class MainWindow
     private bool TryResolveEnhancementJobsTrustedModalSource(
         Tile tile,
         out string canonicalSource,
+        out long sourceSizeBytes,
         out string reason)
     {
         canonicalSource = "";
+        sourceSizeBytes = 0;
         reason = "the Jobs source is unavailable";
         if (!IsEnhancementJobsTrustedModalSource(tile)
             || string.IsNullOrWhiteSpace(tile.Path)
@@ -7817,19 +8320,48 @@ public partial class MainWindow
             return false;
         }
 
-        try
+        // PrepareEnhancementJobsModalTile receives only a source that was
+        // already canonicalized and validated for this explicit action. Do
+        // not repeat path or media I/O on the dispatcher; the modal decoder
+        // remains fail-closed if the file disappears before it is opened.
+        canonicalSource = _enhancementJobsTrustedModalSourcePath!;
+        sourceSizeBytes = _enhancementJobsTrustedModalSourceSizeBytes!.Value;
+        reason = "";
+        return true;
+    }
+
+    private bool TryResolveEnhancementJobsTrustedModalOutput(
+        Tile tile,
+        out string outputPath,
+        out long outputSizeBytes)
+    {
+        outputPath = "";
+        outputSizeBytes = 0;
+        if (!IsEnhancementJobsTrustedModalSource(tile)
+            || string.IsNullOrWhiteSpace(
+                _enhancementJobsTrustedModalOutputPath)
+            || _enhancementJobsTrustedModalOutputSizeBytes is not > 0
+            || _modalEnhancementVersionIndex < 0
+            || _modalEnhancementVersionIndex
+                >= _modalEnhancementVersions.Count)
         {
-            canonicalSource = _resolveFinalPath(Path.GetFullPath(tile.Path));
-            if (!File.Exists(canonicalSource))
-                return false;
-            reason = "";
-            return true;
-        }
-        catch
-        {
-            canonicalSource = "";
             return false;
         }
+
+        ManagedEnhancementVersion selected =
+            _modalEnhancementVersions[_modalEnhancementVersionIndex];
+        if (!string.Equals(
+                selected.Output.OutputPath,
+                _enhancementJobsTrustedModalOutputPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        outputPath = _enhancementJobsTrustedModalOutputPath;
+        outputSizeBytes =
+            _enhancementJobsTrustedModalOutputSizeBytes.Value;
+        return true;
     }
 
     private void RestoreEnhancementJobsModalSelection()
@@ -7841,6 +8373,9 @@ public partial class MainWindow
         Tile? temporaryTile = _enhancementJobsTemporaryVisibleTile;
         _enhancementJobsTemporaryVisibleTile = null;
         _enhancementJobsTrustedModalSourcePath = null;
+        _enhancementJobsTrustedModalSourceSizeBytes = null;
+        _enhancementJobsTrustedModalOutputPath = null;
+        _enhancementJobsTrustedModalOutputSizeBytes = null;
         if (temporaryTile is not null)
             _tiles.Remove(temporaryTile);
 
@@ -9337,14 +9872,31 @@ public partial class MainWindow
             || !view.CanRerunMiniMaxH3VideoWithSavedPrompt
             || !view.CanEditMiniMaxH3VideoPrompt
             || !view.ActionPresentationMatchesCapabilitiesForSmoke()
-            || !TryBuildMiniMaxH3VideoSourceChoice(
-                view,
-                out VideoSourceChoice? source,
-                out _)
-            || source is null)
+            || !view.TryGetVideoMutationProbe(
+                out EnhancementVideoMutationProbe? probe)
+            || probe is null)
         {
             return false;
         }
+
+        var context = new MiniMaxH3VideoExplicitActionContext(
+            WorkspaceGeneration: 0,
+            view,
+            probe,
+            snapshot,
+            ResolvedManagedEnhancementOutputsRoot,
+            SourcePathExternalGuard: null,
+            SourceIdExternalGuard: null);
+        MiniMaxH3VideoExplicitActionValidation validation = Task.Run(
+                () => ValidateMiniMaxH3VideoExplicitActionOnWorker(
+                    context,
+                    validateContentHash: true,
+                    validateCurrentCanvas: true))
+            .GetAwaiter()
+            .GetResult();
+        if (!validation.IsValid || validation.Source is null)
+            return false;
+        VideoSourceChoice source = validation.Source;
 
         actionKinds = new[]
             { view.Action1, view.Action2, view.Action3, view.Action4,
@@ -10105,6 +10657,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     {
         get
         {
+            if (Status == "running")
+            {
+                return StartedAt is DateTimeOffset startedAt
+                    ? $"Started {startedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}"
+                    : "Start time unavailable";
+            }
             string updated = UpdatedAt == DateTimeOffset.MinValue
                 ? "Time unavailable"
                 : $"Updated {UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}";

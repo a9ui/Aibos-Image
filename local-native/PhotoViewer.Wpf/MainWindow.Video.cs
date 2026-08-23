@@ -201,20 +201,6 @@ public partial class MainWindow
         }
     }
 
-    private bool IsMiniMaxH3SourceCanvasCurrent(
-        EnhancementVideoMutationProbe probe)
-        => probe.RequiresCurrentCanvasValidation
-            && probe.SourceSize is long expectedSize
-            && probe.SourceMtimeMs is double expectedMtimeMs
-            && probe.EffectiveWidth is int width
-            && probe.EffectiveHeight is int height
-            && IsMiniMaxH3SourceCanvasCurrent(
-                probe.SourcePath,
-                expectedSize,
-                expectedMtimeMs,
-                width,
-                height);
-
     private bool IsMiniMaxH3SourceCanvasCurrent(JsonElement job)
     {
         try
