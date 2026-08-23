@@ -19790,6 +19790,7 @@ public partial class App : Application
     {
         string resultFullPath = Path.GetFullPath(resultPath);
         string smokeRoot = Directory.CreateTempSubdirectory("aibos-enhancement-jobs-workspace-").FullName;
+        string storeRoot = Path.Combine(smokeRoot, "stores");
         string sourcePath = Path.Combine(smokeRoot, "images", "workspace-source.png");
         string outputPath = Path.Combine(smokeRoot, "stores", "enhance", "outputs", "workspace-output.webp");
         string videoOutputPath = Path.Combine(
@@ -21546,6 +21547,132 @@ public partial class App : Application
                 var completedPhotorealView =
                     window.EnhancementJobViewIdentityForSmoke("done-job")
                         as EnhancementWorkspaceJobView;
+                object DependencyVideoJob(
+                    string id,
+                    string status,
+                    string dependentSourcePath,
+                    object? producerId = null)
+                {
+                    var job = new Dictionary<string, object?>(
+                        StringComparer.Ordinal)
+                    {
+                        ["id"] = id,
+                        ["sourceId"] = sourcePath,
+                        ["sourcePath"] = dependentSourcePath,
+                        ["presetId"] = "minimax-h3-preview-v1",
+                        ["adapterId"] = "minimax-h3-core-v1",
+                        ["operation"] = "video",
+                        ["status"] = status,
+                        ["progress"] = 0,
+                        ["createdAt"] = "2026-07-23T00:00:00.000Z",
+                        ["updatedAt"] = "2026-07-23T00:00:01.000Z",
+                    };
+                    if (producerId is not null)
+                        job["sourceProducerJobId"] = producerId;
+                    return job;
+                }
+                string producerDependencyOutput = Path.Combine(
+                    storeRoot,
+                    "enhance",
+                    "outputs",
+                    "Photorealized",
+                    "producer-dependency.webp");
+                string directDependencyOutput = Path.Combine(
+                    storeRoot,
+                    "enhance",
+                    "outputs",
+                    "Upscaled",
+                    "direct-dependency.webp");
+                string terminalDependencyOutput = Path.Combine(
+                    storeRoot,
+                    "enhance",
+                    "outputs",
+                    "Edited",
+                    "terminal-dependency.webp");
+                string unreferencedOutput = Path.Combine(
+                    storeRoot,
+                    "enhance",
+                    "outputs",
+                    "Upscaled",
+                    "unreferenced.webp");
+                using JsonDocument outputDependencyDocument =
+                    JsonSerializer.SerializeToDocument(new
+                    {
+                        jobs = new object[]
+                        {
+                            Job(
+                                "producer-dependency",
+                                "succeeded",
+                                100,
+                                producerDependencyOutput,
+                                operation: "photoreal"),
+                            Job(
+                                "direct-dependency",
+                                "succeeded",
+                                100,
+                                directDependencyOutput,
+                                operation: "upscale"),
+                            Job(
+                                "terminal-dependency",
+                                "succeeded",
+                                100,
+                                terminalDependencyOutput,
+                                operation: "upscale"),
+                            Job(
+                                "unreferenced-dependency",
+                                "succeeded",
+                                100,
+                                unreferencedOutput,
+                                operation: "upscale"),
+                            DependencyVideoJob(
+                                "producer-dependent-video",
+                                "queued",
+                                producerDependencyOutput,
+                                "producer-dependency"),
+                            DependencyVideoJob(
+                                "malformed-direct-dependent-video",
+                                "running",
+                                directDependencyOutput,
+                                42),
+                            DependencyVideoJob(
+                                "terminal-direct-video",
+                                "canceled",
+                                terminalDependencyOutput),
+                        },
+                    });
+                bool activeVideoOutputDependencyContract =
+                    PhotoViewer.Wpf.MainWindow
+                        .TryReadEnhancementOutputDependencyForSmoke(
+                            outputDependencyDocument.RootElement,
+                            "producer-dependency",
+                            out bool producerDependencyProtected,
+                            out bool producerDependencyCanDelete)
+                    && producerDependencyProtected
+                    && !producerDependencyCanDelete
+                    && PhotoViewer.Wpf.MainWindow
+                        .TryReadEnhancementOutputDependencyForSmoke(
+                            outputDependencyDocument.RootElement,
+                            "direct-dependency",
+                            out bool directDependencyProtected,
+                            out bool directDependencyCanDelete)
+                    && directDependencyProtected
+                    && !directDependencyCanDelete
+                    && PhotoViewer.Wpf.MainWindow
+                        .TryReadEnhancementOutputDependencyForSmoke(
+                            outputDependencyDocument.RootElement,
+                            "terminal-dependency",
+                            out bool terminalDependencyProtected,
+                            out bool terminalDependencyCanDelete)
+                    && !terminalDependencyProtected
+                    && terminalDependencyCanDelete
+                    && PhotoViewer.Wpf.MainWindow
+                        .TryReadEnhancementOutputDependencyForSmoke(
+                            outputDependencyDocument.RootElement,
+                            "unreferenced-dependency",
+                            out bool unreferencedDependencyProtected,
+                            out bool unreferencedDependencyCanDelete)
+                    && !unreferencedDependencyProtected
+                    && unreferencedDependencyCanDelete;
                 using JsonDocument reorderSafetyDocument =
                     JsonSerializer.SerializeToDocument(
                         VideoJob(
@@ -21948,7 +22075,7 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool rerunIssued =
                     await window.RerunPhotorealJobForSmokeAsync(
-                        "canceled-job",
+                        "done-job",
                         enqueueNext: true);
                 if (rerunBodies.Count > 0)
                     randomRerunBody = rerunBodies[^1];
@@ -21984,7 +22111,7 @@ public partial class App : Application
                 int rerunsBeforeInvalidSeed = rerunBodies.Count;
                 bool invalidRerunSeedBlocked =
                     await window.RerunPhotorealJobForSmokeAsync(
-                        "canceled-job",
+                        "done-job",
                         enqueueNext: true)
                     && rerunBodies.Count == rerunsBeforeInvalidSeed
                     && window.EnhancementJobsStatusForSmoke.Contains(
@@ -21997,7 +22124,7 @@ public partial class App : Application
                 int rerunsBeforeMissingSeedCapability = rerunBodies.Count;
                 bool missingRerunSeedCapabilityBlocked =
                     await window.RerunPhotorealJobForSmokeAsync(
-                        "canceled-job",
+                        "done-job",
                         enqueueNext: true)
                     && rerunBodies.Count
                         == rerunsBeforeMissingSeedCapability
@@ -22012,7 +22139,7 @@ public partial class App : Application
                 int rerunsBeforeFixedSeed = rerunBodies.Count;
                 bool fixedRerunSeedIssued =
                     await window.RerunPhotorealJobForSmokeAsync(
-                        "canceled-job",
+                        "done-job",
                         enqueueNext: true);
                 if (rerunBodies.Count == rerunsBeforeFixedSeed + 1)
                     fixedRerunBody = rerunBodies[^1];
@@ -22472,7 +22599,7 @@ public partial class App : Application
                         StringComparer.Ordinal)
                     && window.RetryAllCanceledEnhancementJobsToolTipForSmoke
                         .Contains("保存済み", StringComparison.Ordinal)
-                    && bulkCanceledCleared >= bulkCanceledRetried
+                    && bulkCanceledCleared == 0
                     && afterBulkCanceledClear.Filtered == 1
                     && afterBulkCanceledClear.VisibleIds.SequenceEqual(
                         ["future-canceled-reader-job"],
@@ -22480,19 +22607,14 @@ public partial class App : Application
                     && !window.RetryAllCanceledEnhancementJobsControlForSmoke
                     && window.ClearAllCanceledEnhancementJobsControlForSmoke;
                 bool terminalHistoryBatchDismissContract =
-                    terminalHistoryBatchBodies.Count == 2
+                    terminalHistoryBatchBodies.Count == 1
                     && IsTerminalHistoryBatchBody(
                         terminalHistoryBatchBodies[0],
                         "failed",
                         "clearable-failed-job",
                         "video-malformed-provenance-job",
                         "future-reader-job",
-                        "null-operation-reader-job")
-                    && IsTerminalHistoryBatchBody(
-                        terminalHistoryBatchBodies[1],
-                        "canceled",
-                        "canceled-job",
-                        "future-canceled-reader-job");
+                        "null-operation-reader-job");
                 bool terminalHistoryTargetPlanContract =
                     terminalHistoryTargetBodies.Count == 4
                     && IsTerminalHistoryTargetBody(
@@ -22736,6 +22858,7 @@ public partial class App : Application
                     && photorealPromptDetailsContract
                     && legacyVideoMutationSafe
                     && deliveryVideoMutationSafe
+                    && activeVideoOutputDependencyContract
                     && readerOnlyVideoSafe
                     && malformedProvenanceVideoSafe
                     && unknownOperationSafe
@@ -22775,13 +22898,14 @@ public partial class App : Application
                     && !afterRetry.VisibleIds.Contains("failed-retry-job", StringComparer.Ordinal)
                     && afterRetry.VisibleStatusLabels.Any(static label => label.Contains("待ち順 4", StringComparison.Ordinal))
                     && canceledRetryIssued
-                    && afterCanceledRetry.Total == 19
+                    && afterCanceledRetry.Total == 18
                     && afterCanceledRetry.Active == 5
                     && afterCanceledRetry.VisibleIds.Contains("canceled-retry-job", StringComparer.Ordinal)
+                    && !afterCanceledRetry.VisibleIds.Contains("canceled-job", StringComparer.Ordinal)
                     && rerunIssued
                     && rerunSettingsContract
                     && rerunSeedContract
-                    && afterRerun.Total == 20
+                    && afterRerun.Total == 19
                     && afterRerun.Active == 6
                     && afterRerun.VisibleIds.Contains("rerun-job", StringComparer.Ordinal)
                     && queuedPromptUpdateIssued
@@ -22951,6 +23075,7 @@ public partial class App : Application
                     photorealPromptDetailsContract,
                     legacyVideoMutationSafe,
                     deliveryVideoMutationSafe,
+                    activeVideoOutputDependencyContract,
                     readerOnlyVideoSafe,
                     malformedProvenanceVideoSafe,
                     unknownOperationSafe,

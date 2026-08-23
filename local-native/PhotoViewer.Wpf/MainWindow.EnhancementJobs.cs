@@ -3574,6 +3574,32 @@ public partial class MainWindow
             terminal.LastOrDefault()?.Id);
     }
 
+    internal static bool TryReadEnhancementOutputDependencyForSmoke(
+        JsonElement payload,
+        string outputJobId,
+        out bool dependencyProtected,
+        out bool canDeleteOutput)
+    {
+        dependencyProtected = false;
+        canDeleteOutput = false;
+        if (!TryParseEnhancementWorkspaceJobs(
+                payload,
+                out List<EnhancementWorkspaceJobView> jobs,
+                out _,
+                static _ => false))
+        {
+            return false;
+        }
+
+        EnhancementWorkspaceJobView? outputJob = jobs.FirstOrDefault(job =>
+            string.Equals(job.Id, outputJobId, StringComparison.Ordinal));
+        if (outputJob is null)
+            return false;
+        dependencyProtected = outputJob.OutputDependencyProtected;
+        canDeleteOutput = outputJob.CanDeleteOutput;
+        return true;
+    }
+
     private async Task<(bool Parsed, List<EnhancementWorkspaceJobView> Jobs, string? Error)>
         ParseEnhancementWorkspaceJobsAsync(
             JsonElement payload,
@@ -3672,21 +3698,53 @@ public partial class MainWindow
     private static void FinalizeEnhancementWorkspaceJobs(
         List<EnhancementWorkspaceJobView> jobs)
     {
-        HashSet<string> protectedPhotorealJobIds = jobs
-            .Where(static job => job.Operation == "i2i"
-                && job.I2iMutationSafe
+        HashSet<string> protectedProducerJobIds = jobs
+            .Where(static job => job.Operation is "i2i" or "video"
                 && job.IsActive
                 && !string.IsNullOrWhiteSpace(job.SourceProducerJobId))
             .Select(static job => job.SourceProducerJobId!)
             .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> protectedManagedSourcePaths = jobs
+            .Where(static job => job.Operation == "video"
+                && job.IsActive
+                && !string.IsNullOrWhiteSpace(job.SourcePath))
+            .Select(static job => NormalizeEnhancementDependencyPath(job.SourcePath))
+            .Where(static path => path is not null)
+            .Select(static path => path!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (EnhancementWorkspaceJobView job in jobs)
         {
-            job.OutputDependencyProtected = job.Operation == "photoreal"
-                && protectedPhotorealJobIds.Contains(job.Id);
+            string? outputPath = NormalizeEnhancementDependencyPath(
+                job.OutputPath);
+            job.OutputDependencyProtected = job.IsImageOperation
+                && (protectedProducerJobIds.Contains(job.Id)
+                    || outputPath is not null
+                        && protectedManagedSourcePaths.Contains(outputPath));
         }
 
         AssignEnhancementWorkspaceQueuePositions(jobs);
         jobs.Sort(CompareEnhancementWorkspaceInventory);
+    }
+
+    private static string? NormalizeEnhancementDependencyPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+        string trimmed = path.Trim();
+        try
+        {
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(trimmed));
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException
+                or NotSupportedException
+                or IOException
+                or System.Security.SecurityException)
+        {
+            // Preserve an exact malformed lexical dependency as a conservative
+            // comparison key without probing or rewriting the untrusted path.
+            return trimmed;
+        }
     }
 
     private static void AssignEnhancementWorkspaceQueuePositions(
@@ -4626,10 +4684,9 @@ public partial class MainWindow
                 job,
                 HttpMethod.Post,
                 $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
-                job.Status == "failed"
-                    ? "Retry queued. The original failure was removed."
-                    : "Retry queued as a new job.",
-                removeFailedOriginalAfterSuccess: job.Status == "failed",
+                "Retry queued. The original terminal history was removed.",
+                removeTerminalOriginalAfterSuccess:
+                    job.Status is "failed" or "canceled",
                 operationLogName: "job_retry");
         }
     }
@@ -5222,7 +5279,8 @@ public partial class MainWindow
             return 0;
         }
 
-        bool removeOriginalAfterSuccess = terminalStatus == "failed";
+        bool removeOriginalAfterSuccess =
+            terminalStatus is "failed" or "canceled";
         string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル";
         int protectedCount = terminalCount - terminalJobs.Length;
         if (!ConfirmEnhancementJobsBulkAction(
@@ -5308,7 +5366,7 @@ public partial class MainWindow
                     isPoll: false);
                 int acceptedCount = retriedCount + pendingCount;
                 string completedDetail = removeOriginalAfterSuccess
-                    ? $"確認済み{retriedCount:N0}件の元失敗履歴を消しました。"
+                    ? $"確認済み{retriedCount:N0}件の元{terminalLabel}履歴を消しました。"
                     : $"確認済み{retriedCount:N0}件を新しいジョブとして追加しました。";
                 EnhancementJobsStatusText.Text =
                     $"{terminalLabel}したJobを保存済み設定で{acceptedCount:N0}件受付。{completedDetail}"
@@ -6363,7 +6421,7 @@ public partial class MainWindow
         string route,
         string successMessage,
         object? body = null,
-        bool removeFailedOriginalAfterSuccess = false,
+        bool removeTerminalOriginalAfterSuccess = false,
         string operationLogName = "job_mutation")
     {
         if (_enhancementWorkspaceMutationPending || job.IsBusy || EnhancementJobsDialog.Visibility != Visibility.Visible)
@@ -6371,6 +6429,15 @@ public partial class MainWindow
 
         var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
+        HashSet<string> optimisticJobIds = removeTerminalOriginalAfterSuccess
+            ? [job.Id]
+            : [];
+        EnhancementWorkspaceJobView[] optimisticVisibleJobs =
+            removeTerminalOriginalAfterSuccess
+                ? BeginOptimisticBulkPresentation(
+                    optimisticJobIds,
+                    hideRows: true)
+                : [];
         job.IsBusy = true;
         long generation = _enhancementWorkspaceGeneration;
         try
@@ -6402,8 +6469,8 @@ public partial class MainWindow
             if (response.SavedForDelivery)
             {
                 EnhancementJobsStatusText.Text =
-                    removeFailedOriginalAfterSuccess
-                        ? "再試行の予約を保存しました。登録確認前なので元の失敗履歴は残しています。"
+                    removeTerminalOriginalAfterSuccess
+                        ? "再試行の予約を保存しました。登録確認前なので元の履歴は残しています。"
                         : "再試行の予約を保存しました。Jobsへの登録を継続しています。";
                 AibosOperationLog.Write(
                     operationLogName,
@@ -6424,7 +6491,8 @@ public partial class MainWindow
                 return false;
             }
 
-            if (removeFailedOriginalAfterSuccess)
+            if (removeTerminalOriginalAfterSuccess
+                && !_usingDefaultModalEnhancementSender)
             {
                 EnhancementApiResponse removeResponse =
                     await SendIdempotentEnhancementMutationAsync(
@@ -6433,7 +6501,7 @@ public partial class MainWindow
                 if (!removeResponse.Ok)
                 {
                     EnhancementJobsStatusText.Text =
-                        $"Retry was queued, but the original failure could not be removed. {removeResponse.Error}";
+                        $"Retry was queued, but the original terminal history could not be removed. {removeResponse.Error}";
                     AibosOperationLog.Write(
                         operationLogName,
                         "partial",
@@ -6458,6 +6526,10 @@ public partial class MainWindow
         }
         finally
         {
+            EndOptimisticBulkPresentation(
+                optimisticJobIds,
+                optimisticVisibleJobs,
+                revealRows: true);
             job.IsBusy = false;
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
@@ -7705,10 +7777,9 @@ public partial class MainWindow
             job,
             HttpMethod.Post,
             $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/retry",
-            job.Status == "failed"
-                ? "Retry queued. The original failure was removed."
-                : "Retry queued as a new job.",
-            removeFailedOriginalAfterSuccess: job.Status == "failed",
+            "Retry queued. The original terminal history was removed.",
+            removeTerminalOriginalAfterSuccess:
+                job.Status is "failed" or "canceled",
             operationLogName: "job_retry");
         await WaitForEnhancementWorkspaceIdleForSmokeAsync();
         return completed;
