@@ -18639,6 +18639,83 @@ public partial class App : Application
                         }),
                     };
                 });
+
+                // Verify image-output ownership before any accepted video request
+                // records an active dependency on the same managed output.
+                bool deleteValidationModalSelected =
+                    win.SelectFileNameForSmoke(
+                        Path.GetFileName(photorealSource))
+                    && win.OpenModalForSmoke();
+                bool deleteValidationImageSelected =
+                    deleteValidationModalSelected
+                    && win.SelectModalEnhancementJobVersionForSmoke(
+                        "photoreal-ok");
+                bool imageDeleteVerifiedBeforeTamper =
+                    deleteValidationImageSelected
+                    && win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                bool imageDuplicateJobRejected =
+                    imageDeleteVerifiedBeforeTamper
+                    && win.DisplayedManagedImageDuplicateJobRejectedForSmoke();
+                bool imageGlobalJobIdRejected =
+                    imageDeleteVerifiedBeforeTamper
+                    && win.DisplayedManagedImageGlobalJobIdRejectedForSmoke();
+                byte[] originalSourceBytes = File.ReadAllBytes(photorealSource);
+                DateTime originalSourceMtime = File.GetLastWriteTimeUtc(
+                    photorealSource);
+                bool imageDeleteBlockedAfterSourceTamper;
+                try
+                {
+                    File.WriteAllBytes(
+                        photorealSource,
+                        originalSourceBytes.Concat([byte.MinValue]).ToArray());
+                    imageDeleteBlockedAfterSourceTamper =
+                        !win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                }
+                finally
+                {
+                    File.WriteAllBytes(photorealSource, originalSourceBytes);
+                    File.SetLastWriteTimeUtc(
+                        photorealSource,
+                        originalSourceMtime);
+                }
+                bool imageDeleteVerifiedAfterRestore =
+                    win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                int requestsBeforeImageDeleteRace =
+                    enhancementMutationRequestCount;
+                win.ConfigureManagedOutputDeleteConfirmationForSmoke(() =>
+                {
+                    File.WriteAllBytes(
+                        photorealSource,
+                        originalSourceBytes.Concat([byte.MinValue]).ToArray());
+                    return true;
+                });
+                bool imageDeleteRaceBlocked;
+                try
+                {
+                    imageDeleteRaceBlocked =
+                        !await win.DeleteDisplayedModalMediaForSmokeAsync()
+                        && enhancementMutationRequestCount
+                            == requestsBeforeImageDeleteRace;
+                }
+                finally
+                {
+                    File.WriteAllBytes(photorealSource, originalSourceBytes);
+                    File.SetLastWriteTimeUtc(
+                        photorealSource,
+                        originalSourceMtime);
+                    win.ConfigureManagedOutputDeleteConfirmationForSmoke(
+                        () => true);
+                }
+                bool imageDeleteOwnershipGuard =
+                    imageDeleteVerifiedBeforeTamper
+                    && imageDuplicateJobRejected
+                    && imageGlobalJobIdRejected
+                    && imageDeleteBlockedAfterSourceTamper
+                    && imageDeleteVerifiedAfterRestore
+                    && imageDeleteRaceBlocked
+                    && win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                win.CloseModalForSmoke();
+
                 win.SetMiniMaxH3CapabilityForSmoke(
                     checkedHealth: true,
                     ready: true,
@@ -18977,78 +19054,17 @@ public partial class App : Application
                         StringComparison.Ordinal);
                 win.CloseModalForSmoke();
 
-                bool deleteValidationModalSelected =
+                bool activeVideoImageDependencyModalSelected =
                     win.SelectFileNameForSmoke(
                         Path.GetFileName(photorealSource))
                     && win.OpenModalForSmoke();
-                bool deleteValidationImageSelected =
-                    deleteValidationModalSelected
+                bool activeVideoImageDependencySelected =
+                    activeVideoImageDependencyModalSelected
                     && win.SelectModalEnhancementJobVersionForSmoke(
                         "photoreal-ok");
-                bool imageDeleteVerifiedBeforeTamper =
-                    deleteValidationImageSelected
-                    && win.DisplayedManagedImageDeleteVerifiedForSmoke;
-                bool imageDuplicateJobRejected =
-                    imageDeleteVerifiedBeforeTamper
-                    && win.DisplayedManagedImageDuplicateJobRejectedForSmoke();
-                bool imageGlobalJobIdRejected =
-                    imageDeleteVerifiedBeforeTamper
-                    && win.DisplayedManagedImageGlobalJobIdRejectedForSmoke();
-                byte[] originalSourceBytes = File.ReadAllBytes(photorealSource);
-                DateTime originalSourceMtime = File.GetLastWriteTimeUtc(
-                    photorealSource);
-                bool imageDeleteBlockedAfterSourceTamper;
-                try
-                {
-                    File.WriteAllBytes(
-                        photorealSource,
-                        originalSourceBytes.Concat([byte.MinValue]).ToArray());
-                    imageDeleteBlockedAfterSourceTamper =
-                        !win.DisplayedManagedImageDeleteVerifiedForSmoke;
-                }
-                finally
-                {
-                    File.WriteAllBytes(photorealSource, originalSourceBytes);
-                    File.SetLastWriteTimeUtc(
-                        photorealSource,
-                        originalSourceMtime);
-                }
-                bool imageDeleteVerifiedAfterRestore =
-                    win.DisplayedManagedImageDeleteVerifiedForSmoke;
-                int requestsBeforeImageDeleteRace =
-                    enhancementMutationRequestCount;
-                win.ConfigureManagedOutputDeleteConfirmationForSmoke(() =>
-                {
-                    File.WriteAllBytes(
-                        photorealSource,
-                        originalSourceBytes.Concat([byte.MinValue]).ToArray());
-                    return true;
-                });
-                bool imageDeleteRaceBlocked;
-                try
-                {
-                    imageDeleteRaceBlocked =
-                        !await win.DeleteDisplayedModalMediaForSmokeAsync()
-                        && enhancementMutationRequestCount
-                            == requestsBeforeImageDeleteRace;
-                }
-                finally
-                {
-                    File.WriteAllBytes(photorealSource, originalSourceBytes);
-                    File.SetLastWriteTimeUtc(
-                        photorealSource,
-                        originalSourceMtime);
-                    win.ConfigureManagedOutputDeleteConfirmationForSmoke(
-                        () => true);
-                }
-                bool imageDeleteOwnershipGuard =
-                    imageDeleteVerifiedBeforeTamper
-                    && imageDuplicateJobRejected
-                    && imageGlobalJobIdRejected
-                    && imageDeleteBlockedAfterSourceTamper
-                    && imageDeleteVerifiedAfterRestore
-                    && imageDeleteRaceBlocked
-                    && win.DisplayedManagedImageDeleteVerifiedForSmoke;
+                bool imageDeleteDependencyGuard =
+                    activeVideoImageDependencySelected
+                    && !win.DisplayedManagedImageDeleteVerifiedForSmoke;
 
                 bool deleteValidationVideoSelected =
                     win.SelectModalVideoVersionForSmoke(0);
@@ -19251,6 +19267,7 @@ public partial class App : Application
                     && videoSeedContract
                     && videoBoardFailureFeedback
                     && imageDeleteOwnershipGuard
+                    && imageDeleteDependencyGuard
                     && videoDeleteOwnershipGuard
                     && videoStyleSaved
                     && videoStylePersistence
@@ -19377,6 +19394,7 @@ public partial class App : Application
                     VideoSeedContract = videoSeedContract,
                     VideoBoardFailureFeedback = videoBoardFailureFeedback,
                     ImageDeleteOwnershipGuard = imageDeleteOwnershipGuard,
+                    ImageDeleteDependencyGuard = imageDeleteDependencyGuard,
                     VideoDeleteOwnershipGuard = videoDeleteOwnershipGuard,
                     VideoStyleSaved = videoStyleSaved,
                     VideoStylePersistence = videoStylePersistence,
@@ -38016,6 +38034,7 @@ public partial class App : Application
         public bool VideoSeedContract { get; init; }
         public bool VideoBoardFailureFeedback { get; init; }
         public bool ImageDeleteOwnershipGuard { get; init; }
+        public bool ImageDeleteDependencyGuard { get; init; }
         public bool VideoDeleteOwnershipGuard { get; init; }
         public bool VideoStyleSaved { get; init; }
         public bool VideoStylePersistence { get; init; }
