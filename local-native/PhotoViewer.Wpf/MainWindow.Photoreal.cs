@@ -237,17 +237,29 @@ public partial class MainWindow
         if (!TryGetExactDurableCurrentModalEnhancementVersion(
                 tile,
                 out ManagedEnhancementVersion exact)
-            || (string.Equals(
-                    exact.Operation,
-                    "photoreal",
-                    StringComparison.Ordinal)
-                && _activeI2iSourceProducerJobIds.Contains(exact.JobId)))
+            || IsManagedImageOutputDependencyProtected(exact))
         {
             return false;
         }
 
         version = exact;
         return true;
+    }
+
+    private bool IsManagedImageOutputDependencyProtected(
+        ManagedEnhancementVersion version)
+    {
+        if (!_activeVideoDependencySnapshotComplete
+            || _activeI2iSourceProducerJobIds.Contains(version.JobId)
+            || _activeVideoSourceProducerJobIds.Contains(version.JobId))
+        {
+            return true;
+        }
+
+        string? normalizedOutputPath = NormalizeEnhancementDependencyPath(
+            version.Output.OutputPath);
+        return normalizedOutputPath is null
+            || _activeVideoManagedSourcePaths.Contains(normalizedOutputPath);
     }
 
     public bool DisplayedManagedImageDeleteVerifiedForSmoke

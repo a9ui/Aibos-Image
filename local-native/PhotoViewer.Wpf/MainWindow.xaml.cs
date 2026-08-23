@@ -263,6 +263,11 @@ public partial class MainWindow : Window
         new(StringComparer.Ordinal);
     private readonly HashSet<string> _activeI2iSourceProducerJobIds =
         new(StringComparer.Ordinal);
+    private readonly HashSet<string> _activeVideoSourceProducerJobIds =
+        new(StringComparer.Ordinal);
+    private readonly HashSet<string> _activeVideoManagedSourcePaths =
+        new(StringComparer.OrdinalIgnoreCase);
+    private bool _activeVideoDependencySnapshotComplete;
     private readonly List<string> _restoredPreviewTabPaths = [];
     private readonly SemaphoreSlim _thumbnailDecodeGate = new(MaxThumbnailDecodeWorkers, MaxThumbnailDecodeWorkers);
     private readonly ConcurrentDictionary<string, byte> _thumbnailLoadsInFlight = new(StringComparer.OrdinalIgnoreCase);
@@ -1885,6 +1890,9 @@ public partial class MainWindow : Window
         Dictionary<string, ManagedEnhancementQueueActivity> CatalogQueueActivityByPath,
         HashSet<string> AmbiguousJobIds,
         HashSet<string> ActiveI2iSourceProducerJobIds,
+        HashSet<string> ActiveVideoSourceProducerJobIds,
+        HashSet<string> ActiveVideoManagedSourcePaths,
+        bool ActiveVideoDependencySnapshotComplete,
         List<EnhancementNotificationJobState> ActiveNotificationJobs,
         List<EnhancementNotificationJobState> TerminalNotificationJobs,
         int JobsRead,
@@ -5278,6 +5286,11 @@ public partial class MainWindow : Window
         var pendingI2iJobs = new List<JsonElement>();
         var activeI2iSourceProducerJobIds = new HashSet<string>(
             StringComparer.Ordinal);
+        var activeVideoSourceProducerJobIds = new HashSet<string>(
+            StringComparer.Ordinal);
+        var activeVideoManagedSourcePaths = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
+        bool activeVideoDependencySnapshotComplete = true;
         var activeNotificationJobs = new List<EnhancementNotificationJobState>();
         var terminalNotificationJobs = new List<EnhancementNotificationJobState>();
         var photorealVideoSources =
@@ -5320,6 +5333,13 @@ public partial class MainWindow : Window
                 if (!TryGetStringProperty(job, "status", out string? status))
                     continue;
                 string operation = ReadEnhancementOperation(job);
+                bool claimsVideo = job.EnumerateObject().Any(property =>
+                    property.NameEquals("operation")
+                    && property.Value.ValueKind == JsonValueKind.String
+                    && string.Equals(
+                        property.Value.GetString(),
+                        "video",
+                        StringComparison.Ordinal));
                 TryGetStringProperty(job, "id", out string? notificationJobId);
                 if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(status, "running", StringComparison.OrdinalIgnoreCase))
@@ -5345,6 +5365,48 @@ public partial class MainWindow : Window
                         && !string.IsNullOrWhiteSpace(activeProducerJobId))
                     {
                         activeI2iSourceProducerJobIds.Add(activeProducerJobId);
+                    }
+                    if (claimsVideo)
+                    {
+                        bool dependencyRowComplete = operation == "video"
+                            && HasSingleProperty(job, "id")
+                            && HasSingleProperty(job, "status")
+                            && HasSingleProperty(job, "operation")
+                            && !string.IsNullOrWhiteSpace(notificationJobId)
+                            && !ambiguousJobIds.Contains(notificationJobId!);
+                        if (!TryReadOptionalVideoSourceProducerJobId(
+                                job,
+                                out string? activeVideoProducerJobId))
+                        {
+                            dependencyRowComplete = false;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(
+                                     activeVideoProducerJobId))
+                        {
+                            activeVideoSourceProducerJobIds.Add(
+                                activeVideoProducerJobId);
+                        }
+
+                        string? activeVideoSourcePath = null;
+                        if (!HasSingleProperty(job, "sourcePath")
+                            || !TryGetStringProperty(
+                                job,
+                                "sourcePath",
+                                out string? rawActiveVideoSourcePath)
+                            || (activeVideoSourcePath =
+                                NormalizeEnhancementDependencyPath(
+                                    rawActiveVideoSourcePath)) is null)
+                        {
+                            dependencyRowComplete = false;
+                        }
+                        else
+                        {
+                            activeVideoManagedSourcePaths.Add(
+                                activeVideoSourcePath);
+                        }
+
+                        activeVideoDependencySnapshotComplete &=
+                            dependencyRowComplete;
                     }
                     continue;
                 }
@@ -5538,6 +5600,9 @@ public partial class MainWindow : Window
                     nextCatalogQueueActivityByPath,
                     ambiguousJobIds,
                     activeI2iSourceProducerJobIds,
+                    activeVideoSourceProducerJobIds,
+                    activeVideoManagedSourcePaths,
+                    activeVideoDependencySnapshotComplete,
                     activeNotificationJobs,
                     terminalNotificationJobs,
                     nextJobsRead,
@@ -5721,6 +5786,14 @@ public partial class MainWindow : Window
         _activeI2iSourceProducerJobIds.Clear();
         _activeI2iSourceProducerJobIds.UnionWith(
             snapshot.ActiveI2iSourceProducerJobIds);
+        _activeVideoSourceProducerJobIds.Clear();
+        _activeVideoSourceProducerJobIds.UnionWith(
+            snapshot.ActiveVideoSourceProducerJobIds);
+        _activeVideoManagedSourcePaths.Clear();
+        _activeVideoManagedSourcePaths.UnionWith(
+            snapshot.ActiveVideoManagedSourcePaths);
+        _activeVideoDependencySnapshotComplete =
+            snapshot.ActiveVideoDependencySnapshotComplete;
         _enhancementJobsRead = snapshot.JobsRead;
         _enhancedCandidateCount = snapshot.CandidateCount;
         _videoCandidateCount = snapshot.VideoCandidateCount;
