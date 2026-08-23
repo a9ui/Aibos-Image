@@ -273,6 +273,100 @@ public partial class App
             JsonElement validJob = jobs.Single(job =>
                 job.GetProperty("id").GetString() == "valid-h3-video");
             JsonElement validVideo = validJob.GetProperty("video");
+            JsonElement exactIdentityJob = validJob.Clone();
+            JsonElement envelopeIdentityMutationJob =
+                BuildMiniMaxH3IdentityMutationForSmoke(
+                    validJob,
+                    seed: checked(validVideo.GetProperty("seed").GetInt32() + 1),
+                    prompt: null);
+            const string refreshedIdentityPrompt =
+                "A deliberate turn under refreshed afternoon light.";
+            JsonElement snapshotIdentityMutationJob =
+                BuildMiniMaxH3IdentityMutationForSmoke(
+                    validJob,
+                    seed: null,
+                    prompt: refreshedIdentityPrompt);
+            string expectedIdentityPrompt = validVideo
+                .GetProperty("requested")
+                .GetProperty("prompt")
+                .GetString()!;
+            bool exactIdentityCompared = PhotoViewer.Wpf.MainWindow
+                .TryCompareVideoWorkspaceImmutableIdentityForSmoke(
+                    validJob,
+                    exactIdentityJob,
+                    out bool exactSameIdentity,
+                    out string exactLeftFingerprint,
+                    out string exactRightFingerprint,
+                    out string? exactLeftPrompt,
+                    out string? exactRightPrompt);
+            bool compactVideoMutationProbeExtracted = exactIdentityCompared
+                && IsLowerHexSha256(exactLeftFingerprint)
+                && IsLowerHexSha256(exactRightFingerprint);
+            bool exactVideoProbeIdentityStable = exactIdentityCompared
+                && exactSameIdentity
+                && string.Equals(
+                    exactLeftFingerprint,
+                    exactRightFingerprint,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    exactLeftPrompt,
+                    expectedIdentityPrompt,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    exactRightPrompt,
+                    expectedIdentityPrompt,
+                    StringComparison.Ordinal);
+            bool envelopeIdentityCompared = PhotoViewer.Wpf.MainWindow
+                .TryCompareVideoWorkspaceImmutableIdentityForSmoke(
+                    validJob,
+                    envelopeIdentityMutationJob,
+                    out bool envelopeSameIdentity,
+                    out string envelopeLeftFingerprint,
+                    out string envelopeRightFingerprint,
+                    out string? envelopeLeftPrompt,
+                    out string? envelopeRightPrompt);
+            bool fullVideoEnvelopeFingerprintGuardsIdentity =
+                envelopeIdentityCompared
+                && !envelopeSameIdentity
+                && IsLowerHexSha256(envelopeLeftFingerprint)
+                && IsLowerHexSha256(envelopeRightFingerprint)
+                && !string.Equals(
+                    envelopeLeftFingerprint,
+                    envelopeRightFingerprint,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    envelopeLeftPrompt,
+                    expectedIdentityPrompt,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    envelopeRightPrompt,
+                    expectedIdentityPrompt,
+                    StringComparison.Ordinal);
+            bool snapshotIdentityCompared = PhotoViewer.Wpf.MainWindow
+                .TryCompareVideoWorkspaceImmutableIdentityForSmoke(
+                    validJob,
+                    snapshotIdentityMutationJob,
+                    out bool snapshotSameIdentity,
+                    out string snapshotLeftFingerprint,
+                    out string snapshotRightFingerprint,
+                    out string? snapshotLeftPrompt,
+                    out string? snapshotRightPrompt);
+            bool h3SnapshotDifferenceGuardsIdentity = snapshotIdentityCompared
+                && !snapshotSameIdentity
+                && IsLowerHexSha256(snapshotLeftFingerprint)
+                && IsLowerHexSha256(snapshotRightFingerprint)
+                && !string.Equals(
+                    snapshotLeftFingerprint,
+                    snapshotRightFingerprint,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    snapshotLeftPrompt,
+                    expectedIdentityPrompt,
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    snapshotRightPrompt,
+                    refreshedIdentityPrompt,
+                    StringComparison.Ordinal);
             JsonElement[] stableHashVectors = readerFixture
                 .GetProperty("stableSnapshotHashVectors")
                 .EnumerateArray()
@@ -1339,6 +1433,10 @@ public partial class App
             ok = contractIdentity
                 && sourceContract
                 && sourceDimensionsExact
+                && compactVideoMutationProbeExtracted
+                && exactVideoProbeIdentityStable
+                && fullVideoEnvelopeFingerprintGuardsIdentity
+                && h3SnapshotDifferenceGuardsIdentity
                 && stableHashExact
                 && longSnapshotExact
                 && japaneseHashInterop
@@ -1388,6 +1486,10 @@ public partial class App
                 contractIdentity,
                 sourceContract,
                 sourceDimensionsExact,
+                compactVideoMutationProbeExtracted,
+                exactVideoProbeIdentityStable,
+                fullVideoEnvelopeFingerprintGuardsIdentity,
+                h3SnapshotDifferenceGuardsIdentity,
                 stableHashExact,
                 longSnapshotExact,
                 japaneseHashInterop,
@@ -1444,6 +1546,18 @@ public partial class App
                 frameCount,
                 durationSeconds,
                 audio,
+                exactLeftFingerprint,
+                exactRightFingerprint,
+                envelopeLeftFingerprint,
+                envelopeRightFingerprint,
+                snapshotLeftFingerprint,
+                snapshotRightFingerprint,
+                exactLeftPrompt,
+                exactRightPrompt,
+                envelopeLeftPrompt,
+                envelopeRightPrompt,
+                snapshotLeftPrompt,
+                snapshotRightPrompt,
                 validHash,
                 japaneseHash,
                 portraitHash,
@@ -1568,6 +1682,54 @@ public partial class App
             job.ToJsonString());
         return jobDocument.RootElement.Clone();
     }
+
+    private static JsonElement BuildMiniMaxH3IdentityMutationForSmoke(
+        JsonElement template,
+        int? seed,
+        string? prompt)
+    {
+        JsonObject job = JsonNode.Parse(template.GetRawText())!.AsObject();
+        JsonObject video = job["video"]!.AsObject();
+        if (seed.HasValue)
+            video["seed"] = seed.Value;
+        if (prompt is not null)
+        {
+            video["requested"]!["prompt"] = prompt;
+            video["effective"]!["positivePrompt"] = prompt;
+        }
+
+        using (JsonDocument videoDocument = JsonDocument.Parse(
+            video.ToJsonString()))
+        {
+            job["presetHash"] = PhotoViewer.Wpf.MainWindow
+                .ComputeMiniMaxH3VideoSnapshotHashForSmoke(
+                    videoDocument.RootElement)[..12];
+        }
+
+        if (job["outputPath"]?.GetValueKind() == JsonValueKind.String)
+        {
+            string currentOutputPath = job["outputPath"]!.GetValue<string>();
+            string outputFileName = PhotoViewer.Wpf.MainWindow
+                .BuildVideoOutputFileNameForSmoke(
+                    job["id"]!.GetValue<string>(),
+                    job["sourcePath"]!.GetValue<string>(),
+                    job["sourceSha256"]!.GetValue<string>(),
+                    job["presetId"]!.GetValue<string>(),
+                    job["presetHash"]!.GetValue<string>());
+            job["outputPath"] = Path.Combine(
+                Path.GetDirectoryName(currentOutputPath)!,
+                outputFileName);
+        }
+
+        using JsonDocument jobDocument = JsonDocument.Parse(job.ToJsonString());
+        return jobDocument.RootElement.Clone();
+    }
+
+    private static bool IsLowerHexSha256(string value)
+        => value.Length == 64
+            && value.All(static character =>
+                character is >= '0' and <= '9'
+                    or >= 'a' and <= 'f');
 
     private static byte[] CreateSyntheticOrientationJpeg(
         int width,

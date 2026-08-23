@@ -192,13 +192,16 @@ public partial class MainWindow
         if (!job.IsVideoOperation)
             return true;
 
-        // The direct SQLite inventory keeps list opening independent of media
-        // file I/O. Re-check the selected source only when the user asks to
-        // create another job. API fallback rows were already checked while
-        // parsing and therefore have no deferred probe.
-        return job.TryGetVideoMutationProbe(out JsonElement payload)
-            ? IsVideoMutationSafe(payload)
-            : job.VideoMutationSafe;
+        // Both SQLite and API inventory reads are deliberately limited to
+        // structural JSON validation. Touch the selected source only after an
+        // explicit user action, using the compact immutable probe captured
+        // from that exact inventory row.
+        return job.VideoMutationSafe
+            && job.TryGetVideoMutationProbe(
+                out EnhancementVideoMutationProbe? probe)
+            && probe is not null
+            && (!probe.RequiresCurrentCanvasValidation
+                || IsMiniMaxH3SourceCanvasCurrent(probe));
     }
 
     private static bool IsWanV1VideoMutationSafe(JsonElement job)
@@ -3237,8 +3240,6 @@ public partial class MainWindow
                         $"Enhancement SQLite job {id} has an invalid operation projection.");
                 }
                 jobs.Add(job);
-                if (job.Operation == "video")
-                    job.AttachVideoMutationProbe(root);
             }
             apiOrdinal++;
         }
@@ -3716,43 +3717,16 @@ public partial class MainWindow
             CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
-        // H3 canvas validation touches the current source identity and image
-        // dimensions, so keep that small, stateful check on the UI thread.
-        // The potentially large JSON walk, view-model creation, dependency
-        // analysis, and sort can then run without blocking input or media.
-        var videoMutationSafety = new List<bool>();
-        if (payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("jobs", out JsonElement jobsElement)
-            && jobsElement.ValueKind == JsonValueKind.Array)
-        {
-            foreach (JsonElement element in jobsElement.EnumerateArray())
-            {
-                token.ThrowIfCancellationRequested();
-                if (element.ValueKind != JsonValueKind.Object
-                    || !TryGetStringProperty(element, "id", out _)
-                    || !TryGetStringProperty(element, "status", out string? rawStatus)
-                    || rawStatus!.Trim().ToLowerInvariant()
-                        is not ("queued" or "running" or "succeeded" or "failed" or "canceled" or "deleted")
-                    || ReadEnhancementOperation(element) != "video")
-                {
-                    continue;
-                }
-
-                videoMutationSafety.Add(IsVideoMutationSafe(element));
-            }
-        }
-
+        // API fallback and direct SQLite reads intentionally share the same
+        // passive-read contract: parse and hash bounded JSON in the
+        // background, but never resolve or open user media just to show Jobs.
         return await Task.Run(() =>
         {
-            int videoIndex = 0;
-            bool VideoMutationValidator(JsonElement _)
-                => videoIndex < videoMutationSafety.Count
-                    && videoMutationSafety[videoIndex++];
             bool parsed = TryParseEnhancementWorkspaceJobs(
                 payload,
                 out List<EnhancementWorkspaceJobView> jobs,
                 out string? error,
-                VideoMutationValidator,
+                videoMutationValidator: null,
                 token);
             return (parsed, jobs, error);
         }, token);
@@ -3796,8 +3770,6 @@ public partial class MainWindow
                 error = "The companion returned duplicate job identifiers. The last valid snapshot was preserved.";
                 return false;
             }
-            if (job.Operation == "video")
-                job.AttachVideoMutationProbe(element);
             jobs.Add(job);
         }
 
@@ -3995,12 +3967,19 @@ public partial class MainWindow
                 out MiniMaxH3VideoWorkspaceSnapshot? parsedVideoSnapshot)
                 ? parsedVideoSnapshot
                 : null;
+        EnhancementVideoMutationProbe? videoMutationProbe =
+            structurallySafeVideo
+            && TryReadEnhancementVideoMutationProbe(
+                element,
+                out EnhancementVideoMutationProbe? parsedVideoMutationProbe)
+                ? parsedVideoMutationProbe
+                : null;
         bool queueReorderSafe = operation is "upscale" or "photoreal"
             || (operation == "i2i" && i2iMutationSafe)
             || structurallySafeVideo;
         string resolvedPresetId = presetId ?? "Default preset";
         string resolvedAdapterId = adapterId ?? "local companion";
-        return new EnhancementWorkspaceJobView(
+        var view = new EnhancementWorkspaceJobView(
             id!,
             sourceId ?? "",
             sourcePath ?? "",
@@ -4047,6 +4026,97 @@ public partial class MainWindow
             buildRequestDetails,
             i2iV3Info?.Snapshot,
             miniMaxH3VideoSnapshot);
+        if (videoMutationProbe is not null)
+            view.AttachVideoMutationProbe(videoMutationProbe);
+        return view;
+    }
+
+    private static bool TryReadEnhancementVideoMutationProbe(
+        JsonElement job,
+        out EnhancementVideoMutationProbe? probe)
+    {
+        probe = null;
+        if (!job.TryGetProperty("video", out JsonElement video)
+            || video.ValueKind != JsonValueKind.Object
+            || !TryGetStringProperty(job, "sourceSha256", out string? sourceSha256)
+            || !IsLowerHex(sourceSha256, 64))
+        {
+            return false;
+        }
+
+        TryGetStringProperty(job, "sourceId", out string? sourceId);
+        TryGetStringProperty(job, "sourcePath", out string? sourcePath);
+        if (!TryReadOptionalVideoSourceProducerJobId(
+                job,
+                out string? sourceProducerJobId))
+        {
+            return false;
+        }
+
+        long? sourceSize = null;
+        double? sourceMtimeMs = null;
+        if (job.TryGetProperty(
+                "sourceSignature",
+                out JsonElement sourceSignature)
+            && sourceSignature.ValueKind == JsonValueKind.Object)
+        {
+            if (sourceSignature.TryGetProperty(
+                    "size",
+                    out JsonElement sourceSizeElement)
+                && sourceSizeElement.TryGetInt64(out long parsedSourceSize))
+            {
+                sourceSize = parsedSourceSize;
+            }
+            if (sourceSignature.TryGetProperty(
+                    "mtimeMs",
+                    out JsonElement sourceMtimeElement)
+                && sourceMtimeElement.TryGetDouble(out double parsedSourceMtimeMs))
+            {
+                sourceMtimeMs = parsedSourceMtimeMs;
+            }
+        }
+
+        bool requiresCurrentCanvasValidation = TryGetExactStringProperty(
+            job,
+            "presetId",
+            MiniMaxH3VideoPresetId);
+        int? effectiveWidth = null;
+        int? effectiveHeight = null;
+        if (requiresCurrentCanvasValidation)
+        {
+            if (!video.TryGetProperty(
+                    "effective",
+                    out JsonElement effective)
+                || effective.ValueKind != JsonValueKind.Object
+                || !effective.TryGetProperty(
+                    "width",
+                    out JsonElement widthElement)
+                || !widthElement.TryGetInt32(out int parsedWidth)
+                || !effective.TryGetProperty(
+                    "height",
+                    out JsonElement heightElement)
+                || !heightElement.TryGetInt32(out int parsedHeight)
+                || sourceSize is null
+                || sourceMtimeMs is null)
+            {
+                return false;
+            }
+            effectiveWidth = parsedWidth;
+            effectiveHeight = parsedHeight;
+        }
+
+        probe = new EnhancementVideoMutationProbe(
+            HashStableJson(video),
+            sourceSha256!,
+            sourceId ?? "",
+            sourcePath ?? "",
+            sourceProducerJobId,
+            sourceSize,
+            sourceMtimeMs,
+            effectiveWidth,
+            effectiveHeight,
+            requiresCurrentCanvasValidation);
+        return true;
     }
 
     private static DateTimeOffset? TryReadEnhancementJobTimestamp(
@@ -9137,6 +9207,46 @@ public partial class MainWindow
         JsonElement video)
         => HashStableJson(video);
 
+    internal static bool TryCompareVideoWorkspaceImmutableIdentityForSmoke(
+        JsonElement left,
+        JsonElement right,
+        out bool sameIdentity,
+        out string leftFingerprint,
+        out string rightFingerprint,
+        out string? leftPrompt,
+        out string? rightPrompt)
+    {
+        sameIdentity = false;
+        leftFingerprint = "";
+        rightFingerprint = "";
+        leftPrompt = null;
+        rightPrompt = null;
+        EnhancementWorkspaceJobView? leftView = ParseEnhancementWorkspaceJob(
+            left,
+            0);
+        EnhancementWorkspaceJobView? rightView = ParseEnhancementWorkspaceJob(
+            right,
+            1);
+        if (leftView is null
+            || rightView is null
+            || !leftView.TryGetVideoMutationProbe(
+                out EnhancementVideoMutationProbe? leftProbe)
+            || !rightView.TryGetVideoMutationProbe(
+                out EnhancementVideoMutationProbe? rightProbe)
+            || leftProbe is null
+            || rightProbe is null)
+        {
+            return false;
+        }
+
+        sameIdentity = leftView.HasSameImmutableIdentity(rightView);
+        leftFingerprint = leftProbe.EnvelopeSha256;
+        rightFingerprint = rightProbe.EnvelopeSha256;
+        leftPrompt = leftView.MiniMaxH3VideoSnapshot?.Prompt;
+        rightPrompt = rightView.MiniMaxH3VideoSnapshot?.Prompt;
+        return true;
+    }
+
     public static string BuildVideoOutputFileNameForSmoke(
         string jobId,
         string sourcePath,
@@ -9286,7 +9396,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     private bool _requestDetailsLoaded;
     private bool _queuedPhotorealPromptUpdateCapabilitySafe;
     private bool _photorealEnqueueNextCapabilitySafe;
-    private JsonElement? _videoMutationProbe;
+    private EnhancementVideoMutationProbe? _videoMutationProbe;
 
     public EnhancementWorkspaceJobView(
         string id,
@@ -9526,18 +9636,20 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string RequestDetailsButtonLabel =>
         RequestDetailsExpanded ? "詳細を閉じる" : "詳細";
 
-    internal void AttachVideoMutationProbe(JsonElement payload)
-        => _videoMutationProbe = payload.Clone();
+    internal void AttachVideoMutationProbe(
+        EnhancementVideoMutationProbe probe)
+        => _videoMutationProbe = probe;
 
-    internal bool TryGetVideoMutationProbe(out JsonElement payload)
+    internal bool TryGetVideoMutationProbe(
+        out EnhancementVideoMutationProbe? probe)
     {
-        if (_videoMutationProbe is JsonElement stored)
+        if (_videoMutationProbe is EnhancementVideoMutationProbe stored)
         {
-            payload = stored;
+            probe = stored;
             return true;
         }
 
-        payload = default;
+        probe = null;
         return false;
     }
 
@@ -10043,6 +10155,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 StringComparison.Ordinal)
             && I2iV2EnvelopeClaimed == candidate.I2iV2EnvelopeClaimed
             && Equals(I2iV3Snapshot, candidate.I2iV3Snapshot)
+            && Equals(MiniMaxH3VideoSnapshot, candidate.MiniMaxH3VideoSnapshot)
+            && Equals(_videoMutationProbe, candidate._videoMutationProbe)
             && CreatedAt == candidate.CreatedAt
             && SourceSize == candidate.SourceSize
             && SourceMtimeMs == candidate.SourceMtimeMs;
@@ -10319,6 +10433,18 @@ public sealed record MiniMaxH3VideoWorkspaceSnapshot(
     int MaximumPixelArea,
     int Steps,
     string Prompt);
+
+internal sealed record EnhancementVideoMutationProbe(
+    string EnvelopeSha256,
+    string SourceSha256,
+    string SourceId,
+    string SourcePath,
+    string? SourceProducerJobId,
+    long? SourceSize,
+    double? SourceMtimeMs,
+    int? EffectiveWidth,
+    int? EffectiveHeight,
+    bool RequiresCurrentCanvasValidation);
 
 internal readonly record struct EnhancementQueueHealthView(
     string State,
