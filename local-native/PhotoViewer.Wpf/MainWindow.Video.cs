@@ -201,6 +201,20 @@ public partial class MainWindow
         }
     }
 
+    private bool IsMiniMaxH3SourceCanvasCurrent(
+        EnhancementVideoMutationProbe probe)
+        => probe.RequiresCurrentCanvasValidation
+            && probe.SourceSize is long expectedSize
+            && probe.SourceMtimeMs is double expectedMtimeMs
+            && probe.EffectiveWidth is int width
+            && probe.EffectiveHeight is int height
+            && IsMiniMaxH3SourceCanvasCurrent(
+                probe.SourcePath,
+                expectedSize,
+                expectedMtimeMs,
+                width,
+                height);
+
     private bool IsMiniMaxH3SourceCanvasCurrent(JsonElement job)
     {
         try
@@ -222,8 +236,34 @@ public partial class MainWindow
                 || !effective.TryGetProperty("width", out JsonElement widthElement)
                 || !widthElement.TryGetInt32(out int width)
                 || !effective.TryGetProperty("height", out JsonElement heightElement)
-                || !heightElement.TryGetInt32(out int height)
-                || !TryResolveEnhancementSourceIdentity(
+                || !heightElement.TryGetInt32(out int height))
+            {
+                return false;
+            }
+
+            return IsMiniMaxH3SourceCanvasCurrent(
+                sourcePath!,
+                expectedSize,
+                expectedMtimeMs,
+                width,
+                height);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool IsMiniMaxH3SourceCanvasCurrent(
+        string sourcePath,
+        long expectedSize,
+        double expectedMtimeMs,
+        int width,
+        int height)
+    {
+        try
+        {
+            if (!TryResolveEnhancementSourceIdentity(
                     sourcePath,
                     out string resolvedSource)
                 || !File.Exists(resolvedSource))
