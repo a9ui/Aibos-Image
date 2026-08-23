@@ -249,7 +249,8 @@ public partial class MainWindow
     private bool IsManagedImageOutputDependencyProtected(
         ManagedEnhancementVersion version)
     {
-        if (!_activeVideoDependencySnapshotComplete
+        if (!_enhancementReadOk
+            || !_activeVideoDependencySnapshotComplete
             || _activeI2iSourceProducerJobIds.Contains(version.JobId)
             || _activeVideoSourceProducerJobIds.Contains(version.JobId))
         {
@@ -265,6 +266,15 @@ public partial class MainWindow
     public bool DisplayedManagedImageDeleteVerifiedForSmoke
         => TryGetModalSourceTile(out Tile tile)
             && TryGetDeletableCurrentModalEnhancementVersion(tile, out _);
+
+    public bool ReinitializeModalEnhancementVersionsForSmoke()
+    {
+        if (!TryGetModalSourceTile(out Tile tile))
+            return false;
+
+        InitializeModalEnhancementVersions(tile);
+        return _modalEnhancementVersions.Count > 0;
+    }
 
     public bool DisplayedManagedImageDuplicateJobRejectedForSmoke()
     {
