@@ -2220,6 +2220,16 @@ public partial class MainWindow
                 }
             }
 
+            // The post-inventory health read is also an await boundary. A
+            // rapid optimistic reorder may happen while it is in flight, so
+            // gate reconciliation again after every awaited read instead of
+            // allowing an older inventory to overwrite the visible order.
+            if (queuePresentationRevision
+                != _enhancementWorkspaceQueuePresentationRevision)
+            {
+                return;
+            }
+
             if (coalescedHealthInventorySignature is null)
             {
             bool activeMembershipChanged = !SameActiveEnhancementJobIds(
@@ -2485,11 +2495,25 @@ public partial class MainWindow
         {
             return false;
         }
+        string catalogRevisionSignature = "-";
         string queueOrderRevisionSignature = "-";
         if (payload.TryGetProperty("store", out JsonElement storeElement))
         {
             if (storeElement.ValueKind != JsonValueKind.Object)
                 return false;
+            if (storeElement.TryGetProperty(
+                    "catalogRevision",
+                    out JsonElement catalogRevisionElement))
+            {
+                if (!catalogRevisionElement.TryGetInt64(
+                        out long catalogRevision)
+                    || catalogRevision is < 0 or > 9_007_199_254_740_991)
+                {
+                    return false;
+                }
+                catalogRevisionSignature = catalogRevision.ToString(
+                    CultureInfo.InvariantCulture);
+            }
             if (storeElement.TryGetProperty(
                     "queueOrderRevision",
                     out JsonElement queueOrderRevisionElement))
@@ -2712,7 +2736,7 @@ public partial class MainWindow
         // signature because they catch a same-count replacement or a companion
         // restart without restoring full polling on each progress tick.
         string inventorySignature = FormattableString.Invariant(
-            $"{queued}|{running}|{succeeded}|{failed}|{canceled}|{deleted}|{currentJobId ?? "-"}|{lastClaimAtSignature}|{lastTerminalAtSignature}|{queueOrderRevisionSignature}|{serverStartedAtSignature}|{processId}|{buildIdSignature}");
+            $"{queued}|{running}|{succeeded}|{failed}|{canceled}|{deleted}|{currentJobId ?? "-"}|{lastClaimAtSignature}|{lastTerminalAtSignature}|{catalogRevisionSignature}|{queueOrderRevisionSignature}|{serverStartedAtSignature}|{processId}|{buildIdSignature}");
         health = new EnhancementQueueHealthView(
             stateLabel,
             detail,

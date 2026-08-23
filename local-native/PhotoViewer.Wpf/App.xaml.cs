@@ -19964,9 +19964,14 @@ public partial class App : Application
                 bool queueLaterFirst = false;
                 TaskCompletionSource<bool>? queueMoveGate = null;
                 TaskCompletionSource<bool>? queueOrderRequestEntered = null;
+                long catalogRevision = 0;
                 long queueOrderRevision = 0;
                 TaskCompletionSource<bool>? jobsGetEntered = null;
                 TaskCompletionSource<bool>? jobsGetGate = null;
+                TaskCompletionSource<bool>? healthGetEntered = null;
+                TaskCompletionSource<bool>? healthGetGate = null;
+                int healthGetCount = 0;
+                int healthGetGateAfterCount = int.MaxValue;
                 string jobsResponseMode = "normal";
                 bool allQueuedCanceled = false;
                 bool includeProtectedQueuedJob = false;
@@ -20534,6 +20539,7 @@ public partial class App : Application
                         store = new
                         {
                             version = 1,
+                            catalogRevision,
                             queueOrderRevision,
                         },
                         jobs = new
@@ -20653,6 +20659,25 @@ public partial class App : Application
                     return response;
                 }
 
+                async Task<HttpResponseMessage> CurrentHealthResponseAsync()
+                {
+                    HttpResponseMessage response = healthMode != "missing"
+                        ? JsonResponse(HttpStatusCode.OK, CurrentHealth())
+                        : JsonResponse(
+                            HttpStatusCode.NotFound,
+                            new { error = "health route unavailable" });
+                    int currentHealthGetCount = Interlocked.Increment(
+                        ref healthGetCount);
+                    TaskCompletionSource<bool>? gate = healthGetGate;
+                    if (gate is not null
+                        && currentHealthGetCount > healthGetGateAfterCount)
+                    {
+                        healthGetEntered?.TrySetResult(true);
+                        await gate.Task;
+                    }
+                    return response;
+                }
+
                 window = HiddenWindow();
                 window.SuppressStatePersistence();
                 window.ConfigureEnhancementJobsBulkConfirmationForSmoke(
@@ -20694,9 +20719,7 @@ public partial class App : Application
                     }
                     if (request.Method == HttpMethod.Get && route.EndsWith("/api/enhance/health", StringComparison.Ordinal))
                     {
-                        return Task.FromResult(healthMode != "missing"
-                            ? JsonResponse(HttpStatusCode.OK, CurrentHealth())
-                            : JsonResponse(HttpStatusCode.NotFound, new { error = "health route unavailable" }));
+                        return CurrentHealthResponseAsync();
                     }
                     if (request.Method == HttpMethod.Post && route.EndsWith("/api/enhance/queue", StringComparison.Ordinal))
                     {
@@ -21427,17 +21450,29 @@ public partial class App : Application
                         == afterHealthOnlyPoll.HealthGetRequests + 2
                     && afterQueueOrderRevisionPoll.Total
                         == afterHealthOnlyPoll.Total;
+                catalogRevision++;
+                await window.PollEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot
+                    afterCatalogRevisionPoll =
+                        window.EnhancementJobsWorkspaceForSmoke();
+                bool catalogRevisionRefreshesSameCountInventory =
+                    afterCatalogRevisionPoll.GetRequests
+                        == afterQueueOrderRevisionPoll.GetRequests + 1
+                    && afterCatalogRevisionPoll.HealthGetRequests
+                        == afterQueueOrderRevisionPoll.HealthGetRequests + 2
+                    && afterCatalogRevisionPoll.Total
+                        == afterQueueOrderRevisionPoll.Total;
                 healthLastTerminalAt = "2026-07-30T13:31:00.000Z";
                 await window.PollEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot afterTerminalSignaturePoll =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool terminalSignatureRefreshesSameCountInventory =
                     afterTerminalSignaturePoll.GetRequests
-                        == afterQueueOrderRevisionPoll.GetRequests + 1
+                        == afterCatalogRevisionPoll.GetRequests + 1
                     && afterTerminalSignaturePoll.HealthGetRequests
-                        == afterQueueOrderRevisionPoll.HealthGetRequests + 2
+                        == afterCatalogRevisionPoll.HealthGetRequests + 2
                     && afterTerminalSignaturePoll.Total
-                        == afterQueueOrderRevisionPoll.Total;
+                        == afterCatalogRevisionPoll.Total;
                 healthServerStartedAtUtc = "2026-07-30T13:32:00.000Z";
                 healthProcessId = 5678;
                 healthBuildId = "aibos-health-smoke-restarted";
@@ -22251,6 +22286,57 @@ public partial class App : Application
                         entry,
                         "POST /api/enhance/jobs/queued/order",
                         StringComparison.Ordinal)) == 2;
+                int queuedOrderBatchesBeforeHealthRace =
+                    queuedOrderBatchBodies.Count;
+                healthGetEntered = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                healthGetGateAfterCount = healthGetCount + 1;
+                Task staleHealthAfterInventoryRefresh =
+                    window.RefreshEnhancementJobsForSmokeAsync();
+                await healthGetEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                Task<bool> firstMoveDuringHealthAfterInventory =
+                    window.MoveEnhancementJobForSmokeAsync(
+                        "queue-later-job",
+                        "down");
+                Task<bool> secondMoveDuringHealthAfterInventory =
+                    window.MoveEnhancementJobForSmokeAsync(
+                        "queue-first-job",
+                        "down");
+                EnhancementJobsWorkspaceSmokeSnapshot
+                    afterMovesDuringHealthAfterInventory =
+                        window.EnhancementJobsWorkspaceForSmoke();
+                healthGetGate.SetResult(true);
+                await staleHealthAfterInventoryRefresh;
+                bool movesDuringHealthAfterInventory =
+                    await firstMoveDuringHealthAfterInventory
+                    && await secondMoveDuringHealthAfterInventory;
+                healthGetGate = null;
+                healthGetEntered = null;
+                healthGetGateAfterCount = int.MaxValue;
+                EnhancementJobsWorkspaceSmokeSnapshot
+                    afterHealthAfterInventoryRace =
+                        window.EnhancementJobsWorkspaceForSmoke();
+                string[] expectedHealthRaceOrder =
+                [
+                    "active-job",
+                    "delivery-queue-job",
+                    "queue-first-job",
+                    "queue-later-job",
+                ];
+                bool healthAfterInventoryReorderSuppressed =
+                    movesDuringHealthAfterInventory
+                    && afterMovesDuringHealthAfterInventory.VisibleIds.Take(4)
+                        .SequenceEqual(
+                            expectedHealthRaceOrder,
+                            StringComparer.Ordinal)
+                    && afterHealthAfterInventoryRace.VisibleIds.Take(4)
+                        .SequenceEqual(
+                            expectedHealthRaceOrder,
+                            StringComparer.Ordinal)
+                    && queuedOrderBatchBodies.Count
+                        == queuedOrderBatchesBeforeHealthRace + 1;
                 bool cancelIssued = await window.CancelEnhancementJobForSmokeAsync("active-job");
                 EnhancementJobsWorkspaceSmokeSnapshot afterCancel = window.EnhancementJobsWorkspaceForSmoke();
                 var cancelPendingVideoView =
@@ -23172,6 +23258,7 @@ public partial class App : Application
                     && invalidJobsSnapshotRecovery
                     && healthOnlyPollAvoidedFullInventory
                     && queueOrderRevisionRefreshesSameCountInventory
+                    && catalogRevisionRefreshesSameCountInventory
                     && terminalSignatureRefreshesSameCountInventory
                     && companionRestartRefreshesInventory
                     && healthSignatureNeverBoundToStaleInventory
@@ -23221,6 +23308,7 @@ public partial class App : Application
                     && moveAvoidedFullInventoryReload
                     && queuedOrderBatchContract
                     && staleQueueRefreshSuppressed
+                    && healthAfterInventoryReorderSuppressed
                     && cancelIssued
                     && afterCancel.Total == 18
                     && afterCancel.Active == 4
@@ -23313,6 +23401,8 @@ public partial class App : Application
                     afterHealthOnlyPoll,
                     queueOrderRevisionRefreshesSameCountInventory,
                     afterQueueOrderRevisionPoll,
+                    catalogRevisionRefreshesSameCountInventory,
+                    afterCatalogRevisionPoll,
                     terminalSignatureRefreshesSameCountInventory,
                     afterTerminalSignaturePoll,
                     companionRestartRefreshesInventory,
@@ -23364,6 +23454,8 @@ public partial class App : Application
                     queuedOrderBatchContract,
                     staleQueueRefreshSuppressed,
                     afterStaleRefresh,
+                    healthAfterInventoryReorderSuppressed,
+                    afterHealthAfterInventoryRace,
                     afterMove,
                     afterCancel,
                     videoCancelPendingSafe,
