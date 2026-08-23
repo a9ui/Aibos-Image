@@ -490,6 +490,26 @@ public partial class App : Application
             return;
         }
 
+        int motionDirectorSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--motion-director-smoke");
+        if (motionDirectorSmokeIdx >= 0
+            && motionDirectorSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureMotionDirectorSmoke(e.Args[motionDirectorSmokeIdx + 1]);
+            return;
+        }
+
+        int videoToolsSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--video-tools-smoke");
+        if (videoToolsSmokeIdx >= 0
+            && videoToolsSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoToolsSmoke(e.Args[videoToolsSmokeIdx + 1]);
+            return;
+        }
+
         int highContrastSmokeIdx = Array.IndexOf(e.Args, "--high-contrast-smoke");
         if (highContrastSmokeIdx >= 0 && highContrastSmokeIdx + 1 < e.Args.Length)
         {

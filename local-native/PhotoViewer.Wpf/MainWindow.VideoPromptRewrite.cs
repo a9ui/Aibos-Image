@@ -338,6 +338,7 @@ public partial class MainWindow
                 return false;
             }
 
+            ClearMotionDirectorCandidateOrigin();
             _videoH3PromptCandidate = candidate;
             _videoH3CandidateBasePrompt = basePrompt;
             _videoH3CandidateSourceStamp = sourceStamp;
@@ -545,6 +546,7 @@ public partial class MainWindow
         ModalVideoH3PromptRewritePanel.Visibility = h3Selected
             ? Visibility.Visible
             : Visibility.Collapsed;
+        RefreshMotionDirectorControls(h3Selected);
 
         if (!string.Equals(
                 ModalVideoH3PromptCandidateTextBox.Text,
@@ -686,7 +688,9 @@ public partial class MainWindow
                 StringComparison.Ordinal);
 
     private bool IsVideoH3PromptCandidateFresh()
-        => _videoH3CandidateSourceStamp is VideoH3SourceStamp stamp
+        => _motionDirectorCandidateOrigin
+            ? IsMotionDirectorCandidateFresh()
+            : _videoH3CandidateSourceStamp is VideoH3SourceStamp stamp
             && string.Equals(
                 _videoH3CandidateBasePrompt,
                 _videoPrompt,

@@ -3568,6 +3568,7 @@ public partial class MainWindow
             sourceId: fullPath,
             sourcePath: fullPath,
             sourceProducerJobId: null,
+            sourceVideoJobId: null,
             presetId: MiniMaxH3VideoPresetId,
             adapterId: MiniMaxH3VideoBackendId,
             operation: "video",
