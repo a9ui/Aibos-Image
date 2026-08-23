@@ -595,13 +595,30 @@ public partial class MainWindow
 
             string resolvedInputPath = resolvedSourcePath;
             IReadOnlyList<string> producerAliases = [];
+            IReadOnlyList<string> directManagedInputAliases = [];
             if (sourceProducerJobId is null)
             {
                 if (!EnhancementSourceIdentityComparer.Equals(
                         resolvedSourcePath,
                         resolvedSourceId))
                 {
-                    return false;
+                    if (!TryResolveDisplayedManagedVideoSourcePath(
+                            resolvedSourcePath,
+                            out string displayedManagedInput)
+                        || !EnhancementSourceIdentityComparer.Equals(
+                            displayedManagedInput,
+                            resolvedSourcePath))
+                    {
+                        return false;
+                    }
+
+                    resolvedInputPath = displayedManagedInput;
+                    directManagedInputAliases =
+                    [
+                        sourcePath!,
+                        resolvedSourcePath,
+                        displayedManagedInput,
+                    ];
                 }
             }
             else
@@ -714,6 +731,7 @@ public partial class MainWindow
                     sourceSize,
                     sourceMtimeMs));
             catalogAliases = producerAliases
+                .Concat(directManagedInputAliases)
                 .Concat(new[] { sourceId, resolvedSourceId })
                 .Select(NormalizeCatalogEnhancementPath)
                 .Where(static path => path is not null)
@@ -1944,6 +1962,28 @@ public partial class MainWindow
         durationSeconds = version.DurationSeconds;
         audio = version.Delivery.Audio;
         settingsText = BuildManagedVideoSettingsText(version);
+        return true;
+    }
+
+    public bool TryBuildMiniMaxH3ManagedVideoCatalogForSmoke(
+        JsonElement job,
+        out string resolvedSource,
+        out string[] catalogAliases)
+    {
+        resolvedSource = "";
+        catalogAliases = [];
+        if (!TryBuildMiniMaxH3ManagedVideoVersion(
+                job,
+                new Dictionary<string, ManagedPhotorealVideoSource>(
+                    StringComparer.Ordinal),
+                out resolvedSource,
+                out _,
+                out IReadOnlyList<string> aliases))
+        {
+            return false;
+        }
+
+        catalogAliases = aliases.ToArray();
         return true;
     }
 }

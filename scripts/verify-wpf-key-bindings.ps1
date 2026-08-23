@@ -96,7 +96,7 @@ try {
         'reloadNextApplied', 'reloadCloseApplied', 'settingsEscapeRescue',
         'deleteOpened', 'deleteWheelSuppressed', 'deleteEscapeRescue', 'resetDraft', 'resetSaved', 'resetHints', 'sharedDefaultsSaved',
         'customKeyDisabledAfterReset', 'defaultKeyHotAfterReset',
-        'landingShortcutsSuppressed', 'unknownMergeReloaded',
+        'landingShortcutsSuppressed', 'openLastFolderSetShortcutExact', 'unknownMergeReloaded',
         'sourceUntouched', 'enhancementPassive', 'residueFree'
     )
     $reloadFailed = @($reloadRequired | Where-Object { $reload.$_ -ne $true })

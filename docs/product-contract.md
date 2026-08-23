@@ -169,11 +169,13 @@ The executable cases for these meanings are routed by
   contract requires it, replay-resistant, and bound to one companion epoch.
 - Durable enqueue publishes the bounded inbox item before sending a bodyless
   wake. A post-publication transport failure does not discard the durable item.
-- An authenticated queue resume completes the companion's one-time recovery
-  before it starts a worker. Queue pause remains available during deferred
-  recovery and lets the current job stop at its normal boundary.
+- An authenticated queue resume first restores the configured read-only
+  MiniMax H3 runtime mounts when that seal is unavailable, then completes the
+  companion's one-time recovery before it starts a worker. Queue pause remains
+  available during deferred recovery and lets the current job stop at its
+  normal boundary.
 - Passive reads and startup history access do not recover the queue or start GPU
-  work.
+  work, and do not mount the optional Enhancement runtime.
 
 The exact capability storage, identity proof, tunnel, request, response, and
 startup rules are in `contracts/enhancement-companion-auth-v2.json`.

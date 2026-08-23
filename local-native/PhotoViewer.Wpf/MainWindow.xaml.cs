@@ -18137,14 +18137,17 @@ public partial class MainWindow : Window
     }
 
     private async void OpenLastFolder_Click(object sender, RoutedEventArgs e)
+        => await OpenLastFolderSetAsync(chooseWhenMissing: true);
+
+    private async Task OpenLastFolderSetAsync(bool chooseWhenMissing)
     {
-        var lastFolderSet = _lastFolderSet;
+        List<string> lastFolderSet = _lastFolderSet.ToList();
         if (lastFolderSet.Count > 0)
         {
             SetLandingFolderSet(lastFolderSet);
             await LoadFolderSetAsync(lastFolderSet);
         }
-        else
+        else if (chooseWhenMissing)
             await ChooseAndLoadFolderAsync();
     }
 
@@ -24578,6 +24581,19 @@ public partial class MainWindow : Window
             // Let dialog controls retain normal Tab/Shift+Tab/Space/Enter behavior;
             // only gallery-global shortcuts are suppressed while an overlay is active.
             base.OnPreviewKeyDown(e);
+            return;
+        }
+
+        IInputElement? landingFocusedElement = _shortcutFocusOverrideForSmoke ?? Keyboard.FocusedElement;
+        if (Landing.Visibility == Visibility.Visible
+            && key == Key.L
+            && modifiers == (ModifierKeys.Control | ModifierKeys.Shift)
+            && _lastFolderSet.Count > 0
+            && !IsGlobalShortcutInputFocused(e.OriginalSource)
+            && !IsGlobalShortcutInputFocused(landingFocusedElement))
+        {
+            _ = OpenLastFolderSetAsync(chooseWhenMissing: false);
+            e.Handled = true;
             return;
         }
 

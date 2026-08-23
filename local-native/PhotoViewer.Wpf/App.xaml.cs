@@ -4949,12 +4949,16 @@ public partial class App : Application
         string recentPath = Path.Combine(smokeRoot, "recent-folders.json");
         string jobsPath = Path.Combine(smokeRoot, "enhance", "jobs.json");
         string settingsPath = Path.Combine(smokeRoot, "settings.json");
+        string metadataIndexDirectory = Path.Combine(smokeRoot, "metadata-index");
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH", statePath);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_FAVORITES_PATH", favoritesPath);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SEEN_PATH", seenPath);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_RECENT_PATH", recentPath);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH", jobsPath);
         Environment.SetEnvironmentVariable("PHOTOVIEWER_WPF_SETTINGS_PATH", settingsPath);
+        Environment.SetEnvironmentVariable(
+            "PHOTOVIEWER_WPF_METADATA_INDEX_DIRECTORY",
+            metadataIndexDirectory);
         if (!string.IsNullOrWhiteSpace(generatedAutomationRoot)
             && !string.Equals(generatedAutomationRoot, smokeRoot, StringComparison.OrdinalIgnoreCase))
         {
@@ -5562,6 +5566,18 @@ public partial class App : Application
                         && !window.DeleteConfirmationVisibleForSmoke
                         && window.PreviewTabCountForSmoke == landingPreviewCountBefore
                         && window.ClosedPreviewTabCountForSmoke == landingClosedCountBefore;
+                    bool openLastFolderSetHandled = window.InvokePreviewKeyForSmoke(
+                        Key.L,
+                        ModifierKeys.Control | ModifierKeys.Shift);
+                    var openLastFolderSetWatch = Stopwatch.StartNew();
+                    while (window.LandingVisibleForSmoke && openLastFolderSetWatch.ElapsedMilliseconds < 5_000)
+                    {
+                        await Task.Delay(25);
+                        await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+                    }
+                    bool openLastFolderSetShortcutExact = openLastFolderSetHandled
+                        && !window.LandingVisibleForSmoke
+                        && window.CurrentFolderSetForSmoke.SequenceEqual([folder], StringComparer.OrdinalIgnoreCase);
 
                     ViewerState? finalState = ReadPersistedState(statePath);
                     bool unknownMergeReloaded = finalState?.ExtensionData is not null
@@ -5582,7 +5598,7 @@ public partial class App : Application
                         && settingsEscapeRescue && deleteSelected && deleteOpened && deleteWheelSuppressed && deleteEscapeRescue
                         && resetDraft && resetSaved && resetHints && sharedDefaultsSaved && resetClosed && resetSelected
                         && customKeyDisabledAfterReset && defaultKeyHotAfterReset
-                        && landingShortcutsSuppressed && unknownMergeReloaded
+                        && landingShortcutsSuppressed && openLastFolderSetShortcutExact && unknownMergeReloaded
                         && sourceUntouched && enhancementPassive && residueFree;
                     result = new
                     {
@@ -5608,6 +5624,7 @@ public partial class App : Application
                         customKeyDisabledAfterReset,
                         defaultKeyHotAfterReset,
                         landingShortcutsSuppressed,
+                        openLastFolderSetShortcutExact,
                         unknownMergeReloaded,
                         sourceUntouched,
                         enhancementPassive,
@@ -20410,6 +20427,21 @@ public partial class App : Application
                     };
                     if (photorealSeedCapabilityAvailable)
                         capabilities["photorealSeedControlV1"] = true;
+                    if (healthMode == "h3-seal-missing")
+                    {
+                        using JsonDocument h3Health = JsonDocument.Parse(
+                            CreateVideoV2HealthJson(
+                                writerEnabled: true,
+                                ready: false,
+                                state: "unverified",
+                                reasonCode: "MINIMAX_H3_RUNTIME_SEAL_INVALID",
+                                runtimeSealVerified: false));
+                        capabilities["videoV2"] = h3Health.RootElement
+                            .GetProperty("capabilities")
+                            .GetProperty("videoV2")
+                            .Clone();
+                        worker["pumpRunning"] = false;
+                    }
 
                     return new
                     {
@@ -20419,13 +20451,17 @@ public partial class App : Application
                         {
                             "unknown-status" => "future-health-state",
                             "unknown-issue" => "needs-attention",
+                            "h3-seal-missing" => "needs-attention",
                             _ => counts["running"] + counts["queued"] > 0
                                 ? "working"
                                 : "healthy",
                         },
-                        issues = healthMode == "unknown-issue"
-                            ? new[] { "future-health-issue" }
-                            : Array.Empty<string>(),
+                        issues = healthMode switch
+                        {
+                            "unknown-issue" => ["future-health-issue"],
+                            "h3-seal-missing" => ["queued-without-pump"],
+                            _ => Array.Empty<string>(),
+                        },
                         runtime = new
                         {
                             sourceRevision = "696849546ad61383def4d6d050e6fcb66a5fb3cd",
@@ -21214,6 +21250,21 @@ public partial class App : Application
                 bool unknownIssueSafe = unknownIssueHealth.HealthState == "Needs attention"
                     && unknownIssueHealth.HealthDetail == "Queue attention is required."
                     && unknownIssueHealth.Total == initial.Total;
+                healthMode = "h3-seal-missing";
+                await window.RefreshEnhancementJobsForSmokeAsync();
+                EnhancementJobsWorkspaceSmokeSnapshot missingH3SealHealth =
+                    window.EnhancementJobsWorkspaceForSmoke();
+                bool h3SealRecoveryAction =
+                    missingH3SealHealth.HealthState == "Needs attention"
+                    && missingH3SealHealth.HealthDetail
+                        == "MiniMax H3 sealed runtime is not mounted. Resume the queue to restore it."
+                    && missingH3SealHealth.QueuePaused == false
+                    && missingH3SealHealth.QueuePauseLabel == "再開"
+                    && missingH3SealHealth.QueuePauseEnabled
+                    && await window.SetEnhancementQueuePausedForSmokeAsync(false)
+                    && queueControlBodies.LastOrDefault()
+                        == "{\"paused\":false}";
+                queueControlBodies.Clear();
                 healthMode = "available";
                 await window.RefreshEnhancementJobsForSmokeAsync();
                 EnhancementJobsWorkspaceSmokeSnapshot recoveredHealth =
@@ -21251,7 +21302,7 @@ public partial class App : Application
                 EnhancementJobsWorkspaceSmokeSnapshot queued = window.EnhancementJobsWorkspaceForSmoke();
                 bool jobsFilterLayoutContract =
                     window.EnhancementJobsStatusFilterOrderForSmoke.SequenceEqual(
-                        ["all", "queued", "running", "completed", "failed", "canceled"],
+                        ["all", "queued", "completed", "failed", "canceled"],
                         StringComparer.Ordinal)
                     && window.EnhancementJobsOperationFilterOrderForSmoke.SequenceEqual(
                         ["all", "upscale", "photoreal", "video", "i2i"],
@@ -21263,13 +21314,16 @@ public partial class App : Application
                     && !window.FailedBulkPanelVisibleForSmoke
                     && !window.CanceledBulkPanelVisibleForSmoke;
                 window.SelectEnhancementJobsStatusFilterForSmoke("running");
-                EnhancementJobsWorkspaceSmokeSnapshot running = window.EnhancementJobsWorkspaceForSmoke();
+                EnhancementJobsWorkspaceSmokeSnapshot unsupportedRunningFilter =
+                    window.EnhancementJobsWorkspaceForSmoke();
                 window.SelectEnhancementJobsStatusFilterForSmoke("queued");
                 window.SelectEnhancementJobsOperationFilterForSmoke("video");
                 EnhancementJobsWorkspaceSmokeSnapshot queuedVideoOnly =
                     window.EnhancementJobsWorkspaceForSmoke();
-                bool combinedJobsFiltersContract = running.VisibleIds.SequenceEqual(
-                        ["active-job"],
+                bool combinedJobsFiltersContract =
+                    unsupportedRunningFilter.FilteredTotal == initial.Total
+                    && unsupportedRunningFilter.VisibleIds.Contains(
+                        "active-job",
                         StringComparer.Ordinal)
                     && queuedVideoOnly.VisibleIds.SequenceEqual(
                         ["queue-later-job", "delivery-queue-job"],
@@ -22459,6 +22513,7 @@ public partial class App : Application
                     && legacyHealthFallback
                     && futureHealthFallback
                     && unknownIssueSafe
+                    && h3SealRecoveryAction
                     && healthRecovered
                     && queuePauseContract
                     && stableJobViews
@@ -22592,6 +22647,7 @@ public partial class App : Application
                     legacyHealthFallback,
                     futureHealthFallback,
                     unknownIssueSafe,
+                    h3SealRecoveryAction,
                     healthRecovered,
                     queuePauseContract,
                     initial,

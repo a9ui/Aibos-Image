@@ -45,6 +45,7 @@
   <sys:String x:Key="UiNoFoldersSelected">No folders selected yet.</sys:String>
   <sys:String x:Key="UiUsableSelectedFoldersFormat">{0:N0} usable / {1:N0} selected folder(s)</sys:String>
   <sys:String x:Key="UiOpenLastFolderSet">Open last folder set</sys:String>
+  <sys:String x:Key="UiOpenLastFolderSetShortcutHelp">Open the last folder set (Ctrl + Shift + L)</sys:String>
   <sys:String x:Key="UiNoSavedFolderSet">  No saved folder set</sys:String>
   <sys:String x:Key="UiFavoriteFolderSets">FAVORITE FOLDER SETS</sys:String>
   <sys:String x:Key="UiSaveFavoriteFolderSet">★ Save current set</sys:String>
