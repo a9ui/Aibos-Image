@@ -97,6 +97,7 @@ public partial class MainWindow
     };
     private readonly List<EnhancementWorkspaceJobView> _enhancementWorkspaceJobs = [];
     private readonly Dictionary<string, BitmapSource> _enhancementWorkspaceThumbnailCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _enhancementWorkspaceThumbnailFailedJobIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> _enhancementWorkspaceHighlightedJobIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> _enhancementWorkspaceOptimisticallyHiddenJobIds = new(StringComparer.Ordinal);
     private DispatcherTimer _enhancementWorkspacePollTimer = null!;
@@ -1842,6 +1843,7 @@ public partial class MainWindow
         StopEnhancementWorkspaceThumbnailViewportDebounce();
         _enhancementWorkspaceThumbnailRetryTimer.Stop();
         _enhancementWorkspaceThumbnailRetryAttempt = 0;
+        _enhancementWorkspaceThumbnailFailedJobIds.Clear();
         _enhancementWorkspaceThumbnailViewportLoadPending = false;
         Volatile.Read(ref _enhancementWorkspaceThumbnailCts)?.Cancel();
         Volatile.Read(ref _enhancementWorkspaceInventoryCts)?.Cancel();
@@ -4331,6 +4333,7 @@ public partial class MainWindow
         EventArgs e)
     {
         _enhancementWorkspaceThumbnailRetryTimer.Stop();
+        _enhancementWorkspaceThumbnailFailedJobIds.Clear();
         QueueEnhancementWorkspaceVisibleThumbnailLoad();
     }
 
@@ -4338,6 +4341,7 @@ public partial class MainWindow
     {
         _enhancementWorkspaceThumbnailRetryTimer?.Stop();
         _enhancementWorkspaceThumbnailRetryAttempt = 0;
+        _enhancementWorkspaceThumbnailFailedJobIds.Clear();
     }
 
     private void ScheduleEnhancementWorkspaceThumbnailRetry()
@@ -4477,6 +4481,7 @@ public partial class MainWindow
                         .Select(static job => job!)
                         .DistinctBy(static job => job.Id, StringComparer.Ordinal)
                         .Where(static job => job.Thumbnail is null)
+                        .Where(job => !_enhancementWorkspaceThumbnailFailedJobIds.Contains(job.Id))
                         .Take(EnhancementJobsThumbnailViewportLimit)
                         .ToArray();
                 if (realized.Length == 0
@@ -4523,6 +4528,7 @@ public partial class MainWindow
         CancellationTokenSource cts)
     {
         bool retryMissingThumbnail = false;
+        bool canceled = false;
         try
         {
             foreach (EnhancementWorkspaceJobView job in jobs)
@@ -4538,6 +4544,7 @@ public partial class MainWindow
                 if (canonicalSource is null)
                 {
                     retryMissingThumbnail = true;
+                    _enhancementWorkspaceThumbnailFailedJobIds.Add(job.Id);
                     continue;
                 }
 
@@ -4548,6 +4555,7 @@ public partial class MainWindow
                     if (thumbnail is null)
                     {
                         retryMissingThumbnail = true;
+                        _enhancementWorkspaceThumbnailFailedJobIds.Add(job.Id);
                         continue;
                     }
                     if (_enhancementWorkspaceThumbnailCache.Count >= EnhancementJobsThumbnailCacheLimit)
@@ -4557,11 +4565,13 @@ public partial class MainWindow
 
                 if (generation != _enhancementWorkspaceGeneration || EnhancementJobsDialog.Visibility != Visibility.Visible)
                     return;
+                _enhancementWorkspaceThumbnailFailedJobIds.Remove(job.Id);
                 job.Thumbnail = thumbnail;
             }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
+            canceled = true;
         }
         finally
         {
@@ -4577,6 +4587,14 @@ public partial class MainWindow
                     ScheduleEnhancementWorkspaceThumbnailRetry();
                 else
                     _enhancementWorkspaceThumbnailRetryAttempt = 0;
+                if (!canceled
+                    && jobs.Count >= EnhancementJobsThumbnailViewportLimit)
+                {
+                    _ = Dispatcher.BeginInvoke(
+                        new Action(() =>
+                            QueueEnhancementWorkspaceVisibleThumbnailLoad()),
+                        DispatcherPriority.ContextIdle);
+                }
             }
         }
     }
@@ -7932,10 +7950,49 @@ public partial class MainWindow
                 : "The Aibos Image local AI service is not ready for this AI edit Retry. No reservation was saved.";
     }
 
-    private void OpenEnhancementOutput_Click(object sender, RoutedEventArgs e)
+    private async void OpenEnhancementOutput_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: EnhancementWorkspaceJobView job })
-            TryOpenEnhancementWorkspaceOutput(job);
+            await OpenEnhancementWorkspaceOutputAsync(job);
+    }
+
+    private async Task<bool> OpenEnhancementWorkspaceOutputAsync(
+        EnhancementWorkspaceJobView job)
+    {
+        long generation = _enhancementWorkspaceGeneration;
+        if (job.IsVideoOperation && job.CanUseOutput)
+        {
+            Task refreshTask = _enhancedStateRefreshTask;
+            if (!refreshTask.IsCompleted)
+            {
+                EnhancementJobsStatusText.Text =
+                    "動画出力を確認しています。画面はそのまま操作できます。";
+            }
+            try
+            {
+                await refreshTask;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+
+            if (generation != _enhancementWorkspaceGeneration
+                || EnhancementJobsDialog.Visibility != Visibility.Visible
+                || !_enhancementWorkspaceJobs.Contains(job)
+                || !job.CanUseOutput)
+            {
+                return false;
+            }
+            if (!_enhancementReadOk)
+            {
+                EnhancementJobsStatusText.Text =
+                    "動画出力を確認できませんでした。Jobsを更新してからもう一度試してください。";
+                return false;
+            }
+        }
+
+        return TryOpenEnhancementWorkspaceOutput(job);
     }
 
     private bool TryOpenEnhancementWorkspaceOutput(EnhancementWorkspaceJobView job)
@@ -9430,6 +9487,14 @@ public partial class MainWindow
         return job is not null && TryOpenEnhancementWorkspaceOutput(job);
     }
 
+    public async Task<bool> OpenEnhancementJobOutputForSmokeAsync(string id)
+    {
+        EnhancementWorkspaceJobView? job =
+            _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+        return job is not null
+            && await OpenEnhancementWorkspaceOutputAsync(job);
+    }
+
     public ExplorerRevealSmokeSnapshot RevealEnhancementJobOutputForSmoke(
         string id)
     {
@@ -9460,6 +9525,45 @@ public partial class MainWindow
         finally
         {
             _explorerLauncher = previous;
+        }
+    }
+
+    public async Task<ExplorerRevealSmokeSnapshot>
+        RevealEnhancementJobOutputForSmokeAsync(
+            string id,
+            Task enhancedStateRefreshTask)
+    {
+        ProcessStartInfo? captured = null;
+        Func<ProcessStartInfo, bool> previous = _explorerLauncher;
+        Task previousRefreshTask = _enhancedStateRefreshTask;
+        _enhancedStateRefreshTask = enhancedStateRefreshTask;
+        _explorerLauncher = startInfo =>
+        {
+            captured = startInfo;
+            return true;
+        };
+        try
+        {
+            EnhancementWorkspaceJobView? job =
+                _enhancementWorkspaceJobs.FirstOrDefault(job => job.Id == id);
+            bool opened = job is not null
+                && await OpenEnhancementWorkspaceOutputAsync(job);
+            return new ExplorerRevealSmokeSnapshot(
+                opened && captured is not null,
+                captured?.FileName ?? "",
+                captured?.ArgumentList.ToList() ?? [],
+                captured?.Arguments ?? "",
+                captured?.UseShellExecute ?? false,
+                job is { IsVideoOperation: true, CanUseOutput: true },
+                false,
+                EnhancementJobsStatusText.Text,
+                "jobs-output");
+        }
+        finally
+        {
+            _explorerLauncher = previous;
+            if (ReferenceEquals(_enhancedStateRefreshTask, enhancedStateRefreshTask))
+                _enhancedStateRefreshTask = previousRefreshTask;
         }
     }
 

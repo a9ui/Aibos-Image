@@ -22618,10 +22618,22 @@ public partial class App : Application
                         "done-job",
                         StringComparison.Ordinal);
                 reverseJobsForReturn = false;
+                var videoHydrationGate = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                Task<ExplorerRevealSmokeSnapshot> videoOutputRevealTask =
+                    window.RevealEnhancementJobOutputForSmokeAsync(
+                        "video-reader-job",
+                        videoHydrationGate.Task);
+                await window.Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.Background);
+                bool videoOutputWaitedForHydration =
+                    !videoOutputRevealTask.IsCompleted;
+                videoHydrationGate.SetResult(true);
                 ExplorerRevealSmokeSnapshot videoOutputReveal =
-                    window.RevealEnhancementJobOutputForSmoke(
-                        "video-reader-job");
-                bool videoOutputRevealed = videoOutputReveal.Launched
+                    await videoOutputRevealTask;
+                bool videoOutputRevealed = videoOutputWaitedForHydration
+                    && videoOutputReveal.Launched
                     && string.Equals(
                         videoOutputReveal.FileName,
                         "explorer.exe",
