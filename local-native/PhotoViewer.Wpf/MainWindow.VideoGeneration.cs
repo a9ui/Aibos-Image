@@ -114,6 +114,8 @@ public partial class MainWindow
     private bool _syncingVideoGenerationSettings;
     private bool _videoGenerationRequestPending;
     private VideoSourceChoice? _videoSourceChoice;
+    private readonly Dictionary<string, PendingVideoSourceDependency>
+        _pendingVideoSourceDependencies = new(StringComparer.Ordinal);
     private long _miniMaxH3HealthGeneration;
     private bool _miniMaxH3HealthChecked;
     private bool _miniMaxH3Ready;
@@ -125,6 +127,11 @@ public partial class MainWindow
         string? ProducerJobId,
         string Label,
         bool UsesDisplayedFileDirectly);
+
+    private sealed record PendingVideoSourceDependency(
+        string? ProducerJobId,
+        string? ManagedSourcePath,
+        bool Complete);
 
     private static bool VideoSourceChoicesReferToSameInput(
         VideoSourceChoice left,
@@ -1032,6 +1039,131 @@ public partial class MainWindow
         }
 
         return null;
+    }
+
+    private static FileStream PinVideoSourceForDurablePublish(
+        VideoH3SourceStamp expected)
+    {
+        FileStream? stream = null;
+        try
+        {
+            // Omitting FileShare.Delete closes the inverse race with the
+            // Companion's managed-output DELETE until pending publication is
+            // durable. The inbox dependency guard owns protection afterward.
+            stream = new FileStream(
+                expected.DisplayPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 4_096,
+                FileOptions.RandomAccess);
+            if (!WindowsPathIdentity.TryGetFinalPath(
+                    stream.SafeFileHandle,
+                    out string canonicalPath)
+                || !TryReadExternalFileDropSourceVersion(
+                    stream.SafeFileHandle,
+                    out ExternalFileDropSourceVersion current)
+                || !string.Equals(
+                    canonicalPath,
+                    expected.CanonicalDisplayPath,
+                    StringComparison.OrdinalIgnoreCase)
+                || current.VolumeSerialNumber != expected.VolumeSerialNumber
+                || current.FileIndex != expected.FileIndex
+                || current.Length != expected.Length
+                || current.LastWriteUtcTicks != expected.LastWriteUtcTicks)
+            {
+                throw new IOException(
+                    "The video source identity changed before durable publication.");
+            }
+            FileStream pinned = stream;
+            stream = null;
+            return pinned;
+        }
+        finally
+        {
+            stream?.Dispose();
+        }
+    }
+
+    private bool TryCaptureVideoRetrySourceStamp(
+        EnhancementWorkspaceJobView job,
+        out VideoH3SourceStamp stamp)
+    {
+        stamp = default;
+        if (!job.IsVideoOperation
+            || !job.VideoMutationSafe
+            || job.SourceSize is not long expectedLength
+            || expectedLength <= 0
+            || job.SourceMtimeMs is not double expectedMtimeMs
+            || !double.IsFinite(expectedMtimeMs)
+            || !TryResolveEnhancementWorkspaceInput(
+                job,
+                out string canonicalInput))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var stream = new FileStream(
+                canonicalInput,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 4_096,
+                FileOptions.RandomAccess);
+            if (!WindowsPathIdentity.TryGetFinalPath(
+                    stream.SafeFileHandle,
+                    out string openedCanonicalPath)
+                || !TryReadExternalFileDropSourceVersion(
+                    stream.SafeFileHandle,
+                    out ExternalFileDropSourceVersion version)
+                || !string.Equals(
+                    openedCanonicalPath,
+                    canonicalInput,
+                    StringComparison.OrdinalIgnoreCase)
+                || version.Length != expectedLength
+                || Math.Abs(
+                    new DateTimeOffset(
+                        new DateTime(
+                            version.LastWriteUtcTicks,
+                            DateTimeKind.Utc))
+                        .ToUnixTimeMilliseconds()
+                    - expectedMtimeMs) > 1)
+            {
+                return false;
+            }
+
+            stamp = new VideoH3SourceStamp(
+                job.SourceId,
+                canonicalInput,
+                openedCanonicalPath,
+                job.SourceProducerJobId,
+                version.VolumeSerialNumber,
+                version.FileIndex,
+                version.Length,
+                version.LastWriteUtcTicks);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private FileStream PinVideoRetrySourceForDurablePublish(
+        EnhancementWorkspaceJobView job)
+    {
+        if (!TryCaptureVideoRetrySourceStamp(job, out VideoH3SourceStamp stamp))
+        {
+            throw new IOException(
+                "The saved video source could not be verified before durable retry publication.");
+        }
+        return PinVideoSourceForDurablePublish(stamp);
     }
 
     private void PopulateGalleryVideoSourceMenu(
@@ -2525,6 +2657,7 @@ public partial class MainWindow
         VideoGenerationRequestSettings settings =
             CurrentVideoGenerationRequestSettings();
         _videoGenerationRequestPending = true;
+        string? pendingDeliveryRequestId = null;
         UpdateVideoGenerationActionControls();
         SetVideoGenerationSettingsStatus("ローカル動画生成の準備を確認しています...");
         try
@@ -2593,7 +2726,26 @@ public partial class MainWindow
                         capturedSourceTile,
                         source,
                         sourceStamp,
-                        capturedFromExternalFileDrop));
+                        capturedFromExternalFileDrop),
+                onBeforeDurablePublish: item =>
+                {
+                    IDisposable publishLease =
+                        AcquireVideoDurablePublishLease(
+                            () => PinVideoSourceForDurablePublish(sourceStamp));
+                    try
+                    {
+                        pendingDeliveryRequestId = item.RequestId;
+                        RecordPendingVideoSourceDependency(
+                            item.RequestId,
+                            source);
+                        return publishLease;
+                    }
+                    catch
+                    {
+                        publishLease.Dispose();
+                        throw;
+                    }
+                });
             if (response.SavedForDelivery)
             {
                 RecordActiveVideoSourceDependency(source);
@@ -2649,6 +2801,11 @@ public partial class MainWindow
         }
         finally
         {
+            if (!string.IsNullOrWhiteSpace(pendingDeliveryRequestId))
+            {
+                _pendingVideoSourceDependencies.Remove(
+                    pendingDeliveryRequestId);
+            }
             _videoGenerationRequestPending = false;
             UpdateVideoGenerationActionControls();
         }
@@ -2668,6 +2825,46 @@ public partial class MainWindow
         }
 
         _activeVideoManagedSourcePaths.Add(normalizedSourcePath);
+    }
+
+    private void RecordPendingVideoSourceDependency(
+        string requestId,
+        VideoSourceChoice source)
+    {
+        string? normalizedSourcePath = NormalizeEnhancementDependencyPath(
+            source.DisplayPath);
+        _pendingVideoSourceDependencies[requestId] =
+            new PendingVideoSourceDependency(
+                source.ProducerJobId,
+                normalizedSourcePath,
+                Complete: normalizedSourcePath is not null);
+    }
+
+    private bool IsPendingVideoSourceDependencyProtected(
+        ManagedEnhancementVersion version)
+    {
+        string? normalizedOutputPath = NormalizeEnhancementDependencyPath(
+            version.Output.OutputPath);
+        if (normalizedOutputPath is null)
+            return true;
+
+        foreach (PendingVideoSourceDependency dependency in
+                 _pendingVideoSourceDependencies.Values)
+        {
+            if (!dependency.Complete
+                || string.Equals(
+                    dependency.ProducerJobId,
+                    version.JobId,
+                    StringComparison.Ordinal)
+                || string.Equals(
+                    dependency.ManagedSourcePath,
+                    normalizedOutputPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Dictionary<string, object?> BuildVideoGenerationRequestBody(
@@ -3301,6 +3498,123 @@ public partial class MainWindow
 
     public bool VideoGenerationQueueEnabledForSmoke
         => QueueVideoGenerationButton.IsEnabled;
+
+    public int PendingVideoSourceDependencyCountForSmoke
+        => _pendingVideoSourceDependencies.Count;
+
+    public bool VideoSourcePublishPinBlocksMoveForSmoke()
+    {
+        if (!TryCaptureVideoH3SourceStamp(
+                out _,
+                out VideoH3SourceStamp stamp,
+                out _))
+        {
+            return false;
+        }
+
+        string movedPath = stamp.DisplayPath
+            + ".publish-pin-smoke-"
+            + Guid.NewGuid().ToString("N");
+        bool blocked = false;
+        using (FileStream lease = PinVideoSourceForDurablePublish(stamp))
+        {
+            try
+            {
+                File.Move(stamp.DisplayPath, movedPath);
+            }
+            catch (IOException)
+            {
+                blocked = File.Exists(stamp.DisplayPath)
+                    && !File.Exists(movedPath);
+            }
+        }
+        if (File.Exists(movedPath))
+            File.Move(movedPath, stamp.DisplayPath);
+        return blocked;
+    }
+
+    public bool VideoRetrySourcePublishPinBlocksMoveForSmoke(
+        string sourcePath)
+    {
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(sourcePath);
+            string tempRoot = Path.GetFullPath(Path.GetTempPath())
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(
+                    tempRoot,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException)
+        {
+            return false;
+        }
+
+        var info = new FileInfo(fullPath);
+        if (!info.Exists || info.Length <= 0)
+            return false;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var job = new EnhancementWorkspaceJobView(
+            id: "video-retry-publish-pin-smoke",
+            sourceId: fullPath,
+            sourcePath: fullPath,
+            sourceProducerJobId: null,
+            presetId: MiniMaxH3VideoPresetId,
+            adapterId: MiniMaxH3VideoBackendId,
+            operation: "video",
+            videoMutationSafe: true,
+            queueReorderSafe: false,
+            i2iMutationSafe: false,
+            i2iSchemaVersion: null,
+            i2iTarget: null,
+            i2iInstructionSummary: null,
+            i2iV2EnvelopeClaimed: false,
+            status: "failed",
+            cancelRequested: false,
+            progress: 0,
+            outputPath: null,
+            errorMessage: "smoke",
+            createdAt: now,
+            updatedAt: now,
+            startedAt: null,
+            finishedAt: now,
+            sourceSize: info.Length,
+            sourceMtimeMs: new DateTimeOffset(info.LastWriteTimeUtc)
+                .ToUnixTimeMilliseconds(),
+            queueOrder: null,
+            apiOrdinal: 0,
+            requestDetailsText: "");
+
+        string movedPath = fullPath
+            + ".retry-publish-pin-smoke-"
+            + Guid.NewGuid().ToString("N");
+        bool blocked = false;
+        using (FileStream lease =
+               PinVideoRetrySourceForDurablePublish(job))
+        {
+            try
+            {
+                File.Move(fullPath, movedPath);
+            }
+            catch (IOException)
+            {
+                blocked = File.Exists(fullPath)
+                    && !File.Exists(movedPath);
+            }
+        }
+        if (File.Exists(movedPath))
+            File.Move(movedPath, fullPath);
+        return blocked;
+    }
 
     public bool ModalVideoGenerationBoardVisibleForSmoke
         => ModalVideoGenerationPopup.Visibility == Visibility.Visible;

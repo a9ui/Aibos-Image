@@ -252,7 +252,8 @@ public partial class MainWindow
         if (!_enhancementReadOk
             || !_activeVideoDependencySnapshotComplete
             || _activeI2iSourceProducerJobIds.Contains(version.JobId)
-            || _activeVideoSourceProducerJobIds.Contains(version.JobId))
+            || _activeVideoSourceProducerJobIds.Contains(version.JobId)
+            || IsPendingVideoSourceDependencyProtected(version))
         {
             return true;
         }

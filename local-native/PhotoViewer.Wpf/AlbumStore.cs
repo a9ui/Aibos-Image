@@ -116,6 +116,14 @@ internal static class AlbumStore
         }
     }
 
+    internal static IDisposable? TryAcquireSharedDirectoryWriteLease(
+        string targetPath,
+        int timeoutMilliseconds = DefaultLockTimeoutMilliseconds)
+        => TryAcquireLock(
+            Path.GetFullPath(targetPath),
+            timeoutMilliseconds,
+            cleanupAtomicResidue: false);
+
     internal static AlbumReadResult Read(string path)
     {
         string fullPath = Path.GetFullPath(path);
@@ -559,7 +567,10 @@ internal static class AlbumStore
         }
     }
 
-    private static PersistenceLease? TryAcquireLock(string targetPath, int timeoutMilliseconds)
+    private static PersistenceLease? TryAcquireLock(
+        string targetPath,
+        int timeoutMilliseconds,
+        bool cleanupAtomicResidue = true)
     {
         string lockPath = targetPath + ".lock";
         var wait = Stopwatch.StartNew();
@@ -605,7 +616,8 @@ internal static class AlbumStore
 
             if (!acquired)
                 continue;
-            CleanupAtomicResidue(targetPath);
+            if (cleanupAtomicResidue)
+                CleanupAtomicResidue(targetPath);
             CleanupRetiredDirectoryLocks(lockPath);
             return new PersistenceLease(lockPath, ownerToken);
         }
