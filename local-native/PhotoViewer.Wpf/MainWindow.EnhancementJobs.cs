@@ -28,6 +28,9 @@ public partial class MainWindow
     private const int EnhancementJobsPageSize = 100;
     private const int EnhancementJobsDefaultHistoryLimit = 500;
     private const int EnhancementQueuedJobsBatchLimit = 1_000;
+    private const int EnhancementQueuedJobsBatchReorderLimit = 10_000;
+    private const int EnhancementQueuedJobsBatchReorderMaximumBodyBytes =
+        512 * 1024;
     private const int EnhancementTerminalHistoryBatchLimit = 1_000;
     private const int EnhancementJobRequestDetailsMaximumLength = 32_768;
     private const int EnhancementJobsWorkspaceMaximumRows = 100_000;
@@ -40,6 +43,8 @@ public partial class MainWindow
     private const int EnhancementJobsSqliteMaximumSqlBytes = 64 * 1024;
     private static readonly TimeSpan EnhancementJobsThumbnailViewportDebounce =
         TimeSpan.FromMilliseconds(140);
+    private static readonly TimeSpan EnhancementJobsQueueReorderDebounce =
+        TimeSpan.FromMilliseconds(75);
     private static readonly TimeSpan[] EnhancementJobsThumbnailRetryDelays =
     [
         TimeSpan.FromMilliseconds(500),
@@ -113,6 +118,9 @@ public partial class MainWindow
     private bool _enhancementWorkspaceHealthPollPending;
     private long _enhancementWorkspaceRefreshGeneration;
     private long _enhancementWorkspaceQueuePresentationRevision;
+    private Task? _enhancementWorkspaceQueueOrderFlushTask;
+    private string[]? _enhancementWorkspacePendingQueueOrder;
+    private string[]? _enhancementWorkspaceConfirmedQueueOrder;
     private bool _enhancementWorkspaceMutationPending;
     private long _enhancementWorkspaceGeneration;
     private string _enhancementWorkspaceStatusFilter = "all";
@@ -135,6 +143,7 @@ public partial class MainWindow
     private bool _enhancementWorkspacePhotorealEnqueueNextSupported;
     private bool _enhancementWorkspaceTerminalHistoryBatchDismissSupported;
     private bool _enhancementWorkspaceQueuedJobsBatchCancelSupported;
+    private bool _enhancementWorkspaceQueuedJobsBatchReorderSupported;
     private bool _enhancementWorkspaceTerminalHistoryTargetsSupported;
     private bool _enhancementWorkspaceTerminalHistoryBatchRetrySupported;
     private Func<string, string, bool>? _confirmEnhancementJobsBulkActionForSmoke;
@@ -2476,6 +2485,25 @@ public partial class MainWindow
         {
             return false;
         }
+        string queueOrderRevisionSignature = "-";
+        if (payload.TryGetProperty("store", out JsonElement storeElement))
+        {
+            if (storeElement.ValueKind != JsonValueKind.Object)
+                return false;
+            if (storeElement.TryGetProperty(
+                    "queueOrderRevision",
+                    out JsonElement queueOrderRevisionElement))
+            {
+                if (!queueOrderRevisionElement.TryGetInt64(
+                        out long queueOrderRevision)
+                    || queueOrderRevision is < 0 or > 9_007_199_254_740_991)
+                {
+                    return false;
+                }
+                queueOrderRevisionSignature = queueOrderRevision.ToString(
+                    CultureInfo.InvariantCulture);
+            }
+        }
 
         if (runtimeElement.TryGetProperty("sourceDirty", out JsonElement dirtyElement))
         {
@@ -2508,6 +2536,7 @@ public partial class MainWindow
         bool atomicImageEnqueueNext = false;
         bool terminalHistoryBatchDismiss = false;
         bool queuedJobsBatchCancel = false;
+        bool queuedJobsBatchReorder = false;
         bool terminalHistoryTargets = false;
         bool terminalHistoryBatchRetry = false;
         MiniMaxH3VideoCapabilityState? miniMaxH3Capability =
@@ -2563,6 +2592,22 @@ public partial class MainWindow
                         queuedJobsBatchCancelElement.GetBoolean();
                 }
                 else if (queuedJobsBatchCancelElement.ValueKind != JsonValueKind.Null)
+                {
+                    return false;
+                }
+            }
+            if (capabilitiesElement.TryGetProperty(
+                    "queuedJobsBatchReorderV1",
+                    out JsonElement queuedJobsBatchReorderElement))
+            {
+                if (queuedJobsBatchReorderElement.ValueKind is
+                    JsonValueKind.True or JsonValueKind.False)
+                {
+                    queuedJobsBatchReorder =
+                        queuedJobsBatchReorderElement.GetBoolean();
+                }
+                else if (queuedJobsBatchReorderElement.ValueKind
+                    != JsonValueKind.Null)
                 {
                     return false;
                 }
@@ -2667,7 +2712,7 @@ public partial class MainWindow
         // signature because they catch a same-count replacement or a companion
         // restart without restoring full polling on each progress tick.
         string inventorySignature = FormattableString.Invariant(
-            $"{queued}|{running}|{succeeded}|{failed}|{canceled}|{deleted}|{currentJobId ?? "-"}|{lastClaimAtSignature}|{lastTerminalAtSignature}|{serverStartedAtSignature}|{processId}|{buildIdSignature}");
+            $"{queued}|{running}|{succeeded}|{failed}|{canceled}|{deleted}|{currentJobId ?? "-"}|{lastClaimAtSignature}|{lastTerminalAtSignature}|{queueOrderRevisionSignature}|{serverStartedAtSignature}|{processId}|{buildIdSignature}");
         health = new EnhancementQueueHealthView(
             stateLabel,
             detail,
@@ -2679,6 +2724,7 @@ public partial class MainWindow
             photorealPromptControls && atomicImageEnqueueNext,
             terminalHistoryBatchDismiss,
             queuedJobsBatchCancel,
+            queuedJobsBatchReorder,
             terminalHistoryTargets,
             terminalHistoryBatchRetry,
             inventorySignature,
@@ -2771,6 +2817,8 @@ public partial class MainWindow
             health.TerminalHistoryBatchDismiss;
         _enhancementWorkspaceQueuedJobsBatchCancelSupported =
             health.QueuedJobsBatchCancel;
+        _enhancementWorkspaceQueuedJobsBatchReorderSupported =
+            health.QueuedJobsBatchReorder;
         _enhancementWorkspaceTerminalHistoryTargetsSupported =
             health.TerminalHistoryTargets
             && health.TerminalHistoryBatchDismiss;
@@ -2803,6 +2851,7 @@ public partial class MainWindow
         ApplyPhotorealEnqueueNextCapability(false);
         _enhancementWorkspaceTerminalHistoryBatchDismissSupported = false;
         _enhancementWorkspaceQueuedJobsBatchCancelSupported = false;
+        _enhancementWorkspaceQueuedJobsBatchReorderSupported = false;
         _enhancementWorkspaceTerminalHistoryTargetsSupported = false;
         _enhancementWorkspaceTerminalHistoryBatchRetrySupported = false;
         EnhancementJobsHealthStateText.Text = "Health unavailable";
@@ -4760,7 +4809,9 @@ public partial class MainWindow
         EnhancementWorkspaceJobView job,
         string move)
     {
-        if (_enhancementWorkspaceMutationPending
+        bool coalescedReorderActive =
+            _enhancementWorkspaceQueueOrderFlushTask is not null;
+        if ((_enhancementWorkspaceMutationPending && !coalescedReorderActive)
             || job.IsBusy
             || EnhancementJobsDialog.Visibility != Visibility.Visible
             || move is not ("up" or "down" or "next")
@@ -4777,6 +4828,33 @@ public partial class MainWindow
         if (optimisticOrder.SequenceEqual(previousOrder, StringComparer.Ordinal))
             return false;
 
+        if (_enhancementWorkspaceQueuedJobsBatchReorderSupported
+            && _enhancementWorkspaceJobs
+                .Where(static candidate => candidate.Status == "queued")
+                .All(static candidate => candidate.CanReorder)
+            && CanUseQueuedJobsBatchReorder(previousOrder))
+        {
+            return QueueCoalescedEnhancementWorkspaceOrder(
+                previousOrder,
+                optimisticOrder,
+                move);
+        }
+        if (coalescedReorderActive)
+            return false;
+
+        return await MoveEnhancementJobInQueueLegacyAsync(
+            job,
+            move,
+            previousOrder,
+            optimisticOrder);
+    }
+
+    private async Task<bool> MoveEnhancementJobInQueueLegacyAsync(
+        EnhancementWorkspaceJobView job,
+        string move,
+        string[] previousOrder,
+        string[] optimisticOrder)
+    {
         _enhancementWorkspaceMutationPending = true;
         job.IsBusy = true;
         long generation = _enhancementWorkspaceGeneration;
@@ -4847,6 +4925,263 @@ public partial class MainWindow
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
+    }
+
+    private bool QueueCoalescedEnhancementWorkspaceOrder(
+        string[] previousOrder,
+        string[] optimisticOrder,
+        string move)
+    {
+        bool startsFlush = _enhancementWorkspaceQueueOrderFlushTask is null;
+        if (startsFlush)
+        {
+            _enhancementWorkspaceMutationPending = true;
+            _enhancementWorkspaceConfirmedQueueOrder = previousOrder;
+        }
+
+        _enhancementWorkspaceQueuePresentationRevision++;
+        if (!ApplyEnhancementWorkspaceQueuePresentation(optimisticOrder))
+        {
+            if (startsFlush)
+            {
+                _enhancementWorkspaceMutationPending = false;
+                _enhancementWorkspaceConfirmedQueueOrder = null;
+            }
+            return false;
+        }
+
+        _enhancementWorkspacePendingQueueOrder = optimisticOrder;
+        EnhancementJobsStatusText.Text = move == "next"
+            ? "次の処理位置へすぐ反映しました。連続操作をまとめて保存します…"
+            : "待機順へすぐ反映しました。連続操作をまとめて保存します…";
+        RefreshEnhancementQueueBulkControls();
+        RefreshEnhancementQueuePauseControl();
+        if (startsFlush)
+        {
+            long generation = _enhancementWorkspaceGeneration;
+            _enhancementWorkspaceQueueOrderFlushTask =
+                FlushCoalescedEnhancementWorkspaceOrderAsync(generation);
+        }
+        return true;
+    }
+
+    private static bool CanUseQueuedJobsBatchReorder(
+        IReadOnlyList<string> orderedIds)
+    {
+        if (orderedIds.Count is < 1 or > EnhancementQueuedJobsBatchReorderLimit
+            || orderedIds.Any(static id =>
+                string.IsNullOrWhiteSpace(id) || id.Length > 255)
+            || orderedIds.Distinct(StringComparer.Ordinal).Count()
+                != orderedIds.Count)
+        {
+            return false;
+        }
+
+        string probeBody = JsonSerializer.Serialize(new
+        {
+            ids = orderedIds,
+            orderRequestId = "00000000-0000-0000-0000-000000000000",
+        });
+        return Encoding.UTF8.GetByteCount(probeBody)
+            <= EnhancementQueuedJobsBatchReorderMaximumBodyBytes;
+    }
+
+    private async Task FlushCoalescedEnhancementWorkspaceOrderAsync(
+        long originatingGeneration)
+    {
+        bool refreshAuthoritativeOrder = false;
+        string? failureMessage = null;
+        try
+        {
+            await Task.Delay(EnhancementJobsQueueReorderDebounce);
+            while (_enhancementWorkspacePendingQueueOrder is { } requestedOrder)
+            {
+                _enhancementWorkspacePendingQueueOrder = null;
+                if (_enhancementWorkspaceConfirmedQueueOrder is { } confirmedOrder
+                    && requestedOrder.SequenceEqual(
+                        confirmedOrder,
+                        StringComparer.Ordinal))
+                {
+                    if (_enhancementWorkspacePendingQueueOrder is null)
+                        break;
+                    await Task.Delay(EnhancementJobsQueueReorderDebounce);
+                    continue;
+                }
+
+                string orderRequestId = Guid.NewGuid().ToString("D");
+                EnhancementApiResponse response =
+                    await SendIdempotentEnhancementMutationAsync(
+                        HttpMethod.Post,
+                        "api/enhance/jobs/queued/order",
+                        new
+                        {
+                            ids = requestedOrder,
+                            orderRequestId,
+                        });
+                _enhancementWorkspaceQueuePresentationRevision++;
+                if (!response.Ok
+                    || !TryParseQueuedJobsBatchReorderResponse(
+                        response.Payload,
+                        orderRequestId,
+                        requestedOrder.Length))
+                {
+                    string errorCode = response.Ok
+                        ? "QUEUED_ORDER_RESPONSE_INVALID"
+                        : EnhancementApiErrorCode(response);
+                    failureMessage = errorCode switch
+                    {
+                        "QUEUED_ORDER_SNAPSHOT_CHANGED" =>
+                            "処理開始・追加・取消で待機列が変わったため、最新の順序へ同期しました。",
+                        "QUEUED_ORDER_IDEMPOTENCY_CONFLICT" =>
+                            "待機順の再送IDが競合したため、最新の順序へ同期しました。",
+                        _ =>
+                            $"待機順を保存できなかったため、最新の順序へ同期しました（{errorCode}）。",
+                    };
+                    refreshAuthoritativeOrder = true;
+                    break;
+                }
+
+                _enhancementWorkspaceConfirmedQueueOrder = requestedOrder;
+                if (_enhancementWorkspacePendingQueueOrder is null)
+                    break;
+                await Task.Delay(EnhancementJobsQueueReorderDebounce);
+            }
+
+            if (originatingGeneration != _enhancementWorkspaceGeneration
+                && EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                refreshAuthoritativeOrder = true;
+            }
+
+            if (refreshAuthoritativeOrder)
+            {
+                _enhancementWorkspaceHealthInventorySignature = null;
+                if (originatingGeneration == _enhancementWorkspaceGeneration
+                    && EnhancementJobsDialog.Visibility == Visibility.Visible
+                    && _enhancementWorkspaceConfirmedQueueOrder is { } confirmedOrder)
+                {
+                    _enhancementWorkspaceQueuePresentationRevision++;
+                    ApplyEnhancementWorkspaceQueuePresentation(confirmedOrder);
+                    EnhancementJobsStatusText.Text = "最新の待機順を確認しています…";
+                }
+
+                if (EnhancementJobsDialog.Visibility == Visibility.Visible)
+                {
+                    long refreshGeneration = _enhancementWorkspaceGeneration;
+                    for (int attempt = 0;
+                        attempt < 400
+                            && _enhancementWorkspaceRefreshPending
+                            && _enhancementWorkspaceRefreshGeneration
+                                == refreshGeneration;
+                        attempt++)
+                    {
+                        await Task.Delay(10);
+                    }
+                    await RefreshEnhancementJobsWorkspaceAsync(
+                        refreshGeneration,
+                        isPoll: false);
+                    if (refreshGeneration == _enhancementWorkspaceGeneration
+                        && EnhancementJobsDialog.Visibility == Visibility.Visible
+                        && failureMessage is not null)
+                    {
+                        EnhancementJobsStatusText.Text = failureMessage;
+                    }
+                }
+            }
+            else if (originatingGeneration == _enhancementWorkspaceGeneration
+                && EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                EnhancementJobsStatusText.Text =
+                    "連続した待機順の変更をまとめて保存しました。";
+            }
+        }
+        catch (Exception ex)
+        {
+            _enhancementWorkspaceHealthInventorySignature = null;
+            string transportFailure =
+                $"待機順を保存できなかったため、最新の順序へ同期しました（{ex.GetType().Name}）。";
+            if (originatingGeneration == _enhancementWorkspaceGeneration
+                && EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                _enhancementWorkspaceQueuePresentationRevision++;
+                if (_enhancementWorkspaceConfirmedQueueOrder is { } confirmedOrder)
+                    ApplyEnhancementWorkspaceQueuePresentation(confirmedOrder);
+                EnhancementJobsStatusText.Text = "最新の待機順を確認しています…";
+            }
+            if (EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                long refreshGeneration = _enhancementWorkspaceGeneration;
+                for (int attempt = 0;
+                    attempt < 400
+                        && _enhancementWorkspaceRefreshPending
+                        && _enhancementWorkspaceRefreshGeneration
+                            == refreshGeneration;
+                    attempt++)
+                {
+                    await Task.Delay(10);
+                }
+                await RefreshEnhancementJobsWorkspaceAsync(
+                    refreshGeneration,
+                    isPoll: false);
+                if (refreshGeneration == _enhancementWorkspaceGeneration
+                    && EnhancementJobsDialog.Visibility == Visibility.Visible)
+                {
+                    EnhancementJobsStatusText.Text = transportFailure;
+                }
+            }
+        }
+        finally
+        {
+            _enhancementWorkspacePendingQueueOrder = null;
+            _enhancementWorkspaceConfirmedQueueOrder = null;
+            _enhancementWorkspaceQueueOrderFlushTask = null;
+            _enhancementWorkspaceMutationPending = false;
+            RefreshEnhancementQueueBulkControls();
+            RefreshEnhancementQueuePauseControl();
+        }
+    }
+
+    private static bool TryParseQueuedJobsBatchReorderResponse(
+        JsonElement? payload,
+        string expectedRequestId,
+        int expectedCount)
+    {
+        if (payload is not JsonElement response
+            || response.ValueKind != JsonValueKind.Object
+            || !TryGetStringProperty(
+                response,
+                "orderRequestId",
+                out string? orderRequestId)
+            || !string.Equals(
+                orderRequestId,
+                expectedRequestId,
+                StringComparison.Ordinal)
+            || !response.TryGetProperty(
+                "queueOrderRevision",
+                out JsonElement revisionElement)
+            || !revisionElement.TryGetInt64(out long revision)
+            || revision < 0
+            || !response.TryGetProperty(
+                "orderedCount",
+                out JsonElement orderedCountElement)
+            || !orderedCountElement.TryGetInt32(out int orderedCount)
+            || orderedCount != expectedCount
+            || !response.TryGetProperty(
+                "changedCount",
+                out JsonElement changedCountElement)
+            || !changedCountElement.TryGetInt32(out int changedCount)
+            || changedCount < 0
+            || changedCount > expectedCount
+            || !response.TryGetProperty(
+                "replayed",
+                out JsonElement replayedElement)
+            || replayedElement.ValueKind is not (
+                JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private string[] CurrentEnhancementWorkspaceQueueOrder()
@@ -9972,6 +10307,7 @@ internal readonly record struct EnhancementQueueHealthView(
     bool PhotorealEnqueueNext,
     bool TerminalHistoryBatchDismiss,
     bool QueuedJobsBatchCancel,
+    bool QueuedJobsBatchReorder,
     bool TerminalHistoryTargets,
     bool TerminalHistoryBatchRetry,
     string InventorySignature,

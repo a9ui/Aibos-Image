@@ -69,6 +69,7 @@
     "missingQueuedPhotorealPromptUpdate": "keep health and jobs readable but hide the queued prompt-update action",
     "missingTerminalHistoryBatchDismissV1": "keep health and jobs readable and fall back to protected per-job terminal history dismissal",
     "missingQueuedJobsBatchCancelV1": "keep health and jobs readable and fall back to protected per-job queued cancellation",
+    "missingQueuedJobsBatchReorderV1": "keep health and jobs readable and fall back to protected per-job queued reordering without sending a final-order body to an older route",
     "missingTerminalHistoryTargetsV1": "keep health and jobs readable and never redefine all as only the loaded history window",
     "missingTerminalHistoryBatchRetryV1": "keep health and jobs readable but never retry only the loaded terminal history window as if it were all",
     "terminalHistoryTargetsV1Dependency": "use authoritative targets only with the matching compact mutation capability: dismiss requires terminalHistoryBatchDismissV1 and retry requires terminalHistoryBatchRetryV1, so a plan never degrades into thousands of per-job requests",
@@ -79,6 +80,7 @@
     "missingStoreRevisions": "keep health and jobs readable; readers must not invent revision values",
     "inventoryRevision": "an optional monotonic commit revision; it may advance for progress or heartbeat writes and is not by itself a signal to reload the full jobs inventory",
     "catalogRevision": "an optional monotonic revision for WPF-visible managed-media changes; it stays stable for heartbeat and progress-only writes",
+    "queueOrderRevision": "an optional non-negative monotonic safe integer in store.queueOrderRevision; a change invalidates a cached queued ordering even when status counts are unchanged",
     "pausedDisplay": "show Paused as an intentional state; if one job is running, explain that it may finish while no next job starts",
     "polling": "request health only while the Jobs workspace performs its existing passive refresh",
     "timeoutPolicy": "do not infer a stall from elapsed time alone"

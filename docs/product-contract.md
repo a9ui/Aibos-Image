@@ -202,6 +202,11 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   retry-all stays disabled whenever history extends beyond the loaded window.
 - Queue ordering, pause, claim, retry, cancellation, and queued-setting updates
   share the locks and idempotency rules in `PV-ENHANCE-QUEUE-001`.
+  When exact batch reorder is advertised, rapid WPF moves update the complete
+  queued presentation immediately and coalesce to the latest full order. The
+  companion applies that order in one write only if the queued-id snapshot is
+  still exact; a concurrent claim, enqueue, or cancel returns conflict without
+  a partial reorder or worker wake.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
   ComfyUI, or GPU side effect.
 - Managed outputs stay below the selected output root and operation folder.
