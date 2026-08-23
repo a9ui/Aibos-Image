@@ -19954,6 +19954,7 @@ public partial class App : Application
                     StringComparer.Ordinal);
                 var terminalHistoryBatchBodies = new List<string>();
                 var terminalHistoryTargetBodies = new List<string>();
+                var terminalHistoryRetryBodies = new List<string>();
                 var queuedJobsBatchBodies = new List<string>();
                 var jobsBulkConfirmations = new List<(string Title, string Message)>();
                 bool acceptJobsBulkConfirmation = true;
@@ -20472,6 +20473,7 @@ public partial class App : Application
                     capabilities["terminalHistoryBatchDismissV1"] = true;
                     capabilities["queuedJobsBatchCancelV1"] = true;
                     capabilities["terminalHistoryTargetsV1"] = true;
+                    capabilities["terminalHistoryBatchRetryV1"] = true;
                     capabilities["durableEnqueueInboxV1"] = new
                     {
                         ready = true,
@@ -20834,6 +20836,77 @@ public partial class App : Application
                                 targetCount = selectedIds.Count,
                                 protectedCount = selectedProtectedCount,
                                 ids = selectedIds,
+                            }));
+                    }
+                    if (request.Method == HttpMethod.Post
+                        && route.EndsWith(
+                            "/api/enhance/jobs/terminal/retry",
+                            StringComparison.Ordinal))
+                    {
+                        string body = request.Content?.ReadAsStringAsync()
+                            .GetAwaiter().GetResult() ?? "";
+                        terminalHistoryRetryBodies.Add(body);
+                        using JsonDocument retryDocument =
+                            JsonDocument.Parse(body);
+                        JsonElement retryRoot = retryDocument.RootElement;
+                        string requestedStatus = retryRoot.GetProperty(
+                            "status").GetString() ?? "";
+                        string batchRequestId = retryRoot.GetProperty(
+                            "batchRequestId").GetString() ?? "";
+                        string[] ids = retryRoot.GetProperty("ids")
+                            .EnumerateArray()
+                            .Select(static element => element.GetString() ?? "")
+                            .ToArray();
+                        string[] failedIds = requestedStatus == "failed"
+                            ? ids.Where(static id => string.Equals(
+                                id,
+                                "clearable-failed-job",
+                                StringComparison.Ordinal)).ToArray()
+                            : [];
+                        string[] acceptedIds = ids.Except(
+                            failedIds,
+                            StringComparer.Ordinal).ToArray();
+                        if (requestedStatus == "failed")
+                        {
+                            dismissedFailedJobs.UnionWith(acceptedIds);
+                            if (acceptedIds.Contains(
+                                "delivery-failed-job",
+                                StringComparer.Ordinal))
+                            {
+                                bulkRetryCreated = true;
+                            }
+                        }
+                        else if (requestedStatus == "canceled")
+                        {
+                            dismissedCanceledJobs.UnionWith(acceptedIds);
+                        }
+                        return Task.FromResult(JsonResponse(
+                            HttpStatusCode.Accepted,
+                            new
+                            {
+                                batchRequestId,
+                                batchReplayed = false,
+                                requestedCount = ids.Length,
+                                retriedCount = acceptedIds.Length,
+                                replayedCount = 0,
+                                dismissedSourceCount = acceptedIds.Length,
+                                retainedSourceCount = failedIds.Length,
+                                protectedCount = 0,
+                                missingCount = 0,
+                                failedCount = failedIds.Length,
+                                results = acceptedIds.Select(id => new
+                                {
+                                    sourceJobId = id,
+                                    jobId = $"batch-retry-{id}",
+                                    replayed = false,
+                                }).ToArray(),
+                                failures = failedIds.Select(id => new
+                                {
+                                    sourceJobId = id,
+                                    outcome = "failed",
+                                    code = "SYNTHETIC_RETRY_REJECTION",
+                                    status = 409,
+                                }).ToArray(),
                             }));
                     }
                     if (request.Method == HttpMethod.Delete
@@ -22377,9 +22450,9 @@ public partial class App : Application
                         ["delivery-failed-job", "video-malformed-provenance-job"],
                         StringComparer.Ordinal)
                     && window.RetryAllFailedEnhancementJobsLabelForSmoke
-                        .Contains("(1)", StringComparison.Ordinal)
+                        .Contains("全履歴", StringComparison.Ordinal)
                     && window.RetryAllFailedEnhancementJobsToolTipForSmoke
-                        .Contains("保護対象1件", StringComparison.Ordinal);
+                        .Contains("表示件数に関係なく", StringComparison.Ordinal);
                 window.SelectEnhancementJobsOperationFilterForSmoke("all");
                 bool bulkFailedControlsReady =
                     window.FailedBulkPanelVisibleForSmoke
@@ -22387,11 +22460,11 @@ public partial class App : Application
                     window.RetryAllFailedEnhancementJobsControlForSmoke
                     && window.ClearAllFailedEnhancementJobsControlForSmoke
                     && window.RetryAllFailedEnhancementJobsLabelForSmoke
-                        .Contains("(2)", StringComparison.Ordinal)
+                        .Contains("全履歴", StringComparison.Ordinal)
                     && window.RetryAllFailedEnhancementJobsToolTipForSmoke
                         .Contains("保存済み", StringComparison.Ordinal)
                     && window.RetryAllFailedEnhancementJobsToolTipForSmoke
-                        .Contains("保護対象3件", StringComparison.Ordinal);
+                        .Contains("表示件数に関係なく", StringComparison.Ordinal);
                 window.SelectEnhancementJobsFilterForSmoke("all");
                 bool receiptOnlyResponseStaysVisible =
                     PhotoViewer.Wpf.MainWindow
@@ -22434,7 +22507,8 @@ public partial class App : Application
                 static bool IsTerminalHistoryTargetBody(
                     string bodyText,
                     string expectedStatus,
-                    string expectedOperation)
+                    string expectedOperation,
+                    string expectedAction)
                 {
                     try
                     {
@@ -22443,7 +22517,8 @@ public partial class App : Application
                         return body.GetProperty("status").GetString() == expectedStatus
                             && body.GetProperty("operation").GetString()
                                 == expectedOperation
-                            && body.GetProperty("action").GetString() == "dismiss";
+                            && body.GetProperty("action").GetString()
+                                == expectedAction;
                     }
                     catch (Exception ex) when (
                         ex is JsonException
@@ -22451,6 +22526,59 @@ public partial class App : Application
                             or KeyNotFoundException)
                     {
                         return false;
+                    }
+                }
+                static bool IsTerminalHistoryRetryBody(
+                    string bodyText,
+                    string expectedStatus,
+                    string requiredId,
+                    params string[] protectedIds)
+                {
+                    try
+                    {
+                        using JsonDocument document = JsonDocument.Parse(bodyText);
+                        JsonElement body = document.RootElement;
+                        string? batchRequestId = body.GetProperty(
+                            "batchRequestId").GetString();
+                        string[] ids = body.GetProperty("ids")
+                            .EnumerateArray()
+                            .Select(static element => element.GetString() ?? "")
+                            .ToArray();
+                        return body.GetProperty("status").GetString()
+                                == expectedStatus
+                            && !string.IsNullOrWhiteSpace(batchRequestId)
+                            && batchRequestId.Length <= 128
+                            && ids.Length > 0
+                            && ids.Length <= 1_000
+                            && ids.Distinct(StringComparer.Ordinal).Count()
+                                == ids.Length
+                            && ids.Contains(requiredId, StringComparer.Ordinal)
+                            && protectedIds.All(id =>
+                                !ids.Contains(id, StringComparer.Ordinal));
+                    }
+                    catch (Exception ex) when (
+                        ex is JsonException
+                            or InvalidOperationException
+                            or KeyNotFoundException)
+                    {
+                        return false;
+                    }
+                }
+                static string? ReadTerminalHistoryBatchRequestId(
+                    string bodyText)
+                {
+                    try
+                    {
+                        using JsonDocument document = JsonDocument.Parse(bodyText);
+                        return document.RootElement.GetProperty(
+                            "batchRequestId").GetString();
+                    }
+                    catch (Exception ex) when (
+                        ex is JsonException
+                            or InvalidOperationException
+                            or KeyNotFoundException)
+                    {
+                        return null;
                     }
                 }
                 int failedConfirmationsBefore = jobsBulkConfirmations.Count;
@@ -22465,12 +22593,22 @@ public partial class App : Application
                 acceptJobsBulkConfirmation = true;
                 (string Title, string Message)[] rejectedFailedConfirmations =
                     jobsBulkConfirmations.Skip(failedConfirmationsBefore).ToArray();
+                string[] rejectedFailedMutationRequests = requests
+                    .Skip(requestsBeforeRejectedFailedActions)
+                    .Where(static request => request.Contains(
+                        "/api/enhance/jobs/terminal",
+                        StringComparison.Ordinal))
+                    .ToArray();
                 bool failedBulkConfirmationContract = rejectedFailedRetry == 0
                     && rejectedFailedClear == 0
-                    && requests.Skip(requestsBeforeRejectedFailedActions).SequenceEqual(
-                        ["POST /api/enhance/jobs/terminal/targets"],
+                    && rejectedFailedMutationRequests.SequenceEqual(
+                        [
+                            "POST /api/enhance/jobs/terminal/targets",
+                            "POST /api/enhance/jobs/terminal/targets",
+                        ],
                         StringComparer.Ordinal)
-                    && terminalHistoryTargetBodies.Count == failedTargetsBefore + 1
+                    && terminalHistoryTargetBodies.Count
+                        == failedTargetsBefore + 2
                     && terminalHistoryBatchBodies.Count == failedDismissBatchesBefore
                     && rejectedFailedConfirmations.Length == 2
                     && rejectedFailedConfirmations[0].Title.Contains(
@@ -22502,13 +22640,13 @@ public partial class App : Application
                     && receiptOnlyResponseStaysVisible
                     && bulkFailedRetried == 1
                     && bulkFailedRequests.Contains(
+                        "POST /api/enhance/jobs/terminal/targets",
+                        StringComparer.Ordinal)
+                    && bulkFailedRequests.Contains(
+                        "POST /api/enhance/jobs/terminal/retry",
+                        StringComparer.Ordinal)
+                    && !bulkFailedRequests.Contains(
                         "POST /api/enhance/jobs/delivery-failed-job/retry",
-                        StringComparer.Ordinal)
-                    && bulkFailedRequests.Contains(
-                        "POST /api/enhance/jobs/clearable-failed-job/retry",
-                        StringComparer.Ordinal)
-                    && bulkFailedRequests.Contains(
-                        "DELETE /api/enhance/jobs/delivery-failed-job",
                         StringComparer.Ordinal)
                     && bulkRetryCreated
                     && !afterBulkFailedRetry.VisibleIds.Contains(
@@ -22547,12 +22685,22 @@ public partial class App : Application
                 acceptJobsBulkConfirmation = true;
                 (string Title, string Message)[] rejectedCanceledConfirmations =
                     jobsBulkConfirmations.Skip(canceledConfirmationsBefore).ToArray();
+                string[] rejectedCanceledMutationRequests = requests
+                    .Skip(requestsBeforeRejectedCanceledActions)
+                    .Where(static request => request.Contains(
+                        "/api/enhance/jobs/terminal",
+                        StringComparison.Ordinal))
+                    .ToArray();
                 bool canceledBulkConfirmationContract = rejectedCanceledRetry == 0
                     && rejectedCanceledClear == 0
-                    && requests.Skip(requestsBeforeRejectedCanceledActions).SequenceEqual(
-                        ["POST /api/enhance/jobs/terminal/targets"],
+                    && rejectedCanceledMutationRequests.SequenceEqual(
+                        [
+                            "POST /api/enhance/jobs/terminal/targets",
+                            "POST /api/enhance/jobs/terminal/targets",
+                        ],
                         StringComparer.Ordinal)
-                    && terminalHistoryTargetBodies.Count == canceledTargetsBefore + 1
+                    && terminalHistoryTargetBodies.Count
+                        == canceledTargetsBefore + 2
                     && terminalHistoryBatchBodies.Count == canceledDismissBatchesBefore
                     && rejectedCanceledConfirmations.Length == 2
                     && rejectedCanceledConfirmations[0].Title.Contains(
@@ -22583,16 +22731,9 @@ public partial class App : Application
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool bulkCanceledActionsContract = bulkCanceledControlsReady
                     && bulkCanceledRetried > 0
-                    && bulkCanceledRetryRequests.Length
-                        == bulkCanceledRetried
+                    && bulkCanceledRetryRequests.Length == 1
                     && bulkCanceledRetryRequests.Contains(
-                        "POST /api/enhance/jobs/queue-later-job/retry",
-                        StringComparer.Ordinal)
-                    && bulkCanceledRetryRequests.Contains(
-                        "POST /api/enhance/jobs/legacy-reader-job/retry",
-                        StringComparer.Ordinal)
-                    && bulkCanceledRetryRequests.Contains(
-                        "POST /api/enhance/jobs/failed-cancel-job/retry",
+                        "POST /api/enhance/jobs/terminal/retry",
                         StringComparer.Ordinal)
                     && !bulkCanceledRetryRequests.Contains(
                         "POST /api/enhance/jobs/future-canceled-reader-job/retry",
@@ -22615,24 +22756,68 @@ public partial class App : Application
                         "video-malformed-provenance-job",
                         "future-reader-job",
                         "null-operation-reader-job");
+                bool terminalHistoryBatchRetryContract =
+                    terminalHistoryRetryBodies.Count == 2
+                    && IsTerminalHistoryRetryBody(
+                        terminalHistoryRetryBodies[0],
+                        "failed",
+                        "delivery-failed-job",
+                        "video-malformed-provenance-job",
+                        "future-reader-job",
+                        "null-operation-reader-job")
+                    && IsTerminalHistoryRetryBody(
+                        terminalHistoryRetryBodies[1],
+                        "canceled",
+                        "queue-later-job",
+                        "future-canceled-reader-job")
+                    && !string.Equals(
+                        ReadTerminalHistoryBatchRequestId(
+                            terminalHistoryRetryBodies[0]),
+                        ReadTerminalHistoryBatchRequestId(
+                            terminalHistoryRetryBodies[1]),
+                        StringComparison.Ordinal);
                 bool terminalHistoryTargetPlanContract =
-                    terminalHistoryTargetBodies.Count == 4
+                    terminalHistoryTargetBodies.Count == 8
                     && IsTerminalHistoryTargetBody(
                         terminalHistoryTargetBodies[0],
                         "failed",
-                        "all")
+                        "all",
+                        "retry")
                     && IsTerminalHistoryTargetBody(
                         terminalHistoryTargetBodies[1],
                         "failed",
-                        "all")
+                        "all",
+                        "dismiss")
                     && IsTerminalHistoryTargetBody(
                         terminalHistoryTargetBodies[2],
-                        "canceled",
-                        "all")
+                        "failed",
+                        "all",
+                        "retry")
                     && IsTerminalHistoryTargetBody(
                         terminalHistoryTargetBodies[3],
+                        "failed",
+                        "all",
+                        "dismiss")
+                    && IsTerminalHistoryTargetBody(
+                        terminalHistoryTargetBodies[4],
                         "canceled",
-                        "all");
+                        "all",
+                        "retry")
+                    && IsTerminalHistoryTargetBody(
+                        terminalHistoryTargetBodies[5],
+                        "canceled",
+                        "all",
+                        "dismiss")
+                    && IsTerminalHistoryTargetBody(
+                        terminalHistoryTargetBodies[6],
+                        "canceled",
+                        "all",
+                        "retry")
+                    && IsTerminalHistoryTargetBody(
+                        terminalHistoryTargetBodies[7],
+                        "canceled",
+                        "all",
+                        "dismiss");
                 window.SelectEnhancementJobsFilterForSmoke("all");
                 EnhancementJobsWorkspaceSmokeSnapshot beforeCachedReopen =
                     window.EnhancementJobsWorkspaceForSmoke();
@@ -22667,10 +22852,10 @@ public partial class App : Application
                     && requests.Contains("POST /api/enhance/jobs/failed-cancel-job/cancel", StringComparer.Ordinal)
                     && requests.Contains("POST /api/enhance/jobs/failed-retry-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/failed-retry-job", StringComparer.Ordinal)
-                    && requests.Contains("POST /api/enhance/jobs/delivery-failed-job/retry", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/terminal", StringComparer.Ordinal)
-                    && requests.Contains("DELETE /api/enhance/jobs/delivery-failed-job", StringComparer.Ordinal)
-                    && requests.Contains("POST /api/enhance/jobs/clearable-failed-job/retry", StringComparer.Ordinal)
+                    && !requests.Contains("POST /api/enhance/jobs/delivery-failed-job/retry", StringComparer.Ordinal)
+                    && !requests.Contains("DELETE /api/enhance/jobs/delivery-failed-job", StringComparer.Ordinal)
+                    && !requests.Contains("POST /api/enhance/jobs/clearable-failed-job/retry", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/clearable-failed-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/video-malformed-provenance-job", StringComparer.Ordinal)
                     && !requests.Contains("DELETE /api/enhance/jobs/future-reader-job", StringComparer.Ordinal)
@@ -22687,7 +22872,9 @@ public partial class App : Application
                         "DELETE /api/enhance/jobs/queued",
                         StringComparer.Ordinal)
                     && requests.Count(static request =>
-                        request == "POST /api/enhance/jobs/terminal/targets") == 4
+                        request == "POST /api/enhance/jobs/terminal/targets") == 8
+                    && requests.Count(static request =>
+                        request == "POST /api/enhance/jobs/terminal/retry") == 2
                     && requests.Contains("DELETE /api/enhance/jobs/done-job/output", StringComparer.Ordinal)
                     && requests.Contains("DELETE /api/enhance/jobs/video-reader-job/output", StringComparer.Ordinal);
                 bool queueInventoryOrdered = initial.VisibleIds.Take(4).SequenceEqual(
@@ -22872,6 +23059,7 @@ public partial class App : Application
                     && canceledBulkConfirmationContract
                     && queuedJobsBatchCancelContract
                     && terminalHistoryBatchDismissContract
+                    && terminalHistoryBatchRetryContract
                     && terminalHistoryTargetPlanContract
                     && unsupportedNoMutation
                     && imageVersionsExcludeVideo
@@ -23000,6 +23188,7 @@ public partial class App : Application
                     jobsFilterLayoutContract,
                     queuedJobsBatchCancelContract,
                     terminalHistoryBatchDismissContract,
+                    terminalHistoryBatchRetryContract,
                     terminalHistoryTargetPlanContract,
                     failedBulkConfirmationContract,
                     canceledBulkConfirmationContract,

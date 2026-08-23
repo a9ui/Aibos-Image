@@ -63,6 +63,7 @@
         "terminalHistoryBatchDismissV1": true,
         "queuedJobsBatchCancelV1": true,
         "terminalHistoryTargetsV1": true,
+        "terminalHistoryBatchRetryV1": true,
         "photorealPromptControlsV2": true,
         "atomicImageEnqueueNext": true,
         "displayedManagedVideoSourceV1": true,

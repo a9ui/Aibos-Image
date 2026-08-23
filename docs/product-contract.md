@@ -196,9 +196,10 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   complete validated active snapshot; the companion freezes exact ids for
   presentation-bounded terminal history, so rows created after that plan are
   not included. Exact queued cancellation uses a dedicated batch route; it
-  never overloads the legacy bodyless cancel-all route. Until the companion
-  advertises authoritative terminal batch retry, WPF disables retry-all when
-  terminal history is outside the loaded presentation window.
+  never overloads the legacy bodyless cancel-all route. With authoritative
+  terminal targets and batch retry advertised, WPF retries the exact filtered
+  history in idempotent chunks of at most 1000 ids; without both capabilities,
+  retry-all stays disabled whenever history extends beyond the loaded window.
 - Queue ordering, pause, claim, retry, cancellation, and queued-setting updates
   share the locks and idempotency rules in `PV-ENHANCE-QUEUE-001`.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
