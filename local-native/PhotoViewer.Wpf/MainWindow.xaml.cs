@@ -23599,6 +23599,9 @@ public partial class MainWindow : Window
         SetShowGridFileInfoOverlay(
             state?.ShowGridFileInfoOverlay ?? true,
             persist: false);
+        SetEnhancementJobsHistoryLimit(
+            state?.EnhancementJobsHistoryLimit ?? 500,
+            persist: false);
         SetShowLoadTiming(
             state?.ShowLoadTiming ?? false,
             persist: false);
@@ -23949,6 +23952,7 @@ public partial class MainWindow : Window
                     : null,
                 ShowUnseenDots = _showUnseenDots,
                 ShowGridFileInfoOverlay = _showGridFileInfoOverlay,
+                EnhancementJobsHistoryLimit = _enhancementJobsHistoryLimit,
                 ShowLoadTiming = _showLoadTiming,
                 ShowFavoriteChangeNotifications = _showFavoriteChangeNotifications,
                 EnhancementNotifications =
@@ -31076,6 +31080,9 @@ public sealed class ViewerState
     public bool ShowUnseenDots { get; set; }
     // WPF-local Grid caption presentation. Missing older state keeps captions on.
     public bool? ShowGridFileInfoOverlay { get; set; }
+    // WPF-local Jobs presentation. Active rows are always loaded; this limits
+    // only the most recently updated terminal history rows.
+    public int? EnhancementJobsHistoryLimit { get; set; }
     // Optional WPF-local diagnostics. Missing older state stays off.
     public bool? ShowLoadTiming { get; set; }
     // WPF-local presentation only. Missing in older state keeps notifications on.

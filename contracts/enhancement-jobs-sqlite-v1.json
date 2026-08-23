@@ -50,12 +50,22 @@
     }
   },
   "jobsWorkspaceSurface": {
-    "purpose": "render the complete Jobs inventory from compact per-job projections without transporting or eagerly materializing every full job payload",
+    "purpose": "render every active queue row plus a bounded recent terminal-history window from compact projections without transporting or eagerly materializing every full job payload",
+    "loadedRows": "all queued rows, all running rows, and the most recently updated terminal rows up to the WPF-local history limit",
+    "historyWindow": {
+      "appliesTo": "succeeded, failed, canceled, and deleted rows only",
+      "orderingForSelection": "updated_at descending, then position descending",
+      "presentationOrdering": "selected rows retain position ascending order",
+      "default": 500,
+      "allowed": [100, 500, 1000],
+      "persistence": "WPF-local presentation state; it does not change queue authority or shared settings"
+    },
     "enhancement_jobs": {
       "requiredColumns": {
         "position": "unique non-negative integer",
         "id": "non-empty unique string",
         "status": "queued, running, succeeded, failed, canceled, or deleted",
+        "updated_at": "sortable timestamp used only to select the recent terminal window",
         "reader_payload_json": "UTF-8 JSON object containing the compact WPF-visible job projection"
       },
       "ordering": "position ascending",
@@ -83,7 +93,7 @@
       "retention": "a loaded detail string may be released when Details closes and is refreshed before Copy"
     },
     "snapshot": "one deferred transaction on a read-only query_only connection",
-    "payloadHandling": "validate and project reader_payload_json one row at a time; do not read all payload_json values or construct one aggregate all-jobs response",
+    "payloadHandling": "count statuses relationally, then validate and project reader_payload_json only for the active rows and selected terminal window; do not read all payload_json values or construct one aggregate all-jobs response",
     "resourceBounds": {
       "maximumRows": 100000,
       "maximumProjectionBytesPerRow": 1048576,
@@ -92,7 +102,8 @@
       "sqliteMaximumValueBytes": 1114112,
       "sqliteMaximumSqlBytes": 65536
     },
-    "failure": "malformed, unsupported, or over-limit state fails closed and preserves the last validated Jobs view",
+    "failure": "unsupported status or malformed selected state fails closed and preserves the last validated Jobs view; unselected terminal payloads are not parsed or made mutable by WPF",
+    "bulkScope": "display limits never redefine an operation labelled all; whole-status bulk mutations select and validate their authoritative targets in the companion",
     "mutations": "enqueue, retry, cancel, reorder, dismiss, output deletion, pause, resume, wake, claim, and recovery remain authenticated companion API operations"
   },
   "catalogRevision": {

@@ -184,6 +184,10 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 
 - `enhance/jobs.sqlite3` is the current Jobs authority. WPF uses the registered
   reader surface and does not invent a second writer.
+- Jobs loads every running and queued row, but only the most recently updated
+  terminal history selected by the WPF-local 100, 500, or 1000 row limit. The
+  default is 500. Database totals and operations labelled all are not narrowed
+  by this presentation window.
 - Queue ordering, pause, claim, retry, cancellation, and queued-setting updates
   share the locks and idempotency rules in `PV-ENHANCE-QUEUE-001`.
 - Health is a bounded passive snapshot. Reading it has no queue, worker,
