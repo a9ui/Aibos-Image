@@ -3746,7 +3746,14 @@ public partial class MainWindow
                 payload,
                 out List<EnhancementWorkspaceJobView> jobs,
                 out _,
-                static _ => false))
+                element => TryGetStringProperty(
+                        element,
+                        "id",
+                        out string? candidateId)
+                    && string.Equals(
+                        candidateId,
+                        outputJobId,
+                        StringComparison.Ordinal)))
         {
             return false;
         }
@@ -3835,6 +3842,11 @@ public partial class MainWindow
                 && !string.IsNullOrWhiteSpace(job.SourceProducerJobId))
             .Select(static job => job.SourceProducerJobId!)
             .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> protectedVideoProducerJobIds = jobs
+            .Where(static job => job.IsActive
+                && !string.IsNullOrWhiteSpace(job.SourceVideoJobId))
+            .Select(static job => job.SourceVideoJobId!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         HashSet<string> protectedManagedSourcePaths = jobs
             .Where(static job => job.Operation == "video"
                 && job.IsActive
@@ -3847,10 +3859,13 @@ public partial class MainWindow
         {
             string? outputPath = NormalizeEnhancementDependencyPath(
                 job.OutputPath);
-            job.OutputDependencyProtected = job.IsImageOperation
-                && (protectedProducerJobIds.Contains(job.Id)
-                    || outputPath is not null
-                        && protectedManagedSourcePaths.Contains(outputPath));
+            job.OutputDependencyProtected =
+                job.IsImageOperation
+                    && (protectedProducerJobIds.Contains(job.Id)
+                        || outputPath is not null
+                            && protectedManagedSourcePaths.Contains(outputPath))
+                || job.IsVideoOperation
+                    && protectedVideoProducerJobIds.Contains(job.Id);
         }
 
         AssignEnhancementWorkspaceQueuePositions(jobs);
@@ -3947,6 +3962,15 @@ public partial class MainWindow
             element,
             "sourceProducerJobId",
             out string? sourceProducerJobId);
+        TryGetStringProperty(
+            element,
+            "sourceVideoJobId",
+            out string? sourceVideoJobId);
+        if (sourceVideoJobId is not null
+            && !IsSafeVideoToolsJobId(sourceVideoJobId))
+        {
+            sourceVideoJobId = null;
+        }
         TryGetStringProperty(element, "presetId", out string? presetId);
         TryGetStringProperty(element, "adapterId", out string? adapterId);
         TryGetStringProperty(element, "outputPath", out string? outputPath);
@@ -4009,6 +4033,18 @@ public partial class MainWindow
         bool videoMutationSafe = operation == "video"
             && (videoMutationValidator?.Invoke(element)
                 ?? structurallySafeVideo);
+        // The snapshot discriminator owns fail-closed protection even when
+        // the surrounding operation field is missing or malformed. Exact
+        // presentation still requires operation=video in the reader below.
+        bool videoToolsEnvelopeClaimed =
+            ClaimsVideoToolsWorkspaceSnapshot(element);
+        VideoToolsWorkspaceSnapshot? videoToolsSnapshot =
+            videoToolsEnvelopeClaimed
+            && TryReadVideoToolsWorkspaceSnapshot(
+                element,
+                out VideoToolsWorkspaceSnapshot parsedVideoToolsSnapshot)
+                ? parsedVideoToolsSnapshot
+                : null;
         MiniMaxH3VideoWorkspaceSnapshot? miniMaxH3VideoSnapshot =
             operation == "video"
             && TryReadMiniMaxH3VideoWorkspaceSnapshot(
@@ -4023,9 +4059,10 @@ public partial class MainWindow
                 out EnhancementVideoMutationProbe? parsedVideoMutationProbe)
                 ? parsedVideoMutationProbe
                 : null;
-        bool queueReorderSafe = operation is "upscale" or "photoreal"
-            || (operation == "i2i" && i2iMutationSafe)
-            || structurallySafeVideo;
+        bool queueReorderSafe = !videoToolsEnvelopeClaimed
+            && (operation is "upscale" or "photoreal"
+                || (operation == "i2i" && i2iMutationSafe)
+                || structurallySafeVideo);
         string resolvedPresetId = presetId ?? "Default preset";
         string resolvedAdapterId = adapterId ?? "local companion";
         var view = new EnhancementWorkspaceJobView(
@@ -4033,6 +4070,7 @@ public partial class MainWindow
             sourceId ?? "",
             sourcePath ?? "",
             sourceProducerJobId,
+            sourceVideoJobId,
             resolvedPresetId,
             resolvedAdapterId,
             operation,
@@ -4074,7 +4112,10 @@ public partial class MainWindow
                 : "",
             buildRequestDetails,
             i2iV3Info?.Snapshot,
-            miniMaxH3VideoSnapshot);
+            miniMaxH3VideoSnapshot,
+            videoToolsEnvelopeClaimed,
+            videoToolsSnapshot?.Kind,
+            videoToolsSnapshot?.FinishMode);
         if (videoMutationProbe is not null)
             view.AttachVideoMutationProbe(videoMutationProbe);
         return view;
@@ -9262,6 +9303,7 @@ public partial class MainWindow
                 $"synthetic-source-{index:D5}",
                 Path.Combine(Path.GetTempPath(), $"synthetic-source-{index:D5}.png"),
                 sourceProducerJobId: null,
+                sourceVideoJobId: null,
                 presetId: operation == "video"
                     ? "wan22-ti2v-5b-normal-v1"
                     : "synthetic-preset",
@@ -10378,6 +10420,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         string sourceId,
         string sourcePath,
         string? sourceProducerJobId,
+        string? sourceVideoJobId,
         string presetId,
         string adapterId,
         string operation,
@@ -10404,12 +10447,16 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         string requestDetailsText,
         bool requestDetailsLoaded = true,
         I2iV3WorkspaceSnapshot? i2iV3Snapshot = null,
-        MiniMaxH3VideoWorkspaceSnapshot? miniMaxH3VideoSnapshot = null)
+        MiniMaxH3VideoWorkspaceSnapshot? miniMaxH3VideoSnapshot = null,
+        bool videoToolsEnvelopeClaimed = false,
+        string? videoToolsKind = null,
+        string? videoToolsFinishMode = null)
     {
         Id = id;
         SourceId = sourceId;
         SourcePath = sourcePath;
         SourceProducerJobId = sourceProducerJobId;
+        SourceVideoJobId = sourceVideoJobId;
         PresetId = presetId;
         AdapterId = adapterId;
         Operation = operation;
@@ -10422,6 +10469,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         I2iV2EnvelopeClaimed = i2iV2EnvelopeClaimed;
         I2iV3Snapshot = i2iV3Snapshot;
         MiniMaxH3VideoSnapshot = miniMaxH3VideoSnapshot;
+        VideoToolsEnvelopeClaimed = videoToolsEnvelopeClaimed;
+        VideoToolsKind = videoToolsKind;
+        VideoToolsFinishMode = videoToolsFinishMode;
         Status = status;
         CancelRequested = cancelRequested;
         Progress = progress;
@@ -10443,6 +10493,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string SourceId { get; }
     public string SourcePath { get; }
     public string? SourceProducerJobId { get; }
+    public string? SourceVideoJobId { get; }
     public string PresetId { get; }
     public string AdapterId { get; }
     public string Operation { get; }
@@ -10455,6 +10506,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool I2iV2EnvelopeClaimed { get; }
     public I2iV3WorkspaceSnapshot? I2iV3Snapshot { get; }
     public MiniMaxH3VideoWorkspaceSnapshot? MiniMaxH3VideoSnapshot { get; }
+    public bool VideoToolsEnvelopeClaimed { get; }
+    public string? VideoToolsKind { get; }
+    public string? VideoToolsFinishMode { get; }
+    public bool IsVideoToolsReaderOnly => VideoToolsEnvelopeClaimed;
     public string Status { get; private set; }
     public bool CancelRequested { get; private set; }
     public int Progress { get; private set; }
@@ -10476,21 +10531,24 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool IsKnownOperation =>
         Operation is "upscale" or "photoreal" or "i2i" or "video";
     public bool IsSupportedMutationOperation =>
-        Operation is "upscale" or "photoreal"
-        || (Operation == "i2i" && I2iMutationSafe)
-        || (IsVideoOperation && VideoMutationSafe);
+        !IsVideoToolsReaderOnly
+        && (Operation is "upscale" or "photoreal"
+            || (Operation == "i2i" && I2iMutationSafe)
+            || (IsVideoOperation && VideoMutationSafe));
     public bool OutputDependencyProtected { get; set; }
     public bool QueueMutationScopeSafe { get; set; } = true;
     public bool CanCancel =>
         !_isBusy
         && !CancelRequested
+        && !IsVideoToolsReaderOnly
         && (Status is "queued" or "running"
             ? IsKnownOperation
             : Status == "failed" && IsSupportedMutationOperation);
     public bool ShowCancelAction =>
-        Status is "queued" or "running"
+        !IsVideoToolsReaderOnly
+        && (Status is "queued" or "running"
             ? IsKnownOperation
-            : Status == "failed" && IsSupportedMutationOperation;
+            : Status == "failed" && IsSupportedMutationOperation);
     public string CancelToolTip => CanCancel
         ? Status == "queued"
             ? "この待機Jobだけをキャンセルします。実行中のJobは変更しません"
@@ -10662,7 +10720,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             nameof(RequestDetailsLoaded)));
     }
     public EnhancementJobActionPresentation Action1 =>
-        CanRerunMiniMaxH3VideoWithSavedPrompt
+        IsVideoToolsReaderOnly
+        ? EnhancementJobActionPresentation.Hidden
+        : CanRerunMiniMaxH3VideoWithSavedPrompt
         ? JobAction(
             "video-rerun-saved",
             "同じPromptでもう一度",
@@ -10711,7 +10771,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => EnhancementJobActionPresentation.Hidden,
     };
     public EnhancementJobActionPresentation Action2 =>
-        CanEditMiniMaxH3VideoPrompt
+        IsVideoToolsReaderOnly
+        ? EnhancementJobActionPresentation.Hidden
+        : CanEditMiniMaxH3VideoPrompt
         ? JobAction(
             "video-edit-prompt",
             "Promptを変えて生成",
@@ -10759,8 +10821,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             144),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action3 => CanRerunI2iV3
-        ? JobAction(
+    public EnhancementJobActionPresentation Action3 => IsVideoToolsReaderOnly
+        ? EnhancementJobActionPresentation.Hidden
+        : CanRerunI2iV3
+            ? JobAction(
             "i2i-v3-edit",
             "設定を編集して再実行",
             "元の5欄と数値設定を統合AI編集へ読み込みます。開くだけでは追加しません",
@@ -10801,7 +10865,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => EnhancementJobActionPresentation.Hidden,
     };
     public EnhancementJobActionPresentation Action4 =>
-        I2iV3Snapshot is not null && Status == "succeeded"
+        IsVideoToolsReaderOnly
+        ? EnhancementJobActionPresentation.Hidden
+        : I2iV3Snapshot is not null && Status == "succeeded"
         ? JobAction(
             "open-output",
             "Open output",
@@ -10827,7 +10893,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             144),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action5 => Status == "queued"
+    public EnhancementJobActionPresentation Action5 => IsVideoToolsReaderOnly
+        ? EnhancementJobActionPresentation.Hidden
+        : Status == "queued"
         ? JobAction(
             "cancel",
             CancelLabel,
@@ -10836,7 +10904,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             CanCancel,
             76)
         : EnhancementJobActionPresentation.Hidden;
-    public EnhancementJobActionPresentation DangerAction => Status switch
+    public EnhancementJobActionPresentation DangerAction =>
+        IsVideoToolsReaderOnly
+        ? EnhancementJobActionPresentation.Hidden
+        : Status switch
     {
         "failed" or "canceled" or "deleted" => JobAction(
             "dismiss",
@@ -10950,7 +11021,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => "キャンセル済みにする",
     };
     public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "Unknown source" : Path.GetFileName(SourcePath);
-    public string SourceVersionLabel => (IsVideoOperation || Operation == "i2i")
+    public string SourceVersionLabel => IsVideoToolsReaderOnly
+        ? "管理動画"
+        : (IsVideoOperation || Operation == "i2i")
         && !string.IsNullOrWhiteSpace(SourceProducerJobId)
             ? "実写版"
             : IsVideoOperation
@@ -10980,7 +11053,13 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         }
         return null;
     }
-    public string PresetSummary => IsVideoOperation
+    public string PresetSummary => VideoToolsKind == "retake"
+        ? "Video Tools · 区間を作り直す · Reader-only"
+        : VideoToolsKind == "finish"
+            ? $"Video Tools · 動画高画質化 2x · {(VideoToolsFinishMode == "detail" ? "Detail" : "Faithful")} · Reader-only"
+        : VideoToolsEnvelopeClaimed
+            ? "Video Tools · 互換性を確認できないため保護"
+        : IsVideoOperation
         ? $"{(PresetId switch
         {
             "minimax-h3-i2v-preview-v1" => "MiniMax H3 Preview · 24 fps · 音声あり",
@@ -10993,13 +11072,19 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : Operation == "i2i" && I2iMutationSafe
             ? $"Schema v{I2iSchemaVersion ?? 0}  ·  Target: {I2iTargetDisplayLabel}  ·  {SourceVersionLabel}"
         : $"{PresetId}  ·  {AdapterId}";
-    public string OperationLabel => Operation switch
+    public string OperationLabel => VideoToolsKind switch
+    {
+        "retake" => "RETAKE  区間を作り直す",
+        "finish" => "VIDEO HQ  動画高画質化",
+        _ when VideoToolsEnvelopeClaimed => "VIDEO TOOLS  保護中",
+        _ => Operation switch
     {
         "upscale" => "HQ  高画質化",
         "photoreal" => "REAL  実写化",
         "i2i" => "EDIT  AI編集",
         "video" => "VIDEO  動画化",
         _ => "UNSUPPORTED  未対応",
+    },
     };
     public string I2iTargetDisplayLabel => I2iTarget switch
     {
@@ -11041,7 +11126,13 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string StatusLabel => _isBusy
         ? $"反映中  ·  {PersistedStatusLabel}"
         : PersistedStatusLabel;
-    public string DetailText => IsStructuredI2iEnvelope
+    public string DetailText => VideoToolsKind == "retake"
+        ? "Retake snapshotを読取専用で表示しています。選択区間と実際の差し替え窓、全尺・元音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
+        : VideoToolsKind == "finish"
+            ? "Video Finish 2x snapshotを読取専用で表示しています。fps・フレーム数・長さ・音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
+        : VideoToolsEnvelopeClaimed
+            ? "This Video Tools row is malformed, future, or incomplete and remains protected from every mutation action."
+        : IsStructuredI2iEnvelope
         ? SafeI2iV2DetailText
         : !string.IsNullOrWhiteSpace(ErrorMessage)
         ? ErrorMessage
@@ -11122,6 +11213,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 SourceProducerJobId,
                 candidate.SourceProducerJobId,
                 StringComparison.Ordinal)
+            && string.Equals(
+                SourceVideoJobId,
+                candidate.SourceVideoJobId,
+                StringComparison.OrdinalIgnoreCase)
             && string.Equals(PresetId, candidate.PresetId, StringComparison.Ordinal)
             && string.Equals(AdapterId, candidate.AdapterId, StringComparison.Ordinal)
             && string.Equals(Operation, candidate.Operation, StringComparison.Ordinal)
@@ -11137,6 +11232,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             && I2iV2EnvelopeClaimed == candidate.I2iV2EnvelopeClaimed
             && Equals(I2iV3Snapshot, candidate.I2iV3Snapshot)
             && Equals(MiniMaxH3VideoSnapshot, candidate.MiniMaxH3VideoSnapshot)
+            && VideoToolsEnvelopeClaimed == candidate.VideoToolsEnvelopeClaimed
+            && string.Equals(
+                VideoToolsKind,
+                candidate.VideoToolsKind,
+                StringComparison.Ordinal)
+            && string.Equals(
+                VideoToolsFinishMode,
+                candidate.VideoToolsFinishMode,
+                StringComparison.Ordinal)
             && Equals(_videoMutationProbe, candidate._videoMutationProbe)
             && CreatedAt == candidate.CreatedAt
             && SourceSize == candidate.SourceSize

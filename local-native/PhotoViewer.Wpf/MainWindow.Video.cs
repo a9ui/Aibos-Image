@@ -1205,6 +1205,7 @@ public partial class MainWindow
                 ? "Pause generated video"
                 : "Play generated video");
         UpdateModalDisplayedDeletePresentation();
+        SyncModalVideoToolsEntryPresentation();
     }
 
     private bool TryGetDisplayedModalVideoVersion(

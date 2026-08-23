@@ -3365,6 +3365,22 @@
           <Button x:Name="ModalVideoSettingsButton" Style="{StaticResource IconButton}" ToolTip="この画面で動画化の設定を開く" AutomationProperties.Name="Open video generation settings" Width="24" Height="32" Margin="0,0,4,0" Click="OpenModalVideoSettings_Click">
             <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE70D;" Foreground="{StaticResource TextSecondary}" FontSize="11"/>
           </Button>
+          <Button x:Name="ModalVideoRetakeButton"
+                  Style="{StaticResource GhostButton}"
+                  Content="{DynamicResource UiVideoToolsRetakeAction}"
+                  ToolTip="{DynamicResource UiVideoToolsRetakeHelp}"
+                  AutomationProperties.Name="{DynamicResource UiVideoToolsRetakeAutomation}"
+                  AutomationProperties.HelpText="{DynamicResource UiVideoToolsRetakeHelp}"
+                  MinWidth="92" Height="32" Padding="8,0" Margin="0,0,4,0"
+                  Visibility="Collapsed" Click="OpenModalVideoRetake_Click"/>
+          <Button x:Name="ModalVideoFinishButton"
+                  Style="{StaticResource GhostButton}"
+                  Content="{DynamicResource UiVideoToolsFinishAction}"
+                  ToolTip="{DynamicResource UiVideoToolsFinishHelp}"
+                  AutomationProperties.Name="{DynamicResource UiVideoToolsFinishAutomation}"
+                  AutomationProperties.HelpText="{DynamicResource UiVideoToolsFinishHelp}"
+                  MinWidth="94" Height="32" Padding="8,0" Margin="0,0,4,0"
+                  Visibility="Collapsed" Click="OpenModalVideoFinish_Click"/>
           <Button x:Name="ModalI2iEditButton" Style="{StaticResource GhostButton}"
                   ToolTip="表示中のOriginalまたは実写化版をAI編集"
                   AutomationProperties.Name="実写編集"
@@ -3868,8 +3884,112 @@
                     Visibility="Collapsed" Margin="0,10,0,0" Padding="10"
                     CornerRadius="5" Background="{StaticResource SoftFill}"
                     BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
-                    AutomationProperties.Name="{DynamicResource UiVideoH3PromptAssistantAutomation}">
+                    AutomationProperties.Name="{DynamicResource UiMotionDirectorPanelAutomation}">
               <StackPanel>
+                <DockPanel LastChildFill="True" Margin="0,0,0,5">
+                  <Button x:Name="ModalMotionDirectorBuildButton"
+                          DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}"
+                          Content="{DynamicResource UiMotionDirectorBuildButton}"
+                          MinWidth="112" Height="28" Padding="9,2" Margin="10,0,0,0"
+                          Click="BuildMotionDirectorCandidate_Click"
+                          AutomationProperties.Name="{DynamicResource UiMotionDirectorBuildAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiMotionDirectorBuildHelp}"/>
+                  <TextBlock Text="{DynamicResource UiMotionDirectorTitle}"
+                             Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                             FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </DockPanel>
+                <TextBlock Text="{DynamicResource UiMotionDirectorHelp}"
+                           Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                           TextWrapping="Wrap" Margin="0,0,0,6"/>
+                <TextBlock Text="{DynamicResource UiMotionDirectorActionsLabel}"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                           Margin="0,0,0,3"/>
+                <WrapPanel x:Name="ModalMotionDirectorActionsPanel"
+                           Orientation="Horizontal" Margin="-2,0,0,4">
+                  <CheckBox Tag="subtle-gaze" IsChecked="True"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Height="26" MinHeight="26" Padding="8,1"
+                            Content="{DynamicResource UiMotionDirectorActionGaze}"
+                            Checked="MotionDirectorAction_Changed"
+                            Unchecked="MotionDirectorAction_Changed"
+                            AutomationProperties.Name="{DynamicResource UiMotionDirectorActionGaze}"
+                            AutomationProperties.HelpText="{DynamicResource UiMotionDirectorActionHelp}"/>
+                  <CheckBox Tag="gentle-smile" IsChecked="True"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Height="26" MinHeight="26" Padding="8,1"
+                            Content="{DynamicResource UiMotionDirectorActionSmile}"
+                            Checked="MotionDirectorAction_Changed"
+                            Unchecked="MotionDirectorAction_Changed"
+                            AutomationProperties.Name="{DynamicResource UiMotionDirectorActionSmile}"
+                            AutomationProperties.HelpText="{DynamicResource UiMotionDirectorActionHelp}"/>
+                  <CheckBox Tag="subject-turn"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Height="26" MinHeight="26" Padding="8,1"
+                            Content="{DynamicResource UiMotionDirectorActionTurn}"
+                            Checked="MotionDirectorAction_Changed"
+                            Unchecked="MotionDirectorAction_Changed"
+                            AutomationProperties.Name="{DynamicResource UiMotionDirectorActionTurn}"
+                            AutomationProperties.HelpText="{DynamicResource UiMotionDirectorActionHelp}"/>
+                  <CheckBox Tag="natural-reach"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Height="26" MinHeight="26" Padding="8,1"
+                            Content="{DynamicResource UiMotionDirectorActionReach}"
+                            Checked="MotionDirectorAction_Changed"
+                            Unchecked="MotionDirectorAction_Changed"
+                            AutomationProperties.Name="{DynamicResource UiMotionDirectorActionReach}"
+                            AutomationProperties.HelpText="{DynamicResource UiMotionDirectorActionHelp}"/>
+                  <CheckBox Tag="gentle-walk"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Height="26" MinHeight="26" Padding="8,1"
+                            Content="{DynamicResource UiMotionDirectorActionWalk}"
+                            Checked="MotionDirectorAction_Changed"
+                            Unchecked="MotionDirectorAction_Changed"
+                            AutomationProperties.Name="{DynamicResource UiMotionDirectorActionWalk}"
+                            AutomationProperties.HelpText="{DynamicResource UiMotionDirectorActionHelp}"/>
+                  <CheckBox Tag="expressive-gesture"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Height="26" MinHeight="26" Padding="8,1"
+                            Content="{DynamicResource UiMotionDirectorActionGesture}"
+                            Checked="MotionDirectorAction_Changed"
+                            Unchecked="MotionDirectorAction_Changed"
+                            AutomationProperties.Name="{DynamicResource UiMotionDirectorActionGesture}"
+                            AutomationProperties.HelpText="{DynamicResource UiMotionDirectorActionHelp}"/>
+                </WrapPanel>
+                <Grid Margin="0,0,0,4">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Grid.Column="0" Text="{DynamicResource UiMotionDirectorCameraLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             VerticalAlignment="Center"/>
+                  <ComboBox x:Name="ModalMotionDirectorCameraComboBox" Grid.Column="2"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="0" MinHeight="26"
+                            SelectionChanged="MotionDirectorCamera_SelectionChanged"
+                            AutomationProperties.Name="{DynamicResource UiMotionDirectorCameraAutomation}"
+                            AutomationProperties.HelpText="{DynamicResource UiMotionDirectorCameraHelp}">
+                    <ComboBoxItem Content="{DynamicResource UiMotionDirectorCameraFixed}" Tag="fixed"/>
+                    <ComboBoxItem Content="{DynamicResource UiMotionDirectorCameraPush}" Tag="slow-push"/>
+                    <ComboBoxItem Content="{DynamicResource UiMotionDirectorCameraPull}" Tag="slow-pull"/>
+                    <ComboBoxItem Content="{DynamicResource UiMotionDirectorCameraTrack}" Tag="gentle-track"/>
+                  </ComboBox>
+                  <TextBlock x:Name="ModalMotionDirectorRiskText" Grid.Column="4"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10"
+                             VerticalAlignment="Center"/>
+                </Grid>
+                <TextBlock x:Name="ModalMotionDirectorTimelineText"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10"
+                           FontFamily="Consolas" TextWrapping="Wrap" Margin="0,0,0,3"
+                           AutomationProperties.Name="{DynamicResource UiMotionDirectorTimelineAutomation}"/>
+                <TextBlock x:Name="ModalMotionDirectorWarningText"
+                           Visibility="Collapsed" Foreground="{StaticResource TextSecondary}"
+                           FontSize="10" TextWrapping="Wrap" Margin="0,0,0,5"
+                           AutomationProperties.LiveSetting="Polite"/>
+                <Border Height="1" Background="{StaticResource BorderStrong}" Margin="0,3,0,7"/>
                 <DockPanel LastChildFill="True" Margin="0,0,0,5">
                   <Button x:Name="ModalVideoH3RewritePromptButton"
                           DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
@@ -3878,7 +3998,7 @@
                           Click="RewriteVideoPromptForH3_Click"
                           AutomationProperties.Name="{DynamicResource UiVideoH3RewriteButtonAutomation}"
                           AutomationProperties.HelpText="{DynamicResource UiVideoH3RewriteButtonHelp}"/>
-                  <TextBlock Text="{DynamicResource UiVideoH3PromptAssistantTitle}"
+                  <TextBlock Text="{DynamicResource UiMotionDirectorAiProposalTitle}"
                              Foreground="{StaticResource TextPrimary}" FontSize="11.5"
                              FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </DockPanel>
@@ -4037,6 +4157,189 @@
                     Click="QueueVideoGeneration_Click"
                     AutomationProperties.Name="Add video generation job"
                     AutomationProperties.HelpText="Explicitly adds one video job to the same durable GPU queue used by image enhancements."/>
+            </StackPanel>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+
+      <Grid x:Name="ModalVideoToolsPopup" Grid.RowSpan="3" Grid.ColumnSpan="2"
+            Visibility="Collapsed" Panel.ZIndex="91" Background="Transparent"
+            WindowChrome.IsHitTestVisibleInChrome="True"
+            MouseLeftButtonDown="ModalVideoToolsBackdrop_MouseLeftButtonDown"
+            AutomationProperties.Name="{DynamicResource UiVideoToolsBoardAutomation}">
+        <Border x:Name="ModalVideoToolsBoardBorder" Width="430" MaxHeight="680"
+                Padding="16" CornerRadius="7"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+                Background="{StaticResource BgElevated}"
+                BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                KeyboardNavigation.TabNavigation="Cycle"
+                KeyboardNavigation.ControlTabNavigation="Cycle">
+          <ScrollViewer VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,6,0">
+              <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                        Width="28" Height="28" Click="CloseVideoTools_Click"
+                        ToolTip="{DynamicResource UiVideoToolsClose}"
+                        AutomationProperties.Name="{DynamicResource UiVideoToolsClose}">
+                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE711;"
+                             Foreground="{StaticResource TextSecondary}" FontSize="12"/>
+                </Button>
+                <StackPanel>
+                  <TextBlock x:Name="VideoToolsTitleText"
+                             Text="{DynamicResource UiVideoToolsTitle}"
+                             Foreground="{StaticResource TextPrimary}"
+                             FontSize="16" FontWeight="SemiBold"/>
+                  <TextBlock Text="Video Tools v1 · Preview"
+                             Foreground="{StaticResource TextSecondary}"
+                             FontSize="10.5" Margin="0,2,0,0"/>
+                </StackPanel>
+              </DockPanel>
+
+              <TextBlock x:Name="VideoToolsSourceText"
+                         Foreground="{StaticResource TextPrimary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,0,0,8"
+                         AutomationProperties.Name="{DynamicResource UiVideoToolsSourceAutomation}"/>
+
+              <StackPanel x:Name="VideoToolsRetakePanel">
+                <TextBlock Text="{DynamicResource UiVideoToolsRetakeDescription}"
+                           Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                           TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <Grid Margin="0,0,0,9">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="{DynamicResource UiVideoToolsStartSeconds}"
+                               Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                               Margin="0,0,0,4"/>
+                    <TextBox x:Name="VideoToolsSelectionStartTextBox"
+                             Text="0" MaxLength="18" Padding="7,4"
+                             Foreground="{StaticResource TextPrimary}"
+                             Background="{StaticResource BgPrimary}"
+                             CaretBrush="{StaticResource TextPrimary}"
+                             SelectionBrush="{StaticResource AccentFill}"
+                             BorderBrush="{StaticResource BorderStrong}"
+                             TextChanged="VideoToolsInput_Changed"
+                             AutomationProperties.Name="{DynamicResource UiVideoToolsStartAutomation}"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Text="{DynamicResource UiVideoToolsEndSeconds}"
+                               Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                               Margin="0,0,0,4"/>
+                    <TextBox x:Name="VideoToolsSelectionEndTextBox"
+                             Text="5.166666666666667" MaxLength="18" Padding="7,4"
+                             Foreground="{StaticResource TextPrimary}"
+                             Background="{StaticResource BgPrimary}"
+                             CaretBrush="{StaticResource TextPrimary}"
+                             SelectionBrush="{StaticResource AccentFill}"
+                             BorderBrush="{StaticResource BorderStrong}"
+                             TextChanged="VideoToolsInput_Changed"
+                             AutomationProperties.Name="{DynamicResource UiVideoToolsEndAutomation}"/>
+                  </StackPanel>
+                </Grid>
+
+                <Border Padding="9" CornerRadius="5" Margin="0,0,0,10"
+                        Background="{StaticResource SoftFill}"
+                        BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                  <TextBlock x:Name="VideoToolsRetakePlanText"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             TextWrapping="Wrap"
+                             AutomationProperties.Name="{DynamicResource UiVideoToolsRetakePlanAutomation}"
+                             AutomationProperties.LiveSetting="Polite"/>
+                </Border>
+
+                <TextBlock Text="{DynamicResource UiVideoToolsPromptLabel}"
+                           Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                           Margin="0,0,0,4"/>
+                <TextBox x:Name="VideoToolsPromptTextBox" MinHeight="92"
+                         MaxHeight="160" MaxLength="8001" AcceptsReturn="True"
+                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                         Padding="7,5" Foreground="{StaticResource TextPrimary}"
+                         Background="{StaticResource BgPrimary}"
+                         CaretBrush="{StaticResource TextPrimary}"
+                         SelectionBrush="{StaticResource AccentFill}"
+                         BorderBrush="{StaticResource BorderStrong}"
+                         TextChanged="VideoToolsInput_Changed"
+                         AutomationProperties.Name="{DynamicResource UiVideoToolsPromptAutomation}"
+                         AutomationProperties.HelpText="{DynamicResource UiVideoToolsPromptHelp}"/>
+
+                <Grid Margin="0,9,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="90"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="STEP (1–40)"
+                               Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                               Margin="0,0,0,4"/>
+                    <TextBox x:Name="VideoToolsStepsTextBox" Text="20"
+                             MaxLength="2" Padding="7,4"
+                             Foreground="{StaticResource TextPrimary}"
+                             Background="{StaticResource BgPrimary}"
+                             CaretBrush="{StaticResource TextPrimary}"
+                             SelectionBrush="{StaticResource AccentFill}"
+                             BorderBrush="{StaticResource BorderStrong}"
+                             TextChanged="VideoToolsInput_Changed"
+                             AutomationProperties.Name="{DynamicResource UiVideoToolsStepsAutomation}"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Text="{DynamicResource UiVideoToolsCanvasLabel}"
+                               Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                               Margin="0,0,0,4"/>
+                    <ComboBox x:Name="VideoToolsCanvasTierComboBox"
+                              Style="{StaticResource PhotorealSettingsComboBox}"
+                              SelectedIndex="2"
+                              SelectionChanged="VideoToolsInput_Changed"
+                              AutomationProperties.Name="{DynamicResource UiVideoToolsCanvasAutomation}">
+                      <ComboBoxItem Content="{DynamicResource UiVideoToolsCanvasLight}" Tag="230400"/>
+                      <ComboBoxItem Content="{DynamicResource UiVideoToolsCanvasStandard}" Tag="307200"/>
+                      <ComboBoxItem Content="{DynamicResource UiVideoToolsCanvasHigh}" Tag="414720"/>
+                    </ComboBox>
+                  </StackPanel>
+                </Grid>
+              </StackPanel>
+
+              <StackPanel x:Name="VideoToolsFinishPanel" Visibility="Collapsed">
+                <TextBlock Text="{DynamicResource UiVideoToolsFinishDescription}"
+                           Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                           TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <TextBlock Text="{DynamicResource UiVideoToolsFinishModeLabel}"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                           Margin="0,0,0,4"/>
+                <ComboBox x:Name="VideoToolsFinishModeComboBox"
+                          Style="{StaticResource PhotorealSettingsComboBox}"
+                          SelectedIndex="0"
+                          SelectionChanged="VideoToolsFinishMode_SelectionChanged"
+                          AutomationProperties.Name="{DynamicResource UiVideoToolsFinishModeAutomation}">
+                  <ComboBoxItem Content="{DynamicResource UiVideoToolsFinishFaithful}" Tag="faithful"/>
+                  <ComboBoxItem Content="{DynamicResource UiVideoToolsFinishDetail}" Tag="detail"/>
+                </ComboBox>
+                <Border Padding="9" CornerRadius="5" Margin="0,10,0,0"
+                        Background="{StaticResource SoftFill}"
+                        BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                  <TextBlock x:Name="VideoToolsFinishPlanText"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             TextWrapping="Wrap"
+                             AutomationProperties.Name="{DynamicResource UiVideoToolsFinishPlanAutomation}"
+                             AutomationProperties.LiveSetting="Polite"/>
+                </Border>
+              </StackPanel>
+
+              <TextBlock x:Name="VideoToolsStatusText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,10,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+              <Button x:Name="VideoToolsStartButton"
+                      Style="{StaticResource PrimaryButton}"
+                      Content="{DynamicResource UiVideoToolsStartButton}"
+                      Height="34" Margin="0,12,0,0"
+                      HorizontalAlignment="Stretch" IsEnabled="False"
+                      Click="StartVideoTools_Click"
+                      AutomationProperties.Name="{DynamicResource UiVideoToolsStartAutomationButton}"/>
             </StackPanel>
           </ScrollViewer>
         </Border>
