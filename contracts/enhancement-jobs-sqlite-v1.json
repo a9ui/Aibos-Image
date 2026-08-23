@@ -103,7 +103,7 @@
       "sqliteMaximumSqlBytes": 65536
     },
     "failure": "unsupported status or malformed selected state fails closed and preserves the last validated Jobs view; unselected terminal payloads are not parsed or made mutable by WPF",
-    "bulkScope": "display limits never redefine an operation labelled all; whole-status bulk mutations select and validate their authoritative targets in the companion",
+    "bulkScope": "display limits never redefine an operation labelled all; WPF may freeze exact ids from its complete validated active snapshot, while the companion passively freezes authoritative exact target ids for presentation-bounded terminal history; every mutation revalidates status and executability; exact queued cancellation uses its dedicated /api/enhance/jobs/queued/batch route so an older companion fails closed instead of treating the body as cancel-all",
     "mutations": "enqueue, retry, cancel, reorder, dismiss, output deletion, pause, resume, wake, claim, and recovery remain authenticated companion API operations"
   },
   "catalogRevision": {

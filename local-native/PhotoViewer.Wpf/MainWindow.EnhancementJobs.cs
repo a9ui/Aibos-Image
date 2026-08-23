@@ -27,6 +27,7 @@ public partial class MainWindow
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private const int EnhancementJobsPageSize = 100;
     private const int EnhancementJobsDefaultHistoryLimit = 500;
+    private const int EnhancementQueuedJobsBatchLimit = 1_000;
     private const int EnhancementTerminalHistoryBatchLimit = 1_000;
     private const int EnhancementJobRequestDetailsMaximumLength = 32_768;
     private const int EnhancementJobsWorkspaceMaximumRows = 100_000;
@@ -133,6 +134,8 @@ public partial class MainWindow
     private bool _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
     private bool _enhancementWorkspacePhotorealEnqueueNextSupported;
     private bool _enhancementWorkspaceTerminalHistoryBatchDismissSupported;
+    private bool _enhancementWorkspaceQueuedJobsBatchCancelSupported;
+    private bool _enhancementWorkspaceTerminalHistoryTargetsSupported;
     private Func<string, string, bool>? _confirmEnhancementJobsBulkActionForSmoke;
     private bool _returnToEnhancementJobsAfterModalClose;
     private Tile? _enhancementJobsTemporaryVisibleTile;
@@ -1447,17 +1450,47 @@ public partial class MainWindow
             && _enhancementWorkspaceJobs.Any(static job =>
                 job.CanUpdatePhotorealPrompts);
 
+    private bool EnhancementWorkspaceHasCompleteTerminalHistory(string status)
+        => _enhancementWorkspaceJobs.Count(job => job.Status == status)
+            == EnhancementWorkspaceTotalStatusCount(status);
+
     private bool CanRetryAllTerminalEnhancementJobs(string status)
-        => _enhancementWorkspaceJobs.Any(job =>
-            job.Status == status
-            && MatchesEnhancementWorkspaceOperationFilter(job)
-            && job.CanRetry);
+        => EnhancementWorkspaceHasCompleteTerminalHistory(status)
+            && _enhancementWorkspaceJobs.Any(job =>
+                job.Status == status
+                && MatchesEnhancementWorkspaceOperationFilter(job)
+                && job.CanRetry);
+
+    private int EnhancementWorkspaceTotalStatusCount(string status)
+    {
+        EnhancementWorkspaceStatusCounts counts =
+            _enhancementWorkspaceTotalCounts
+            ?? CountEnhancementWorkspaceStatuses(_enhancementWorkspaceJobs);
+        return status switch
+        {
+            "queued" => counts.Queued,
+            "running" => counts.Running,
+            "succeeded" => counts.Succeeded,
+            "failed" => counts.Failed,
+            "canceled" => counts.Canceled,
+            "deleted" => counts.Deleted,
+            _ => 0,
+        };
+    }
 
     private bool CanClearAllTerminalEnhancementJobs(string status)
-        => _enhancementWorkspaceJobs.Any(job =>
-            job.Status == status
-            && MatchesEnhancementWorkspaceOperationFilter(job)
-            && job.CanDismiss);
+    {
+        int loadedStatusCount = _enhancementWorkspaceJobs.Count(job =>
+            job.Status == status);
+        int totalStatusCount = EnhancementWorkspaceTotalStatusCount(status);
+        if (_enhancementWorkspaceTerminalHistoryTargetsSupported)
+            return totalStatusCount > 0;
+        return loadedStatusCount == totalStatusCount
+            && _enhancementWorkspaceJobs.Any(job =>
+                job.Status == status
+                && MatchesEnhancementWorkspaceOperationFilter(job)
+                && job.CanDismiss);
+    }
 
     private EnhancementWorkspaceJobView[] BeginOptimisticBulkPresentation(
         IReadOnlySet<string> jobIds,
@@ -1506,20 +1539,40 @@ public partial class MainWindow
                 && MatchesEnhancementWorkspaceOperationFilter(job))
             .ToArray();
         int retryableCount = terminalJobs.Count(static job => job.CanRetry);
-        int dismissibleCount = terminalJobs.Count(static job => job.CanDismiss);
+        int loadedDismissibleCount = terminalJobs.Count(static job => job.CanDismiss);
+        bool serverSelectsAllHistory =
+            _enhancementWorkspaceTerminalHistoryTargetsSupported;
+        int dismissibleCount = serverSelectsAllHistory
+            && _enhancementWorkspaceOperationFilter == "all"
+                ? EnhancementWorkspaceTotalStatusCount(status)
+                : loadedDismissibleCount;
         int retryProtectedCount = terminalJobs.Length - retryableCount;
-        int dismissProtectedCount = terminalJobs.Length - dismissibleCount;
+        int dismissProtectedCount = terminalJobs.Length - loadedDismissibleCount;
+        bool legacyHistoryIsComplete =
+            EnhancementWorkspaceHasCompleteTerminalHistory(status);
 
-        retryButton.Content = $"全部リトライ ({retryableCount:N0})";
-        retryButton.ToolTip = retryableCount > 0
+        retryButton.Content = legacyHistoryIsComplete
+            ? $"全部リトライ ({retryableCount:N0})"
+            : "全部リトライ (更新が必要)";
+        retryButton.ToolTip = !legacyHistoryIsComplete
+            ? "画面外の履歴を『全部』から漏らさないため、Companionの一括リトライ対応後に実行できます。"
+            : retryableCount > 0
             ? $"再試行できる{retryableCount:N0}件を、それぞれの保存済みPrompt・設定で待機列の末尾へ追加します。"
                 + (retryProtectedCount > 0
                     ? $" 保護対象{retryProtectedCount:N0}件は変更しません。"
                     : "")
             : "保存済み設定で安全に再試行できるJobはありません。future・malformed・read-only等の保護対象は変更しません。";
-        clearButton.Content = $"{clearLabel} ({dismissibleCount:N0})";
-        clearButton.ToolTip = dismissibleCount > 0
-            ? $"削除可能な履歴{dismissibleCount:N0}件だけを消します。元画像と出力ファイルは変更しません。"
+        clearButton.Content = serverSelectsAllHistory
+            && _enhancementWorkspaceOperationFilter != "all"
+                ? $"{clearLabel} (全履歴)"
+                : $"{clearLabel} ({dismissibleCount:N0})";
+        clearButton.ToolTip = !serverSelectsAllHistory
+            && !legacyHistoryIsComplete
+                ? "画面外の履歴を『全部』から漏らさないため、Companion更新後に一括消去できます。"
+            : dismissibleCount > 0
+            ? serverSelectsAllHistory
+                ? $"現在の種類フィルターに合う{status}履歴を、画面の表示件数に関係なく一括で消します。元画像と出力ファイルは変更しません。"
+                : $"削除可能な履歴{dismissibleCount:N0}件だけを消します。元画像と出力ファイルは変更しません。"
                 + (dismissProtectedCount > 0
                     ? $" 保護対象{dismissProtectedCount:N0}件は残します。"
                     : "")
@@ -2439,6 +2492,8 @@ public partial class MainWindow
         bool photorealPromptControls = false;
         bool atomicImageEnqueueNext = false;
         bool terminalHistoryBatchDismiss = false;
+        bool queuedJobsBatchCancel = false;
+        bool terminalHistoryTargets = false;
         MiniMaxH3VideoCapabilityState? miniMaxH3Capability =
             TryParseMiniMaxH3VideoCapability(
                 payload,
@@ -2477,6 +2532,37 @@ public partial class MainWindow
                         terminalHistoryBatchDismissElement.GetBoolean();
                 }
                 else if (terminalHistoryBatchDismissElement.ValueKind != JsonValueKind.Null)
+                {
+                    return false;
+                }
+            }
+            if (capabilitiesElement.TryGetProperty(
+                    "queuedJobsBatchCancelV1",
+                    out JsonElement queuedJobsBatchCancelElement))
+            {
+                if (queuedJobsBatchCancelElement.ValueKind is
+                    JsonValueKind.True or JsonValueKind.False)
+                {
+                    queuedJobsBatchCancel =
+                        queuedJobsBatchCancelElement.GetBoolean();
+                }
+                else if (queuedJobsBatchCancelElement.ValueKind != JsonValueKind.Null)
+                {
+                    return false;
+                }
+            }
+            if (capabilitiesElement.TryGetProperty(
+                    "terminalHistoryTargetsV1",
+                    out JsonElement terminalHistoryTargetsElement))
+            {
+                if (terminalHistoryTargetsElement.ValueKind is
+                    JsonValueKind.True or JsonValueKind.False)
+                {
+                    terminalHistoryTargets =
+                        terminalHistoryTargetsElement.GetBoolean();
+                }
+                else if (terminalHistoryTargetsElement.ValueKind
+                    != JsonValueKind.Null)
                 {
                     return false;
                 }
@@ -2560,6 +2646,8 @@ public partial class MainWindow
             queuedPhotorealPromptUpdate,
             photorealPromptControls && atomicImageEnqueueNext,
             terminalHistoryBatchDismiss,
+            queuedJobsBatchCancel,
+            terminalHistoryTargets,
             inventorySignature,
             currentJobId,
             currentProgress,
@@ -2648,6 +2736,11 @@ public partial class MainWindow
         ApplyPhotorealEnqueueNextCapability(health.PhotorealEnqueueNext);
         _enhancementWorkspaceTerminalHistoryBatchDismissSupported =
             health.TerminalHistoryBatchDismiss;
+        _enhancementWorkspaceQueuedJobsBatchCancelSupported =
+            health.QueuedJobsBatchCancel;
+        _enhancementWorkspaceTerminalHistoryTargetsSupported =
+            health.TerminalHistoryTargets
+            && health.TerminalHistoryBatchDismiss;
         EnhancementJobsHealthStateText.Text = health.State;
         EnhancementJobsHealthStateText.Foreground =
             (Brush)FindResource(health.ForegroundResource);
@@ -2673,6 +2766,8 @@ public partial class MainWindow
         ApplyQueuedPhotorealPromptUpdateCapability(false);
         ApplyPhotorealEnqueueNextCapability(false);
         _enhancementWorkspaceTerminalHistoryBatchDismissSupported = false;
+        _enhancementWorkspaceQueuedJobsBatchCancelSupported = false;
+        _enhancementWorkspaceTerminalHistoryTargetsSupported = false;
         EnhancementJobsHealthStateText.Text = "Health unavailable";
         EnhancementJobsHealthStateText.Foreground =
             (Brush)FindResource("TextTertiary");
@@ -4952,32 +5047,70 @@ public partial class MainWindow
         {
             int canceledCount = 0;
             int failedCount = 0;
+            int alreadyMissingCount = 0;
+            int attemptedCount = 0;
+            int unattemptedCount = 0;
             string? firstError = null;
             string operationLabel = EnhancementWorkspaceOperationFilterLabel();
             EnhancementJobsStatusText.Text =
                 $"待機中の{operationLabel} {queuedJobs.Length:N0}件をキャンセルしています…";
             await Dispatcher.Yield(DispatcherPriority.Render);
-            for (int index = 0; index < queuedJobs.Length; index++)
+            if (_enhancementWorkspaceQueuedJobsBatchCancelSupported)
             {
-                EnhancementWorkspaceJobView job = queuedJobs[index];
-                EnhancementApiResponse response = await SendEnhancementApiAsync(
-                    HttpMethod.Post,
-                    $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel");
-                if (response.Ok)
+                foreach (string[] ids in optimisticJobIds.Chunk(
+                    EnhancementQueuedJobsBatchLimit))
                 {
-                    canceledCount++;
+                    attemptedCount += ids.Length;
+                    EnhancementApiResponse response =
+                        await SendIdempotentEnhancementMutationAsync(
+                             HttpMethod.Delete,
+                            "api/enhance/jobs/queued/batch",
+                             new { ids });
+                    if (!response.Ok
+                        || !TryParseQueuedJobsBatchCancelResponse(
+                            response.Payload,
+                            ids.Length,
+                            out int batchCanceledCount,
+                            out int newlyProtectedCount,
+                            out int missingCount))
+                    {
+                        failedCount += ids.Length;
+                        firstError ??= response.Ok
+                            ? "QUEUED_JOBS_BATCH_RESPONSE_INVALID"
+                            : EnhancementApiErrorCode(response);
+                        break;
+                    }
+                    canceledCount += batchCanceledCount;
+                    protectedCount += newlyProtectedCount;
+                    alreadyMissingCount += missingCount;
                 }
-                else
+                unattemptedCount = queuedJobs.Length - attemptedCount;
+            }
+            else
+            {
+                for (int index = 0; index < queuedJobs.Length; index++)
                 {
-                    failedCount++;
-                    firstError ??= response.Error;
-                }
-                if ((index + 1) % 25 == 0
-                    && index + 1 < queuedJobs.Length)
-                {
-                    EnhancementJobsStatusText.Text =
-                        $"待機中の{operationLabel}をキャンセル中… {index + 1:N0}/{queuedJobs.Length:N0}件";
-                    await Dispatcher.Yield(DispatcherPriority.Background);
+                    EnhancementWorkspaceJobView job = queuedJobs[index];
+                    attemptedCount++;
+                    EnhancementApiResponse response = await SendEnhancementApiAsync(
+                        HttpMethod.Post,
+                        $"api/enhance/jobs/{Uri.EscapeDataString(job.Id)}/cancel");
+                    if (response.Ok)
+                    {
+                        canceledCount++;
+                    }
+                    else
+                    {
+                        failedCount++;
+                        firstError ??= response.Error;
+                    }
+                    if ((index + 1) % 25 == 0
+                        && index + 1 < queuedJobs.Length)
+                    {
+                        EnhancementJobsStatusText.Text =
+                            $"待機中の{operationLabel}をキャンセル中… {index + 1:N0}/{queuedJobs.Length:N0}件";
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                    }
                 }
             }
             if (generation != _enhancementWorkspaceGeneration
@@ -4993,8 +5126,14 @@ public partial class MainWindow
                 + (protectedCount > 0
                     ? $" 保護対象 {protectedCount:N0}件は残しました。"
                     : "")
+                + (alreadyMissingCount > 0
+                    ? $" {alreadyMissingCount:N0}件はすでに待機列から移動していました。"
+                    : "")
                 + (failedCount > 0
                     ? $" {failedCount:N0}件は失敗しました。{firstError}"
+                    : "")
+                + (unattemptedCount > 0
+                    ? $" 残り {unattemptedCount:N0}件は安全のため未実行です。"
                     : "");
         }
         finally
@@ -5006,6 +5145,37 @@ public partial class MainWindow
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
         }
+    }
+
+    private static bool TryParseQueuedJobsBatchCancelResponse(
+        JsonElement? payload,
+        int requestedCount,
+        out int canceledCount,
+        out int protectedCount,
+        out int missingCount)
+    {
+        canceledCount = 0;
+        protectedCount = 0;
+        missingCount = 0;
+        if (payload is not JsonElement root
+            || root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("canceledCount", out JsonElement canceled)
+            || !canceled.TryGetInt32(out canceledCount)
+            || !root.TryGetProperty("protectedCount", out JsonElement protectedElement)
+            || !protectedElement.TryGetInt32(out protectedCount)
+            || !root.TryGetProperty("missingCount", out JsonElement missingElement)
+            || !missingElement.TryGetInt32(out missingCount)
+            || canceledCount < 0
+            || protectedCount < 0
+            || missingCount < 0
+            || canceledCount + protectedCount + missingCount != requestedCount)
+        {
+            canceledCount = 0;
+            protectedCount = 0;
+            missingCount = 0;
+            return false;
+        }
+        return true;
     }
 
     private async void RetryAllFailedEnhancementJobs_Click(
@@ -5027,6 +5197,12 @@ public partial class MainWindow
     private async Task<int> RetryAllTerminalEnhancementJobsAsync(
         string terminalStatus)
     {
+        if (!EnhancementWorkspaceHasCompleteTerminalHistory(terminalStatus))
+        {
+            EnhancementJobsStatusText.Text =
+                "画面外の履歴を『全部』から漏らさないため、Companionの一括リトライ対応後に実行できます。";
+            return 0;
+        }
         int terminalCount = _enhancementWorkspaceJobs.Count(job =>
             job.Status == terminalStatus
             && MatchesEnhancementWorkspaceOperationFilter(job));
@@ -5101,7 +5277,8 @@ public partial class MainWindow
                     continue;
                 }
 
-                if (removeOriginalAfterSuccess)
+                if (removeOriginalAfterSuccess
+                    && !_usingDefaultModalEnhancementSender)
                 {
                     EnhancementApiResponse remove = await SendEnhancementApiAsync(
                         HttpMethod.Delete,
@@ -5123,7 +5300,6 @@ public partial class MainWindow
                     await Dispatcher.Yield(DispatcherPriority.Background);
                 }
             }
-
             if (generation == _enhancementWorkspaceGeneration
                 && EnhancementJobsDialog.Visibility == Visibility.Visible)
             {
@@ -5200,51 +5376,114 @@ public partial class MainWindow
             .Select(static job => job.Id)
             .ToArray();
         int protectedCount = terminalJobs.Length - dismissibleIds.Length;
+        int loadedStatusCount = _enhancementWorkspaceJobs.Count(job =>
+            job.Status == terminalStatus);
+        int totalStatusCount = EnhancementWorkspaceTotalStatusCount(
+            terminalStatus);
+        bool useExactTargetPlan =
+            _enhancementWorkspaceTerminalHistoryTargetsSupported;
         if (_enhancementWorkspaceMutationPending
             || EnhancementJobsDialog.Visibility != Visibility.Visible
-            || dismissibleIds.Length == 0)
+            || useExactTargetPlan && totalStatusCount == 0
+            || !useExactTargetPlan && dismissibleIds.Length == 0)
         {
             return 0;
         }
-        if (!ConfirmEnhancementJobsBulkAction(
-                terminalStatus,
-                retry: false,
-                dismissibleIds.Length,
-                protectedCount))
+        if (!useExactTargetPlan && loadedStatusCount != totalStatusCount)
         {
+            EnhancementJobsStatusText.Text =
+                "画面外の履歴を『全部』から漏らさないため、Companion更新後に一括消去できます。";
             return 0;
         }
 
         string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル";
         var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
-        HashSet<string> optimisticJobIds = dismissibleIds
-            .ToHashSet(StringComparer.Ordinal);
-        EnhancementWorkspaceJobView[] optimisticVisibleJobs =
-            BeginOptimisticBulkPresentation(
-                optimisticJobIds,
-                hideRows: true);
+        HashSet<string> optimisticJobIds = new(StringComparer.Ordinal);
+        EnhancementWorkspaceJobView[] optimisticVisibleJobs = [];
         RefreshEnhancementQueueBulkControls();
         Button clearButton = terminalStatus == "failed"
             ? EnhancementJobsClearFailedButton
             : EnhancementJobsClearCanceledButton;
-        clearButton.Content = "履歴を消しています…";
+        clearButton.Content = "対象を確認しています…";
         long generation = _enhancementWorkspaceGeneration;
         int clearedCount = 0;
         int failedCount = 0;
         int alreadyMissingCount = 0;
+        int attemptedCount = 0;
+        int unattemptedCount = 0;
         string? failure = null;
         int? failureStatus = null;
-        EnhancementJobsStatusText.Text =
-            $"{terminalLabel}履歴 {dismissibleIds.Length:N0}件を消しています…";
-        await Dispatcher.Yield(DispatcherPriority.Render);
         try
         {
+            if (useExactTargetPlan)
+            {
+                EnhancementJobsStatusText.Text =
+                    $"{terminalLabel}履歴の対象を確定しています…";
+                await Dispatcher.Yield(DispatcherPriority.Render);
+                EnhancementApiResponse plan = await SendEnhancementApiAsync(
+                    HttpMethod.Post,
+                    "api/enhance/jobs/terminal/targets",
+                    new
+                    {
+                        status = terminalStatus,
+                        operation = _enhancementWorkspaceOperationFilter,
+                        action = "dismiss",
+                    },
+                    maxResponseBytes: 600_000);
+                if (!plan.Ok
+                    || !TryParseTerminalHistoryTargetPlanResponse(
+                        plan.Payload,
+                        out dismissibleIds,
+                        out protectedCount))
+                {
+                    failure = plan.Ok
+                        ? "TERMINAL_HISTORY_TARGET_PLAN_INVALID"
+                        : EnhancementApiErrorCode(plan);
+                    failureStatus = plan.StatusCode;
+                    EnhancementJobsStatusText.Text =
+                        $"{terminalLabel}履歴の対象を安全に確定できませんでした。履歴は変更していません（{failure}）。";
+                    AibosOperationLog.Write(
+                        $"{terminalStatus}_jobs_clear_all",
+                        "failed",
+                        operationWatch.ElapsedMilliseconds,
+                        failureStatus,
+                        failure,
+                        itemCount: 0);
+                    return 0;
+                }
+            }
+
+            if (dismissibleIds.Length == 0)
+            {
+                EnhancementJobsStatusText.Text = protectedCount > 0
+                    ? $"{terminalLabel}履歴はすべて保護対象なので変更しませんでした。"
+                    : $"消去できる{terminalLabel}履歴はありません。";
+                return 0;
+            }
+            if (!ConfirmEnhancementJobsBulkAction(
+                    terminalStatus,
+                    retry: false,
+                    dismissibleIds.Length,
+                    protectedCount))
+            {
+                return 0;
+            }
+
+            optimisticJobIds = dismissibleIds.ToHashSet(StringComparer.Ordinal);
+            optimisticVisibleJobs = BeginOptimisticBulkPresentation(
+                optimisticJobIds,
+                hideRows: true);
+            clearButton.Content = "履歴を消しています…";
+            EnhancementJobsStatusText.Text =
+                $"{terminalLabel}履歴 {dismissibleIds.Length:N0}件を消しています…";
+            await Dispatcher.Yield(DispatcherPriority.Render);
             if (_enhancementWorkspaceTerminalHistoryBatchDismissSupported)
             {
                 foreach (string[] ids in dismissibleIds.Chunk(
                     EnhancementTerminalHistoryBatchLimit))
                 {
+                    attemptedCount += ids.Length;
                     EnhancementApiResponse remove =
                         await SendIdempotentEnhancementMutationAsync(
                         HttpMethod.Delete,
@@ -5269,12 +5508,14 @@ public partial class MainWindow
                     protectedCount += newlyProtectedCount;
                     alreadyMissingCount += missingCount;
                 }
+                unattemptedCount = dismissibleIds.Length - attemptedCount;
             }
             else
             {
                 for (int index = 0; index < dismissibleIds.Length; index++)
                 {
                     string id = dismissibleIds[index];
+                    attemptedCount++;
                     EnhancementApiResponse remove =
                         await SendIdempotentEnhancementMutationAsync(
                             HttpMethod.Delete,
@@ -5301,6 +5542,7 @@ public partial class MainWindow
                     }
                 }
             }
+            unattemptedCount = dismissibleIds.Length - attemptedCount;
 
             if (generation == _enhancementWorkspaceGeneration
                 && EnhancementJobsDialog.Visibility == Visibility.Visible)
@@ -5321,6 +5563,9 @@ public partial class MainWindow
                         : "")
                     + (failedCount > 0
                         ? $" {failedCount:N0}件は削除できませんでした（{failure}）。"
+                        : "")
+                    + (unattemptedCount > 0
+                        ? $" 残り {unattemptedCount:N0}件は安全のため未実行です。"
                         : "");
             }
             AibosOperationLog.Write(
@@ -5342,6 +5587,49 @@ public partial class MainWindow
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
         }
+    }
+
+    private static bool TryParseTerminalHistoryTargetPlanResponse(
+        JsonElement? payload,
+        out string[] ids,
+        out int protectedCount)
+    {
+        ids = [];
+        protectedCount = 0;
+        if (payload is not JsonElement root
+            || root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("targetCount", out JsonElement targetCountElement)
+            || !targetCountElement.TryGetInt32(out int targetCount)
+            || targetCount < 0
+            || targetCount > 10_000
+            || !root.TryGetProperty("protectedCount", out JsonElement protectedElement)
+            || !protectedElement.TryGetInt32(out protectedCount)
+            || protectedCount < 0
+            || !root.TryGetProperty("ids", out JsonElement idsElement)
+            || idsElement.ValueKind != JsonValueKind.Array
+            || idsElement.GetArrayLength() != targetCount)
+        {
+            protectedCount = 0;
+            return false;
+        }
+
+        var parsedIds = new string[targetCount];
+        var uniqueIds = new HashSet<string>(StringComparer.Ordinal);
+        int index = 0;
+        foreach (JsonElement idElement in idsElement.EnumerateArray())
+        {
+            if (idElement.ValueKind != JsonValueKind.String
+                || idElement.GetString() is not string id
+                || id.Length is < 1 or > 255
+                || !uniqueIds.Add(id))
+            {
+                protectedCount = 0;
+                return false;
+            }
+            parsedIds[index++] = id;
+        }
+        ids = parsedIds;
+        return true;
     }
 
     private static bool TryParseTerminalHistoryBatchDismissResponse(
@@ -5388,7 +5676,7 @@ public partial class MainWindow
             : "対象の履歴だけを消します。元画像と出力ファイルは削除しません。";
         string operationLabel = EnhancementWorkspaceOperationFilterLabel();
         string message =
-            $"現在の種類フィルター「{operationLabel}」に表示された{terminalLabel}の対象 {actionCount:N0}件を{actionLabel}しますか？\n\n{detail}"
+            $"現在の種類フィルター「{operationLabel}」に一致する{terminalLabel}の履歴 {actionCount:N0}件を{actionLabel}しますか？\n\n{detail}"
             + (protectedCount > 0
                 ? $"\n\nfuture・malformed・read-only等の保護対象 {protectedCount:N0}件は残します。"
                 : "");
@@ -9157,6 +9445,8 @@ internal readonly record struct EnhancementQueueHealthView(
     bool QueuedPhotorealPromptUpdate,
     bool PhotorealEnqueueNext,
     bool TerminalHistoryBatchDismiss,
+    bool QueuedJobsBatchCancel,
+    bool TerminalHistoryTargets,
     string InventorySignature,
     string? CurrentJobId,
     int? CurrentProgress,

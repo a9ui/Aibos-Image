@@ -91,6 +91,14 @@ try {
         ($healthContract.readerRules.missingTerminalHistoryBatchDismissV1 -eq
             "keep health and jobs readable and fall back to protected per-job terminal history dismissal")
         ($healthFixture.workingFixture.payload.capabilities.terminalHistoryBatchDismissV1 -eq $true)
+        ($healthContract.readerRules.missingQueuedJobsBatchCancelV1 -eq
+            "keep health and jobs readable and fall back to protected per-job queued cancellation")
+        ($healthContract.readerRules.missingTerminalHistoryTargetsV1 -eq
+            "keep health and jobs readable and never redefine all as only the loaded history window")
+        ($healthContract.readerRules.terminalHistoryTargetsV1Dependency -like
+            "*terminalHistoryBatchDismissV1*")
+        ($healthFixture.workingFixture.payload.capabilities.queuedJobsBatchCancelV1 -eq $true)
+        ($healthFixture.workingFixture.payload.capabilities.terminalHistoryTargetsV1 -eq $true)
     )
     if ($healthContractChecks -contains $false) {
         throw "Enhancement health contract fields are invalid."
@@ -376,6 +384,8 @@ try {
         'queuedPromptUpdateContract',
         'bulkQueuedPromptUpdateContract',
         'clearQueuedIssued',
+        'queuedJobsBatchCancelContract',
+        'terminalHistoryTargetPlanContract',
         'jobsRestoredAfterViewerClose',
         'jobsViewportRestoredAfterViewerClose',
         'jobsThumbMinimumVisible',
