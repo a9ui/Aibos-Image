@@ -136,6 +136,7 @@ public partial class MainWindow
     private bool _enhancementWorkspaceTerminalHistoryBatchDismissSupported;
     private bool _enhancementWorkspaceQueuedJobsBatchCancelSupported;
     private bool _enhancementWorkspaceTerminalHistoryTargetsSupported;
+    private bool _enhancementWorkspaceTerminalHistoryBatchRetrySupported;
     private Func<string, string, bool>? _confirmEnhancementJobsBulkActionForSmoke;
     private bool _returnToEnhancementJobsAfterModalClose;
     private Tile? _enhancementJobsTemporaryVisibleTile;
@@ -1455,11 +1456,19 @@ public partial class MainWindow
             == EnhancementWorkspaceTotalStatusCount(status);
 
     private bool CanRetryAllTerminalEnhancementJobs(string status)
-        => EnhancementWorkspaceHasCompleteTerminalHistory(status)
-            && _enhancementWorkspaceJobs.Any(job =>
+    {
+        bool historyIsComplete =
+            EnhancementWorkspaceHasCompleteTerminalHistory(status);
+        if (!historyIsComplete)
+        {
+            return _enhancementWorkspaceTerminalHistoryBatchRetrySupported
+                && EnhancementWorkspaceTotalStatusCount(status) > 0;
+        }
+        return _enhancementWorkspaceJobs.Any(job =>
                 job.Status == status
                 && MatchesEnhancementWorkspaceOperationFilter(job)
                 && job.CanRetry);
+    }
 
     private int EnhancementWorkspaceTotalStatusCount(string status)
     {
@@ -1550,12 +1559,18 @@ public partial class MainWindow
         int dismissProtectedCount = terminalJobs.Length - loadedDismissibleCount;
         bool legacyHistoryIsComplete =
             EnhancementWorkspaceHasCompleteTerminalHistory(status);
-
-        retryButton.Content = legacyHistoryIsComplete
+        bool serverRetriesAllHistory =
+            _enhancementWorkspaceTerminalHistoryBatchRetrySupported;
+        retryButton.Content = serverRetriesAllHistory
+            ? "全部リトライ (全履歴)"
+            : legacyHistoryIsComplete
             ? $"全部リトライ ({retryableCount:N0})"
             : "全部リトライ (更新が必要)";
-        retryButton.ToolTip = !legacyHistoryIsComplete
+        retryButton.ToolTip = !serverRetriesAllHistory
+            && !legacyHistoryIsComplete
             ? "画面外の履歴を『全部』から漏らさないため、Companionの一括リトライ対応後に実行できます。"
+            : serverRetriesAllHistory
+                ? $"現在の種類フィルターに合う{status}履歴を、画面の表示件数に関係なく保存済み設定で一括再試行します。成功した元履歴だけを消します。"
             : retryableCount > 0
             ? $"再試行できる{retryableCount:N0}件を、それぞれの保存済みPrompt・設定で待機列の末尾へ追加します。"
                 + (retryProtectedCount > 0
@@ -2494,6 +2509,7 @@ public partial class MainWindow
         bool terminalHistoryBatchDismiss = false;
         bool queuedJobsBatchCancel = false;
         bool terminalHistoryTargets = false;
+        bool terminalHistoryBatchRetry = false;
         MiniMaxH3VideoCapabilityState? miniMaxH3Capability =
             TryParseMiniMaxH3VideoCapability(
                 payload,
@@ -2562,6 +2578,22 @@ public partial class MainWindow
                         terminalHistoryTargetsElement.GetBoolean();
                 }
                 else if (terminalHistoryTargetsElement.ValueKind
+                    != JsonValueKind.Null)
+                {
+                    return false;
+                }
+            }
+            if (capabilitiesElement.TryGetProperty(
+                    "terminalHistoryBatchRetryV1",
+                    out JsonElement terminalHistoryBatchRetryElement))
+            {
+                if (terminalHistoryBatchRetryElement.ValueKind is
+                    JsonValueKind.True or JsonValueKind.False)
+                {
+                    terminalHistoryBatchRetry =
+                        terminalHistoryBatchRetryElement.GetBoolean();
+                }
+                else if (terminalHistoryBatchRetryElement.ValueKind
                     != JsonValueKind.Null)
                 {
                     return false;
@@ -2648,6 +2680,7 @@ public partial class MainWindow
             terminalHistoryBatchDismiss,
             queuedJobsBatchCancel,
             terminalHistoryTargets,
+            terminalHistoryBatchRetry,
             inventorySignature,
             currentJobId,
             currentProgress,
@@ -2741,6 +2774,9 @@ public partial class MainWindow
         _enhancementWorkspaceTerminalHistoryTargetsSupported =
             health.TerminalHistoryTargets
             && health.TerminalHistoryBatchDismiss;
+        _enhancementWorkspaceTerminalHistoryBatchRetrySupported =
+            health.TerminalHistoryTargets
+            && health.TerminalHistoryBatchRetry;
         EnhancementJobsHealthStateText.Text = health.State;
         EnhancementJobsHealthStateText.Foreground =
             (Brush)FindResource(health.ForegroundResource);
@@ -2768,6 +2804,7 @@ public partial class MainWindow
         _enhancementWorkspaceTerminalHistoryBatchDismissSupported = false;
         _enhancementWorkspaceQueuedJobsBatchCancelSupported = false;
         _enhancementWorkspaceTerminalHistoryTargetsSupported = false;
+        _enhancementWorkspaceTerminalHistoryBatchRetrySupported = false;
         EnhancementJobsHealthStateText.Text = "Health unavailable";
         EnhancementJobsHealthStateText.Foreground =
             (Brush)FindResource("TextTertiary");
@@ -5254,6 +5291,11 @@ public partial class MainWindow
     private async Task<int> RetryAllTerminalEnhancementJobsAsync(
         string terminalStatus)
     {
+        if (_enhancementWorkspaceTerminalHistoryBatchRetrySupported)
+        {
+            return await RetryAllTerminalEnhancementJobsBatchAsync(
+                terminalStatus);
+        }
         if (!EnhancementWorkspaceHasCompleteTerminalHistory(terminalStatus))
         {
             EnhancementJobsStatusText.Text =
@@ -5397,6 +5439,213 @@ public partial class MainWindow
                 optimisticJobIds,
                 optimisticVisibleJobs,
                 revealRows: removeOriginalAfterSuccess);
+            _enhancementWorkspaceMutationPending = false;
+            RefreshEnhancementQueueBulkControls();
+            RefreshEnhancementQueuePauseControl();
+        }
+    }
+
+    private async Task<int> RetryAllTerminalEnhancementJobsBatchAsync(
+        string terminalStatus)
+    {
+        int totalStatusCount = EnhancementWorkspaceTotalStatusCount(
+            terminalStatus);
+        if (_enhancementWorkspaceMutationPending
+            || EnhancementJobsDialog.Visibility != Visibility.Visible
+            || totalStatusCount == 0)
+        {
+            return 0;
+        }
+
+        string terminalLabel = terminalStatus == "failed"
+            ? "失敗"
+            : "キャンセル";
+        var operationWatch = Stopwatch.StartNew();
+        _enhancementWorkspaceMutationPending = true;
+        HashSet<string> optimisticJobIds = new(StringComparer.Ordinal);
+        EnhancementWorkspaceJobView[] optimisticVisibleJobs = [];
+        Button retryButton = terminalStatus == "failed"
+            ? EnhancementJobsRetryFailedButton
+            : EnhancementJobsRetryCanceledButton;
+        RefreshEnhancementQueueBulkControls();
+        retryButton.Content = "対象を確認しています…";
+        long generation = _enhancementWorkspaceGeneration;
+        string? failure = null;
+        int? failureStatus = null;
+        int acceptedCount = 0;
+        int retriedCount = 0;
+        int replayedCount = 0;
+        int protectedCount = 0;
+        int missingCount = 0;
+        int itemFailedCount = 0;
+        int pendingCount = 0;
+        int unconfirmedCount = 0;
+        int attemptedCount = 0;
+        int unattemptedCount = 0;
+        try
+        {
+            EnhancementJobsStatusText.Text =
+                $"{terminalLabel}履歴の再試行対象を確定しています…";
+            await Dispatcher.Yield(DispatcherPriority.Render);
+            EnhancementApiResponse plan = await SendEnhancementApiAsync(
+                HttpMethod.Post,
+                "api/enhance/jobs/terminal/targets",
+                new
+                {
+                    status = terminalStatus,
+                    operation = _enhancementWorkspaceOperationFilter,
+                    action = "retry",
+                },
+                maxResponseBytes: 600_000);
+            if (!plan.Ok
+                || !TryParseTerminalHistoryTargetPlanResponse(
+                    plan.Payload,
+                    out string[] retryIds,
+                    out protectedCount))
+            {
+                failure = plan.Ok
+                    ? "TERMINAL_RETRY_TARGET_PLAN_INVALID"
+                    : EnhancementApiErrorCode(plan);
+                failureStatus = plan.StatusCode;
+                EnhancementJobsStatusText.Text =
+                    $"{terminalLabel}履歴の再試行対象を安全に確定できませんでした。履歴とキューは変更していません（{failure}）。";
+                AibosOperationLog.Write(
+                    $"{terminalStatus}_jobs_retry_all_batch",
+                    "failed",
+                    operationWatch.ElapsedMilliseconds,
+                    failureStatus,
+                    failure,
+                    itemCount: 0);
+                return 0;
+            }
+
+            if (retryIds.Length == 0)
+            {
+                EnhancementJobsStatusText.Text = protectedCount > 0
+                    ? $"{terminalLabel}履歴はすべて再試行保護対象なので変更しませんでした。"
+                    : $"再試行できる{terminalLabel}履歴はありません。";
+                return 0;
+            }
+            if (!ConfirmEnhancementJobsBulkAction(
+                    terminalStatus,
+                    retry: true,
+                    retryIds.Length,
+                    protectedCount))
+            {
+                return 0;
+            }
+
+            optimisticJobIds = retryIds.ToHashSet(StringComparer.Ordinal);
+            optimisticVisibleJobs = BeginOptimisticBulkPresentation(
+                optimisticJobIds,
+                hideRows: true);
+            retryButton.Content = "再試行を一括受付中…";
+            EnhancementJobsStatusText.Text =
+                $"{terminalLabel}したJob {retryIds.Length:N0}件を保存済み設定で一括再試行しています…";
+            await Dispatcher.Yield(DispatcherPriority.Render);
+
+            foreach (string[] ids in retryIds.Chunk(
+                EnhancementTerminalHistoryBatchLimit))
+            {
+                attemptedCount += ids.Length;
+                string batchRequestId = Guid.NewGuid().ToString("N");
+                EnhancementApiResponse retry =
+                    await SendIdempotentEnhancementMutationAsync(
+                        HttpMethod.Post,
+                        "api/enhance/jobs/terminal/retry",
+                        new
+                        {
+                            status = terminalStatus,
+                            ids,
+                            batchRequestId,
+                        });
+                if (retry.SavedForDelivery)
+                {
+                    pendingCount += ids.Length;
+                    failure ??= "RETRY_SAVED_FOR_DELIVERY";
+                    failureStatus ??= retry.StatusCode;
+                    break;
+                }
+                if (!retry.Ok
+                    || !TryParseTerminalHistoryBatchRetryResponse(
+                        retry.Payload,
+                        batchRequestId,
+                        ids,
+                        out int batchRetriedCount,
+                        out int batchReplayedCount,
+                        out int batchProtectedCount,
+                        out int batchMissingCount,
+                        out int batchFailedCount))
+                {
+                    unconfirmedCount += ids.Length;
+                    failure ??= retry.Ok
+                        ? "TERMINAL_RETRY_BATCH_RESPONSE_INVALID"
+                        : EnhancementApiErrorCode(retry);
+                    failureStatus ??= retry.StatusCode;
+                    break;
+                }
+
+                retriedCount += batchRetriedCount;
+                replayedCount += batchReplayedCount;
+                protectedCount += batchProtectedCount;
+                missingCount += batchMissingCount;
+                itemFailedCount += batchFailedCount;
+                acceptedCount += batchRetriedCount + batchReplayedCount;
+            }
+            unattemptedCount = retryIds.Length - attemptedCount;
+
+            if (generation == _enhancementWorkspaceGeneration
+                && EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                await RefreshEnhancementJobsWorkspaceAsync(
+                    generation,
+                    isPoll: false);
+                string resultSummary = acceptedCount > 0
+                    ? $"{terminalLabel}したJob {acceptedCount:N0}件を保存済み設定で受付し、元履歴を消しました。"
+                    : $"{terminalLabel}したJobを再試行できませんでした。元履歴は残しています。";
+                EnhancementJobsStatusText.Text = resultSummary
+                    + (replayedCount > 0
+                        ? $" うち{replayedCount:N0}件は同じ一括要求の確認済み結果です。"
+                        : "")
+                    + (protectedCount > 0
+                        ? $" 保護対象 {protectedCount:N0}件は残しました。"
+                        : "")
+                    + (missingCount > 0
+                        ? $" {missingCount:N0}件はすでに履歴から移動していました。"
+                        : "")
+                    + (itemFailedCount > 0
+                        ? $" {itemFailedCount:N0}件は検証または登録に失敗し、元履歴を残しました。"
+                        : "")
+                    + (pendingCount > 0
+                        ? $" {pendingCount:N0}件は登録確認中なので元履歴を残しています。"
+                        : "")
+                    + (unconfirmedCount > 0
+                        ? $" {unconfirmedCount:N0}件は応答を確認できないため状態を再読込しました（{failure}）。"
+                        : "")
+                    + (unattemptedCount > 0
+                        ? $" 残り {unattemptedCount:N0}件は安全のため未実行です。"
+                        : "");
+            }
+
+            string? operationError = failure
+                ?? (itemFailedCount > 0
+                    ? "TERMINAL_RETRY_ITEM_FAILURE"
+                    : null);
+            AibosOperationLog.Write(
+                $"{terminalStatus}_jobs_retry_all_batch",
+                operationError is null ? "completed" : "partial",
+                operationWatch.ElapsedMilliseconds,
+                failureStatus,
+                operationError,
+                itemCount: acceptedCount);
+            return acceptedCount;
+        }
+        finally
+        {
+            EndOptimisticBulkPresentation(
+                optimisticJobIds,
+                optimisticVisibleJobs,
+                revealRows: true);
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
@@ -5718,6 +5967,212 @@ public partial class MainWindow
             missingCount = 0;
             return false;
         }
+        return true;
+    }
+
+    private static bool TryParseTerminalHistoryBatchRetryResponse(
+        JsonElement? payload,
+        string expectedBatchRequestId,
+        IReadOnlyCollection<string> expectedIds,
+        out int retriedCount,
+        out int replayedCount,
+        out int protectedCount,
+        out int missingCount,
+        out int failedCount)
+    {
+        retriedCount = 0;
+        replayedCount = 0;
+        protectedCount = 0;
+        missingCount = 0;
+        failedCount = 0;
+        if (payload is not JsonElement root
+            || root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty(
+                "batchRequestId",
+                out JsonElement batchRequestIdElement)
+            || batchRequestIdElement.ValueKind != JsonValueKind.String
+            || !string.Equals(
+                batchRequestIdElement.GetString(),
+                expectedBatchRequestId,
+                StringComparison.Ordinal)
+            || !root.TryGetProperty(
+                "batchReplayed",
+                out JsonElement batchReplayedElement)
+            || batchReplayedElement.ValueKind is not (
+                JsonValueKind.True or JsonValueKind.False)
+            || !root.TryGetProperty(
+                "requestedCount",
+                out JsonElement requestedCountElement)
+            || !requestedCountElement.TryGetInt32(out int requestedCount)
+            || requestedCount != expectedIds.Count
+            || !TryReadNonNegativeBatchCount(
+                root,
+                "retriedCount",
+                out retriedCount)
+            || !TryReadNonNegativeBatchCount(
+                root,
+                "replayedCount",
+                out replayedCount)
+            || !TryReadNonNegativeBatchCount(
+                root,
+                "dismissedSourceCount",
+                out int dismissedSourceCount)
+            || !TryReadNonNegativeBatchCount(
+                root,
+                "retainedSourceCount",
+                out int retainedSourceCount)
+            || !TryReadNonNegativeBatchCount(
+                root,
+                "protectedCount",
+                out protectedCount)
+            || !TryReadNonNegativeBatchCount(
+                root,
+                "missingCount",
+                out missingCount)
+            || !TryReadNonNegativeBatchCount(
+                root,
+                "failedCount",
+                out failedCount)
+            || retriedCount > requestedCount
+            || replayedCount > requestedCount
+            || protectedCount > requestedCount
+            || missingCount > requestedCount
+            || failedCount > requestedCount
+            || retriedCount + replayedCount + protectedCount
+                + missingCount + failedCount != requestedCount
+            || dismissedSourceCount != retriedCount + replayedCount
+            || retainedSourceCount
+                != protectedCount + missingCount + failedCount
+            || batchReplayedElement.GetBoolean() && retriedCount != 0
+            || !root.TryGetProperty("results", out JsonElement resultsElement)
+            || resultsElement.ValueKind != JsonValueKind.Array
+            || resultsElement.GetArrayLength() != dismissedSourceCount
+            || !root.TryGetProperty("failures", out JsonElement failuresElement)
+            || failuresElement.ValueKind != JsonValueKind.Array
+            || failuresElement.GetArrayLength() != retainedSourceCount)
+        {
+            retriedCount = 0;
+            replayedCount = 0;
+            protectedCount = 0;
+            missingCount = 0;
+            failedCount = 0;
+            return false;
+        }
+
+        var requested = expectedIds.ToHashSet(StringComparer.Ordinal);
+        if (requested.Count != expectedIds.Count)
+            return false;
+        var accounted = new HashSet<string>(StringComparer.Ordinal);
+        int observedRetriedCount = 0;
+        int observedReplayedCount = 0;
+        foreach (JsonElement result in resultsElement.EnumerateArray())
+        {
+            if (result.ValueKind != JsonValueKind.Object
+                || !TryGetBoundedBatchString(
+                    result,
+                    "sourceJobId",
+                    255,
+                    out string sourceJobId)
+                || !requested.Contains(sourceJobId)
+                || !accounted.Add(sourceJobId)
+                || !TryGetBoundedBatchString(
+                    result,
+                    "jobId",
+                    255,
+                    out _)
+                || !result.TryGetProperty(
+                    "replayed",
+                    out JsonElement replayedElement)
+                || replayedElement.ValueKind is not (
+                    JsonValueKind.True or JsonValueKind.False))
+            {
+                return false;
+            }
+            if (replayedElement.GetBoolean())
+                observedReplayedCount++;
+            else
+                observedRetriedCount++;
+        }
+
+        int observedProtectedCount = 0;
+        int observedMissingCount = 0;
+        int observedFailedCount = 0;
+        foreach (JsonElement failure in failuresElement.EnumerateArray())
+        {
+            if (failure.ValueKind != JsonValueKind.Object
+                || !TryGetBoundedBatchString(
+                    failure,
+                    "sourceJobId",
+                    255,
+                    out string sourceJobId)
+                || !requested.Contains(sourceJobId)
+                || !accounted.Add(sourceJobId)
+                || !TryGetBoundedBatchString(
+                    failure,
+                    "outcome",
+                    16,
+                    out string outcome)
+                || outcome is not ("protected" or "missing" or "failed")
+                || !TryGetBoundedBatchString(
+                    failure,
+                    "code",
+                    128,
+                    out _)
+                || !failure.TryGetProperty("status", out JsonElement status)
+                || !status.TryGetInt32(out int statusCode)
+                || statusCode is < 400 or > 599)
+            {
+                return false;
+            }
+            switch (outcome)
+            {
+                case "protected":
+                    observedProtectedCount++;
+                    break;
+                case "missing":
+                    observedMissingCount++;
+                    break;
+                default:
+                    observedFailedCount++;
+                    break;
+            }
+        }
+
+        return accounted.Count == requestedCount
+            && observedRetriedCount == retriedCount
+            && observedReplayedCount == replayedCount
+            && observedProtectedCount == protectedCount
+            && observedMissingCount == missingCount
+            && observedFailedCount == failedCount;
+    }
+
+    private static bool TryReadNonNegativeBatchCount(
+        JsonElement root,
+        string propertyName,
+        out int value)
+    {
+        value = 0;
+        return root.TryGetProperty(propertyName, out JsonElement element)
+            && element.TryGetInt32(out value)
+            && value >= 0;
+    }
+
+    private static bool TryGetBoundedBatchString(
+        JsonElement root,
+        string propertyName,
+        int maximumLength,
+        out string value)
+    {
+        value = "";
+        if (!root.TryGetProperty(propertyName, out JsonElement element)
+            || element.ValueKind != JsonValueKind.String
+            || element.GetString() is not string parsed
+            || parsed.Length is < 1
+            || parsed.Length > maximumLength)
+        {
+            return false;
+        }
+        value = parsed;
         return true;
     }
 
@@ -9518,6 +9973,7 @@ internal readonly record struct EnhancementQueueHealthView(
     bool TerminalHistoryBatchDismiss,
     bool QueuedJobsBatchCancel,
     bool TerminalHistoryTargets,
+    bool TerminalHistoryBatchRetry,
     string InventorySignature,
     string? CurrentJobId,
     int? CurrentProgress,

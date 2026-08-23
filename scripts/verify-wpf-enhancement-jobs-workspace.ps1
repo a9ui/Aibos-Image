@@ -386,6 +386,7 @@ try {
         'bulkQueuedPromptUpdateContract',
         'clearQueuedIssued',
         'queuedJobsBatchCancelContract',
+        'terminalHistoryBatchRetryContract',
         'terminalHistoryTargetPlanContract',
         'jobsRestoredAfterViewerClose',
         'jobsViewportRestoredAfterViewerClose',

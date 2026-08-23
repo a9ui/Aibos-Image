@@ -103,7 +103,7 @@
       "sqliteMaximumSqlBytes": 65536
     },
     "failure": "unsupported status or malformed selected state fails closed and preserves the last validated Jobs view; unselected terminal payloads are not parsed or made mutable by WPF",
-    "bulkScope": "display limits never redefine an operation labelled all; WPF may freeze exact ids from its complete validated active snapshot, while the companion passively freezes authoritative exact target ids for presentation-bounded terminal history; every mutation revalidates status and executability; exact queued cancellation uses its dedicated /api/enhance/jobs/queued/batch route so an older companion fails closed instead of treating the body as cancel-all",
+    "bulkScope": "display limits never redefine an operation labelled all; WPF may freeze exact ids from its complete validated active snapshot, while the companion passively freezes authoritative exact target ids for presentation-bounded terminal history; every mutation revalidates status and executability; exact queued cancellation uses its dedicated /api/enhance/jobs/queued/batch route, and exact terminal retry uses /api/enhance/jobs/terminal/retry in idempotent chunks of at most 1000 ids, so an older companion fails closed instead of narrowing or reinterpreting the request",
     "retryLifecycle": {
       "commitOrder": "commit the replacement child job and durable idempotency receipt before dismissing its failed or canceled source history row",
       "success": "after durable acceptance, the source terminal row is dismissed and the replacement child remains visible under its own identity",
