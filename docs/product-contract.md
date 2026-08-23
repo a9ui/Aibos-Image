@@ -152,6 +152,11 @@ The executable cases for these meanings are routed by
   managed-operation path.
 - Every job snapshots the effective request needed for deterministic retry.
   Later settings changes do not silently rewrite queued or running jobs.
+- A successful retry first commits the replacement child job and its durable
+  idempotency receipt. Only then is the failed or canceled source row removed
+  from terminal history. Rejected, pending-delivery, ambiguous, or malformed
+  retry results retain the source row, and retry never removes source or output
+  media.
 - A request that uses a managed producer refers to its durable job identity.
   A video request may instead name the exact managed still currently displayed,
   but only through the advertised displayed-source capability and after both
@@ -201,6 +206,10 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - Managed outputs stay below the selected output root and operation folder.
   Lexical and canonical ownership checks apply before open, Favorite, retry,
   deletion, or producer reuse.
+- A managed image output cannot be deleted while any queued or running video
+  row depends on its producer id or names that exact canonical output as its
+  persisted source path. This protection remains fail-closed for an active
+  video row whose other mutation fields are malformed or reader-only.
 - A completed output is finalized below its operation's `YYYY-MM-DD` folder.
   The date comes only from that output file's Windows CreationTime in the
   companion's local timezone. Job, source, and EXIF dates do not substitute.

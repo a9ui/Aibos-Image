@@ -151,7 +151,8 @@
       "validation": "resolve the configured managed output root and selected file through lexical and canonical containment checks, require one supported regular still image, and pin size, mtime, decoded bounds, and SHA-256 before persisting",
       "sourceIdentity": "retain the validated Original sourceId when available; when the managed file itself is the opened catalog item, sourceId and sourcePath are its canonical managed path",
       "persistence": "persist the normal video sourceId, canonical sourcePath, sourceSignature, and sourceSha256; do not persist the request-only sourceManagedOutputPath field",
-      "retry": "revalidate the persisted sourcePath, sourceSignature, and sourceSha256 without requiring the historical producer job"
+      "retry": "revalidate the persisted sourcePath, sourceSignature, and sourceSha256 without requiring the historical producer job",
+      "deletion": "do not delete a managed image output while any queued or running video row names that exact canonical output as its persisted sourcePath; the producer-id protection inherited from video v1 also remains in force"
     },
     "seed": {
       "ownedByServer": true,

@@ -353,6 +353,7 @@ try {
         'photorealPromptDetailsContract',
         'legacyVideoMutationSafe',
         'deliveryVideoMutationSafe',
+        'activeVideoOutputDependencyContract',
         'readerOnlyVideoSafe',
         'malformedProvenanceVideoSafe',
         'videoCancelPendingSafe',
