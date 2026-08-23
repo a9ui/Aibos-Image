@@ -2596,6 +2596,7 @@ public partial class MainWindow
                         capturedFromExternalFileDrop));
             if (response.SavedForDelivery)
             {
+                RecordActiveVideoSourceDependency(source);
                 SetVideoGenerationSettingsStatus(
                     "動画化の予約を保存しました。Jobsへの登録を継続しています。");
                 SetTransientStatusToast(
@@ -2613,6 +2614,7 @@ public partial class MainWindow
             }
 
             TryGetStringProperty(job, "id", out string? jobId);
+            RecordActiveVideoSourceDependency(source);
             ApplyActiveEnhancementQueueJobToVisibleCatalog(job, capturedSourceTile);
             string suffix = string.IsNullOrWhiteSpace(jobId)
                 ? ""
@@ -2650,6 +2652,22 @@ public partial class MainWindow
             _videoGenerationRequestPending = false;
             UpdateVideoGenerationActionControls();
         }
+    }
+
+    private void RecordActiveVideoSourceDependency(VideoSourceChoice source)
+    {
+        if (!string.IsNullOrWhiteSpace(source.ProducerJobId))
+            _activeVideoSourceProducerJobIds.Add(source.ProducerJobId);
+
+        string? normalizedSourcePath = NormalizeEnhancementDependencyPath(
+            source.DisplayPath);
+        if (normalizedSourcePath is null)
+        {
+            _activeVideoDependencySnapshotComplete = false;
+            return;
+        }
+
+        _activeVideoManagedSourcePaths.Add(normalizedSourcePath);
     }
 
     private static Dictionary<string, object?> BuildVideoGenerationRequestBody(
