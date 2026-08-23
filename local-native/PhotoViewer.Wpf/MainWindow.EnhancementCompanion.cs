@@ -1338,7 +1338,9 @@ public partial class MainWindow
         Func<JsonElement, string?>? healthValidator = null,
         bool requireExactHealthValidation = false,
         string? recoverySourceIdentity = null,
-        Func<string?>? prePublishValidator = null)
+        Func<string?>? prePublishValidator = null,
+        Func<CancellationToken, Task<string?>>?
+            asyncPrePublishValidator = null)
     {
         if (_usingDefaultModalEnhancementSender)
         {
@@ -1369,7 +1371,9 @@ public partial class MainWindow
                 kind: retryJobId is null ? "create" : "retry",
                 retryJobId: retryJobId,
                 includeQueuePlacementInBody: includeQueuePlacementInBody);
-            string? prePublishError = prePublishValidator?.Invoke();
+            string? prePublishError = asyncPrePublishValidator is not null
+                ? await asyncPrePublishValidator(token)
+                : null;
             if (!string.IsNullOrWhiteSpace(prePublishError))
             {
                 return new EnhancementApiResponse(
@@ -1378,6 +1382,17 @@ public partial class MainWindow
                     null,
                     prePublishError);
             }
+            token.ThrowIfCancellationRequested();
+            prePublishError = prePublishValidator?.Invoke();
+            if (!string.IsNullOrWhiteSpace(prePublishError))
+            {
+                return new EnhancementApiResponse(
+                    false,
+                    409,
+                    null,
+                    prePublishError);
+            }
+            token.ThrowIfCancellationRequested();
             _ = EnhancementEnqueueInboxStore.Publish(
                 ResolvedEnhancementJobsPath,
                 [item]);

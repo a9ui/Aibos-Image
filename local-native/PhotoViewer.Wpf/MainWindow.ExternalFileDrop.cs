@@ -1173,6 +1173,19 @@ public partial class MainWindow
             out error);
     }
 
+    private bool IsExternalFileDropPrePublishGuardCurrent(
+        ExternalFileDropPrePublishGuard guard)
+        => ExternalFileDropSessionActive
+            && guard.SessionGeneration == _externalFileDropSessionGeneration
+            && TryGetExternalFileDropSessionTile(
+                guard.CanonicalPath,
+                out Tile authoritativeTile)
+            && _externalFileDropSourceVersions.TryGetValue(
+                authoritativeTile,
+                out ExternalFileDropSourceVersion current)
+            && current.SessionGeneration == guard.SessionGeneration
+            && current.SameFileVersion(guard.SourceVersion);
+
     private Func<string?>? CaptureExternalFileDropPrePublishValidator(
         Tile capturedTile)
     {

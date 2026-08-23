@@ -18609,7 +18609,9 @@ public partial class MainWindow : Window
             LastLoadMetrics.ModalDeferredDecode = t.IsRealFile;
         }
 
-        if (t.IsRealFile && File.Exists(displayPath))
+        if (t.IsRealFile
+            && (IsEnhancementJobsTrustedModalSource(t)
+                || File.Exists(displayPath)))
             _ = LoadModalBitmapAsync(
                 displayPath,
                 t.Path,
@@ -18701,11 +18703,15 @@ public partial class MainWindow : Window
     {
         resolution = null!;
         string canonicalSource;
-        if (IsEnhancementJobsTrustedModalSource(tile))
+        long sourceSizeBytes;
+        bool trustedJobsSource =
+            IsEnhancementJobsTrustedModalSource(tile);
+        if (trustedJobsSource)
         {
             if (!TryResolveEnhancementJobsTrustedModalSource(
                     tile,
                     out canonicalSource,
+                    out sourceSizeBytes,
                     out failureReason))
             {
                 return false;
@@ -18715,10 +18721,27 @@ public partial class MainWindow : Window
         {
             return false;
         }
+        else
+        {
+            sourceSizeBytes = new FileInfo(canonicalSource).Length;
+        }
 
-        var sourceInfo = new FileInfo(canonicalSource);
         if (requestEnhanced)
         {
+            if (trustedJobsSource
+                && TryResolveEnhancementJobsTrustedModalOutput(
+                    tile,
+                    out string trustedOutputPath,
+                    out long trustedOutputSizeBytes))
+            {
+                resolution = new DisplayedAssetResolution(
+                    trustedOutputPath,
+                    trustedOutputSizeBytes,
+                    true,
+                    null);
+                failureReason = "";
+                return true;
+            }
             if (TryGetModalEnhancedOutput(tile, out string? outputPath) && outputPath is not null)
             {
                 var outputInfo = new FileInfo(outputPath);
@@ -18729,14 +18752,18 @@ public partial class MainWindow : Window
 
             resolution = new DisplayedAssetResolution(
                 canonicalSource,
-                sourceInfo.Length,
+                sourceSizeBytes,
                 false,
                 "Displayed Enhanced output is unavailable; using Original instead.");
             failureReason = "";
             return true;
         }
 
-        resolution = new DisplayedAssetResolution(canonicalSource, sourceInfo.Length, false, null);
+        resolution = new DisplayedAssetResolution(
+            canonicalSource,
+            sourceSizeBytes,
+            false,
+            null);
         failureReason = "";
         return true;
     }
