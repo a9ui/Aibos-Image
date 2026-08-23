@@ -128,7 +128,24 @@ public partial class MainWindow
         int PublishedCount);
     private sealed record DurableEnhancementBatchItem(
         object? Body,
-        string? RetryJobId);
+        string? RetryJobId,
+        Func<IDisposable?>? DurablePublishLeaseFactory = null);
+    private sealed class DurablePublishLease(
+        params IDisposable[] leases) : IDisposable
+    {
+        private IDisposable[]? _leases = leases;
+
+        public void Dispose()
+        {
+            IDisposable[]? owned = Interlocked.Exchange(ref _leases, null);
+            if (owned is null)
+                return;
+            for (int index = owned.Length - 1; index >= 0; index--)
+            {
+                try { owned[index].Dispose(); } catch { }
+            }
+        }
+    }
     private sealed record EnhancementCompanionOwnershipProbe(
         bool Verified,
         bool TransportUnavailable,
@@ -136,6 +153,40 @@ public partial class MainWindow
         int StatusCode,
         JsonElement? Payload,
         string Error);
+
+    private IDisposable AcquireEnhancementJobsWriteLeaseForDurablePublish()
+    {
+        string jobsPath = Path.GetFullPath(ResolvedEnhancementJobsPath);
+        string? jobsDirectory = Path.GetDirectoryName(jobsPath);
+        if (string.IsNullOrWhiteSpace(jobsDirectory))
+        {
+            throw new IOException(
+                "The Enhancement Jobs lock target is unavailable.");
+        }
+        // Companion writers deliberately use the legacy JSON pathname as the
+        // stable cross-backend lock target for both JSON and SQLite stores.
+        string lockTarget = Path.Combine(jobsDirectory, "jobs.json");
+        return AlbumStore.TryAcquireSharedDirectoryWriteLease(lockTarget)
+            ?? throw new IOException(
+                "The Enhancement Jobs store is busy; durable publication was not started.");
+    }
+
+    private IDisposable AcquireVideoDurablePublishLease(
+        Func<FileStream> pinSource)
+    {
+        IDisposable jobsLease =
+            AcquireEnhancementJobsWriteLeaseForDurablePublish();
+        try
+        {
+            FileStream sourceLease = pinSource();
+            return new DurablePublishLease(jobsLease, sourceLease);
+        }
+        catch
+        {
+            jobsLease.Dispose();
+            throw;
+        }
+    }
 
     private async Task<EnhancementApiResponse> EnsureEnhancementCompanionReadyForExplicitActionAsync(
         string? sourceIdentity = null,
@@ -1340,7 +1391,9 @@ public partial class MainWindow
         string? recoverySourceIdentity = null,
         Func<string?>? prePublishValidator = null,
         Func<CancellationToken, Task<string?>>?
-            asyncPrePublishValidator = null)
+            asyncPrePublishValidator = null,
+        Func<EnhancementEnqueueInboxItem, IDisposable?>?
+            onBeforeDurablePublish = null)
     {
         if (_usingDefaultModalEnhancementSender)
         {
@@ -1393,9 +1446,13 @@ public partial class MainWindow
                     prePublishError);
             }
             token.ThrowIfCancellationRequested();
-            _ = EnhancementEnqueueInboxStore.Publish(
-                ResolvedEnhancementJobsPath,
-                [item]);
+            using (IDisposable? durablePublishLease =
+                   onBeforeDurablePublish?.Invoke(item))
+            {
+                _ = EnhancementEnqueueInboxStore.Publish(
+                    ResolvedEnhancementJobsPath,
+                    [item]);
+            }
         }
         catch (Exception ex) when (
             ex is IOException
@@ -1481,8 +1538,13 @@ public partial class MainWindow
             .Select(CreateEnhancementRetryHealthValidator)
             .ToArray();
         return await TrySendDurableEnhancementBatchCoreAsync(
-            jobs.Select(static job =>
-                new DurableEnhancementBatchItem(null, job.Id)).ToArray(),
+            jobs.Select(job =>
+                new DurableEnhancementBatchItem(
+                    null,
+                    job.Id,
+                    job.IsVideoOperation
+                        ? () => PinVideoRetrySourceForDurablePublish(job)
+                        : null)).ToArray(),
             "last",
             token,
             itemHealthValidators: validators,
@@ -1585,8 +1647,37 @@ public partial class MainWindow
                 return false;
             }
 
+            var durablePublishLeases = new List<IDisposable>(count);
+            void DisposeDurablePublishLeases()
+            {
+                for (int index = durablePublishLeases.Count - 1;
+                     index >= 0;
+                     index--)
+                {
+                    durablePublishLeases[index].Dispose();
+                }
+                durablePublishLeases.Clear();
+            }
             try
             {
+                bool requiresJobsWriteLease = Enumerable.Range(0, count)
+                    .Select(localIndex =>
+                        publishIndices[start + localIndex])
+                    .Any(globalIndex => items[globalIndex]
+                        .DurablePublishLeaseFactory is not null);
+                if (requiresJobsWriteLease)
+                {
+                    durablePublishLeases.Add(
+                        AcquireEnhancementJobsWriteLeaseForDurablePublish());
+                }
+                for (int localIndex = 0; localIndex < count; localIndex++)
+                {
+                    int globalIndex = publishIndices[start + localIndex];
+                    IDisposable? lease = items[globalIndex]
+                        .DurablePublishLeaseFactory?.Invoke();
+                    if (lease is not null)
+                        durablePublishLeases.Add(lease);
+                }
                 EnhancementEnqueueInboxItem[] chunk = Enumerable.Range(0, count)
                     .Select(localIndex =>
                     {
@@ -1621,6 +1712,9 @@ public partial class MainWindow
             }
             catch (EnhancementEnqueuePayloadTooLargeException) when (count > 1)
             {
+                // Recursive split publication must reacquire the shared Jobs
+                // lock after this oversized envelope's leases are released.
+                DisposeDurablePublishLeases();
                 int firstCount = count / 2;
                 bool firstPublished = PublishRange(start, firstCount);
                 if (!firstPublished || abortRemainingPublishes)
@@ -1646,6 +1740,10 @@ public partial class MainWindow
             {
                 abortRemainingPublishes = true;
                 return false;
+            }
+            finally
+            {
+                DisposeDurablePublishLeases();
             }
         }
 

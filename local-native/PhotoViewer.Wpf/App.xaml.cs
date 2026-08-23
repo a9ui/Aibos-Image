@@ -18571,6 +18571,8 @@ public partial class App : Application
                 string videoRequestJson = "";
                 int enhancementMutationRequestCount = 0;
                 bool h3WriterReady = true;
+                TaskCompletionSource<bool>? videoMutationObserved = null;
+                TaskCompletionSource<bool>? videoMutationRelease = null;
                 win.ConfigureModalEnhancementForSmoke(async (request, token) =>
                 {
                     if (request.Method == HttpMethod.Get)
@@ -18609,6 +18611,12 @@ public partial class App : Application
                     videoRequestJson = request.Content is null
                         ? ""
                         : await request.Content.ReadAsStringAsync(token);
+                    if (videoMutationObserved is not null
+                        && videoMutationRelease is not null)
+                    {
+                        videoMutationObserved.TrySetResult(true);
+                        await videoMutationRelease.Task.WaitAsync(token);
+                    }
                     string requestId = request.Headers.TryGetValues(
                             "Idempotency-Key",
                             out IEnumerable<string>? requestIds)
@@ -18759,9 +18767,42 @@ public partial class App : Application
                         StringComparison.OrdinalIgnoreCase);
                 int postsBeforeDisplayedPhotorealVideo =
                     enhancementMutationRequestCount;
-                bool displayedPhotorealVideoQueued =
+                bool imageDeletePublicationFilePin =
                     displayedPhotorealVideoSource
-                    && await win.QueueVideoGenerationForSmokeAsync();
+                    && win.VideoSourcePublishPinBlocksMoveForSmoke();
+                bool videoRetryPublicationFilePin =
+                    win.VideoRetrySourcePublishPinBlocksMoveForSmoke(
+                        photorealSource);
+                bool imageDeletePublicationGuard = false;
+                bool displayedPhotorealVideoQueued = false;
+                if (displayedPhotorealVideoSource)
+                {
+                    videoMutationObserved = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    videoMutationRelease = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    try
+                    {
+                        Task<bool> queueTask =
+                            win.QueueVideoGenerationForSmokeAsync();
+                        await videoMutationObserved.Task.WaitAsync(
+                            TimeSpan.FromSeconds(5));
+                        imageDeletePublicationGuard =
+                            !win.DisplayedManagedImageDeleteVerifiedForSmoke
+                            && win.PendingVideoSourceDependencyCountForSmoke == 1;
+                        videoMutationRelease.TrySetResult(true);
+                        displayedPhotorealVideoQueued = await queueTask;
+                        imageDeletePublicationGuard =
+                            imageDeletePublicationGuard
+                            && win.PendingVideoSourceDependencyCountForSmoke == 0;
+                    }
+                    finally
+                    {
+                        videoMutationRelease?.TrySetResult(true);
+                        videoMutationObserved = null;
+                        videoMutationRelease = null;
+                    }
+                }
                 bool displayedPhotorealVideoRequestExact = false;
                 if (displayedPhotorealVideoQueued
                     && enhancementMutationRequestCount
@@ -19191,6 +19232,17 @@ public partial class App : Application
 
                 string afterJobsJson = File.ReadAllText(jobsPath);
                 bool enhancementStateUnchanged = string.Equals(beforeJobsJson, afterJobsJson, StringComparison.Ordinal);
+                string jobsLockPath = Path.Combine(
+                    Path.GetDirectoryName(jobsPath)!,
+                    "jobs.json.lock");
+                bool videoPublicationWriterLockResidueFree =
+                    !File.Exists(jobsLockPath)
+                    && !Directory.Exists(jobsLockPath)
+                    && !Directory.EnumerateFileSystemEntries(
+                            Path.GetDirectoryName(jobsPath)!,
+                            "jobs.json.lock.*",
+                            SearchOption.TopDirectoryOnly)
+                        .Any();
 
                 bool ok = string.Equals(Path.GetFullPath(resolvedJobsPath), Path.GetFullPath(jobsPath), StringComparison.OrdinalIgnoreCase)
                     && win.EnhancementReadOkForSmoke
@@ -19394,6 +19446,14 @@ public partial class App : Application
                     VideoSeedContract = videoSeedContract,
                     VideoBoardFailureFeedback = videoBoardFailureFeedback,
                     ImageDeleteOwnershipGuard = imageDeleteOwnershipGuard,
+                    ImageDeletePublicationGuard =
+                        imageDeletePublicationGuard,
+                    ImageDeletePublicationFilePin =
+                        imageDeletePublicationFilePin,
+                    VideoRetryPublicationFilePin =
+                        videoRetryPublicationFilePin,
+                    VideoPublicationWriterLockResidueFree =
+                        videoPublicationWriterLockResidueFree,
                     ImageDeleteDependencyGuard = imageDeleteDependencyGuard,
                     VideoDeleteOwnershipGuard = videoDeleteOwnershipGuard,
                     VideoStyleSaved = videoStyleSaved,
@@ -38068,6 +38128,10 @@ public partial class App : Application
         public bool VideoSeedContract { get; init; }
         public bool VideoBoardFailureFeedback { get; init; }
         public bool ImageDeleteOwnershipGuard { get; init; }
+        public bool ImageDeletePublicationGuard { get; init; }
+        public bool ImageDeletePublicationFilePin { get; init; }
+        public bool VideoRetryPublicationFilePin { get; init; }
+        public bool VideoPublicationWriterLockResidueFree { get; init; }
         public bool ImageDeleteDependencyGuard { get; init; }
         public bool VideoDeleteOwnershipGuard { get; init; }
         public bool VideoStyleSaved { get; init; }

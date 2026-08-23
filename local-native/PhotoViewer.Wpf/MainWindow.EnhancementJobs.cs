@@ -7386,6 +7386,7 @@ public partial class MainWindow
         job.IsBusy = true;
         long generation = context.WorkspaceGeneration;
         var operationWatch = Stopwatch.StartNew();
+        string? pendingDeliveryRequestId = null;
         try
         {
             EnhancementJobsStatusText.Text =
@@ -7398,6 +7399,14 @@ public partial class MainWindow
                 return;
             }
             VideoSourceChoice source = validation.Source;
+            if (!TryCaptureVideoSourceStamp(
+                    source,
+                    out VideoH3SourceStamp sourceStamp))
+            {
+                EnhancementJobsStatusText.Text =
+                    "この動画が使った入力画像を固定できません。ジョブは追加していません。";
+                return;
+            }
             VideoGenerationRequestSettings settings =
                 MiniMaxH3VideoRerunRequestSettings(context.Snapshot);
             EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
@@ -7420,7 +7429,26 @@ public partial class MainWindow
                     ValidateMiniMaxH3VideoRerunSourceBeforePublishAsync(
                         context,
                         source,
-                        token));
+                        token),
+                onBeforeDurablePublish: item =>
+                {
+                    IDisposable publishLease =
+                        AcquireVideoDurablePublishLease(
+                            () => PinVideoSourceForDurablePublish(sourceStamp));
+                    try
+                    {
+                        pendingDeliveryRequestId = item.RequestId;
+                        RecordPendingVideoSourceDependency(
+                            item.RequestId,
+                            source);
+                        return publishLease;
+                    }
+                    catch
+                    {
+                        publishLease.Dispose();
+                        throw;
+                    }
+                });
             if (generation != _enhancementWorkspaceGeneration
                 || EnhancementJobsDialog.Visibility != Visibility.Visible)
             {
@@ -7469,6 +7497,11 @@ public partial class MainWindow
         }
         finally
         {
+            if (!string.IsNullOrWhiteSpace(pendingDeliveryRequestId))
+            {
+                _pendingVideoSourceDependencies.Remove(
+                    pendingDeliveryRequestId);
+            }
             job.IsBusy = false;
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
@@ -7837,7 +7870,11 @@ public partial class MainWindow
             queuePlacement: "last",
             retryJobId: job.Id,
             healthValidator: retryHealthValidator,
-            requireExactHealthValidation: retryHealthValidator is not null);
+            requireExactHealthValidation: retryHealthValidator is not null,
+            onBeforeDurablePublish: job.IsVideoOperation
+                ? _ => AcquireVideoDurablePublishLease(
+                    () => PinVideoRetrySourceForDurablePublish(job))
+                : null);
     }
 
     private static string EnhancementApiErrorCode(
@@ -9641,6 +9678,9 @@ public partial class MainWindow
     public async Task<(bool Ok, bool SavedForDelivery, int StatusCode, string Error)>
         RetryMiniMaxH3JobForSmokeAsync(string id)
     {
+        // This isolated UI smoke probes only the H3 health gate with synthetic
+        // ids and no persisted Jobs row. Product retry entry points always use
+        // SendEnhancementWorkspaceRetryAsync and pin their persisted source.
         Func<JsonElement, string?>? healthValidator =
             CreateEnhancementRetryHealthValidator(
                 operation: "video",

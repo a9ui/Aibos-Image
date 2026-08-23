@@ -6,6 +6,10 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $storeSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\EnhancementEnqueueInboxStore.cs'
 $policySource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\EnhancementEnqueueProbePolicy.cs'
+$companionSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.EnhancementCompanion.cs'
+$jobsSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.EnhancementJobs.cs'
+$videoSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoGeneration.cs'
+$sharedLockSource = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\AlbumStore.cs'
 $contractPath = Join-Path $repoRoot 'contracts\enhancement-enqueue-inbox-v1.json'
 if (-not (Test-Path -LiteralPath $storeSource -PathType Leaf)) {
     throw 'Durable enqueue inbox store source is missing.'
@@ -13,8 +17,59 @@ if (-not (Test-Path -LiteralPath $storeSource -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $policySource -PathType Leaf)) {
     throw 'Durable enqueue probe policy source is missing.'
 }
+foreach ($sourcePath in @($companionSource, $jobsSource, $videoSource, $sharedLockSource)) {
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Durable enqueue WPF source is missing: $sourcePath"
+    }
+}
 if (-not (Test-Path -LiteralPath $contractPath -PathType Leaf)) {
     throw 'Durable enqueue inbox contract is missing.'
+}
+
+$companionText = Get-Content -LiteralPath $companionSource -Raw
+$jobsText = Get-Content -LiteralPath $jobsSource -Raw
+$videoText = Get-Content -LiteralPath $videoSource -Raw
+$sharedLockText = Get-Content -LiteralPath $sharedLockSource -Raw
+if (($jobsText -notmatch 'onBeforeDurablePublish:\s*job\.IsVideoOperation') -or
+    ($jobsText -notmatch 'PinVideoRetrySourceForDurablePublish\(job\)')) {
+    throw 'Single video retry does not pin its source through durable publication.'
+}
+$savedPromptStart = $jobsText.IndexOf(
+    'private async Task RerunMiniMaxH3VideoWithSavedPromptAsync',
+    [StringComparison]::Ordinal)
+$savedPromptEnd = if ($savedPromptStart -ge 0) {
+    $jobsText.IndexOf(
+        'private bool TryOpenMiniMaxH3VideoRerunSourceInViewer',
+        $savedPromptStart,
+        [StringComparison]::Ordinal)
+} else {
+    -1
+}
+if ($savedPromptStart -lt 0 -or $savedPromptEnd -le $savedPromptStart) {
+    throw 'Saved-Prompt video rerun method boundary is missing.'
+}
+$savedPromptText = $jobsText.Substring(
+    $savedPromptStart,
+    $savedPromptEnd - $savedPromptStart)
+if (($savedPromptText -notmatch 'TryCaptureVideoSourceStamp') -or
+    ($savedPromptText -notmatch 'AcquireVideoDurablePublishLease') -or
+    ($savedPromptText -notmatch 'PinVideoSourceForDurablePublish\(sourceStamp\)') -or
+    ($savedPromptText -notmatch 'RecordPendingVideoSourceDependency') -or
+    ($savedPromptText -notmatch '_pendingVideoSourceDependencies\.Remove')) {
+    throw 'Saved-Prompt video rerun no longer pins and overlays its source through durable publication.'
+}
+if (($companionText -notmatch 'DurablePublishLeaseFactory\?\.Invoke\(\)') -or
+    ($companionText -notmatch 'job\.IsVideoOperation\s*\?\s*\(\) => PinVideoRetrySourceForDurablePublish\(job\)')) {
+    throw 'Batch video retry does not acquire every source lease before envelope publication.'
+}
+if (($videoText -notmatch 'PinVideoRetrySourceForDurablePublish') -or
+    ($videoText -notmatch 'FileShare\.Read,')) {
+    throw 'Video durable-publication pin no longer denies delete sharing.'
+}
+if (($companionText -notmatch 'AcquireEnhancementJobsWriteLeaseForDurablePublish') -or
+    ($companionText -notmatch 'Path\.Combine\(jobsDirectory, "jobs\.json"\)') -or
+    ($sharedLockText -notmatch 'TryAcquireSharedDirectoryWriteLease')) {
+    throw 'WPF video publication no longer shares the Companion Jobs writer lock target.'
 }
 
 $dotnet = if ([string]::IsNullOrWhiteSpace($DotnetPath)) {
@@ -146,6 +201,8 @@ string retrySourceDismissal = contract
     .GetProperty("consumer")
     .GetProperty("failedRetrySourceDismissal")
     .GetString() ?? "";
+JsonElement managedVideoSourceReservation = contract.GetProperty(
+    "managedVideoSourceReservation");
 bool contractOk = contract.GetProperty("schemaVersion").GetInt32()
         == EnhancementEnqueueInboxStore.ProtocolVersion
     && capability.GetProperty("protocolVersion").GetInt32()
@@ -164,6 +221,22 @@ bool contractOk = contract.GetProperty("schemaVersion").GetInt32()
     && !retrySourceDismissal.Contains(
         "canceled source history remains visible",
         StringComparison.Ordinal)
+    && managedVideoSourceReservation
+        .GetProperty("maximumDependencyScanCommittedFiles").GetInt32() == 128
+    && managedVideoSourceReservation
+        .GetProperty("maximumDependencyScanDirectoryEntries").GetInt32() == 256
+    && managedVideoSourceReservation
+        .GetProperty("maximumDependencyScanItems").GetInt32() == 4096
+    && managedVideoSourceReservation
+        .GetProperty("maximumDependencyScanUtf8Bytes").GetInt32() == 67108864
+    && managedVideoSourceReservation.GetProperty("passiveRead").GetString()!
+        .Contains("does not create directories", StringComparison.Ordinal)
+    && managedVideoSourceReservation.GetProperty("needsAction").GetString()!
+        .Contains("definitive 4xx no-job outcome", StringComparison.Ordinal)
+    && managedVideoSourceReservation.GetProperty("publicationTransfer").GetString()!
+        .Contains("exact source handle", StringComparison.Ordinal)
+    && managedVideoSourceReservation.GetProperty("writerInterlock").GetString()!
+        .Contains("jobs.json", StringComparison.Ordinal)
     && createVector.GetProperty("requestHash").GetString()
         == EnhancementEnqueueInboxStore.ComputeRequestHash(
             createVector.GetProperty("kind").GetString()!,

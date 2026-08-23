@@ -67,7 +67,10 @@ public partial class MainWindow
     private readonly record struct VideoH3SourceStamp(
         string SourceIdentity,
         string DisplayPath,
+        string CanonicalDisplayPath,
         string? ProducerJobId,
+        uint VolumeSerialNumber,
+        ulong FileIndex,
         long Length,
         long LastWriteUtcTicks);
 
@@ -782,25 +785,54 @@ public partial class MainWindow
             return false;
         }
 
+        if (TryCaptureVideoSourceStamp(source, out stamp))
+        {
+            error = "";
+            return true;
+        }
+
+        error = VideoH3Localized(
+            "UiVideoH3StatusSourceUnavailable",
+            "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。");
+        source = null!;
+        return false;
+    }
+
+    private static bool TryCaptureVideoSourceStamp(
+        VideoSourceChoice source,
+        out VideoH3SourceStamp stamp)
+    {
+        stamp = default;
         try
         {
             string displayPath = Path.GetFullPath(source.DisplayPath);
-            var info = new FileInfo(displayPath);
-            if (!info.Exists || info.Length <= 0)
+            using var stream = new FileStream(
+                displayPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 4_096,
+                FileOptions.RandomAccess);
+            if (!WindowsPathIdentity.TryGetFinalPath(
+                    stream.SafeFileHandle,
+                    out string canonicalDisplayPath)
+                || !TryReadExternalFileDropSourceVersion(
+                    stream.SafeFileHandle,
+                    out ExternalFileDropSourceVersion version)
+                || version.Length <= 0)
             {
-                error = VideoH3Localized(
-                    "UiVideoH3StatusSourceUnavailable",
-                    "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。");
                 return false;
             }
 
             stamp = new VideoH3SourceStamp(
                 source.SourceIdentity,
                 displayPath,
+                canonicalDisplayPath,
                 source.ProducerJobId,
-                info.Length,
-                info.LastWriteTimeUtc.Ticks);
-            error = "";
+                version.VolumeSerialNumber,
+                version.FileIndex,
+                version.Length,
+                version.LastWriteUtcTicks);
             return true;
         }
         catch (Exception ex) when (
@@ -809,10 +841,6 @@ public partial class MainWindow
                 or ArgumentException
                 or NotSupportedException)
         {
-            error = VideoH3Localized(
-                "UiVideoH3StatusSourceUnavailable",
-                "表示中の画像ファイルを読み込めません。移動または削除されていないか確認してください。");
-            source = null!;
             return false;
         }
     }
@@ -829,9 +857,15 @@ public partial class MainWindow
                 right.DisplayPath,
                 StringComparison.OrdinalIgnoreCase)
             && string.Equals(
+                left.CanonicalDisplayPath,
+                right.CanonicalDisplayPath,
+                StringComparison.OrdinalIgnoreCase)
+            && string.Equals(
                 left.ProducerJobId,
                 right.ProducerJobId,
                 StringComparison.Ordinal)
+            && left.VolumeSerialNumber == right.VolumeSerialNumber
+            && left.FileIndex == right.FileIndex
             && left.Length == right.Length
             && left.LastWriteUtcTicks == right.LastWriteUtcTicks;
 

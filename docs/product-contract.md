@@ -216,6 +216,12 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   row depends on its producer id or names that exact canonical output as its
   persisted source path. This protection remains fail-closed for an active
   video row whose other mutation fields are malformed or reader-only.
+- Durable video create and retry publication reserves the same managed source
+  before a Jobs row is visible. Publication and managed-output deletion share
+  the Jobs writer lock; DELETE passively scans bounded committed pending,
+  processing, and needs-action inbox state while holding that lock. Malformed,
+  unsupported-future, over-bound, ambiguous, or unresolved reservation state
+  fails closed without deleting output or rewriting Jobs state.
 - A completed output is finalized below its operation's `YYYY-MM-DD` folder.
   The date comes only from that output file's Windows CreationTime in the
   companion's local timezone. Job, source, and EXIF dates do not substitute.
