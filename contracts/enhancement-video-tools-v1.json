@@ -1,0 +1,504 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-TOOLS-001",
+  "protocol": "aibos-enhancement-video-tools-v1",
+  "jobStoreVersion": 1,
+  "operation": "video",
+  "mediaKind": "video",
+  "pairedRollout": {
+    "publicReaderBeforePrivateWriter": true,
+    "readerOnlyFoundation": true,
+    "productionWriterEnabled": false
+  },
+  "request": {
+    "commonRequiredFields": [
+      "sourceId",
+      "sourceVideoJobId",
+      "operation",
+      "mediaKind",
+      "videoTools"
+    ],
+    "optionalEnvelopeFields": [
+      "clientRequestId"
+    ],
+    "unknownEnvelopeFields": "reject",
+    "sourceAuthority": "sourceVideoJobId resolves one succeeded exact managed video producer; a client path is never accepted",
+    "sourceVideoJobIdPattern": "case-insensitive UUID with 8-4-4-4-12 hexadecimal groups or exactly 32 hexadecimal characters",
+    "sourceIdMeaning": "original gallery identity remains stable while sourceVideoJobId selects the managed video version",
+    "mixedLegacyFields": {
+      "rejected": [
+        "presetId",
+        "adapterId",
+        "video",
+        "seed",
+        "sourceProducerJobId",
+        "sourceManagedOutputPath",
+        "sourceRecoveredOutputPath",
+        "sourceImagePath",
+        "sourceOutputPath"
+      ],
+      "unknownVideoToolsFields": "reject"
+    },
+    "retake": {
+      "exactVideoToolsFields": [
+        "schemaVersion",
+        "kind",
+        "selection",
+        "prompt",
+        "steps",
+        "maximumPixelArea"
+      ],
+      "schemaVersion": 1,
+      "kind": "retake",
+      "selection": {
+        "exactFields": [
+          "startFrame",
+          "endFrameExclusive"
+        ],
+        "timeline": "zero-based source frames at exactly 24 fps",
+        "bounds": "0 <= startFrame < endFrameExclusive <= probed source frameCount"
+      },
+      "prompt": "one canonical compiled MiniMax H3 prompt: exact outer grammar, well-formed UTF-16, 1 through 8000 code units, trimmed, no internal DSL or reserved token, valid dialogue wrappers, and the beginning, continuous-development, and ending shot phrases",
+      "steps": {
+        "minimum": 1,
+        "maximum": 40
+      },
+      "maximumPixelArea": [
+        230400,
+        307200,
+        414720
+      ]
+    },
+    "finish": {
+      "exactVideoToolsFields": [
+        "schemaVersion",
+        "kind",
+        "mode",
+        "scale"
+      ],
+      "schemaVersion": 1,
+      "kind": "finish",
+      "mode": [
+        "faithful",
+        "detail"
+      ],
+      "scale": 2,
+      "meaning": "temporal spatial super-resolution; frame interpolation and RIFE are not this operation"
+    }
+  },
+  "promptInteropFixtures": {
+    "motionDirectorV1": {
+      "planner": {
+        "frameCount": 124,
+        "playbackFps": 24,
+        "actionIds": [
+          "subtle-gaze",
+          "gentle-smile"
+        ],
+        "cameraId": "fixed"
+      },
+      "prompt": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description: [Shot 1] Preserve the exact identity, face, body proportions, clothing, visible objects, lighting, palette, and scene layout from <Picture 1>. Keep one continuous shot; do not add people, objects, contact, text, cuts, or scene changes. The shot begins in one continuous take. The camera remains fixed in one continuous shot with the original framing and perspective preserved. The motion develops continuously. Timed motion plan: At 0.000–0.458 seconds, the subject prepares for subtle gaze with restrained natural micro-movement. At 0.458–1.875 seconds, the subject makes a small, deliberate gaze shift while the face, eyes, and head remain anatomically stable. At 1.875–2.333 seconds, the subtle gaze eases out and the subject settles naturally without a pose jump. At 2.333–2.875 seconds, the subject prepares for gentle smile with restrained natural micro-movement. At 2.875–4.583 seconds, the subject's expression gradually warms into a gentle natural smile without changing identity or facial structure. At 4.583–5.125 seconds, the gentle smile eases out and the subject settles naturally without a pose jump. At 5.125–5.167 seconds, the subject holds the final source-faithful pose with only natural breathing, hair, and fabric micro-motion. By the end, the movement settles naturally without a cut. The final frame at 5.167 seconds remains visually consistent with the source image.\n\noverall_soundscape: Quiet image-consistent diegetic ambience with subtle movement and fabric sounds only when visually supported; no invented dialogue or prominent effects.\n\nnon_diegetic_music: None; do not add music."
+    }
+  },
+  "source": {
+    "requiredProducerState": "succeeded",
+    "requiredOwnership": "exact managed Videos output inside the configured Enhancement output root",
+    "maximumBytes": 536870912,
+    "maximumDurationMs": 15100,
+    "maximumVideoStreams": 1,
+    "maximumAudioStreams": 1,
+    "maximumWidth": 1920,
+    "maximumHeight": 1080,
+    "maximumPixelArea": 2073600,
+    "maximumFrames": 450,
+    "allowedFps": [
+      {
+        "numerator": 24,
+        "denominator": 1
+      },
+      {
+        "numerator": 30,
+        "denominator": 1
+      }
+    ],
+    "probePin": "persist and reverify signature, SHA-256, container, dimensions, exact frame count, fps rational, duration, and stream counts before execution and publish",
+    "retakeAdditionalRule": "producer must be a mutation-safe exact 24 fps MiniMax H3 v2 job with 124, 243, 294, or 362 frames",
+    "finishAdditionalRule": "producer must be a mutation-safe current MiniMax H3 v2 or Wan v1 job; arbitrary succeeded, malformed, future, or foreign video rows remain protected"
+  },
+  "retakePlanner": {
+    "legalFrameCounts": [
+      124,
+      243,
+      294,
+      362
+    ],
+    "algorithm": "select the smallest legal frame count that covers the selected half-open frame interval and fits the source; center on the selection with integer floor, then clamp to [0, sourceFrameCount - actualFrameCount]",
+    "centerTieBreakFormula": "centeredStart = floor((selectedStartFrame + selectedEndFrameInclusive - actualFrameCount + 1) / 2); actualStartFrame = clamp(centeredStart, 0, sourceFrameCount - actualFrameCount)",
+    "oddSpareFrameTieBreak": "the single odd spare frame is placed before the selected interval",
+    "persistedAuthority": [
+      "selected.startFrame",
+      "selected.endFrame",
+      "selected.startMs",
+      "selected.endMs",
+      "actual.startFrame",
+      "actual.endFrame",
+      "actual.startMs",
+      "actual.endMs",
+      "actual.frameCount",
+      "firstAnchorFrame",
+      "lastAnchorFrame"
+    ],
+    "clientActualWindow": "never accepted"
+  },
+  "retakeDelivery": {
+    "outputTimeline": "the full source clip, never only the generated actual window",
+    "splice": "replace only actual video frames and preserve the unchanged prefix and suffix",
+    "canvas": "derive one source-aspect MiniMax H3 canvas from the probed source dimensions and requested maximumPixelArea, then use it for every output frame",
+    "frameCount": "equal to the probed source frame count",
+    "duration": "equal to the probed source duration",
+    "fps": "exactly 24/1 from the H3 source",
+    "audio": "preserve the original source audio unchanged and discard any H3-generated audio"
+  },
+  "finishPlan": {
+    "spatialScale": 2,
+    "maximumOutputWidth": 3840,
+    "maximumOutputHeight": 2160,
+    "maximumOutputPixelArea": 8294400,
+    "preserve": [
+      "fps rational",
+      "duration",
+      "frame count",
+      "audio when present"
+    ],
+    "temporalSceneCutReset": true
+  },
+  "persistedSnapshot": {
+    "discriminator": "video.protocol, video.schemaVersion, and video.kind",
+    "protocol": "aibos-enhancement-video-tools-v1",
+    "schemaVersion": 1,
+    "stableIds": {
+      "retakePresetId": "minimax-h3-retake-v1",
+      "retakeBackendId": "minimax-h3-retake-v1",
+      "finishPresetId": "aibos-video-finish-2x-v1",
+      "finishBackendId": "aibos-video-finish-2x-v1"
+    },
+    "exactKeys": {
+      "retake": {
+        "video": [
+          "schemaVersion",
+          "protocol",
+          "kind",
+          "presetId",
+          "backendId",
+          "source",
+          "requested",
+          "plan",
+          "delivery"
+        ],
+        "requested": [
+          "schemaVersion",
+          "kind",
+          "selection",
+          "prompt",
+          "steps",
+          "maximumPixelArea"
+        ],
+        "selection": [
+          "startFrame",
+          "endFrameExclusive"
+        ],
+        "plan": [
+          "selected",
+          "actual",
+          "firstAnchorFrame",
+          "lastAnchorFrame"
+        ],
+        "selected": [
+          "startMs",
+          "endMs",
+          "startFrame",
+          "endFrame"
+        ],
+        "actual": [
+          "startMs",
+          "endMs",
+          "startFrame",
+          "endFrame",
+          "frameCount"
+        ],
+        "delivery": [
+          "targetFps",
+          "width",
+          "height",
+          "frameCount",
+          "durationMs",
+          "preserveSourceAudio",
+          "discardGeneratedAudio",
+          "splicePrefixAndSuffix"
+        ]
+      },
+      "finish": {
+        "video": [
+          "schemaVersion",
+          "protocol",
+          "kind",
+          "presetId",
+          "backendId",
+          "source",
+          "requested",
+          "plan"
+        ],
+        "requested": [
+          "schemaVersion",
+          "kind",
+          "mode",
+          "scale"
+        ],
+        "plan": [
+          "inputWidth",
+          "inputHeight",
+          "outputWidth",
+          "outputHeight",
+          "frameCount",
+          "fpsNumerator",
+          "fpsDenominator",
+          "durationMs",
+          "preserveAudio",
+          "temporalSceneCutReset"
+        ]
+      },
+      "shared": {
+        "source": [
+          "jobId",
+          "signature",
+          "sha256",
+          "probe"
+        ],
+        "signature": [
+          "size",
+          "mtimeMs"
+        ],
+        "probe": [
+          "container",
+          "width",
+          "height",
+          "frameCount",
+          "fpsNumerator",
+          "fpsDenominator",
+          "durationMs",
+          "videoStreamCount",
+          "audioStreamCount"
+        ]
+      }
+    },
+    "sourceVideoJobIdField": "job.sourceVideoJobId must equal video.source.jobId",
+    "presetHash": "recursively sort object keys with ordinal string comparison, serialize compact JSON, SHA-256 UTF-8 bytes, and take the first 12 lowercase hexadecimal characters",
+    "unknownOrMalformed": "reader-only protected row; preserve unknown fields and prohibit enqueue, claim, retry, cancel, reorder, output deletion, and execution",
+    "retry": "disabled while writerEnabled is false; a future compatible writer must reverify the same producer row, managed path, signature, SHA-256, and probe while reusing the exact persisted snapshot"
+  },
+  "readerFixtures": {
+    "retake": {
+      "job": {
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "minimax-h3-retake-v1",
+        "adapterId": "minimax-h3-retake-v1",
+        "presetHash": "3b62213062d0"
+      },
+      "video": {
+        "schemaVersion": 1,
+        "protocol": "aibos-enhancement-video-tools-v1",
+        "kind": "retake",
+        "presetId": "minimax-h3-retake-v1",
+        "backendId": "minimax-h3-retake-v1",
+        "source": {
+          "jobId": "11111111-2222-4333-8444-555555555555",
+          "signature": {
+            "size": 12345,
+            "mtimeMs": 1786320000000
+          },
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "probe": {
+            "container": "mp4",
+            "width": 864,
+            "height": 480,
+            "frameCount": 362,
+            "fpsNumerator": 24,
+            "fpsDenominator": 1,
+            "durationMs": 15083,
+            "videoStreamCount": 1,
+            "audioStreamCount": 1
+          }
+        },
+        "requested": {
+          "schemaVersion": 1,
+          "kind": "retake",
+          "selection": {
+            "startFrame": 150,
+            "endFrameExclusive": 180
+          },
+          "prompt": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description: [Shot 1] A clearly adult woman in a red jacket stands beneath warm studio lights. The source image's original visual medium and rendering style remain unchanged. The shot begins in one continuous take. She turns her head and raises one hand in a clear wave. A smooth medium-shot dolly moves slightly left. Her composed smile grows warmer through the motion. The motion develops continuously within the same action. By the end, the movement settles naturally without a cut. Hair and jacket fabric settle after the gesture.\n\noverall_soundscape: Soft fabric movement and quiet room ambience.\n\nnon_diegetic_music: N/A",
+          "steps": 20,
+          "maximumPixelArea": 414720
+        },
+        "plan": {
+          "selected": {
+            "startMs": 6250,
+            "endMs": 7500,
+            "startFrame": 150,
+            "endFrame": 179
+          },
+          "actual": {
+            "startMs": 4291,
+            "endMs": 9459,
+            "startFrame": 103,
+            "endFrame": 226,
+            "frameCount": 124
+          },
+          "firstAnchorFrame": 103,
+          "lastAnchorFrame": 226
+        },
+        "delivery": {
+          "targetFps": 24,
+          "width": 864,
+          "height": 480,
+          "frameCount": 362,
+          "durationMs": 15083,
+          "preserveSourceAudio": true,
+          "discardGeneratedAudio": true,
+          "splicePrefixAndSuffix": true
+        }
+      }
+    },
+    "finish": {
+      "job": {
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "aibos-video-finish-2x-v1",
+        "adapterId": "aibos-video-finish-2x-v1",
+        "presetHash": "6467a0f6a2d8"
+      },
+      "video": {
+        "schemaVersion": 1,
+        "protocol": "aibos-enhancement-video-tools-v1",
+        "kind": "finish",
+        "presetId": "aibos-video-finish-2x-v1",
+        "backendId": "aibos-video-finish-2x-v1",
+        "source": {
+          "jobId": "11111111-2222-4333-8444-555555555555",
+          "signature": {
+            "size": 12345,
+            "mtimeMs": 1786320000000
+          },
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "probe": {
+            "container": "mp4",
+            "width": 960,
+            "height": 544,
+            "frameCount": 181,
+            "fpsNumerator": 30,
+            "fpsDenominator": 1,
+            "durationMs": 6033,
+            "videoStreamCount": 1,
+            "audioStreamCount": 0
+          }
+        },
+        "requested": {
+          "schemaVersion": 1,
+          "kind": "finish",
+          "mode": "faithful",
+          "scale": 2
+        },
+        "plan": {
+          "inputWidth": 960,
+          "inputHeight": 544,
+          "outputWidth": 1920,
+          "outputHeight": 1088,
+          "frameCount": 181,
+          "fpsNumerator": 30,
+          "fpsDenominator": 1,
+          "durationMs": 6033,
+          "preserveAudio": true,
+          "temporalSceneCutReset": true
+        }
+      }
+    },
+    "rules": {
+      "sourceProducerJobId": "absent",
+      "jobSourceVideoJobId": "must equal video.source.jobId",
+      "presetHash": "must equal the stable snapshot hash shown by each fixture",
+      "unknownNestedField": "protected reader-only"
+    }
+  },
+  "healthCapability": {
+    "property": "capabilities.videoToolsV1",
+    "exactShape": {
+      "contractId": "PV-ENHANCE-VIDEO-TOOLS-001",
+      "protocol": "aibos-enhancement-video-tools-v1",
+      "readerReady": true,
+      "retake": {
+        "writerEnabled": false,
+        "backendConfigured": false,
+        "runtimeVerified": false,
+        "ready": false,
+        "state": "disabled",
+        "reasonCode": "RETAKE_RUNTIME_UNPINNED"
+      },
+      "finish": {
+        "writerEnabled": false,
+        "backendConfigured": false,
+        "runtimeVerified": false,
+        "ready": false,
+        "state": "disabled",
+        "reasonCode": "FINISH_RUNTIME_UNPINNED"
+      }
+    },
+    "reasonCodes": {
+      "retake": [
+        "RETAKE_RUNTIME_UNPINNED",
+        "RETAKE_WORKFLOW_INPUT_UNVERIFIED",
+        "RETAKE_MODEL_LICENSE_RECEIPT_MISSING",
+        "RETAKE_GPU_CANARY_MISSING",
+        "RETAKE_OUTPUT_CANARY_MISSING"
+      ],
+      "finish": [
+        "FINISH_RUNTIME_UNPINNED",
+        "FINISH_WORKFLOW_INPUT_UNVERIFIED",
+        "FINISH_MODEL_LICENSE_RECEIPT_MISSING",
+        "FINISH_GPU_CANARY_MISSING",
+        "FINISH_OUTPUT_CANARY_MISSING"
+      ]
+    },
+    "runtimeVerifiedRequires": [
+      "pinned runtime receipt",
+      "exact workflow/input contract receipt",
+      "model identity and license receipt",
+      "bounded GPU canary",
+      "output ownership and media canary"
+    ],
+    "passiveRead": {
+      "createsJobs": false,
+      "startsWorker": false,
+      "wakesQueue": false,
+      "claimsJobs": false,
+      "retriesJobs": false,
+      "probesMedia": false,
+      "pollsBackend": false
+    }
+  },
+  "durableDependencies": {
+    "activeJob": "sourceVideoJobId reserves its producer output while queued or running",
+    "durableInbox": "a pending exact create or retry envelope using sourceVideoJobId reserves the producer output until a durable outcome exists",
+    "delete": "producer output deletion fails closed while an active or pending dependency exists",
+    "sourceDeletion": "never performed by Video Tools"
+  },
+  "productionGate": {
+    "currentPostResult": {
+      "status": 503,
+      "code": "VIDEO_TOOLS_NOT_READY"
+    },
+    "writerRule": "both lane writerEnabled and ready must be exact true after paired reader rollout and all runtimeVerified receipts; readerReady alone never authorizes enqueue"
+  }
+}

@@ -245,6 +245,33 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - MiniMax H3 requests use the additive version 2 contract. Profile, step, and
   canvas selections are separate versioned capabilities; clients require exact
   readiness before durable publication.
+- Motion Director is a deterministic, WPF-local planning surface for MiniMax
+  H3. It compiles bounded action, camera, and frame-timeline choices into a
+  transient prompt candidate. Opening it, changing its controls, or building a
+  candidate creates no Job and publishes no durable reservation. Only the
+  existing explicit Apply action changes the video prompt; video generation
+  still requires its separate explicit enqueue action.
+- Video Tools version 1 keeps `operation=video` and selects one succeeded,
+  exact managed video by producer Job id. A client path is never source
+  authority. Retake accepts a half-open frame selection on an exact 24 fps H3
+  v2 source, derives and persists the smallest legal centered H3 window, and
+  shows the selected and actual windows separately. The completed Retake is
+  the full source clip: only the actual video window is replaced, unchanged
+  prefix and suffix frames remain, source frame count, duration, and fps remain
+  exact, original source audio is preserved, and generated-window audio is
+  discarded.
+- Video Finish is a separate spatial 2x super-resolution intent. Faithful and
+  detail modes preserve source fps, duration, frame count, and audio, reset
+  temporal state at scene cuts, and do not perform frame interpolation. RIFE
+  interpolation is not Video Finish.
+- Video Tools health is passive and exact. Reader readiness never authorizes a
+  writer. Retake and Finish remain disabled until their own pinned runtime,
+  workflow input, model/license, bounded GPU, and output media canaries all
+  verify. Unknown, malformed, or future Video Tools snapshots remain
+  reader-only protected. A queued or running `sourceVideoJobId`, and an exact
+  committed pending durable inbox reservation for it, blocks deletion of that
+  producer output. The exact wire, bounds, persisted snapshot, delivery, and
+  production gate are defined by `PV-ENHANCE-VIDEO-TOOLS-001`.
 - Readiness is obtained from the current authenticated health response. It is
   not inferred from a committed activation record, benchmark, previous
   process, or candidate revision.

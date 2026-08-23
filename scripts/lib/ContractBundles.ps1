@@ -119,6 +119,15 @@ function Get-AibosVideoV2Bundle {
     return $core
 }
 
+function Get-AibosVideoToolsV1Bundle {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    $index = Get-AibosContractIndex $RepoRoot
+    $bundle = Get-AibosVerificationBundle $index 'enhancement-video-tools-v1'
+    return Read-AibosJsonFile (
+        Resolve-AibosIndexedPath $RepoRoot ([string]$bundle.core))
+}
+
 function Write-AibosJsonFile {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -185,9 +194,12 @@ function Test-AibosContractIndex {
     $shared = Get-AibosSharedStateBundle $RepoRoot
     $videoV1 = Get-AibosVideoV1Bundle $RepoRoot
     $videoV2 = Get-AibosVideoV2Bundle $RepoRoot
+    $videoToolsV1 = Get-AibosVideoToolsV1Bundle $RepoRoot
     if (@($shared.contracts).Count -ne 6 -or
         $videoV1.contractId -cne 'PV-ENHANCE-VIDEO-001' -or
         $videoV2.contractId -cne 'PV-ENHANCE-VIDEO-002' -or
+        $videoToolsV1.contractId -cne 'PV-ENHANCE-VIDEO-TOOLS-001' -or
+        $videoToolsV1.protocol -cne 'aibos-enhancement-video-tools-v1' -or
         $videoV2.promptRewriteProtocol.contractId -cne
             'PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001') {
         throw 'A verification bundle could not be materialized with its expected identity.'
