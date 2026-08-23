@@ -124,6 +124,7 @@ try {
         'videoSeedContract',
         'videoBoardFailureFeedback',
         'imageDeleteOwnershipGuard',
+        'imageDeleteDependencyGuard',
         'videoDeleteOwnershipGuard',
         'videoStyleSaved',
         'videoStylePersistence',
