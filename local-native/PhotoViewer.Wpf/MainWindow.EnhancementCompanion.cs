@@ -1703,7 +1703,9 @@ public partial class MainWindow
                     {
                         responses[publishedIndex] = NormalizeDurableEnqueueResponse(
                             nudge,
-                            publishedItem);
+                            publishedItem,
+                            allowDefinitiveFailure:
+                                publishedIndex == globalIndex);
                     }
                 }
                 else
@@ -1857,7 +1859,8 @@ public partial class MainWindow
 
     private static EnhancementApiResponse NormalizeDurableEnqueueResponse(
         EnhancementApiResponse response,
-        EnhancementEnqueueInboxItem item)
+        EnhancementEnqueueInboxItem item,
+        bool allowDefinitiveFailure = true)
     {
         if (response.Ok
             && EnhancementEnqueueProbePolicy.HasMatchingDurableReceipt(
@@ -1871,7 +1874,8 @@ public partial class MainWindow
                     ? response
                     : SavedForDeliveryResponse(item);
         }
-        if (response.InnerStatusAuthoritative
+        if (allowDefinitiveFailure
+            && response.InnerStatusAuthoritative
             && response.StatusCode is >= 400 and < 500
             && response.StatusCode is not (408 or 425 or 429))
         {
@@ -3870,6 +3874,43 @@ public partial class MainWindow
             await TrySendDurableEnhancementBatchAsync(bodies);
         return response.PublishedCount;
     }
+
+    public async Task<bool> DurableBatchDefinitiveFailureIsPerItemForSmokeAsync(
+        IReadOnlyList<object?> bodies,
+        Func<(bool Observed, bool Bodyless, string? RequestId)> captureNudge)
+    {
+        DurableEnhancementBatchResponse response =
+            await TrySendDurableEnhancementBatchAsync(bodies);
+        (bool nudgeObserved, bool nudgeBodyless, string? nudgeRequestId) =
+            captureNudge();
+        return bodies.Count == 2
+            && nudgeObserved
+            && nudgeBodyless
+            && !string.IsNullOrWhiteSpace(nudgeRequestId)
+            && response.PublishedCount == 2
+            && response.NudgeCount == 1
+            && response.Responses.Length == 2
+            && response.Responses[0] is
+            {
+                Ok: false,
+                StatusCode: 409,
+                SavedForDelivery: false,
+                InnerStatusAuthoritative: true,
+            }
+            && response.Responses[1] is
+            {
+                Ok: true,
+                StatusCode: 202,
+                SavedForDelivery: true,
+            }
+            && !string.IsNullOrWhiteSpace(
+                response.Responses[1].DeliveryRequestId)
+            && !string.Equals(
+                response.Responses[1].DeliveryRequestId,
+                nudgeRequestId,
+                StringComparison.Ordinal);
+    }
+
     public static bool ReceiptOnlyDurableResponseIsPendingForSmoke()
     {
         EnhancementEnqueueInboxItem item =

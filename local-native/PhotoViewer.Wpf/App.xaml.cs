@@ -23966,6 +23966,7 @@ public partial class App : Application
             bool durableRecoveryBeforePublish = false;
             bool durableRecoveryAfterPublish = false;
             bool durableRecoveryCarriedRequestId = false;
+            bool durableBatchDefinitiveFailurePerItem = false;
             bool durableLegacyWakeFallback = false;
             bool durableRecoveryRequestsCoalesced = false;
             bool companionAuthAclProvenanceContract = false;
@@ -24678,6 +24679,10 @@ public partial class App : Application
                         == passiveReconnectLaunchCount;
                 bool durableListenerSwapped = false;
                 bool durableListenerSawOnlyCiphertext = true;
+                bool simulateDurableBatchConflict = false;
+                bool durableBatchNudgeObserved = false;
+                bool durableBatchNudgeBodyless = false;
+                string? durableBatchNudgeRequestId = null;
                 string pendingDirectory = EnhancementEnqueueInboxStore
                     .GetPendingDirectory(jobsPath);
                 int pendingBeforeListenerSwap = Directory.Exists(pendingDirectory)
@@ -24708,6 +24713,19 @@ public partial class App : Application
                                 "/api/enhance/queue/recover",
                                 StringComparison.Ordinal))
                         {
+                            if (simulateDurableBatchConflict)
+                            {
+                                if (!durableBatchNudgeObserved)
+                                {
+                                    durableBatchNudgeObserved = true;
+                                    durableBatchNudgeBodyless = inner?.BodyJson is null;
+                                    durableBatchNudgeRequestId = inner?.IdempotencyKey;
+                                }
+                                return win.EnhancementCompanionSecureResponseForSmoke(
+                                    request,
+                                    (int)HttpStatusCode.Conflict,
+                                    new { error = "synthetic first-item conflict" });
+                            }
                             if (durableListenerSwapped)
                             {
                                 durableRecoveryAfterPublish = true;
@@ -24719,7 +24737,8 @@ public partial class App : Application
                                 durableRecoveryBeforePublish = true;
                             }
                         }
-                        if (durableListenerSwapped)
+                        if (durableListenerSwapped
+                            && !simulateDurableBatchConflict)
                         {
                             string outer = request.Content is null
                                 ? ""
@@ -24798,6 +24817,19 @@ public partial class App : Application
                     && durableRecoveryAfterPublish
                     && durableRecoveryCarriedRequestId
                     && pendingAfterListenerSwap == pendingBeforeListenerSwap + 1;
+                await win.WaitForDurableEnqueueRecoveryForSmokeAsync();
+
+                simulateDurableBatchConflict = true;
+                durableBatchDefinitiveFailurePerItem = await win
+                    .DurableBatchDefinitiveFailureIsPerItemForSmokeAsync(
+                    [
+                        new { operation = "upscale", presetId = "batch-first" },
+                        new { operation = "upscale", presetId = "batch-second" },
+                    ],
+                    () => (
+                        durableBatchNudgeObserved,
+                        durableBatchNudgeBodyless,
+                        durableBatchNudgeRequestId));
                 await win.WaitForDurableEnqueueRecoveryForSmokeAsync();
 
                 int compatibilityRecoveryCount = 0;
@@ -25308,6 +25340,7 @@ public partial class App : Application
                     && companionListenerHandoffResponseRejected
                     && companionPassiveReadReconnected
                     && durableListenerHandoffSavedForDelivery
+                    && durableBatchDefinitiveFailurePerItem
                     && durableLegacyWakeFallback
                     && durableRecoveryRequestsCoalesced
                     && companionAuthAclProvenanceContract
@@ -25465,6 +25498,7 @@ public partial class App : Application
                 durableRecoveryBeforePublish,
                 durableRecoveryAfterPublish,
                 durableRecoveryCarriedRequestId,
+                durableBatchDefinitiveFailurePerItem,
                 durableLegacyWakeFallback,
                 durableRecoveryRequestsCoalesced,
                 companionAuthAclProvenanceContract,
