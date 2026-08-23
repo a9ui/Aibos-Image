@@ -19822,6 +19822,11 @@ public partial class App : Application
         string searchHistoryPath = Path.Combine(smokeRoot, "stores", "search-history.json");
         string metadataIndexDirectory = Path.Combine(smokeRoot, "stores", "metadata-index");
         string jobsPath = Path.Combine(smokeRoot, "stores", "enhance", "jobs.json");
+        string historyWindowJobsPath = Path.Combine(
+            smokeRoot,
+            "stores",
+            "enhance",
+            "history-window.sqlite3");
         var previousEnvironment = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["PHOTOVIEWER_WPF_STATE_PATH"] = Environment.GetEnvironmentVariable("PHOTOVIEWER_WPF_STATE_PATH"),
@@ -19856,6 +19861,49 @@ public partial class App : Application
             var requests = new List<string>();
             try
             {
+                const int historyWindowQueuedCount = 2_050;
+                const int historyWindowRunningCount = 1;
+                const int historyWindowTerminalCount = 1_200;
+                WriteEnhancementJobsHistoryWindowSqliteFixture(
+                    historyWindowJobsPath,
+                    historyWindowQueuedCount,
+                    historyWindowRunningCount,
+                    historyWindowTerminalCount);
+                EnhancementJobsHistoryWindowSmokeSnapshot[] historyWindows =
+                    new[] { 100, 500, 1_000 }
+                    .Select(limit =>
+                        global::PhotoViewer.Wpf.MainWindow
+                            .ReadEnhancementJobsHistoryWindowSqliteForSmoke(
+                            historyWindowJobsPath,
+                            limit))
+                    .ToArray();
+                int expectedActiveCount = historyWindowQueuedCount
+                    + historyWindowRunningCount;
+                int expectedTotalCount = expectedActiveCount
+                    + historyWindowTerminalCount;
+                bool historyWindowReaderContract = historyWindows.Length == 3
+                    && historyWindows.All(window =>
+                        window.ActiveCount == expectedActiveCount
+                        && window.TotalCount == expectedTotalCount
+                        && window.TerminalCount == window.HistoryLimit
+                        && window.LoadedCount
+                            == expectedActiveCount + window.HistoryLimit
+                        && string.Equals(
+                            window.LastTerminalId,
+                            "history-terminal-1199",
+                            StringComparison.Ordinal))
+                    && string.Equals(
+                        historyWindows[0].FirstTerminalId,
+                        "history-terminal-1100",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        historyWindows[1].FirstTerminalId,
+                        "history-terminal-0700",
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        historyWindows[2].FirstTerminalId,
+                        "history-terminal-0200",
+                        StringComparison.Ordinal);
                 Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
                 Directory.CreateDirectory(Path.GetDirectoryName(videoOutputPath)!);
@@ -22482,7 +22530,8 @@ public partial class App : Application
                             && body.GetProperty("maxDimension").GetInt32() == 1024
                             && body.GetProperty("seed").ValueKind == JsonValueKind.Null;
                     });
-                ok = initial.Visible
+                ok = historyWindowReaderContract
+                    && initial.Visible
                     && initial.Total == 18
                     && initial.Active == 4
                     && initial.Failed == 7
@@ -22625,6 +22674,8 @@ public partial class App : Application
                 result = new
                 {
                     ok,
+                    historyWindowReaderContract,
+                    historyWindows,
                     passiveOpen,
                     healthVisible,
                     healthProvenance,
@@ -32401,6 +32452,7 @@ public partial class App : Application
                     position INTEGER NOT NULL UNIQUE,
                     id TEXT PRIMARY KEY,
                     status TEXT,
+                    updated_at TEXT NOT NULL DEFAULT '2026-08-22T00:00:01.000Z',
                     reader_payload_json TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 );
@@ -32449,6 +32501,138 @@ public partial class App : Application
         checkpoint.ExecuteNonQuery();
     }
 
+    private static void WriteEnhancementJobsHistoryWindowSqliteFixture(
+        string databasePath,
+        int queuedCount,
+        int runningCount,
+        int terminalCount)
+    {
+        if (queuedCount < 0 || runningCount < 0 || terminalCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(queuedCount));
+
+        Directory.CreateDirectory(
+            Path.GetDirectoryName(Path.GetFullPath(databasePath))!);
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Pooling = false,
+            }.ToString());
+        connection.Open();
+        using (var schema = connection.CreateCommand())
+        {
+            schema.CommandText = """
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = FULL;
+                CREATE TABLE enhancement_store_metadata (
+                    singleton INTEGER PRIMARY KEY,
+                    store_version INTEGER NOT NULL,
+                    catalog_revision INTEGER NOT NULL
+                );
+                INSERT INTO enhancement_store_metadata
+                    (singleton, store_version, catalog_revision)
+                VALUES (1, 1, 1);
+                CREATE TABLE enhancement_jobs (
+                    position INTEGER NOT NULL UNIQUE,
+                    id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    reader_payload_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE INDEX enhancement_jobs_status_updated_idx
+                    ON enhancement_jobs(status, updated_at DESC);
+                """;
+            schema.ExecuteNonQuery();
+        }
+
+        DateTimeOffset createdAt = DateTimeOffset.Parse(
+            "2026-08-22T00:00:00.000Z",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal);
+        int activeCount = checked(queuedCount + runningCount);
+        int totalCount = checked(activeCount + terminalCount);
+        using (SqliteTransaction transaction = connection.BeginTransaction())
+        using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO enhancement_jobs
+                    (position, id, status, updated_at,
+                     reader_payload_json, payload_json)
+                VALUES ($position, $id, $status, $updatedAt,
+                        $readerPayload, $payload)
+                """;
+            SqliteParameter position = insert.Parameters.Add(
+                "$position",
+                SqliteType.Integer);
+            SqliteParameter id = insert.Parameters.Add("$id", SqliteType.Text);
+            SqliteParameter status = insert.Parameters.Add(
+                "$status",
+                SqliteType.Text);
+            SqliteParameter updatedAt = insert.Parameters.Add(
+                "$updatedAt",
+                SqliteType.Text);
+            SqliteParameter readerPayload = insert.Parameters.Add(
+                "$readerPayload",
+                SqliteType.Text);
+            SqliteParameter payload = insert.Parameters.Add(
+                "$payload",
+                SqliteType.Text);
+
+            for (int index = 0; index < totalCount; index++)
+            {
+                bool running = index < runningCount;
+                bool queued = !running && index < activeCount;
+                int terminalIndex = index - activeCount;
+                string jobId = running
+                    ? $"history-running-{index:D4}"
+                    : queued
+                        ? $"history-queued-{index - runningCount:D4}"
+                        : $"history-terminal-{terminalIndex:D4}";
+                string jobStatus = running
+                    ? "running"
+                    : queued
+                        ? "queued"
+                        : "succeeded";
+                string updatedAtText = createdAt
+                    .AddSeconds(queued || running ? index : terminalIndex)
+                    .ToString("O", CultureInfo.InvariantCulture);
+                var projection = new
+                {
+                    id = jobId,
+                    sourceId = $"X:\\synthetic\\{jobId}.png",
+                    sourcePath = $"X:\\synthetic\\{jobId}.png",
+                    presetId = "photo-detail-x4",
+                    adapterId = "realesrgan-ncnn",
+                    operation = "upscale",
+                    status = jobStatus,
+                    progress = queued ? 0 : running ? 42 : 100,
+                    queueOrder = queued ? index - runningCount : (int?)null,
+                    outputPath = queued || running
+                        ? null
+                        : $"X:\\synthetic\\outputs\\{jobId}.png",
+                    createdAt = createdAt.ToString("O", CultureInfo.InvariantCulture),
+                    updatedAt = updatedAtText,
+                };
+                string projectionJson = JsonSerializer.Serialize(projection);
+                position.Value = index;
+                id.Value = jobId;
+                status.Value = jobStatus;
+                updatedAt.Value = updatedAtText;
+                readerPayload.Value = projectionJson;
+                payload.Value = projectionJson;
+                insert.ExecuteNonQuery();
+            }
+            transaction.Commit();
+        }
+
+        using var checkpoint = connection.CreateCommand();
+        checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        checkpoint.ExecuteNonQuery();
+    }
+
     private static long WriteLargeEnhancementJobsSqliteFixture(
         string databasePath,
         string targetId,
@@ -32480,6 +32664,7 @@ public partial class App : Application
                     position INTEGER NOT NULL UNIQUE,
                     id TEXT PRIMARY KEY,
                     status TEXT,
+                    updated_at TEXT NOT NULL DEFAULT '2026-08-22T00:00:01.000Z',
                     reader_payload_json TEXT NOT NULL,
                     payload_json TEXT NOT NULL
                 );

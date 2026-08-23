@@ -15,6 +15,7 @@ $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csp
 $queueContractPath = Join-Path $repoRoot "contracts\enhancement-queue-order-v1.json"
 $healthContractPath = Join-Path $repoRoot "contracts\enhancement-health-v1.json"
 $healthFixturePath = Join-Path $repoRoot "contracts\fixtures\enhancement-health-working-v1.json"
+$jobsSqliteContractPath = Join-Path $repoRoot "contracts\enhancement-jobs-sqlite-v1.json"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-enhancement-jobs-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -93,6 +94,25 @@ try {
     )
     if ($healthContractChecks -contains $false) {
         throw "Enhancement health contract fields are invalid."
+    }
+    if (-not (Test-Path -LiteralPath $jobsSqliteContractPath -PathType Leaf)) {
+        throw "Enhancement Jobs SQLite contract was not found: $jobsSqliteContractPath"
+    }
+    $jobsSqliteContract = Get-Content -LiteralPath $jobsSqliteContractPath -Raw |
+        ConvertFrom-Json
+    $jobsSqliteContractChecks = @(
+        ($jobsSqliteContract.schemaVersion -eq 1)
+        ($jobsSqliteContract.contractId -eq "PV-ENHANCE-JOBS-SQLITE-001")
+        ($jobsSqliteContract.protocol -eq "aibos.enhancement-jobs-sqlite/v1")
+        ($jobsSqliteContract.jobsWorkspaceSurface.historyWindow.default -eq 500)
+        (($jobsSqliteContract.jobsWorkspaceSurface.historyWindow.allowed -join ",") -eq
+            "100,500,1000")
+        ($null -ne $jobsSqliteContract.jobsWorkspaceSurface.enhancement_jobs.requiredColumns.updated_at)
+        ($jobsSqliteContract.jobsWorkspaceSurface.bulkScope.Contains(
+            "display limits never redefine"))
+    )
+    if ($jobsSqliteContractChecks -contains $false) {
+        throw "Enhancement Jobs SQLite history-window contract fields are invalid."
     }
     $videoContract = Get-AibosVideoV1Bundle $repoRoot
     $videoContractChecks = @(
@@ -296,6 +316,7 @@ try {
     } | ConvertTo-Json -Depth 3
     $required = @(
         'passiveOpen',
+        'historyWindowReaderContract',
         'healthVisible',
         'healthProvenance',
         'healthPassive',

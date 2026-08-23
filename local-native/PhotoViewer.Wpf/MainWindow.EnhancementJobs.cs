@@ -26,6 +26,7 @@ public partial class MainWindow
     private const int EnhancementJobsThumbnailViewportLimit = 12;
     private const int EnhancementJobsThumbnailCacheLimit = 96;
     private const int EnhancementJobsPageSize = 100;
+    private const int EnhancementJobsDefaultHistoryLimit = 500;
     private const int EnhancementTerminalHistoryBatchLimit = 1_000;
     private const int EnhancementJobRequestDetailsMaximumLength = 32_768;
     private const int EnhancementJobsWorkspaceMaximumRows = 100_000;
@@ -59,8 +60,22 @@ public partial class MainWindow
         "low quality, worst quality, blurry, flicker, jitter, frame interpolation artifacts, identity drift, face distortion, deformed hands, extra limbs, missing limbs, warped anatomy, melting, morphing, duplicate character, camera shake, text, logo, watermark";
     private const string MiniMaxH3DefaultPositivePrompt =
         "Animate the supplied image with subtle natural motion. Keep the camera stable and preserve the exact subject, composition, lighting, and scene. Do not add new objects or cut to another scene. Use only quiet ambient sound, with no speech and no music.";
+    private readonly record struct EnhancementWorkspaceStatusCounts(
+        int Queued,
+        int Running,
+        int Succeeded,
+        int Failed,
+        int Canceled,
+        int Deleted)
+    {
+        public int Total => checked(
+            Queued + Running + Succeeded + Failed + Canceled + Deleted);
+        public int Active => checked(Queued + Running);
+        public int Completed => checked(Succeeded + Deleted);
+    }
     private sealed record EnhancementWorkspaceSqliteSnapshot(
-        List<EnhancementWorkspaceJobView> Jobs);
+        List<EnhancementWorkspaceJobView> Jobs,
+        EnhancementWorkspaceStatusCounts Counts);
     private sealed record EnhancementWorkspaceJobDetailIdentity(
         string Id,
         string Status,
@@ -101,6 +116,9 @@ public partial class MainWindow
     private long _enhancementWorkspaceGeneration;
     private string _enhancementWorkspaceStatusFilter = "all";
     private string _enhancementWorkspaceOperationFilter = "all";
+    private int _enhancementJobsHistoryLimit = EnhancementJobsDefaultHistoryLimit;
+    private bool _settingEnhancementJobsHistoryLimitSelection;
+    private EnhancementWorkspaceStatusCounts? _enhancementWorkspaceTotalCounts;
     private int _enhancementWorkspacePageIndex;
     private int _enhancementWorkspaceFilteredCount;
     private DateTimeOffset _enhancementWorkspaceHighlightExpiresAt;
@@ -1312,6 +1330,80 @@ public partial class MainWindow
             ? filter
             : "all";
 
+    private static int NormalizeEnhancementJobsHistoryLimit(int value)
+        => value is 100 or 500 or 1_000
+            ? value
+            : EnhancementJobsDefaultHistoryLimit;
+
+    private void SetEnhancementJobsHistoryLimit(int value, bool persist)
+    {
+        int normalized = NormalizeEnhancementJobsHistoryLimit(value);
+        _enhancementJobsHistoryLimit = normalized;
+        if (EnhancementJobsHistoryLimitComboBox is not null)
+        {
+            ComboBoxItem? item = EnhancementJobsHistoryLimitComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(candidate =>
+                    int.TryParse(
+                        Convert.ToString(candidate.Tag, CultureInfo.InvariantCulture),
+                        NumberStyles.None,
+                        CultureInfo.InvariantCulture,
+                        out int candidateValue)
+                    && candidateValue == normalized);
+            if (item is not null
+                && !ReferenceEquals(
+                    EnhancementJobsHistoryLimitComboBox.SelectedItem,
+                    item))
+            {
+                _settingEnhancementJobsHistoryLimitSelection = true;
+                try
+                {
+                    EnhancementJobsHistoryLimitComboBox.SelectedItem = item;
+                }
+                finally
+                {
+                    _settingEnhancementJobsHistoryLimitSelection = false;
+                }
+            }
+        }
+        if (persist)
+            SaveState();
+    }
+
+    private async void EnhancementJobsHistoryLimit_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_settingEnhancementJobsHistoryLimitSelection
+            || sender is not ComboBox
+            {
+                SelectedItem: ComboBoxItem { Tag: object tag },
+            }
+            || !int.TryParse(
+                Convert.ToString(tag, CultureInfo.InvariantCulture),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int requested))
+        {
+            return;
+        }
+
+        int normalized = NormalizeEnhancementJobsHistoryLimit(requested);
+        bool changed = normalized != _enhancementJobsHistoryLimit;
+        SetEnhancementJobsHistoryLimit(normalized, persist: true);
+        if (!changed || EnhancementJobsDialog.Visibility != Visibility.Visible)
+            return;
+
+        Interlocked.Exchange(ref _enhancementWorkspaceInventoryCts, null)?.Cancel();
+        _enhancementWorkspaceGeneration++;
+        _enhancementWorkspacePageIndex = 0;
+        EnhancementJobsStatusText.Text =
+            $"履歴の表示件数を最新 {normalized:N0}件へ変更しています…";
+        await RefreshEnhancementJobsWorkspaceAsync(
+            _enhancementWorkspaceGeneration,
+            isPoll: false);
+    }
+
     private bool MatchesEnhancementWorkspaceStatusFilter(
         EnhancementWorkspaceJobView job)
         => _enhancementWorkspaceStatusFilter switch
@@ -1632,12 +1724,10 @@ public partial class MainWindow
                 DispatcherPriority.Input);
             if (canReuseCachedInventory)
             {
-                // A full inventory is roughly 24 MiB for a long-lived library.
-                // Reopening Jobs used to decrypt, parse, allocate, and reconcile
-                // that entire payload even when compact health proved that the
-                // inventory had not changed. Reuse the already validated view
-                // models and let the health signature request a full refresh
-                // only when counts, terminal history, queue ownership, or the
+                // Reuse the already validated active queue plus bounded history
+                // view models when compact health proves that the inventory has
+                // not changed. The health signature requests a new snapshot only
+                // when counts, terminal history, queue ownership, or the
                 // companion epoch actually changed.
                 ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
                 await PollEnhancementJobsWorkspaceAsync(generation);
@@ -1649,7 +1739,7 @@ public partial class MainWindow
                     if (!_aiProcessingMinimizedMode && activeCount > 0)
                         _enhancementWorkspacePollTimer.Start();
                     EnhancementJobsStatusText.Text = activeCount > 0
-                        ? $"共有GPUキューを実行順で表示中です。実行中 {_enhancementWorkspaceJobs.Count(static job => job.Status == "running"):N0}、待ち {_enhancementWorkspaceJobs.Count(static job => job.Status == "queued"):N0}。"
+                        ? $"共有GPUキューを実行順で表示中です。実行中 {_enhancementWorkspaceJobs.Count(static job => job.Status == "running"):N0}、待ち {_enhancementWorkspaceJobs.Count(static job => job.Status == "queued"):N0}。履歴は最新 {_enhancementJobsHistoryLimit:N0}件まで読みます。"
                         : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
                 }
             }
@@ -1911,8 +2001,9 @@ public partial class MainWindow
             }
 
             // The compact health payload is enough for idle progress ticks.
-            // Fetch the full inventory only when its status counts/current job
-            // changed, or when an older companion cannot provide health.
+            // Fetch the active queue plus bounded history only when its status
+            // counts/current job changed, or when an older companion cannot
+            // provide health.
             await RefreshEnhancementJobsWorkspaceAsync(
                 generation,
                 isPoll: true,
@@ -1950,8 +2041,8 @@ public partial class MainWindow
         {
             if (refreshHealth)
             {
-                // Bind the full inventory only to a health signature observed
-                // before that inventory is requested. Reading health after an
+                // Bind the Jobs snapshot only to a health signature observed
+                // before that snapshot is requested. Reading health after an
                 // in-flight jobs response can attach a newer runtime/count
                 // signature to an older snapshot and suppress the next poll.
                 EnhancementQueueHealthView? healthBeforeInventory =
@@ -2036,14 +2127,14 @@ public partial class MainWindow
                         // The inventory was in flight while queue/runtime state
                         // changed. Do not display it or mark the newer health
                         // signature handled; coalesce exactly one replacement
-                        // full read after this single-flight section exits.
+                        // snapshot read after this single-flight section exits.
                         coalescedHealthInventorySignature =
                             healthAfterInventorySignature;
                     }
                     else
                     {
                         // Continuous churn must not create an unbounded chain
-                        // of 24 MiB full reads. Apply this latest inventory
+                        // of snapshot reads. Apply this latest inventory
                         // without accepting a mismatched signature and keep one
                         // compact-health poll alive for the next reconciliation.
                         observedHealthInventorySignature = null;
@@ -2071,18 +2162,26 @@ public partial class MainWindow
                 RefreshEnhancementWorkspaceFilterToggleStates();
             }
             ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
-            int activeCount = jobs.Count(static job => job.IsActive);
-            int runningCount = jobs.Count(static job => job.Status == "running");
-            int queuedCount = jobs.Count(static job => job.Status == "queued");
-            int completedCount = jobs.Count(static job => job.Status is "succeeded" or "deleted");
-            int failedCount = jobs.Count(static job => job.Status == "failed");
-            int canceledCount = jobs.Count(static job => job.Status == "canceled");
+            EnhancementWorkspaceStatusCounts counts =
+                _enhancementWorkspaceTotalCounts
+                ?? CountEnhancementWorkspaceStatuses(jobs);
+            int activeCount = counts.Active;
+            int runningCount = counts.Running;
+            int queuedCount = counts.Queued;
+            int completedCount = counts.Completed;
+            int failedCount = counts.Failed;
+            int canceledCount = counts.Canceled;
+            int loadedHistoryCount = jobs.Count(static job => !job.IsActive);
+            int totalHistoryCount = counts.Total - counts.Active;
             RefreshEnhancementQueueBulkControls();
             EnhancementJobsHeaderSummary.Text =
-                $"{jobs.Count:N0} total  ·  {activeCount:N0} active  ·  {completedCount:N0} completed"
-                + $"  ·  {failedCount:N0} failed  ·  {canceledCount:N0} canceled";
+                $"{counts.Total:N0} total  ·  {activeCount:N0} active  ·  {completedCount:N0} completed"
+                + $"  ·  {failedCount:N0} failed  ·  {canceledCount:N0} canceled"
+                + (loadedHistoryCount < totalHistoryCount
+                    ? $"  ·  latest {loadedHistoryCount:N0}/{totalHistoryCount:N0} history loaded"
+                    : "");
             EnhancementJobsStatusText.Text = activeCount > 0
-                ? $"共有GPUキューを実行順で表示中です。実行中 {runningCount:N0}、待ち {queuedCount:N0}。"
+                ? $"共有GPUキューを実行順で表示中です。実行中 {runningCount:N0}、待ち {queuedCount:N0}。履歴は最新 {_enhancementJobsHistoryLimit:N0}件まで読みます。"
                 : $"Updated {DateTime.Now:HH:mm:ss}. Polling is stopped because no jobs are active.";
             if (highlightedBatchAlreadyTerminal)
                 EnhancementJobsStatusText.Text += " The new batch already finished, so all highlighted jobs are shown.";
@@ -2714,15 +2813,71 @@ public partial class MainWindow
                     ? "Jobs could not be refreshed."
                     : response.Error.Trim());
         }
-        return await ParseEnhancementWorkspaceJobsAsync(payload, token);
+        (bool parsed, List<EnhancementWorkspaceJobView> jobs, string? error) =
+            await ParseEnhancementWorkspaceJobsAsync(payload, token);
+        if (parsed)
+        {
+            _enhancementWorkspaceTotalCounts =
+                CountEnhancementWorkspaceStatuses(jobs);
+        }
+        return (parsed, jobs, error);
+    }
+
+    private static EnhancementWorkspaceStatusCounts
+        CountEnhancementWorkspaceStatuses(
+            IEnumerable<EnhancementWorkspaceJobView> jobs)
+    {
+        int queued = 0;
+        int running = 0;
+        int succeeded = 0;
+        int failed = 0;
+        int canceled = 0;
+        int deleted = 0;
+        foreach (EnhancementWorkspaceJobView job in jobs)
+        {
+            switch (job.Status)
+            {
+                case "queued":
+                    queued++;
+                    break;
+                case "running":
+                    running++;
+                    break;
+                case "succeeded":
+                    succeeded++;
+                    break;
+                case "failed":
+                    failed++;
+                    break;
+                case "canceled":
+                    canceled++;
+                    break;
+                case "deleted":
+                    deleted++;
+                    break;
+            }
+        }
+        return new EnhancementWorkspaceStatusCounts(
+            queued,
+            running,
+            succeeded,
+            failed,
+            canceled,
+            deleted);
     }
 
     private static EnhancementWorkspaceSqliteSnapshot
         ReadEnhancementJobsWorkspaceSqliteSnapshot(
             string path,
+            int terminalHistoryLimit,
             CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
+        if (NormalizeEnhancementJobsHistoryLimit(terminalHistoryLimit)
+            != terminalHistoryLimit)
+        {
+            throw new ArgumentOutOfRangeException(nameof(terminalHistoryLimit));
+        }
         string fullPath = Path.GetFullPath(path);
         if (!IsEnhancementSqliteStore(fullPath))
         {
@@ -2733,16 +2888,37 @@ public partial class MainWindow
         using SqliteConnection connection = OpenEnhancementSqliteReadConnection(fullPath);
         using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
         _ = ReadEnhancementCatalogRevision(connection, transaction);
+        EnhancementWorkspaceStatusCounts counts =
+            ReadEnhancementWorkspaceStatusCounts(connection, transaction);
 
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
+            WITH recent_terminal AS (
+                SELECT position, id, status, reader_payload_json
+                FROM enhancement_jobs
+                WHERE status IN ('succeeded', 'failed', 'canceled', 'deleted')
+                ORDER BY updated_at DESC, position DESC
+                LIMIT $terminalHistoryLimit
+            ),
+            visible_jobs AS (
+                SELECT position, id, status, reader_payload_json
+                FROM enhancement_jobs
+                WHERE status IN ('queued', 'running')
+                UNION ALL
+                SELECT position, id, status, reader_payload_json
+                FROM recent_terminal
+            )
             SELECT position, id, status, reader_payload_json
-            FROM enhancement_jobs
+            FROM visible_jobs
             ORDER BY position ASC
             """;
+        command.Parameters.AddWithValue(
+            "$terminalHistoryLimit",
+            terminalHistoryLimit);
         using SqliteDataReader reader = command.ExecuteReader();
-        var jobs = new List<EnhancementWorkspaceJobView>();
+        var jobs = new List<EnhancementWorkspaceJobView>(
+            Math.Min(counts.Total, counts.Active + terminalHistoryLimit));
         var jobIds = new HashSet<string>(StringComparer.Ordinal);
         long? previousPosition = null;
         long totalPayloadBytes = 0;
@@ -2864,7 +3040,73 @@ public partial class MainWindow
 
         reader.Close();
         transaction.Commit();
-        return new EnhancementWorkspaceSqliteSnapshot(jobs);
+        return new EnhancementWorkspaceSqliteSnapshot(jobs, counts);
+    }
+
+    private static EnhancementWorkspaceStatusCounts
+        ReadEnhancementWorkspaceStatusCounts(
+            SqliteConnection connection,
+            SqliteTransaction transaction)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT status, COUNT(*)
+            FROM enhancement_jobs
+            GROUP BY status
+            """;
+        using SqliteDataReader reader = command.ExecuteReader();
+        int queued = 0;
+        int running = 0;
+        int succeeded = 0;
+        int failed = 0;
+        int canceled = 0;
+        int deleted = 0;
+        long total = 0;
+        while (reader.Read())
+        {
+            string status = ReadRequiredSqliteText(reader, 0, "job status");
+            long count = ReadRequiredSqliteInteger(reader, 1, "job status count");
+            if (count < 0
+                || total > EnhancementJobsWorkspaceMaximumRows - count)
+            {
+                throw new InvalidDataException(
+                    "The Jobs workspace SQLite inventory exceeds the safe row limit.");
+            }
+            int bounded = checked((int)count);
+            switch (status)
+            {
+                case "queued":
+                    queued = bounded;
+                    break;
+                case "running":
+                    running = bounded;
+                    break;
+                case "succeeded":
+                    succeeded = bounded;
+                    break;
+                case "failed":
+                    failed = bounded;
+                    break;
+                case "canceled":
+                    canceled = bounded;
+                    break;
+                case "deleted":
+                    deleted = bounded;
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        "The Jobs workspace SQLite inventory contains an unsupported status.");
+            }
+            total += count;
+        }
+        return new EnhancementWorkspaceStatusCounts(
+            queued,
+            running,
+            succeeded,
+            failed,
+            canceled,
+            deleted);
     }
 
     private static bool HasRequiredEnhancementWorkspaceProjectionIdentity(
@@ -2907,11 +3149,15 @@ public partial class MainWindow
             await _enhancementWorkspaceSqliteReadGate.WaitAsync(token);
             gateEntered = true;
             EnhancementWorkspaceSqliteSnapshot snapshot = await Task.Run(
-                () => ReadEnhancementJobsWorkspaceSqliteSnapshot(path, token),
+                () => ReadEnhancementJobsWorkspaceSqliteSnapshot(
+                    path,
+                    _enhancementJobsHistoryLimit,
+                    token),
                 token);
             await Task.Run(
                 () => FinalizeEnhancementWorkspaceJobs(snapshot.Jobs),
                 token);
+            _enhancementWorkspaceTotalCounts = snapshot.Counts;
             AibosOperationLog.Write(
                 "jobs_sqlite_read",
                 "completed",
@@ -3207,7 +3453,31 @@ public partial class MainWindow
         string path)
         => _ = ReadEnhancementJobsWorkspaceSqliteSnapshot(
             Path.GetFullPath(path),
+            EnhancementJobsDefaultHistoryLimit,
             CancellationToken.None);
+
+    internal static EnhancementJobsHistoryWindowSmokeSnapshot
+        ReadEnhancementJobsHistoryWindowSqliteForSmoke(
+            string path,
+            int terminalHistoryLimit)
+    {
+        EnhancementWorkspaceSqliteSnapshot snapshot =
+            ReadEnhancementJobsWorkspaceSqliteSnapshot(
+                Path.GetFullPath(path),
+                terminalHistoryLimit,
+                CancellationToken.None);
+        EnhancementWorkspaceJobView[] terminal = snapshot.Jobs
+            .Where(static job => !job.IsActive)
+            .ToArray();
+        return new EnhancementJobsHistoryWindowSmokeSnapshot(
+            terminalHistoryLimit,
+            snapshot.Jobs.Count,
+            snapshot.Counts.Total,
+            snapshot.Counts.Active,
+            terminal.Length,
+            terminal.FirstOrDefault()?.Id,
+            terminal.LastOrDefault()?.Id);
+    }
 
     private async Task<(bool Parsed, List<EnhancementWorkspaceJobView> Jobs, string? Error)>
         ParseEnhancementWorkspaceJobsAsync(
@@ -8920,6 +9190,15 @@ public sealed record EnhancementJobsWorkspaceSmokeSnapshot(
     string[] VisibleIds,
     string[] VisibleStatusLabels,
     string[] VisibleOperationLabels);
+
+internal sealed record EnhancementJobsHistoryWindowSmokeSnapshot(
+    int HistoryLimit,
+    int LoadedCount,
+    int TotalCount,
+    int ActiveCount,
+    int TerminalCount,
+    string? FirstTerminalId,
+    string? LastTerminalId);
 
 public sealed record EnhancementJobsPagingSmokeSnapshot(
     int PageSize,

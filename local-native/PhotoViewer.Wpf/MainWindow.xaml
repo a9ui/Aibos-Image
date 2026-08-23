@@ -1731,6 +1731,17 @@
                             AutomationProperties.Name="Show video generation jobs"/>
                   <CheckBox x:Name="EnhancementJobsI2iFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="AI編集" Tag="i2i" Click="EnhancementJobsOperationFilter_Click" ToolTip="AI編集Jobだけを表示"/>
                 </UniformGrid>
+                <TextBlock Text="履歴の表示件数" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
+                <ComboBox x:Name="EnhancementJobsHistoryLimitComboBox"
+                          Style="{StaticResource PhotorealSettingsComboBox}"
+                          SelectedIndex="1"
+                          SelectionChanged="EnhancementJobsHistoryLimit_SelectionChanged"
+                          AutomationProperties.Name="Maximum recent enhancement history rows"
+                          ToolTip="待機中と実行中はすべて表示し、それ以外の最新履歴だけをこの件数まで読みます">
+                  <ComboBoxItem Content="100件（最軽量）" Tag="100"/>
+                  <ComboBoxItem Content="500件（標準）" Tag="500"/>
+                  <ComboBoxItem Content="1,000件" Tag="1000"/>
+                </ComboBox>
                 <Button x:Name="EnhancementJobsPauseResumeButton" Style="{StaticResource GhostButton}" Content="一時停止"
                         Click="ToggleEnhancementQueuePaused_Click" IsEnabled="False" MinHeight="30" Margin="0,12,0,0"
                         AutomationProperties.Name="Pause enhancement queue"
