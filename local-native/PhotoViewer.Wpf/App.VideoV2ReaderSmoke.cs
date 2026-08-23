@@ -463,6 +463,56 @@ public partial class App
                 legacyManagedJobNode.ToJsonString());
             JsonElement legacyManagedJob =
                 legacyManagedJobDocument.RootElement.Clone();
+            string displayedManagedSourcePath = Path.Combine(
+                outputRoot,
+                "Photorealized",
+                "displayed-managed-source.png");
+            Directory.CreateDirectory(Path.GetDirectoryName(
+                displayedManagedSourcePath)!);
+            File.WriteAllBytes(displayedManagedSourcePath, sourceBytes);
+            File.SetLastWriteTimeUtc(
+                displayedManagedSourcePath,
+                DateTimeOffset.FromUnixTimeMilliseconds(sourceMtimeMs + 4_000L)
+                    .UtcDateTime);
+            var displayedManagedSourceInfo = new FileInfo(
+                displayedManagedSourcePath);
+            long displayedManagedSourceMtimeMs = new DateTimeOffset(
+                    displayedManagedSourceInfo.LastWriteTimeUtc)
+                .ToUnixTimeMilliseconds();
+            const string displayedManagedJobId =
+                "valid-h3-displayed-managed-source";
+            JsonObject displayedManagedJobNode = JsonNode.Parse(
+                    validJob.GetRawText())!
+                .AsObject();
+            displayedManagedJobNode["id"] = displayedManagedJobId;
+            displayedManagedJobNode["sourceId"] = sourcePath;
+            displayedManagedJobNode["sourcePath"] = displayedManagedSourcePath;
+            displayedManagedJobNode.Remove("sourceProducerJobId");
+            displayedManagedJobNode["sourceSignature"] = new JsonObject
+            {
+                ["size"] = displayedManagedSourceInfo.Length,
+                ["mtimeMs"] = displayedManagedSourceMtimeMs,
+            };
+            string displayedManagedOutputFileName = PhotoViewer.Wpf.MainWindow
+                .BuildVideoOutputFileNameForSmoke(
+                    displayedManagedJobId,
+                    displayedManagedSourcePath,
+                    sourceSha,
+                    validJob.GetProperty("presetId").GetString()!,
+                    validPresetHash);
+            string displayedManagedOutputPath = Path.Combine(
+                outputRoot,
+                "Videos",
+                "2026-08-23",
+                displayedManagedOutputFileName);
+            displayedManagedJobNode["outputPath"] = displayedManagedOutputPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(
+                displayedManagedOutputPath)!);
+            File.WriteAllBytes(displayedManagedOutputPath, mediaFixtureBytes);
+            using JsonDocument displayedManagedJobDocument = JsonDocument.Parse(
+                displayedManagedJobNode.ToJsonString());
+            JsonElement displayedManagedJob =
+                displayedManagedJobDocument.RootElement.Clone();
             JsonObject staleProducerManagedJobNode = JsonNode.Parse(
                     legacyManagedJob.GetRawText())!
                 .AsObject();
@@ -476,6 +526,10 @@ public partial class App
                 legacyManagedSourcePath);
             byte[] legacyManagedOutputBefore = File.ReadAllBytes(
                 legacyManagedOutputPath);
+            byte[] displayedManagedSourceBefore = File.ReadAllBytes(
+                displayedManagedSourcePath);
+            byte[] displayedManagedOutputBefore = File.ReadAllBytes(
+                displayedManagedOutputPath);
 
             const int exifStoredWidth = 96;
             const int exifStoredHeight = 64;
@@ -880,6 +934,55 @@ public partial class App
                     staleManagedRequestJson,
                     legacyManagedRequestJson,
                     StringComparison.Ordinal);
+            bool displayedManagedWorkspaceSourceExact =
+                !displayedManagedJob.TryGetProperty(
+                    "sourceProducerJobId",
+                    out _)
+                && window.TryReadMiniMaxH3WorkspaceSourceForSmoke(
+                    displayedManagedJob,
+                    out string displayedManagedSourceVersion,
+                    out string displayedManagedSourceName,
+                    out string displayedManagedCanonicalInput)
+                && displayedManagedSourceVersion == "実写版"
+                && displayedManagedSourceName
+                    == Path.GetFileName(displayedManagedSourcePath)
+                && string.Equals(
+                    displayedManagedCanonicalInput,
+                    Path.GetFullPath(displayedManagedSourcePath),
+                    StringComparison.OrdinalIgnoreCase);
+            bool displayedManagedPlaybackExact = PhotoViewer.Wpf.MainWindow
+                    .IsMiniMaxH3VideoMutationSafeForSmoke(displayedManagedJob)
+                && window.TryBuildMiniMaxH3ManagedVideoVersionForSmoke(
+                    displayedManagedJob,
+                    out int displayedManagedWidth,
+                    out int displayedManagedHeight,
+                    out int displayedManagedPlaybackFps,
+                    out int displayedManagedFrameCount,
+                    out double displayedManagedDuration,
+                    out bool displayedManagedAudio,
+                    out _)
+                && displayedManagedWidth == 864
+                && displayedManagedHeight == 480
+                && displayedManagedPlaybackFps == 24
+                && displayedManagedFrameCount == 124
+                && Math.Abs(
+                    displayedManagedDuration - 124d / 24d) <= 1e-12
+                && displayedManagedAudio;
+            bool displayedManagedCatalogExact = window
+                    .TryBuildMiniMaxH3ManagedVideoCatalogForSmoke(
+                        displayedManagedJob,
+                        out string displayedManagedResolvedSource,
+                        out string[] displayedManagedCatalogAliases)
+                && string.Equals(
+                    displayedManagedResolvedSource,
+                    Path.GetFullPath(sourcePath),
+                    StringComparison.OrdinalIgnoreCase)
+                && displayedManagedCatalogAliases.Contains(
+                    Path.GetFullPath(sourcePath),
+                    StringComparer.OrdinalIgnoreCase)
+                && displayedManagedCatalogAliases.Contains(
+                    Path.GetFullPath(displayedManagedSourcePath),
+                    StringComparer.OrdinalIgnoreCase);
 
             bool exifWorkspaceReaderExact = exifValidJobs.All(job =>
                 PhotoViewer.Wpf.MainWindow
@@ -1200,6 +1303,10 @@ public partial class App
                     .SequenceEqual(legacyManagedSourceBefore)
                 && File.ReadAllBytes(legacyManagedOutputPath)
                     .SequenceEqual(legacyManagedOutputBefore)
+                && File.ReadAllBytes(displayedManagedSourcePath)
+                    .SequenceEqual(displayedManagedSourceBefore)
+                && File.ReadAllBytes(displayedManagedOutputPath)
+                    .SequenceEqual(displayedManagedOutputBefore)
                 && exifFixturesReadOnly
                 && mutationRequests == readerFixture
                     .GetProperty("expectedMutationRequestsDuringRead")
@@ -1211,6 +1318,8 @@ public partial class App
                     selectedStepsOutputPath,
                     legacyManagedSourcePath,
                     legacyManagedOutputPath,
+                    displayedManagedSourcePath,
+                    displayedManagedOutputPath,
                     corruptVideoPath,
                     jobsPath,
                     statePath,
@@ -1253,6 +1362,9 @@ public partial class App
                 && legacyManagedRerunExact
                 && legacyManagedRerunRequestExact
                 && staleManagedProducerIgnoredExact
+                && displayedManagedWorkspaceSourceExact
+                && displayedManagedPlaybackExact
+                && displayedManagedCatalogExact
                 && protectedRerunActionsHidden
                 && validPlayback
                 && selectedStepsPlayback
@@ -1307,6 +1419,9 @@ public partial class App
                 legacyManagedRerunExact,
                 legacyManagedRerunRequestExact,
                 staleManagedProducerIgnoredExact,
+                displayedManagedWorkspaceSourceExact,
+                displayedManagedPlaybackExact,
+                displayedManagedCatalogExact,
                 protectedRerunActionsHidden,
                 validPlayback,
                 selectedStepsPlayback,

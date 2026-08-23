@@ -45,6 +45,7 @@
   <sys:String x:Key="UiNoFoldersSelected">フォルダーが選択されていません。</sys:String>
   <sys:String x:Key="UiUsableSelectedFoldersFormat">使用可能 {0:N0} / 選択 {1:N0} folder(s)</sys:String>
   <sys:String x:Key="UiOpenLastFolderSet">前回のフォルダーセットを開く</sys:String>
+  <sys:String x:Key="UiOpenLastFolderSetShortcutHelp">前回のフォルダーセットを開く（Ctrl + Shift + L）</sys:String>
   <sys:String x:Key="UiNoSavedFolderSet">  保存済みセットなし</sys:String>
   <sys:String x:Key="UiFavoriteFolderSets">お気に入りのフォルダーセット</sys:String>
   <sys:String x:Key="UiSaveFavoriteFolderSet">★ 現在のセットを保存</sys:String>

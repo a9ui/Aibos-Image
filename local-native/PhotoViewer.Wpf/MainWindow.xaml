@@ -1339,10 +1339,13 @@
           <TextBlock x:Name="LandingFolderStatusText" Text="{DynamicResource UiNoFoldersSelected}" Foreground="{StaticResource TextTertiary}" FontSize="12" Margin="2,8,0,0"/>
         </StackPanel>
 
-        <Button Style="{StaticResource BrowseButton}" Height="40" HorizontalAlignment="Stretch" Margin="0,12,0,0" Click="OpenLastFolder_Click">
+        <Button x:Name="OpenLastFolderSetButton" Style="{StaticResource BrowseButton}" Height="40" HorizontalAlignment="Stretch" Margin="0,12,0,0"
+                Click="OpenLastFolder_Click" ToolTip="{DynamicResource UiOpenLastFolderSetShortcutHelp}"
+                AutomationProperties.Name="{DynamicResource UiOpenLastFolderSet}" AutomationProperties.HelpText="{DynamicResource UiOpenLastFolderSetShortcutHelp}">
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="{DynamicResource UiOpenLastFolderSet}" Foreground="{StaticResource TextPrimary}" FontWeight="Medium"/>
             <TextBlock x:Name="LastFolderSetText" Text="{DynamicResource UiNoSavedFolderSet}" Foreground="{StaticResource TextTertiary}" FontSize="12" VerticalAlignment="Center"/>
+            <TextBlock Text="[Ctrl + Shift + L]" Foreground="{StaticResource TextTertiary}" FontSize="11" Margin="10,0,0,0" VerticalAlignment="Center"/>
           </StackPanel>
         </Button>
 
@@ -1715,7 +1718,6 @@
                 <UniformGrid x:Name="EnhancementJobsStatusFiltersPanel" Columns="1">
                   <CheckBox x:Name="EnhancementJobsAllFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="すべて" Tag="all" IsChecked="True" Click="EnhancementJobsStatusFilter_Click" ToolTip="すべての状態を表示"/>
                   <CheckBox x:Name="EnhancementJobsQueuedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="待機中" Tag="queued" Click="EnhancementJobsStatusFilter_Click" ToolTip="待機中だけを表示。実行中は含みません"/>
-                  <CheckBox x:Name="EnhancementJobsRunningFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="処理中" Tag="running" Click="EnhancementJobsStatusFilter_Click" ToolTip="現在処理中のJobだけを表示"/>
                   <CheckBox x:Name="EnhancementJobsCompletedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="完成" Tag="completed" Click="EnhancementJobsStatusFilter_Click" ToolTip="完成または出力削除済みの履歴を表示"/>
                   <CheckBox x:Name="EnhancementJobsFailedFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="失敗" Tag="failed" Click="EnhancementJobsStatusFilter_Click" ToolTip="失敗したJobだけを表示"/>
                   <CheckBox x:Name="EnhancementJobsCanceledFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="キャンセル" Tag="canceled" Click="EnhancementJobsStatusFilter_Click" ToolTip="キャンセル済みのJobだけを表示"/>

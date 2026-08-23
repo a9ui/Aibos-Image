@@ -12,6 +12,7 @@ using Microsoft.Data.Sqlite;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -37,6 +38,15 @@ public partial class MainWindow
     private const int EnhancementJobsSqliteMaximumSqlBytes = 64 * 1024;
     private static readonly TimeSpan EnhancementJobsThumbnailViewportDebounce =
         TimeSpan.FromMilliseconds(140);
+    private static readonly TimeSpan[] EnhancementJobsThumbnailRetryDelays =
+    [
+        TimeSpan.FromMilliseconds(500),
+        TimeSpan.FromSeconds(1.5),
+        TimeSpan.FromSeconds(4),
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(20),
+        TimeSpan.FromSeconds(30),
+    ];
     private const string UnsupportedEnhancementOperation = "unsupported";
     private const string VideoPreservationPreamble =
         "Animate the supplied image as the exact first frame. "
@@ -67,8 +77,10 @@ public partial class MainWindow
     private readonly List<EnhancementWorkspaceJobView> _enhancementWorkspaceJobs = [];
     private readonly Dictionary<string, BitmapSource> _enhancementWorkspaceThumbnailCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _enhancementWorkspaceHighlightedJobIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _enhancementWorkspaceOptimisticallyHiddenJobIds = new(StringComparer.Ordinal);
     private DispatcherTimer _enhancementWorkspacePollTimer = null!;
     private DispatcherTimer _enhancementWorkspaceThumbnailViewportTimer = null!;
+    private DispatcherTimer _enhancementWorkspaceThumbnailRetryTimer = null!;
     private CancellationTokenSource? _enhancementWorkspaceThumbnailCts;
     private CancellationTokenSource? _enhancementWorkspaceInventoryCts;
     private readonly SemaphoreSlim _enhancementWorkspaceSqliteReadGate =
@@ -79,6 +91,7 @@ public partial class MainWindow
     private int _enhancementWorkspaceThumbnailScrollCancellationCount;
     private int _enhancementWorkspaceScrollChangedCount;
     private int _enhancementWorkspaceThumbnailTimerRestartCount;
+    private int _enhancementWorkspaceThumbnailRetryAttempt;
     private long _enhancementWorkspaceLastThumbnailScrollTimestamp;
     private bool _enhancementWorkspaceRefreshPending;
     private bool _enhancementWorkspaceHealthPollPending;
@@ -98,6 +111,7 @@ public partial class MainWindow
     private bool? _enhancementWorkspaceHealthEndpointSupported;
     private string? _enhancementWorkspaceHealthInventorySignature;
     private bool? _enhancementWorkspaceQueuePaused;
+    private bool _enhancementWorkspaceQueueRecoveryRequired;
     private bool _enhancementWorkspaceQueuedPhotorealPromptUpdateSupported;
     private bool _enhancementWorkspacePhotorealEnqueueNextSupported;
     private bool _enhancementWorkspaceTerminalHistoryBatchDismissSupported;
@@ -1289,7 +1303,7 @@ public partial class MainWindow
         => operation is "upscale" or "photoreal" or "i2i";
 
     private static string NormalizeEnhancementWorkspaceStatusFilter(string? filter)
-        => filter is "queued" or "running" or "completed" or "failed" or "canceled"
+        => filter is "queued" or "completed" or "failed" or "canceled"
             ? filter
             : "all";
 
@@ -1303,7 +1317,6 @@ public partial class MainWindow
         => _enhancementWorkspaceStatusFilter switch
         {
             "queued" => job.Status == "queued",
-            "running" => job.Status == "running",
             "failed" => job.Status == "failed",
             "canceled" => job.Status == "canceled",
             "completed" => job.Status is "succeeded" or "deleted",
@@ -1353,6 +1366,41 @@ public partial class MainWindow
             job.Status == status
             && MatchesEnhancementWorkspaceOperationFilter(job)
             && job.CanDismiss);
+
+    private EnhancementWorkspaceJobView[] BeginOptimisticBulkPresentation(
+        IReadOnlySet<string> jobIds,
+        bool hideRows)
+    {
+        EnhancementWorkspaceJobView[] visibleJobs =
+            (EnhancementJobsList.ItemsSource
+                as IEnumerable<EnhancementWorkspaceJobView>)?
+                .Where(job => jobIds.Contains(job.Id))
+                .ToArray()
+            ?? [];
+        foreach (EnhancementWorkspaceJobView job in visibleJobs)
+            job.IsBusy = true;
+        if (hideRows)
+        {
+            _enhancementWorkspaceOptimisticallyHiddenJobIds.UnionWith(jobIds);
+            ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+        }
+        return visibleJobs;
+    }
+
+    private void EndOptimisticBulkPresentation(
+        IReadOnlySet<string> jobIds,
+        IReadOnlyList<EnhancementWorkspaceJobView> visibleJobs,
+        bool revealRows)
+    {
+        foreach (EnhancementWorkspaceJobView job in visibleJobs)
+            job.IsBusy = false;
+        if (!revealRows)
+            return;
+
+        _enhancementWorkspaceOptimisticallyHiddenJobIds.ExceptWith(jobIds);
+        if (EnhancementJobsDialog.Visibility == Visibility.Visible)
+            ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+    }
 
     private void RefreshTerminalBulkControlPresentation(
         string status,
@@ -1505,6 +1553,12 @@ public partial class MainWindow
         };
         _enhancementWorkspaceThumbnailViewportTimer.Tick +=
             EnhancementWorkspaceThumbnailViewportTimer_Tick;
+        _enhancementWorkspaceThumbnailRetryTimer = new DispatcherTimer(
+            DispatcherPriority.Background);
+        _enhancementWorkspaceThumbnailRetryTimer.Tick +=
+            EnhancementWorkspaceThumbnailRetryTimer_Tick;
+        EnhancementJobsList.ItemContainerGenerator.StatusChanged +=
+            EnhancementJobsItemContainerGenerator_StatusChanged;
     }
 
     private async void OpenEnhancementJobs_Click(object sender, RoutedEventArgs e)
@@ -1528,6 +1582,7 @@ public partial class MainWindow
             StopGalleryAutoScroll();
             SearchHistoryPopup.IsOpen = false;
             _enhancementWorkspaceFocusBeforeDialog = focusToRestore ?? Keyboard.FocusedElement;
+            ResetEnhancementWorkspaceThumbnailRetry();
             _enhancementWorkspaceStatusFilter =
                 NormalizeEnhancementWorkspaceStatusFilter(initialFilter);
             _enhancementWorkspaceOperationFilter = initialOperationFilter is null
@@ -1564,6 +1619,7 @@ public partial class MainWindow
                 _enhancementWorkspaceHealthInventorySignature = null;
             }
             _enhancementWorkspaceQueuePaused = null;
+            _enhancementWorkspaceQueueRecoveryRequired = false;
             RefreshEnhancementQueuePauseControl();
             if (!canReuseCachedInventory)
                 ApplyEnhancementQueueHealthUnavailable("Checking queue health...");
@@ -1629,9 +1685,12 @@ public partial class MainWindow
         _enhancementWorkspaceGeneration++;
         _enhancementWorkspacePollTimer.Stop();
         StopEnhancementWorkspaceThumbnailViewportDebounce();
+        _enhancementWorkspaceThumbnailRetryTimer.Stop();
+        _enhancementWorkspaceThumbnailRetryAttempt = 0;
         _enhancementWorkspaceThumbnailViewportLoadPending = false;
         Volatile.Read(ref _enhancementWorkspaceThumbnailCts)?.Cancel();
         Volatile.Read(ref _enhancementWorkspaceInventoryCts)?.Cancel();
+        _enhancementWorkspaceOptimisticallyHiddenJobIds.Clear();
         EnhancementJobsDialog.Visibility = Visibility.Collapsed;
         if (restoreFocus)
             RestoreOverlayFocus(_enhancementWorkspaceFocusBeforeDialog);
@@ -1656,6 +1715,7 @@ public partial class MainWindow
         string operationOutcome = "failed";
         try
         {
+            ResetEnhancementWorkspaceThumbnailRetry();
             await RefreshEnhancementJobsWorkspaceAsync(
                 _enhancementWorkspaceGeneration,
                 isPoll: false);
@@ -1683,7 +1743,12 @@ public partial class MainWindow
     private async void ToggleEnhancementQueuePaused_Click(object sender, RoutedEventArgs e)
     {
         if (_enhancementWorkspaceQueuePaused is bool paused)
-            await SetEnhancementQueuePausedAsync(!paused);
+        {
+            bool requestedPaused = paused
+                ? false
+                : !_enhancementWorkspaceQueueRecoveryRequired;
+            await SetEnhancementQueuePausedAsync(requestedPaused);
+        }
     }
 
     private async Task<bool> SetEnhancementQueuePausedAsync(bool paused)
@@ -1695,7 +1760,7 @@ public partial class MainWindow
         {
             return false;
         }
-        if (current == paused)
+        if (current == paused && !_enhancementWorkspaceQueueRecoveryRequired)
             return true;
 
         var operationWatch = Stopwatch.StartNew();
@@ -1744,6 +1809,7 @@ public partial class MainWindow
             }
 
             _enhancementWorkspaceQueuePaused = persistedPaused;
+            _enhancementWorkspaceQueueRecoveryRequired = false;
             RefreshEnhancementQueuePauseControl();
             await RefreshEnhancementJobsWorkspaceAsync(generation, isPoll: false);
             if (generation != _enhancementWorkspaceGeneration
@@ -2137,12 +2203,12 @@ public partial class MainWindow
             return false;
         }
 
-        string? firstIssue = null;
+        string? firstIssueCode = null;
         foreach (JsonElement issueElement in issuesElement.EnumerateArray())
         {
             if (issueElement.ValueKind != JsonValueKind.String)
                 return false;
-            firstIssue ??= DescribeEnhancementQueueHealthIssue(issueElement.GetString());
+            firstIssueCode ??= issueElement.GetString();
         }
 
         if (!TryReadOptionalHealthTimestamp(
@@ -2274,6 +2340,12 @@ public partial class MainWindow
         bool photorealPromptControls = false;
         bool atomicImageEnqueueNext = false;
         bool terminalHistoryBatchDismiss = false;
+        MiniMaxH3VideoCapabilityState? miniMaxH3Capability =
+            TryParseMiniMaxH3VideoCapability(
+                payload,
+                out MiniMaxH3VideoCapabilityState parsedMiniMaxH3Capability)
+                ? parsedMiniMaxH3Capability
+                : null;
         if (payload.TryGetProperty(
                 "capabilities",
                 out JsonElement capabilitiesElement))
@@ -2348,6 +2420,14 @@ public partial class MainWindow
         };
         if (status != "needs-attention" && paused == true)
             stateLabel = "Paused";
+        bool queueRecoveryRequired = string.Equals(
+            firstIssueCode,
+            "queued-without-pump",
+            StringComparison.Ordinal);
+        string? firstIssue = queueRecoveryRequired
+            && miniMaxH3Capability is { Ready: false } unavailableMiniMaxH3
+                ? DescribeMiniMaxH3QueueUnavailable(unavailableMiniMaxH3.ReasonCode)
+                : DescribeEnhancementQueueHealthIssue(firstIssueCode);
         string detail = status == "needs-attention"
             ? firstIssue ?? "Queue attention is required."
             : paused == true && running > 0
@@ -2377,6 +2457,7 @@ public partial class MainWindow
             revision,
             foregroundResource,
             paused,
+            queueRecoveryRequired,
             queuedPhotorealPromptUpdate,
             photorealPromptControls && atomicImageEnqueueNext,
             terminalHistoryBatchDismiss,
@@ -2437,9 +2518,32 @@ public partial class MainWindow
             _ => "Queue attention is required.",
         };
 
+    private static string DescribeMiniMaxH3QueueUnavailable(string? reasonCode)
+        => reasonCode switch
+        {
+            "MINIMAX_H3_RUNTIME_SEAL_INVALID" =>
+                "MiniMax H3 sealed runtime is not mounted. Resume the queue to restore it.",
+            "MINIMAX_H3_RUNTIME_MANIFEST_INVALID" =>
+                "MiniMax H3 runtime verification failed. Restore the configured runtime, then resume.",
+            "MINIMAX_H3_LICENSE_NOT_ACCEPTED" =>
+                "MiniMax H3 license acceptance is not verified.",
+            "MINIMAX_H3_MODELS_UNVERIFIED" =>
+                "MiniMax H3 model verification failed.",
+            "MINIMAX_H3_WORKFLOW_UNVERIFIED" =>
+                "MiniMax H3 workflow verification failed.",
+            "MINIMAX_H3_GPU_CANARY_UNVERIFIED" =>
+                "MiniMax H3 GPU verification is incomplete.",
+            "MINIMAX_H3_BACKEND_CONFIG_INVALID" =>
+                "MiniMax H3 backend configuration is invalid.",
+            "MINIMAX_H3_WRITER_DISABLED" =>
+                "MiniMax H3 processing is disabled in the local companion.",
+            _ => "MiniMax H3 is unavailable. Restore it, then resume the queue.",
+        };
+
     private void ApplyEnhancementQueueHealth(EnhancementQueueHealthView health)
     {
         _enhancementWorkspaceQueuePaused = health.Paused;
+        _enhancementWorkspaceQueueRecoveryRequired = health.QueueRecoveryRequired;
         ApplyQueuedPhotorealPromptUpdateCapability(
             health.QueuedPhotorealPromptUpdate);
         ApplyPhotorealEnqueueNextCapability(health.PhotorealEnqueueNext);
@@ -2466,6 +2570,7 @@ public partial class MainWindow
     private void ApplyEnhancementQueueHealthUnavailable(string detail)
     {
         _enhancementWorkspaceQueuePaused = null;
+        _enhancementWorkspaceQueueRecoveryRequired = false;
         ApplyQueuedPhotorealPromptUpdateCapability(false);
         ApplyPhotorealEnqueueNextCapability(false);
         _enhancementWorkspaceTerminalHistoryBatchDismissSupported = false;
@@ -2498,17 +2603,20 @@ public partial class MainWindow
             return;
 
         bool paused = _enhancementWorkspaceQueuePaused == true;
-        EnhancementJobsPauseResumeButton.Content = paused ? "再開" : "一時停止";
+        bool resume = paused || _enhancementWorkspaceQueueRecoveryRequired;
+        EnhancementJobsPauseResumeButton.Content = resume ? "再開" : "一時停止";
         EnhancementJobsPauseResumeButton.IsEnabled =
             _enhancementWorkspaceQueuePaused.HasValue
             && !_enhancementWorkspaceMutationPending
             && !_enhancementWorkspaceRefreshPending;
         AutomationProperties.SetName(
             EnhancementJobsPauseResumeButton,
-            paused ? "Resume enhancement queue" : "Pause enhancement queue");
+            resume ? "Resume enhancement queue" : "Pause enhancement queue");
         EnhancementJobsPauseResumeButton.ToolTip = _enhancementWorkspaceQueuePaused.HasValue
-            ? paused
-                ? "待機順を保ったままキュー処理を再開します"
+            ? resume
+                ? _enhancementWorkspaceQueueRecoveryRequired
+                    ? "停止したqueue pumpを復旧し、待機順を保ったまま処理を再開します"
+                    : "待機順を保ったままキュー処理を再開します"
                 : "処理中の1件は完了させ、次の待機ジョブから止めます"
             : "キュー停止に対応したローカルcompanionが必要です";
     }
@@ -3530,8 +3638,6 @@ public partial class MainWindow
             _enhancementWorkspaceStatusFilter == "all";
         EnhancementJobsQueuedFilter.IsChecked =
             _enhancementWorkspaceStatusFilter == "queued";
-        EnhancementJobsRunningFilter.IsChecked =
-            _enhancementWorkspaceStatusFilter == "running";
         EnhancementJobsCompletedFilter.IsChecked =
             _enhancementWorkspaceStatusFilter == "completed";
         EnhancementJobsFailedFilter.IsChecked =
@@ -3585,6 +3691,7 @@ public partial class MainWindow
         }
 
         _enhancementWorkspaceScrollChangedCount++;
+        ResetEnhancementWorkspaceThumbnailRetry();
         CancellationTokenSource? activeLoad =
             Volatile.Read(ref _enhancementWorkspaceThumbnailCts);
         if (activeLoad is not null && !activeLoad.IsCancellationRequested)
@@ -3618,6 +3725,49 @@ public partial class MainWindow
 
         StopEnhancementWorkspaceThumbnailViewportDebounce();
         QueueEnhancementWorkspaceVisibleThumbnailLoad();
+    }
+
+    private void EnhancementJobsItemContainerGenerator_StatusChanged(
+        object? sender,
+        EventArgs e)
+    {
+        if (EnhancementJobsList.ItemContainerGenerator.Status
+                == GeneratorStatus.ContainersGenerated)
+        {
+            QueueEnhancementWorkspaceVisibleThumbnailLoad();
+        }
+    }
+
+    private void EnhancementWorkspaceThumbnailRetryTimer_Tick(
+        object? sender,
+        EventArgs e)
+    {
+        _enhancementWorkspaceThumbnailRetryTimer.Stop();
+        QueueEnhancementWorkspaceVisibleThumbnailLoad();
+    }
+
+    private void ResetEnhancementWorkspaceThumbnailRetry()
+    {
+        _enhancementWorkspaceThumbnailRetryTimer?.Stop();
+        _enhancementWorkspaceThumbnailRetryAttempt = 0;
+    }
+
+    private void ScheduleEnhancementWorkspaceThumbnailRetry()
+    {
+        if (_aiProcessingMinimizedMode
+            || EnhancementJobsDialog.Visibility != Visibility.Visible
+            || _enhancementWorkspaceThumbnailViewportTimer.IsEnabled
+            || _enhancementWorkspaceThumbnailRetryTimer.IsEnabled
+            || _enhancementWorkspaceThumbnailRetryAttempt
+                >= EnhancementJobsThumbnailRetryDelays.Length)
+        {
+            return;
+        }
+
+        _enhancementWorkspaceThumbnailRetryTimer.Interval =
+            EnhancementJobsThumbnailRetryDelays[
+                _enhancementWorkspaceThumbnailRetryAttempt++];
+        _enhancementWorkspaceThumbnailRetryTimer.Start();
     }
 
     private void StopEnhancementWorkspaceThumbnailViewportDebounce()
@@ -3655,6 +3805,8 @@ public partial class MainWindow
     {
         EnhancementWorkspaceJobView[] filtered = _enhancementWorkspaceJobs
             .Where(job =>
+                !_enhancementWorkspaceOptimisticallyHiddenJobIds.Contains(job.Id)
+                &&
                 MatchesEnhancementWorkspaceStatusFilter(job)
                 && MatchesEnhancementWorkspaceOperationFilter(job))
             .ToArray();
@@ -3709,7 +3861,8 @@ public partial class MainWindow
             itemCount);
     }
 
-    private void QueueEnhancementWorkspaceVisibleThumbnailLoad()
+    private void QueueEnhancementWorkspaceVisibleThumbnailLoad(
+        int realizationAttempt = 0)
     {
         if (_aiProcessingMinimizedMode
             || EnhancementJobsDialog.Visibility != Visibility.Visible
@@ -3738,6 +3891,17 @@ public partial class MainWindow
                         .Where(static job => job.Thumbnail is null)
                         .Take(EnhancementJobsThumbnailViewportLimit)
                         .ToArray();
+                if (realized.Length == 0
+                    && realizationAttempt < 2
+                    && EnhancementJobsList.Items.Count > 0)
+                {
+                    _ = Dispatcher.BeginInvoke(
+                        new Action(() =>
+                            QueueEnhancementWorkspaceVisibleThumbnailLoad(
+                                realizationAttempt + 1)),
+                        DispatcherPriority.ContextIdle);
+                    return;
+                }
                 BeginEnhancementWorkspaceThumbnailLoad(realized);
             }),
             DispatcherPriority.Loaded);
@@ -3770,6 +3934,7 @@ public partial class MainWindow
         long generation,
         CancellationTokenSource cts)
     {
+        bool retryMissingThumbnail = false;
         try
         {
             foreach (EnhancementWorkspaceJobView job in jobs)
@@ -3784,6 +3949,7 @@ public partial class MainWindow
                     cts.Token);
                 if (canonicalSource is null)
                 {
+                    retryMissingThumbnail = true;
                     continue;
                 }
 
@@ -3792,7 +3958,10 @@ public partial class MainWindow
                 {
                     thumbnail = await Task.Run(() => DecodeEnhancementWorkspaceThumbnail(canonicalSource), cts.Token);
                     if (thumbnail is null)
+                    {
+                        retryMissingThumbnail = true;
                         continue;
+                    }
                     if (_enhancementWorkspaceThumbnailCache.Count >= EnhancementJobsThumbnailCacheLimit)
                         _enhancementWorkspaceThumbnailCache.Remove(_enhancementWorkspaceThumbnailCache.Keys.First());
                     _enhancementWorkspaceThumbnailCache[cacheKey] = thumbnail;
@@ -3813,6 +3982,14 @@ public partial class MainWindow
                 null,
                 cts);
             cts.Dispose();
+            if (generation == _enhancementWorkspaceGeneration
+                && EnhancementJobsDialog.Visibility == Visibility.Visible)
+            {
+                if (retryMissingThumbnail)
+                    ScheduleEnhancementWorkspaceThumbnailRetry();
+                else
+                    _enhancementWorkspaceThumbnailRetryAttempt = 0;
+            }
         }
     }
 
@@ -3863,9 +4040,6 @@ public partial class MainWindow
         canonicalInput = "";
         if (job.SourceSize is null
             || job.SourceMtimeMs is null
-            || !TryResolveEnhancementWorkspaceCatalogSource(
-                job,
-                out string canonicalCatalogSource)
             || !TryResolveEnhancementSourceIdentity(
                 job.SourcePath,
                 out string sourcePathIdentity)
@@ -3878,9 +4052,16 @@ public partial class MainWindow
 
         try
         {
-            bool usesPhotorealInput = job.IsVideoOperation
+            bool usesProducerManagedInput = job.IsVideoOperation
                 && !string.IsNullOrWhiteSpace(job.SourceProducerJobId);
-            if (usesPhotorealInput)
+            bool usesDisplayedManagedInput = job.IsVideoOperation
+                && TryResolveDisplayedManagedVideoSourcePath(
+                    sourcePathIdentity,
+                    out string displayedManagedInput)
+                && EnhancementSourceIdentityComparer.Equals(
+                    displayedManagedInput,
+                    sourcePathIdentity);
+            if (usesProducerManagedInput || usesDisplayedManagedInput)
             {
                 string lexicalInput = Path.GetFullPath(job.SourcePath);
                 string lexicalRoot =
@@ -3893,7 +4074,10 @@ public partial class MainWindow
                     return false;
                 }
             }
-            else if (!EnhancementSourceIdentityComparer.Equals(
+            else if (!TryResolveEnhancementWorkspaceCatalogSource(
+                         job,
+                         out string canonicalCatalogSource)
+                     || !EnhancementSourceIdentityComparer.Equals(
                          sourcePathIdentity,
                          canonicalCatalogSource))
             {
@@ -4484,7 +4668,15 @@ public partial class MainWindow
         }
 
         _enhancementWorkspaceMutationPending = true;
+        HashSet<string> optimisticJobIds = queuedJobs
+            .Select(static job => job.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        EnhancementWorkspaceJobView[] optimisticVisibleJobs =
+            BeginOptimisticBulkPresentation(
+                optimisticJobIds,
+                hideRows: true);
         RefreshEnhancementQueueBulkControls();
+        EnhancementJobsClearQueuedButton.Content = "待機中を消しています…";
         long generation = _enhancementWorkspaceGeneration;
         try
         {
@@ -4537,6 +4729,10 @@ public partial class MainWindow
         }
         finally
         {
+            EndOptimisticBulkPresentation(
+                optimisticJobIds,
+                optimisticVisibleJobs,
+                revealRows: true);
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
         }
@@ -4593,7 +4789,18 @@ public partial class MainWindow
         }
         var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
+        HashSet<string> optimisticJobIds = terminalJobs
+            .Select(static job => job.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        EnhancementWorkspaceJobView[] optimisticVisibleJobs =
+            BeginOptimisticBulkPresentation(
+                optimisticJobIds,
+                hideRows: removeOriginalAfterSuccess);
         RefreshEnhancementQueueBulkControls();
+        Button retryButton = terminalStatus == "failed"
+            ? EnhancementJobsRetryFailedButton
+            : EnhancementJobsRetryCanceledButton;
+        retryButton.Content = "再試行を受付中…";
         long generation = _enhancementWorkspaceGeneration;
         int retriedCount = 0;
         int pendingCount = 0;
@@ -4682,6 +4889,10 @@ public partial class MainWindow
         }
         finally
         {
+            EndOptimisticBulkPresentation(
+                optimisticJobIds,
+                optimisticVisibleJobs,
+                revealRows: removeOriginalAfterSuccess);
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
@@ -4737,7 +4948,17 @@ public partial class MainWindow
         string terminalLabel = terminalStatus == "failed" ? "失敗" : "キャンセル";
         var operationWatch = Stopwatch.StartNew();
         _enhancementWorkspaceMutationPending = true;
+        HashSet<string> optimisticJobIds = dismissibleIds
+            .ToHashSet(StringComparer.Ordinal);
+        EnhancementWorkspaceJobView[] optimisticVisibleJobs =
+            BeginOptimisticBulkPresentation(
+                optimisticJobIds,
+                hideRows: true);
         RefreshEnhancementQueueBulkControls();
+        Button clearButton = terminalStatus == "failed"
+            ? EnhancementJobsClearFailedButton
+            : EnhancementJobsClearCanceledButton;
+        clearButton.Content = "履歴を消しています…";
         long generation = _enhancementWorkspaceGeneration;
         int clearedCount = 0;
         int failedCount = 0;
@@ -4843,6 +5064,10 @@ public partial class MainWindow
         }
         finally
         {
+            EndOptimisticBulkPresentation(
+                optimisticJobIds,
+                optimisticVisibleJobs,
+                revealRows: true);
             _enhancementWorkspaceMutationPending = false;
             RefreshEnhancementQueueBulkControls();
             RefreshEnhancementQueuePauseControl();
@@ -7506,6 +7731,27 @@ public partial class MainWindow
         return true;
     }
 
+    public bool TryReadMiniMaxH3WorkspaceSourceForSmoke(
+        JsonElement job,
+        out string sourceVersionLabel,
+        out string sourceName,
+        out string canonicalInput)
+    {
+        sourceVersionLabel = "";
+        sourceName = "";
+        canonicalInput = "";
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(
+            job,
+            0,
+            IsVideoMutationSafe);
+        if (view is null)
+            return false;
+
+        sourceVersionLabel = view.SourceVersionLabel;
+        sourceName = view.SourceName;
+        return TryResolveEnhancementWorkspaceInput(view, out canonicalInput);
+    }
+
     public bool TryBuildMiniMaxH3VideoRerunForSmoke(
         JsonElement job,
         out string[] actionKinds,
@@ -8177,7 +8423,33 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string SourceVersionLabel => (IsVideoOperation || Operation == "i2i")
         && !string.IsNullOrWhiteSpace(SourceProducerJobId)
             ? "実写版"
-            : "Original";
+            : IsVideoOperation
+                ? ManagedStillSourceVersionLabel(SourcePath) ?? "Original"
+                : "Original";
+
+    private static string? ManagedStillSourceVersionLabel(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+        try
+        {
+            string[] parts = Path.GetFullPath(path)
+                .Split(
+                    [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                    StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Contains("Photorealized", StringComparer.Ordinal))
+                return "実写版";
+            if (parts.Contains("Upscaled", StringComparer.Ordinal))
+                return "高画質版";
+            if (parts.Contains("Edited", StringComparer.Ordinal))
+                return "AI編集版";
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+        }
+        return null;
+    }
     public string PresetSummary => IsVideoOperation
         ? $"{(PresetId switch
         {
@@ -8224,7 +8496,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             : $"{I2iTargetDisplayLabel}: verified public instruction is unavailable.";
     private string ProgressPercentText =>
         $"{Progress.ToString("0", CultureInfo.InvariantCulture)}%";
-    public string StatusLabel => CancelRequested && Status == "running"
+    private string PersistedStatusLabel => CancelRequested && Status == "running"
         ? $"中止処理中  ·  Running {ProgressPercentText}"
         : Status switch
         {
@@ -8236,6 +8508,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "deleted" => "Output deleted",
             _ => Status,
         };
+    public string StatusLabel => _isBusy
+        ? $"反映中  ·  {PersistedStatusLabel}"
+        : PersistedStatusLabel;
     public string DetailText => IsStructuredI2iEnvelope
         ? SafeI2iV2DetailText
         : !string.IsNullOrWhiteSpace(ErrorMessage)
@@ -8563,6 +8838,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUpdatePhotorealPrompts)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanUseOutput)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanDeleteOutput)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusLabel)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccessibleName)));
             NotifyActionPresentationsChanged();
         }
     }
@@ -8606,6 +8883,7 @@ internal readonly record struct EnhancementQueueHealthView(
     string Revision,
     string ForegroundResource,
     bool? Paused,
+    bool QueueRecoveryRequired,
     bool QueuedPhotorealPromptUpdate,
     bool PhotorealEnqueueNext,
     bool TerminalHistoryBatchDismiss,
