@@ -355,6 +355,11 @@ internal static class MotionDirectorPlanner
             "0.000",
             CultureInfo.InvariantCulture);
 
+    private static string FormatPromptSeconds(int frame, int playbackFps)
+        => ((decimal)frame / playbackFps).ToString(
+            "0.00",
+            CultureInfo.InvariantCulture);
+
     private static void GrowAllocations(
         IReadOnlyList<MotionDirectorActionDefinition> actions,
         IDictionary<string, int> allocation,
@@ -395,16 +400,20 @@ internal static class MotionDirectorPlanner
             if (index > 0)
                 integrated.Append(' ');
             integrated.Append("At ");
-            integrated.Append(FormatSeconds(segment.StartFrame, playbackFps));
+            integrated.Append(FormatPromptSeconds(
+                segment.StartFrame,
+                playbackFps));
             integrated.Append('–');
-            integrated.Append(FormatSeconds(segment.EndFrame, playbackFps));
+            integrated.Append(FormatPromptSeconds(
+                segment.EndFrame,
+                playbackFps));
             integrated.Append(" seconds, ");
             integrated.Append(segment.H3Phrase);
             integrated.Append('.');
         }
         integrated.Append(
             " By the end, the movement settles naturally without a cut. The final frame at ");
-        integrated.Append(FormatSeconds(frameCount, playbackFps));
+        integrated.Append(FormatPromptSeconds(frameCount, playbackFps));
         integrated.Append(" seconds remains visually consistent with the source image.");
 
         return "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\n"

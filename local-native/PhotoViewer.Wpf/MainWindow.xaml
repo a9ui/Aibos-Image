@@ -4204,6 +4204,11 @@
                            Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                            TextWrapping="Wrap" Margin="0,0,0,8"
                            AutomationProperties.LiveSetting="Polite"/>
+                <TextBlock x:Name="ModalVideoH3ConformanceText"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                           FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"
+                           AutomationProperties.Name="{DynamicResource UiVideoH3ConformanceAutomation}"
+                           AutomationProperties.LiveSetting="Polite"/>
                 <Grid Margin="0,0,0,6">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>

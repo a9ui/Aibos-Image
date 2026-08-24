@@ -21,18 +21,6 @@ public partial class MainWindow
     // generation prompt.
     private const int MaxVideoH3CandidateEditorLength =
         MaxVideoPromptLength + 1;
-    private const string VideoH3PromptOpening =
-        "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.";
-    private const string VideoH3IntegratedPrefix =
-        "\n\nintegrated_multimodal_description: [Shot 1] ";
-    private const string VideoH3SoundscapePrefix =
-        "\n\noverall_soundscape: ";
-    private const string VideoH3MusicPrefix =
-        "\n\nnon_diegetic_music: ";
-    private const string VideoH3IntegratedMarker =
-        "integrated_multimodal_description:";
-    private const string VideoH3SoundscapeMarker = "overall_soundscape:";
-    private const string VideoH3MusicMarker = "non_diegetic_music:";
     private const string VideoH3DirectionRewriteInstruction =
         "Creative direction: preserve the user's intent, then strengthen image-compatible subject motion, expression, timing, and camera movement without inventing new people, objects, touch, or cuts.";
     private const string VideoH3AutoRewriteInstruction =
@@ -536,6 +524,7 @@ public partial class MainWindow
             || ModalVideoH3RewritePromptButton is null
             || ModalVideoH3RewriteModeComboBox is null
             || ModalVideoH3PromptCandidateTextBox is null
+            || ModalVideoH3ConformanceText is null
             || ModalVideoH3ApplyPromptButton is null
             || ModalVideoH3UndoPromptButton is null)
         {
@@ -613,8 +602,14 @@ public partial class MainWindow
         ModalVideoH3PromptCandidateTextBox.IsEnabled = h3Selected
             && !_videoH3RewritePending
             && !string.IsNullOrEmpty(_videoH3PromptCandidate);
+        MiniMaxH3ConformanceResult conformance =
+            MiniMaxH3I2vaPromptConformance.Analyze(
+                _videoH3PromptCandidate);
+        bool candidateFresh = IsVideoH3PromptCandidateFresh();
+        ModalVideoH3ConformanceText.Text =
+            DescribeVideoH3Conformance(conformance, candidateFresh);
         ModalVideoH3ApplyPromptButton.IsEnabled =
-            CanApplyVideoH3PromptCandidate();
+            CanApplyVideoH3PromptCandidate(candidateFresh);
         ModalVideoH3UndoPromptButton.IsEnabled = CanUndoAppliedVideoH3Prompt();
 
         if (!updateStatus || !h3Selected)
@@ -639,11 +634,11 @@ public partial class MainWindow
                 "UiVideoH3StatusIdle",
                 "画像と入力から候補を作ります。ここでは動画ジョブを追加しません。"));
         }
-        else if (!IsVideoH3PromptCandidateFresh())
+        else if (!candidateFresh)
         {
             SetVideoH3PromptRewriteStatus(VideoH3Localized(
                 "UiVideoH3StatusStale",
-                "入力・画像・Model・Styleが変わりました。表示中の候補は反映できますが、必要ならもう一度H3語化してください。"));
+                "入力・画像・Model・Styleが変わりました。表示中の候補は反映できません。もう一度H3語化してください。"));
         }
         else if (!TryNormalizeAndValidateVideoH3Prompt(
                      _videoH3PromptCandidate,
@@ -661,10 +656,11 @@ public partial class MainWindow
         }
     }
 
-    private bool CanApplyVideoH3PromptCandidate()
+    private bool CanApplyVideoH3PromptCandidate(bool? knownFresh = null)
     {
         if (!IsMiniMaxH3VideoModel(_videoModelId)
             || _videoH3RewritePending
+            || !(knownFresh ?? IsVideoH3PromptCandidateFresh())
             || !TryNormalizeAndValidateVideoH3Prompt(
                 _videoH3PromptCandidate,
                 out string normalizedCandidate))
@@ -971,70 +967,58 @@ public partial class MainWindow
         string raw,
         out string normalized)
     {
-        normalized = "";
-        if (raw.Length is < 1 or > MaxVideoPromptLength)
-            return false;
+        MiniMaxH3ConformanceResult result =
+            MiniMaxH3I2vaPromptConformance.Analyze(raw);
+        normalized = result.NormalizedPrompt;
+        return result.Conformant;
+    }
 
-        normalized = raw.Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (normalized.Contains('\r')
-            || !normalized.StartsWith(
-                VideoH3PromptOpening + VideoH3IntegratedPrefix,
-                StringComparison.Ordinal))
+    private string DescribeVideoH3Conformance(
+        MiniMaxH3ConformanceResult result,
+        bool candidateFresh)
+    {
+        string prefix = VideoH3Localized(
+            "UiVideoH3ConformancePrefix",
+            "MiniMax H3 · I2VA");
+        if (string.IsNullOrEmpty(_videoH3PromptCandidate))
+            return prefix;
+        if (!candidateFresh)
         {
-            return false;
+            return prefix + " · " + VideoH3Localized(
+                "UiVideoH3ConformanceStale",
+                "Stale · 反映不可");
+        }
+        if (result.Conformant)
+        {
+            return prefix + " · " + VideoH3Localized(
+                "UiVideoH3ConformanceReady",
+                "✓ 適合");
         }
 
-        int integratedIndex = VideoH3PromptOpening.Length;
-        int soundscapeIndex = normalized.IndexOf(
-            VideoH3SoundscapePrefix,
-            integratedIndex + VideoH3IntegratedPrefix.Length,
-            StringComparison.Ordinal);
-        int musicIndex = normalized.IndexOf(
-            VideoH3MusicPrefix,
-            soundscapeIndex < 0
-                ? integratedIndex + VideoH3IntegratedPrefix.Length
-                : soundscapeIndex + VideoH3SoundscapePrefix.Length,
-            StringComparison.Ordinal);
-        int integratedMarkerIndex = normalized.IndexOf(
-            VideoH3IntegratedMarker,
-            StringComparison.Ordinal);
-        int soundscapeMarkerIndex = normalized.IndexOf(
-            VideoH3SoundscapeMarker,
-            StringComparison.Ordinal);
-        int musicMarkerIndex = normalized.IndexOf(
-            VideoH3MusicMarker,
-            StringComparison.Ordinal);
-        if (soundscapeIndex < 0
-            || musicIndex < 0
-            || integratedMarkerIndex != integratedIndex + 2
-            || soundscapeMarkerIndex != soundscapeIndex + 2
-            || musicMarkerIndex != musicIndex + 2
-            || normalized.LastIndexOf(
-                VideoH3IntegratedMarker,
-                StringComparison.Ordinal) != integratedMarkerIndex
-            || normalized.LastIndexOf(
-                VideoH3SoundscapeMarker,
-                StringComparison.Ordinal) != soundscapeMarkerIndex
-            || normalized.LastIndexOf(
-                VideoH3MusicMarker,
-                StringComparison.Ordinal) != musicMarkerIndex
-            || integratedMarkerIndex >= soundscapeMarkerIndex
-            || soundscapeMarkerIndex >= musicMarkerIndex)
+        MiniMaxH3ConformanceDiagnostic first = result.Diagnostics.First(
+            static diagnostic =>
+                diagnostic.Severity == MiniMaxH3ConformanceSeverity.Error);
+        string reason = first.Code switch
         {
-            return false;
-        }
-
-        string integrated = normalized[
-            (integratedIndex + VideoH3IntegratedPrefix.Length)..soundscapeIndex];
-        string soundscape = normalized[
-            (soundscapeIndex + VideoH3SoundscapePrefix.Length)..musicIndex];
-        string music = normalized[(musicIndex + VideoH3MusicPrefix.Length)..];
-        return !string.IsNullOrWhiteSpace(integrated)
-            && !string.IsNullOrWhiteSpace(soundscape)
-            && !string.IsNullOrWhiteSpace(music)
-            && !normalized.Any(static character =>
-                char.IsControl(character)
-                && character is not '\n' and not '\t');
+            "H3_FORMAT_TOO_LONG" => VideoH3Localized(
+                "UiVideoH3ConformanceTooLong",
+                "8000文字を超えています"),
+            "H3_REFERENCE_FIRST_FRAME_BINDING"
+                or "H3_REFERENCE_SHOT1_TIMESTAMP" => VideoH3Localized(
+                    "UiVideoH3ConformanceReferenceError",
+                    "Picture 1 / Shot 1参照を確認してください"),
+            _ => VideoH3Localized(
+                "UiVideoH3ConformanceFormatError",
+                "H3 section構造を確認してください"),
+        };
+        string format = VideoH3Localized(
+            "UiVideoH3ConformanceErrorsFormat",
+            "{0} error · {1}");
+        return prefix + " · " + string.Format(
+            System.Globalization.CultureInfo.CurrentCulture,
+            format,
+            result.ErrorCount,
+            reason);
     }
 
     private static bool IsValidSha256(string? value)
@@ -1147,6 +1131,8 @@ public partial class MainWindow
         ModalVideoH3UndoPromptButton.IsEnabled;
     public string VideoH3PromptRewriteStatusForSmoke =>
         ModalVideoH3PromptRewriteStatusText.Text;
+    public string VideoH3PromptConformanceTextForSmoke =>
+        ModalVideoH3ConformanceText.Text;
     public string VideoH3PromptRewriteModeForSmoke =>
         VideoH3PromptRewriteModeId(_videoH3RewriteMode);
 
@@ -1184,6 +1170,12 @@ public partial class MainWindow
         string raw,
         out string normalized)
         => TryNormalizeAndValidateVideoH3Prompt(raw, out normalized);
+    public static IReadOnlyList<string> VideoH3PromptConformanceCodesForSmoke(
+        string raw)
+        => MiniMaxH3I2vaPromptConformance.Analyze(raw)
+            .Diagnostics
+            .Select(static diagnostic => diagnostic.Code)
+            .ToArray();
     public bool VideoH3PromptRewritePanelVisibleForSmoke =>
         ModalVideoH3PromptRewritePanel.Visibility == Visibility.Visible;
 
@@ -1218,6 +1210,11 @@ public partial class MainWindow
                     ModalVideoH3PromptCandidateTextBox).Length == 0)
             {
                 issues.Add("candidate-a11y");
+            }
+            if (AutomationProperties.GetName(
+                    ModalVideoH3ConformanceText).Length == 0)
+            {
+                issues.Add("conformance-a11y");
             }
             if (AutomationProperties.GetName(
                     ModalVideoH3ApplyPromptButton).Length == 0)

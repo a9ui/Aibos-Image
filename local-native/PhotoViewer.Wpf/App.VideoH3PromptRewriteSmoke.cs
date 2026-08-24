@@ -461,6 +461,13 @@ public partial class App
                         && window.VideoH3PromptCandidateFreshForSmoke
                         && window.VideoH3PromptCandidateEditableForSmoke
                         && window.VideoH3PromptCandidateApplyEnabledForSmoke;
+                    bool conformanceReady = candidateSeparate
+                        && window.VideoH3PromptConformanceTextForSmoke.Contains(
+                            "I2VA",
+                            StringComparison.Ordinal)
+                        && window.VideoH3PromptConformanceTextForSmoke.Contains(
+                            "✓",
+                            StringComparison.Ordinal);
 
                     bool revisionFixturesExact = true;
                     int revisionFixtureCount = 0;
@@ -557,7 +564,13 @@ public partial class App
                         !window.VideoH3PromptCandidateApplyEnabledForSmoke
                         && !PhotoViewer.Wpf.MainWindow.TryValidateVideoH3PromptForSmoke(
                             duplicateMarkerCandidate,
-                            out _);
+                            out _)
+                        && PhotoViewer.Wpf.MainWindow
+                            .VideoH3PromptConformanceCodesForSmoke(
+                                duplicateMarkerCandidate)
+                            .Contains(
+                                "H3_FORMAT_SECTION_DUPLICATE",
+                                StringComparer.Ordinal);
                     string wrongMarkerOrderCandidate =
                         "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\n"
                         + "integrated_multimodal_description: [Shot 1] A clearly adult idol waves.\n\n"
@@ -566,6 +579,55 @@ public partial class App
                     bool wholePromptMarkerOrder =
                         !PhotoViewer.Wpf.MainWindow.TryValidateVideoH3PromptForSmoke(
                             wrongMarkerOrderCandidate,
+                            out _)
+                        && PhotoViewer.Wpf.MainWindow
+                            .VideoH3PromptConformanceCodesForSmoke(
+                                wrongMarkerOrderCandidate)
+                            .Contains(
+                                "H3_FORMAT_SECTION_ORDER",
+                                StringComparer.Ordinal);
+                    string timedShotOneCandidate = candidateEdited.Replace(
+                        "CANDIDATE_EDITED.",
+                        "CANDIDATE_EDITED. Later [Shot 1, 1.000 seconds] repeats.",
+                        StringComparison.Ordinal);
+                    bool untimedShotOneEnforced =
+                        !PhotoViewer.Wpf.MainWindow.TryValidateVideoH3PromptForSmoke(
+                            timedShotOneCandidate,
+                            out _)
+                        && PhotoViewer.Wpf.MainWindow
+                            .VideoH3PromptConformanceCodesForSmoke(
+                                timedShotOneCandidate)
+                            .Contains(
+                                "H3_REFERENCE_SHOT1_TIMESTAMP",
+                                StringComparer.Ordinal);
+                    string excessivePrecisionCandidate = candidateEdited.Replace(
+                        "CANDIDATE_EDITED.",
+                        "CANDIDATE_EDITED. At 0.000–1.250 seconds, she waves.",
+                        StringComparison.Ordinal);
+                    bool officialTimingPrecisionEnforced =
+                        !PhotoViewer.Wpf.MainWindow.TryValidateVideoH3PromptForSmoke(
+                            excessivePrecisionCandidate,
+                            out _)
+                        && PhotoViewer.Wpf.MainWindow
+                            .VideoH3PromptConformanceCodesForSmoke(
+                                excessivePrecisionCandidate)
+                            .Contains(
+                                "H3_TIMELINE_PRECISION",
+                                StringComparer.Ordinal);
+                    string officialNoMusicCandidate = candidateEdited.Replace(
+                        "Bright upbeat synth-pop at a moderate tempo.",
+                        "N/A",
+                        StringComparison.Ordinal);
+                    string compatibleNoMusicCandidate = candidateEdited.Replace(
+                        "Bright upbeat synth-pop at a moderate tempo.",
+                        "None; do not add music.",
+                        StringComparison.Ordinal);
+                    bool noMusicAliasesAccepted =
+                        PhotoViewer.Wpf.MainWindow.TryValidateVideoH3PromptForSmoke(
+                            officialNoMusicCandidate,
+                            out _)
+                        && PhotoViewer.Wpf.MainWindow.TryValidateVideoH3PromptForSmoke(
+                            compatibleNoMusicCandidate,
                             out _);
                     window.SetVideoH3PromptCandidateForSmoke(candidateEditedCrLf);
                     candidateEditable &=
@@ -751,7 +813,7 @@ public partial class App
 
                     async Task<bool> DelayedRewriteRejectsChangeAsync(
                         Action changeContext,
-                        bool expectApplyEnabled = true)
+                        bool expectApplyEnabled = false)
                     {
                         string retainedCandidate =
                             window.VideoH3PromptCandidateForSmoke;
@@ -816,7 +878,10 @@ public partial class App
                         basePrompt + " Changed after rewrite.");
                     bool inputStale = rewrittenForInputStale
                         && !window.VideoH3PromptCandidateFreshForSmoke
-                        && window.VideoH3PromptCandidateApplyEnabledForSmoke
+                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke
+                        && window.VideoH3PromptConformanceTextForSmoke.Contains(
+                            "Stale",
+                            StringComparison.Ordinal)
                         && string.Equals(
                             window.VideoH3PromptCandidateForSmoke,
                             candidateA,
@@ -824,7 +889,7 @@ public partial class App
                     window.SetAuthoritativeVideoPromptForSmoke(basePrompt);
                     bool revertedInputStillStale =
                         !window.VideoH3PromptCandidateFreshForSmoke
-                        && window.VideoH3PromptCandidateApplyEnabledForSmoke;
+                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
 
                     bool rewrittenForStyleStale =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
@@ -833,7 +898,7 @@ public partial class App
                     bool styleStale = rewrittenForStyleStale
                         && styleSaved
                         && !window.VideoH3PromptCandidateFreshForSmoke
-                        && window.VideoH3PromptCandidateApplyEnabledForSmoke;
+                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
 
                     bool rewrittenForModelStale =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
@@ -845,7 +910,7 @@ public partial class App
                         && panelHiddenForWan
                         && window.VideoH3PromptRewritePanelVisibleForSmoke
                         && !window.VideoH3PromptCandidateFreshForSmoke
-                        && window.VideoH3PromptCandidateApplyEnabledForSmoke;
+                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke;
 
                     bool rewrittenForSourceStale =
                         await window.RewriteVideoPromptForH3ForSmokeAsync();
@@ -865,11 +930,11 @@ public partial class App
                         window.VideoH3PromptCandidateApplyEnabledForSmoke;
                     bool sourceStale = rewrittenForSourceStale
                         && !freshAfterSourceChange
-                        && sourceApplyAccepted
+                        && !sourceApplyAccepted
                         && !applyAfterSourceChange
                         && string.Equals(
                             window.AuthoritativeVideoPromptForSmoke,
-                            candidateA,
+                            basePrompt,
                             StringComparison.Ordinal);
 
                     string retainedBeforeInvalid =
@@ -903,8 +968,8 @@ public partial class App
                         window.VideoH3PromptCandidateForSmoke;
                     window.SetAuthoritativeVideoPromptForSmoke(
                         basePrompt + " Manual edit invalidates the candidate.");
-                    bool manualEditInvalidatesUndoButKeepsApply = rewrittenAfterInvalid
-                        && window.VideoH3PromptCandidateApplyEnabledForSmoke
+                    bool manualEditStalesCandidateAndUndo = rewrittenAfterInvalid
+                        && !window.VideoH3PromptCandidateApplyEnabledForSmoke
                         && !window.VideoH3PromptUndoEnabledForSmoke
                         && string.Equals(
                             window.VideoH3PromptCandidateForSmoke,
@@ -1065,11 +1130,15 @@ public partial class App
                         && errorFixturesFailClosed
                         && errorFixtureCount >= 1
                         && candidateSeparate
+                        && conformanceReady
                         && editorOversizeRejectedWhole
                         && candidateEditable
                         && rawUtf16LimitCheckedBeforeNormalization
                         && wholePromptMarkerUniqueness
                         && wholePromptMarkerOrder
+                        && untimedShotOneEnforced
+                        && officialTimingPrecisionEnforced
+                        && noMusicAliasesAccepted
                         && candidateNotPersisted
                         && queueReadsOnlyInput
                         && applied
@@ -1087,7 +1156,7 @@ public partial class App
                         && sourceStale
                         && oversizeRejected
                         && hashMismatchRejected
-                    && manualEditInvalidatesUndoButKeepsApply
+                        && manualEditStalesCandidateAndUndo
                         && modeOverflowRejectedExplicitly
                         && responseTransportBounded
                         && sourceChangedBeforePublishNoReservation
@@ -1114,11 +1183,15 @@ public partial class App
                         errorFixturesFailClosed,
                         errorFixtureCount,
                         candidateSeparate,
+                        conformanceReady,
                         editorOversizeRejectedWhole,
                         candidateEditable,
                         rawUtf16LimitCheckedBeforeNormalization,
                         wholePromptMarkerUniqueness,
                         wholePromptMarkerOrder,
+                        untimedShotOneEnforced,
+                        officialTimingPrecisionEnforced,
+                        noMusicAliasesAccepted,
                         candidateNotPersisted,
                         queueReadsOnlyInput,
                         applied,
@@ -1145,12 +1218,12 @@ public partial class App
                         sourceStale,
                         rewrittenForSourceStale,
                         freshAfterSourceChange,
-                    sourceApplyAccepted,
+                        sourceApplyAccepted,
                         applyAfterSourceChange,
                         sourceLengthAfterChange = new FileInfo(sourcePath).Length,
                         oversizeRejected,
                         hashMismatchRejected,
-                    manualEditInvalidatesUndoButKeepsApply,
+                        manualEditStalesCandidateAndUndo,
                         modeOverflowRejectedExplicitly,
                         responseTransportBounded,
                         unavailableCompilerFailedClosed,
