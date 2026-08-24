@@ -121,8 +121,30 @@
         "denominator": 1
       }
     ],
-    "probePin": "persist and reverify signature, SHA-256, container, dimensions, exact frame count, fps rational, duration, and stream counts before execution and publish",
-    "retakeAdditionalRule": "producer must be a mutation-safe exact 24 fps MiniMax H3 v2 job with 124, 243, 294, or 362 frames",
+    "probePin": "persist and reverify signature, SHA-256, container, dimensions, exact frame count, fps rational, duration, stream counts, and the exact audio packet payload identity before execution and publish",
+    "audioProbe": {
+      "coupling": "audio is null if and only if audioStreamCount is 0; audio is one exact object if and only if audioStreamCount is 1",
+      "exactFields": [
+        "codec",
+        "codecTag",
+        "profile",
+        "sampleRate",
+        "channels",
+        "timeBaseNumerator",
+        "timeBaseDenominator",
+        "startTimestamp",
+        "durationTimestamp",
+        "packetCount",
+        "packetPayloadBytes",
+        "packetPayloadSha256"
+      ],
+      "supportedIdentity": "AAC codec, mp4a codec tag, LC profile, 32000 Hz stereo, zero start timestamp, safe positive integer time base, duration, packet count, and packet payload byte count, at most 536870912 packet payload bytes, and one 64-character lowercase hexadecimal packet payload SHA-256",
+      "packetMetadata": "for exactly one audio stream, bounded ffprobe output contains only each demux-order packet pos and size; encoded packet payload bytes, hex dumps, and arbitrary packet fields are never requested or accepted",
+      "packetPayloadDigestAlgorithm": "initialize SHA-256, then for every audio packet in ffprobe demux order append its exact encoded payload length as one unsigned 64-bit big-endian integer followed immediately by the exact encoded packet payload bytes read at that packet's validated pos and size through the same opened canonical regular-file handle; the final lowercase digest is packetPayloadSha256",
+      "packetScanBounds": "at most 4096 exact pos/size entries, 4194304 bytes per packet, 536870912 total packet payload bytes and source bytes, 524288 bytes of packet-metadata stdout and stderr, and a 15000 millisecond packet metadata timeout; every offset and size must be a safe integer wholly inside the unchanged opened source file",
+      "finish": "may use null or the exact supported one-stream audio object; this does not activate Finish"
+    },
+    "retakeAdditionalRule": "producer must be a mutation-safe exact 24 fps MiniMax H3 v2 job with 124, 243, 294, or 362 frames and the exact supported H3 AAC audio identity",
     "finishAdditionalRule": "producer must be a mutation-safe current MiniMax H3 v2 or Wan v1 job; arbitrary succeeded, malformed, future, or foreign video rows remain protected"
   },
   "retakePlanner": {
@@ -157,7 +179,7 @@
     "frameCount": "equal to the probed source frame count",
     "duration": "equal to the probed source duration",
     "fps": "exactly 24/1 from the H3 source",
-    "audio": "preserve the original source audio unchanged and discard any H3-generated audio"
+    "audio": "preserve the original source audio packets unchanged, including exact packet count, payload byte count, and packet payload SHA-256; discard any H3-generated audio"
   },
   "finishPlan": {
     "spatialScale": 2,
@@ -190,6 +212,7 @@
           "kind",
           "presetId",
           "backendId",
+          "seed",
           "source",
           "requested",
           "plan",
@@ -287,14 +310,30 @@
           "fpsDenominator",
           "durationMs",
           "videoStreamCount",
-          "audioStreamCount"
+          "audioStreamCount",
+          "audio"
+        ],
+        "audio": [
+          "codec",
+          "codecTag",
+          "profile",
+          "sampleRate",
+          "channels",
+          "timeBaseNumerator",
+          "timeBaseDenominator",
+          "startTimestamp",
+          "durationTimestamp",
+          "packetCount",
+          "packetPayloadBytes",
+          "packetPayloadSha256"
         ]
       }
     },
     "sourceVideoJobIdField": "job.sourceVideoJobId must equal video.source.jobId",
     "presetHash": "recursively sort object keys with ordinal string comparison, serialize compact JSON, SHA-256 UTF-8 bytes, and take the first 12 lowercase hexadecimal characters",
     "unknownOrMalformed": "reader-only protected row; preserve unknown fields and prohibit enqueue, claim, retry, cancel, reorder, output deletion, and execution",
-    "retry": "disabled while writerEnabled is false; a future compatible writer must reverify the same producer row, managed path, signature, SHA-256, and probe while reusing the exact persisted snapshot"
+    "seed": "Retake seed is one server-owned top-level integer from 0 through 2147483647; it is never accepted from the request envelope and is included in presetHash",
+    "retry": "disabled while writerEnabled is false; a future compatible writer must reverify the same producer row, managed path, signature, SHA-256, and full probe while reusing the exact persisted snapshot and exact seed; one new explicit request receives a newly generated server seed before durable creation"
   },
   "readerFixtures": {
     "retake": {
@@ -304,7 +343,7 @@
         "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
         "presetId": "minimax-h3-retake-v1",
         "adapterId": "minimax-h3-retake-v1",
-        "presetHash": "3b62213062d0"
+        "presetHash": "04bb3a97871a"
       },
       "video": {
         "schemaVersion": 1,
@@ -312,6 +351,7 @@
         "kind": "retake",
         "presetId": "minimax-h3-retake-v1",
         "backendId": "minimax-h3-retake-v1",
+        "seed": 1234567890,
         "source": {
           "jobId": "11111111-2222-4333-8444-555555555555",
           "signature": {
@@ -328,7 +368,21 @@
             "fpsDenominator": 1,
             "durationMs": 15083,
             "videoStreamCount": 1,
-            "audioStreamCount": 1
+            "audioStreamCount": 1,
+            "audio": {
+              "codec": "aac",
+              "codecTag": "mp4a",
+              "profile": "LC",
+              "sampleRate": 32000,
+              "channels": 2,
+              "timeBaseNumerator": 1,
+              "timeBaseDenominator": 32000,
+              "startTimestamp": 0,
+              "durationTimestamp": 482667,
+              "packetCount": 473,
+              "packetPayloadBytes": 128000,
+              "packetPayloadSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
           }
         },
         "requested": {
@@ -378,7 +432,7 @@
         "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
         "presetId": "aibos-video-finish-2x-v1",
         "adapterId": "aibos-video-finish-2x-v1",
-        "presetHash": "6467a0f6a2d8"
+        "presetHash": "1e693d4afe85"
       },
       "video": {
         "schemaVersion": 1,
@@ -402,7 +456,8 @@
             "fpsDenominator": 1,
             "durationMs": 6033,
             "videoStreamCount": 1,
-            "audioStreamCount": 0
+            "audioStreamCount": 0,
+            "audio": null
           }
         },
         "requested": {
@@ -429,6 +484,7 @@
       "sourceProducerJobId": "absent",
       "jobSourceVideoJobId": "must equal video.source.jobId",
       "presetHash": "must equal the stable snapshot hash shown by each fixture",
+      "retakeSeed": "missing, invalid, or changed without its matching persisted presetHash is protected reader-only; retry reuses the exact persisted value",
       "unknownNestedField": "protected reader-only"
     }
   },

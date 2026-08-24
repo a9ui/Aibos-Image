@@ -193,6 +193,9 @@ public partial class App
                 && !retakeRequest.TryGetProperty("presetId", out _)
                 && !retakeRequest.TryGetProperty("adapterId", out _)
                 && !retakeRequest.TryGetProperty("video", out _);
+            bool retakeRequestHasNoSeed =
+                !retakeRequest.TryGetProperty("seed", out _)
+                && !retake.TryGetProperty("seed", out _);
 
             bool unsafeRequestRejected = ThrowsArgumentException(() =>
                     PhotoViewer.Wpf.MainWindow.BuildVideoToolsRetakeRequestForSmoke(
@@ -384,6 +387,210 @@ public partial class App
                 && !finishMutation
                 && finishActions.Length == 0;
 
+            bool retakeSeedProtected =
+                IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-seed-missing",
+                    static video => { video.Remove("seed"); })
+                && IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-seed-negative",
+                    static video => video["seed"] = -1)
+                && IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-seed-too-large",
+                    static video => video["seed"] = 2_147_483_648L)
+                && IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-seed-not-integer",
+                    static video => video["seed"] = "1234567890");
+            bool retakeSeedHashDriftProtected =
+                IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-seed-drift",
+                    static video => video["seed"] = 1_234_567_891,
+                    refreshPresetHash: false);
+            using JsonDocument rehashedSeedWorkspaceJob =
+                CreateVideoToolsWorkspaceJob(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-seed-rehashed",
+                    "queued",
+                    static video => video["seed"] = 1_234_567_891,
+                    refreshPresetHash: true);
+            bool retakeSeedRehashedAccepted =
+                IsReadableVideoToolsWorkspaceJob(
+                    rehashedSeedWorkspaceJob,
+                    "retake");
+
+            using JsonDocument largeSafeAudioWorkspaceJob =
+                CreateVideoToolsWorkspaceJob(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-large-safe-integers",
+                    "queued",
+                    static video =>
+                    {
+                        JsonObject audio = video["source"]!["probe"]!["audio"]!
+                            .AsObject();
+                        audio["timeBaseNumerator"] =
+                            9_007_199_254_740_991L;
+                        audio["timeBaseDenominator"] =
+                            8_007_199_254_740_991L;
+                        audio["packetCount"] =
+                            7_007_199_254_740_991L;
+                    },
+                    refreshPresetHash: true);
+            bool retakeLargeSafeAudioAccepted =
+                IsReadableVideoToolsWorkspaceJob(
+                    largeSafeAudioWorkspaceJob,
+                    "retake");
+
+            bool retakeAudioProtected =
+                IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-missing",
+                    static video =>
+                    {
+                        video["source"]!["probe"]!.AsObject()
+                            .Remove("audio");
+                    })
+                && IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-null",
+                    static video =>
+                        video["source"]!["probe"]!["audio"] = null)
+                && IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-count-zero",
+                    static video =>
+                        video["source"]!["probe"]!["audioStreamCount"] = 0)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-codec",
+                    static audio => audio["codec"] = "opus")
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-codec-tag",
+                    static audio => audio["codecTag"] = "MP4A")
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-profile",
+                    static audio => audio["profile"] = "lc")
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-sample-rate",
+                    static audio => audio["sampleRate"] = 44_100)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-channels",
+                    static audio => audio["channels"] = 1)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-time-base-numerator",
+                    static audio => audio["timeBaseNumerator"] = 0)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-time-base-denominator",
+                    static audio => audio["timeBaseDenominator"] = 0)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-time-base-unsafe",
+                    static audio =>
+                        audio["timeBaseNumerator"] =
+                            9_007_199_254_740_992L)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-start",
+                    static audio => audio["startTimestamp"] = 1)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-duration-zero",
+                    static audio => audio["durationTimestamp"] = 0)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-duration-unsafe",
+                    static audio =>
+                        audio["durationTimestamp"] = 9_007_199_254_740_992L)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-packet-count",
+                    static audio => audio["packetCount"] = 0)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-packet-count-unsafe",
+                    static audio =>
+                        audio["packetCount"] = 9_007_199_254_740_992L)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-packet-bytes-zero",
+                    static audio => audio["packetPayloadBytes"] = 0)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-packet-bytes-large",
+                    static audio => audio["packetPayloadBytes"] = 536_870_913)
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-digest-case",
+                    static audio =>
+                        audio["packetPayloadSha256"] = new string('C', 64))
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-digest-length",
+                    static audio =>
+                        audio["packetPayloadSha256"] = new string('c', 63))
+                && IsRetakeAudioMutationProtected(
+                    readerFixtures.GetProperty("retake"),
+                    "retake-audio-future-field",
+                    static audio => audio["futureField"] = true);
+
+            string exactAudioJson = readerFixtures.GetProperty("retake")
+                .GetProperty("video")
+                .GetProperty("source")
+                .GetProperty("probe")
+                .GetProperty("audio")
+                .GetRawText();
+            using JsonDocument finishAudioWorkspaceJob =
+                CreateVideoToolsWorkspaceJob(
+                    readerFixtures.GetProperty("finish"),
+                    "finish-audio-object",
+                    "running",
+                    video =>
+                    {
+                        JsonObject probe = video["source"]!["probe"]!
+                            .AsObject();
+                        probe["audioStreamCount"] = 1;
+                        probe["audio"] = JsonNode.Parse(exactAudioJson);
+                    },
+                    refreshPresetHash: true);
+            bool finishAudioObjectAccepted =
+                IsReadableVideoToolsWorkspaceJob(
+                    finishAudioWorkspaceJob,
+                    "finish");
+            bool finishAudioCouplingProtected = finishAudioObjectAccepted
+                && IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("finish"),
+                    "finish-audio-count-one-null",
+                    static video =>
+                        video["source"]!["probe"]!["audioStreamCount"] = 1)
+                && IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("finish"),
+                    "finish-audio-count-zero-object",
+                    video =>
+                        video["source"]!["probe"]!["audio"] =
+                            JsonNode.Parse(exactAudioJson))
+                && IsVideoToolsWorkspaceMutationProtected(
+                    readerFixtures.GetProperty("finish"),
+                    "finish-audio-invalid-object",
+                    video =>
+                    {
+                        JsonObject probe = video["source"]!["probe"]!
+                            .AsObject();
+                        JsonObject audio = JsonNode.Parse(exactAudioJson)!
+                            .AsObject();
+                        audio["packetPayloadSha256"] = new string('C', 64);
+                        probe["audioStreamCount"] = 1;
+                        probe["audio"] = audio;
+                    });
+
             using JsonDocument malformedWorkspaceJob =
                 CreateVideoToolsWorkspaceJob(
                     readerFixtures.GetProperty("retake"),
@@ -468,6 +675,12 @@ public partial class App
                 && operationMismatchActions.Length == 0;
             bool readerSnapshots = retakeReaderProtected
                 && finishReaderProtected
+                && retakeSeedProtected
+                && retakeSeedHashDriftProtected
+                && retakeSeedRehashedAccepted
+                && retakeLargeSafeAudioAccepted
+                && retakeAudioProtected
+                && finishAudioCouplingProtected
                 && malformedReaderProtected
                 && malformedShapeProtected
                 && futureReaderProtected
@@ -734,9 +947,11 @@ public partial class App
                     && body.GetProperty("mediaKind").GetString() == "video"
                     && videoTools.GetProperty("kind").GetString() == "retake"
                     && !body.TryGetProperty("queuePlacement", out _)
+                    && !body.TryGetProperty("seed", out _)
                     && !body.TryGetProperty("sourcePath", out _)
                     && !body.TryGetProperty("sourceManagedOutputPath", out _)
-                    && !videoTools.TryGetProperty("actualWindow", out _);
+                    && !videoTools.TryGetProperty("actualWindow", out _)
+                    && !videoTools.TryGetProperty("seed", out _);
             }
             releasePost.TrySetResult(true);
             bool firstRetakeCompleted = await firstRetake;
@@ -827,6 +1042,7 @@ public partial class App
                 && capabilityMalformedRejected
                 && motionDirectorPromptInterop
                 && retakeRequestExact
+                && retakeRequestHasNoSeed
                 && unsafeRequestRejected
                 && uppercaseUuidAccepted
                 && finishPlan
@@ -857,6 +1073,7 @@ public partial class App
                 capabilityMalformedRejected,
                 motionDirectorPromptInterop,
                 retakeRequestExact,
+                retakeRequestHasNoSeed,
                 unsafeRequestRejected,
                 uppercaseUuidAccepted,
                 finishPlan,
@@ -866,6 +1083,13 @@ public partial class App
                 readerSnapshots,
                 retakeReaderProtected,
                 finishReaderProtected,
+                retakeSeedProtected,
+                retakeSeedHashDriftProtected,
+                retakeSeedRehashedAccepted,
+                retakeLargeSafeAudioAccepted,
+                retakeAudioProtected,
+                finishAudioObjectAccepted,
+                finishAudioCouplingProtected,
                 malformedReaderProtected,
                 malformedShapeProtected,
                 futureReaderProtected,
@@ -1104,12 +1328,69 @@ public partial class App
         }
         """;
 
+    private static bool IsVideoToolsWorkspaceMutationProtected(
+        JsonElement fixture,
+        string id,
+        Action<JsonObject> mutateVideo,
+        bool refreshPresetHash = true)
+    {
+        using JsonDocument workspaceJob = CreateVideoToolsWorkspaceJob(
+            fixture,
+            id,
+            "queued",
+            mutateVideo,
+            refreshPresetHash: refreshPresetHash);
+        return IsProtectedVideoToolsWorkspaceJob(workspaceJob);
+    }
+
+    private static bool IsRetakeAudioMutationProtected(
+        JsonElement fixture,
+        string id,
+        Action<JsonObject> mutateAudio)
+        => IsVideoToolsWorkspaceMutationProtected(
+            fixture,
+            id,
+            video => mutateAudio(
+                video["source"]!["probe"]!["audio"]!.AsObject()));
+
+    private static bool IsProtectedVideoToolsWorkspaceJob(
+        JsonDocument workspaceJob)
+        => PhotoViewer.Wpf.MainWindow
+                .TryReadVideoToolsWorkspacePresentationForSmoke(
+                    workspaceJob.RootElement,
+                    out string readerKind,
+                    out _,
+                    out _,
+                    out _,
+                    out bool supportedMutation,
+                    out string[] visibleActions)
+            && readerKind == "protected"
+            && !supportedMutation
+            && visibleActions.Length == 0;
+
+    private static bool IsReadableVideoToolsWorkspaceJob(
+        JsonDocument workspaceJob,
+        string expectedKind)
+        => PhotoViewer.Wpf.MainWindow
+                .TryReadVideoToolsWorkspacePresentationForSmoke(
+                    workspaceJob.RootElement,
+                    out string readerKind,
+                    out _,
+                    out _,
+                    out _,
+                    out bool supportedMutation,
+                    out string[] visibleActions)
+            && readerKind == expectedKind
+            && !supportedMutation
+            && visibleActions.Length == 0;
+
     private static JsonDocument CreateVideoToolsWorkspaceJob(
         JsonElement fixture,
         string id,
         string status,
         Action<JsonObject>? mutateVideo = null,
-        Action<JsonObject>? mutateJob = null)
+        Action<JsonObject>? mutateJob = null,
+        bool refreshPresetHash = false)
     {
         JsonObject job = JsonNode.Parse(
                 fixture.GetProperty("job").GetRawText())!
@@ -1118,6 +1399,14 @@ public partial class App
                 fixture.GetProperty("video").GetRawText())!
             .AsObject();
         mutateVideo?.Invoke(video);
+        if (refreshPresetHash)
+        {
+            using JsonDocument videoDocument = JsonDocument.Parse(
+                video.ToJsonString());
+            job["presetHash"] = PhotoViewer.Wpf.MainWindow
+                .ComputeVideoToolsSnapshotHashForSmoke(
+                    videoDocument.RootElement);
+        }
         job["id"] = id;
         job["status"] = status;
         job["sourceId"] = "synthetic/source.png";
