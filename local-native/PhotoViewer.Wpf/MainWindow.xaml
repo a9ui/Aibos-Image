@@ -4559,11 +4559,17 @@
               <UniformGrid Columns="3" Margin="0,0,0,5">
                 <Button x:Name="ModalVideoEditV2StartPreviewButton"
                         Style="{StaticResource GhostButton}" Tag="start"
-                        MinHeight="76" Margin="0,0,4,0" Padding="8,6"
+                        MinHeight="148" Margin="0,0,4,0" Padding="8,6"
                         Click="ModalVideoEditV2PreviewSeek_Click"
                         AutomationProperties.Name="{DynamicResource UiVideoEditV2StartPreviewAutomation}"
                         AutomationProperties.HelpText="{DynamicResource UiVideoEditV2PreviewSeekHelp}">
                   <StackPanel>
+                    <Border Height="72" Margin="0,0,0,6" CornerRadius="3"
+                            Background="{StaticResource BgPrimary}"
+                            ClipToBounds="True">
+                      <Image x:Name="ModalVideoEditV2StartPreviewImage"
+                             Stretch="Uniform" SnapsToDevicePixels="True"/>
+                    </Border>
                     <TextBlock Text="{DynamicResource UiVideoEditV2StartPreviewLabel}"
                                Foreground="{StaticResource TextSecondary}" FontSize="10"/>
                     <TextBlock x:Name="ModalVideoEditV2StartPreviewFrameText"
@@ -4577,11 +4583,17 @@
                 </Button>
                 <Button x:Name="ModalVideoEditV2MiddlePreviewButton"
                         Style="{StaticResource GhostButton}" Tag="middle"
-                        MinHeight="76" Margin="2,0" Padding="8,6"
+                        MinHeight="148" Margin="2,0" Padding="8,6"
                         Click="ModalVideoEditV2PreviewSeek_Click"
                         AutomationProperties.Name="{DynamicResource UiVideoEditV2MiddlePreviewAutomation}"
                         AutomationProperties.HelpText="{DynamicResource UiVideoEditV2PreviewSeekHelp}">
                   <StackPanel>
+                    <Border Height="72" Margin="0,0,0,6" CornerRadius="3"
+                            Background="{StaticResource BgPrimary}"
+                            ClipToBounds="True">
+                      <Image x:Name="ModalVideoEditV2MiddlePreviewImage"
+                             Stretch="Uniform" SnapsToDevicePixels="True"/>
+                    </Border>
                     <TextBlock Text="{DynamicResource UiVideoEditV2MiddlePreviewLabel}"
                                Foreground="{StaticResource TextSecondary}" FontSize="10"/>
                     <TextBlock x:Name="ModalVideoEditV2MiddlePreviewFrameText"
@@ -4595,11 +4607,17 @@
                 </Button>
                 <Button x:Name="ModalVideoEditV2EndPreviewButton"
                         Style="{StaticResource GhostButton}" Tag="end"
-                        MinHeight="76" Margin="4,0,0,0" Padding="8,6"
+                        MinHeight="148" Margin="4,0,0,0" Padding="8,6"
                         Click="ModalVideoEditV2PreviewSeek_Click"
                         AutomationProperties.Name="{DynamicResource UiVideoEditV2EndPreviewAutomation}"
                         AutomationProperties.HelpText="{DynamicResource UiVideoEditV2PreviewSeekHelp}">
                   <StackPanel>
+                    <Border Height="72" Margin="0,0,0,6" CornerRadius="3"
+                            Background="{StaticResource BgPrimary}"
+                            ClipToBounds="True">
+                      <Image x:Name="ModalVideoEditV2EndPreviewImage"
+                             Stretch="Uniform" SnapsToDevicePixels="True"/>
+                    </Border>
                     <TextBlock Text="{DynamicResource UiVideoEditV2EndPreviewLabel}"
                                Foreground="{StaticResource TextSecondary}" FontSize="10"/>
                     <TextBlock x:Name="ModalVideoEditV2EndPreviewFrameText"
@@ -4690,6 +4708,13 @@
                              Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                              TextWrapping="Wrap"
                              AutomationProperties.Name="{DynamicResource UiVideoEditV2SummaryAutomation}"/>
+                  <Button x:Name="ModalVideoEditV2ApplyButton"
+                          Style="{StaticResource GhostButton}"
+                          Content="{DynamicResource UiVideoEditV2ApplyButton}"
+                          Height="30" Margin="0,9,0,0" IsEnabled="False"
+                          Click="ApplyModalVideoEditV2Candidate_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoEditV2ApplyAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ApplyHelp}"/>
                 </StackPanel>
               </Border>
 

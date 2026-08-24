@@ -2,6 +2,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Input;
 
@@ -9,6 +10,11 @@ namespace PhotoViewer.Wpf;
 
 public partial class App
 {
+    private const string VideoEditV2SmokePngBase64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC";
+    private const string VideoEditV2SmokePngSha256 =
+        "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee";
+
     private void CaptureVideoEditV2Smoke(string resultPath)
     {
         string resultFullPath = Path.GetFullPath(resultPath);
@@ -18,6 +24,7 @@ public partial class App
         string sourceRoot = Path.Combine(smokeRoot, "source");
         string storeRoot = Path.Combine(smokeRoot, "stores");
         string sourcePath = Path.Combine(sourceRoot, "synthetic-edit.mp4");
+        string movPath = Path.Combine(sourceRoot, "synthetic-view-only.mov");
         var environment = new Dictionary<string, string?>
         {
             ["PHOTOVIEWER_WPF_STATE_PATH"] = Path.Combine(
@@ -63,76 +70,16 @@ public partial class App
 
         try
         {
-            bool planner24 = VideoEditV2Planner.TryPlan(
-                    7_200,
-                    24,
-                    1,
-                    24,
-                    144,
-                    out VideoEditV2SelectionPlan plan24,
-                    out _)
-                && plan24.SelectedFrameCount == 120
-                && plan24.StartPreviewFrame == 24
-                && plan24.MiddlePreviewFrame == 83
-                && plan24.EndPreviewFrame == 143
-                && plan24.EndFrameExclusive == 144;
-            bool planner30 = VideoEditV2Planner.TryPlan(
-                    9_000,
-                    30,
-                    1,
-                    30,
-                    180,
-                    out VideoEditV2SelectionPlan plan30,
-                    out _)
-                && plan30.SelectedFrameCount == 150
-                && plan30.MaximumSelectionFrames == 150;
-            bool planner60 = VideoEditV2Planner.TryPlan(
-                    18_000,
-                    60,
-                    1,
-                    60,
-                    360,
-                    out VideoEditV2SelectionPlan plan60,
-                    out _)
-                && plan60.SelectedFrameCount == 300
-                && plan60.MaximumSelectionFrames == 300;
-            bool invalidPlannerInputs =
-                !VideoEditV2Planner.TryPlan(
-                    7_200,
-                    25,
-                    1,
-                    0,
-                    100,
-                    out _,
-                    out VideoEditV2PlanError unsupportedFps)
-                && unsupportedFps == VideoEditV2PlanError.UnsupportedFps
-                && !VideoEditV2Planner.TryPlan(
-                    7_200,
-                    24,
-                    1,
-                    0,
-                    121,
-                    out _,
-                    out VideoEditV2PlanError tooLong)
-                && tooLong == VideoEditV2PlanError.SelectionTooLong
-                && !VideoEditV2Planner.TryPlan(
-                    7_200,
-                    24,
-                    1,
-                    10,
-                    10,
-                    out _,
-                    out VideoEditV2PlanError empty)
-                && empty == VideoEditV2PlanError.InvalidRange;
-            bool purePlanner = planner24
-                && planner30
-                && planner60
-                && invalidPlannerInputs;
-
+            bool purePlanner = VerifyVideoEditV2PurePlanner();
+            bool parserVectors = VerifyVideoEditV2TransientParserVectors();
             Directory.CreateDirectory(sourceRoot);
             Directory.CreateDirectory(storeRoot);
             WriteIsoBmffSmokeVideo(sourcePath);
+            File.Copy(sourcePath, movPath);
             string sourceBefore = FingerprintVideoEditV2File(sourcePath);
+            string sourceSha256 = Convert.ToHexString(
+                    SHA256.HashData(File.ReadAllBytes(sourcePath)))
+                .ToLowerInvariant();
             foreach ((string key, string? value) in environment)
                 Environment.SetEnvironmentVariable(key, value);
 
@@ -145,13 +92,178 @@ public partial class App
                 pathResolverCalls++;
                 return Path.GetFullPath(path);
             });
-            int companionCalls = 0;
-            window.ConfigureModalEnhancementForSmoke((_, _) =>
+
+            var actions = new List<string>();
+            bool exactRouteOnly = true;
+            bool exactRequests = true;
+            bool malformedCompile = false;
+            bool holdCompile = false;
+            string? capturedSelector = null;
+            TaskCompletionSource<bool>? compileEntered = null;
+            TaskCompletionSource<bool>? releaseCompile = null;
+            window.ConfigureModalEnhancementForSmoke(async (request, token) =>
             {
-                companionCalls++;
-                return Task.FromResult(new HttpResponseMessage(
-                    HttpStatusCode.ServiceUnavailable));
+                exactRouteOnly &= request.Method == HttpMethod.Post
+                    && string.Equals(
+                        request.RequestUri?.AbsolutePath,
+                        "/api/enhance/video-prompts/v2/edit/compile",
+                        StringComparison.Ordinal);
+                string json = request.Content is null
+                    ? ""
+                    : await request.Content.ReadAsStringAsync(token);
+                exactRequests &= Encoding.UTF8.GetByteCount(json)
+                    <= VideoEditV2TransientContract.MaximumRequestBytes;
+                using JsonDocument document = JsonDocument.Parse(json);
+                JsonElement root = document.RootElement;
+                if (!TryGetVideoEditV2SmokeAction(root, out string action))
+                {
+                    exactRequests = false;
+                    return VideoEditV2SmokeJsonResponse(
+                        HttpStatusCode.BadRequest,
+                        "{\"error\":\"invalid action\"}");
+                }
+                actions.Add(action);
+
+                switch (action)
+                {
+                    case "probe":
+                    {
+                        JsonElement source = default;
+                        exactRequests &= HasExactVideoEditV2SmokeKeys(
+                                root,
+                                "action",
+                                "source")
+                            && root.TryGetProperty(
+                                "source",
+                                out source)
+                            && HasExactVideoEditV2SmokeKeys(
+                                source,
+                                "kind",
+                                "path",
+                                "size",
+                                "mtimeMs",
+                                "sha256")
+                            && source.TryGetProperty(
+                                "kind",
+                                out JsonElement kind)
+                            && kind.GetString() == "displayed-file"
+                            && source.TryGetProperty(
+                                "sha256",
+                                out JsonElement sha)
+                            && sha.GetString() == sourceSha256;
+                        capturedSelector = source.ValueKind == JsonValueKind.Object
+                            ? source.GetRawText()
+                            : null;
+                        return VideoEditV2SmokeJsonResponse(
+                            HttpStatusCode.OK,
+                            BuildVideoEditV2SmokeProbeResponse());
+                    }
+                    case "preview":
+                    {
+                        exactRequests &= HasExactVideoEditV2SmokeKeys(
+                                root,
+                                "action",
+                                "source",
+                                "selection")
+                            && root.TryGetProperty(
+                                "source",
+                                out JsonElement source)
+                            && string.Equals(
+                                source.GetRawText(),
+                                capturedSelector,
+                                StringComparison.Ordinal)
+                            && TryGetVideoEditV2SmokeSelection(
+                                root,
+                                out int start,
+                                out int end);
+                        TryGetVideoEditV2SmokeSelection(
+                            root,
+                            out int previewStart,
+                            out int previewEnd);
+                        return VideoEditV2SmokeJsonResponse(
+                            HttpStatusCode.OK,
+                            BuildVideoEditV2SmokePreviewResponse(
+                                previewStart,
+                                previewEnd));
+                    }
+                    case "compile":
+                    {
+                        exactRequests &= HasExactVideoEditV2SmokeKeys(
+                                root,
+                                "action",
+                                "source",
+                                "selection",
+                                "previews",
+                                "instructionJa")
+                            && root.TryGetProperty(
+                                "source",
+                                out JsonElement source)
+                            && string.Equals(
+                                source.GetRawText(),
+                                capturedSelector,
+                                StringComparison.Ordinal)
+                            && root.TryGetProperty(
+                                "previews",
+                                out JsonElement identities)
+                            && identities.ValueKind == JsonValueKind.Array
+                            && identities.GetArrayLength() == 3;
+                        if (holdCompile)
+                        {
+                            compileEntered?.TrySetResult(true);
+                            if (releaseCompile is not null)
+                                await releaseCompile.Task.WaitAsync(token);
+                        }
+                        const string backendPrompt =
+                            "Preserve the subject, background, timing, and camera. Change only the clothing color to blue.";
+                        const string summaryJa =
+                            "人物・背景・動き・カメラを保ち、服の色だけを青へ変えます。";
+                        const string compilerRevision =
+                            "aibos-video-edit-compiler-v1";
+                        if (!VideoEditV2TransientContract
+                            .TryComputeContextDigestFromCompileRequestForSmoke(
+                                root,
+                                backendPrompt,
+                                summaryJa,
+                                compilerRevision,
+                                out string digest))
+                        {
+                            exactRequests = false;
+                            return VideoEditV2SmokeJsonResponse(
+                                HttpStatusCode.BadRequest,
+                                "{\"error\":\"digest input invalid\"}");
+                        }
+                        string responseJson = JsonSerializer.Serialize(new
+                        {
+                            action = "compile",
+                            candidate = malformedCompile
+                                ? (object)new
+                                {
+                                    backendPrompt,
+                                    summaryJa,
+                                    compilerRevision,
+                                    contextDigest = digest,
+                                    model = "forbidden-model",
+                                }
+                                : new
+                                {
+                                    backendPrompt,
+                                    summaryJa,
+                                    compilerRevision,
+                                    contextDigest = digest,
+                                },
+                        });
+                        return VideoEditV2SmokeJsonResponse(
+                            HttpStatusCode.OK,
+                            responseJson);
+                    }
+                    default:
+                        exactRequests = false;
+                        return VideoEditV2SmokeJsonResponse(
+                            HttpStatusCode.NotFound,
+                            "{\"error\":\"unexpected action\"}");
+                }
             });
+
             window.Show();
             window.Dispatcher.InvokeAsync(async () =>
             {
@@ -169,6 +281,7 @@ public partial class App
                     bool boardOpened = window.OpenVideoEditV2ForSmoke();
                     bool externalStartsUnverified = boardOpened
                         && window.VideoEditV2ProbeAffordanceVisibleForSmoke
+                        && window.VideoEditV2ProbeEnabledForSmoke
                         && !window.VideoEditV2ExactFrameControlsEnabledForSmoke
                         && window.VideoEditV2CompilerDisabledForSmoke
                         && window.VideoEditV2StartDisabledForSmoke
@@ -177,157 +290,211 @@ public partial class App
                             .All(static value => value == "f --");
                     string storesAfterOpen =
                         FingerprintVideoEditV2Tree(storeRoot);
-                    bool passiveOpen = companionCalls == 0
+                    bool passiveOpen = actions.Count == 0
                         && pathResolverCalls == pathResolverCallsAfterDrop
                         && string.Equals(
                             storesBefore,
                             storesAfterOpen,
                             StringComparison.Ordinal);
 
-                    bool exactProbeAccepted =
-                        window.SetVideoEditV2ExternalProbeForSmoke(24, 240)
-                        && window.VideoEditV2ExactFrameControlsEnabledForSmoke
-                        && window.VideoEditV2CompilerDisabledForSmoke
-                        && window.VideoEditV2StartDisabledForSmoke
-                        && window.VideoEditV2TrimDisabledForSmoke;
-                    bool selected = window.SetVideoEditV2SelectionForSmoke(
-                        24,
-                        144);
-                    string[] previewFrames =
+                    bool firstLoad = await window
+                        .LoadVideoEditV2FramesForSmokeAsync();
+                    string[] firstFrames =
                         window.VideoEditV2PreviewFramesForSmoke;
-                    bool halfOpenPreview = selected
-                        && previewFrames.SequenceEqual(
-                            ["f 24", "f 83", "f 143"])
-                        && window.VideoEditV2RangeStatusForSmoke.Contains(
-                            "[24, 144)",
-                            StringComparison.Ordinal);
+                    bool exactPreviewLoaded = firstLoad
+                        && actions.SequenceEqual(["probe", "preview"])
+                        && window.VideoEditV2ExactFrameControlsEnabledForSmoke
+                        && window.VideoEditV2PreviewImagesLoadedForSmoke
+                        && firstFrames.SequenceEqual(
+                            ["f 0", "f 59", "f 119"])
+                        && window.VideoEditV2StartDisabledForSmoke;
                     bool previewSeek = window.SeekVideoEditV2PreviewForSmoke(
                             "middle")
                         && Math.Abs(
                             window.VideoEditV2PlaybackPositionForSmoke
-                                - 83d / 24d) < 0.001;
+                                - 59d / 24d) < 0.001;
+
+                    int callsBeforeSelection = actions.Count;
+                    bool selectionChanged = window
+                        .SetVideoEditV2SelectionForSmoke(24, 144);
+                    bool selectionStalesWithoutNetwork = selectionChanged
+                        && window.VideoEditV2PreviewStaleForSmoke
+                        && window.VideoEditV2CompilerDisabledForSmoke
+                        && actions.Count == callsBeforeSelection;
+                    bool reloadedSelection = await window
+                        .LoadVideoEditV2FramesForSmokeAsync();
+                    string[] selectedFrames =
+                        window.VideoEditV2PreviewFramesForSmoke;
+                    bool halfOpenPreview = reloadedSelection
+                        && selectedFrames.SequenceEqual(
+                            ["f 24", "f 83", "f 143"])
+                        && window.VideoEditV2RangeStatusForSmoke.Contains(
+                            "[24, 144)",
+                            StringComparison.Ordinal);
 
                     window.SetVideoEditV2InstructionForSmoke(
                         "人物と背景を保ち、服の色だけを青へ変える");
-                    bool malformedCompilerResponseRejected =
-                        !window.ApplyVideoEditV2CompiledCandidateForSmoke(
-                            "Preserve the source except for the requested edit.",
-                            "指定箇所以外を維持します。",
-                            "synthetic-compiler-v1",
-                            "not-a-sha256")
-                        && !window.ApplyVideoEditV2CompiledCandidateForSmoke(
-                            "Preserve the source.\0",
-                            "指定箇所以外を維持します。",
-                            "synthetic-compiler-v1",
-                            new string('b', 64));
-                    bool candidateApplied =
-                        window.ApplyVideoEditV2CompiledCandidateForSmoke(
-                            "Preserve the subject, background, timing, and camera. Change only the clothing color to blue.",
-                            "人物・背景・動き・カメラを保ち、服の色だけを青へ変えます。");
-                    bool reviewWithoutStart = candidateApplied
-                        && window.VideoEditV2ReviewVisibleForSmoke
-                        && window.VideoEditV2StartDisabledForSmoke
-                        && window.VideoEditV2StartAttemptCountForSmoke == 0;
-                    bool changed = window.SetVideoEditV2SelectionForSmoke(
-                        48,
-                        168);
-                    bool candidateStales = changed
-                        && window.VideoEditV2CandidateStaleForSmoke
-                        && window.VideoEditV2StartDisabledForSmoke;
-
+                    malformedCompile = true;
                     window.SetVideoEditV2SkipReviewForSmoke(true);
-                    bool autoSuppressed =
-                        window.ApplyVideoEditV2CompiledCandidateForSmoke(
-                            "Preserve the source except for the requested semantic edit.",
-                            "指定部分だけを変更し、他は維持します。")
+                    bool malformedRejected = !await window
+                        .CompileVideoEditV2ForSmokeAsync();
+                    bool skipConsumedOnFailure = malformedRejected
+                        && !window.VideoEditV2SkipReviewCheckedForSmoke
+                        && !window.VideoEditV2ReviewVisibleForSmoke
+                        && window.VideoEditV2StartAttemptCountForSmoke == 0;
+
+                    malformedCompile = false;
+                    bool compiledForReview = await window
+                        .CompileVideoEditV2ForSmokeAsync();
+                    bool reviewWithoutStart = compiledForReview
                         && window.VideoEditV2ReviewVisibleForSmoke
                         && window.VideoEditV2StartDisabledForSmoke
                         && window.VideoEditV2StartAttemptCountForSmoke == 0;
-                    string storesAfterCandidate =
+                    bool transientApproval = window
+                        .ApplyVideoEditV2CandidateApprovalForSmoke()
+                        && window.VideoEditV2CandidateApprovedForSmoke
+                        && window.VideoEditV2StartDisabledForSmoke
+                        && window.VideoEditV2StartAttemptCountForSmoke == 0;
+
+                    bool candidateAndPreviewStale = window
+                            .SetVideoEditV2SelectionForSmoke(48, 168)
+                        && window.VideoEditV2CandidateStaleForSmoke
+                        && window.VideoEditV2PreviewStaleForSmoke
+                        && window.VideoEditV2StartDisabledForSmoke;
+                    bool reloadedForSkip = await window
+                        .LoadVideoEditV2FramesForSmokeAsync();
+                    window.SetVideoEditV2InstructionForSmoke(
+                        "人物と背景を保ち、服の色だけを青へ変える");
+                    window.SetVideoEditV2SkipReviewForSmoke(true);
+                    bool compiledWithSkip = reloadedForSkip
+                        && await window.CompileVideoEditV2ForSmokeAsync();
+                    bool skipWriterFalse = compiledWithSkip
+                        && !window.VideoEditV2SkipReviewCheckedForSmoke
+                        && window.VideoEditV2ReviewVisibleForSmoke
+                        && !window.VideoEditV2CandidateApprovedForSmoke
+                        && window.VideoEditV2StartDisabledForSmoke
+                        && window.VideoEditV2StartAttemptCountForSmoke == 0;
+
+                    holdCompile = true;
+                    compileEntered = new(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    releaseCompile = new(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    window.SetVideoEditV2SkipReviewForSmoke(true);
+                    Task<bool> pendingCompile = window
+                        .CompileVideoEditV2ForSmokeAsync();
+                    await compileEntered.Task.WaitAsync(
+                        TimeSpan.FromSeconds(5));
+                    bool busyCancel = window
+                        .CancelVideoEditV2CompileForSmoke();
+                    releaseCompile.TrySetResult(true);
+                    bool canceledCompile = !await pendingCompile
+                        && busyCancel
+                        && !window.VideoEditV2CompilePendingForSmoke
+                        && !window.VideoEditV2SkipReviewCheckedForSmoke
+                        && window.VideoEditV2StartAttemptCountForSmoke == 0;
+                    holdCompile = false;
+
+                    string storesAfterActions =
                         FingerprintVideoEditV2Tree(storeRoot);
-                    bool transientOnly = companionCalls == 0
-                        && pathResolverCalls == pathResolverCallsAfterDrop
-                        && string.Equals(
+                    bool transientOnly = string.Equals(
                             storesBefore,
-                            storesAfterCandidate,
-                            StringComparison.Ordinal);
+                            storesAfterActions,
+                            StringComparison.Ordinal)
+                        && pathResolverCalls == pathResolverCallsAfterDrop;
+                    bool exactActionOrder = actions.SequenceEqual(
+                    [
+                        "probe", "preview",
+                        "probe", "preview",
+                        "compile", "compile",
+                        "probe", "preview",
+                        "compile", "compile",
+                    ]);
 
                     bool escapeClosesBoard =
                         window.InvokePreviewKeyForSmoke(Key.Escape)
                         && !window.VideoEditV2BoardVisibleForSmoke
                         && window.VideoEditV2LastCloseWasStaleForSmoke;
-                    bool reopenAfterEscape =
-                        window.OpenVideoEditV2ForSmoke();
-                    bool minimizeClosesBoard = reopenAfterEscape
-                        && window.ActivateModalMinimizeForSmoke()
-                        && !window.VideoEditV2BoardVisibleForSmoke
-                        && window.VideoEditV2LastCloseWasStaleForSmoke;
-                    bool reopenAfterMinimize =
-                        window.OpenVideoEditV2ForSmoke();
-                    bool sourceNavigationClosesBoard = reopenAfterMinimize
-                        && window
-                            .InvalidateVideoEditV2ForSourceNavigationForSmoke();
-                    bool reopenAfterSourceNavigation =
-                        window.OpenVideoEditV2ForSmoke();
-
+                    bool reopenAfterEscape = window.OpenVideoEditV2ForSmoke();
+                    bool closeClearsTransient = reopenAfterEscape
+                        && !window.VideoEditV2ExactFrameControlsEnabledForSmoke;
                     window.CloseModalForSmoke();
-                    bool sourceChangeClosesStale =
-                        reopenAfterSourceNavigation
-                        && window.VideoEditV2LastCloseWasStaleForSmoke
-                        && !window.VideoEditV2EntryVisibleForSmoke;
+
+                    ExternalVideoDropSmokeSnapshot movDrop =
+                        await window.DropExternalVideoForSmokeAsync([movPath]);
+                    bool movOpened = movDrop.Accepted
+                        && window.OpenVideoEditV2ForSmoke();
+                    int callsBeforeMovProbe = actions.Count;
+                    bool movProbeUnsupported = movOpened
+                        && !await window.LoadVideoEditV2FramesForSmokeAsync()
+                        && actions.Count == callsBeforeMovProbe;
+                    window.CloseModalForSmoke();
+
                     bool sourceUntouched = string.Equals(
                         sourceBefore,
                         FingerprintVideoEditV2File(sourcePath),
                         StringComparison.Ordinal);
+                    bool noForbiddenCalls = exactRouteOnly
+                        && exactRequests
+                        && actions.All(static action =>
+                            action is "probe" or "preview" or "compile");
 
                     ok = purePlanner
+                        && parserVectors
                         && hiddenForImages
                         && videoEntry
                         && externalStartsUnverified
                         && passiveOpen
-                        && exactProbeAccepted
-                        && halfOpenPreview
+                        && exactPreviewLoaded
                         && previewSeek
-                        && malformedCompilerResponseRejected
+                        && selectionStalesWithoutNetwork
+                        && halfOpenPreview
+                        && skipConsumedOnFailure
                         && reviewWithoutStart
-                        && candidateStales
-                        && autoSuppressed
+                        && transientApproval
+                        && candidateAndPreviewStale
+                        && skipWriterFalse
+                        && canceledCompile
                         && transientOnly
+                        && exactActionOrder
                         && escapeClosesBoard
-                        && minimizeClosesBoard
-                        && sourceNavigationClosesBoard
-                        && sourceChangeClosesStale
-                        && sourceUntouched;
+                        && closeClearsTransient
+                        && movProbeUnsupported
+                        && sourceUntouched
+                        && noForbiddenCalls;
                     result = new
                     {
                         ok,
                         purePlanner,
-                        planner24,
-                        planner30,
-                        planner60,
-                        invalidPlannerInputs,
+                        parserVectors,
                         hiddenForImages,
                         videoEntry,
-                        boardOpened,
                         externalStartsUnverified,
                         passiveOpen,
-                        exactProbeAccepted,
-                        halfOpenPreview,
-                        previewFrames,
+                        exactPreviewLoaded,
+                        firstFrames,
                         previewSeek,
-                        malformedCompilerResponseRejected,
+                        selectionStalesWithoutNetwork,
+                        halfOpenPreview,
+                        selectedFrames,
+                        skipConsumedOnFailure,
                         reviewWithoutStart,
-                        candidateStales,
-                        autoSuppressed,
+                        transientApproval,
+                        candidateAndPreviewStale,
+                        skipWriterFalse,
+                        canceledCompile,
                         transientOnly,
-                        companionCalls,
+                        exactActionOrder,
+                        actions,
+                        exactRouteOnly,
+                        exactRequests,
+                        escapeClosesBoard,
+                        closeClearsTransient,
+                        movProbeUnsupported,
+                        sourceUntouched,
+                        noForbiddenCalls,
                         pathResolverCalls,
                         pathResolverCallsAfterDrop,
-                        escapeClosesBoard,
-                        minimizeClosesBoard,
-                        sourceNavigationClosesBoard,
-                        sourceChangeClosesStale,
-                        sourceUntouched,
                     };
                 }
                 catch (Exception ex)
@@ -392,6 +559,281 @@ public partial class App
             Shutdown(1);
         }
     }
+
+    private static bool VerifyVideoEditV2PurePlanner()
+        => VideoEditV2Planner.TryPlan(
+                7_200,
+                24,
+                1,
+                24,
+                144,
+                out VideoEditV2SelectionPlan plan24,
+                out _)
+            && plan24.SelectedFrameCount == 120
+            && plan24.StartPreviewFrame == 24
+            && plan24.MiddlePreviewFrame == 83
+            && plan24.EndPreviewFrame == 143
+            && VideoEditV2Planner.TryPlan(
+                9_000,
+                30,
+                1,
+                30,
+                180,
+                out VideoEditV2SelectionPlan plan30,
+                out _)
+            && plan30.MaximumSelectionFrames == 150
+            && VideoEditV2Planner.TryPlan(
+                18_000,
+                60,
+                1,
+                60,
+                360,
+                out VideoEditV2SelectionPlan plan60,
+                out _)
+            && plan60.MaximumSelectionFrames == 300
+            && !VideoEditV2Planner.TryPlan(
+                7_200,
+                25,
+                1,
+                0,
+                100,
+                out _,
+                out VideoEditV2PlanError unsupported)
+            && unsupported == VideoEditV2PlanError.UnsupportedFps;
+
+    private static bool VerifyVideoEditV2TransientParserVectors()
+    {
+        const string producerId = "11111111-2222-4333-8444-555555555555";
+        if (!VideoEditV2TransientContract.TryCreateManagedSelector(
+                producerId,
+                out VideoEditV2SourceSelector selector)
+            || !VideoEditV2Planner.TryPlan(
+                240,
+                24,
+                1,
+                24,
+                144,
+                out VideoEditV2SelectionPlan plan,
+                out _))
+        {
+            return false;
+        }
+        var summary = new VideoEditV2SourceSummary(
+            240,
+            24,
+            1,
+            10_000,
+            1_280,
+            720);
+        string validJson = BuildVideoEditV2SmokePreviewResponse(24, 144);
+        using JsonDocument validDocument = JsonDocument.Parse(validJson);
+        bool valid = VideoEditV2TransientContract.TryParsePreviewResponse(
+            validDocument.RootElement,
+            summary,
+            plan,
+            out VideoEditV2PreviewSet? previews,
+            selector,
+            "synthetic-source");
+        using JsonDocument extraDocument = JsonDocument.Parse(
+            validJson[..^1] + ",\"model\":\"forbidden\"}");
+        bool extraRejected = !VideoEditV2TransientContract
+            .TryParsePreviewResponse(
+                extraDocument.RootElement,
+                summary,
+                plan,
+                out _,
+                selector,
+                "synthetic-source");
+        using JsonDocument oversizeDocument = JsonDocument.Parse(
+            validJson.Replace(
+                "\"encodedBytes\":90",
+                "\"encodedBytes\":524289",
+                StringComparison.Ordinal));
+        bool oversizeRejected = !VideoEditV2TransientContract
+            .TryParsePreviewResponse(
+                oversizeDocument.RootElement,
+                summary,
+                plan,
+                out _,
+                selector,
+                "synthetic-source");
+        if (!valid || previews is null)
+            return false;
+
+        const string backendPrompt =
+            "Preserve the source except for the requested semantic edit.";
+        const string summaryJa = "指定部分だけを変更し、他は維持します。";
+        const string revision = "aibos-video-edit-compiler-v1";
+        string digest = VideoEditV2TransientContract.ComputeContextDigest(
+            selector,
+            plan,
+            previews.Previews,
+            "人物を保ち、服の色だけを青へ変える",
+            backendPrompt,
+            summaryJa,
+            revision);
+        bool crossLanguageDigest = string.Equals(
+            digest,
+            "c9ab8a21bc7eea58a609c408447ece6b547f6c074aea828173ab59740bf19e75",
+            StringComparison.Ordinal);
+        string candidateJson = JsonSerializer.Serialize(new
+        {
+            action = "compile",
+            candidate = new
+            {
+                backendPrompt,
+                summaryJa,
+                compilerRevision = revision,
+                contextDigest = digest,
+            },
+        });
+        using JsonDocument candidateDocument = JsonDocument.Parse(candidateJson);
+        bool candidateValid = VideoEditV2TransientContract.TryParseCompileResponse(
+            candidateDocument.RootElement,
+            selector,
+            plan,
+            previews.Previews,
+            "人物を保ち、服の色だけを青へ変える",
+            "synthetic-source",
+            "synthetic-context",
+            out _);
+        using JsonDocument forbiddenDocument = JsonDocument.Parse(
+            candidateJson.Replace(
+                "\"contextDigest\":",
+                "\"png\":\"forbidden\",\"contextDigest\":",
+                StringComparison.Ordinal));
+        bool forbiddenRejected = !VideoEditV2TransientContract
+            .TryParseCompileResponse(
+                forbiddenDocument.RootElement,
+                selector,
+                plan,
+                previews.Previews,
+                "人物を保ち、服の色だけを青へ変える",
+                "synthetic-source",
+                "synthetic-context",
+                out _);
+        return valid
+            && extraRejected
+            && oversizeRejected
+            && crossLanguageDigest
+            && candidateValid
+            && forbiddenRejected;
+    }
+
+    private static string BuildVideoEditV2SmokeProbeResponse()
+        => JsonSerializer.Serialize(new
+        {
+            action = "probe",
+            source = new
+            {
+                frameCount = 240,
+                fpsNumerator = 24,
+                fpsDenominator = 1,
+                durationMs = 10_000,
+                width = 1_280,
+                height = 720,
+            },
+        });
+
+    private static string BuildVideoEditV2SmokePreviewResponse(
+        int startFrame,
+        int endFrameExclusive)
+    {
+        int middleFrame = (startFrame + endFrameExclusive - 1) / 2;
+        int endFrame = endFrameExclusive - 1;
+        return JsonSerializer.Serialize(new
+        {
+            action = "preview",
+            source = new
+            {
+                frameCount = 240,
+                fpsNumerator = 24,
+                fpsDenominator = 1,
+                durationMs = 10_000,
+                width = 1_280,
+                height = 720,
+            },
+            previews = new[]
+            {
+                VideoEditV2SmokePreview("start", startFrame, '1'),
+                VideoEditV2SmokePreview("middle", middleFrame, '2'),
+                VideoEditV2SmokePreview("end", endFrame, '3'),
+            },
+        });
+    }
+
+    private static object VideoEditV2SmokePreview(
+        string role,
+        int sourceFrame,
+        char decodedHashDigit)
+        => new
+        {
+            role,
+            sourceFrame,
+            sourcePts = (sourceFrame * 1_000L).ToString(),
+            decodedPixelSha256 = new string(decodedHashDigit, 64),
+            decoderRevision = "aibos-ffmpeg-rgb24-v1-synthetic",
+            mime = "image/png",
+            width = 1,
+            height = 1,
+            encodedBytes = 90,
+            encodedSha256 = VideoEditV2SmokePngSha256,
+            base64 = VideoEditV2SmokePngBase64,
+        };
+
+    private static bool TryGetVideoEditV2SmokeAction(
+        JsonElement root,
+        out string action)
+    {
+        action = "";
+        return root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("action", out JsonElement value)
+            && value.ValueKind == JsonValueKind.String
+            && value.GetString() is string parsed
+            && (action = parsed) is not null;
+    }
+
+    private static bool TryGetVideoEditV2SmokeSelection(
+        JsonElement root,
+        out int start,
+        out int end)
+    {
+        start = 0;
+        end = 0;
+        return root.TryGetProperty("selection", out JsonElement selection)
+            && HasExactVideoEditV2SmokeKeys(
+                selection,
+                "startFrame",
+                "endFrameExclusive")
+            && selection.TryGetProperty(
+                "startFrame",
+                out JsonElement startElement)
+            && startElement.TryGetInt32(out start)
+            && selection.TryGetProperty(
+                "endFrameExclusive",
+                out JsonElement endElement)
+            && endElement.TryGetInt32(out end);
+    }
+
+    private static bool HasExactVideoEditV2SmokeKeys(
+        JsonElement value,
+        params string[] expected)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+            return false;
+        var names = value.EnumerateObject()
+            .Select(static property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        return names.SetEquals(expected);
+    }
+
+    private static HttpResponseMessage VideoEditV2SmokeJsonResponse(
+        HttpStatusCode statusCode,
+        string json)
+        => new(statusCode)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
 
     private static string FingerprintVideoEditV2Tree(string root)
     {
