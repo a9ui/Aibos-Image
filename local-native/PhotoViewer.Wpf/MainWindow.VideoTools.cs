@@ -27,6 +27,7 @@ public partial class MainWindow
     private const int VideoToolsMaximumSourcePixelArea = 1_920 * 1_080;
     private const int VideoToolsMaximumOutputPixelArea = 3_840 * 2_160;
     private const long VideoToolsMaximumSourceBytes = 512L * 1024 * 1024;
+    private const long VideoToolsMaximumSafeInteger = 9_007_199_254_740_991;
     private const double VideoToolsMaximumSourceDurationSeconds = 15.1;
     private static readonly int[] VideoToolsRetakeFrameCounts =
         [124, 243, 294, 362];
@@ -122,6 +123,14 @@ public partial class MainWindow
     private readonly record struct VideoToolsWorkspaceSnapshot(
         string Kind,
         string? FinishMode);
+
+    private readonly record struct VideoToolsAudioIdentity(
+        long TimeBaseNumerator,
+        long TimeBaseDenominator,
+        long DurationTimestamp,
+        long PacketCount,
+        long PacketPayloadBytes,
+        string PacketPayloadSha256);
 
     private sealed record VideoToolsRetakeActionContext(
         long Generation,
@@ -688,7 +697,8 @@ public partial class MainWindow
                 out int sourceFrameCount,
                 out int fpsNumerator,
                 out int durationMs,
-                out int audioStreamCount)
+                out int audioStreamCount,
+                out VideoToolsAudioIdentity? audioIdentity)
             || !TryGetSingleVideoToolsString(
                 video,
                 "presetId",
@@ -704,6 +714,23 @@ public partial class MainWindow
             return false;
         }
 
+        object? audioValue = audioIdentity is VideoToolsAudioIdentity audio
+            ? new
+            {
+                codec = "aac",
+                codecTag = "mp4a",
+                profile = "LC",
+                sampleRate = 32_000,
+                channels = 2,
+                timeBaseNumerator = audio.TimeBaseNumerator,
+                timeBaseDenominator = audio.TimeBaseDenominator,
+                startTimestamp = 0,
+                durationTimestamp = audio.DurationTimestamp,
+                packetCount = audio.PacketCount,
+                packetPayloadBytes = audio.PacketPayloadBytes,
+                packetPayloadSha256 = audio.PacketPayloadSha256,
+            }
+            : null;
         object sourceValue = new
         {
             jobId = sourceJobId,
@@ -720,6 +747,7 @@ public partial class MainWindow
                 durationMs,
                 videoStreamCount = 1,
                 audioStreamCount,
+                audio = audioValue,
             },
         };
         if (kind == "retake")
@@ -731,13 +759,22 @@ public partial class MainWindow
                     "kind",
                     "presetId",
                     "backendId",
+                    "seed",
                     "source",
                     "requested",
                     "plan",
                     "delivery")
                 || presetId != "minimax-h3-retake-v1"
                 || backendId != "minimax-h3-retake-v1"
+                || !TryGetBoundedVideoToolsInt(
+                    video,
+                    "seed",
+                    0,
+                    int.MaxValue,
+                    out int seed)
                 || fpsNumerator != 24
+                || audioStreamCount != 1
+                || audioIdentity is null
                 || !VideoToolsRetakeFrameCounts.Contains(sourceFrameCount)
                 || !TryReadExactVideoToolsRetakeRequest(
                     requested,
@@ -808,6 +845,7 @@ public partial class MainWindow
                 kind = "retake",
                 presetId = "minimax-h3-retake-v1",
                 backendId = "minimax-h3-retake-v1",
+                seed,
                 source = sourceValue,
                 requested = requestedValue,
                 plan = new
@@ -917,12 +955,14 @@ public partial class MainWindow
         out int frameCount,
         out int fpsNumerator,
         out int durationMs,
-        out int audioStreamCount)
+        out int audioStreamCount,
+        out VideoToolsAudioIdentity? audioIdentity)
     {
         jobId = "";
         size = 0;
         mtimeMs = 0;
         sha256 = "";
+        audioIdentity = null;
         width = height = frameCount = fpsNumerator = durationMs =
             audioStreamCount = 0;
         if (source.ValueKind != JsonValueKind.Object
@@ -948,6 +988,7 @@ public partial class MainWindow
             || signature.ValueKind != JsonValueKind.Object
             || !HasExactProperties(signature, "size", "mtimeMs")
             || !signature.TryGetProperty("size", out JsonElement sizeElement)
+            || sizeElement.ValueKind != JsonValueKind.Number
             || !sizeElement.TryGetInt64(out size)
             || size is < 1 or > VideoToolsMaximumSourceBytes
             || !signature.TryGetProperty(
@@ -967,7 +1008,8 @@ public partial class MainWindow
                 "fpsDenominator",
                 "durationMs",
                 "videoStreamCount",
-                "audioStreamCount")
+                "audioStreamCount",
+                "audio")
             || !VideoToolsExactString(probe, "container", "mp4")
             || !TryGetBoundedVideoToolsInt(probe, "width", 1, 1_920, out width)
             || !TryGetBoundedVideoToolsInt(probe, "height", 1, 1_080, out height)
@@ -999,6 +1041,11 @@ public partial class MainWindow
                 0,
                 1,
                 out audioStreamCount)
+            || !probe.TryGetProperty("audio", out JsonElement audio)
+            || !TryReadExactVideoToolsAudio(
+                audio,
+                audioStreamCount,
+                out audioIdentity)
             || Math.Abs(
                 durationMs
                     - frameCount * 1_000d / fpsNumerator) > 50)
@@ -1006,6 +1053,99 @@ public partial class MainWindow
             return false;
         }
         return true;
+    }
+
+    private static bool TryReadExactVideoToolsAudio(
+        JsonElement audio,
+        int audioStreamCount,
+        out VideoToolsAudioIdentity? identity)
+    {
+        identity = null;
+        if (audioStreamCount == 0)
+            return audio.ValueKind == JsonValueKind.Null;
+        if (audioStreamCount != 1
+            || audio.ValueKind != JsonValueKind.Object
+            || !HasExactProperties(
+                audio,
+                "codec",
+                "codecTag",
+                "profile",
+                "sampleRate",
+                "channels",
+                "timeBaseNumerator",
+                "timeBaseDenominator",
+                "startTimestamp",
+                "durationTimestamp",
+                "packetCount",
+                "packetPayloadBytes",
+                "packetPayloadSha256")
+            || !VideoToolsExactString(audio, "codec", "aac")
+            || !VideoToolsExactString(audio, "codecTag", "mp4a")
+            || !VideoToolsExactString(audio, "profile", "LC")
+            || !VideoToolsExactInt32(audio, "sampleRate", 32_000)
+            || !VideoToolsExactInt32(audio, "channels", 2)
+            || !TryGetPositiveSafeVideoToolsInteger(
+                audio,
+                "timeBaseNumerator",
+                VideoToolsMaximumSafeInteger,
+                out long timeBaseNumerator)
+            || !TryGetPositiveSafeVideoToolsInteger(
+                audio,
+                "timeBaseDenominator",
+                VideoToolsMaximumSafeInteger,
+                out long timeBaseDenominator)
+            || !audio.TryGetProperty(
+                "startTimestamp",
+                out JsonElement startTimestamp)
+            || startTimestamp.ValueKind != JsonValueKind.Number
+            || !startTimestamp.TryGetInt64(out long start)
+            || start != 0
+            || !TryGetPositiveSafeVideoToolsInteger(
+                audio,
+                "durationTimestamp",
+                VideoToolsMaximumSafeInteger,
+                out long durationTimestamp)
+            || !TryGetPositiveSafeVideoToolsInteger(
+                audio,
+                "packetCount",
+                VideoToolsMaximumSafeInteger,
+                out long packetCount)
+            || !TryGetPositiveSafeVideoToolsInteger(
+                audio,
+                "packetPayloadBytes",
+                VideoToolsMaximumSourceBytes,
+                out long packetPayloadBytes)
+            || !TryGetSingleVideoToolsString(
+                audio,
+                "packetPayloadSha256",
+                out string packetPayloadSha256)
+            || !IsLowerHex(packetPayloadSha256, 64))
+        {
+            return false;
+        }
+        identity = new VideoToolsAudioIdentity(
+            timeBaseNumerator,
+            timeBaseDenominator,
+            durationTimestamp,
+            packetCount,
+            packetPayloadBytes,
+            packetPayloadSha256);
+        return true;
+    }
+
+    private static bool TryGetPositiveSafeVideoToolsInteger(
+        JsonElement element,
+        string propertyName,
+        long maximum,
+        out long value)
+    {
+        value = 0;
+        return HasSingleProperty(element, propertyName)
+            && element.TryGetProperty(propertyName, out JsonElement property)
+            && property.ValueKind == JsonValueKind.Number
+            && property.TryGetInt64(out value)
+            && value >= 1
+            && value <= maximum;
     }
 
     private static bool TryReadExactVideoToolsRetakeRequest(
@@ -1160,6 +1300,10 @@ public partial class MainWindow
         return true;
     }
 
+    public static string ComputeVideoToolsSnapshotHashForSmoke(
+        JsonElement video)
+        => HashStableJson(video)[..12];
+
     private static bool TryGetBoundedVideoToolsInt(
         JsonElement element,
         string propertyName,
@@ -1170,6 +1314,7 @@ public partial class MainWindow
         value = 0;
         return HasSingleProperty(element, propertyName)
             && element.TryGetProperty(propertyName, out JsonElement property)
+            && property.ValueKind == JsonValueKind.Number
             && property.TryGetInt32(out value)
             && value >= minimum
             && value <= maximum;

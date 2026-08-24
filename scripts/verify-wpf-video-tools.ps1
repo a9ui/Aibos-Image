@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotNetPath = 'dotnet',
+    [string]$NuGetPackageSource = '',
     [switch]$SkipBuild,
     [switch]$StaticOnly
 )
@@ -33,6 +34,12 @@ $storesRoot = Join-Path $runRoot 'stores'
 $resultPath = Join-Path $runRoot 'result.json'
 $stdoutPath = Join-Path $runRoot 'stdout.log'
 $stderrPath = Join-Path $runRoot 'stderr.log'
+$nugetConfigPath = Join-Path $runRoot 'NuGet.VideoTools.temp.config'
+$packageSourceRoot = if (-not [string]::IsNullOrWhiteSpace($NuGetPackageSource)) {
+    [IO.Path]::GetFullPath($NuGetPackageSource)
+} else {
+    $null
+}
 $previousEnvironment = @{}
 $environmentPaths = [ordered]@{
     PHOTOVIEWER_WPF_STATE_PATH = (Join-Path $storesRoot 'state.json')
@@ -45,6 +52,12 @@ $environmentPaths = [ordered]@{
     PHOTOVIEWER_WPF_ENHANCEMENT_OUTPUT_ROOT = (Join-Path $storesRoot 'outputs')
     AIBOS_VIDEO_TOOLS_CONTRACT_PATH = $contractPath
 }
+if ($null -ne $packageSourceRoot) {
+    $environmentPaths['NUGET_SCRATCH'] = Join-Path $runRoot 'nuget-scratch'
+    $environmentPaths['NUGET_HTTP_CACHE_PATH'] = Join-Path $runRoot 'nuget-http-cache'
+    $environmentPaths['NUGET_PLUGINS_CACHE_PATH'] = Join-Path $runRoot 'nuget-plugins-cache'
+    $environmentPaths['NUGET_PACKAGES'] = Join-Path $runRoot 'nuget-packages'
+}
 
 try {
     New-Item -ItemType Directory -Path $runRoot, $storesRoot -Force | Out-Null
@@ -53,15 +66,23 @@ try {
         throw "Video Tools contract was not found: $contractPath"
     }
     $contractHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $contractPath).Hash
-    if ($contractHash -ne '7CBB3A7D6963A2FA8BC2C79EA6E12CC5E9425480EEAC9B7CED38A80470D97EA7') {
+    if ($contractHash -ne '484B2AB0160BC420BC6E1F29B52E8780EC9260F48023BD7A9E33945BACB53207') {
         throw "Video Tools paired contract hash is not exact: $contractHash"
     }
     $contract = Get-Content -Raw -Encoding UTF8 -LiteralPath $contractPath |
         ConvertFrom-Json
     if ($contract.contractId -ne 'PV-ENHANCE-VIDEO-TOOLS-001' `
         -or $contract.protocol -ne 'aibos-enhancement-video-tools-v1' `
-        -or $contract.readerFixtures.retake.job.presetHash -ne '3b62213062d0' `
-        -or $contract.readerFixtures.finish.job.presetHash -ne '6467a0f6a2d8' `
+        -or $contract.readerFixtures.retake.job.presetHash -ne '04bb3a97871a' `
+        -or $contract.readerFixtures.finish.job.presetHash -ne '1e693d4afe85' `
+        -or $contract.persistedSnapshot.exactKeys.retake.video -notcontains 'seed' `
+        -or $contract.persistedSnapshot.exactKeys.shared.probe -notcontains 'audio' `
+        -or $contract.persistedSnapshot.exactKeys.shared.audio -notcontains 'packetPayloadSha256' `
+        -or $contract.request.mixedLegacyFields.rejected -notcontains 'seed' `
+        -or $contract.readerFixtures.retake.video.source.probe.audioStreamCount -ne 1 `
+        -or $null -eq $contract.readerFixtures.retake.video.source.probe.audio `
+        -or $contract.readerFixtures.finish.video.source.probe.audioStreamCount -ne 0 `
+        -or $null -ne $contract.readerFixtures.finish.video.source.probe.audio `
         -or $contract.persistedSnapshot.unknownOrMalformed -notmatch 'reader-only protected') {
         throw 'The exact Video Tools reader fixtures or protection rule is missing.'
     }
@@ -126,6 +147,9 @@ try {
         -or $implementation -notmatch 'AcquireVideoDurablePublishLease' `
         -or $implementation -notmatch 'PinVideoSourceForDurablePublish' `
         -or $implementation -notmatch 'RecordPendingVideoSourceDependency' `
+        -or $implementation -notmatch 'TryReadExactVideoToolsAudio' `
+        -or $implementation -notmatch 'VideoToolsMaximumSafeInteger' `
+        -or $implementation -notmatch 'packetPayloadSha256' `
         -or $implementation -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync' `
         -or $implementation -match '\["sourcePath"\]' `
         -or $implementation -match 'sourceManagedOutputPath') {
@@ -154,7 +178,12 @@ try {
         -or $smokeSource -notmatch 'retakeDurableRequestExact' `
         -or $smokeSource -notmatch 'retakeStaleContextNoPublish' `
         -or $smokeSource -notmatch 'retakeDoubleStartSinglePublish' `
-        -or $smokeSource -notmatch 'retakeSourceReservationProtected') {
+        -or $smokeSource -notmatch 'retakeSourceReservationProtected' `
+        -or $smokeSource -notmatch 'retakeRequestHasNoSeed' `
+        -or $smokeSource -notmatch 'retakeSeedProtected' `
+        -or $smokeSource -notmatch 'retakeSeedHashDriftProtected' `
+        -or $smokeSource -notmatch 'retakeAudioProtected' `
+        -or $smokeSource -notmatch 'finishAudioCouplingProtected') {
         throw 'The Video Tools Jobs reader or fail-closed mutation protection is incomplete.'
     }
     $appSource = Get-Content -Raw -Encoding UTF8 -LiteralPath $appPath
@@ -245,10 +274,28 @@ try {
     [Environment]::SetEnvironmentVariable('DOTNET_ROOT_X64', $dotNetRoot, 'Process')
 
     if (-not $SkipBuild) {
-        & $dotNetExecutable build $project `
-            -c $Configuration `
-            --artifacts-path $buildRoot `
-            --nologo
+        $buildArguments = @(
+            'build',
+            $project,
+            '-c',
+            $Configuration,
+            '--artifacts-path',
+            $buildRoot,
+            '--nologo'
+        )
+        if ($null -ne $packageSourceRoot) {
+            if (-not (Test-Path -LiteralPath $packageSourceRoot -PathType Container)) {
+                throw "The offline NuGet package source was not found: $packageSourceRoot"
+            }
+            $escapedGlobalPackagesRoot = [Security.SecurityElement]::Escape(
+                $packageSourceRoot)
+            [IO.File]::WriteAllText(
+                $nugetConfigPath,
+                ('<configuration><packageSources><clear /><add key="global-packages-cache" value="{0}" /></packageSources></configuration>' -f $escapedGlobalPackagesRoot),
+                [Text.UTF8Encoding]::new($false))
+            $buildArguments += "-p:RestoreConfigFile=$nugetConfigPath"
+        }
+        & $dotNetExecutable @buildArguments
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
@@ -286,6 +333,7 @@ try {
         -or -not $result.capabilityMalformedRejected `
         -or -not $result.motionDirectorPromptInterop `
         -or -not $result.retakeRequestExact `
+        -or -not $result.retakeRequestHasNoSeed `
         -or -not $result.unsafeRequestRejected `
         -or -not $result.uppercaseUuidAccepted `
         -or -not $result.finishPlan `
@@ -295,6 +343,13 @@ try {
         -or -not $result.readerSnapshots `
         -or -not $result.retakeReaderProtected `
         -or -not $result.finishReaderProtected `
+        -or -not $result.retakeSeedProtected `
+        -or -not $result.retakeSeedHashDriftProtected `
+        -or -not $result.retakeSeedRehashedAccepted `
+        -or -not $result.retakeLargeSafeAudioAccepted `
+        -or -not $result.retakeAudioProtected `
+        -or -not $result.finishAudioObjectAccepted `
+        -or -not $result.finishAudioCouplingProtected `
         -or -not $result.malformedReaderProtected `
         -or -not $result.malformedShapeProtected `
         -or -not $result.futureReaderProtected `
