@@ -3413,10 +3413,10 @@
                   Visibility="Collapsed" Click="OpenModalVideoRetake_Click"/>
           <Button x:Name="ModalVideoFinishButton"
                   Style="{StaticResource GhostButton}"
-                  Content="{DynamicResource UiVideoToolsFinishAction}"
-                  ToolTip="{DynamicResource UiVideoToolsFinishHelp}"
-                  AutomationProperties.Name="{DynamicResource UiVideoToolsFinishAutomation}"
-                  AutomationProperties.HelpText="{DynamicResource UiVideoToolsFinishHelp}"
+                  Content="{DynamicResource UiVideoFinishV2Action}"
+                  ToolTip="{DynamicResource UiVideoFinishV2ActionHelp}"
+                  AutomationProperties.Name="{DynamicResource UiVideoFinishV2ActionAutomation}"
+                  AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ActionHelp}"
                   MinWidth="94" Height="32" Padding="8,0" Margin="0,0,4,0"
                   Visibility="Collapsed" Click="OpenModalVideoFinish_Click"/>
           <Button x:Name="ModalVideoEditV2Button"
@@ -3430,11 +3430,16 @@
             <Button.ContextMenu>
               <ContextMenu x:Name="ModalVideoEditV2ExternalContextMenu"
                            Placement="MousePoint"
-                           AutomationProperties.Name="{DynamicResource UiVideoEditV2ContextMenuAutomation}">
+                           AutomationProperties.Name="{DynamicResource UiVideoV2ContextMenuAutomation}">
                 <MenuItem Header="{DynamicResource UiVideoEditV2Action}"
                           Click="OpenModalVideoEditV2_Click"
                           AutomationProperties.Name="{DynamicResource UiVideoEditV2ActionAutomation}"
                           AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ActionHelp}"/>
+                <MenuItem x:Name="ModalVideoFinishV2ExternalMenuItem"
+                          Header="{DynamicResource UiVideoFinishV2Action}"
+                          Click="OpenModalVideoFinish_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoFinishV2ActionAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ActionHelp}"/>
               </ContextMenu>
             </Button.ContextMenu>
           </Button>
@@ -4402,6 +4407,176 @@
         </Border>
       </Grid>
 
+      <Grid x:Name="ModalVideoFinishV2Popup" Grid.RowSpan="3" Grid.ColumnSpan="2"
+            Visibility="Collapsed" Panel.ZIndex="92" Background="Transparent"
+            WindowChrome.IsHitTestVisibleInChrome="True"
+            MouseLeftButtonDown="ModalVideoFinishV2Backdrop_MouseLeftButtonDown"
+            PreviewKeyDown="ModalVideoFinishV2_PreviewKeyDown"
+            IsVisibleChanged="ModalVideoFinishV2Popup_IsVisibleChanged"
+            AutomationProperties.Name="{DynamicResource UiVideoFinishV2BoardAutomation}"
+            AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2BoardHelp}">
+        <Border x:Name="ModalVideoFinishV2BoardBorder" Width="500" MaxHeight="720"
+                Padding="16" CornerRadius="7"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+                Background="{StaticResource BgElevated}"
+                BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                KeyboardNavigation.TabNavigation="Cycle"
+                KeyboardNavigation.ControlTabNavigation="Cycle">
+          <ScrollViewer VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,6,0">
+              <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                        Width="28" Height="28" Click="CloseModalVideoFinishV2_Click"
+                        ToolTip="{DynamicResource UiVideoFinishV2Close}"
+                        AutomationProperties.Name="{DynamicResource UiVideoFinishV2Close}">
+                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE711;"
+                             Foreground="{StaticResource TextSecondary}" FontSize="12"/>
+                </Button>
+                <StackPanel>
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2Action}"
+                             Foreground="{StaticResource TextPrimary}"
+                             FontSize="17" FontWeight="SemiBold"/>
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2Subtitle}"
+                             Foreground="{StaticResource TextSecondary}"
+                             FontSize="10.5" Margin="0,2,0,0"/>
+                </StackPanel>
+              </DockPanel>
+
+              <Border Padding="10" CornerRadius="5" Margin="0,0,0,11"
+                      Background="{StaticResource SoftFill}"
+                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                <StackPanel>
+                  <TextBlock x:Name="ModalVideoFinishV2SourceText"
+                             Foreground="{StaticResource TextPrimary}" FontSize="10.5"
+                             FontWeight="SemiBold" TextWrapping="Wrap"
+                             AutomationProperties.Name="{DynamicResource UiVideoFinishV2SourceAutomation}"/>
+                  <Button x:Name="ModalVideoFinishV2ProbeButton"
+                          Style="{StaticResource GhostButton}"
+                          Content="{DynamicResource UiVideoFinishV2ProbeAction}"
+                          Height="31" Margin="0,8,0,0" HorizontalAlignment="Stretch"
+                          Visibility="Collapsed" Click="ProbeModalVideoFinishV2_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoFinishV2ProbeAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ProbeHelp}"/>
+                  <TextBlock x:Name="ModalVideoFinishV2ProbeStatusText"
+                             Foreground="{StaticResource TextTertiary}" FontSize="9.5"
+                             TextWrapping="Wrap" Margin="0,5,0,0"
+                             AutomationProperties.LiveSetting="Polite"/>
+                </StackPanel>
+              </Border>
+
+              <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="12"/>
+                  <ColumnDefinition Width="154"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2ModeLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <ComboBox x:Name="ModalVideoFinishV2ModeComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="1" Height="31"
+                            SelectionChanged="ModalVideoFinishV2Input_Changed"
+                            AutomationProperties.Name="{DynamicResource UiVideoFinishV2ModeAutomation}"
+                            AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ModeHelp}">
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2ModeFast}" Tag="fast"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2ModeStandard}" Tag="standard"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2ModeQuality}" Tag="quality"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2ScaleLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <ComboBox x:Name="ModalVideoFinishV2ScaleComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="0" Height="31"
+                            SelectionChanged="ModalVideoFinishV2Input_Changed"
+                            AutomationProperties.Name="{DynamicResource UiVideoFinishV2ScaleAutomation}"
+                            AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ScaleHelp}">
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2Scale2}" Tag="2"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2Scale4}" Tag="4"/>
+                  </ComboBox>
+                </StackPanel>
+              </Grid>
+              <TextBlock x:Name="ModalVideoFinishV2ModeDetailText"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10"
+                         TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+              <Border Padding="11" CornerRadius="5" Margin="0,0,0,10"
+                      Background="{StaticResource BgPrimary}"
+                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                      AutomationProperties.Name="{DynamicResource UiVideoFinishV2PlanAutomation}">
+                <StackPanel>
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2PlanTitle}"
+                             Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                             FontWeight="SemiBold" Margin="0,0,0,5"/>
+                  <TextBlock x:Name="ModalVideoFinishV2PlanText"
+                             Foreground="{StaticResource TextPrimary}" FontSize="11"
+                             TextWrapping="Wrap"/>
+                  <TextBlock x:Name="ModalVideoFinishV2EstimateText"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10"
+                             TextWrapping="Wrap" Margin="0,5,0,0"/>
+                </StackPanel>
+              </Border>
+
+              <Border Padding="11" CornerRadius="5" Margin="0,0,0,10"
+                      Background="{StaticResource SoftFill}"
+                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                <StackPanel>
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2PreserveTitle}"
+                             Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                             FontWeight="SemiBold" Margin="0,0,0,5"/>
+                  <TextBlock x:Name="ModalVideoFinishV2PolicyText"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             TextWrapping="Wrap"
+                             AutomationProperties.Name="{DynamicResource UiVideoFinishV2PolicyAutomation}"/>
+                </StackPanel>
+              </Border>
+
+              <Border Padding="11" CornerRadius="5"
+                      Background="{StaticResource SoftFill}"
+                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                <StackPanel>
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2GpuTitle}"
+                             Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                             FontWeight="SemiBold"/>
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2GpuFlow}"
+                             Foreground="{StaticResource TextTertiary}" FontSize="10"
+                             TextWrapping="Wrap" Margin="0,4,0,7"/>
+                  <TextBlock x:Name="ModalVideoFinishV2ReadinessText"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             TextWrapping="Wrap"
+                             AutomationProperties.Name="{DynamicResource UiVideoFinishV2ReadinessAutomation}"
+                             AutomationProperties.LiveSetting="Polite"/>
+                  <Button x:Name="ModalVideoFinishV2ReadinessButton"
+                          Style="{StaticResource GhostButton}"
+                          Content="{DynamicResource UiVideoFinishV2ReadinessAction}"
+                          Height="31" Margin="0,8,0,0" HorizontalAlignment="Stretch"
+                          Click="RefreshModalVideoFinishV2Readiness_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoFinishV2ReadinessAutomationButton}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ReadinessHelp}"/>
+                </StackPanel>
+              </Border>
+
+              <TextBlock Text="{DynamicResource UiVideoFinishV2JobsNotice}"
+                         Foreground="{StaticResource TextTertiary}" FontSize="10"
+                         TextWrapping="Wrap" Margin="0,8,0,0"/>
+              <Button x:Name="ModalVideoFinishV2StartButton"
+                      Style="{StaticResource PrimaryButton}"
+                      Content="{DynamicResource UiVideoFinishV2StartPending}"
+                      Height="36" Margin="0,11,0,0"
+                      HorizontalAlignment="Stretch" IsEnabled="False"
+                      Click="StartModalVideoFinishV2_Click"
+                      AutomationProperties.Name="{DynamicResource UiVideoFinishV2StartAutomation}"
+                      AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2StartHelp}"/>
+            </StackPanel>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+
       <Grid x:Name="ModalVideoEditV2Popup" Grid.RowSpan="3" Grid.ColumnSpan="2"
             Visibility="Collapsed" Panel.ZIndex="92" Background="Transparent"
             WindowChrome.IsHitTestVisibleInChrome="True"
@@ -4872,6 +5047,12 @@
                       Click="OpenModalVideoEditV2_Click"
                       AutomationProperties.Name="{DynamicResource UiVideoEditV2ActionAutomation}"
                       AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ActionHelp}"/>
+            <MenuItem x:Name="ModalContextVideoFinishV2"
+                      Header="{DynamicResource UiVideoFinishV2Action}"
+                      Visibility="Collapsed"
+                      Click="OpenModalVideoFinish_Click"
+                      AutomationProperties.Name="{DynamicResource UiVideoFinishV2ActionAutomation}"
+                      AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ActionHelp}"/>
             <MenuItem x:Name="ModalContextI2iEditMenu" Header="AI編集" AutomationProperties.Name="AI編集の種類を選ぶ">
               <MenuItem x:Name="ModalContextI2iEdit" Header="髪色…" Click="OpenModalI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
               <MenuItem x:Name="ModalContextI2iV2Edit" Header="統合AI編集（全体・表情・服装・背景・ポーズ）…" Click="OpenModalI2iEditV3_Click"

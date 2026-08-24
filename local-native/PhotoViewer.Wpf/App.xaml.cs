@@ -520,6 +520,18 @@ public partial class App : Application
             return;
         }
 
+        int videoFinishV2SmokeIdx = Array.IndexOf(
+            e.Args,
+            "--video-finish-v2-smoke");
+        if (videoFinishV2SmokeIdx >= 0
+            && videoFinishV2SmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoFinishV2Smoke(
+                e.Args[videoFinishV2SmokeIdx + 1],
+                e.Args);
+            return;
+        }
+
         int videoToolsV2ReaderSmokeIdx = Array.IndexOf(
             e.Args,
             "--video-tools-v2-reader-smoke");

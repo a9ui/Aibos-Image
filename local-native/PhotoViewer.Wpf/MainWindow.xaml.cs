@@ -20385,6 +20385,12 @@ public partial class MainWindow : Window
             ModalUpscaleSettingsPopup.Visibility = Visibility.Collapsed;
         if (ModalVideoGenerationPopup is not null)
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
+        if (ModalVideoFinishV2Popup is not null)
+        {
+            CloseModalVideoFinishV2Board(
+                restoreFocus: false,
+                stale: true);
+        }
         if (ModalVideoToolsPopup is not null)
             CloseVideoToolsBoard(restoreFocus: false);
         if (ModalVideoEditV2Popup is not null)
@@ -21273,6 +21279,7 @@ public partial class MainWindow : Window
             || IsDescendantOrSelf(target, ModalPhotorealSettingsPopup)
             || IsDescendantOrSelf(target, ModalVideoGenerationPopup)
             || IsDescendantOrSelf(target, ModalVideoToolsPopup)
+            || IsDescendantOrSelf(target, ModalVideoFinishV2Popup)
             || IsDescendantOrSelf(target, ModalVideoEditV2Popup)
             || IsDescendantOrSelf(target, ModalMetadataSidebar)
             || IsDescendantOrSelf(target, ModalFooter)
@@ -24633,6 +24640,14 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (ModalVideoFinishV2Popup?.Visibility == Visibility.Visible)
+        {
+            CloseModalVideoFinishV2Board(
+                restoreFocus: true,
+                stale: true);
+            return true;
+        }
+
         if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
         {
             CloseModalVideoEditV2Board(
@@ -24716,6 +24731,16 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        if (ModalVideoFinishV2Popup?.Visibility == Visibility.Visible
+            && key == Key.Escape
+            && modifiers == ModifierKeys.None)
+        {
+            CloseModalVideoFinishV2Board(
+                restoreFocus: true,
+                stale: true);
+            e.Handled = true;
+            return;
+        }
         if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible
             && key == Key.Escape
             && modifiers == ModifierKeys.None)
@@ -24763,9 +24788,14 @@ public partial class MainWindow : Window
             || ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
             || ModalVideoGenerationPopup?.Visibility == Visibility.Visible
             || ModalVideoToolsPopup?.Visibility == Visibility.Visible
+            || ModalVideoFinishV2Popup?.Visibility == Visibility.Visible
             || ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
         {
-            if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
+            if (ModalVideoFinishV2Popup?.Visibility == Visibility.Visible)
+            {
+                FocusModalVideoFinishV2Board();
+            }
+            else if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
             {
                 FocusModalVideoEditV2Board();
             }
@@ -25393,6 +25423,13 @@ public partial class MainWindow : Window
         if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
         {
             CloseModalVideoEditV2Board(
+                restoreFocus: false,
+                stale: true);
+            return true;
+        }
+        if (ModalVideoFinishV2Popup?.Visibility == Visibility.Visible)
+        {
+            CloseModalVideoFinishV2Board(
                 restoreFocus: false,
                 stale: true);
             return true;
