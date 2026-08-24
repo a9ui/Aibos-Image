@@ -122,7 +122,7 @@
         "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
         "presetId": "aibos-video-edit-v2",
         "adapterId": "bernini-r-1.3b-edit-candidate-v1",
-        "presetHash": "b9fe1440fd6a"
+        "presetHash": "6b1da83cc37b"
       },
       "video": {
         "schemaVersion": 2,
