@@ -13,6 +13,8 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $plannerPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\VideoEditV2Plan.cs'
 $surfacePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoEditV2.cs'
 $transientContractPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\VideoEditV2TransientContract.cs'
+$durableContractPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\VideoEditV2DurableContract.cs'
+$durableSurfacePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoEditV2Durable.cs'
 $externalVideoPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.ExternalVideoDrop.cs'
 $smokePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\App.VideoEditV2Smoke.cs'
 $projectPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
@@ -26,6 +28,8 @@ foreach ($requiredPath in @(
     $plannerPath,
     $surfacePath,
     $transientContractPath,
+    $durableContractPath,
+    $durableSurfacePath,
     $externalVideoPath,
     $smokePath,
     $projectPath,
@@ -42,6 +46,8 @@ foreach ($requiredPath in @(
 $planner = Get-Content -Raw -Encoding UTF8 -LiteralPath $plannerPath
 $surface = Get-Content -Raw -Encoding UTF8 -LiteralPath $surfacePath
 $transientContract = Get-Content -Raw -Encoding UTF8 -LiteralPath $transientContractPath
+$durableContract = Get-Content -Raw -Encoding UTF8 -LiteralPath $durableContractPath
+$durableSurface = Get-Content -Raw -Encoding UTF8 -LiteralPath $durableSurfacePath
 $externalVideo = Get-Content -Raw -Encoding UTF8 -LiteralPath $externalVideoPath
 $smoke = Get-Content -Raw -Encoding UTF8 -LiteralPath $smokePath
 $xaml = Get-Content -Raw -Encoding UTF8 -LiteralPath $xamlPath
@@ -110,6 +116,33 @@ if ($transientContract -notmatch 'MaximumBackendPromptLength\s*=\s*8_000' `
     -or $transientContract -notmatch 'value\.Length == 64' `
     -or $transientContract -notmatch "character is >= '0' and <= '9'[\s\S]{0,80}or >= 'a' and <= 'f'") {
     throw 'Malformed compiler text, revision, or lowercase SHA-256 context digest is not rejected fail-closed.'
+}
+if ($durableContract -notmatch 'PV-ENHANCE-VIDEO-TOOLS-002' `
+    -or $durableContract -notmatch 'aibos-enhancement-video-tools-v2' `
+    -or $durableContract -notmatch 'TryBuildEditRequest' `
+    -or $durableContract -notmatch 'CryptographicOperations\.FixedTimeEquals' `
+    -or $durableContract -notmatch 'IsExactReadyHealth' `
+    -or $durableContract -notmatch 'aibos-video-edit-ready-v1' `
+    -or $durableContract -notmatch 'bernini-r-1\.3b-edit-candidate-v1' `
+    -or $durableContract -notmatch 'source-video-conditioned-semantic-v2v' `
+    -or $durableContract -notmatch 'maximumConcurrentExecutions[\s\S]{0,160}\b1\b' `
+    -or $durableContract -match 'style\s*=|styleName|styleId') {
+    throw 'The durable Edit v2 request or exact ready capability parser is incomplete or leaked an uncontracted style field.'
+}
+if ($durableSurface -notmatch 'SendEnhancementEnqueueAsync' `
+    -or $durableSurface -notmatch 'requireExactHealthValidation:\s*true' `
+    -or $durableSurface -notmatch 'AcquireVideoDurablePublishLease' `
+    -or $durableSurface -notmatch 'PinVideoSourceForDurablePublish' `
+    -or $durableSurface -notmatch 'RecordPendingVideoSourceDependency' `
+    -or $durableSurface -notmatch 'RecordActiveVideoSourceDependency' `
+    -or $durableSurface -notmatch 'BuildProbeRequestJson' `
+    -or $durableSurface -notmatch 'BuildPreviewRequestJson' `
+    -or $durableSurface -notmatch 'TryBuildEditRequest' `
+    -or $durableSurface -match 'BuildCompileRequestJson' `
+    -or $durableSurface -notmatch '"light"\s*=>\s*30' `
+    -or $durableSurface -notmatch '"balanced"\s*=>\s*60' `
+    -or $durableSurface -notmatch '"strong"\s*=>\s*90') {
+    throw 'The explicit durable Start pipeline is missing exact health, source/preview/digest revalidation, dependency interlocks, or semantic UI mappings.'
 }
 if ($surface -notmatch 'TryCaptureDisplayedVideoEditV2Source\([\s\S]{0,220}current\.Managed[\s\S]{0,180}ModalContextMenu\?\.IsEnabled != false' `
     -or $surface -notmatch 'ModalVideoEditV2ExternalContextMenu\.IsOpen = true;[\s\S]{0,80}e\.Handled = true;') {
@@ -217,6 +250,13 @@ $requiredResourceKeys = @(
     'UiVideoEditV2StyleAutomation',
     'UiVideoEditV2StepsAutomation',
     'UiVideoEditV2ReadinessAutomation',
+    'UiVideoEditV2WriterChecking',
+    'UiVideoEditV2WriterReady',
+    'UiVideoEditV2Preparing',
+    'UiVideoEditV2StartReady',
+    'UiVideoEditV2StartStale',
+    'UiVideoEditV2Queued',
+    'UiVideoEditV2SavedForDelivery',
     'UiVideoEditV2StartHelp')
 foreach ($resourcePath in @($jaResourcePath, $enResourcePath)) {
     [xml]$resource = Get-Content -Raw -Encoding UTF8 -LiteralPath $resourcePath
@@ -238,6 +278,7 @@ if ($app -notmatch '--video-edit-v2-smoke' `
 }
 if ($smoke -notmatch 'purePlanner' `
     -or $smoke -notmatch 'parserVectors' `
+    -or $smoke -notmatch 'healthVectors' `
     -or $smoke -notmatch 'externalStartsUnverified' `
     -or $smoke -notmatch 'passiveOpen' `
     -or $smoke -notmatch 'pathResolverCallsAfterDrop' `

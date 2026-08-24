@@ -103,6 +103,16 @@ public partial class App
             TaskCompletionSource<bool>? releaseCompile = null;
             window.ConfigureModalEnhancementForSmoke(async (request, token) =>
             {
+                if (request.Method == HttpMethod.Get
+                    && string.Equals(
+                        request.RequestUri?.AbsolutePath,
+                        "/api/enhance/health",
+                        StringComparison.Ordinal))
+                {
+                    return VideoEditV2SmokeJsonResponse(
+                        HttpStatusCode.OK,
+                        BuildVideoEditV2SmokeDisabledHealthResponse());
+                }
                 exactRouteOnly &= request.Method == HttpMethod.Post
                     && string.Equals(
                         request.RequestUri?.AbsolutePath,
@@ -696,7 +706,7 @@ public partial class App
             "人物を保ち、服の色だけを青へ変える",
             "synthetic-source",
             "synthetic-context",
-            out _);
+            out VideoEditV2CompiledCandidate parsedCandidate);
         using JsonDocument forbiddenDocument = JsonDocument.Parse(
             candidateJson.Replace(
                 "\"contextDigest\":",
@@ -712,12 +722,125 @@ public partial class App
                 "synthetic-source",
                 "synthetic-context",
                 out _);
+        bool durableExact = candidateValid
+            && VideoEditV2DurableContract.TryBuildEditRequest(
+                "X:\\synthetic\\source.mp4",
+                selector,
+                plan,
+                previews.Previews,
+                "人物を保ち、服の色だけを青へ変える",
+                parsedCandidate,
+                new VideoEditV2DurableSettings(
+                    AudioPolicy: "preserve",
+                    Steps: 20,
+                    Strength: 60,
+                    MaximumPixelArea: 414_720),
+                out JsonElement durableRequest)
+            && HasExactVideoEditV2SmokeKeys(
+                durableRequest,
+                "sourceId",
+                "operation",
+                "mediaKind",
+                "videoTools")
+            && durableRequest.GetProperty("videoTools") is JsonElement tools
+            && HasExactVideoEditV2SmokeKeys(
+                tools,
+                "schemaVersion",
+                "kind",
+                "source",
+                "selection",
+                "instructionJa",
+                "compiled",
+                "audioPolicy",
+                "steps",
+                "strength",
+                "maximumPixelArea")
+            && !tools.TryGetProperty("style", out _)
+            && tools.GetProperty("strength").GetInt32() == 60;
+        bool invalidDurableRejected = candidateValid
+            && !VideoEditV2DurableContract.TryBuildEditRequest(
+                "X:\\synthetic\\source.mp4",
+                selector,
+                plan,
+                previews.Previews,
+                "人物を保ち、服の色だけを青へ変える",
+                parsedCandidate,
+                new VideoEditV2DurableSettings(
+                    AudioPolicy: "preserve",
+                    Steps: 20,
+                    Strength: 9,
+                    MaximumPixelArea: 414_720),
+                out _);
+        bool displayedDurableExact =
+            VideoEditV2TransientContract.TryCreateDisplayedFileSelector(
+                "X:\\synthetic\\source.mp4",
+                1_024,
+                1_700_000_000_000,
+                new string('b', 64),
+                out VideoEditV2SourceSelector displayedSelector);
+        if (displayedDurableExact)
+        {
+            string displayedDigest = VideoEditV2TransientContract
+                .ComputeContextDigest(
+                    displayedSelector,
+                    plan,
+                    previews.Previews,
+                    "人物を保ち、服の色だけを青へ変える",
+                    parsedCandidate.BackendPrompt,
+                    parsedCandidate.SummaryJa,
+                    parsedCandidate.CompilerRevision);
+            VideoEditV2CompiledCandidate displayedCandidate =
+                parsedCandidate with { ContextDigest = displayedDigest };
+            displayedDurableExact = VideoEditV2DurableContract
+                    .TryBuildEditRequest(
+                        "X:\\synthetic\\source.mp4",
+                        displayedSelector,
+                        plan,
+                        previews.Previews,
+                        "人物を保ち、服の色だけを青へ変える",
+                        displayedCandidate,
+                        new VideoEditV2DurableSettings(
+                            AudioPolicy: "mute",
+                            Steps: 40,
+                            Strength: 90,
+                            MaximumPixelArea: 230_400),
+                        out JsonElement displayedRequest)
+                && HasExactVideoEditV2SmokeKeys(
+                    displayedRequest.GetProperty("videoTools")
+                        .GetProperty("source"),
+                    "kind",
+                    "path",
+                    "size",
+                    "mtimeMs",
+                    "sha256")
+                && displayedRequest.GetProperty("videoTools")
+                    .GetProperty("audioPolicy").GetString() == "mute";
+        }
+        using JsonDocument readyHealth = JsonDocument.Parse(
+            BuildVideoEditV2SmokeReadyHealthResponse());
+        using JsonDocument disabledHealth = JsonDocument.Parse(
+            BuildVideoEditV2SmokeDisabledHealthResponse());
+        using JsonDocument additiveReadyHealth = JsonDocument.Parse(
+            BuildVideoEditV2SmokeReadyHealthResponse().Replace(
+                "\"readerReady\":true,",
+                "\"readerReady\":true,\"unexpected\":true,",
+                StringComparison.Ordinal));
+        bool healthVectors = VideoEditV2DurableContract.IsExactReadyHealth(
+                readyHealth.RootElement)
+            && !VideoEditV2DurableContract.IsExactReadyHealth(
+                disabledHealth.RootElement)
+            && !VideoEditV2DurableContract.IsExactReadyHealth(
+                additiveReadyHealth.RootElement);
         return valid
             && extraRejected
             && oversizeRejected
             && crossLanguageDigest
             && candidateValid
-            && forbiddenRejected;
+            && forbiddenRejected
+            && durableExact
+            && invalidDurableRejected
+            && displayedDurableExact
+            && healthVectors;
     }
 
     private static string BuildVideoEditV2SmokeProbeResponse()
@@ -734,6 +857,163 @@ public partial class App
                 height = 720,
             },
         });
+
+    private static string BuildVideoEditV2SmokeDisabledHealthResponse()
+        => JsonSerializer.Serialize(new
+        {
+            capabilities = new
+            {
+                videoToolsV2 = new
+                {
+                    contractId = VideoEditV2DurableContract.ContractId,
+                    protocol = VideoEditV2DurableContract.Protocol,
+                    readerReady = true,
+                    edit = new
+                    {
+                        writerEnabled = false,
+                        backendConfigured = false,
+                        runtimeVerified = false,
+                        ready = false,
+                        state = "disabled",
+                        reasonCode =
+                            "VIDEO_TOOLS_V2_EDIT_BACKEND_CANARY_REQUIRED",
+                    },
+                    finish = VideoEditV2SmokeDisabledFeature(
+                        "VIDEO_TOOLS_V2_FINISH_RUNTIME_UNPINNED"),
+                    finishModes = new
+                    {
+                        fast = VideoEditV2SmokeDisabledFeature(
+                            "VIDEO_TOOLS_V2_FINISH_FAST_CANARY_REQUIRED"),
+                        standard = VideoEditV2SmokeDisabledFeature(
+                            "VIDEO_TOOLS_V2_FINISH_STANDARD_CANARY_REQUIRED"),
+                        quality = VideoEditV2SmokeDisabledFeature(
+                            "VIDEO_TOOLS_V2_FINISH_QUALITY_MODE_MAPPING_CANARY_REQUIRED"),
+                    },
+                },
+            },
+        });
+
+    private static string BuildVideoEditV2SmokeReadyHealthResponse()
+    {
+        static string Receipt(string name) => $"receipt-{name}-v1";
+        return JsonSerializer.Serialize(new
+        {
+            capabilities = new
+            {
+                videoToolsV2 = new
+                {
+                    contractId = VideoEditV2DurableContract.ContractId,
+                    protocol = VideoEditV2DurableContract.Protocol,
+                    readerReady = true,
+                    edit = new
+                    {
+                        writerEnabled = true,
+                        backendConfigured = true,
+                        runtimeVerified = true,
+                        ready = true,
+                        state = "ready",
+                        reasonCode = (string?)null,
+                        capabilityRevision =
+                            VideoEditV2DurableContract.CapabilityRevision,
+                        resolvedBackend = new
+                        {
+                            backendId =
+                                "bernini-r-1.3b-edit-candidate-v1",
+                            semanticRole = "semantic-v2v",
+                            conditioningKind =
+                                "source-video-conditioned-semantic-v2v",
+                            genuineSourceVideoConditioning = true,
+                            imageGuideRetake = false,
+                            modelRevision = "bernini-r-1.3b-v1",
+                            workflowRevision = "workflow-v1",
+                            promptCompilerRevision = "compiler-v1",
+                            timelineMappingRevision = "timeline-v1",
+                            deliveryMappingRevision = "delivery-v1",
+                        },
+                        receipts = new
+                        {
+                            runtimeReceiptId = Receipt("runtime"),
+                            modelReceiptId = Receipt("model"),
+                            workflowReceiptId = Receipt("workflow"),
+                            promptCompilerReceiptId = Receipt("compiler"),
+                            timelineMapperReceiptId = Receipt("timeline"),
+                            audioDeliveryReceiptId = Receipt("audio"),
+                            qualityCanaryReceiptId = Receipt("quality"),
+                            resourceCanaryReceiptId = Receipt("resource"),
+                            cancelCanaryReceiptId = Receipt("cancel"),
+                            recoveryCanaryReceiptId = Receipt("recovery"),
+                            outputValidatorReceiptId = Receipt("output"),
+                            receiptSetSha256 = new string('a', 64),
+                        },
+                        resourceBounds = new
+                        {
+                            maximumSourceBytes = 536_870_912,
+                            maximumSourceDurationMs = 300_000,
+                            maximumSourceWidth = 1_920,
+                            maximumSourceHeight = 1_080,
+                            maximumSourcePixelArea = 2_073_600,
+                            maximumSourceFrames = 18_000,
+                            allowedSourceFps = new[]
+                                { "24/1", "30/1", "60/1" },
+                            maximumSelectedDurationMs = 5_000,
+                            maximumSelectedFrames = 300,
+                            supportedMaximumPixelAreas = new[]
+                                { 230_400, 307_200, 414_720 },
+                            minimumSteps = 1,
+                            maximumSteps = 40,
+                            minimumStrength = 10,
+                            maximumStrength = 100,
+                            maximumConcurrentExecutions = 1,
+                            maximumGpuVramBytes = 12_884_901_888L,
+                            maximumHostRamBytes = 34_359_738_368L,
+                            maximumScratchBytes = 8_589_934_592L,
+                            maximumOutputBytes = 536_870_912L,
+                            processTimeoutMs = 900_000,
+                            cancelGraceMs = 10_000,
+                        },
+                        outputPolicy = new
+                        {
+                            revision =
+                                "aibos-video-edit-child-mp4-validator-v1",
+                            container = "mp4",
+                            videoCodec = "h264",
+                            pixelFormat = "yuv420p",
+                            bitDepth = 8,
+                            dynamicRange = "SDR",
+                            videoStreamCount = 1,
+                            maximumAudioStreamCount = 1,
+                            subtitleStreamCount = 0,
+                            dataStreamCount = 0,
+                            attachmentStreamCount = 0,
+                            maximumBytes = 536_870_912L,
+                        },
+                    },
+                    finish = VideoEditV2SmokeDisabledFeature(
+                        "VIDEO_TOOLS_V2_FINISH_RUNTIME_UNPINNED"),
+                    finishModes = new
+                    {
+                        fast = VideoEditV2SmokeDisabledFeature(
+                            "VIDEO_TOOLS_V2_FINISH_FAST_CANARY_REQUIRED"),
+                        standard = VideoEditV2SmokeDisabledFeature(
+                            "VIDEO_TOOLS_V2_FINISH_STANDARD_CANARY_REQUIRED"),
+                        quality = VideoEditV2SmokeDisabledFeature(
+                            "VIDEO_TOOLS_V2_FINISH_QUALITY_MODE_MAPPING_CANARY_REQUIRED"),
+                    },
+                },
+            },
+        });
+    }
+
+    private static object VideoEditV2SmokeDisabledFeature(string reasonCode)
+        => new
+        {
+            writerEnabled = false,
+            backendConfigured = false,
+            runtimeVerified = false,
+            ready = false,
+            state = "disabled",
+            reasonCode,
+        };
 
     private static string BuildVideoEditV2SmokePreviewResponse(
         int startFrame,
