@@ -3,7 +3,7 @@
   "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
   "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
   "compatibility": {
-    "contractSha256": "eee8bc37402923717936576402357d93d8150b7f6874852f8a0e18dde3e33eb7",
+    "contractSha256": "6a647819e675bfb8c4367290c0e015929f50d6e79d3dc4b757244b7a90c6cf26",
     "consumers": [
       "public-wpf",
       "private-companion"
@@ -565,7 +565,7 @@
         "kind": "finish",
         "source": {
           "kind": "displayed-file",
-          "path": "${ROOT}\\source.mp4",
+          "path": "C:\\AibosSynthetic\\Imports\\source.mp4",
           "size": 45678,
           "mtimeMs": 1786320000000,
           "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
@@ -584,7 +584,7 @@
         "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
         "presetId": "aibos-video-edit-v2",
         "adapterId": "bernini-r-1.3b-edit-candidate-v1",
-        "presetHash": "6b1da83cc37b"
+        "presetHash": "3aadcfc17a7a"
       },
       "video": {
         "schemaVersion": 2,
@@ -603,7 +603,7 @@
         "source": {
           "kind": "managed-video-job",
           "producerJobId": "11111111-2222-4333-8444-555555555555",
-          "canonicalPath": "${OUTPUT_ROOT}\\Videos\\2026-08-24\\source.mp4",
+          "canonicalPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\source.mp4",
           "signature": {
             "size": 12345,
             "mtimeMs": 1786320000000
@@ -744,7 +744,7 @@
         "sourceId": "fixture-dropped-video",
         "presetId": "aibos-video-finish-v2",
         "adapterId": "nvidia-vfx-vsr-1.2-candidate-v1",
-        "presetHash": "0de44dba6b60"
+        "presetHash": "c06ca658607a"
       },
       "video": {
         "schemaVersion": 2,
@@ -762,13 +762,13 @@
         },
         "source": {
           "kind": "staged-displayed-file",
-          "originalCanonicalPath": "${ROOT}\\source.mp4",
+          "originalCanonicalPath": "C:\\AibosSynthetic\\Imports\\source.mp4",
           "originalSignature": {
             "size": 45678,
             "mtimeMs": 1786320000000
           },
           "originalSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "stagingCanonicalPath": "${STAGING}\\33333333-4444-4555-8666-777777777777\\source.mp4",
+          "stagingCanonicalPath": "C:\\AibosSynthetic\\Durable\\video-tools-v2\\sources\\33333333-4444-4555-8666-777777777777\\source.mp4",
           "stagingSignature": {
             "size": 45678,
             "mtimeMs": 1786320001000
@@ -847,6 +847,310 @@
           "preserveSourceAudioPackets": true
         }
       }
+    }
+  },
+  "durableReaderStateVectors": {
+    "materialization": "Overlay one lifecycle object on the matching synthetic readerFixtures kind after deriving the exact top-level source and preset envelopes. No path is opened and no durable row is written.",
+    "edit": {
+      "valid": {
+        "queued": {
+          "status": "queued",
+          "progress": 0,
+          "cancelRequested": false,
+          "queueOrder": 2,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "running": {
+          "status": "running",
+          "progress": 50,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "lastHeartbeatAt": "2026-08-24T00:00:00.750Z",
+          "runId": "synthetic-edit-run-v1",
+          "workerInstanceId": "synthetic-video-tools-worker-v1",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "succeeded": {
+          "status": "succeeded",
+          "progress": 100,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z",
+          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\${JOB_ID}__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__3aadcfc17a7a.mp4",
+          "outputSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "outputBytes": 1024
+        },
+        "failed": {
+          "status": "failed",
+          "progress": 40,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z",
+          "errorCode": "VIDEO_TOOLS_V2_EDIT_SYNTHETIC_FAILURE",
+          "errorMessage": "Synthetic Video Tools Edit failure."
+        },
+        "canceled": {
+          "status": "canceled",
+          "progress": 40,
+          "cancelRequested": true,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "deleted": {
+          "status": "deleted",
+          "progress": 100,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        }
+      },
+      "readerOnly": {
+        "runningCancellationTransient": {
+          "status": "running",
+          "progress": 50,
+          "cancelRequested": true,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "lastHeartbeatAt": "2026-08-24T00:00:00.750Z",
+          "runId": "synthetic-edit-run-v1",
+          "workerInstanceId": "synthetic-video-tools-worker-v1",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "succeededMissingOutputSha256": {
+          "status": "succeeded",
+          "progress": 100,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z",
+          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\${JOB_ID}__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__3aadcfc17a7a.mp4",
+          "outputBytes": 1024
+        },
+        "runningUnicodeRunId": {
+          "status": "running",
+          "progress": 50,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "lastHeartbeatAt": "2026-08-24T00:00:00.750Z",
+          "runId": "実行-v1",
+          "workerInstanceId": "synthetic-video-tools-worker-v1",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "runningInternalWhitespaceRunId": {
+          "status": "running",
+          "progress": 50,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "lastHeartbeatAt": "2026-08-24T00:00:00.750Z",
+          "runId": "synthetic edit run v1",
+          "workerInstanceId": "synthetic-video-tools-worker-v1",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "runningExternalPromptId129": {
+          "status": "running",
+          "progress": 50,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "lastHeartbeatAt": "2026-08-24T00:00:00.750Z",
+          "runId": "synthetic-edit-run-v1",
+          "workerInstanceId": "synthetic-video-tools-worker-v1",
+          "externalPromptId": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "runningExternalProcessIdOverflow": {
+          "status": "running",
+          "progress": 50,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "lastHeartbeatAt": "2026-08-24T00:00:00.750Z",
+          "runId": "synthetic-edit-run-v1",
+          "workerInstanceId": "synthetic-video-tools-worker-v1",
+          "externalProcessId": 2147483648,
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "extendedYearTimestamp": {
+          "status": "queued",
+          "progress": 0,
+          "cancelRequested": false,
+          "queueOrder": 2,
+          "createdAt": "+010000-08-24T00:00:00.000Z",
+          "updatedAt": "+010000-08-24T00:00:01.000Z"
+        },
+        "lossyQueueOrderToken": {
+          "status": "queued",
+          "progress": 0,
+          "cancelRequested": false,
+          "queueOrder": 2.0000000000000001,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "succeededRelativeOutputPath": {
+          "status": "succeeded",
+          "progress": 100,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z",
+          "outputPath": "relative.txt",
+          "outputSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "outputBytes": 1024
+        },
+        "succeededWrongJobOutputPath": {
+          "status": "succeeded",
+          "progress": 100,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z",
+          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\00000000-0000-4000-8000-000000000000__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__3aadcfc17a7a.mp4",
+          "outputSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "outputBytes": 1024
+        },
+        "futureSnapshotVersion": {
+          "lifecycle": {
+            "status": "queued",
+            "progress": 0,
+            "cancelRequested": false,
+            "queueOrder": 2,
+            "createdAt": "2026-08-24T00:00:00.000Z",
+            "updatedAt": "2026-08-24T00:00:01.000Z"
+          },
+          "videoSchemaVersion": 99
+        }
+      },
+      "sourceEnvelopeReaderOnly": {
+        "topLevelSourcePathTransform": "uppercase",
+        "snapshotRelativePath": "relative.mp4",
+        "snapshotWrongExtension": "C:\\AibosSynthetic\\Videos\\2026-08-24\\source.mov",
+        "snapshotControlPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\source\tname.mp4"
+      }
+    },
+    "finish": {
+      "valid": {
+        "queued": {
+          "status": "queued",
+          "progress": 0,
+          "cancelRequested": false,
+          "queueOrder": 3,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "running": {
+          "status": "running",
+          "progress": 50,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "lastHeartbeatAt": "2026-08-24T00:00:00.750Z",
+          "runId": "synthetic-finish-run-v1",
+          "workerInstanceId": "synthetic-video-tools-worker-v1",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "succeeded": {
+          "status": "succeeded",
+          "progress": 100,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z",
+          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\${JOB_ID}__source__dddddddddddddddd__aibos-video-finish-v2__nvidia-vfx-vsr-1.2-candidate-v1__c06ca658607a.mp4",
+          "outputSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "outputBytes": 2048
+        },
+        "failed": {
+          "status": "failed",
+          "progress": 40,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z",
+          "errorCode": "VIDEO_TOOLS_V2_FINISH_SYNTHETIC_FAILURE",
+          "errorMessage": "Synthetic Video Tools Finish failure."
+        },
+        "canceled": {
+          "status": "canceled",
+          "progress": 40,
+          "cancelRequested": true,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "deleted": {
+          "status": "deleted",
+          "progress": 100,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        }
+      },
+      "readerOnly": {
+        "runningCancellationTransient": {
+          "status": "running",
+          "progress": 50,
+          "cancelRequested": true,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "lastHeartbeatAt": "2026-08-24T00:00:00.750Z",
+          "runId": "synthetic-finish-run-v1",
+          "workerInstanceId": "synthetic-video-tools-worker-v1",
+          "updatedAt": "2026-08-24T00:00:01.000Z"
+        },
+        "succeededMissingOutputSha256": {
+          "status": "succeeded",
+          "progress": 100,
+          "cancelRequested": false,
+          "createdAt": "2026-08-24T00:00:00.000Z",
+          "startedAt": "2026-08-24T00:00:00.250Z",
+          "finishedAt": "2026-08-24T00:00:00.900Z",
+          "updatedAt": "2026-08-24T00:00:01.000Z",
+          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\${JOB_ID}__source__dddddddddddddddd__aibos-video-finish-v2__nvidia-vfx-vsr-1.2-candidate-v1__c06ca658607a.mp4",
+          "outputBytes": 2048
+        },
+        "futureSnapshotVersion": {
+          "lifecycle": {
+            "status": "queued",
+            "progress": 0,
+            "cancelRequested": false,
+            "queueOrder": 3,
+            "createdAt": "2026-08-24T00:00:00.000Z",
+            "updatedAt": "2026-08-24T00:00:01.000Z"
+          },
+          "videoSchemaVersion": 99
+        }
+      },
+      "sourceEnvelopeReaderOnly": {
+        "topLevelSourcePathTransform": "uppercase"
+      }
+    },
+    "passiveReadExpected": {
+      "rowVisible": true,
+      "mutable": false,
+      "enqueueCalls": 0,
+      "workerWakeCalls": 0,
+      "filesystemCalls": 0,
+      "durableMutationCalls": 0
     }
   },
   "audioPolicyVectors": {

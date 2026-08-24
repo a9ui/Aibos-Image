@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 
@@ -46,6 +47,7 @@ public partial class MainWindow
     private const long VideoToolsV2MaximumSafeInteger =
         9_007_199_254_740_991;
     private const long VideoToolsV2MaximumSourceBytes = 536_870_912;
+    private const long VideoToolsV2MaximumOutputBytes = 536_870_912;
     private const int VideoToolsV2MaximumSourceDurationMs = 300_000;
     private const int VideoToolsV2MaximumSourceFrames = 18_000;
     private const int VideoToolsV2MaximumSourceWidth = 1_920;
@@ -93,7 +95,11 @@ public partial class MainWindow
         string DynamicRange,
         long VideoTimeBaseNumerator,
         long VideoTimeBaseDenominator,
-        long VideoStartTimestamp);
+        long VideoStartTimestamp,
+        string ExecutionCanonicalPath,
+        long ExecutionSize,
+        double ExecutionMtimeMs,
+        string ExecutionSha256);
 
     private readonly record struct VideoToolsV2EditRequestSnapshot(
         int StartFrame,
@@ -161,9 +167,12 @@ public partial class MainWindow
                 out string presetHash)
             || !IsLowerHex(presetHash, 12)
             || VideoToolsV2HasAnyProperty(job, "sourceProducerJobId")
-            || VideoToolsV2HasAnyProperty(job, "sourcePath")
             || VideoToolsV2HasAnyProperty(job, "sourceManagedOutputPath")
             || VideoToolsV2HasAnyProperty(job, "sourceRecoveredOutputPath")
+            || VideoToolsV2HasAnyProperty(job, "sourceRecoveredAdapterId")
+            || VideoToolsV2HasAnyProperty(job, "sourceRecoveredSignature")
+            || VideoToolsV2HasAnyProperty(job, "sourceRecoveredSha256")
+            || VideoToolsV2HasAnyProperty(job, "videoTrim")
             || !job.TryGetProperty("video", out JsonElement video)
             || video.ValueKind != JsonValueKind.Object
             || !HasSingleProperty(job, "video")
@@ -211,7 +220,7 @@ public partial class MainWindow
             return false;
         }
 
-        return kind == "edit"
+        bool parsed = kind == "edit"
             ? TryReadExactVideoToolsV2Edit(
                 video,
                 source,
@@ -224,12 +233,45 @@ public partial class MainWindow
                 videoPresetId,
                 videoBackendId,
                 out snapshot);
+        return parsed
+            && VideoToolsV2JobPresetMatches(job, snapshot)
+            && TryReadExactVideoToolsV2JobLifecycle(job, snapshot);
     }
 
     private static bool VideoToolsV2JobSourceMatches(
         JsonElement job,
         VideoToolsV2SourceSnapshot source)
     {
+        if (!TryGetVideoToolsV2Path(
+                job,
+                "sourcePath",
+                out string sourcePath)
+            || !string.Equals(
+                sourcePath,
+                source.ExecutionCanonicalPath,
+                StringComparison.Ordinal)
+            || !job.TryGetProperty(
+                "sourceSignature",
+                out JsonElement sourceSignature)
+            || !HasSingleProperty(job, "sourceSignature")
+            || !TryReadVideoToolsV2Signature(
+                sourceSignature,
+                out long sourceSize,
+                out long sourceMtimeMs)
+            || sourceSize != source.ExecutionSize
+            || sourceMtimeMs != source.ExecutionMtimeMs
+            || !TryGetSingleVideoToolsString(
+                job,
+                "sourceSha256",
+                out string sourceSha256)
+            || !string.Equals(
+                sourceSha256,
+                source.ExecutionSha256,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         if (source.Kind == "managed-video-job")
         {
             return source.ProducerJobId is string producerJobId
@@ -241,7 +283,7 @@ public partial class MainWindow
                 && string.Equals(
                     sourceVideoJobId,
                     producerJobId,
-                    StringComparison.OrdinalIgnoreCase);
+                    StringComparison.Ordinal);
         }
 
         return source.Kind == "staged-displayed-file"
@@ -264,6 +306,10 @@ public partial class MainWindow
         string? stagingCanonicalPath = null;
         long sourceSize;
         long sourceMtimeMs;
+        long executionSize;
+        long executionMtimeMs;
+        string executionSha256;
+        string executionCanonicalPath;
         JsonElement signature;
         JsonElement probe;
         if (kind == "managed-video-job")
@@ -296,6 +342,10 @@ public partial class MainWindow
             {
                 return false;
             }
+            executionCanonicalPath = canonicalPath;
+            executionSize = sourceSize;
+            executionMtimeMs = sourceMtimeMs;
+            executionSha256 = sha256;
         }
         else if (kind == "staged-displayed-file")
         {
@@ -333,7 +383,7 @@ public partial class MainWindow
                 || !TryReadVideoToolsV2Signature(
                     stagingSignature,
                     out long stagingSize,
-                    out _)
+                    out long stagingMtimeMs)
                 || sourceSize != stagingSize
                 || !TryGetSingleVideoToolsString(
                     source,
@@ -352,6 +402,10 @@ public partial class MainWindow
             {
                 return false;
             }
+            executionCanonicalPath = stagingCanonicalPath;
+            executionSize = stagingSize;
+            executionMtimeMs = stagingMtimeMs;
+            executionSha256 = stagingSha256;
         }
         else
         {
@@ -398,8 +452,319 @@ public partial class MainWindow
             dynamicRange,
             videoTimeBaseNumerator,
             videoTimeBaseDenominator,
-            videoStartTimestamp);
+            videoStartTimestamp,
+            executionCanonicalPath,
+            executionSize,
+            executionMtimeMs,
+            executionSha256);
         return true;
+    }
+
+    private static bool TryReadExactVideoToolsV2JobLifecycle(
+        JsonElement job,
+        VideoToolsV2ReaderSnapshot snapshot)
+    {
+        if (!TryGetSingleVideoToolsString(job, "id", out string id)
+            || !IsSafeVideoToolsJobId(id)
+            || !TryGetSingleVideoToolsString(job, "status", out string status)
+            || status is not ("queued" or "running" or "succeeded" or "failed" or "canceled" or "deleted")
+            || !TryGetVideoToolsV2Int32(job, "progress", out int progress)
+            || !TryGetVideoToolsV2Boolean(
+                job,
+                "cancelRequested",
+                out bool cancelRequested)
+            || !TryGetCanonicalVideoToolsV2Timestamp(
+                job,
+                "createdAt",
+                out DateTimeOffset createdAt)
+            || !TryGetCanonicalVideoToolsV2Timestamp(
+                job,
+                "updatedAt",
+                out DateTimeOffset updatedAt)
+            || updatedAt < createdAt)
+        {
+            return false;
+        }
+
+        bool hasQueueOrder = VideoToolsV2HasAnyProperty(job, "queueOrder");
+        bool hasStartedAt = VideoToolsV2HasAnyProperty(job, "startedAt");
+        bool hasFinishedAt = VideoToolsV2HasAnyProperty(job, "finishedAt");
+        bool hasOutput = VideoToolsV2HasAnyProperty(job, "outputPath")
+            || VideoToolsV2HasAnyProperty(job, "outputSha256")
+            || VideoToolsV2HasAnyProperty(job, "outputBytes");
+        bool hasError = VideoToolsV2HasAnyProperty(job, "errorCode")
+            || VideoToolsV2HasAnyProperty(job, "errorMessage");
+        bool hasAttempt = VideoToolsV2HasAnyProperty(job, "runId")
+            || VideoToolsV2HasAnyProperty(job, "workerInstanceId")
+            || VideoToolsV2HasAnyProperty(job, "lastHeartbeatAt")
+            || VideoToolsV2HasAnyProperty(job, "lastProgressAt")
+            || VideoToolsV2HasAnyProperty(job, "externalPromptId")
+            || VideoToolsV2HasAnyProperty(job, "externalProcessId")
+            || VideoToolsV2HasAnyProperty(job, "diagnostics");
+
+        if (status == "queued")
+        {
+            return progress == 0
+                && !cancelRequested
+                && TryGetVideoToolsV2Integer(
+                    job,
+                    "queueOrder",
+                    0,
+                    VideoToolsV2MaximumSafeInteger,
+                    out _)
+                && !hasStartedAt
+                && !hasFinishedAt
+                && !hasOutput
+                && !hasError
+                && !hasAttempt;
+        }
+
+        if (hasQueueOrder
+            || !TryGetCanonicalVideoToolsV2Timestamp(
+                job,
+                "startedAt",
+                out DateTimeOffset startedAt)
+            || startedAt < createdAt)
+        {
+            return false;
+        }
+
+        if (status == "running")
+        {
+            return progress is >= 1 and <= 99
+                && !cancelRequested
+                && !hasFinishedAt
+                && !hasOutput
+                && !hasError
+                && TryReadExactVideoToolsV2RunningAttempt(
+                    job,
+                    startedAt,
+                    updatedAt);
+        }
+
+        if (!TryGetCanonicalVideoToolsV2Timestamp(
+                job,
+                "finishedAt",
+                out DateTimeOffset finishedAt)
+            || finishedAt < startedAt
+            || updatedAt < finishedAt
+            || hasAttempt)
+        {
+            return false;
+        }
+
+        if (status == "succeeded")
+        {
+            return progress == 100
+                && !cancelRequested
+                && !hasError
+                && TryGetVideoToolsV2Path(
+                    job,
+                    "outputPath",
+                    out string outputPath)
+                && VideoToolsV2ManagedOutputPathMatches(
+                    job,
+                    id,
+                    snapshot,
+                    outputPath)
+                && TryGetSingleVideoToolsString(
+                    job,
+                    "outputSha256",
+                    out string outputSha256)
+                && IsLowerHex(outputSha256, 64)
+                && TryGetVideoToolsV2Integer(
+                    job,
+                    "outputBytes",
+                    1,
+                    VideoToolsV2MaximumOutputBytes,
+                    out _);
+        }
+
+        if (status == "failed")
+        {
+            return progress is >= 0 and <= 99
+                && !cancelRequested
+                && !hasOutput
+                && TryGetVideoToolsV2Error(job);
+        }
+
+        if (status == "canceled")
+        {
+            return progress is >= 0 and <= 99
+                && cancelRequested
+                && !hasOutput
+                && !hasError;
+        }
+
+        return progress == 100
+            && !cancelRequested
+            && !hasOutput
+            && !hasError;
+    }
+
+    private static bool TryReadExactVideoToolsV2RunningAttempt(
+        JsonElement job,
+        DateTimeOffset startedAt,
+        DateTimeOffset updatedAt)
+    {
+        if (!TryGetVideoToolsV2TechnicalText(job, "runId", 128, out _)
+            || !TryGetVideoToolsV2TechnicalText(
+                job,
+                "workerInstanceId",
+                128,
+                out _)
+            || !TryGetCanonicalVideoToolsV2Timestamp(
+                job,
+                "lastHeartbeatAt",
+                out DateTimeOffset heartbeat)
+            || heartbeat < startedAt
+            || heartbeat > updatedAt)
+        {
+            return false;
+        }
+
+        if (VideoToolsV2HasAnyProperty(job, "lastProgressAt")
+            && (!TryGetCanonicalVideoToolsV2Timestamp(
+                    job,
+                    "lastProgressAt",
+                    out DateTimeOffset progressAt)
+                || progressAt < startedAt
+                || progressAt > updatedAt))
+        {
+            return false;
+        }
+        if (VideoToolsV2HasAnyProperty(job, "externalPromptId")
+            && !TryGetVideoToolsV2TechnicalText(
+                job,
+                "externalPromptId",
+                512,
+                out _))
+        {
+            return false;
+        }
+        if (VideoToolsV2HasAnyProperty(job, "externalProcessId")
+            && !TryGetVideoToolsV2Integer(
+                job,
+                "externalProcessId",
+                1,
+                int.MaxValue,
+                out _))
+        {
+            return false;
+        }
+        return !VideoToolsV2HasAnyProperty(job, "diagnostics")
+            || HasSingleProperty(job, "diagnostics")
+                && job.TryGetProperty(
+                    "diagnostics",
+                    out JsonElement diagnostics)
+                && diagnostics.ValueKind == JsonValueKind.Object;
+    }
+
+    private static bool TryGetVideoToolsV2Error(JsonElement job)
+    {
+        return TryGetSingleVideoToolsString(
+                job,
+                "errorCode",
+                out string errorCode)
+            && errorCode.Length is >= 1 and <= 128
+            && errorCode.All(character => character is >= 'A' and <= 'Z'
+                or >= '0' and <= '9' or '_')
+            && TryGetVideoToolsV2BoundedText(
+                job,
+                "errorMessage",
+                2_000,
+                asciiOnly: false,
+                out _);
+    }
+
+    private static bool TryGetCanonicalVideoToolsV2Timestamp(
+        JsonElement value,
+        string name,
+        out DateTimeOffset timestamp)
+    {
+        timestamp = default;
+        return TryGetSingleVideoToolsString(value, name, out string text)
+            && DateTimeOffset.TryParseExact(
+                text,
+                "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal
+                    | DateTimeStyles.AdjustToUniversal,
+                out timestamp)
+            && string.Equals(
+                timestamp.ToString(
+                    "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+                    CultureInfo.InvariantCulture),
+                text,
+                StringComparison.Ordinal);
+    }
+
+    private static bool VideoToolsV2JobPresetMatches(
+        JsonElement job,
+        VideoToolsV2ReaderSnapshot snapshot)
+    {
+        if (!job.TryGetProperty("preset", out JsonElement preset)
+            || !HasSingleProperty(job, "preset")
+            || !HasExactProperties(
+                preset,
+                "id",
+                "label",
+                "modelFamily",
+                "modelName",
+                "scale",
+                "outputFormat",
+                "denoise",
+                "sharpen",
+                "detail",
+                "smoothness",
+                "colorBrightness",
+                "colorContrast",
+                "colorSaturation",
+                "options")
+            || !VideoToolsExactString(preset, "id", snapshot.PresetId)
+            || !VideoToolsExactString(
+                preset,
+                "label",
+                snapshot.Kind == "edit"
+                    ? "Aibos Video Edit v2"
+                    : "Aibos Video Finish v2")
+            || !VideoToolsExactString(preset, "modelFamily", "general")
+            || !VideoToolsExactString(
+                preset,
+                "modelName",
+                snapshot.BackendId)
+            || !VideoToolsV2ExactInt32(
+                preset,
+                "scale",
+                snapshot.Kind == "finish" ? snapshot.FinishScale!.Value : 1)
+            || !VideoToolsExactString(preset, "outputFormat", "png")
+            || !VideoToolsV2ExactInt32(preset, "denoise", 0)
+            || !VideoToolsV2ExactInt32(preset, "sharpen", 0)
+            || !VideoToolsV2ExactInt32(preset, "detail", 0)
+            || !VideoToolsV2ExactInt32(preset, "smoothness", 0)
+            || !VideoToolsV2ExactInt32(preset, "colorBrightness", 0)
+            || !VideoToolsV2ExactInt32(preset, "colorContrast", 0)
+            || !VideoToolsV2ExactInt32(preset, "colorSaturation", 0)
+            || !preset.TryGetProperty("options", out JsonElement options)
+            || !HasExactProperties(
+                options,
+                "backendId",
+                "protocol",
+                "kind",
+                "container"))
+        {
+            return false;
+        }
+        return VideoToolsExactString(
+                options,
+                "backendId",
+                snapshot.BackendId)
+            && VideoToolsExactString(
+                options,
+                "protocol",
+                VideoToolsV2Protocol)
+            && VideoToolsExactString(options, "kind", snapshot.Kind)
+            && VideoToolsExactString(options, "container", "mp4");
     }
 
     private static bool TryReadVideoToolsV2Signature(
@@ -1756,12 +2121,118 @@ public partial class MainWindow
         JsonElement element,
         string propertyName,
         out string value)
-        => TryGetVideoToolsV2BoundedText(
-            element,
-            propertyName,
-            32_768,
-            asciiOnly: false,
-            out value);
+    {
+        if (!TryGetVideoToolsV2BoundedText(
+                element,
+                propertyName,
+                32_768,
+                asciiOnly: false,
+                out value)
+            || value.Any(static character =>
+                character is <= '\x1f' or '\x7f')
+            || value.Contains('/', StringComparison.Ordinal)
+            || !Path.IsPathFullyQualified(value)
+            || !string.Equals(
+                Path.GetExtension(value),
+                ".mp4",
+                StringComparison.Ordinal))
+        {
+            value = "";
+            return false;
+        }
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(value),
+                value,
+                StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is ArgumentException
+            or NotSupportedException
+            or PathTooLongException)
+        {
+            value = "";
+            return false;
+        }
+    }
+
+    private static bool VideoToolsV2ManagedOutputPathMatches(
+        JsonElement job,
+        string jobId,
+        VideoToolsV2ReaderSnapshot snapshot,
+        string outputPath)
+    {
+        if (!TryGetSingleVideoToolsString(
+                job,
+                "sourceSha256",
+                out string sourceSha256)
+            || !IsLowerHex(sourceSha256, 64)
+            || !TryGetSingleVideoToolsString(
+                job,
+                "presetHash",
+                out string presetHash)
+            || !IsLowerHex(presetHash, 12))
+        {
+            return false;
+        }
+
+        string sourceBase = Path.GetFileNameWithoutExtension(
+            snapshot.SourceCanonicalPath);
+        var safeBase = new StringBuilder(Math.Min(sourceBase.Length, 64));
+        foreach (char character in sourceBase)
+        {
+            if (safeBase.Length >= 64)
+                break;
+            safeBase.Append(character is '<' or '>' or ':' or '"'
+                    or '/' or '\\' or '|' or '?' or '*'
+                    or <= '\x1f'
+                ? '_'
+                : character);
+        }
+        if (safeBase.Length == 0)
+            safeBase.Append("image");
+
+        string expectedFilename = string.Join(
+            "__",
+            jobId,
+            safeBase.ToString(),
+            sourceSha256[..16],
+            snapshot.PresetId,
+            snapshot.BackendId,
+            presetHash) + ".mp4";
+        if (!string.Equals(
+                Path.GetFileName(outputPath),
+                expectedFilename,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string? parentPath = Path.GetDirectoryName(outputPath);
+        if (string.IsNullOrWhiteSpace(parentPath))
+            return false;
+        string parentName = Path.GetFileName(parentPath);
+        if (string.Equals(parentName, "Videos", StringComparison.Ordinal))
+            return true;
+        string? grandparentPath = Path.GetDirectoryName(parentPath);
+        return !string.IsNullOrWhiteSpace(grandparentPath)
+            && string.Equals(
+                Path.GetFileName(grandparentPath),
+                "Videos",
+                StringComparison.Ordinal)
+            && DateTime.TryParseExact(
+                parentName,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out DateTime outputDate)
+            && string.Equals(
+                outputDate.ToString(
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture),
+                parentName,
+                StringComparison.Ordinal);
+    }
 
     private static bool VideoToolsV2WindowsLexicalPathsEqual(
         string left,
@@ -1890,8 +2361,7 @@ public partial class MainWindow
                 propertyName,
                 out JsonElement property)
             || property.ValueKind != JsonValueKind.Number
-            || !property.TryGetDouble(out double numeric)
-            || !double.IsFinite(numeric)
+            || !TryGetLosslessVideoToolsV2Number(property, out double numeric)
             || Math.Truncate(numeric) != numeric
             || numeric < minimum
             || numeric > maximum
@@ -1925,6 +2395,36 @@ public partial class MainWindow
         return true;
     }
 
+    private static bool TryGetVideoToolsV2Int32(
+        JsonElement element,
+        string propertyName,
+        out int value)
+        => TryGetBoundedVideoToolsV2Int(
+            element,
+            propertyName,
+            int.MinValue,
+            int.MaxValue,
+            out value);
+
+    private static bool TryGetVideoToolsV2Boolean(
+        JsonElement element,
+        string propertyName,
+        out bool value)
+    {
+        value = false;
+        if (!HasSingleProperty(element, propertyName)
+            || !element.TryGetProperty(
+                propertyName,
+                out JsonElement property)
+            || property.ValueKind is not (
+                JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+        value = property.ValueKind == JsonValueKind.True;
+        return true;
+    }
+
     private static bool VideoToolsV2ExactInt32(
         JsonElement element,
         string propertyName,
@@ -1947,10 +2447,102 @@ public partial class MainWindow
         return HasSingleProperty(element, propertyName)
             && element.TryGetProperty(propertyName, out JsonElement property)
             && property.ValueKind == JsonValueKind.Number
-            && property.TryGetDouble(out value)
-            && double.IsFinite(value)
+            && TryGetLosslessVideoToolsV2Number(property, out value)
             && value >= minimum
             && value <= maximum;
+    }
+
+    private static bool TryGetLosslessVideoToolsV2Number(
+        JsonElement property,
+        out double value)
+    {
+        value = 0;
+        string token = property.GetRawText();
+        if (token.Length is < 1 or > 256
+            || !property.TryGetDouble(out value)
+            || !double.IsFinite(value)
+            || !TryNormalizeVideoToolsV2Decimal(
+                token,
+                out bool tokenNegative,
+                out string tokenDigits,
+                out long tokenExponent))
+        {
+            return false;
+        }
+        if (value == 0 && tokenDigits != "0")
+            return false;
+        if (BitConverter.DoubleToInt64Bits(value) == long.MinValue)
+            return tokenDigits == "0";
+        string roundTripped = value.ToString(
+            "R",
+            CultureInfo.InvariantCulture);
+        return TryNormalizeVideoToolsV2Decimal(
+                roundTripped,
+                out bool roundTripNegative,
+                out string roundTripDigits,
+                out long roundTripExponent)
+            && tokenNegative == roundTripNegative
+            && string.Equals(
+                tokenDigits,
+                roundTripDigits,
+                StringComparison.Ordinal)
+            && tokenExponent == roundTripExponent;
+    }
+
+    private static bool TryNormalizeVideoToolsV2Decimal(
+        string token,
+        out bool negative,
+        out string digits,
+        out long exponent)
+    {
+        negative = token.StartsWith("-", StringComparison.Ordinal);
+        string unsigned = negative ? token[1..] : token;
+        int exponentIndex = unsigned.IndexOfAny(['e', 'E']);
+        string mantissa = exponentIndex < 0
+            ? unsigned
+            : unsigned[..exponentIndex];
+        string exponentText = exponentIndex < 0
+            ? "0"
+            : unsigned[(exponentIndex + 1)..];
+        if (!long.TryParse(
+                exponentText,
+                NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture,
+                out long explicitExponent))
+        {
+            digits = "";
+            exponent = 0;
+            return false;
+        }
+        int decimalIndex = mantissa.IndexOf('.');
+        int decimalPlaces = decimalIndex < 0
+            ? 0
+            : mantissa.Length - decimalIndex - 1;
+        digits = mantissa.Replace(".", "", StringComparison.Ordinal)
+            .TrimStart('0');
+        if (digits.Length == 0)
+        {
+            negative = false;
+            digits = "0";
+            exponent = 0;
+            return true;
+        }
+        try
+        {
+            exponent = checked(explicitExponent - decimalPlaces);
+            while (digits.EndsWith('0'))
+            {
+                digits = digits[..^1];
+                exponent = checked(exponent + 1);
+            }
+            return digits.All(char.IsAsciiDigit);
+        }
+        catch (OverflowException)
+        {
+            digits = "";
+            exponent = 0;
+            return false;
+        }
     }
 
     private static bool VideoToolsV2HasAnyProperty(

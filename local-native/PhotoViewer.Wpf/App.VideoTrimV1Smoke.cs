@@ -22,6 +22,11 @@ public partial class App
         string fixturePath = RequireVideoToolsV2ReaderArgument(
             arguments,
             "--fixture");
+        string? pairedJobPath = TryGetVideoTrimV1SmokeArgument(
+            arguments,
+            "--paired-job");
+        bool pairedJobChecked = pairedJobPath is not null;
+        bool pairedJobExact = !pairedJobChecked;
         string smokeRoot = Directory.CreateTempSubdirectory(
                 "aibos-wpf-video-trim-v1-")
             .FullName;
@@ -55,6 +60,8 @@ public partial class App
 
         try
         {
+            if (pairedJobPath is not null)
+                pairedJobExact = VerifyPairedVideoTrimV1SmokeJob(pairedJobPath);
             Directory.CreateDirectory(sourceRoot);
             Directory.CreateDirectory(outputRoot);
             WriteIsoBmffSmokeVideo(sourcePath);
@@ -328,8 +335,10 @@ public partial class App
                 bool readerExact = VerifyVideoTrimV1SmokeReaderVectors(
                     jobs,
                     malformed,
-                    future);
-                object[] readerDiagnostics = jobs.Take(5).Select(job => new
+                    future,
+                    fixtureRoot["durableJobVectors"]![
+                        "knownLifecyclePolicyVectors"]!.AsObject());
+                object[] readerDiagnostics = jobs.Take(6).Select(job => new
                 {
                     id = job["id"]?.GetValue<string>(),
                     presetHash = job["presetHash"]?.GetValue<string>(),
@@ -387,6 +396,23 @@ public partial class App
                     global::PhotoViewer.Wpf.MainWindow
                         .ReadVideoTrimV1JobForSmoke(
                             JsonSerializer.SerializeToElement(stagedSucceeded));
+                JsonObject stagedSourceIdDrift = stagedSucceeded
+                    .DeepClone().AsObject();
+                stagedSourceIdDrift["sourceId"] = sourcePath.ToLowerInvariant();
+                VideoTrimV1JobSmokeSnapshot? stagedSourceIdDriftReader =
+                    global::PhotoViewer.Wpf.MainWindow
+                        .ReadVideoTrimV1JobForSmoke(
+                            JsonSerializer.SerializeToElement(
+                                stagedSourceIdDrift));
+                bool stagedSourceIdProtected = stagedSourceIdDriftReader is
+                {
+                    Claimed: true,
+                    ExactCurrent: false,
+                    ReaderOnly: true,
+                    SupportedMutation: false,
+                    FilterKey: null,
+                    VisibleActionKinds.Length: 0,
+                };
 
                 int passiveEnqueueBeforeJobs = enqueueBodies.Count;
                 int passiveWakeBeforeJobs = wakeRequests;
@@ -396,13 +422,13 @@ public partial class App
                 EnhancementJobsWorkspaceSmokeSnapshot workspace =
                     window.EnhancementJobsWorkspaceForSmoke();
                 bool jobsFilterExact = workspace.Visible
-                    && workspace.VisibleIds.Length == 6
+                    && workspace.VisibleIds.Length == 7
                     && workspace.VisibleIds.Contains(
                         VideoTrimV1SmokeStagedJobId,
                         StringComparer.Ordinal)
                     && workspace.VisibleIds.Count(id => id.StartsWith(
                         "trim-fixture-",
-                        StringComparison.Ordinal)) == 5
+                        StringComparison.Ordinal)) == 6
                     && workspace.VisibleOperationLabels.All(label =>
                         label.Contains("動画トリム", StringComparison.Ordinal))
                     && window.EnhancementJobsOperationFilterForSmoke == "video"
@@ -419,6 +445,8 @@ public partial class App
                     .RetryEnhancementJobForSmokeAsync("trim-fixture-failed");
                 bool terminalDismissed = await window
                     .DismissEnhancementJobForSmokeAsync("trim-fixture-canceled");
+                bool deletedFixtureDismissed = await window
+                    .DismissEnhancementJobForSmokeAsync("trim-fixture-deleted");
                 int deletesBefore = mutationRoutes.Count(route =>
                     route.EndsWith("/output", StringComparison.Ordinal));
                 bool protectedDelete = await window
@@ -432,15 +460,42 @@ public partial class App
                 bool deletedAfterRelease = await window
                     .DeleteEnhancementJobOutputForSmokeAsync(
                         VideoTrimV1SmokeStagedJobId);
+                JsonObject? deletedStagedJob = jobs.FirstOrDefault(job =>
+                    job["id"]?.GetValue<string>()
+                        == VideoTrimV1SmokeStagedJobId);
+                VideoTrimV1JobSmokeSnapshot? deletedStaged =
+                    deletedStagedJob is null
+                        ? null
+                        : global::PhotoViewer.Wpf.MainWindow
+                            .ReadVideoTrimV1JobForSmoke(
+                                JsonSerializer.SerializeToElement(
+                                    deletedStagedJob));
+                bool deletedTransitionExact = deletedStaged is
+                {
+                    ExactCurrent: true,
+                    ReaderOnly: false,
+                    SupportedMutation: true,
+                    FilterKey: "trim",
+                    Status: "deleted",
+                    CanRetry: false,
+                    CanDismiss: true,
+                    CanDeleteOutput: false,
+                };
+                bool deletedStagedDismissed = await window
+                    .DismissEnhancementJobForSmokeAsync(
+                        VideoTrimV1SmokeStagedJobId);
                 int deletesAfter = mutationRoutes.Count(route =>
                     route.EndsWith("/output", StringComparison.Ordinal));
                 bool jobsActions = queuedCanceled
                     && runningCanceled
                     && failedRetried
                     && terminalDismissed
+                    && deletedFixtureDismissed
                     && protectedDelete
                     && deletesProtected == deletesBefore
                     && deletedAfterRelease
+                    && deletedTransitionExact
+                    && deletedStagedDismissed
                     && deletesAfter == deletesBefore + 1;
                 window.CloseEnhancementJobsForSmoke();
 
@@ -467,10 +522,15 @@ public partial class App
                     && passiveJobs
                     && jobsActions
                     && sourceUntouched
-                    && networkExact;
+                    && networkExact
+                    && stagedReader is { ExactCurrent: true, ReaderOnly: false }
+                    && stagedSourceIdProtected
+                    && pairedJobExact;
                 result = new
                 {
                     ok,
+                    pairedJobChecked,
+                    pairedJobExact,
                     entryExact,
                     passiveOpen,
                     previewExact,
@@ -519,6 +579,8 @@ public partial class App
             result = new
             {
                 ok = false,
+                pairedJobChecked,
+                pairedJobExact,
                 exceptionType = ex.GetType().Name,
                 message = ex.Message,
                 stackTrace = ex.ToString(),
@@ -539,6 +601,105 @@ public partial class App
             TryDeleteVideoFinishV2SmokeRoot(smokeRoot);
             Shutdown(ok ? 0 : 1);
         }
+    }
+
+    private static bool VerifyPairedVideoTrimV1SmokeJob(string pairedJobPath)
+    {
+        SharedJsonDocumentReadResult pairedRead =
+            SharedJsonDocumentReader.Read(pairedJobPath);
+        if (pairedRead.Status is not SharedJsonDocumentReadStatus.Success
+            || pairedRead.Json is null)
+        {
+            throw new InvalidDataException(
+                pairedRead.Error ?? "The paired Video Trim Job is missing.");
+        }
+
+        using JsonDocument pairedDocument = JsonDocument.Parse(
+            pairedRead.Json,
+            new JsonDocumentOptions
+            {
+                AllowTrailingCommas = false,
+                CommentHandling = JsonCommentHandling.Disallow,
+                MaxDepth = 64,
+            });
+        if (pairedDocument.RootElement.ValueKind == JsonValueKind.Object)
+        {
+            VideoTrimV1JobSmokeSnapshot? pairedSnapshot =
+                global::PhotoViewer.Wpf.MainWindow
+                    .ReadVideoTrimV1JobForSmoke(pairedDocument.RootElement);
+            bool exactQueued = pairedSnapshot is
+            {
+                Claimed: true,
+                ExactCurrent: true,
+                ReaderOnly: false,
+                SupportedMutation: true,
+                FilterKey: "trim",
+                Status: "queued",
+                CanCancel: true,
+                CanReorder: true,
+            };
+            if (!exactQueued)
+            {
+                throw new InvalidDataException(
+                    "The paired Video Trim Job is not an exact mutable queued Job.");
+            }
+            return true;
+        }
+        if (pairedDocument.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException(
+                "The paired Video Trim payload must be one Job or a Job array.");
+        }
+        VideoTrimV1JobSmokeSnapshot?[] snapshots = pairedDocument.RootElement
+            .EnumerateArray()
+            .Select(global::PhotoViewer.Wpf.MainWindow
+                .ReadVideoTrimV1JobForSmoke)
+            .ToArray();
+        bool exact = snapshots.Length == 6
+            && snapshots.Select(snapshot => snapshot?.Status).SequenceEqual(
+                ["queued", "running", "succeeded", "failed", "canceled", "deleted"],
+                StringComparer.Ordinal)
+            && snapshots.All(snapshot => snapshot is
+            {
+                Claimed: true,
+                ExactCurrent: true,
+                ReaderOnly: false,
+                SupportedMutation: true,
+                FilterKey: "trim",
+            })
+            && snapshots[0] is { CanCancel: true, CanReorder: true }
+            && snapshots[1] is { CanCancel: true }
+            && snapshots[2] is { CanUseOutput: true, CanDeleteOutput: true }
+            && snapshots[3] is { CanRetry: true, CanDismiss: true }
+            && snapshots[4] is { CanRetry: true, CanDismiss: true }
+            && snapshots[5] is
+            {
+                CanRetry: false,
+                CanDismiss: true,
+                CanDeleteOutput: false,
+                VisibleActionKinds: ["dismiss"],
+            };
+        if (!exact)
+        {
+            throw new InvalidDataException(
+                "The paired SQLite Video Trim projections are not exact across all six states.");
+        }
+        return true;
+    }
+
+    private static string? TryGetVideoTrimV1SmokeArgument(
+        string[] args,
+        string name)
+    {
+        int index = Array.IndexOf(args, name);
+        if (index < 0)
+            return null;
+        if (index + 1 >= args.Length
+            || string.IsNullOrWhiteSpace(args[index + 1]))
+        {
+            throw new InvalidDataException($"{name} requires a value.");
+        }
+        return Path.GetFullPath(args[index + 1]);
     }
 
     private static string BuildVideoTrimV1Health(
@@ -667,7 +828,8 @@ public partial class App
     private static bool VerifyVideoTrimV1SmokeReaderVectors(
         IReadOnlyCollection<JsonObject> jobs,
         JsonObject malformed,
-        JsonObject future)
+        JsonObject future,
+        JsonObject lifecyclePolicy)
     {
         VideoTrimV1JobSmokeSnapshot? queued = global::PhotoViewer.Wpf.MainWindow
             .ReadVideoTrimV1JobForSmoke(JsonSerializer.SerializeToElement(
@@ -689,12 +851,217 @@ public partial class App
             .ReadVideoTrimV1JobForSmoke(JsonSerializer.SerializeToElement(
                 jobs.Single(job => job["id"]?.GetValue<string>()
                     == "trim-fixture-canceled")));
+        VideoTrimV1JobSmokeSnapshot? deleted = global::PhotoViewer.Wpf.MainWindow
+            .ReadVideoTrimV1JobForSmoke(JsonSerializer.SerializeToElement(
+                jobs.Single(job => job["id"]?.GetValue<string>()
+                    == "trim-fixture-deleted")));
         VideoTrimV1JobSmokeSnapshot? malformedRead = global::PhotoViewer.Wpf.MainWindow
             .ReadVideoTrimV1JobForSmoke(
                 JsonSerializer.SerializeToElement(malformed));
         VideoTrimV1JobSmokeSnapshot? futureRead = global::PhotoViewer.Wpf.MainWindow
             .ReadVideoTrimV1JobForSmoke(
                 JsonSerializer.SerializeToElement(future));
+        string[] attemptWorkerFields = lifecyclePolicy["attemptWorkerFields"]!
+            .AsArray()
+            .Select(static node => node!.GetValue<string>())
+            .ToArray();
+        string[] forbiddenStatuses = lifecyclePolicy["forbiddenStatuses"]!
+            .AsArray()
+            .Select(static node => node!.GetValue<string>())
+            .ToArray();
+        JsonObject runningLifecycle = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-running")
+            .DeepClone().AsObject();
+        runningLifecycle["runId"] = "trim-run-v1";
+        runningLifecycle["workerInstanceId"] = "trim-worker-v1";
+        runningLifecycle["lastHeartbeatAt"] = runningLifecycle["updatedAt"]!
+            .DeepClone();
+        runningLifecycle["lastProgressAt"] = runningLifecycle["updatedAt"]!
+            .DeepClone();
+        runningLifecycle["externalPromptId"] = "trim-prompt-v1";
+        runningLifecycle["externalProcessId"] = 321;
+        runningLifecycle["diagnostics"] = new JsonObject
+        {
+            ["warningLevel"] = "slow",
+        };
+        VideoTrimV1JobSmokeSnapshot? runningLifecycleRead =
+            global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(runningLifecycle));
+        bool forbiddenLifecycleProtected = true;
+        foreach (string status in forbiddenStatuses)
+        {
+            JsonObject baseline = jobs.Single(job =>
+                    job["id"]?.GetValue<string>() == $"trim-fixture-{status}")
+                .DeepClone().AsObject();
+            foreach (string field in attemptWorkerFields)
+            {
+                baseline[field] = field switch
+                {
+                    "externalProcessId" => JsonValue.Create(321),
+                    "diagnostics" => new JsonObject
+                    {
+                        ["warningLevel"] = "slow",
+                    },
+                    "lastHeartbeatAt" or "lastProgressAt" =>
+                        baseline["updatedAt"]!.DeepClone(),
+                    _ => JsonValue.Create($"trim-{field}-v1"),
+                };
+                VideoTrimV1JobSmokeSnapshot? protectedRead =
+                    global::PhotoViewer.Wpf.MainWindow
+                        .ReadVideoTrimV1JobForSmoke(
+                            JsonSerializer.SerializeToElement(baseline));
+                forbiddenLifecycleProtected &= protectedRead is
+                {
+                    Claimed: true,
+                    ExactCurrent: false,
+                    ReaderOnly: true,
+                    SupportedMutation: false,
+                    FilterKey: null,
+                    VisibleActionKinds.Length: 0,
+                };
+                baseline.Remove(field);
+            }
+        }
+        JsonObject compatibleUnknown = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-deleted")
+            .DeepClone().AsObject();
+        compatibleUnknown["futureCompatibleNote"] = "preserved";
+        VideoTrimV1JobSmokeSnapshot? compatibleUnknownRead =
+            global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(compatibleUnknown));
+        JsonObject privateExecution = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-queued")
+            .DeepClone().AsObject();
+        JsonObject privateSource = privateExecution["videoTrim"]!["source"]!
+            .AsObject();
+        string privateSourcePath = privateSource["canonicalPath"]!
+            .GetValue<string>();
+        privateExecution["sourcePath"] = privateSourcePath;
+        privateExecution["sourceSignature"] = privateSource["signature"]!
+            .DeepClone();
+        privateExecution["sourceSha256"] = privateSource["sha256"]!
+            .DeepClone();
+        VideoTrimV1JobSmokeSnapshot? privateExecutionExact =
+            global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(privateExecution));
+        VideoTrimV1JobSmokeSnapshot? stableExponentExecution =
+            ReadVideoTrimV1RawExecutionMtimeForSmoke(
+                privateExecution,
+                "1.7875296e12");
+        VideoTrimV1JobSmokeSnapshot? lossyExecutionMtime =
+            ReadVideoTrimV1RawExecutionMtimeForSmoke(
+                privateExecution,
+                "1787529600000.0000001");
+        privateExecution["sourcePath"] = privateSourcePath.ToLowerInvariant();
+        VideoTrimV1JobSmokeSnapshot? privateExecutionCaseDrift =
+            global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(privateExecution));
+        privateExecution["sourcePath"] = privateSourcePath.Contains('/', StringComparison.Ordinal)
+            ? privateSourcePath.Replace('/', '\\')
+            : privateSourcePath.Replace('\\', '/');
+        VideoTrimV1JobSmokeSnapshot? privateExecutionSlashDrift =
+            global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(privateExecution));
+
+        JsonObject queuedOverflow = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-queued")
+            .DeepClone().AsObject();
+        queuedOverflow["queueOrder"] = 2_147_483_648L;
+        JsonObject runningProcessOverflow = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-running")
+            .DeepClone().AsObject();
+        runningProcessOverflow["externalProcessId"] = 2_147_483_648L;
+        JsonObject failedLowerCode = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-failed")
+            .DeepClone().AsObject();
+        failedLowerCode["errorCode"] = "video-trim.failure";
+        JsonObject failedSpaceCode = failedLowerCode.DeepClone().AsObject();
+        failedSpaceCode["errorCode"] = "video trim failure";
+        JsonObject failedControlMessage = failedLowerCode.DeepClone().AsObject();
+        failedControlMessage["errorMessage"] = "Synthetic\0failure.";
+        JsonObject timestampWithoutMilliseconds = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-queued")
+            .DeepClone().AsObject();
+        timestampWithoutMilliseconds["createdAt"] = "2026-08-24T00:00:00Z";
+        timestampWithoutMilliseconds["updatedAt"] = "2026-08-24T00:00:00Z";
+        JsonObject timestampWithSevenDigits = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-queued")
+            .DeepClone().AsObject();
+        timestampWithSevenDigits["createdAt"] =
+            "2026-08-24T00:00:00.0000000Z";
+        timestampWithSevenDigits["updatedAt"] =
+            "2026-08-24T00:00:00.0000000Z";
+        JsonObject runningRunControl = runningLifecycle.DeepClone().AsObject();
+        runningRunControl["runId"] = "trim\0run";
+        JsonObject runningWorkerControl = runningLifecycle.DeepClone().AsObject();
+        runningWorkerControl["workerInstanceId"] = "trim\nworker";
+        JsonObject runningPromptControl = runningLifecycle.DeepClone().AsObject();
+        runningPromptControl["externalPromptId"] = "trim\0prompt";
+        JsonObject runningDiagnosticsBoundary = runningLifecycle
+            .DeepClone().AsObject();
+        runningDiagnosticsBoundary["diagnostics"] = new JsonObject
+        {
+            ["payload"] = new string('x', 32_754),
+        };
+        JsonObject runningDiagnosticsOverflow = runningLifecycle
+            .DeepClone().AsObject();
+        runningDiagnosticsOverflow["diagnostics"] = new JsonObject
+        {
+            ["payload"] = new string('x', 32_755),
+        };
+        JsonObject sourceIdControl = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-queued")
+            .DeepClone().AsObject();
+        sourceIdControl["sourceId"] = "catalog\0source";
+        JsonObject sourceIdOverflow = jobs.Single(job =>
+                job["id"]?.GetValue<string>() == "trim-fixture-queued")
+            .DeepClone().AsObject();
+        sourceIdOverflow["sourceId"] = new string('x', 32_769);
+        bool scalarBoundariesExact =
+            global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(queuedOverflow)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(runningProcessOverflow)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(failedLowerCode)) is
+                { ExactCurrent: true, ReaderOnly: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(failedSpaceCode)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(failedControlMessage)) is
+                { ReaderOnly: true, SupportedMutation: false };
+        bool remainingScalarBoundariesExact =
+            global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(
+                    timestampWithoutMilliseconds)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(timestampWithSevenDigits)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(runningRunControl)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(runningWorkerControl)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(runningPromptControl)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(runningDiagnosticsBoundary)) is
+                { ExactCurrent: true, ReaderOnly: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(runningDiagnosticsOverflow)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(sourceIdControl)) is
+                { ReaderOnly: true, SupportedMutation: false }
+            && global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+                JsonSerializer.SerializeToElement(sourceIdOverflow)) is
+                { ReaderOnly: true, SupportedMutation: false };
         return queued is
             {
                 Claimed: true,
@@ -713,6 +1080,65 @@ public partial class App
             }
             && failed is { CanRetry: true, CanDismiss: true }
             && canceled is { CanRetry: true, CanDismiss: true }
+            && deleted is
+            {
+                ExactCurrent: true,
+                ReaderOnly: false,
+                SupportedMutation: true,
+                FilterKey: "trim",
+                Status: "deleted",
+                CanRetry: false,
+                CanDismiss: true,
+                CanDeleteOutput: false,
+                VisibleActionKinds: ["dismiss"],
+            }
+            && runningLifecycleRead is
+            {
+                ExactCurrent: true,
+                ReaderOnly: false,
+                SupportedMutation: true,
+                Status: "running",
+            }
+            && forbiddenLifecycleProtected
+            && compatibleUnknownRead is
+            {
+                ExactCurrent: true,
+                ReaderOnly: false,
+                SupportedMutation: true,
+                Status: "deleted",
+            }
+            && privateExecutionExact is
+            {
+                ExactCurrent: true,
+                ReaderOnly: false,
+                SupportedMutation: true,
+            }
+            && stableExponentExecution is
+            {
+                ExactCurrent: true,
+                ReaderOnly: false,
+                SupportedMutation: true,
+            }
+            && lossyExecutionMtime is
+            {
+                ReaderOnly: true,
+                SupportedMutation: false,
+                VisibleActionKinds.Length: 0,
+            }
+            && privateExecutionCaseDrift is
+            {
+                ReaderOnly: true,
+                SupportedMutation: false,
+                VisibleActionKinds.Length: 0,
+            }
+            && privateExecutionSlashDrift is
+            {
+                ReaderOnly: true,
+                SupportedMutation: false,
+                VisibleActionKinds.Length: 0,
+            }
+            && scalarBoundariesExact
+            && remainingScalarBoundariesExact
             && malformedRead is
             {
                 Claimed: true,
@@ -731,6 +1157,41 @@ public partial class App
                 FilterKey: null,
                 VisibleActionKinds.Length: 0,
             };
+    }
+
+    private static VideoTrimV1JobSmokeSnapshot?
+        ReadVideoTrimV1RawExecutionMtimeForSmoke(
+            JsonObject job,
+            string rawMtime)
+    {
+        string json = job.ToJsonString();
+        const string signatureMarker = "\"sourceSignature\":";
+        const string mtimeMarker = "\"mtimeMs\":";
+        int signatureIndex = json.LastIndexOf(
+            signatureMarker,
+            StringComparison.Ordinal);
+        int valueStart = signatureIndex < 0
+            ? -1
+            : json.IndexOf(
+                mtimeMarker,
+                signatureIndex,
+                StringComparison.Ordinal);
+        if (valueStart < 0)
+            throw new InvalidDataException("Private Trim sourceSignature is missing.");
+        valueStart += mtimeMarker.Length;
+        int valueEnd = valueStart;
+        while (valueEnd < json.Length
+            && json[valueEnd] is not (',' or '}'))
+        {
+            valueEnd++;
+        }
+        string drift = string.Concat(
+            json.AsSpan(0, valueStart),
+            rawMtime,
+            json.AsSpan(valueEnd));
+        using JsonDocument document = JsonDocument.Parse(drift);
+        return global::PhotoViewer.Wpf.MainWindow.ReadVideoTrimV1JobForSmoke(
+            document.RootElement);
     }
 
     private static JsonObject BuildVideoTrimV1StagedInventoryJob(
@@ -854,7 +1315,22 @@ public partial class App
             string? outputPath = job["outputPath"]?.GetValue<string>();
             if (!string.IsNullOrWhiteSpace(outputPath) && File.Exists(outputPath))
                 File.Delete(outputPath);
-            jobs.Remove(job);
+            job["status"] = "deleted";
+            job["progress"] = 100;
+            job["cancelRequested"] = false;
+            job["startedAt"] ??= "2026-08-24T00:00:01.000Z";
+            job["finishedAt"] = "2026-08-24T00:00:06.000Z";
+            job["updatedAt"] = "2026-08-24T00:00:06.000Z";
+            foreach (string field in new[]
+            {
+                "queueOrder", "runId", "workerInstanceId",
+                "lastHeartbeatAt", "lastProgressAt", "externalPromptId",
+                "externalProcessId", "outputPath", "outputSha256",
+                "outputBytes", "errorCode", "errorMessage", "diagnostics",
+            })
+            {
+                job.Remove(field);
+            }
             response = VideoEditV2SmokeJsonResponse(
                 HttpStatusCode.OK,
                 "{\"deleted\":true}");

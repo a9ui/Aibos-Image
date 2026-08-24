@@ -600,7 +600,8 @@
         "running",
         "succeeded",
         "failed",
-        "canceled"
+        "canceled",
+        "deleted"
       ],
       "stateFields": {
         "queued": [
@@ -625,11 +626,69 @@
         "canceled": [
           "startedAt",
           "finishedAt"
+        ],
+        "deleted": [
+          "startedAt",
+          "finishedAt"
         ]
       },
-      "stateRule": "Fixture Jobs contain the exact required fields plus only their exact stateFields. queued has progress 0 and cancelRequested false; running is 1 through 99 and false; succeeded is 100 and false with one validated managed output; failed has bounded non-path error fields and no output; canceled has cancelRequested true and no output. Timestamps are bounded RFC 3339 UTC and monotonic.",
-      "sourceRule": "For the managed fixture sourceVideoJobId exactly equals videoTrim.source.producerJobId. A staged displayed-file Job omits sourceVideoJobId and uses only its server-owned staged source snapshot. Raw client path fields are absent from the Job envelope.",
-      "unknownFields": "Compatible unknown Job fields are preserved by readers. A writer may mutate only an exact supported snapshot and must never normalize, strip, or repair an unknown field by rewriting the row."
+      "knownLifecycleFields": [
+        "queueOrder",
+        "startedAt",
+        "finishedAt",
+        "runId",
+        "workerInstanceId",
+        "lastHeartbeatAt",
+        "lastProgressAt",
+        "externalPromptId",
+        "externalProcessId",
+        "diagnostics",
+        "outputPath",
+        "outputSha256",
+        "outputBytes",
+        "errorCode",
+        "errorMessage"
+      ],
+      "allowedKnownLifecycleFieldsByState": {
+        "queued": [
+          "queueOrder"
+        ],
+        "running": [
+          "startedAt",
+          "runId",
+          "workerInstanceId",
+          "lastHeartbeatAt",
+          "lastProgressAt",
+          "externalPromptId",
+          "externalProcessId",
+          "diagnostics"
+        ],
+        "succeeded": [
+          "startedAt",
+          "finishedAt",
+          "outputPath",
+          "outputSha256",
+          "outputBytes"
+        ],
+        "failed": [
+          "startedAt",
+          "finishedAt",
+          "errorCode",
+          "errorMessage"
+        ],
+        "canceled": [
+          "startedAt",
+          "finishedAt"
+        ],
+        "deleted": [
+          "startedAt",
+          "finishedAt"
+        ]
+      },
+      "stateRule": "Fixture Jobs contain the exact required fields plus only their exact stateFields. queued has progress 0, cancelRequested false, and a non-negative signed Int32 queueOrder; running is 1 through 99 and false, optional runId and workerInstanceId are control-free 1 through 128 character strings, optional externalPromptId is a control-free 1 through 512 character string, optional externalProcessId is a positive signed Int32, and optional diagnostics is an object whose recursively key-sorted compact JSON is at most 32768 UTF-16 code units; succeeded is 100 and false with one validated managed output; failed has a 1 through 128 character technical errorCode containing only ASCII ! through ~, a 1 through 2000 character control-free errorMessage, and no output; canceled has cancelRequested true and no output; deleted is 100 with cancelRequested false and no output, error, queue, run, or worker identity. Every timestamp is exactly yyyy-MM-ddTHH:mm:ss.fffZ with a four-digit year and three millisecond digits, and timestamps are monotonic. The top-level private execution sourcePath, when present, is ordinal byte-for-byte equal to the immutable snapshot execution path; case or slash normalization is not accepted.",
+      "sourceRule": "sourceId is a control-free 1 through 32768 character string. For the managed fixture sourceVideoJobId exactly equals videoTrim.source.producerJobId. A staged displayed-file Job has sourceId ordinal-exact to videoTrim.source.originalCanonicalPath, omits sourceVideoJobId, and uses only its server-owned staged source snapshot. Raw client path fields are absent from the Job envelope.",
+      "numericRule": "Every recognized JSON number is finite and lossless under its reader scalar. Integer values are within the JavaScript safe exact range before their narrower signed Int32, resource, or protocol bound is applied. A mathematically identical stable exponent token is compatible; underflow, unsafe integer, or excess-precision tokens that round to a different persisted number are reader-only.",
+      "unknownFields": "Compatible unknown Job fields are preserved by readers. The listed known lifecycle fields are not compatible unknowns: a known field outside the exact status allow-list, or a malformed allowed running field, makes the row reader-only. A writer may mutate only an exact supported snapshot and must never normalize, strip, or repair an unknown field by rewriting the row."
     },
     "snapshot": {
       "revision": "aibos-video-trim-job-snapshot-v1",
@@ -819,7 +878,7 @@
           }
         }
       },
-      "rule": "delivery is an immutable expected-output snapshot in every Job state. Only succeeded plus the top-level validated output identity makes it an available managed child. Failed or canceled delivery is not an output claim."
+      "rule": "delivery is an immutable expected-output snapshot in every Job state. Only succeeded plus the top-level validated output identity makes it an available managed child. Failed, canceled, or deleted delivery is not an output claim."
     },
     "readerProtection": {
       "malformed": "A claimed v1 Job with a missing, duplicate, wrong-type, contradictory, out-of-bound, hash-drifted, status-inconsistent, or otherwise malformed envelope, snapshot, source, plan, or delivery remains visible reader-only and has zero mutation actions.",
@@ -881,7 +940,7 @@
     },
     "retry": "Create a new attempt with new scratch, temporary output, and process identity while reusing the exact persisted request, selection, audio policy, source/stage identity, dependency reservation, plan, and compatible receipts. Revalidate all of them; never reopen an external original or reuse an unvalidated earlier output.",
     "cancel": "Durably record cancel-requested before signalling only the proven attempt process, respect the bounded grace interval, publish nothing after cancellation, preserve source and ambiguous artifacts, and mark cancelled only after journal and process exit agree.",
-    "delete": "Delete only a proven terminal trim child output and unreferenced Job-owned staging/scratch after exact hashes, ownership, journal, dependency, retry, recovery, and publication checks. Never delete the source, managed producer output, external original, or ambiguous artifact.",
+    "delete": "Delete only a proven terminal trim child output and unreferenced Job-owned staging/scratch after exact hashes, ownership, journal, dependency, retry, recovery, and publication checks. Successful output deletion atomically retains the immutable videoTrim snapshot in an exact deleted terminal row with progress 100, cancelRequested false, startedAt and finishedAt, and no output, error, queue, run, or worker identity; that row is dismissible but is not retryable and cannot delete output again. Never delete the source, managed producer output, external original, or ambiguous artifact.",
     "recovery": "Only an authenticated explicit bounded recovery worker reconciles nonterminal journals, processes, staging, scratch, temporary output, final output, and Job state. Passive health, Jobs, viewing, navigation, search, and hydration never recover or mutate.",
     "publish": "After temporary validation, atomically publish without overwrite under the canonical managed output root, reopen the same bytes, verify exact hash, length, streams, selected frame count, rational fps, zero-origin PTS digest, duration, and audio policy, then commit succeeded state.",
     "failure": "Any malformed state, source drift, unsupported media, process ambiguity, bound failure, receipt drift, output mismatch, publication conflict, or ownership uncertainty publishes nothing, preserves source and unproven artifacts, and records a bounded reader-visible failure or needs-action state."

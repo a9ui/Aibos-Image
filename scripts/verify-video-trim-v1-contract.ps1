@@ -710,8 +710,33 @@ Assert-ExactSet @($durableReader.jobEnvelope.managedAdditionalFields) @(
     'sourceVideoJobId'
 ) 'durable trim managed Job additional fields'
 Assert-ExactSet @($durableReader.jobEnvelope.statusValues) @(
-    'queued', 'running', 'succeeded', 'failed', 'canceled'
+    'queued', 'running', 'succeeded', 'failed', 'canceled', 'deleted'
 ) 'durable trim Job statuses'
+Assert-ExactSet @($durableReader.jobEnvelope.knownLifecycleFields) @(
+    'queueOrder', 'startedAt', 'finishedAt', 'runId', 'workerInstanceId',
+    'lastHeartbeatAt', 'lastProgressAt', 'externalPromptId',
+    'externalProcessId', 'diagnostics', 'outputPath', 'outputSha256',
+    'outputBytes', 'errorCode', 'errorMessage'
+) 'durable trim known lifecycle fields'
+Assert-ExactSet @($durableReader.jobEnvelope.allowedKnownLifecycleFieldsByState.queued) @(
+    'queueOrder'
+) 'queued trim lifecycle fields'
+Assert-ExactSet @($durableReader.jobEnvelope.allowedKnownLifecycleFieldsByState.running) @(
+    'startedAt', 'runId', 'workerInstanceId', 'lastHeartbeatAt',
+    'lastProgressAt', 'externalPromptId', 'externalProcessId', 'diagnostics'
+) 'running trim lifecycle fields'
+Assert-ExactSet @($durableReader.jobEnvelope.allowedKnownLifecycleFieldsByState.succeeded) @(
+    'startedAt', 'finishedAt', 'outputPath', 'outputSha256', 'outputBytes'
+) 'succeeded trim lifecycle fields'
+Assert-ExactSet @($durableReader.jobEnvelope.allowedKnownLifecycleFieldsByState.failed) @(
+    'startedAt', 'finishedAt', 'errorCode', 'errorMessage'
+) 'failed trim lifecycle fields'
+Assert-ExactSet @($durableReader.jobEnvelope.allowedKnownLifecycleFieldsByState.canceled) @(
+    'startedAt', 'finishedAt'
+) 'canceled trim lifecycle fields'
+Assert-ExactSet @($durableReader.jobEnvelope.allowedKnownLifecycleFieldsByState.deleted) @(
+    'startedAt', 'finishedAt'
+) 'deleted trim lifecycle fields'
 Assert-ExactSet @($durableReader.snapshot.exactFields) @(
     'schemaVersion', 'protocol', 'presetId', 'adapterId',
     'receiptSetSha256', 'source', 'requested', 'plan', 'delivery'
@@ -757,15 +782,38 @@ Assert-ExactSet @($durableReader.delivery.exactFields) @(
 
 $durableFixture = $fixture.durableJobVectors
 $durableJobs = @($durableFixture.jobs)
-if ($durableJobs.Count -ne 5 -or
+if ($durableJobs.Count -ne 6 -or
     $durableFixture.expectedCurrentWriterEnabled -ne $false -or
     $durableFixture.expectedReady -ne $false -or
     $durableFixture.expectedMutationRequestsDuringRead -ne 0) {
-    throw 'Durable Video Trim Job fixtures must cover five states without activation.'
+    throw 'Durable Video Trim Job fixtures must cover six states without activation.'
 }
 Assert-ExactSet @($durableJobs.status) @(
-    'queued', 'running', 'succeeded', 'failed', 'canceled'
+    'queued', 'running', 'succeeded', 'failed', 'canceled', 'deleted'
 ) 'durable trim fixture statuses'
+$lifecycleVectors = $durableFixture.knownLifecyclePolicyVectors
+Assert-ExactSet @($lifecycleVectors.attemptWorkerFields) @(
+    'runId', 'workerInstanceId', 'lastHeartbeatAt', 'lastProgressAt',
+    'externalPromptId', 'externalProcessId', 'diagnostics'
+) 'durable trim attempt and worker policy vectors'
+Assert-ExactSet @($lifecycleVectors.forbiddenStatuses) @(
+    'queued', 'succeeded', 'failed', 'canceled', 'deleted'
+) 'durable trim attempt and worker forbidden statuses'
+if ($lifecycleVectors.allowedStatus -cne 'running' -or
+    $lifecycleVectors.expectedForbiddenMode -cne 'reader-only' -or
+    $lifecycleVectors.expectedMutationRequests -ne 0 -or
+    $lifecycleVectors.expectedPreserveCompatibleUnknownFields -ne $true -or
+    $lifecycleVectors.timestampFormat -cne 'yyyy-MM-ddTHH:mm:ss.fffZ' -or
+    $lifecycleVectors.maximumDiagnosticsStableJsonCodeUnits -ne 32768 -or
+    $lifecycleVectors.sourceIdMaximumCodeUnits -ne 32768 -or
+    $lifecycleVectors.expectedControlFreeRunningIds -ne $true -or
+    $lifecycleVectors.expectedStagedSourceIdOrdinalExact -ne $true -or
+    $lifecycleVectors.recognizedNumberPolicy -cne
+        'lossless-safe-exact-with-stable-exponent' -or
+    $durableReader.jobEnvelope.numericRule -notmatch 'lossless' -or
+    $durableReader.jobEnvelope.numericRule -notmatch 'stable exponent') {
+    throw 'Durable trim known lifecycle policy vectors changed.'
+}
 
 $baselineSnapshotJson = $null
 $expectedOutputPtsSha256 = Get-SequentialPtsSha256 48
@@ -915,6 +963,11 @@ foreach ($job in $durableJobs) {
         'canceled' {
             if ($job.cancelRequested -ne $true) {
                 throw 'Canceled trim Job must retain cancelRequested.'
+            }
+        }
+        'deleted' {
+            if ($job.progress -ne 100 -or $job.cancelRequested -ne $false) {
+                throw 'Deleted trim Job terminal state is not exact.'
             }
         }
     }

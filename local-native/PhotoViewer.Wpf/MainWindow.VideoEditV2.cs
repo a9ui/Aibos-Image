@@ -366,6 +366,7 @@ public partial class MainWindow
 
         ApplyModalVideoEditV2SourceToControls(resetRange: true);
         ModalVideoEditV2Popup.Visibility = Visibility.Visible;
+        ModalVideoEditV2TrimButton.IsEnabled = true;
         RefreshModalVideoEditV2ActionControls();
         _ = Dispatcher.BeginInvoke(
             new Action(() =>

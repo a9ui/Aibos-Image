@@ -2,6 +2,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$DotNetPath = 'dotnet',
+    [string]$PairedJobPath,
     [switch]$SkipBuild,
     [switch]$StaticOnly,
     [switch]$NoRestore,
@@ -37,8 +38,8 @@ foreach ($path in $required) {
     }
 }
 
-$expectedContractSha = '11686813d4b18791d7895f08e272c41ac9567790ad4cc7c41eed17e1d18591c5'
-$expectedFixtureSha = '26fe5dff0ce823656d07db43bf610f8c76e5e0cb5beb9d270b3b893ef9808996'
+$expectedContractSha = 'f0e2b48c06c78a04ec64cb70bd36f03c8ed1f65a89ce31551cd34e225bfe3c40'
+$expectedFixtureSha = '65d74368293fff2a65d730ad1fa1d2cd3f32a200179ab0eaa6db738991582ec8'
 $actualContractSha = (Get-FileHash -LiteralPath $contractPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $actualFixtureSha = (Get-FileHash -LiteralPath $fixturePath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actualContractSha -cne $expectedContractSha -or
@@ -187,6 +188,25 @@ if ($resources -match 'remux runtime|remuxで') {
     throw 'The Video Trim v1 UI must describe exact re-encoding, not remux.'
 }
 
+$tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
+$pairedJobFullPath = $null
+if (-not [string]::IsNullOrWhiteSpace($PairedJobPath)) {
+    if (-not (Test-Path -LiteralPath $PairedJobPath -PathType Leaf)) {
+        throw "The paired Video Trim Job is missing: $PairedJobPath"
+    }
+    $pairedJobFullPath = [IO.Path]::GetFullPath(
+        (Resolve-Path -LiteralPath $PairedJobPath).Path)
+    if (-not $pairedJobFullPath.StartsWith(
+            $tempRoot + [IO.Path]::DirectorySeparatorChar,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The paired Video Trim Job must be a leaf under the system TEMP root.'
+    }
+    $pairedJobLength = (Get-Item -LiteralPath $pairedJobFullPath).Length
+    if ($pairedJobLength -gt 1MB) {
+        throw 'The paired Video Trim Job exceeds the 1 MiB shared JSON limit.'
+    }
+}
+
 if ($StaticOnly) {
     [pscustomobject]@{
         ok = $true
@@ -202,7 +222,6 @@ if ($StaticOnly) {
     return
 }
 
-$tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $runRoot = Join-Path $tempRoot ('aibos-wpf-video-trim-v1-' + [guid]::NewGuid().ToString('N'))
 $buildRoot = Join-Path $runRoot 'build'
 $resultPath = Join-Path $runRoot 'result.json'
@@ -241,12 +260,16 @@ try {
     }
     if ($null -eq $appDll) { throw 'Built PhotoViewer.Wpf.dll was not found.' }
 
-    $process = Start-Process -FilePath $dotNetExecutable -ArgumentList @(
+    $smokeArguments = @(
         $appDll.FullName,
         '--video-trim-v1-smoke',
         $resultPath,
         '--fixture',
-        $fixturePath) -PassThru -WindowStyle Hidden `
+        $fixturePath)
+    if ($null -ne $pairedJobFullPath) {
+        $smokeArguments += @('--paired-job', $pairedJobFullPath)
+    }
+    $process = Start-Process -FilePath $dotNetExecutable -ArgumentList $smokeArguments -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     if (-not $process.WaitForExit($OverallTimeoutSeconds * 1000)) {
         $process.Kill($true)
@@ -266,6 +289,11 @@ try {
     $result = Get-Content -Raw -Encoding UTF8 -LiteralPath $resultPath | ConvertFrom-Json
     if ($result.ok -ne $true) {
         throw "Video Trim v1 smoke returned a failing result: $($result | ConvertTo-Json -Depth 10 -Compress)"
+    }
+    if ($null -ne $pairedJobFullPath -and
+        ($result.pairedJobChecked -ne $true -or
+            $result.pairedJobExact -ne $true)) {
+        throw 'The paired Video Trim Job did not pass the exact WPF reader regression.'
     }
     $result | ConvertTo-Json -Depth 10
 }

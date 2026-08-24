@@ -102,13 +102,13 @@
       "contractId": "PV-ENHANCE-VIDEO-TOOLS-002",
       "path": "contracts/enhancement-video-tools-v2.json",
       "scope": "Reader-first source-video Edit and spatial Video Finish protocol",
-      "sha256": "eee8bc37402923717936576402357d93d8150b7f6874852f8a0e18dde3e33eb7"
+      "sha256": "6a647819e675bfb8c4367290c0e015929f50d6e79d3dc4b757244b7a90c6cf26"
     },
     {
       "contractId": "PV-ENHANCE-VIDEO-TRIM-001",
       "path": "contracts/enhancement-video-trim-v1.json",
       "scope": "Reader-first non-AI exact-frame Video Trim and export protocol",
-      "sha256": "11686813d4b18791d7895f08e272c41ac9567790ad4cc7c41eed17e1d18591c5"
+      "sha256": "f0e2b48c06c78a04ec64cb70bd36f03c8ed1f65a89ce31551cd34e225bfe3c40"
     },
     {
       "contractId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001",
@@ -166,13 +166,13 @@
       "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
       "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
       "path": "contracts/fixtures/enhancement-video-tools-v2-reader-v1.json",
-      "sha256": "5944bee764d363d95aaa67f79444511eabc2aebaca90bccd2a88b2e095685c5a"
+      "sha256": "c5631834efcf408b81b321fd9f40a07afb5ec977a564c080a335fae0eb9eea2a"
     },
     {
       "fixtureId": "PV-ENHANCE-VIDEO-TRIM-001-READER-FIXTURES",
       "forContractId": "PV-ENHANCE-VIDEO-TRIM-001",
       "path": "contracts/fixtures/enhancement-video-trim-v1-reader-v1.json",
-      "sha256": "26fe5dff0ce823656d07db43bf610f8c76e5e0cb5beb9d270b3b893ef9808996"
+      "sha256": "65d74368293fff2a65d730ad1fa1d2cd3f32a200179ab0eaa6db738991582ec8"
     }
   ],
   "verificationBundles": [

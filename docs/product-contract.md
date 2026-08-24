@@ -562,13 +562,32 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   delete, recovery, publication, frame delivery, audio semantics, readiness,
   and receipts remain its own exact meanings.
 - A supported durable Video Trim Job retains one immutable exact `videoTrim`
-  snapshot through `queued`, `running`, `succeeded`, `failed`, and `canceled`.
+  snapshot through `queued`, `running`, `succeeded`, `failed`, `canceled`, and
+  `deleted`.
   Its source, request, rational frame plan, AAC-or-mute policy, expected exact
   frame delivery, PTS digest, and ownership bindings do not change across
   states. Delivery becomes an available managed child only after a succeeded
   row also carries the reopened validated output identity. Malformed and future
   Job claims preserve compatible unknown fields and remain reader-only with no
-  retry, cancel, delete, recovery, execution, or publication action.
+  retry, cancel, delete, recovery, execution, or publication action. A
+  successful output deletion retains an exact dismissible `deleted` history
+  row without output, error, queue, run, or worker identity.
+  Known attempt and worker fields are accepted only on a running row; their
+  presence on queued or terminal rows is lifecycle drift and makes that row
+  reader-only. Compatible unknown fields remain preserved.
+  The private execution `sourcePath` is ordinal-exact to the immutable
+  execution snapshot. Queue and external process integers use signed Int32
+  bounds, while failed error text follows the public technical/control-free
+  reader rules without private normalization shortcuts.
+  Lifecycle timestamps use the writer's exact four-digit-year, three-digit
+  millisecond UTC form. Running IDs are bounded control-free text and running
+  diagnostics use the same 32,768-code-unit stable-JSON bound in both readers.
+  `sourceId` is bounded control-free text and, for staged displayed sources,
+  is ordinal-exact to the immutable original canonical path.
+  Recognized JSON numbers are finite and lossless, integers first remain in the
+  JavaScript safe exact range, and only mathematically identical stable exponent
+  spelling is compatible; rounded high-precision and underflow tokens fail
+  closed as reader-only.
 - `capabilities.videoTrimV1` is passive and reader-ready, while the current
   runtime, source-inspection route, writer, ready advertisement, live receipts,
   and quality assertion remain false. Isolated synthetic TEMP route fixtures

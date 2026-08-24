@@ -4,6 +4,7 @@ param(
     [switch]$SkipBuild,
     [switch]$StaticOnly,
     [switch]$NoRestore,
+    [string]$PairedJobsPath = '',
     [ValidateRange(10, 120)]
     [int]$OverallTimeoutSeconds = 60
 )
@@ -40,7 +41,7 @@ foreach ($requiredPath in @(
 }
 
 $fixtureHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fixturePath).Hash.ToLowerInvariant()
-if ($fixtureHash -cne '5944bee764d363d95aaa67f79444511eabc2aebaca90bccd2a88b2e095685c5a') {
+if ($fixtureHash -cne 'c5631834efcf408b81b321fd9f40a07afb5ec977a564c080a335fae0eb9eea2a') {
     throw "Unexpected Video Tools v2 fixture hash: $fixtureHash"
 }
 
@@ -98,6 +99,10 @@ foreach ($token in @(
     'editLifecycle',
     'finishLifecycle',
     'knownLifecycleEnabled',
+    'exactLifecycleProtection',
+    'fixtureLifecycleVectorsExact',
+    'pairedPrivateJobsExact',
+    'pairedPrivateSqliteJobsExact',
     'lifecyclePresentationExact',
     'existingLifecycleRegression',
     'passiveRead')) {
@@ -144,6 +149,14 @@ if ($StaticOnly) {
 
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
+$resolvedPairedJobsPath = $null
+if (-not [string]::IsNullOrWhiteSpace($PairedJobsPath)) {
+    $resolvedPairedJobsPath = [IO.Path]::GetFullPath($PairedJobsPath)
+    if (-not $resolvedPairedJobsPath.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) `
+        -or -not (Test-Path -LiteralPath $resolvedPairedJobsPath -PathType Leaf)) {
+        throw 'Paired Video Tools v2 Job bridge must be one existing TEMP file.'
+    }
+}
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot (
     'aibos-wpf-video-tools-v2-reader-' + [guid]::NewGuid().ToString('N'))))
 $buildRoot = Join-Path $runRoot 'build'
@@ -198,16 +211,22 @@ try {
         throw 'Built WPF DLL was not found.'
     }
 
+    $smokeArguments = @(
+        ('"{0}"' -f $dll),
+        '--video-tools-v2-reader-smoke',
+        ('"{0}"' -f $resultPath),
+        '--fixture',
+        ('"{0}"' -f $fixturePath),
+        '--v1-fixture',
+        ('"{0}"' -f $v1FixturePath))
+    if ($resolvedPairedJobsPath) {
+        $smokeArguments += @(
+            '--paired-jobs',
+            ('"{0}"' -f $resolvedPairedJobsPath))
+    }
     $process = Start-Process `
         -FilePath $dotNetExecutable `
-        -ArgumentList @(
-            ('"{0}"' -f $dll),
-            '--video-tools-v2-reader-smoke',
-            ('"{0}"' -f $resultPath),
-            '--fixture',
-            ('"{0}"' -f $fixturePath),
-            '--v1-fixture',
-            ('"{0}"' -f $v1FixturePath)) `
+        -ArgumentList $smokeArguments `
         -RedirectStandardOutput $stdoutPath `
         -RedirectStandardError $stderrPath `
         -WindowStyle Hidden `
@@ -251,9 +270,17 @@ try {
         'editLifecycle',
         'finishLifecycle',
         'knownLifecycleEnabled',
+        'exactLifecycleProtection',
+        'fixtureLifecycleVectorsExact',
         'lifecyclePresentationExact',
         'existingLifecycleRegression',
         'passiveRead')
+    if ($resolvedPairedJobsPath) {
+        $required += @(
+            'pairedPrivateJobsExact',
+            'pairedPrivateSqliteJobsExact'
+        )
+    }
     $failed = @($required | Where-Object { $result.$_ -ne $true })
     if ($processExitCode -ne 0 -or $result.ok -ne $true -or $failed.Count -gt 0) {
         throw ('WPF Video Tools v2 reader smoke failed: ' +

@@ -24,6 +24,9 @@ public partial class App
             string v1FixturePath = RequireVideoToolsV2ReaderArgument(
                 args,
                 "--v1-fixture");
+            string? pairedJobsPath = OptionalVideoToolsV2ReaderArgument(
+                args,
+                "--paired-jobs");
             byte[] fixtureBefore = File.ReadAllBytes(fixturePath);
             byte[] v1FixtureBefore = File.ReadAllBytes(v1FixturePath);
             using JsonDocument fixtureDocument = JsonDocument.Parse(
@@ -34,6 +37,14 @@ public partial class App
                 .GetProperty("readerFixtures");
             JsonElement editFixture = fixtures.GetProperty("edit");
             JsonElement finishFixture = fixtures.GetProperty("finish");
+            JsonElement durableReaderStateVectors = fixtureDocument
+                .RootElement
+                .GetProperty("durableReaderStateVectors");
+            bool pairedPrivateSqliteJobsExact = pairedJobsPath is null;
+            bool pairedPrivateJobsExact = pairedJobsPath is null
+                || ReadPairedVideoToolsV2Jobs(
+                    pairedJobsPath,
+                    out pairedPrivateSqliteJobsExact);
 
             using JsonDocument edit = CreateVideoToolsV2WorkspaceJob(
                 editFixture,
@@ -111,6 +122,10 @@ public partial class App
                 editFixture,
                 "44444444-5555-4666-8777-888888888884",
                 "canceled");
+            using JsonDocument editDeleted = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "44444444-5555-4666-8777-888888888885",
+                "deleted");
             using JsonDocument finishQueued = CreateVideoToolsV2WorkspaceJob(
                 finishFixture,
                 "55555555-6666-4777-8888-999999999991",
@@ -127,6 +142,10 @@ public partial class App
                 finishFixture,
                 "55555555-6666-4777-8888-999999999994",
                 "canceled");
+            using JsonDocument finishDeleted = CreateVideoToolsV2WorkspaceJob(
+                finishFixture,
+                "55555555-6666-4777-8888-999999999995",
+                "deleted");
 
             EnhancementJobLifecycleSmokeSnapshot? editQueuedLifecycle =
                 PhotoViewer.Wpf.MainWindow
@@ -147,6 +166,10 @@ public partial class App
             EnhancementJobLifecycleSmokeSnapshot? editSucceededLifecycle =
                 PhotoViewer.Wpf.MainWindow
                     .ReadEnhancementJobLifecycleForSmoke(edit.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? editDeletedLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        editDeleted.RootElement);
             EnhancementJobLifecycleSmokeSnapshot? finishQueuedLifecycle =
                 PhotoViewer.Wpf.MainWindow
                     .ReadEnhancementJobLifecycleForSmoke(
@@ -166,6 +189,10 @@ public partial class App
             EnhancementJobLifecycleSmokeSnapshot? finishSucceededLifecycle =
                 PhotoViewer.Wpf.MainWindow
                     .ReadEnhancementJobLifecycleForSmoke(finish.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? finishDeletedLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        finishDeleted.RootElement);
 
             bool editLifecycle = IsExpectedCurrentV2Lifecycle(
                     editQueuedLifecycle,
@@ -211,7 +238,16 @@ public partial class App
                     canDismiss: false,
                     canReorder: false,
                     canDeleteOutput: true,
-                    ["open-output", "delete-output"]);
+                    ["open-output", "delete-output"])
+                && IsExpectedCurrentV2Lifecycle(
+                    editDeletedLifecycle,
+                    "edit",
+                    canCancel: false,
+                    canRetry: false,
+                    canDismiss: true,
+                    canReorder: false,
+                    canDeleteOutput: false,
+                    ["dismiss"]);
             bool finishLifecycle = IsExpectedCurrentV2Lifecycle(
                     finishQueuedLifecycle,
                     "finish",
@@ -256,8 +292,55 @@ public partial class App
                     canDismiss: false,
                     canReorder: false,
                     canDeleteOutput: true,
-                    ["open-output", "delete-output"]);
+                    ["open-output", "delete-output"])
+                && IsExpectedCurrentV2Lifecycle(
+                    finishDeletedLifecycle,
+                    "finish",
+                    canCancel: false,
+                    canRetry: false,
+                    canDismiss: true,
+                    canReorder: false,
+                    canDeleteOutput: false,
+                    ["dismiss"]);
             bool knownLifecycleEnabled = editLifecycle && finishLifecycle;
+
+            bool exactLifecycleProtection = new (string Status, Action<JsonObject> Mutate)[]
+                {
+                    ("queued", job => job.Remove("cancelRequested")),
+                    ("queued", job => job["progress"] = 1),
+                    ("running", job => job["cancelRequested"] = true),
+                    ("running", job => job["queueOrder"] = 0),
+                    ("running", job => job.Remove("workerInstanceId")),
+                    ("succeeded", job => job.Remove("outputSha256")),
+                    ("failed", job => job.Remove("errorCode")),
+                    ("canceled", job => job["cancelRequested"] = false),
+                    ("deleted", job => job["outputPath"] = @"C:\stale.mp4"),
+                    ("failed", job => job["finishedAt"] = "2026-08-24T00:00:00Z"),
+                }
+                .Select((entry, index) =>
+                {
+                    using JsonDocument malformed =
+                        CreateVideoToolsV2WorkspaceJob(
+                            editFixture,
+                            $"66666666-7777-4888-8999-{index:D12}",
+                            entry.Status,
+                            mutateJob: entry.Mutate);
+                    return IsProtectedV2ReaderRow(malformed.RootElement);
+                })
+                .All(static protectedRow => protectedRow);
+            bool fixtureEditLifecycleVectorsExact =
+                DurableReaderStateVectorsAreExact(
+                    durableReaderStateVectors.GetProperty("edit"),
+                    editFixture,
+                    "edit");
+            bool fixtureFinishLifecycleVectorsExact =
+                DurableReaderStateVectorsAreExact(
+                    durableReaderStateVectors.GetProperty("finish"),
+                    finishFixture,
+                    "finish");
+            bool fixtureLifecycleVectorsExact =
+                fixtureEditLifecycleVectorsExact
+                && fixtureFinishLifecycleVectorsExact;
 
             bool detailsExact = editRequestDetails.Contains(
                     "入力依存: 管理動画 Job 11111111-2222-4333-8444-555555555555",
@@ -438,8 +521,16 @@ public partial class App
                             @"c:/synthetic/video/child/../source.mp4";
                     },
                     refreshPresetHash: true);
+            using JsonDocument sourcePathCaseDrift =
+                CreateVideoToolsV2WorkspaceJob(
+                    finishFixture,
+                    "12345678-0000-4000-8000-000000000011",
+                    "queued",
+                    mutateJob: job => job["sourcePath"] =
+                        job["sourcePath"]!.GetValue<string>().ToUpperInvariant());
             bool lexicalPathIdentityProtected = IsProtectedV2ReaderRow(
-                lexicalSameStagedPaths.RootElement);
+                lexicalSameStagedPaths.RootElement)
+                && IsProtectedV2ReaderRow(sourcePathCaseDrift.RootElement);
 
             using JsonDocument ecmaTrimPositive =
                 CreateVideoToolsV2WorkspaceJob(
@@ -816,7 +907,13 @@ public partial class App
             bool kindPanelFromNonVideo =
                 window.EnhancementJobsVideoKindPanelVisibleForSmoke
                 && window.EnhancementJobsVideoKindFilterOrderForSmoke
-                    .SequenceEqual(["all", "generation", "edit", "finish"]);
+                    .SequenceEqual([
+                        "all",
+                        "generation",
+                        "edit",
+                        "trim",
+                        "finish",
+                    ]);
             window.SelectEnhancementJobsVideoKindFilterForSmoke("edit");
             bool kindSelectionSwitchesToVideo =
                 window.EnhancementJobsOperationFilterForSmoke == "video"
@@ -885,6 +982,7 @@ public partial class App
 
             ok = exactEdit
                 && exactFinish
+                && pairedPrivateJobsExact
                 && detailsExact
                 && nestedExtraRejected
                 && duplicateRejected
@@ -901,6 +999,8 @@ public partial class App
                 && v1MeaningPreserved
                 && kindFiltersExact
                 && knownLifecycleEnabled
+                && exactLifecycleProtection
+                && fixtureLifecycleVectorsExact
                 && lifecyclePresentationExact
                 && existingLifecycleRegression
                 && passiveRead;
@@ -909,6 +1009,8 @@ public partial class App
                 ok,
                 exactEdit,
                 exactFinish,
+                pairedPrivateJobsExact,
+                pairedPrivateSqliteJobsExact,
                 detailsExact,
                 nestedExtraRejected,
                 duplicateRejected,
@@ -930,6 +1032,10 @@ public partial class App
                 editLifecycle,
                 finishLifecycle,
                 knownLifecycleEnabled,
+                exactLifecycleProtection,
+                fixtureEditLifecycleVectorsExact,
+                fixtureFinishLifecycleVectorsExact,
+                fixtureLifecycleVectorsExact,
                 lifecyclePresentationExact,
                 existingLifecycleRegression,
                 passiveRead,
@@ -1041,6 +1147,197 @@ public partial class App
                 visibleActions,
                 StringComparer.Ordinal);
 
+    private static bool DurableReaderStateVectorsAreExact(
+        JsonElement vectors,
+        JsonElement fixture,
+        string expectedKind)
+    {
+        JsonElement valid = vectors.GetProperty("valid");
+        JsonElement readerOnly = vectors.GetProperty("readerOnly");
+        string[] expectedValid =
+            ["queued", "running", "succeeded", "failed", "canceled", "deleted"];
+        string[] expectedReaderOnly = expectedKind == "edit"
+            ? [
+                "runningCancellationTransient",
+                "succeededMissingOutputSha256",
+                "runningUnicodeRunId",
+                "runningInternalWhitespaceRunId",
+                "runningExternalPromptId129",
+                "runningExternalProcessIdOverflow",
+                "extendedYearTimestamp",
+                "lossyQueueOrderToken",
+                "succeededRelativeOutputPath",
+                "succeededWrongJobOutputPath",
+                "futureSnapshotVersion",
+            ]
+            : [
+                "runningCancellationTransient",
+                "succeededMissingOutputSha256",
+                "futureSnapshotVersion",
+            ];
+        if (!valid.EnumerateObject().Select(static item => item.Name)
+                .SequenceEqual(expectedValid, StringComparer.Ordinal)
+            || !readerOnly.EnumerateObject().Select(static item => item.Name)
+                .SequenceEqual(expectedReaderOnly, StringComparer.Ordinal)
+            || vectors.GetProperty("sourceEnvelopeReaderOnly")
+                .GetProperty("topLevelSourcePathTransform")
+                .GetString() != "uppercase")
+        {
+            return false;
+        }
+
+        int vectorIndex = 0;
+        foreach (JsonProperty vector in valid.EnumerateObject())
+        {
+            using JsonDocument job =
+                CreateVideoToolsV2WorkspaceJobFromLifecycleVector(
+                    fixture,
+                    $"88888888-0000-4000-8000-{vectorIndex++:D12}",
+                    vector.Value);
+            if (!PhotoViewer.Wpf.MainWindow
+                    .TryReadVideoToolsV2WorkspacePresentationForSmoke(
+                        job.RootElement,
+                        out string kind,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out bool supportedMutation,
+                        out _,
+                        out _)
+                || kind != expectedKind
+                || !supportedMutation)
+            {
+                return false;
+            }
+        }
+
+        foreach (JsonProperty vector in readerOnly.EnumerateObject())
+        {
+            JsonElement lifecycle = vector.Name == "futureSnapshotVersion"
+                ? vector.Value.GetProperty("lifecycle")
+                : vector.Value;
+            using JsonDocument job =
+                CreateVideoToolsV2WorkspaceJobFromLifecycleVector(
+                    fixture,
+                    $"99999999-0000-4000-8000-{vectorIndex++:D12}",
+                    lifecycle);
+            if (vector.Name != "futureSnapshotVersion")
+            {
+                if (!IsProtectedV2ReaderRow(job.RootElement))
+                {
+                    return false;
+                }
+                continue;
+            }
+            JsonObject future = JsonNode.Parse(job.RootElement.GetRawText())!
+                .AsObject();
+            future["video"]!["schemaVersion"] =
+                vector.Value.GetProperty("videoSchemaVersion").GetInt32();
+            using JsonDocument futureVideo = JsonDocument.Parse(
+                future["video"]!.ToJsonString());
+            future["presetHash"] = PhotoViewer.Wpf.MainWindow
+                .ComputeVideoToolsSnapshotHashForSmoke(
+                    futureVideo.RootElement);
+            using JsonDocument futureDocument = JsonDocument.Parse(
+                future.ToJsonString());
+            if (!IsProtectedV2ReaderRow(futureDocument.RootElement))
+            {
+                return false;
+            }
+        }
+
+        using JsonDocument queued =
+            CreateVideoToolsV2WorkspaceJobFromLifecycleVector(
+                fixture,
+                "aaaaaaaa-0000-4000-8000-000000000001",
+                valid.GetProperty("queued"));
+        JsonObject sourceDrift = JsonNode.Parse(
+                queued.RootElement.GetRawText())!
+            .AsObject();
+        sourceDrift["sourcePath"] = sourceDrift["sourcePath"]!
+            .GetValue<string>()
+            .ToUpperInvariant();
+        using JsonDocument sourceDriftDocument = JsonDocument.Parse(
+            sourceDrift.ToJsonString());
+        if (!IsProtectedV2ReaderRow(sourceDriftDocument.RootElement))
+            return false;
+
+        if (expectedKind != "edit")
+            return true;
+        JsonElement sourceVectors = vectors.GetProperty(
+            "sourceEnvelopeReaderOnly");
+        foreach (string propertyName in new[]
+        {
+            "snapshotRelativePath",
+            "snapshotWrongExtension",
+            "snapshotControlPath",
+        })
+        {
+            JsonObject malformed = JsonNode.Parse(
+                    queued.RootElement.GetRawText())!
+                .AsObject();
+            JsonNode source = malformed["video"]!["source"]!;
+            string malformedPath = sourceVectors
+                .GetProperty(propertyName)
+                .GetString()!;
+            source["canonicalPath"] = malformedPath;
+            malformed["sourcePath"] = malformedPath;
+            using JsonDocument malformedVideo = JsonDocument.Parse(
+                malformed["video"]!.ToJsonString());
+            malformed["presetHash"] = PhotoViewer.Wpf.MainWindow
+                .ComputeVideoToolsSnapshotHashForSmoke(
+                    malformedVideo.RootElement);
+            using JsonDocument malformedDocument = JsonDocument.Parse(
+                malformed.ToJsonString());
+            if (!IsProtectedV2ReaderRow(malformedDocument.RootElement))
+                return false;
+        }
+        return true;
+    }
+
+    private static JsonDocument CreateVideoToolsV2WorkspaceJobFromLifecycleVector(
+        JsonElement fixture,
+        string id,
+        JsonElement lifecycle)
+    {
+        using JsonDocument exactEnvelope = CreateVideoToolsV2WorkspaceJob(
+            fixture,
+            id,
+            "queued");
+        JsonObject job = JsonNode.Parse(
+                exactEnvelope.RootElement.GetRawText())!
+            .AsObject();
+        foreach (string field in new[]
+        {
+            "status", "progress", "cancelRequested", "queueOrder",
+            "createdAt", "updatedAt", "startedAt", "finishedAt",
+            "runId", "workerInstanceId", "lastHeartbeatAt", "lastProgressAt",
+            "externalPromptId", "externalProcessId", "diagnostics",
+            "outputPath", "outputSha256", "outputBytes",
+            "errorCode", "errorMessage",
+        })
+        {
+            job.Remove(field);
+        }
+        foreach (JsonProperty property in lifecycle.EnumerateObject())
+        {
+            if (property.NameEquals("outputPath")
+                && property.Value.ValueKind == JsonValueKind.String)
+            {
+                job[property.Name] = property.Value.GetString()!
+                    .Replace("${JOB_ID}", id, StringComparison.Ordinal);
+            }
+            else
+            {
+                job[property.Name] = JsonNode.Parse(
+                    property.Value.GetRawText());
+            }
+        }
+        return JsonDocument.Parse(job.ToJsonString());
+    }
+
     private static JsonDocument CreateVideoToolsV2WorkspaceJob(
         JsonElement fixture,
         string id,
@@ -1066,17 +1363,132 @@ public partial class App
         }
         job["id"] = id;
         job["status"] = status;
-        job["progress"] = status == "succeeded" ? 100 : 0;
+        job["progress"] = status is "succeeded" or "deleted"
+            ? 100
+            : status == "running"
+                ? 50
+                : status is "failed" or "canceled"
+                    ? 40
+                    : 0;
+        job["cancelRequested"] = status == "canceled";
         job["createdAt"] = "2026-08-24T00:00:00.000Z";
         job["updatedAt"] = "2026-08-24T00:00:01.000Z";
+        JsonObject source = video["source"]!.AsObject();
+        bool managed = string.Equals(
+            source["kind"]!.GetValue<string>(),
+            "managed-video-job",
+            StringComparison.Ordinal);
+        job["sourcePath"] = managed
+            ? source["canonicalPath"]!.DeepClone()
+            : source["stagingCanonicalPath"]!.DeepClone();
+        job["sourceSignature"] = managed
+            ? source["signature"]!.DeepClone()
+            : source["stagingSignature"]!.DeepClone();
+        job["sourceSha256"] = managed
+            ? source["sha256"]!.DeepClone()
+            : source["stagingSha256"]!.DeepClone();
+        string kind = video["kind"]!.GetValue<string>();
+        string backendId = video["backendId"]!.GetValue<string>();
+        int scale = kind == "finish"
+            ? video["requested"]!["scale"]!.GetValue<int>()
+            : 1;
+        job["preset"] = new JsonObject
+        {
+            ["id"] = video["presetId"]!.DeepClone(),
+            ["label"] = kind == "edit"
+                ? "Aibos Video Edit v2"
+                : "Aibos Video Finish v2",
+            ["modelFamily"] = "general",
+            ["modelName"] = backendId,
+            ["scale"] = scale,
+            ["outputFormat"] = "png",
+            ["denoise"] = 0,
+            ["sharpen"] = 0,
+            ["detail"] = 0,
+            ["smoothness"] = 0,
+            ["colorBrightness"] = 0,
+            ["colorContrast"] = 0,
+            ["colorSaturation"] = 0,
+            ["options"] = new JsonObject
+            {
+                ["backendId"] = backendId,
+                ["protocol"] = "aibos-enhancement-video-tools-v2",
+                ["kind"] = kind,
+                ["container"] = "mp4",
+            },
+        };
+        if (status == "queued")
+        {
+            job["queueOrder"] = 2;
+        }
+        else
+        {
+            job["startedAt"] = "2026-08-24T00:00:00.250Z";
+        }
+        if (status == "running")
+        {
+            job["runId"] = $"run-{id}";
+            job["workerInstanceId"] = "synthetic-video-tools-worker";
+            job["lastHeartbeatAt"] = "2026-08-24T00:00:00.750Z";
+        }
         if (status == "succeeded")
         {
-            job["outputPath"] =
-                $@"C:\synthetic\Videos\2026-08-24\{id}.mp4";
+            job["outputPath"] = BuildSyntheticVideoToolsV2OutputPath(
+                job,
+                video,
+                id);
+            job["outputSha256"] = "a".PadLeft(64, 'a');
+            job["outputBytes"] = 1_024;
+            job["finishedAt"] = "2026-08-24T00:00:00.900Z";
+        }
+        else if (status == "failed")
+        {
+            job["errorCode"] = "VIDEO_TOOLS_SYNTHETIC_FAILURE";
+            job["errorMessage"] = "Synthetic Video Tools failure.";
+            job["finishedAt"] = "2026-08-24T00:00:00.900Z";
+        }
+        else if (status is "canceled" or "deleted")
+        {
+            job["finishedAt"] = "2026-08-24T00:00:00.900Z";
         }
         job["video"] = video;
         mutateJob?.Invoke(job);
         return JsonDocument.Parse(job.ToJsonString());
+    }
+
+    private static string BuildSyntheticVideoToolsV2OutputPath(
+        JsonObject job,
+        JsonObject video,
+        string id)
+    {
+        JsonObject source = video["source"]!.AsObject();
+        string displayPath = source["kind"]!.GetValue<string>()
+            == "managed-video-job"
+            ? source["canonicalPath"]!.GetValue<string>()
+            : source["originalCanonicalPath"]!.GetValue<string>();
+        string safeBase = string.Concat(
+                Path.GetFileNameWithoutExtension(displayPath)
+                    .Select(static character => character is '<' or '>'
+                            or ':' or '"' or '/' or '\\' or '|' or '?'
+                            or '*' or <= '\x1f'
+                        ? '_'
+                        : character))
+            [..Math.Min(
+                64,
+                Path.GetFileNameWithoutExtension(displayPath).Length)];
+        if (safeBase.Length == 0)
+            safeBase = "image";
+        string filename = string.Join(
+            "__",
+            id,
+            safeBase,
+            job["sourceSha256"]!.GetValue<string>()[..16],
+            video["presetId"]!.GetValue<string>(),
+            video["backendId"]!.GetValue<string>(),
+            job["presetHash"]!.GetValue<string>()) + ".mp4";
+        return Path.Combine(
+            @"C:\AibosSynthetic\Videos\2026-08-24",
+            filename);
     }
 
     private static bool IsProtectedV2AudioMutation(
@@ -1115,16 +1527,16 @@ public partial class App
         string rawVideo)
     {
         using JsonDocument videoDocument = JsonDocument.Parse(rawVideo);
+        using JsonDocument exactEnvelope = CreateVideoToolsV2WorkspaceJob(
+            fixture,
+            id,
+            status);
         JsonObject job = JsonNode.Parse(
-                fixture.GetProperty("job").GetRawText())!
+                exactEnvelope.RootElement.GetRawText())!
             .AsObject();
+        job.Remove("video");
         job["presetHash"] = PhotoViewer.Wpf.MainWindow
             .ComputeVideoToolsSnapshotHashForSmoke(videoDocument.RootElement);
-        job["id"] = id;
-        job["status"] = status;
-        job["progress"] = 0;
-        job["createdAt"] = "2026-08-24T00:00:00.000Z";
-        job["updatedAt"] = "2026-08-24T00:00:01.000Z";
         string jobJson = job.ToJsonString();
         return JsonDocument.Parse(
             jobJson[..^1] + ",\"video\":" + rawVideo + "}");
@@ -1167,6 +1579,144 @@ public partial class App
               "updatedAt": "2026-08-24T00:00:01.000Z"
             }
             """);
+
+    private static bool ReadPairedVideoToolsV2Jobs(
+        string pairedJobsPath,
+        out bool sqliteExact)
+    {
+        sqliteExact = false;
+        byte[] before = File.ReadAllBytes(pairedJobsPath);
+        using JsonDocument document = JsonDocument.Parse(before);
+        JsonElement root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("edit", out JsonElement edit)
+            || !root.TryGetProperty("finish", out JsonElement finish)
+            || !root.TryGetProperty("sqlite", out JsonElement sqlite)
+            || !PhotoViewer.Wpf.MainWindow
+                .TryReadVideoToolsV2WorkspacePresentationForSmoke(
+                    edit,
+                    out string editKind,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out bool editMutation,
+                    out _,
+                    out _)
+            || editKind != "edit"
+            || !editMutation
+            || !PhotoViewer.Wpf.MainWindow
+                .TryReadVideoToolsV2WorkspacePresentationForSmoke(
+                    finish,
+                    out string finishKind,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out bool finishMutation,
+                    out _,
+                    out _)
+            || finishKind != "finish"
+            || !finishMutation
+            || !PairedVideoToolsV2CaseDriftIsProtected(edit)
+            || !(sqliteExact = PairedSqliteVideoToolsV2JobsAreExact(sqlite)))
+        {
+            return false;
+        }
+        return before.AsSpan().SequenceEqual(File.ReadAllBytes(pairedJobsPath));
+    }
+
+    private static bool PairedSqliteVideoToolsV2JobsAreExact(
+        JsonElement sqlite)
+    {
+        foreach (string kind in new[] { "edit", "finish" })
+        {
+            if (!sqlite.TryGetProperty(kind, out JsonElement states))
+                return false;
+            foreach (string status in new[]
+            {
+                "queued", "running", "succeeded", "failed", "canceled", "deleted",
+            })
+            {
+                if (!states.TryGetProperty(status, out JsonElement job)
+                    || !PhotoViewer.Wpf.MainWindow
+                        .TryReadVideoToolsV2WorkspacePresentationForSmoke(
+                            job,
+                            out string readerKind,
+                            out _,
+                            out _,
+                            out _,
+                            out _,
+                            out _,
+                            out bool supportedMutation,
+                            out _,
+                            out _)
+                    || readerKind != kind
+                    || !supportedMutation)
+                {
+                    return false;
+                }
+                EnhancementJobLifecycleSmokeSnapshot? lifecycle =
+                    PhotoViewer.Wpf.MainWindow
+                        .ReadEnhancementJobLifecycleForSmoke(job);
+                if (lifecycle is not
+                    {
+                        ExactCurrentVideoToolsV2: true,
+                        ReaderOnly: false,
+                        SupportedMutation: true,
+                    })
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static bool PairedVideoToolsV2CaseDriftIsProtected(
+        JsonElement job)
+    {
+        JsonObject pathDrift = JsonNode.Parse(job.GetRawText())!.AsObject();
+        pathDrift["sourcePath"] = pathDrift["sourcePath"]!
+            .GetValue<string>()
+            .ToUpperInvariant();
+        using JsonDocument pathDocument = JsonDocument.Parse(
+            pathDrift.ToJsonString());
+        if (!IsProtectedV2ReaderRow(pathDocument.RootElement))
+            return false;
+        if (!job.TryGetProperty(
+                "sourceVideoJobId",
+                out JsonElement sourceVideoJobId)
+            || sourceVideoJobId.ValueKind != JsonValueKind.String)
+        {
+            return true;
+        }
+        string original = sourceVideoJobId.GetString()!;
+        string upper = original.ToUpperInvariant();
+        if (string.Equals(original, upper, StringComparison.Ordinal))
+            return false;
+        JsonObject dependencyDrift = JsonNode.Parse(
+                job.GetRawText())!
+            .AsObject();
+        dependencyDrift["sourceVideoJobId"] = upper;
+        using JsonDocument dependencyDocument = JsonDocument.Parse(
+            dependencyDrift.ToJsonString());
+        return IsProtectedV2ReaderRow(dependencyDocument.RootElement);
+    }
+
+    private static string? OptionalVideoToolsV2ReaderArgument(
+        string[] args,
+        string name)
+    {
+        int index = Array.IndexOf(args, name);
+        return index >= 0
+            && index + 1 < args.Length
+            && !string.IsNullOrWhiteSpace(args[index + 1])
+            ? Path.GetFullPath(args[index + 1])
+            : null;
+    }
 
     private static string RequireVideoToolsV2ReaderArgument(
         string[] args,

@@ -3171,7 +3171,7 @@ public partial class MainWindow
         using SqliteTransaction transaction = connection.BeginTransaction(deferred: true);
         _ = ReadEnhancementCatalogRevision(connection, transaction);
         EnhancementWorkspaceStatusCounts counts =
-            ReadEnhancementWorkspaceStatusCounts(connection, transaction);
+            ReadEnhancementWorkspaceStatusCounts(connection, transaction, token);
 
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -3326,15 +3326,19 @@ public partial class MainWindow
     private static EnhancementWorkspaceStatusCounts
         ReadEnhancementWorkspaceStatusCounts(
             SqliteConnection connection,
-            SqliteTransaction transaction)
+            SqliteTransaction transaction,
+            CancellationToken token)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT status, COUNT(*)
+            SELECT status
             FROM enhancement_jobs
-            GROUP BY status
+            LIMIT $maximumRowsPlusOne
             """;
+        command.Parameters.AddWithValue(
+            "$maximumRowsPlusOne",
+            checked(EnhancementJobsWorkspaceMaximumRows + 1));
         using SqliteDataReader reader = command.ExecuteReader();
         int queued = 0;
         int running = 0;
@@ -3345,40 +3349,38 @@ public partial class MainWindow
         long total = 0;
         while (reader.Read())
         {
-            string status = ReadRequiredSqliteText(reader, 0, "job status");
-            long count = ReadRequiredSqliteInteger(reader, 1, "job status count");
-            if (count < 0
-                || total > EnhancementJobsWorkspaceMaximumRows - count)
+            token.ThrowIfCancellationRequested();
+            if (total >= EnhancementJobsWorkspaceMaximumRows)
             {
                 throw new InvalidDataException(
                     "The Jobs workspace SQLite inventory exceeds the safe row limit.");
             }
-            int bounded = checked((int)count);
+            string status = ReadRequiredSqliteText(reader, 0, "job status");
             switch (status)
             {
                 case "queued":
-                    queued = bounded;
+                    queued++;
                     break;
                 case "running":
-                    running = bounded;
+                    running++;
                     break;
                 case "succeeded":
-                    succeeded = bounded;
+                    succeeded++;
                     break;
                 case "failed":
-                    failed = bounded;
+                    failed++;
                     break;
                 case "canceled":
-                    canceled = bounded;
+                    canceled++;
                     break;
                 case "deleted":
-                    deleted = bounded;
+                    deleted++;
                     break;
                 default:
                     throw new InvalidDataException(
                         "The Jobs workspace SQLite inventory contains an unsupported status.");
             }
-            total += count;
+            total++;
         }
         return new EnhancementWorkspaceStatusCounts(
             queued,
