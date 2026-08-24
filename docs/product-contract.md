@@ -533,6 +533,16 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   selection may use the full bounded source and is not limited to 15 seconds.
   Time labels and thumbnails are presentation only; persisted frame indices and
   checked rational source fps are execution authority.
+- Exact frame controls use the separate authenticated transient Video Trim
+  source-inspection route only after an explicit user action. `probe` returns
+  exact frame count, rational fps and duration, dimensions, rational video time
+  base, start timestamp, and the complete source PTS digest. `preview`
+  revalidates that exact source identity and one current half-open selection,
+  then returns bounded PNGs for three distinct server-verified start, middle,
+  and end frames. A selection change makes those previews stale. Probe and
+  preview never create or mutate a Job or inbox item, stage a source, wake or
+  claim the queue, start a worker, or create output. They are not Video Tools
+  Edit prompt compilation, and thumbnails are never frame-selection authority.
 - The result is one new non-destructive managed child MP4 containing exactly
   the selected frame count at source rational fps, with zero-origin relative
   PTS and a persisted full PTS digest. Version 1 deliberately re-encodes video
@@ -551,11 +561,21 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   attempt-journal framework, and managed output ownership; retry, cancel,
   delete, recovery, publication, frame delivery, audio semantics, readiness,
   and receipts remain its own exact meanings.
+- A supported durable Video Trim Job retains one immutable exact `videoTrim`
+  snapshot through `queued`, `running`, `succeeded`, `failed`, and `canceled`.
+  Its source, request, rational frame plan, AAC-or-mute policy, expected exact
+  frame delivery, PTS digest, and ownership bindings do not change across
+  states. Delivery becomes an available managed child only after a succeeded
+  row also carries the reopened validated output identity. Malformed and future
+  Job claims preserve compatible unknown fields and remain reader-only with no
+  retry, cancel, delete, recovery, execution, or publication action.
 - `capabilities.videoTrimV1` is passive and reader-ready, while the current
-  runtime, writer, ready advertisement, live receipts, and quality assertion
-  remain false. Passive viewing, health, Jobs, search, navigation, and hydration
-  never open, hash, probe, stage, enqueue, wake, claim, retry, recover, or start
-  a process. A future exact ready variant requires the paired public/private
+  runtime, source-inspection route, writer, ready advertisement, live receipts,
+  and quality assertion remain false. Isolated synthetic TEMP route fixtures
+  are test evidence and never activation. Passive viewing, health, Jobs, search,
+  navigation, and hydration never open, hash, probe, stage, enqueue, wake,
+  claim, retry, recover, or start a process. A future exact ready variant
+  requires the paired public/private
   activation revision plus sealed FFmpeg, FFprobe, runtime, quality, resource,
   cancel, recovery, and output-validator receipts. Unknown, malformed, and
   future claims preserve compatible fields and remain reader-only. The exact

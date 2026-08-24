@@ -3,7 +3,7 @@
   "fixtureId": "PV-ENHANCE-VIDEO-TRIM-001-READER-FIXTURES",
   "forContractId": "PV-ENHANCE-VIDEO-TRIM-001",
   "compatibility": {
-    "contractSha256": "ed9f00f0a96e69e45fef1f3263b6f72773957ab03dd237992ea3ac39d2eeff25",
+    "contractSha256": "11686813d4b18791d7895f08e272c41ac9567790ad4cc7c41eed17e1d18591c5",
     "consumers": [
       "public-wpf",
       "private-companion"
@@ -95,6 +95,244 @@
     "expectedEnqueue": false,
     "expectedReasonCode": "VIDEO_TRIM_V1_RECEIPT_SET_UNVERIFIED"
   },
+  "sourceInspectionVectors": {
+    "currentProduction": {
+      "enabled": false,
+      "status": 503,
+      "code": "VIDEO_TRIM_V1_SOURCE_INSPECTION_NOT_READY",
+      "expectedMutationRequests": 0
+    },
+    "probe": {
+      "route": "/api/enhance/video-trim/v1/source-inspection",
+      "method": "POST",
+      "maximumRequestBytes": 131072,
+      "maximumResponseBytes": 131072,
+      "request": {
+        "action": "probe",
+        "source": {
+          "kind": "managed-video-job",
+          "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+        }
+      },
+      "response": {
+        "action": "probe",
+        "protocol": "aibos-enhancement-video-trim-v1",
+        "inspectionRevision": "aibos-video-trim-source-inspection-v1",
+        "source": {
+          "container": "mp4",
+          "videoCodec": "h264",
+          "pixelFormat": "yuv420p",
+          "bitDepth": 8,
+          "dynamicRange": "SDR",
+          "width": 1280,
+          "height": 720,
+          "frameCount": 240,
+          "fpsNumerator": 24,
+          "fpsDenominator": 1,
+          "durationMs": 10000,
+          "durationNumerator": 10,
+          "durationDenominator": 1,
+          "videoStreamCount": 1,
+          "audioStreamCount": 1,
+          "extraStreamCount": 0,
+          "videoTimeBaseNumerator": 1,
+          "videoTimeBaseDenominator": 24000,
+          "videoStartTimestamp": 0,
+          "videoPtsSha256": "c6518c90a14cb148e05d1561e6f57a52d23c8dd0c80dbe8c984f92f58ab4d240",
+          "probeDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      },
+      "expectedEffects": {
+        "createsJobs": false,
+        "publishesDurableInbox": false,
+        "mutatesInbox": false,
+        "stagesSource": false,
+        "mutatesJobs": false,
+        "wakesQueue": false,
+        "claimsJobs": false,
+        "startsWorker": false,
+        "acquiresCpuJobLane": false,
+        "acquiresGpuLease": false,
+        "mountsModels": false,
+        "createsOutput": false,
+        "persistsPreviews": false
+      }
+    },
+    "preview": {
+      "route": "/api/enhance/video-trim/v1/source-inspection",
+      "method": "POST",
+      "maximumRequestBytes": 131072,
+      "maximumResponseBytes": 2113536,
+      "request": {
+        "action": "preview",
+        "source": {
+          "kind": "managed-video-job",
+          "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+        },
+        "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "selection": {
+          "startFrame": 24,
+          "endFrameExclusive": 72
+        },
+        "frames": [
+          24,
+          47,
+          71
+        ]
+      },
+      "response": {
+        "action": "preview",
+        "protocol": "aibos-enhancement-video-trim-v1",
+        "inspectionRevision": "aibos-video-trim-source-inspection-v1",
+        "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "selection": {
+          "startFrame": 24,
+          "endFrameExclusive": 72
+        },
+        "previews": [
+          {
+            "role": "start",
+            "sourceFrame": 24,
+            "sourcePts": "24000",
+            "decodedPixelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "decoderRevision": "aibos-video-trim-rgb24-v1-synthetic",
+            "mime": "image/png",
+            "width": 1,
+            "height": 1,
+            "encodedBytes": 90,
+            "encodedSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+            "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC"
+          },
+          {
+            "role": "middle",
+            "sourceFrame": 47,
+            "sourcePts": "47000",
+            "decodedPixelSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "decoderRevision": "aibos-video-trim-rgb24-v1-synthetic",
+            "mime": "image/png",
+            "width": 1,
+            "height": 1,
+            "encodedBytes": 90,
+            "encodedSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+            "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC"
+          },
+          {
+            "role": "end",
+            "sourceFrame": 71,
+            "sourcePts": "71000",
+            "decodedPixelSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+            "decoderRevision": "aibos-video-trim-rgb24-v1-synthetic",
+            "mime": "image/png",
+            "width": 1,
+            "height": 1,
+            "encodedBytes": 90,
+            "encodedSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+            "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC"
+          }
+        ]
+      },
+      "expectedEffects": {
+        "createsJobs": false,
+        "publishesDurableInbox": false,
+        "mutatesInbox": false,
+        "stagesSource": false,
+        "mutatesJobs": false,
+        "wakesQueue": false,
+        "claimsJobs": false,
+        "startsWorker": false,
+        "acquiresCpuJobLane": false,
+        "acquiresGpuLease": false,
+        "mountsModels": false,
+        "createsOutput": false,
+        "persistsPreviews": false
+      },
+      "expectedThumbnailAuthority": false
+    },
+    "shortSelection": {
+      "selection": {
+        "startFrame": 24,
+        "endFrameExclusive": 26
+      },
+      "expectedPreviewAccepted": false,
+      "expectedTrimSelectionAccepted": true,
+      "expectedMutationRequests": 0
+    },
+    "errorVectors": [
+      {
+        "status": 400,
+        "response": {
+          "code": "VIDEO_TRIM_V1_INSPECTION_INVALID_REQUEST",
+          "message": "The Video Trim inspection request is invalid.",
+          "retryable": false
+        }
+      },
+      {
+        "status": 409,
+        "response": {
+          "code": "VIDEO_TRIM_V1_INSPECTION_SOURCE_STALE",
+          "message": "The selected video changed. Load its frames again.",
+          "retryable": false
+        }
+      },
+      {
+        "status": 413,
+        "response": {
+          "code": "VIDEO_TRIM_V1_INSPECTION_REQUEST_TOO_LARGE",
+          "message": "The Video Trim inspection request is too large.",
+          "retryable": false
+        }
+      },
+      {
+        "status": 415,
+        "response": {
+          "code": "VIDEO_TRIM_V1_INSPECTION_SOURCE_UNSUPPORTED",
+          "message": "The selected video is not supported for exact trimming.",
+          "retryable": false
+        }
+      },
+      {
+        "status": 422,
+        "response": {
+          "code": "VIDEO_TRIM_V1_INSPECTION_SELECTION_INVALID",
+          "message": "The selected frame range cannot be previewed.",
+          "retryable": false
+        }
+      },
+      {
+        "status": 429,
+        "response": {
+          "code": "VIDEO_TRIM_V1_INSPECTION_BUSY",
+          "message": "Video Trim frame inspection is busy.",
+          "retryable": true
+        }
+      },
+      {
+        "status": 500,
+        "response": {
+          "code": "VIDEO_TRIM_V1_INSPECTION_FAILED",
+          "message": "Video Trim frame inspection failed.",
+          "retryable": true
+        }
+      },
+      {
+        "status": 503,
+        "response": {
+          "code": "VIDEO_TRIM_V1_SOURCE_INSPECTION_NOT_READY",
+          "message": "Video Trim frame inspection is not ready.",
+          "retryable": false
+        }
+      },
+      {
+        "status": 504,
+        "response": {
+          "code": "VIDEO_TRIM_V1_INSPECTION_TIMEOUT",
+          "message": "Video Trim frame inspection timed out.",
+          "retryable": true
+        }
+      }
+    ]
+  },
   "longSelectionVector": {
     "sourceProbe": {
       "container": "mp4",
@@ -147,6 +385,627 @@
       "outputKind": "new-managed-child"
     },
     "expectedMutationRequests": 0
+  },
+  "durableJobVectors": {
+    "evidence": "Synthetic reader vectors for one immutable managed-source Video Trim snapshot across the five exact visible states. They do not assert writer activation, runtime readiness, a live receipt, or user durable state.",
+    "jobs": [
+      {
+        "id": "trim-fixture-queued",
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceId": "fixture-managed-video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "aibos-video-trim-v1",
+        "adapterId": "ffmpeg-video-trim-v1",
+        "presetHash": "b01dad55571c",
+        "status": "queued",
+        "progress": 0,
+        "cancelRequested": false,
+        "queueOrder": 0,
+        "createdAt": "2026-08-24T00:00:00.000Z",
+        "updatedAt": "2026-08-24T00:00:00.000Z",
+        "videoTrim": {
+          "schemaVersion": 1,
+          "protocol": "aibos-enhancement-video-trim-v1",
+          "presetId": "aibos-video-trim-v1",
+          "adapterId": "ffmpeg-video-trim-v1",
+          "receiptSetSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "source": {
+            "kind": "managed-video-job",
+            "producerJobId": "11111111-2222-4333-8444-555555555555",
+            "canonicalPath": "${OUTPUT_ROOT}/Videos/2026-08-24/source.mp4",
+            "signature": {
+              "size": 123456,
+              "mtimeMs": 1787529600000
+            },
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "probe": {
+              "container": "mp4",
+              "videoCodec": "h264",
+              "pixelFormat": "yuv420p",
+              "bitDepth": 8,
+              "dynamicRange": "SDR",
+              "width": 1280,
+              "height": 720,
+              "frameCount": 240,
+              "fpsNumerator": 24,
+              "fpsDenominator": 1,
+              "durationMs": 10000,
+              "durationNumerator": 10,
+              "durationDenominator": 1,
+              "videoStreamCount": 1,
+              "audioStreamCount": 1,
+              "extraStreamCount": 0,
+              "videoTimeBaseNumerator": 1,
+              "videoTimeBaseDenominator": 24000,
+              "videoStartTimestamp": 0,
+              "videoPtsSha256": "c6518c90a14cb148e05d1561e6f57a52d23c8dd0c80dbe8c984f92f58ab4d240"
+            },
+            "probeDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "dependencyDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "requested": {
+            "schemaVersion": 1,
+            "source": {
+              "kind": "managed-video-job",
+              "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+            },
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "audioPolicy": "preserve"
+          },
+          "plan": {
+            "revision": "aibos-video-trim-plan-v1",
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "startPts": 24000,
+            "endPtsExclusive": 72000,
+            "selectedFrameCount": 48,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "audioPlan": {
+              "kind": "reencode-selected-interval",
+              "policy": "preserve",
+              "codec": "aac"
+            }
+          },
+          "delivery": {
+            "revision": "aibos-video-trim-delivery-v1",
+            "container": "mp4",
+            "videoCodec": "h264",
+            "pixelFormat": "yuv420p",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "width": 1280,
+            "height": 720,
+            "frameCount": 48,
+            "fpsNumerator": 24,
+            "fpsDenominator": 1,
+            "timeBaseNumerator": 1,
+            "timeBaseDenominator": 24,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "firstRelativePts": 0,
+            "lastRelativePts": 47,
+            "videoPtsSha256": "d0d071432418c7297fa97aa32c18bb5244a20ec4b1b8edaa30e0e96637138d51",
+            "audio": {
+              "kind": "aac-selected-interval",
+              "policy": "preserve",
+              "audioStreamCount": 1,
+              "codec": "aac",
+              "packetBitIdentityClaimed": false,
+              "sampleExactClaimed": false
+            }
+          }
+        }
+      },
+      {
+        "id": "trim-fixture-running",
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceId": "fixture-managed-video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "aibos-video-trim-v1",
+        "adapterId": "ffmpeg-video-trim-v1",
+        "presetHash": "b01dad55571c",
+        "status": "running",
+        "progress": 42,
+        "cancelRequested": false,
+        "createdAt": "2026-08-24T00:00:00.000Z",
+        "updatedAt": "2026-08-24T00:00:02.000Z",
+        "startedAt": "2026-08-24T00:00:01.000Z",
+        "videoTrim": {
+          "schemaVersion": 1,
+          "protocol": "aibos-enhancement-video-trim-v1",
+          "presetId": "aibos-video-trim-v1",
+          "adapterId": "ffmpeg-video-trim-v1",
+          "receiptSetSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "source": {
+            "kind": "managed-video-job",
+            "producerJobId": "11111111-2222-4333-8444-555555555555",
+            "canonicalPath": "${OUTPUT_ROOT}/Videos/2026-08-24/source.mp4",
+            "signature": {
+              "size": 123456,
+              "mtimeMs": 1787529600000
+            },
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "probe": {
+              "container": "mp4",
+              "videoCodec": "h264",
+              "pixelFormat": "yuv420p",
+              "bitDepth": 8,
+              "dynamicRange": "SDR",
+              "width": 1280,
+              "height": 720,
+              "frameCount": 240,
+              "fpsNumerator": 24,
+              "fpsDenominator": 1,
+              "durationMs": 10000,
+              "durationNumerator": 10,
+              "durationDenominator": 1,
+              "videoStreamCount": 1,
+              "audioStreamCount": 1,
+              "extraStreamCount": 0,
+              "videoTimeBaseNumerator": 1,
+              "videoTimeBaseDenominator": 24000,
+              "videoStartTimestamp": 0,
+              "videoPtsSha256": "c6518c90a14cb148e05d1561e6f57a52d23c8dd0c80dbe8c984f92f58ab4d240"
+            },
+            "probeDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "dependencyDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "requested": {
+            "schemaVersion": 1,
+            "source": {
+              "kind": "managed-video-job",
+              "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+            },
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "audioPolicy": "preserve"
+          },
+          "plan": {
+            "revision": "aibos-video-trim-plan-v1",
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "startPts": 24000,
+            "endPtsExclusive": 72000,
+            "selectedFrameCount": 48,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "audioPlan": {
+              "kind": "reencode-selected-interval",
+              "policy": "preserve",
+              "codec": "aac"
+            }
+          },
+          "delivery": {
+            "revision": "aibos-video-trim-delivery-v1",
+            "container": "mp4",
+            "videoCodec": "h264",
+            "pixelFormat": "yuv420p",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "width": 1280,
+            "height": 720,
+            "frameCount": 48,
+            "fpsNumerator": 24,
+            "fpsDenominator": 1,
+            "timeBaseNumerator": 1,
+            "timeBaseDenominator": 24,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "firstRelativePts": 0,
+            "lastRelativePts": 47,
+            "videoPtsSha256": "d0d071432418c7297fa97aa32c18bb5244a20ec4b1b8edaa30e0e96637138d51",
+            "audio": {
+              "kind": "aac-selected-interval",
+              "policy": "preserve",
+              "audioStreamCount": 1,
+              "codec": "aac",
+              "packetBitIdentityClaimed": false,
+              "sampleExactClaimed": false
+            }
+          }
+        }
+      },
+      {
+        "id": "trim-fixture-succeeded",
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceId": "fixture-managed-video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "aibos-video-trim-v1",
+        "adapterId": "ffmpeg-video-trim-v1",
+        "presetHash": "b01dad55571c",
+        "status": "succeeded",
+        "progress": 100,
+        "cancelRequested": false,
+        "createdAt": "2026-08-24T00:00:00.000Z",
+        "updatedAt": "2026-08-24T00:00:05.000Z",
+        "startedAt": "2026-08-24T00:00:01.000Z",
+        "finishedAt": "2026-08-24T00:00:05.000Z",
+        "outputPath": "${OUTPUT_ROOT}/Videos/2026-08-24/trim-fixture-succeeded.mp4",
+        "outputSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "outputBytes": 98765,
+        "videoTrim": {
+          "schemaVersion": 1,
+          "protocol": "aibos-enhancement-video-trim-v1",
+          "presetId": "aibos-video-trim-v1",
+          "adapterId": "ffmpeg-video-trim-v1",
+          "receiptSetSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "source": {
+            "kind": "managed-video-job",
+            "producerJobId": "11111111-2222-4333-8444-555555555555",
+            "canonicalPath": "${OUTPUT_ROOT}/Videos/2026-08-24/source.mp4",
+            "signature": {
+              "size": 123456,
+              "mtimeMs": 1787529600000
+            },
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "probe": {
+              "container": "mp4",
+              "videoCodec": "h264",
+              "pixelFormat": "yuv420p",
+              "bitDepth": 8,
+              "dynamicRange": "SDR",
+              "width": 1280,
+              "height": 720,
+              "frameCount": 240,
+              "fpsNumerator": 24,
+              "fpsDenominator": 1,
+              "durationMs": 10000,
+              "durationNumerator": 10,
+              "durationDenominator": 1,
+              "videoStreamCount": 1,
+              "audioStreamCount": 1,
+              "extraStreamCount": 0,
+              "videoTimeBaseNumerator": 1,
+              "videoTimeBaseDenominator": 24000,
+              "videoStartTimestamp": 0,
+              "videoPtsSha256": "c6518c90a14cb148e05d1561e6f57a52d23c8dd0c80dbe8c984f92f58ab4d240"
+            },
+            "probeDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "dependencyDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "requested": {
+            "schemaVersion": 1,
+            "source": {
+              "kind": "managed-video-job",
+              "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+            },
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "audioPolicy": "preserve"
+          },
+          "plan": {
+            "revision": "aibos-video-trim-plan-v1",
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "startPts": 24000,
+            "endPtsExclusive": 72000,
+            "selectedFrameCount": 48,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "audioPlan": {
+              "kind": "reencode-selected-interval",
+              "policy": "preserve",
+              "codec": "aac"
+            }
+          },
+          "delivery": {
+            "revision": "aibos-video-trim-delivery-v1",
+            "container": "mp4",
+            "videoCodec": "h264",
+            "pixelFormat": "yuv420p",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "width": 1280,
+            "height": 720,
+            "frameCount": 48,
+            "fpsNumerator": 24,
+            "fpsDenominator": 1,
+            "timeBaseNumerator": 1,
+            "timeBaseDenominator": 24,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "firstRelativePts": 0,
+            "lastRelativePts": 47,
+            "videoPtsSha256": "d0d071432418c7297fa97aa32c18bb5244a20ec4b1b8edaa30e0e96637138d51",
+            "audio": {
+              "kind": "aac-selected-interval",
+              "policy": "preserve",
+              "audioStreamCount": 1,
+              "codec": "aac",
+              "packetBitIdentityClaimed": false,
+              "sampleExactClaimed": false
+            }
+          }
+        }
+      },
+      {
+        "id": "trim-fixture-failed",
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceId": "fixture-managed-video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "aibos-video-trim-v1",
+        "adapterId": "ffmpeg-video-trim-v1",
+        "presetHash": "b01dad55571c",
+        "status": "failed",
+        "progress": 42,
+        "cancelRequested": false,
+        "createdAt": "2026-08-24T00:00:00.000Z",
+        "updatedAt": "2026-08-24T00:00:04.000Z",
+        "startedAt": "2026-08-24T00:00:01.000Z",
+        "finishedAt": "2026-08-24T00:00:04.000Z",
+        "errorCode": "VIDEO_TRIM_OUTPUT_VALIDATION_FAILED",
+        "errorMessage": "Synthetic output validation failed.",
+        "videoTrim": {
+          "schemaVersion": 1,
+          "protocol": "aibos-enhancement-video-trim-v1",
+          "presetId": "aibos-video-trim-v1",
+          "adapterId": "ffmpeg-video-trim-v1",
+          "receiptSetSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "source": {
+            "kind": "managed-video-job",
+            "producerJobId": "11111111-2222-4333-8444-555555555555",
+            "canonicalPath": "${OUTPUT_ROOT}/Videos/2026-08-24/source.mp4",
+            "signature": {
+              "size": 123456,
+              "mtimeMs": 1787529600000
+            },
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "probe": {
+              "container": "mp4",
+              "videoCodec": "h264",
+              "pixelFormat": "yuv420p",
+              "bitDepth": 8,
+              "dynamicRange": "SDR",
+              "width": 1280,
+              "height": 720,
+              "frameCount": 240,
+              "fpsNumerator": 24,
+              "fpsDenominator": 1,
+              "durationMs": 10000,
+              "durationNumerator": 10,
+              "durationDenominator": 1,
+              "videoStreamCount": 1,
+              "audioStreamCount": 1,
+              "extraStreamCount": 0,
+              "videoTimeBaseNumerator": 1,
+              "videoTimeBaseDenominator": 24000,
+              "videoStartTimestamp": 0,
+              "videoPtsSha256": "c6518c90a14cb148e05d1561e6f57a52d23c8dd0c80dbe8c984f92f58ab4d240"
+            },
+            "probeDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "dependencyDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "requested": {
+            "schemaVersion": 1,
+            "source": {
+              "kind": "managed-video-job",
+              "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+            },
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "audioPolicy": "preserve"
+          },
+          "plan": {
+            "revision": "aibos-video-trim-plan-v1",
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "startPts": 24000,
+            "endPtsExclusive": 72000,
+            "selectedFrameCount": 48,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "audioPlan": {
+              "kind": "reencode-selected-interval",
+              "policy": "preserve",
+              "codec": "aac"
+            }
+          },
+          "delivery": {
+            "revision": "aibos-video-trim-delivery-v1",
+            "container": "mp4",
+            "videoCodec": "h264",
+            "pixelFormat": "yuv420p",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "width": 1280,
+            "height": 720,
+            "frameCount": 48,
+            "fpsNumerator": 24,
+            "fpsDenominator": 1,
+            "timeBaseNumerator": 1,
+            "timeBaseDenominator": 24,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "firstRelativePts": 0,
+            "lastRelativePts": 47,
+            "videoPtsSha256": "d0d071432418c7297fa97aa32c18bb5244a20ec4b1b8edaa30e0e96637138d51",
+            "audio": {
+              "kind": "aac-selected-interval",
+              "policy": "preserve",
+              "audioStreamCount": 1,
+              "codec": "aac",
+              "packetBitIdentityClaimed": false,
+              "sampleExactClaimed": false
+            }
+          }
+        }
+      },
+      {
+        "id": "trim-fixture-canceled",
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceId": "fixture-managed-video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "aibos-video-trim-v1",
+        "adapterId": "ffmpeg-video-trim-v1",
+        "presetHash": "b01dad55571c",
+        "status": "canceled",
+        "progress": 42,
+        "cancelRequested": true,
+        "createdAt": "2026-08-24T00:00:00.000Z",
+        "updatedAt": "2026-08-24T00:00:03.000Z",
+        "startedAt": "2026-08-24T00:00:01.000Z",
+        "finishedAt": "2026-08-24T00:00:03.000Z",
+        "videoTrim": {
+          "schemaVersion": 1,
+          "protocol": "aibos-enhancement-video-trim-v1",
+          "presetId": "aibos-video-trim-v1",
+          "adapterId": "ffmpeg-video-trim-v1",
+          "receiptSetSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "source": {
+            "kind": "managed-video-job",
+            "producerJobId": "11111111-2222-4333-8444-555555555555",
+            "canonicalPath": "${OUTPUT_ROOT}/Videos/2026-08-24/source.mp4",
+            "signature": {
+              "size": 123456,
+              "mtimeMs": 1787529600000
+            },
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "probe": {
+              "container": "mp4",
+              "videoCodec": "h264",
+              "pixelFormat": "yuv420p",
+              "bitDepth": 8,
+              "dynamicRange": "SDR",
+              "width": 1280,
+              "height": 720,
+              "frameCount": 240,
+              "fpsNumerator": 24,
+              "fpsDenominator": 1,
+              "durationMs": 10000,
+              "durationNumerator": 10,
+              "durationDenominator": 1,
+              "videoStreamCount": 1,
+              "audioStreamCount": 1,
+              "extraStreamCount": 0,
+              "videoTimeBaseNumerator": 1,
+              "videoTimeBaseDenominator": 24000,
+              "videoStartTimestamp": 0,
+              "videoPtsSha256": "c6518c90a14cb148e05d1561e6f57a52d23c8dd0c80dbe8c984f92f58ab4d240"
+            },
+            "probeDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "dependencyDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "requested": {
+            "schemaVersion": 1,
+            "source": {
+              "kind": "managed-video-job",
+              "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+            },
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "audioPolicy": "preserve"
+          },
+          "plan": {
+            "revision": "aibos-video-trim-plan-v1",
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "startPts": 24000,
+            "endPtsExclusive": 72000,
+            "selectedFrameCount": 48,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "audioPlan": {
+              "kind": "reencode-selected-interval",
+              "policy": "preserve",
+              "codec": "aac"
+            }
+          },
+          "delivery": {
+            "revision": "aibos-video-trim-delivery-v1",
+            "container": "mp4",
+            "videoCodec": "h264",
+            "pixelFormat": "yuv420p",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "width": 1280,
+            "height": 720,
+            "frameCount": 48,
+            "fpsNumerator": 24,
+            "fpsDenominator": 1,
+            "timeBaseNumerator": 1,
+            "timeBaseDenominator": 24,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "firstRelativePts": 0,
+            "lastRelativePts": 47,
+            "videoPtsSha256": "d0d071432418c7297fa97aa32c18bb5244a20ec4b1b8edaa30e0e96637138d51",
+            "audio": {
+              "kind": "aac-selected-interval",
+              "policy": "preserve",
+              "audioStreamCount": 1,
+              "codec": "aac",
+              "packetBitIdentityClaimed": false,
+              "sampleExactClaimed": false
+            }
+          }
+        }
+      }
+    ],
+    "audioPolicyVectors": {
+      "preserve": {
+        "requestedValue": "preserve",
+        "plan": {
+          "kind": "reencode-selected-interval",
+          "policy": "preserve",
+          "codec": "aac"
+        },
+        "delivery": {
+          "kind": "aac-selected-interval",
+          "policy": "preserve",
+          "audioStreamCount": 1,
+          "codec": "aac",
+          "packetBitIdentityClaimed": false,
+          "sampleExactClaimed": false
+        }
+      },
+      "mute": {
+        "requestedValue": "mute",
+        "plan": {
+          "kind": "mute",
+          "policy": "mute"
+        },
+        "delivery": {
+          "kind": "muted",
+          "policy": "mute",
+          "audioStreamCount": 0
+        }
+      }
+    },
+    "expectedCurrentWriterEnabled": false,
+    "expectedReady": false,
+    "expectedMutationRequestsDuringRead": 0
   },
   "negativeVectors": {
     "videoToolsV2KindTrim": {
@@ -206,6 +1065,48 @@
         "gpuLease": true
       },
       "expectedWriterAction": "reject"
+    },
+    "malformedDurableJob": {
+      "job": {
+        "id": "trim-fixture-malformed",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "succeeded",
+        "videoTrim": {
+          "schemaVersion": 1,
+          "protocol": "aibos-enhancement-video-trim-v1",
+          "delivery": {
+            "frameCount": "48"
+          }
+        },
+        "compatibleUnknownField": {
+          "keep": true
+        }
+      },
+      "expectedMode": "reader-only",
+      "expectedPreserveUnknownFields": true,
+      "expectedMutationRequests": 0
+    },
+    "futureDurableJob": {
+      "job": {
+        "id": "trim-fixture-future",
+        "operation": "video",
+        "mediaKind": "video",
+        "status": "queued",
+        "videoTrim": {
+          "schemaVersion": 2,
+          "protocol": "aibos-enhancement-video-trim-v2-future",
+          "futureField": {
+            "keep": true
+          }
+        },
+        "compatibleUnknownField": {
+          "keep": true
+        }
+      },
+      "expectedMode": "reader-only",
+      "expectedPreserveUnknownFields": true,
+      "expectedMutationRequests": 0
     }
   }
 }
