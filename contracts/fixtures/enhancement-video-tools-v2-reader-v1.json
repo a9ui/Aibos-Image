@@ -237,8 +237,8 @@
           },
           "strengthMapping": {
             "mappingRevision": "synthetic-edit-strength-map-v1",
-            "numerator": 55,
-            "denominator": 100
+            "numerator": 11,
+            "denominator": 20
           },
           "modelCanvas": {
             "width": 864,

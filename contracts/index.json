@@ -160,7 +160,7 @@
       "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
       "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
       "path": "contracts/fixtures/enhancement-video-tools-v2-reader-v1.json",
-      "sha256": "1bdfd3ff8bb4399cc5959dd3590fc8656b9126cb9b49091d7038c14792f3a9e4"
+      "sha256": "405f9ba5a1a1d0e33d40f9f710ee50efc42473fe538e671e3742f86770595123"
     }
   ],
   "verificationBundles": [
