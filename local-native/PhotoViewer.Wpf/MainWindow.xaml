@@ -4190,7 +4190,7 @@
                              Text="{DynamicResource UiVideoToolsTitle}"
                              Foreground="{StaticResource TextPrimary}"
                              FontSize="16" FontWeight="SemiBold"/>
-                  <TextBlock Text="Video Tools v1 · Preview"
+                  <TextBlock Text="Video Tools v1"
                              Foreground="{StaticResource TextSecondary}"
                              FontSize="10.5" Margin="0,2,0,0"/>
                 </StackPanel>
