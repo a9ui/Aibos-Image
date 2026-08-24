@@ -12,6 +12,8 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $plannerPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\VideoEditV2Plan.cs'
 $surfacePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoEditV2.cs'
+$transientContractPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\VideoEditV2TransientContract.cs'
+$externalVideoPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.ExternalVideoDrop.cs'
 $smokePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\App.VideoEditV2Smoke.cs'
 $projectPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $xamlPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.xaml'
@@ -23,6 +25,8 @@ $enResourcePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\Localization
 foreach ($requiredPath in @(
     $plannerPath,
     $surfacePath,
+    $transientContractPath,
+    $externalVideoPath,
     $smokePath,
     $projectPath,
     $xamlPath,
@@ -37,6 +41,8 @@ foreach ($requiredPath in @(
 
 $planner = Get-Content -Raw -Encoding UTF8 -LiteralPath $plannerPath
 $surface = Get-Content -Raw -Encoding UTF8 -LiteralPath $surfacePath
+$transientContract = Get-Content -Raw -Encoding UTF8 -LiteralPath $transientContractPath
+$externalVideo = Get-Content -Raw -Encoding UTF8 -LiteralPath $externalVideoPath
 $smoke = Get-Content -Raw -Encoding UTF8 -LiteralPath $smokePath
 $xaml = Get-Content -Raw -Encoding UTF8 -LiteralPath $xamlPath
 $main = Get-Content -Raw -Encoding UTF8 -LiteralPath $mainPath
@@ -52,8 +58,33 @@ if ($planner -notmatch 'SupportedSourceFpsValues\s*=\s*\[24, 30, 60\]' `
 if ($planner -match 'System\.IO|HttpClient|SendEnhancement|Enqueue|SaveState|File\.|Directory\.|Process\.|Task\.') {
     throw 'The pure AI video edit planner crossed an I/O, transport, process, or persistence boundary.'
 }
-if ($surface -match 'HttpClient|SendEnhancement|Enqueue|SaveState|File\.|Directory\.|Process\.|Task\.Run|StartEnhancement') {
-    throw 'The preview-only AI video edit surface crossed its no-transport, no-process, or no-persistence boundary.'
+if ($surface -notmatch 'VideoEditV2TransientContract\.Route' `
+    -or $surface -notmatch 'SendEnhancementApiAsync' `
+    -or $surface -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync|SendEnhancementEnqueue|Enqueue|SaveState|Process\.|Task\.Run|StartEnhancement') {
+    throw 'Video Edit v2 must use only its exact authenticated transient POST route and must not recover, enqueue, persist, wake, or start a process.'
+}
+if ($transientContract -notmatch 'api/enhance/video-prompts/v2/edit/compile' `
+    -or $transientContract -notmatch 'MaximumPreviewResponseBytes\s*=\s*2_113_536' `
+    -or $transientContract -notmatch 'MaximumActionResponseBytes\s*=\s*128 \* 1024' `
+    -or $transientContract -notmatch 'MaximumPreviewEncodedBytes\s*=\s*512 \* 1024' `
+    -or $transientContract -notmatch 'MaximumPreviewTotalEncodedBytes\s*=\s*1_572_864' `
+    -or $transientContract -notmatch 'MaximumPreviewEdge\s*=\s*384' `
+    -or $transientContract -notmatch 'MaximumPreviewPixels\s*=\s*147_456' `
+    -or $transientContract -notmatch 'BitmapCacheOption\.OnLoad' `
+    -or $transientContract -notmatch '\.Freeze\(\)' `
+    -or $transientContract -notmatch 'HasExactProperties' `
+    -or $transientContract -notmatch 'HasExactPngHeader' `
+    -or $transientContract -notmatch 'CryptographicOperations\.FixedTimeEquals' `
+    -or $transientContract -notmatch 'ComputeContextDigest') {
+    throw 'The transient Video Edit v2 parser is missing exact transport, PNG, decoded-image, or freezing bounds.'
+}
+if ($externalVideo -notmatch 'CaptureExternalVideoSourceIdentityForEditV2Async' `
+    -or $externalVideo -notmatch 'RandomAccess\.ReadAsync' `
+    -or $externalVideo -notmatch 'IncrementalHash\.CreateHash' `
+    -or $externalVideo -notmatch 'TryReadExternalFileDropSourceVersion[\s\S]{0,140}before' `
+    -or $externalVideo -notmatch 'TryReadExternalFileDropSourceVersion[\s\S]{0,140}after' `
+    -or $externalVideo -notmatch 'Path\.GetExtension\(session\.CanonicalPath\)[\s\S]{0,100}"\.mp4"') {
+    throw 'The displayed-file selector is not hashed offset-safely through the pinned handle with pre/post seams and MP4-only probing.'
 }
 if ($surface -match 'TryFrameCountFromDuration' `
     -or $surface -notmatch 'Managed:\s*false,[\s\S]{0,180}ExactTimeline:\s*exact,[\s\S]{0,120}fpsNumerator,[\s\S]{0,120}frameCount' `
@@ -61,17 +92,23 @@ if ($surface -match 'TryFrameCountFromDuration' `
     -or $surface -notmatch 'frameCount = exact \? probe!\.FrameCount : 0') {
     throw 'Dropped video metadata must stay unknown until the explicit exact probe is accepted.'
 }
-if ($surface -notmatch 'ModalVideoEditV2ProbeButton\.IsEnabled\s*=\s*false' `
-    -or $surface -notmatch 'ModalVideoEditV2CompileButton\.IsEnabled\s*=\s*false' `
+if ($surface -notmatch 'LoadModalVideoEditV2FramesAsync' `
+    -or $surface -notmatch 'BuildProbeRequestJson' `
+    -or $surface -notmatch 'BuildPreviewRequestJson' `
+    -or $surface -notmatch 'BuildCompileRequestJson' `
+    -or $surface -notmatch 'MaximumPreviewResponseBytes' `
+    -or $surface -notmatch 'MaximumActionResponseBytes' `
+    -or $surface -notmatch 'HasFreshModalVideoEditV2PreviewsForPlan' `
     -or $surface -notmatch 'ModalVideoEditV2StartButton\.IsEnabled\s*=\s*false' `
     -or $surface -notmatch 'ModalVideoEditV2TrimButton\.IsEnabled\s*=\s*false') {
-    throw 'Unconnected probe, compiler, AI writer, and non-AI trim actions must remain honestly disabled.'
+    throw 'Explicit probe/preview/compile transport, fresh-preview gating, or disabled writer/trim boundaries are missing.'
 }
-if ($surface -notmatch 'IsSafeModalVideoEditV2CompilerText' `
-    -or $surface -notmatch 'char\.IsControl' `
-    -or $surface -notmatch 'value\.Length == 64' `
-    -or $surface -notmatch "character is >= '0' and <= '9'[\s\S]{0,80}or >= 'a' and <= 'f'" `
-    -or $surface -notmatch 'IsSafeModalVideoEditV2CompilerRevision') {
+if ($transientContract -notmatch 'MaximumBackendPromptLength\s*=\s*8_000' `
+    -or $transientContract -notmatch 'MaximumSummaryLength\s*=\s*2_000' `
+    -or $transientContract -notmatch 'MaximumCompilerRevisionLength\s*=\s*128' `
+    -or $transientContract -notmatch 'char\.IsControl' `
+    -or $transientContract -notmatch 'value\.Length == 64' `
+    -or $transientContract -notmatch "character is >= '0' and <= '9'[\s\S]{0,80}or >= 'a' and <= 'f'") {
     throw 'Malformed compiler text, revision, or lowercase SHA-256 context digest is not rejected fail-closed.'
 }
 if ($surface -notmatch 'TryCaptureDisplayedVideoEditV2Source\([\s\S]{0,220}current\.Managed[\s\S]{0,180}ModalContextMenu\?\.IsEnabled != false' `
@@ -86,6 +123,14 @@ $passiveManagedCode = $passiveManaged -replace '(?m)//.*$', ''
 if ([string]::IsNullOrWhiteSpace($passiveManagedCode) `
     -or $passiveManagedCode -match 'TryGetModalSourceTile|TryValidateManagedVideoVersion|FileInfo|_resolveFinalPath|ResolveFinal|File\.|Open\(|Hash|Probe') {
     throw 'Passive managed-video board capture must copy only the hydrated modal Job snapshot without path or media revalidation.'
+}
+$passiveContext = [regex]::Match(
+    $surface,
+    'private string BuildModalVideoEditV2ContextStamp\(\)[\s\S]*?private bool ApplyModalVideoEditV2CompiledCandidate',
+    [Text.RegularExpressions.RegexOptions]::CultureInvariant).Value
+if ([string]::IsNullOrWhiteSpace($passiveContext) `
+    -or $passiveContext -match 'SHA|HashData|CaptureExternal|SendEnhancement|File\.|Open\(|Probe') {
+    throw 'Passive selection or instruction staleness checks must not hash, open, probe, or send the source.'
 }
 if ($main -notmatch 'if \(sourceChanged\)[\s\S]{0,100}InvalidateModalVideoEditV2ForSourceChange\(\)' `
     -or $main -notmatch 'CloseModalVideoEditV2Board\(restoreFocus: false, stale: true\)' `
@@ -111,13 +156,17 @@ $requiredXamlNames = @(
     'ModalVideoEditV2StartFrameTextBox',
     'ModalVideoEditV2EndFrameTextBox',
     'ModalVideoEditV2StartPreviewButton',
+    'ModalVideoEditV2StartPreviewImage',
     'ModalVideoEditV2MiddlePreviewButton',
+    'ModalVideoEditV2MiddlePreviewImage',
     'ModalVideoEditV2EndPreviewButton',
+    'ModalVideoEditV2EndPreviewImage',
     'ModalVideoEditV2TrimButton',
     'ModalVideoEditV2InstructionTextBox',
     'ModalVideoEditV2CompileButton',
     'ModalVideoEditV2SkipReviewCheckBox',
     'ModalVideoEditV2ReviewPanel',
+    'ModalVideoEditV2ApplyButton',
     'ModalVideoEditV2AudioComboBox',
     'ModalVideoEditV2StrengthComboBox',
     'ModalVideoEditV2CanvasComboBox',
@@ -151,6 +200,8 @@ $requiredResourceKeys = @(
     'UiVideoEditV2ChildClipNotice',
     'UiVideoEditV2ProbeAction',
     'UiVideoEditV2ProbeHelp',
+    'UiVideoEditV2PreviewReady',
+    'UiVideoEditV2PreviewStale',
     'UiVideoEditV2FpsHelp',
     'UiVideoEditV2PreviewSeekNotice',
     'UiVideoEditV2TrimAction',
@@ -159,6 +210,7 @@ $requiredResourceKeys = @(
     'UiVideoEditV2CompileAutomation',
     'UiVideoEditV2SkipReviewHelp',
     'UiVideoEditV2ReviewAutomation',
+    'UiVideoEditV2ApplyAutomation',
     'UiVideoEditV2AudioAutomation',
     'UiVideoEditV2StrengthAutomation',
     'UiVideoEditV2CanvasAutomation',
@@ -185,18 +237,20 @@ if ($app -notmatch '--video-edit-v2-smoke' `
     throw 'The isolated AI video edit smoke dispatch is missing.'
 }
 if ($smoke -notmatch 'purePlanner' `
+    -or $smoke -notmatch 'parserVectors' `
     -or $smoke -notmatch 'externalStartsUnverified' `
     -or $smoke -notmatch 'passiveOpen' `
     -or $smoke -notmatch 'pathResolverCallsAfterDrop' `
     -or $smoke -notmatch 'halfOpenPreview' `
-    -or $smoke -notmatch 'malformedCompilerResponseRejected' `
-    -or $smoke -notmatch 'candidateStales' `
-    -or $smoke -notmatch 'autoSuppressed' `
+    -or $smoke -notmatch 'skipConsumedOnFailure' `
+    -or $smoke -notmatch 'candidateAndPreviewStale' `
+    -or $smoke -notmatch 'skipWriterFalse' `
+    -or $smoke -notmatch 'canceledCompile' `
+    -or $smoke -notmatch 'exactActionOrder' `
+    -or $smoke -notmatch 'movProbeUnsupported' `
     -or $smoke -notmatch 'escapeClosesBoard' `
-    -or $smoke -notmatch 'minimizeClosesBoard' `
-    -or $smoke -notmatch 'sourceNavigationClosesBoard' `
     -or $smoke -notmatch 'sourceUntouched') {
-    throw 'The focused smoke does not cover pure planning, passive open, review, staleness, and source ownership.'
+    throw 'The focused smoke does not cover strict parsing, passive open, explicit action order, review/skip/cancel, staleness, MP4-only probing, and source ownership.'
 }
 
 if ($StaticOnly) {
@@ -319,22 +373,27 @@ try {
     $result = Get-Content -Raw -LiteralPath $resultPath | ConvertFrom-Json
     $required = @(
         'purePlanner',
+        'parserVectors',
         'hiddenForImages',
         'videoEntry',
         'externalStartsUnverified',
         'passiveOpen',
-        'exactProbeAccepted',
+        'exactPreviewLoaded',
+        'selectionStalesWithoutNetwork',
         'halfOpenPreview',
         'previewSeek',
-        'malformedCompilerResponseRejected',
+        'skipConsumedOnFailure',
         'reviewWithoutStart',
-        'candidateStales',
-        'autoSuppressed',
+        'transientApproval',
+        'candidateAndPreviewStale',
+        'skipWriterFalse',
+        'canceledCompile',
         'transientOnly',
+        'exactActionOrder',
         'escapeClosesBoard',
-        'minimizeClosesBoard',
-        'sourceNavigationClosesBoard',
-        'sourceChangeClosesStale',
+        'closeClearsTransient',
+        'movProbeUnsupported',
+        'noForbiddenCalls',
         'sourceUntouched')
     $failed = @($required | Where-Object { $result.$_ -ne $true })
     if ($processExitCode -ne 0 `

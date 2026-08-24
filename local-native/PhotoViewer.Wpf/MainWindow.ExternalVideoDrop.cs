@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Input;
@@ -160,6 +161,101 @@ public partial class MainWindow
             && session.Version.LastWriteUtcTicks == capture.LastWriteUtcTicks
             && session.Version.CreationUtcTicks == capture.CreationUtcTicks
             && TryGetExternalVideoDropSessionTile(out _);
+    }
+
+    private async Task<ExternalVideoSourceIdentityCapture?>
+        CaptureExternalVideoSourceIdentityForEditV2Async(
+            ExternalVideoSourceSeamSmokeSnapshot capture,
+            CancellationToken token)
+    {
+        ExternalVideoDropSession? session = _externalVideoDropSession;
+        if (session is null
+            || !ReferenceEquals(session, _externalVideoDropSession)
+            || !string.Equals(
+                Path.GetExtension(session.CanonicalPath),
+                ".mp4",
+                StringComparison.OrdinalIgnoreCase)
+            || !TryRevalidateExternalVideoSourceSeam(capture)
+            || !TryReadExternalFileDropSourceVersion(
+                session.PinnedStream.SafeFileHandle,
+                out ExternalFileDropSourceVersion before)
+            || !session.Version.SameFileVersion(before)
+            || !WindowsPathIdentity.TryGetFinalPath(
+                session.PinnedStream.SafeFileHandle,
+                out string openedCanonical)
+            || !string.Equals(
+                openedCanonical,
+                capture.CanonicalPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        byte[] buffer = GC.AllocateUninitializedArray<byte>(128 * 1024);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        long offset = 0;
+        try
+        {
+            while (offset < before.Length)
+            {
+                token.ThrowIfCancellationRequested();
+                int requested = checked((int)Math.Min(
+                    buffer.Length,
+                    before.Length - offset));
+                int read = await RandomAccess.ReadAsync(
+                    session.PinnedStream.SafeFileHandle,
+                    buffer.AsMemory(0, requested),
+                    offset,
+                    token);
+                if (read <= 0)
+                    return null;
+                hash.AppendData(buffer, 0, read);
+                offset = checked(offset + read);
+            }
+
+            token.ThrowIfCancellationRequested();
+            if (offset != before.Length
+                || !ReferenceEquals(session, _externalVideoDropSession)
+                || !TryReadExternalFileDropSourceVersion(
+                    session.PinnedStream.SafeFileHandle,
+                    out ExternalFileDropSourceVersion after)
+                || !before.SameFileVersion(after)
+                || !TryRevalidateExternalVideoSourceSeam(capture)
+                || !WindowsPathIdentity.TryGetFinalPath(
+                    session.PinnedStream.SafeFileHandle,
+                    out string finalCanonical)
+                || !string.Equals(
+                    finalCanonical,
+                    openedCanonical,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            long mtimeMs = new DateTimeOffset(
+                    new DateTime(before.LastWriteUtcTicks, DateTimeKind.Utc))
+                .ToUnixTimeMilliseconds();
+            return new ExternalVideoSourceIdentityCapture(
+                capture,
+                openedCanonical,
+                before.Length,
+                mtimeMs,
+                Convert.ToHexString(hash.GetHashAndReset())
+                    .ToLowerInvariant());
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException
+                or ObjectDisposedException)
+        {
+            return null;
+        }
     }
 
     private async Task<ExternalVideoDropSmokeSnapshot> ApplyDroppedVideoAsync(
@@ -726,3 +822,10 @@ public sealed record ExternalVideoSourceSeamSmokeSnapshot(
     long Length,
     long LastWriteUtcTicks,
     long CreationUtcTicks);
+
+internal sealed record ExternalVideoSourceIdentityCapture(
+    ExternalVideoSourceSeamSmokeSnapshot Seam,
+    string CanonicalPath,
+    long Size,
+    long MtimeMs,
+    string Sha256);
