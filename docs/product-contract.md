@@ -373,6 +373,26 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   after that preflight. Every Edit writer remains false until its own model,
   workflow, instruction, timeline, memory, cancellation, and output receipts
   pass.
+- The current disabled Edit health object remains the exact compatible six-field
+  shape. A future `state=ready` object is a different exact discriminated
+  variant. It must identify Bernini-R-1.3B as the first genuine
+  source-video-conditioned semantic V2V backend and bind exact model, workflow,
+  compiler, timeline, and delivery revisions. It must also bind one sealed set
+  of runtime, model, workflow, compiler, timeline, audio, quality, resource,
+  cancel, recovery, and output-validator receipts, plus exact source,
+  selection, pixel-tier, process, memory, scratch, output-byte, timeout, cancel,
+  and one-execution resource bounds. Image-to-video, two-image retake, FL2VA,
+  Ref2VA, AddGuide, per-frame I2I, unknown backends, missing receipts, or
+  inferred bounds cannot satisfy this variant.
+- Exact ready shape is necessary but not sufficient. Every receipt must resolve,
+  hash, and cross-bind the same capability/backend/resource/output revisions,
+  current canary result, runner identity, and synthetic fixture. A paired
+  activation revision must separately open the production writer. Setting the
+  existing writer, backend, runtime, and ready booleans to true, or supplying a
+  structurally complete object with synthetic/unresolved receipts, remains not
+  ready and cannot publish an inbox item. No live Bernini canary receipt exists
+  in this contract revision, so ready advertisement, production writer, and
+  quality assertion all remain false.
 - Edit persists the exact selected source frames and PTS, then the server-owned
   backend fps, frame map, internal frame count, alignment padding such as
   `4n+1`, delivery crop and source-fps reconstruction, strength mapping, seed,
@@ -387,6 +407,44 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   emits no audio stream and stores no packet-range identity. `mute` always emits
   no audio stream and never fabricates a zero-range/hash identity or synthesized
   silence. The source is never overwritten.
+- Before success, the child output must pass the exact
+  `aibos-video-edit-child-mp4-validator-v1` policy. It is one bounded regular
+  MP4 with exactly one H.264 `yuv420p`, 8-bit SDR video stream, zero or one audio
+  stream dictated by the persisted audio-delivery variant, and no subtitle,
+  data, attachment, unknown, or extra streams. Dimensions, selected frame
+  count, rational source fps, rebased presentation timestamps, PTS digest, and
+  duration must exactly match the immutable delivery. Generated audio is
+  forbidden; preserved encoded packet payloads must match the selected source
+  packet identity. Final bytes must fit both the 512 MiB hard ceiling and the
+  smaller advertised canaried output bound. The worker validates the same
+  closed temporary bytes, persists their receipt/hash/probe/journal identity,
+  atomically publishes without overwrite, then reopens and validates the
+  published file before marking success.
+- A displayed-file staging copy is owned by the logical Job, not by one attempt.
+  Exact retry reuses and revalidates that copy and never reopens the external
+  path or imports replacement bytes. Cancel preserves it while any retry or
+  recovery journal may refer to it. Delete removes it only after terminal Job,
+  dependency, retry, journal, publication, and ownership checks all agree;
+  ambiguous ownership preserves it and fails closed.
+- Each execution attempt has a durable, bounded, identity-bearing journal before
+  process launch. It binds Job/attempt, immutable preset hash, backend receipt
+  set, source/staging identity, managed dependency closure, scratch ownership,
+  temporary output, process ownership, validator result, publication, and
+  cleanup state. Retry creates a new attempt and new scratch/output while
+  reusing the exact request, seed, source, dependency closure, and compatible
+  receipts. Cancel records intent before signalling only its proven process;
+  PID alone is insufficient. Startup recovery is an authenticated explicit
+  worker action, never a passive health/Jobs-read side effect. Delete and
+  cleanup require terminal journal agreement and never repair state by deleting
+  source media.
+- Managed Edit sources may themselves be outputs of managed Edit Jobs. Under
+  the shared Jobs lock, publication walks at most 64 exact producer edges with
+  cycle and visited-ID protection, persists the ordered ancestor output closure
+  in the durable dependency reservation, and transfers it to the Job without a
+  gap. Any ancestor output remains deletion-protected while a descendant inbox,
+  active/retry Job, cancel/recovery journal, or publication journal depends on
+  it. Missing, malformed, future, cyclic, over-depth, or ambiguous lineage
+  fails closed.
 - Version 2 Finish is a separate AI spatial super-resolution Job. Its public
   modes are `fast`, `standard`, and `quality`, with explicit 2x or 4x scale.
   Each mode has an independent backend, source-bound, scale, delivery, and

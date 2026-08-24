@@ -3,7 +3,7 @@
   "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
   "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
   "compatibility": {
-    "contractSha256": "e669d1893324f1c4c270628574ab9091d653560c1094c3b81f417bf8cff3239e",
+    "contractSha256": "2af258e1908d558818d4bae376306ad625ee729ca259c5460b8f97b43dae6a8b",
     "consumers": [
       "public-wpf",
       "private-companion"
@@ -62,6 +62,140 @@
       }
     },
     "expectedPassiveMutationRequests": 0
+  },
+  "editCapabilityNegativeVectors": {
+    "booleanFlipOnly": {
+      "capability": {
+        "writerEnabled": true,
+        "backendConfigured": true,
+        "runtimeVerified": true,
+        "ready": true,
+        "state": "ready",
+        "reasonCode": null
+      },
+      "missingReadyKeys": [
+        "capabilityRevision",
+        "resolvedBackend",
+        "receipts",
+        "resourceBounds",
+        "outputPolicy"
+      ],
+      "expectedReady": false,
+      "expectedEnqueue": false,
+      "expectedReasonCode": "VIDEO_TOOLS_V2_EDIT_READY_SHAPE_INCOMPLETE"
+    },
+    "shapeCompleteButUnresolvedReceipts": {
+      "evidence": "synthetic negative vector only; receipt names and numeric runtime bounds are not measured production evidence, recommendations, or activation authority",
+      "capability": {
+        "writerEnabled": true,
+        "backendConfigured": true,
+        "runtimeVerified": true,
+        "ready": true,
+        "state": "ready",
+        "reasonCode": null,
+        "capabilityRevision": "aibos-video-edit-ready-v1",
+        "resolvedBackend": {
+          "backendId": "bernini-r-1.3b-edit-candidate-v1",
+          "semanticRole": "semantic-v2v",
+          "conditioningKind": "source-video-conditioned-semantic-v2v",
+          "genuineSourceVideoConditioning": true,
+          "imageGuideRetake": false,
+          "modelRevision": "synthetic-unsealed-bernini-model",
+          "workflowRevision": "synthetic-unsealed-bernini-workflow",
+          "promptCompilerRevision": "aibos-video-edit-compiler-v1",
+          "timelineMappingRevision": "synthetic-source-to-backend-map-v1",
+          "deliveryMappingRevision": "synthetic-child-clip-delivery-v1"
+        },
+        "receipts": {
+          "runtimeReceiptId": "synthetic-unresolved-runtime",
+          "modelReceiptId": "synthetic-unresolved-model",
+          "workflowReceiptId": "synthetic-unresolved-workflow",
+          "promptCompilerReceiptId": "synthetic-unresolved-compiler",
+          "timelineMapperReceiptId": "synthetic-unresolved-timeline",
+          "audioDeliveryReceiptId": "synthetic-unresolved-audio",
+          "qualityCanaryReceiptId": "synthetic-unresolved-quality",
+          "resourceCanaryReceiptId": "synthetic-unresolved-resource",
+          "cancelCanaryReceiptId": "synthetic-unresolved-cancel",
+          "recoveryCanaryReceiptId": "synthetic-unresolved-recovery",
+          "outputValidatorReceiptId": "synthetic-unresolved-output-validator",
+          "receiptSetSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "resourceBounds": {
+          "maximumSourceBytes": 536870912,
+          "maximumSourceDurationMs": 300000,
+          "maximumSourceWidth": 1920,
+          "maximumSourceHeight": 1080,
+          "maximumSourcePixelArea": 2073600,
+          "maximumSourceFrames": 18000,
+          "allowedSourceFps": [
+            "24/1",
+            "30/1",
+            "60/1"
+          ],
+          "maximumSelectedDurationMs": 5000,
+          "maximumSelectedFrames": 300,
+          "supportedMaximumPixelAreas": [
+            230400,
+            307200,
+            414720
+          ],
+          "minimumSteps": 1,
+          "maximumSteps": 40,
+          "minimumStrength": 10,
+          "maximumStrength": 100,
+          "maximumConcurrentExecutions": 1,
+          "maximumGpuVramBytes": 12884901888,
+          "maximumHostRamBytes": 34359738368,
+          "maximumScratchBytes": 8589934592,
+          "maximumOutputBytes": 536870912,
+          "processTimeoutMs": 1800000,
+          "cancelGraceMs": 30000
+        },
+        "outputPolicy": {
+          "revision": "aibos-video-edit-child-mp4-validator-v1",
+          "container": "mp4",
+          "videoCodec": "h264",
+          "pixelFormat": "yuv420p",
+          "bitDepth": 8,
+          "dynamicRange": "SDR",
+          "videoStreamCount": 1,
+          "maximumAudioStreamCount": 1,
+          "subtitleStreamCount": 0,
+          "dataStreamCount": 0,
+          "attachmentStreamCount": 0,
+          "maximumBytes": 536870912
+        }
+      },
+      "receiptResolutionSucceeded": false,
+      "pairedProductionGateEnabled": false,
+      "expectedReady": false,
+      "expectedEnqueue": false,
+      "expectedReasonCode": "VIDEO_TOOLS_V2_EDIT_RECEIPT_SET_UNVERIFIED"
+    },
+    "nonV2vBackend": {
+      "resolvedBackend": {
+        "backendId": "minimax-h3-fl2va-not-v2v",
+        "semanticRole": "image-to-video",
+        "conditioningKind": "first-last-image-guide",
+        "genuineSourceVideoConditioning": false,
+        "imageGuideRetake": true,
+        "modelRevision": "synthetic",
+        "workflowRevision": "synthetic",
+        "promptCompilerRevision": "synthetic",
+        "timelineMappingRevision": "synthetic",
+        "deliveryMappingRevision": "synthetic"
+      },
+      "expectedReady": false,
+      "expectedEnqueue": false,
+      "expectedReasonCode": "VIDEO_TOOLS_V2_EDIT_BACKEND_NOT_GENUINE_V2V"
+    },
+    "currentClaims": {
+      "readyVariantAdvertised": false,
+      "liveCanaryReceiptsPresent": false,
+      "productionWriterEnabled": false,
+      "qualityAsserted": false,
+      "firstSemanticCandidateBackendId": "bernini-r-1.3b-edit-candidate-v1"
+    }
   },
   "previewProbeVector": {
     "route": "/api/enhance/video-prompts/v2/edit/compile",

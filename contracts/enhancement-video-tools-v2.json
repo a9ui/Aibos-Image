@@ -582,6 +582,64 @@
     "boundaryPacketRule": "an encoded packet intersecting a selection boundary may decode to samples outside the exact frame-derived interval; this is why preserve makes no sample-exact trim claim",
     "publish": "one new managed Videos output and child Job; never modify, replace, or automatically splice into the long source"
   },
+  "editOutputValidator": {
+    "policyRevision": "aibos-video-edit-child-mp4-validator-v1",
+    "productionValidated": false,
+    "validatorCanaryVerified": false,
+    "file": {
+      "regularFileRequired": true,
+      "reparsePointAllowed": false,
+      "hardLinkIdentityAmbiguityAllowed": false,
+      "container": "mp4",
+      "minimumBytes": 1,
+      "hardMaximumBytes": 536870912,
+      "bound": "final byte length must be no greater than both hardMaximumBytes and the exact ready capability resourceBounds.maximumOutputBytes"
+    },
+    "streams": {
+      "videoStreamCount": 1,
+      "maximumAudioStreamCount": 1,
+      "subtitleStreamCount": 0,
+      "dataStreamCount": 0,
+      "attachmentStreamCount": 0,
+      "unknownStreamTypesAllowed": false,
+      "audioCoupling": "audio stream count and encoded packet identity must exactly match the persisted discriminated audioDelivery; mute and preserve-empty require zero audio streams"
+    },
+    "video": {
+      "codec": "h264",
+      "pixelFormat": "yuv420p",
+      "bitDepth": 8,
+      "dynamicRange": "SDR",
+      "width": "exactly delivery.width",
+      "height": "exactly delivery.height",
+      "frameCount": "exactly delivery.frameCount and the selected source frame count",
+      "fps": "exactly delivery.fpsNumerator/delivery.fpsDenominator and the persisted rational source fps",
+      "durationMs": "exactly delivery.durationMs",
+      "implicitCrop": false,
+      "frameInterpolation": false
+    },
+    "pts": {
+      "startTimestamp": 0,
+      "entryCount": "exactly delivery.frameCount",
+      "sequence": "one finite signed 64-bit presentation timestamp per output frame in presentation order, strictly increasing in one persisted positive rational time base, and exactly equal to the selected source PTS sequence rebased to zero under deliveryMappingReceiptId",
+      "digest": "compute videoPtsSha256 with the source probe signed-64-bit big-endian algorithm and require exact equality with delivery.videoPtsSha256",
+      "missingDuplicateDecreasingOrExtra": "reject"
+    },
+    "audio": {
+      "generatedAudioAllowed": false,
+      "preservePackets": "codec, codec tag, profile, sample rate, channels, ordered packet payload bytes, and the non-empty source packet range must match the persisted source probe, audioPlan, and audioDelivery; container timestamp rebasing may change packet timestamps but not payload bytes",
+      "muteOrEmpty": "no audio stream, silence track, zero-range placeholder, or packet identity is allowed",
+      "sampleExactBoundaryClaimed": false
+    },
+    "validationAndPublicationOrder": [
+      "write only to a newly allocated attempt-owned temporary file below the bounded job scratch root",
+      "close encoder and process handles, then open that exact regular file through a no-delete/no-write validation lease",
+      "prove unchanged identity before and after bounded byte hash, stream probe, frame decode/count, PTS digest, pixel-format check, and audio packet validation",
+      "persist the output validator receipt, final SHA-256, byte length, probe digest, and journal transition before publication",
+      "atomically publish the same validated bytes to one newly allocated canonical managed Videos path; never overwrite an existing file",
+      "reopen and revalidate published identity before marking the Job succeeded"
+    ],
+    "failure": "any mismatch, timeout, extra stream, unsupported pixel format, byte-bound overflow, ambiguous identity, or journal disagreement keeps the Job non-succeeded, publishes nothing, preserves the source, and cleans only proven attempt-owned temporary artifacts"
+  },
   "finishBackendCandidates": {
     "status": "candidate-canary-required",
     "productionWriterEnabled": false,
@@ -1057,6 +1115,179 @@
         }
       }
     },
+    "editCapabilityVariants": {
+      "location": "capabilities.videoToolsV2.edit",
+      "discriminator": "state",
+      "currentDisabledCompatibility": {
+        "exactKeys": [
+          "writerEnabled",
+          "backendConfigured",
+          "runtimeVerified",
+          "ready",
+          "state",
+          "reasonCode"
+        ],
+        "shape": "healthCapability.exactShape.edit remains the exact current disabled variant with no additive ready-only fields",
+        "unknownOrMalformed": "preserve reader visibility, treat Edit as not ready, and prohibit publication, enqueue, wake, claim, retry, process start, or output mutation"
+      },
+      "ready": {
+        "capabilityRevision": "aibos-video-edit-ready-v1",
+        "exactKeys": [
+          "writerEnabled",
+          "backendConfigured",
+          "runtimeVerified",
+          "ready",
+          "state",
+          "reasonCode",
+          "capabilityRevision",
+          "resolvedBackend",
+          "receipts",
+          "resourceBounds",
+          "outputPolicy"
+        ],
+        "fixedValues": {
+          "writerEnabled": true,
+          "backendConfigured": true,
+          "runtimeVerified": true,
+          "ready": true,
+          "state": "ready",
+          "reasonCode": null,
+          "capabilityRevision": "aibos-video-edit-ready-v1"
+        },
+        "resolvedBackend": {
+          "exactKeys": [
+            "backendId",
+            "semanticRole",
+            "conditioningKind",
+            "genuineSourceVideoConditioning",
+            "imageGuideRetake",
+            "modelRevision",
+            "workflowRevision",
+            "promptCompilerRevision",
+            "timelineMappingRevision",
+            "deliveryMappingRevision"
+          ],
+          "firstActivation": {
+            "backendId": "bernini-r-1.3b-edit-candidate-v1",
+            "semanticRole": "semantic-v2v",
+            "conditioningKind": "source-video-conditioned-semantic-v2v",
+            "genuineSourceVideoConditioning": true,
+            "imageGuideRetake": false
+          },
+          "rule": "The exact model and workflow must consume the selected source video across time as conditioning. Image-to-video, first/last-frame retake, FL2VA, Ref2VA, AddGuide, per-frame I2I, or an unknown backend cannot satisfy this shape. Model and workflow revision strings are non-empty receipt-bound stable identifiers."
+        },
+        "receipts": {
+          "exactKeys": [
+            "runtimeReceiptId",
+            "modelReceiptId",
+            "workflowReceiptId",
+            "promptCompilerReceiptId",
+            "timelineMapperReceiptId",
+            "audioDeliveryReceiptId",
+            "qualityCanaryReceiptId",
+            "resourceCanaryReceiptId",
+            "cancelCanaryReceiptId",
+            "recoveryCanaryReceiptId",
+            "outputValidatorReceiptId",
+            "receiptSetSha256"
+          ],
+          "idRule": "every receipt ID is a non-empty 1 through 128 character stable ASCII identifier that resolves to one local sealed receipt; no request or health client supplies it",
+          "setDigest": "receiptSetSha256 is 64 lowercase hexadecimal characters over the exact canonical receipt set and all resolved receipt content digests",
+          "crossBinding": "every receipt must bind protocol, capability revision, backend/model/workflow revisions, compiler, timeline and audio delivery revisions, exact resource bounds, output policy revision, runner/platform identity, synthetic fixture revision, and its measured canary result. Missing, stale, contradictory, unresolvable, or differently bound receipts make ready false."
+        },
+        "resourceBounds": {
+          "exactKeys": [
+            "maximumSourceBytes",
+            "maximumSourceDurationMs",
+            "maximumSourceWidth",
+            "maximumSourceHeight",
+            "maximumSourcePixelArea",
+            "maximumSourceFrames",
+            "allowedSourceFps",
+            "maximumSelectedDurationMs",
+            "maximumSelectedFrames",
+            "supportedMaximumPixelAreas",
+            "minimumSteps",
+            "maximumSteps",
+            "minimumStrength",
+            "maximumStrength",
+            "maximumConcurrentExecutions",
+            "maximumGpuVramBytes",
+            "maximumHostRamBytes",
+            "maximumScratchBytes",
+            "maximumOutputBytes",
+            "processTimeoutMs",
+            "cancelGraceMs"
+          ],
+          "fixedRequestBounds": {
+            "maximumSourceBytes": 536870912,
+            "maximumSourceDurationMs": 300000,
+            "maximumSourceWidth": 1920,
+            "maximumSourceHeight": 1080,
+            "maximumSourcePixelArea": 2073600,
+            "maximumSourceFrames": 18000,
+            "allowedSourceFps": [
+              "24/1",
+              "30/1",
+              "60/1"
+            ],
+            "maximumSelectedDurationMs": 5000,
+            "maximumSelectedFrames": 300,
+            "supportedMaximumPixelAreas": [
+              230400,
+              307200,
+              414720
+            ],
+            "minimumSteps": 1,
+            "maximumSteps": 40,
+            "minimumStrength": 10,
+            "maximumStrength": 100,
+            "maximumConcurrentExecutions": 1
+          },
+          "measuredRuntimeBounds": "maximumGpuVramBytes, maximumHostRamBytes, maximumScratchBytes, maximumOutputBytes, processTimeoutMs, and cancelGraceMs are positive safe integers, no larger than independently configured server hard ceilings, and exactly equal to the resource canary receipt; zero, missing, inferred, or uncanaried values are not ready",
+          "plannerRule": "the complete request, selected source, planned canvas, scratch estimate, output bound, current free resources, and one-job lease must fit every advertised bound before inbox publication and again before process start; a smaller unknown backend or silent quality fallback is prohibited"
+        },
+        "outputPolicy": {
+          "exactKeys": [
+            "revision",
+            "container",
+            "videoCodec",
+            "pixelFormat",
+            "bitDepth",
+            "dynamicRange",
+            "videoStreamCount",
+            "maximumAudioStreamCount",
+            "subtitleStreamCount",
+            "dataStreamCount",
+            "attachmentStreamCount",
+            "maximumBytes"
+          ],
+          "fixedValues": {
+            "revision": "aibos-video-edit-child-mp4-validator-v1",
+            "container": "mp4",
+            "videoCodec": "h264",
+            "pixelFormat": "yuv420p",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "videoStreamCount": 1,
+            "maximumAudioStreamCount": 1,
+            "subtitleStreamCount": 0,
+            "dataStreamCount": 0,
+            "attachmentStreamCount": 0
+          },
+          "maximumBytesRule": "positive safe integer exactly equal to resourceBounds.maximumOutputBytes and no greater than editOutputValidator.file.hardMaximumBytes"
+        },
+        "activationRule": "Exact ready shape is necessary but not sufficient. The authenticated health producer must resolve and rehash every receipt, prove all fixed and runtime bounds, match the exact output policy, hold the paired activation revision, and pass current durable dependency, staging, cancel, recovery, and output-validator checks. Any failure emits the disabled variant rather than a partially ready shape."
+      },
+      "currentEvidence": {
+        "readyVariantAdvertised": false,
+        "liveCanaryReceiptsPresent": false,
+        "productionWriterEnabled": false,
+        "qualityAsserted": false,
+        "firstSemanticCandidateBackendId": "bernini-r-1.3b-edit-candidate-v1"
+      },
+      "finishIsolation": "This Edit shape does not add, reinterpret, or enable any Finish field, mode, backend, receipt, resource bound, or writer. Finish remains the exact current disabled lane."
+    },
     "reasonCodes": {
       "edit": [
         "VIDEO_TOOLS_V2_EDIT_WRITER_DISABLED",
@@ -1070,7 +1301,14 @@
         "VIDEO_TOOLS_V2_EDIT_H3_RESEARCH_ONLY",
         "VIDEO_TOOLS_V2_EDIT_TIMELINE_MAPPING_CANARY_REQUIRED",
         "VIDEO_TOOLS_V2_EDIT_GPU_CANARY_REQUIRED",
-        "VIDEO_TOOLS_V2_EDIT_OUTPUT_CANARY_REQUIRED"
+        "VIDEO_TOOLS_V2_EDIT_OUTPUT_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_EDIT_READY_SHAPE_INCOMPLETE",
+        "VIDEO_TOOLS_V2_EDIT_RECEIPT_SET_UNVERIFIED",
+        "VIDEO_TOOLS_V2_EDIT_BACKEND_NOT_GENUINE_V2V",
+        "VIDEO_TOOLS_V2_EDIT_RESOURCE_BOUNDS_UNVERIFIED",
+        "VIDEO_TOOLS_V2_EDIT_OUTPUT_VALIDATOR_UNVERIFIED",
+        "VIDEO_TOOLS_V2_EDIT_DURABLE_RECOVERY_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_EDIT_DEPENDENCY_CLOSURE_INVALID"
       ],
       "finish": [
         "VIDEO_TOOLS_V2_FINISH_WRITER_DISABLED",
@@ -1121,9 +1359,70 @@
     "managedActiveJob": "producerJobId reserves its exact producer output while the child is queued or running",
     "managedDurableInbox": "a bounded exact committed create or retry item reserves the producer output before the child Job exists",
     "managedDelete": "producer output deletion passively fails closed while an active or committed pending dependency exists",
+    "nestedManagedSource": {
+      "maximumDepth": 64,
+      "maximumVisitedJobs": 64,
+      "walk": "under the shared Jobs publication or mutation lock, follow only exact supported managed source producerJobId edges from the direct producer toward the root; retain a visited-id set and reject a cycle, duplicate edge, missing row, malformed or future row, non-succeeded producer, ownership mismatch, or exceeded bound",
+      "durableReservation": "before a descendant inbox item becomes visible, persist the exact ordered producer job IDs and canonical output identities in the dependency reservation ledger. Job commit transfers the same closure to the child Job without a gap; retry reuses and revalidates it rather than recomputing from client paths.",
+      "deleteGuard": "deletion of any producer or ancestor output fails closed while any committed inbox reservation, active descendant Job, retry item, cancel/recovery journal, or publication journal contains that exact dependency identity",
+      "release": "release one edge or closure only after the descendant row and every retry, cancel, recovery, output, and staging reference are durably absent; partial or ambiguous release preserves all ancestors"
+    },
     "externalStaging": "staging is owned only by its Video Tools job and remains available for exact retry while any row, durable item, or recovery journal may refer to it",
     "externalOriginal": "never deleted, moved, overwritten, repaired, or replaced by Aibos",
     "cleanup": "remove only a proven job-owned staging or scratch artifact after all active, durable, retry, cancel, recovery, and publish dependencies are absent; ambiguous identity preserves the artifact and fails closed"
+  },
+  "editDurableWriter": {
+    "productionWriterEnabled": false,
+    "displayedStaging": {
+      "ownership": "one staged source belongs to one logical Edit Job, not to an execution attempt. The immutable snapshot binds staging canonical path, size, mtimeMs, SHA-256, probe, owner Job ID, and source identity digest.",
+      "creation": "the claimed inbox delivery journal allocates one new bounded staging path, copies only from the already revalidated opened external source handle, independently hashes and probes the closed staged bytes, then atomically commits staging ownership with the Job snapshot",
+      "preCommitFailure": "creates no Job. A recovery journal may remove only the exact newly allocated incomplete stage after proving request, path, handle, and byte identity; otherwise it preserves the artifact and reports needs-action.",
+      "retry": "reuse the exact committed staged identity and revalidate signature, SHA-256, probe, owner Job ID, and source identity digest. Never reopen the external path, import replacement bytes, or make a per-attempt staging copy.",
+      "cancel": "cancel does not delete the external original or guess staging ownership. The stage remains while the Job, a retry action, or any cancel/recovery journal can reference it.",
+      "delete": "remove staging only after the terminal Job output and Job row are eligible for deletion, no dependency or retry remains, every attempt journal is terminal, and exact stage ownership is revalidated; failure preserves staging and fails closed"
+    },
+    "attemptJournal": {
+      "revision": "aibos-video-edit-attempt-journal-v1",
+      "states": [
+        "reserved",
+        "source-validated",
+        "process-started",
+        "cancel-requested",
+        "process-exited",
+        "output-validating",
+        "output-validated",
+        "publishing",
+        "published",
+        "cleanup-pending",
+        "complete",
+        "failed"
+      ],
+      "requiredIdentity": [
+        "journalRevision",
+        "jobId",
+        "attemptId",
+        "presetHash",
+        "backendId",
+        "receiptSetSha256",
+        "sourceIdentityDigest",
+        "dependencyClosureDigest",
+        "scratchOwnershipDigest",
+        "temporaryOutputIdentity",
+        "state"
+      ],
+      "beforeProcess": "persist reserved/source-validated state, exact immutable snapshot hash, source and dependency identities, attempt-owned scratch root, temporary output allocation, current receipt set, and process launch intent before starting any backend process",
+      "processOwnership": "after launch, persist a non-reusable process identity bound to attemptId. Cancel and recovery may signal or terminate only that proven process; PID alone is never ownership proof.",
+      "transitionRule": "append or replace journal state atomically with the latest on-disk Job under the Jobs mutation authority. Unknown state, missing identity, reversed transition, receipt drift, or conflicting attempt is reader-only and blocks execution, success, cleanup, retry, and delete.",
+      "publication": "output-validated state binds the exact validator receipt, output SHA-256, byte length, probe, PTS digest, audio delivery identity, and intended final path before publishing. Succeeded Job state is committed only after published bytes are reopened and matched.",
+      "retention": "retain the journal until Job state, idempotency receipt, final output or failure, cancellation, dependency ledger, staging, and scratch cleanup all agree"
+    },
+    "recoveryInvariants": {
+      "retry": "uses the exact persisted request, plan, seed, source/staging identities, dependency closure, and receipt-compatible backend; creates a new attemptId and new scratch/temp output. It never resumes or publishes an earlier unvalidated temporary output.",
+      "cancel": "durably records cancel-requested before signalling the proven process, waits only the bounded advertised grace interval, records exit observation, publishes nothing after cancellation, and marks cancelled only after journal and process ownership agree",
+      "startupRecovery": "reconcile nonterminal journal with current Job and filesystem identities without starting a model or worker during passive health/Jobs reads. Recovery runs only through the authenticated explicit recovery worker and is bounded by exact journal count, path, byte, probe, and time limits.",
+      "delete": "terminal output and job-owned staging/scratch deletion require exact current hashes/identities, complete journal, no active/retry/recovery/publication reference, and no managed descendant dependency. Partial cleanup never deletes source media or rewrites the Job as repaired.",
+      "failure": "ambiguous process, output, staging, dependency, or journal ownership preserves data, leaves a reader-visible failure or needs-action state, and fails closed"
+    }
   },
   "lifecycle": {
     "retry": {
@@ -1133,21 +1432,21 @@
       "revalidateSourceHashes": true,
       "revalidateSourceProbe": true,
       "reResolveClientPath": false,
-      "rule": "retry creates one replacement child from the exact snapshot and current pinned receipts; source mismatch, missing staging, unsupported capability, or ambiguous publication keeps the source row and fails closed"
+      "rule": "retry creates one new attempt from the exact snapshot, seed, source/staging identity, dependency closure, and compatible pinned receipt set; it never reuses an earlier scratch or unvalidated output. Source mismatch, missing staging, unsupported capability, incomplete journal, or ambiguous publication keeps the source row and fails closed."
     },
     "cancel": {
       "ownershipFailure": "fail-closed",
       "sourceDeletion": false,
-      "rule": "cancel only a mutation-safe known v2 row through existing authenticated queue ownership; preserve source, committed durable state, and unproven process or staging ownership"
+      "rule": "cancel only a mutation-safe known v2 row through existing authenticated queue ownership and the exact attempt journal; durably record cancel-requested before signalling only the proven attempt process, publish nothing afterward, and preserve source, committed durable state, and unproven process or staging ownership"
     },
     "delete": {
       "ownershipFailure": "fail-closed",
       "sourceDeletion": false,
-      "rule": "delete only a proven terminal v2 output and proven unreferenced job-owned artifacts; never delete a managed producer output or external original"
+      "rule": "delete only a proven terminal v2 output and proven unreferenced job-owned artifacts after a complete attempt journal and empty bounded dependency closure check; never delete a managed producer or ancestor output, external original, or ambiguous staging identity"
     },
     "publish": {
       "ownershipFailure": "fail-closed",
-      "rule": "publish one validated final MP4 below the canonical managed Videos date folder only after exact source, output, frame timeline, audio, runtime, journal, and idempotency ownership validation"
+      "rule": "publish one output-validator-approved final MP4 below the canonical managed Videos date folder only after exact source, dependency closure, output bytes, stream shape, frame timeline, pixel format, audio, runtime receipt set, attempt journal, and idempotency ownership validation"
     }
   },
   "productionGate": {
@@ -1155,6 +1454,21 @@
       "status": 503,
       "code": "VIDEO_TOOLS_V2_NOT_READY"
     },
-    "writerRule": "both Edit and Finish writers remain false. A lane may be enabled only in a paired revision after its exact backend/runtime/workflow/canary receipts and all passive, ownership, cancellation, recovery, and output invariants pass. Enabling one lane never enables the other."
+    "currentEdit": {
+      "productionWriterEnabled": false,
+      "readyVariantAdvertised": false,
+      "liveCanaryReceiptsPresent": false,
+      "qualityAsserted": false,
+      "firstSemanticCandidateBackendId": "bernini-r-1.3b-edit-candidate-v1"
+    },
+    "editActivationConjunction": [
+      "a future paired public/private revision explicitly changes the Edit production writer gate; changing health booleans alone is insufficient",
+      "authenticated health emits the exact state=ready Edit variant with Bernini source-video semantic V2V as the first activation backend",
+      "every runtime, model, workflow, compiler, timeline, audio, quality, resource, cancel, recovery, and output-validator receipt resolves and matches receiptSetSha256",
+      "the request and plan fit the exact current resource bounds and one-execution lease",
+      "displayed staging or managed dependency closure, attempt journal, retry, cancel, recovery, delete, and output publication invariants all validate",
+      "the final child MP4 passes the exact output validator before succeeded state"
+    ],
+    "writerRule": "both Edit and Finish writers remain false. Edit activation requires the complete conjunction above and the exact ready capability variant; no subset or boolean-only flip is ready. A lane may be enabled only in a paired revision after all exact receipts and passive, ownership, cancellation, recovery, dependency, and output invariants pass. Enabling Edit never enables Finish."
   }
 }
