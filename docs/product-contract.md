@@ -451,20 +451,58 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   canary capability; no backend or mode silently falls back to another and no
   candidate ID implies a default mode. The faithful candidate is NVIDIA VFX
   VideoSuperRes via `nvidia-vfx 0.1.0.1`, internal VFX SDK `1.2.0.0`, with a
-  server-owned `MEDIUM`, `HIGH`, or `ULTRA` setting. It is not claimed
-  frame-independent, so scene-cut reset or effect recreation remains a gate.
+  server-owned `LOW`, `MEDIUM`, `HIGH`, or `ULTRA` setting. The first future
+  activation mapping is fast = one receipt-resolved `LOW` or `MEDIUM`, standard
+  = `HIGH`, and quality = `ULTRA`; fast has no inferred default between its two
+  values. It is not claimed frame-independent, so scene-cut reset or effect
+  recreation remains a gate.
   SeedVR2 3B is the generative-detail candidate and must explicitly pass source
   fidelity, synthesized-texture, and bounded-VRAM canaries. NanoVSR-1.7M is the
   lightweight native-4x candidate; its reported bidirectional recurrent,
   15-frame disjoint-chunk demonstration requires an exact Aibos overlap/crop
   revision and chunk-seam canary. NanoVSR 2x remains unsupported until a
   separate 4x-to-2x delivery mapping passes.
+- The current overall Finish health object and each current fast, standard, and
+  quality object remain their exact compatible six-field disabled variants. A
+  future overall `state=ready` variant is exact and separate from a future
+  requested-mode `state=ready` variant. A Finish request is ready only when
+  both exact variants occur in the same authenticated health response, their
+  backend, setting, overall and mode receipt digests, source and scale bounds,
+  scene-cut policy, streaming revision, journal, and output policy cross-bind,
+  and the request fits both. A ready standard mode cannot run a disabled quality
+  request; a lower setting, 2x, another candidate, or Edit is never a fallback.
+  NanoVSR, SeedVR2, FlashVSR, and other candidate families are not part of this
+  first activation shape.
+- Future faithful Finish readiness requires one source-length-independent,
+  bounded decoder/GPU/encoder frame stream and at most one GPU Finish Job. It
+  retains only a canaried bounded number of decoded frames and bytes, never the
+  complete video in RAM or VRAM. It preserves the complete source frame count,
+  rational fps, full video PTS sequence and digest, duration, and persisted
+  encoded audio packet identity. It performs no interpolation, frame-rate
+  conversion, implicit crop, implicit 4x-to-2x fallback, generated audio, or
+  audio-shortness video truncation. Explicit 4x must fit every mode and overall
+  dimension, pixel, queue, memory, scratch, and output-byte bound.
 - Finish output is initially 8-bit SDR, no larger than 3840 x 2160 or
   8,294,400 pixels, with exact source frame count, rational fps, video PTS,
   duration, and encoded audio packets. It performs no interpolation,
   frame-rate conversion, implicit crop, or implicit scale fallback. Every
   candidate's scene-boundary temporal-state behavior remains an exact canary
   requirement rather than an inferred SDK or model property.
+- Before success, Finish writes one attempt-owned temporary regular MP4 and
+  validates exactly one H.264 `yuv420p` 8-bit SDR video stream, zero or one
+  source-matching audio stream, no extra stream types, full frame/PTS identity,
+  requested dimensions, packet-copy identity, and both advertised and 512 MiB
+  hard byte ceilings. A separate Finish attempt journal binds Job, attempt,
+  mode, scale, backend setting, overall and mode receipt sets, source and
+  dependency identities, scratch, process/helper ownership, validator result,
+  publication, and cleanup. PID alone is not ownership proof. Retry creates a
+  new attempt without changing mode or scale; cancel records intent before
+  signalling only proven ownership; passive reads never recover or mount the
+  SDK. Published bytes are reopened and matched before success.
+- No live Finish canary or quality receipt is asserted in this revision. The
+  overall Finish writer, every mode writer, ready advertisement, validator,
+  journal writer, and quality assertion all remain false. Defining the future
+  discriminated shapes does not activate a production POST path.
 - Edit and Finish share only the typed video Job envelope, source pinning,
   idempotency, durable inbox, queue, output-root, and lifecycle infrastructure.
   Their request schemas, capabilities, receipts, backend candidates, planners,

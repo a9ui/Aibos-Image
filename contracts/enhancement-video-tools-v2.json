@@ -653,6 +653,7 @@
         "internalSdkVersion": "1.2.0.0",
         "evidenceRevision": "NVIDIA FlashDreams e580e27d408b3cf8bd8a549f990c361b94d3379f",
         "serverQualityValues": [
+          "LOW",
           "MEDIUM",
           "HIGH",
           "ULTRA"
@@ -740,6 +741,63 @@
     "implicitResizeFallback": false,
     "sceneCutResetCanaryRequired": true,
     "sceneCut": "backend temporal-state behavior is not inferred from a model, SDK, or integration description. Production stays closed until a pinned runner proves reset or recreation at detected scene boundaries and persists its detector, threshold, and reset-policy receipts."
+  },
+  "finishOutputValidator": {
+    "policyRevision": "aibos-video-finish-mp4-validator-v1",
+    "productionValidated": false,
+    "validatorCanaryVerified": false,
+    "file": {
+      "regularFileRequired": true,
+      "reparsePointAllowed": false,
+      "hardLinkIdentityAmbiguityAllowed": false,
+      "container": "mp4",
+      "minimumBytes": 1,
+      "hardMaximumBytes": 536870912,
+      "bound": "final byte length must be no greater than both hardMaximumBytes and the exact ready Finish resourceBounds.maximumOutputBytes"
+    },
+    "streams": {
+      "videoStreamCount": 1,
+      "maximumAudioStreamCount": 1,
+      "subtitleStreamCount": 0,
+      "dataStreamCount": 0,
+      "attachmentStreamCount": 0,
+      "unknownStreamTypesAllowed": false,
+      "audioCoupling": "zero or one audio stream exactly matches the persisted source probe and packet-copy delivery identity; an input with no audio emits no audio stream"
+    },
+    "video": {
+      "codec": "h264",
+      "pixelFormat": "yuv420p",
+      "bitDepth": 8,
+      "dynamicRange": "SDR",
+      "width": "exactly delivery.width, source width multiplied by the explicitly requested scale, and no greater than the ready mode and overall output bounds",
+      "height": "exactly delivery.height, source height multiplied by the explicitly requested scale, and no greater than the ready mode and overall output bounds",
+      "frameCount": "exactly delivery.frameCount and the complete source video frame count",
+      "fps": "exactly delivery.fpsNumerator/delivery.fpsDenominator and the persisted rational source fps",
+      "durationMs": "exactly delivery.durationMs and the persisted source duration",
+      "implicitCrop": false,
+      "frameInterpolation": false,
+      "frameRateConversion": false
+    },
+    "pts": {
+      "entryCount": "exactly the complete source frame count",
+      "sequence": "the full finite signed-64-bit source video presentation timestamp sequence and its persisted rational time base are preserved exactly in presentation order; missing, duplicate, decreasing, rebased, synthesized, dropped, or extra timestamps reject",
+      "digest": "compute videoPtsSha256 with the source probe signed-64-bit big-endian algorithm and require exact equality with both source.probe.videoPtsSha256 and delivery.videoPtsSha256"
+    },
+    "audio": {
+      "generatedAudioAllowed": false,
+      "packetCopy": "when the persisted source has audio, codec, codec tag, profile, sample rate, channels, stream time base, start and duration timestamps, ordered packet payload bytes, packet count, payload byte count, and packet payload SHA-256 must match the exact source probe and delivery identity without re-encoding; no sample-exact or per-packet timestamp identity is claimed beyond those persisted fields",
+      "noAudioSource": "emit zero audio streams and no fabricated silence, empty packet range, or packet identity",
+      "videoTruncationToAudioAllowed": false
+    },
+    "validationAndPublicationOrder": [
+      "write only to one newly allocated attempt-owned temporary file below the bounded Finish scratch root",
+      "close encoder and process handles, then open that exact regular file through a no-delete/no-write validation lease",
+      "prove unchanged identity before and after bounded byte hash, stream probe, full frame decode/count, full PTS digest, pixel-format check, requested-scale check, and exact audio packet-copy validation",
+      "persist the Finish output-validator receipt, final SHA-256, byte length, probe digest, timeline and audio identities, and journal transition before publication",
+      "atomically publish the same validated bytes to one newly allocated canonical managed Videos path without overwrite",
+      "reopen and revalidate the published identity before marking the Finish Job succeeded"
+    ],
+    "failure": "any mismatch, timeout, extra stream, unsupported pixel format or color state, byte or pixel overflow, frame or PTS change, audio identity change, ambiguous ownership, or journal disagreement keeps the Job non-succeeded, publishes nothing, preserves the source, and cleans only proven attempt-owned temporary artifacts"
   },
   "persistedSnapshot": {
     "protocol": "aibos-enhancement-video-tools-v2",
@@ -1288,6 +1346,369 @@
       },
       "finishIsolation": "This Edit shape does not add, reinterpret, or enable any Finish field, mode, backend, receipt, resource bound, or writer. Finish remains the exact current disabled lane."
     },
+    "finishCapabilityVariants": {
+      "location": "capabilities.videoToolsV2.finish",
+      "discriminator": "state",
+      "currentDisabledCompatibility": {
+        "exactKeys": [
+          "writerEnabled",
+          "backendConfigured",
+          "runtimeVerified",
+          "ready",
+          "state",
+          "reasonCode"
+        ],
+        "shape": "healthCapability.exactShape.finish remains the exact current disabled variant with no additive ready-only fields",
+        "unknownOrMalformed": "preserve reader visibility, treat Finish and every Finish mode as not ready, and prohibit publication, enqueue, wake, claim, retry, process start, or output mutation"
+      },
+      "ready": {
+        "capabilityRevision": "aibos-video-finish-ready-v1",
+        "exactKeys": [
+          "writerEnabled",
+          "backendConfigured",
+          "runtimeVerified",
+          "ready",
+          "state",
+          "reasonCode",
+          "capabilityRevision",
+          "resolvedBackend",
+          "receipts",
+          "resourceBounds",
+          "streamingPolicy",
+          "outputPolicy"
+        ],
+        "fixedValues": {
+          "writerEnabled": true,
+          "backendConfigured": true,
+          "runtimeVerified": true,
+          "ready": true,
+          "state": "ready",
+          "reasonCode": null,
+          "capabilityRevision": "aibos-video-finish-ready-v1"
+        },
+        "resolvedBackend": {
+          "exactKeys": [
+            "backendId",
+            "semanticRole",
+            "backendFamily",
+            "package",
+            "internalSdkVersion",
+            "runnerRevision",
+            "outputValidatorRevision",
+            "attemptJournalRevision"
+          ],
+          "firstActivation": {
+            "backendId": "nvidia-vfx-vsr-1.2-candidate-v1",
+            "semanticRole": "faithful",
+            "backendFamily": "NVIDIA VFX VideoSuperRes 1.2",
+            "package": "nvidia-vfx 0.1.0.1",
+            "internalSdkVersion": "1.2.0.0",
+            "outputValidatorRevision": "aibos-video-finish-mp4-validator-v1",
+            "attemptJournalRevision": "aibos-video-finish-attempt-journal-v1"
+          },
+          "rule": "The first Finish activation shape resolves only the faithful NVIDIA VFX VideoSuperRes candidate. runnerRevision is one non-empty receipt-bound stable identifier. NanoVSR, SeedVR2, FlashVSR, a generative detail model, Edit backend, unknown backend, or candidate-ID inference cannot satisfy this shape."
+        },
+        "receipts": {
+          "exactKeys": [
+            "runtimeReceiptId",
+            "packageReceiptId",
+            "sdkReceiptId",
+            "driverGpuReceiptId",
+            "runnerReceiptId",
+            "frameStreamingReceiptId",
+            "timelinePreservationReceiptId",
+            "audioPacketCopyReceiptId",
+            "sceneCutReceiptId",
+            "resourceCanaryReceiptId",
+            "cancelCanaryReceiptId",
+            "recoveryCanaryReceiptId",
+            "journalReceiptId",
+            "outputValidatorReceiptId",
+            "receiptSetSha256"
+          ],
+          "idRule": "every receipt ID is a non-empty 1 through 128 character stable ASCII identifier resolving to one local sealed Finish receipt; no request or health client supplies it",
+          "setDigest": "receiptSetSha256 is 64 lowercase hexadecimal characters over the exact canonical Finish receipt set and all resolved receipt content digests",
+          "crossBinding": "every receipt binds protocol, Finish capability revision, NVIDIA package/SDK/runner identity, driver and GPU, exact resource bounds, O(1) streaming revision, full timeline and audio policy, scene-cut reset policy, journal revision, output validator, synthetic fixture, and measured canary result. Edit or per-mode receipt sets do not substitute for this set."
+        },
+        "resourceBounds": {
+          "exactKeys": [
+            "maximumSourceBytes",
+            "maximumSourceDurationMs",
+            "maximumSourceWidth",
+            "maximumSourceHeight",
+            "maximumSourcePixelArea",
+            "maximumSourceFrames",
+            "allowedSourceFps",
+            "supportedScales",
+            "maximumOutputWidth",
+            "maximumOutputHeight",
+            "maximumOutputPixelArea",
+            "maximumConcurrentGpuJobs",
+            "maximumBufferedFrames",
+            "maximumDecodedFrameBytes",
+            "maximumGpuVramBytes",
+            "maximumHostRamBytes",
+            "maximumScratchBytes",
+            "maximumOutputBytes",
+            "processTimeoutMs",
+            "cancelGraceMs"
+          ],
+          "fixedRequestBounds": {
+            "maximumSourceBytes": 536870912,
+            "maximumSourceDurationMs": 300000,
+            "maximumSourceWidth": 1920,
+            "maximumSourceHeight": 1080,
+            "maximumSourcePixelArea": 2073600,
+            "maximumSourceFrames": 18000,
+            "allowedSourceFps": [
+              "24/1",
+              "30/1",
+              "60/1"
+            ],
+            "supportedScales": [
+              2,
+              4
+            ],
+            "maximumOutputWidth": 3840,
+            "maximumOutputHeight": 2160,
+            "maximumOutputPixelArea": 8294400,
+            "maximumConcurrentGpuJobs": 1
+          },
+          "measuredRuntimeBounds": "maximumBufferedFrames, maximumDecodedFrameBytes, maximumGpuVramBytes, maximumHostRamBytes, maximumScratchBytes, maximumOutputBytes, processTimeoutMs, and cancelGraceMs are positive safe integers, no larger than independently configured server hard ceilings, and exactly equal to the current resource canary receipt. maximumBufferedFrames is fixed independently of source length and the complete source is never accumulated in RAM or VRAM.",
+          "plannerRule": "the complete source, requested scale, exact output dimensions and pixels, buffered-frame estimate, scratch and output estimates, current free resources, and one-GPU-Job lease must fit both the overall and requested-mode bounds before inbox publication and again before process start. 4x is explicit; any exceeded bound rejects instead of falling back to 2x or another mode."
+        },
+        "streamingPolicy": {
+          "exactKeys": [
+            "revision",
+            "boundedFrameStreaming",
+            "sourceLengthDependentRetention",
+            "maximumConcurrentGpuJobs",
+            "frameCountPreserved",
+            "rationalFpsPreserved",
+            "fullVideoPtsSequencePreserved",
+            "durationPreserved",
+            "frameInterpolation",
+            "frameRateConversion",
+            "generatedAudioAllowed",
+            "sourceAudioPacketIdentityPreserved"
+          ],
+          "fixedValues": {
+            "revision": "aibos-video-finish-bounded-streaming-v1",
+            "boundedFrameStreaming": true,
+            "sourceLengthDependentRetention": false,
+            "maximumConcurrentGpuJobs": 1,
+            "frameCountPreserved": true,
+            "rationalFpsPreserved": true,
+            "fullVideoPtsSequencePreserved": true,
+            "durationPreserved": true,
+            "frameInterpolation": false,
+            "frameRateConversion": false,
+            "generatedAudioAllowed": false,
+            "sourceAudioPacketIdentityPreserved": true
+          },
+          "rule": "one bounded decoder queue feeds one GPU Finish execution and one bounded encoder queue. Queue capacity and decoded bytes are exact receipt-bound limits independent of source duration; passive health does not allocate either queue or mount the SDK."
+        },
+        "outputPolicy": {
+          "exactKeys": [
+            "revision",
+            "container",
+            "videoCodec",
+            "pixelFormat",
+            "bitDepth",
+            "dynamicRange",
+            "videoStreamCount",
+            "maximumAudioStreamCount",
+            "subtitleStreamCount",
+            "dataStreamCount",
+            "attachmentStreamCount",
+            "implicitCrop",
+            "maximumWidth",
+            "maximumHeight",
+            "maximumPixelArea",
+            "maximumBytes"
+          ],
+          "fixedValues": {
+            "revision": "aibos-video-finish-mp4-validator-v1",
+            "container": "mp4",
+            "videoCodec": "h264",
+            "pixelFormat": "yuv420p",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "videoStreamCount": 1,
+            "maximumAudioStreamCount": 1,
+            "subtitleStreamCount": 0,
+            "dataStreamCount": 0,
+            "attachmentStreamCount": 0,
+            "implicitCrop": false,
+            "maximumWidth": 3840,
+            "maximumHeight": 2160,
+            "maximumPixelArea": 8294400
+          },
+          "maximumBytesRule": "positive safe integer exactly equal to resourceBounds.maximumOutputBytes and no greater than finishOutputValidator.file.hardMaximumBytes"
+        },
+        "activationRule": "The exact Finish ready shape is necessary but not sufficient. The same authenticated health response must also contain the exact ready variant for the requested mode, with cross-matching backend, receipts, bounds, setting and delivery policy. Every receipt must resolve and rehash, the paired activation revision must separately open the writer, and durable staging/dependency, journal, cancel, recovery and output validation must pass. Any failure emits a disabled variant rather than a partial ready shape."
+      },
+      "currentEvidence": {
+        "readyVariantAdvertised": false,
+        "liveCanaryReceiptsPresent": false,
+        "productionWriterEnabled": false,
+        "qualityAsserted": false,
+        "firstFaithfulCandidateBackendId": "nvidia-vfx-vsr-1.2-candidate-v1"
+      },
+      "editIsolation": "This Finish shape does not add, reinterpret, satisfy, or enable any Edit field, compiler, backend, receipt, resource bound, journal, validator, or writer."
+    },
+    "finishModeCapabilityVariants": {
+      "location": "capabilities.videoToolsV2.finishModes.{requestedMode}",
+      "discriminator": "state",
+      "currentDisabledCompatibility": {
+        "exactKeys": [
+          "writerEnabled",
+          "backendConfigured",
+          "runtimeVerified",
+          "ready",
+          "state",
+          "reasonCode"
+        ],
+        "shape": "each healthCapability.exactShape.finishModes entry remains the exact current disabled variant with no additive ready-only fields",
+        "unknownOrMalformed": "treat only that requested mode as unavailable, preserve reader visibility, and never select another mode, setting, scale, or backend"
+      },
+      "ready": {
+        "modeCapabilityRevision": "aibos-video-finish-mode-ready-v1",
+        "exactKeys": [
+          "writerEnabled",
+          "backendConfigured",
+          "runtimeVerified",
+          "ready",
+          "state",
+          "reasonCode",
+          "modeCapabilityRevision",
+          "mode",
+          "resolvedBackend",
+          "receipts",
+          "sourceBounds",
+          "supportedScales",
+          "deliveryPolicy"
+        ],
+        "fixedValues": {
+          "writerEnabled": true,
+          "backendConfigured": true,
+          "runtimeVerified": true,
+          "ready": true,
+          "state": "ready",
+          "reasonCode": null,
+          "modeCapabilityRevision": "aibos-video-finish-mode-ready-v1"
+        },
+        "resolvedBackend": {
+          "exactKeys": [
+            "backendId",
+            "semanticRole",
+            "backendSetting",
+            "modeMappingRevision",
+            "deliveryMappingRevision",
+            "sceneCutPolicyRevision"
+          ],
+          "modeMappings": {
+            "fast": {
+              "mode": "fast",
+              "backendId": "nvidia-vfx-vsr-1.2-candidate-v1",
+              "semanticRole": "faithful",
+              "allowedBackendSettings": [
+                "LOW",
+                "MEDIUM"
+              ],
+              "rule": "one and only one LOW or MEDIUM value is resolved, persisted, and bound to the mode-mapping and quality receipts; neither value is inferred as a default"
+            },
+            "standard": {
+              "mode": "standard",
+              "backendId": "nvidia-vfx-vsr-1.2-candidate-v1",
+              "semanticRole": "faithful",
+              "fixedBackendSetting": "HIGH"
+            },
+            "quality": {
+              "mode": "quality",
+              "backendId": "nvidia-vfx-vsr-1.2-candidate-v1",
+              "semanticRole": "faithful",
+              "fixedBackendSetting": "ULTRA"
+            }
+          },
+          "rule": "backendSetting, mapping revisions, and scene-cut policy are non-empty receipt-bound stable identifiers or the exact allowed quality value. NanoVSR, SeedVR2, FlashVSR, another Finish mode, or a lower setting cannot silently satisfy the requested mode."
+        },
+        "receipts": {
+          "exactKeys": [
+            "modeMappingReceiptId",
+            "qualityCanaryReceiptId",
+            "sourceBoundCanaryReceiptId",
+            "scale2CanaryReceiptId",
+            "scale4CanaryReceiptId",
+            "deliveryMappingReceiptId",
+            "sceneCutCanaryReceiptId",
+            "modeReceiptSetSha256"
+          ],
+          "idRule": "every receipt ID is one non-empty 1 through 128 character stable ASCII identifier resolving to one local sealed receipt for this exact mode and backend setting",
+          "setDigest": "modeReceiptSetSha256 is 64 lowercase hexadecimal characters over this exact mode receipt set and its resolved receipt content digests",
+          "crossBinding": "the set binds the same overall Finish capability and receiptSetSha256, exact requested mode, resolved setting, source bounds, 2x and 4x mappings, delivery policy, scene-cut reset policy, runner, driver/GPU and current A/B quality result"
+        },
+        "sourceBounds": {
+          "exactKeys": [
+            "maximumSourceBytes",
+            "maximumSourceDurationMs",
+            "maximumSourceWidth",
+            "maximumSourceHeight",
+            "maximumSourcePixelArea",
+            "maximumSourceFrames",
+            "allowedSourceFps"
+          ],
+          "rule": "all values are exact positive or enumerated receipt-bound bounds no greater than the overall Finish resourceBounds; inferred, omitted, zero, or broader mode bounds are not ready"
+        },
+        "supportedScales": [
+          2,
+          4
+        ],
+        "deliveryPolicy": {
+          "exactKeys": [
+            "revision",
+            "explicitScale4Required",
+            "scale4OutputBoundsRequired",
+            "silentScaleFallback",
+            "silentModeFallback",
+            "frameCountPreserved",
+            "rationalFpsPreserved",
+            "fullVideoPtsSequencePreserved",
+            "frameInterpolation",
+            "frameRateConversion",
+            "implicitCrop",
+            "sourceAudioPacketIdentityPreserved"
+          ],
+          "fixedValues": {
+            "revision": "aibos-video-finish-delivery-v1",
+            "explicitScale4Required": true,
+            "scale4OutputBoundsRequired": true,
+            "silentScaleFallback": false,
+            "silentModeFallback": false,
+            "frameCountPreserved": true,
+            "rationalFpsPreserved": true,
+            "fullVideoPtsSequencePreserved": true,
+            "frameInterpolation": false,
+            "frameRateConversion": false,
+            "implicitCrop": false,
+            "sourceAudioPacketIdentityPreserved": true
+          },
+          "rule": "2x and 4x have distinct exact canary receipts and delivery mappings. 4x is accepted only when explicitly requested and its multiplied dimensions, pixels, scratch and output bytes fit every overall and mode bound."
+        },
+        "activationRule": "the requested mode object must be exact, all receipts must resolve and cross-bind the overall ready Finish capability, and the request must fit this mode's source and scale bounds. A ready object for another mode authorizes nothing."
+      },
+      "requestedModeRule": "Finish overall must be the exact state=ready variant and the exact requested mode under finishModes must independently be its exact state=ready variant in the same authenticated health response. A disabled, unknown, malformed, differently mapped, or receipt-incompatible requested mode rejects; another ready mode is never a fallback.",
+      "currentEvidence": {
+        "readyVariantsAdvertised": {
+          "fast": false,
+          "standard": false,
+          "quality": false
+        },
+        "liveCanaryReceiptsPresent": false,
+        "productionWriterEnabled": false,
+        "qualityAsserted": false
+      }
+    },
     "reasonCodes": {
       "edit": [
         "VIDEO_TOOLS_V2_EDIT_WRITER_DISABLED",
@@ -1316,26 +1737,42 @@
         "VIDEO_TOOLS_V2_FINISH_RUNTIME_UNPINNED",
         "VIDEO_TOOLS_V2_FINISH_SCENE_CUT_CANARY_REQUIRED",
         "VIDEO_TOOLS_V2_FINISH_GPU_CANARY_REQUIRED",
-        "VIDEO_TOOLS_V2_FINISH_OUTPUT_CANARY_REQUIRED"
+        "VIDEO_TOOLS_V2_FINISH_OUTPUT_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_READY_SHAPE_INCOMPLETE",
+        "VIDEO_TOOLS_V2_FINISH_RECEIPT_SET_UNVERIFIED",
+        "VIDEO_TOOLS_V2_FINISH_RESOURCE_BOUNDS_UNVERIFIED",
+        "VIDEO_TOOLS_V2_FINISH_OUTPUT_VALIDATOR_UNVERIFIED",
+        "VIDEO_TOOLS_V2_FINISH_DURABLE_RECOVERY_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_REQUESTED_MODE_NOT_READY"
       ],
       "finishFast": [
         "VIDEO_TOOLS_V2_FINISH_FAST_CANARY_REQUIRED",
         "VIDEO_TOOLS_V2_FINISH_FAST_MODE_MAPPING_CANARY_REQUIRED",
-        "VIDEO_TOOLS_V2_FINISH_FAST_SCENE_CUT_CANARY_REQUIRED"
+        "VIDEO_TOOLS_V2_FINISH_FAST_SCENE_CUT_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_FAST_READY_SHAPE_INCOMPLETE",
+        "VIDEO_TOOLS_V2_FINISH_FAST_RECEIPT_SET_UNVERIFIED",
+        "VIDEO_TOOLS_V2_FINISH_FAST_SETTING_UNRESOLVED",
+        "VIDEO_TOOLS_V2_FINISH_FAST_SCALE_4_OUTPUT_BOUND_EXCEEDED"
       ],
       "finishStandard": [
         "VIDEO_TOOLS_V2_FINISH_STANDARD_CANARY_REQUIRED",
         "VIDEO_TOOLS_V2_FINISH_STANDARD_MODE_MAPPING_CANARY_REQUIRED",
         "VIDEO_TOOLS_V2_FINISH_STANDARD_SOURCE_BOUND_UNVERIFIED",
         "VIDEO_TOOLS_V2_FINISH_STANDARD_TEMPORAL_SEAM_CANARY_REQUIRED",
-        "VIDEO_TOOLS_V2_FINISH_STANDARD_SCALE_MAPPING_CANARY_REQUIRED"
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_SCALE_MAPPING_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_READY_SHAPE_INCOMPLETE",
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_RECEIPT_SET_UNVERIFIED",
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_SCALE_4_OUTPUT_BOUND_EXCEEDED"
       ],
       "finishQuality": [
         "VIDEO_TOOLS_V2_FINISH_QUALITY_CANARY_REQUIRED",
         "VIDEO_TOOLS_V2_FINISH_QUALITY_MODE_MAPPING_CANARY_REQUIRED",
         "VIDEO_TOOLS_V2_FINISH_QUALITY_DETAIL_POLICY_UNVERIFIED",
         "VIDEO_TOOLS_V2_FINISH_QUALITY_GPU_CANARY_REQUIRED",
-        "VIDEO_TOOLS_V2_FINISH_QUALITY_SCALE_UNSUPPORTED"
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_SCALE_UNSUPPORTED",
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_READY_SHAPE_INCOMPLETE",
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_RECEIPT_SET_UNVERIFIED",
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_SCALE_4_OUTPUT_BOUND_EXCEEDED"
       ]
     },
     "passiveRead": {
@@ -1353,7 +1790,7 @@
       "claimsJobs": false,
       "retriesJobs": false
     },
-    "writerRule": "readerReady never authorizes durable publication. Edit requires its exact lane fields. Finish additionally requires the exact requested mode's independent writerEnabled, backendConfigured, runtimeVerified, and ready fields. All must be true under one authenticated current health response, and its supported scales, source bounds, backend/delivery mappings, temporal policy, and receipts must exactly match the request planner. No other mode is a fallback."
+    "writerRule": "readerReady never authorizes durable publication. Edit requires its own exact lane variant. Finish requires both the exact overall Finish state=ready variant and the exact requested Finish mode state=ready variant in one authenticated current health response; booleans alone are insufficient. Backend, resolved setting, overall and mode receipt digests, source/scale bounds, streaming, scene-cut, journal and output policies must cross-match the request planner. A different ready mode, setting, scale, Edit lane, or candidate is never a fallback."
   },
   "durableDependencies": {
     "managedActiveJob": "producerJobId reserves its exact producer output while the child is queued or running",
@@ -1424,6 +1861,61 @@
       "failure": "ambiguous process, output, staging, dependency, or journal ownership preserves data, leaves a reader-visible failure or needs-action state, and fails closed"
     }
   },
+  "finishDurableWriter": {
+    "productionWriterEnabled": false,
+    "displayedStaging": {
+      "ownership": "one staged source belongs to one logical Finish Job, not to an execution attempt. The immutable snapshot binds staging canonical path, signature, SHA-256, probe, owner Job ID, and source identity digest.",
+      "retry": "reuse and revalidate only the exact committed staged identity. Never reopen the external path, import replacement bytes, or make a per-attempt staging copy.",
+      "cancel": "cancel preserves the external original and the proven Job-owned stage while the Job, retry, or any Finish cancel/recovery/publication journal can reference it.",
+      "delete": "remove staging only after the terminal Finish Job and output are eligible for deletion, no dependency or retry remains, every Finish attempt journal is terminal, and exact stage ownership is revalidated; ambiguity preserves the stage and fails closed"
+    },
+    "attemptJournal": {
+      "revision": "aibos-video-finish-attempt-journal-v1",
+      "states": [
+        "reserved",
+        "source-validated",
+        "process-started",
+        "cancel-requested",
+        "process-exited",
+        "output-validating",
+        "output-validated",
+        "publishing",
+        "published",
+        "cleanup-pending",
+        "complete",
+        "failed"
+      ],
+      "requiredIdentity": [
+        "journalRevision",
+        "jobId",
+        "attemptId",
+        "presetHash",
+        "mode",
+        "scale",
+        "backendId",
+        "backendSetting",
+        "receiptSetSha256",
+        "modeReceiptSetSha256",
+        "sourceIdentityDigest",
+        "dependencyClosureDigest",
+        "scratchOwnershipDigest",
+        "temporaryOutputIdentity",
+        "state"
+      ],
+      "beforeProcess": "persist reserved/source-validated state, exact immutable Finish snapshot hash, mode, scale, backend setting, overall and mode receipt sets, source/dependency identities, attempt-owned scratch root, temporary output allocation, streaming launch intent, and one-GPU-Job lease before starting any SDK helper or backend process",
+      "processOwnership": "after launch, persist one non-reusable process or native-helper identity cryptographically bound to attemptId. Cancel and recovery may signal, release, or terminate only that proven identity; PID alone is never ownership proof.",
+      "transitionRule": "append or replace Finish journal state atomically with the latest on-disk Job under the Jobs mutation authority. Unknown or missing state, reversed transition, mode/setting/scale or receipt drift, output identity drift, or conflicting attempt is reader-only and blocks execution, success, cleanup, retry, delete, and publication.",
+      "publication": "output-validated binds the exact Finish validator receipt, output SHA-256, byte length, stream probe, full source PTS digest, audio packet-copy identity, requested scale and intended final path before publishing. Succeeded Job state is committed only after the published bytes are reopened and every identity matches.",
+      "retention": "retain the Finish journal until Job state, idempotency receipt, final output or failure, cancellation, dependency ledger, staging, GPU/helper release, bounded queues, and scratch cleanup all agree"
+    },
+    "recoveryInvariants": {
+      "retry": "uses the exact persisted request, mode, scale, backend setting, source/staging identities, dependency closure, overall and mode receipt sets, and delivery plan; creates a new attemptId, process identity, queues, scratch, and temporary output. It never resumes or publishes an earlier unvalidated temporary output and never changes mode or scale.",
+      "cancel": "durably records cancel-requested before signalling only the proven Finish helper/process, waits only the advertised grace interval, drains or invalidates bounded queues without publishing, records exit and GPU lease release, and marks cancelled only after journal and ownership agree",
+      "startupRecovery": "reconcile nonterminal Finish journals with current Job, process/helper, GPU lease, staging, scratch, queue, and output identities only through the authenticated explicit recovery worker. Passive health and Jobs reads never start recovery, open media, mount the SDK, or mutate state.",
+      "delete": "terminal Finish output and Job-owned staging/scratch deletion require exact current hashes and identities, complete Finish journal, no active/retry/recovery/publication reference, and no managed descendant dependency. Partial cleanup never deletes source media or rewrites the Job as repaired.",
+      "failure": "ambiguous process/helper, GPU lease, queue, output, staging, dependency, or journal ownership preserves data, publishes nothing, leaves a reader-visible failure or needs-action state, and fails closed"
+    }
+  },
   "lifecycle": {
     "retry": {
       "reuseExactPersistedSnapshot": true,
@@ -1461,6 +1953,14 @@
       "qualityAsserted": false,
       "firstSemanticCandidateBackendId": "bernini-r-1.3b-edit-candidate-v1"
     },
+    "currentFinish": {
+      "productionWriterEnabled": false,
+      "readyVariantAdvertised": false,
+      "anyModeReadyVariantAdvertised": false,
+      "liveCanaryReceiptsPresent": false,
+      "qualityAsserted": false,
+      "firstFaithfulCandidateBackendId": "nvidia-vfx-vsr-1.2-candidate-v1"
+    },
     "editActivationConjunction": [
       "a future paired public/private revision explicitly changes the Edit production writer gate; changing health booleans alone is insufficient",
       "authenticated health emits the exact state=ready Edit variant with Bernini source-video semantic V2V as the first activation backend",
@@ -1469,6 +1969,16 @@
       "displayed staging or managed dependency closure, attempt journal, retry, cancel, recovery, delete, and output publication invariants all validate",
       "the final child MP4 passes the exact output validator before succeeded state"
     ],
-    "writerRule": "both Edit and Finish writers remain false. Edit activation requires the complete conjunction above and the exact ready capability variant; no subset or boolean-only flip is ready. A lane may be enabled only in a paired revision after all exact receipts and passive, ownership, cancellation, recovery, dependency, and output invariants pass. Enabling Edit never enables Finish."
+    "finishActivationConjunction": [
+      "a future paired public/private revision explicitly changes the Finish production writer gate; changing overall or mode health booleans alone is insufficient",
+      "authenticated health emits the exact state=ready overall Finish variant resolving the faithful NVIDIA VFX VideoSuperRes candidate and the exact state=ready variant for the requested fast, standard, or quality mode in the same response",
+      "fast resolves exactly LOW or MEDIUM through its receipt, standard resolves HIGH, and quality resolves ULTRA; the persisted setting never changes and another mode or lower setting is not a fallback",
+      "every overall runtime, package, SDK, driver/GPU, runner, streaming, timeline, audio, scene-cut, resource, cancel, recovery, journal, and output-validator receipt resolves and matches receiptSetSha256",
+      "every requested-mode mapping, quality, source-bound, 2x, explicit 4x, delivery, and scene-cut receipt resolves and matches modeReceiptSetSha256 and the same overall capability",
+      "the complete source and requested scale fit exact overall and requested-mode source, pixel, queue, memory, scratch, byte, timeout and one-GPU-Job bounds before publication and execution",
+      "the bounded O(1) frame-streaming runner, scene-cut reset/recreation, full source frame count, rational fps, complete PTS sequence, duration, exact audio packet-copy identity, cancel, recovery, and Finish attempt journal canaries pass",
+      "the final 8-bit SDR H.264 yuv420p MP4 passes the exact Finish output validator and published-byte reopen before succeeded state"
+    ],
+    "writerRule": "both Edit and Finish production writers, ready advertisements, live canary receipt claims, and quality assertions remain false. Edit and Finish each require their own complete conjunction and exact discriminated capability variants; Finish additionally requires the requested mode variant. No subset, boolean-only flip, unresolved receipt, another ready mode, candidate implication, or Edit readiness is production-ready. A lane may be enabled only in a paired revision after its own passive, ownership, cancellation, recovery, dependency, journal, resource, and output invariants pass."
   }
 }

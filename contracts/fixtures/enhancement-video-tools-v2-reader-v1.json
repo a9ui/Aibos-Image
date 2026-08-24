@@ -3,7 +3,7 @@
   "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
   "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
   "compatibility": {
-    "contractSha256": "2af258e1908d558818d4bae376306ad625ee729ca259c5460b8f97b43dae6a8b",
+    "contractSha256": "eee8bc37402923717936576402357d93d8150b7f6874852f8a0e18dde3e33eb7",
     "consumers": [
       "public-wpf",
       "private-companion"
@@ -195,6 +195,258 @@
       "productionWriterEnabled": false,
       "qualityAsserted": false,
       "firstSemanticCandidateBackendId": "bernini-r-1.3b-edit-candidate-v1"
+    }
+  },
+  "finishCapabilityNegativeVectors": {
+    "booleanFlipOnly": {
+      "capability": {
+        "writerEnabled": true,
+        "backendConfigured": true,
+        "runtimeVerified": true,
+        "ready": true,
+        "state": "ready",
+        "reasonCode": null
+      },
+      "missingReadyKeys": [
+        "capabilityRevision",
+        "resolvedBackend",
+        "receipts",
+        "resourceBounds",
+        "streamingPolicy",
+        "outputPolicy"
+      ],
+      "expectedReady": false,
+      "expectedEnqueue": false,
+      "expectedReasonCode": "VIDEO_TOOLS_V2_FINISH_READY_SHAPE_INCOMPLETE"
+    },
+    "modeBooleanFlipOnly": {
+      "requestedMode": "standard",
+      "capability": {
+        "writerEnabled": true,
+        "backendConfigured": true,
+        "runtimeVerified": true,
+        "ready": true,
+        "state": "ready",
+        "reasonCode": null
+      },
+      "missingReadyKeys": [
+        "modeCapabilityRevision",
+        "mode",
+        "resolvedBackend",
+        "receipts",
+        "sourceBounds",
+        "supportedScales",
+        "deliveryPolicy"
+      ],
+      "expectedReady": false,
+      "expectedEnqueue": false,
+      "expectedReasonCode": "VIDEO_TOOLS_V2_FINISH_STANDARD_READY_SHAPE_INCOMPLETE"
+    },
+    "shapeCompleteButUnresolvedReceipts": {
+      "evidence": "synthetic negative vector only; receipt names, runtime bounds, settings, and quality values are not live canary evidence, recommendations, or activation authority",
+      "overallCapability": {
+        "writerEnabled": true,
+        "backendConfigured": true,
+        "runtimeVerified": true,
+        "ready": true,
+        "state": "ready",
+        "reasonCode": null,
+        "capabilityRevision": "aibos-video-finish-ready-v1",
+        "resolvedBackend": {
+          "backendId": "nvidia-vfx-vsr-1.2-candidate-v1",
+          "semanticRole": "faithful",
+          "backendFamily": "NVIDIA VFX VideoSuperRes 1.2",
+          "package": "nvidia-vfx 0.1.0.1",
+          "internalSdkVersion": "1.2.0.0",
+          "runnerRevision": "synthetic-unsealed-finish-runner",
+          "outputValidatorRevision": "aibos-video-finish-mp4-validator-v1",
+          "attemptJournalRevision": "aibos-video-finish-attempt-journal-v1"
+        },
+        "receipts": {
+          "runtimeReceiptId": "synthetic-unresolved-finish-runtime",
+          "packageReceiptId": "synthetic-unresolved-nvidia-vfx-package",
+          "sdkReceiptId": "synthetic-unresolved-vfx-sdk",
+          "driverGpuReceiptId": "synthetic-unresolved-driver-gpu",
+          "runnerReceiptId": "synthetic-unresolved-finish-runner",
+          "frameStreamingReceiptId": "synthetic-unresolved-frame-streaming",
+          "timelinePreservationReceiptId": "synthetic-unresolved-full-pts",
+          "audioPacketCopyReceiptId": "synthetic-unresolved-audio-packets",
+          "sceneCutReceiptId": "synthetic-unresolved-scene-cut",
+          "resourceCanaryReceiptId": "synthetic-unresolved-finish-resource",
+          "cancelCanaryReceiptId": "synthetic-unresolved-finish-cancel",
+          "recoveryCanaryReceiptId": "synthetic-unresolved-finish-recovery",
+          "journalReceiptId": "synthetic-unresolved-finish-journal",
+          "outputValidatorReceiptId": "synthetic-unresolved-finish-validator",
+          "receiptSetSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "resourceBounds": {
+          "maximumSourceBytes": 536870912,
+          "maximumSourceDurationMs": 300000,
+          "maximumSourceWidth": 1920,
+          "maximumSourceHeight": 1080,
+          "maximumSourcePixelArea": 2073600,
+          "maximumSourceFrames": 18000,
+          "allowedSourceFps": [
+            "24/1",
+            "30/1",
+            "60/1"
+          ],
+          "supportedScales": [
+            2,
+            4
+          ],
+          "maximumOutputWidth": 3840,
+          "maximumOutputHeight": 2160,
+          "maximumOutputPixelArea": 8294400,
+          "maximumConcurrentGpuJobs": 1,
+          "maximumBufferedFrames": 4,
+          "maximumDecodedFrameBytes": 33177600,
+          "maximumGpuVramBytes": 12884901888,
+          "maximumHostRamBytes": 34359738368,
+          "maximumScratchBytes": 8589934592,
+          "maximumOutputBytes": 536870912,
+          "processTimeoutMs": 1800000,
+          "cancelGraceMs": 30000
+        },
+        "streamingPolicy": {
+          "revision": "aibos-video-finish-bounded-streaming-v1",
+          "boundedFrameStreaming": true,
+          "sourceLengthDependentRetention": false,
+          "maximumConcurrentGpuJobs": 1,
+          "frameCountPreserved": true,
+          "rationalFpsPreserved": true,
+          "fullVideoPtsSequencePreserved": true,
+          "durationPreserved": true,
+          "frameInterpolation": false,
+          "frameRateConversion": false,
+          "generatedAudioAllowed": false,
+          "sourceAudioPacketIdentityPreserved": true
+        },
+        "outputPolicy": {
+          "revision": "aibos-video-finish-mp4-validator-v1",
+          "container": "mp4",
+          "videoCodec": "h264",
+          "pixelFormat": "yuv420p",
+          "bitDepth": 8,
+          "dynamicRange": "SDR",
+          "videoStreamCount": 1,
+          "maximumAudioStreamCount": 1,
+          "subtitleStreamCount": 0,
+          "dataStreamCount": 0,
+          "attachmentStreamCount": 0,
+          "implicitCrop": false,
+          "maximumWidth": 3840,
+          "maximumHeight": 2160,
+          "maximumPixelArea": 8294400,
+          "maximumBytes": 536870912
+        }
+      },
+      "requestedMode": "standard",
+      "modeCapability": {
+        "writerEnabled": true,
+        "backendConfigured": true,
+        "runtimeVerified": true,
+        "ready": true,
+        "state": "ready",
+        "reasonCode": null,
+        "modeCapabilityRevision": "aibos-video-finish-mode-ready-v1",
+        "mode": "standard",
+        "resolvedBackend": {
+          "backendId": "nvidia-vfx-vsr-1.2-candidate-v1",
+          "semanticRole": "faithful",
+          "backendSetting": "HIGH",
+          "modeMappingRevision": "synthetic-unsealed-standard-map",
+          "deliveryMappingRevision": "synthetic-unsealed-standard-delivery",
+          "sceneCutPolicyRevision": "synthetic-unsealed-scene-reset"
+        },
+        "receipts": {
+          "modeMappingReceiptId": "synthetic-unresolved-standard-map",
+          "qualityCanaryReceiptId": "synthetic-unresolved-standard-quality",
+          "sourceBoundCanaryReceiptId": "synthetic-unresolved-standard-source",
+          "scale2CanaryReceiptId": "synthetic-unresolved-standard-2x",
+          "scale4CanaryReceiptId": "synthetic-unresolved-standard-4x",
+          "deliveryMappingReceiptId": "synthetic-unresolved-standard-delivery",
+          "sceneCutCanaryReceiptId": "synthetic-unresolved-standard-scene-cut",
+          "modeReceiptSetSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "sourceBounds": {
+          "maximumSourceBytes": 536870912,
+          "maximumSourceDurationMs": 300000,
+          "maximumSourceWidth": 1920,
+          "maximumSourceHeight": 1080,
+          "maximumSourcePixelArea": 2073600,
+          "maximumSourceFrames": 18000,
+          "allowedSourceFps": [
+            "24/1",
+            "30/1",
+            "60/1"
+          ]
+        },
+        "supportedScales": [
+          2,
+          4
+        ],
+        "deliveryPolicy": {
+          "revision": "aibos-video-finish-delivery-v1",
+          "explicitScale4Required": true,
+          "scale4OutputBoundsRequired": true,
+          "silentScaleFallback": false,
+          "silentModeFallback": false,
+          "frameCountPreserved": true,
+          "rationalFpsPreserved": true,
+          "fullVideoPtsSequencePreserved": true,
+          "frameInterpolation": false,
+          "frameRateConversion": false,
+          "implicitCrop": false,
+          "sourceAudioPacketIdentityPreserved": true
+        }
+      },
+      "overallReceiptResolutionSucceeded": false,
+      "modeReceiptResolutionSucceeded": false,
+      "pairedProductionGateEnabled": false,
+      "expectedReady": false,
+      "expectedEnqueue": false,
+      "expectedReasonCode": "VIDEO_TOOLS_V2_FINISH_RECEIPT_SET_UNVERIFIED"
+    },
+    "overallReadyRequestedModeDisabled": {
+      "overallCapabilityVector": "shapeCompleteButUnresolvedReceipts.overallCapability",
+      "requestedMode": "quality",
+      "requestedModeCapability": {
+        "writerEnabled": false,
+        "backendConfigured": false,
+        "runtimeVerified": false,
+        "ready": false,
+        "state": "disabled",
+        "reasonCode": "VIDEO_TOOLS_V2_FINISH_QUALITY_MODE_MAPPING_CANARY_REQUIRED"
+      },
+      "otherReadyModeVector": "shapeCompleteButUnresolvedReceipts.modeCapability",
+      "expectedReady": false,
+      "expectedEnqueue": false,
+      "expectedFallbackMode": null,
+      "expectedReasonCode": "VIDEO_TOOLS_V2_FINISH_REQUESTED_MODE_NOT_READY"
+    },
+    "modeReadyOverallDisabled": {
+      "overallCapability": {
+        "writerEnabled": false,
+        "backendConfigured": false,
+        "runtimeVerified": false,
+        "ready": false,
+        "state": "disabled",
+        "reasonCode": "VIDEO_TOOLS_V2_FINISH_RUNTIME_UNPINNED"
+      },
+      "requestedMode": "standard",
+      "requestedModeCapabilityVector": "shapeCompleteButUnresolvedReceipts.modeCapability",
+      "expectedReady": false,
+      "expectedEnqueue": false,
+      "expectedReasonCode": "VIDEO_TOOLS_V2_FINISH_RUNTIME_UNPINNED"
+    },
+    "currentClaims": {
+      "readyVariantAdvertised": false,
+      "anyModeReadyVariantAdvertised": false,
+      "liveCanaryReceiptsPresent": false,
+      "productionWriterEnabled": false,
+      "qualityAsserted": false,
+      "firstFaithfulCandidateBackendId": "nvidia-vfx-vsr-1.2-candidate-v1"
     }
   },
   "previewProbeVector": {
