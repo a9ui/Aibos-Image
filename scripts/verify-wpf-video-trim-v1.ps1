@@ -287,14 +287,15 @@ try {
     }
     $process.WaitForExit()
     $process.Refresh()
-    if ($process.ExitCode -ne 0) {
+    $processExitCode = [int]$process.ExitCode
+    if ($processExitCode -ne 0) {
         $detail = if (Test-Path -LiteralPath $resultPath) {
             Get-Content -Raw -Encoding UTF8 -LiteralPath $resultPath
         }
         else {
             Get-Content -Raw -Encoding UTF8 -LiteralPath $stderrPath
         }
-        throw "Video Trim v1 smoke failed with exit code $($process.ExitCode): $detail"
+        throw "Video Trim v1 smoke failed with exit code ${processExitCode}: $detail"
     }
     $result = Get-Content -Raw -Encoding UTF8 -LiteralPath $resultPath | ConvertFrom-Json
     if ($result.ok -ne $true) {
