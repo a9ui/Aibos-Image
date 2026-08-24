@@ -330,6 +330,7 @@ public partial class MainWindow
             CloseModalVideoGenerationBoard();
 
         CancelModalVideoEditV2TransientActions();
+        ResetModalVideoEditV2DurableState();
         _videoEditV2Source = source;
         _videoEditV2Plan = null;
         _videoEditV2Candidate = null;
@@ -514,6 +515,7 @@ public partial class MainWindow
         bool stale)
     {
         CancelModalVideoEditV2TransientActions();
+        CancelModalVideoEditV2DurableActions();
         _videoEditV2LastCloseWasStale = stale;
         _videoEditV2Closing = true;
         try
@@ -571,6 +573,7 @@ public partial class MainWindow
         if (ModalVideoEditV2Popup?.Visibility != Visibility.Visible)
             return;
         CancelModalVideoEditV2TransientActions();
+        CancelModalVideoEditV2DurableActions();
         _videoEditV2Plan = null;
         _videoEditV2PreviewSet = null;
         _videoEditV2PreviewStale = true;
@@ -615,7 +618,14 @@ public partial class MainWindow
         ModalVideoEditV2UseCurrentEndButton.IsEnabled = enabled;
         ModalVideoEditV2CompileButton.IsEnabled = false;
         ModalVideoEditV2TrimButton.IsEnabled = false;
-        ModalVideoEditV2StartButton.IsEnabled = false;
+        ModalVideoEditV2StartButton.IsEnabled =
+            CanStartModalVideoEditV2Durably();
+        ModalVideoEditV2StartButton.Content = VideoEditV2Text(
+            _videoEditV2RequestPending
+                ? "UiVideoEditV2Preparing"
+                : _videoEditV2WriterReady
+                    ? "UiVideoEditV2StartReady"
+                    : "UiVideoEditV2StartPending");
     }
 
     private void ModalVideoEditV2Fps_SelectionChanged(
@@ -1578,11 +1588,18 @@ public partial class MainWindow
                 return false;
             }
 
-            ApplyModalVideoEditV2CompiledCandidate(
-                candidate,
-                skipReviewAuthorization);
+            if (!ApplyModalVideoEditV2CompiledCandidate(
+                    candidate,
+                    skipReviewAuthorization))
+            {
+                return false;
+            }
+            bool automaticStartScheduled = skipReviewAuthorization
+                && await HandleModalVideoEditV2SkipReviewAsync(candidate);
             SetTransientStatusToast(VideoEditV2Text(
-                skipReviewAuthorization
+                automaticStartScheduled
+                    ? "UiVideoEditV2Preparing"
+                    : skipReviewAuthorization
                     ? "UiVideoEditV2SkipNotStarted"
                     : "UiVideoEditV2CandidateReady"));
             return true;
@@ -1748,19 +1765,9 @@ public partial class MainWindow
         ModalVideoEditV2CompileStatusText.Text =
             VideoEditV2Text("UiVideoEditV2CandidateApproved");
         ModalVideoEditV2ReadinessText.Text =
-            VideoEditV2Text("UiVideoEditV2WriterPending");
-        ModalVideoEditV2StartButton.IsEnabled = false;
+            VideoEditV2Text("UiVideoEditV2WriterChecking");
         RefreshModalVideoEditV2ActionControls();
-    }
-
-    private void StartModalVideoEditV2_Click(
-        object sender,
-        RoutedEventArgs e)
-    {
-        _videoEditV2StartAttemptCount++;
-        ModalVideoEditV2ReadinessText.Text =
-            VideoEditV2Text("UiVideoEditV2WriterPending");
-        ModalVideoEditV2StartButton.IsEnabled = false;
+        _ = RefreshModalVideoEditV2WriterCapabilityAsync();
     }
 
     private void ModalVideoEditV2_RightClick(

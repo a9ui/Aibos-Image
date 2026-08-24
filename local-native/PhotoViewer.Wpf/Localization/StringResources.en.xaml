@@ -243,7 +243,7 @@
   <sys:String x:Key="UiVideoEditV2CompileFailed">The compiled response or context digest could not be verified. No Job was started.</sys:String>
   <sys:String x:Key="UiVideoEditV2SkipReview">Skip converted review</sys:String>
   <sys:String x:Key="UiVideoEditV2SkipReviewAutomation">Skip review after instruction conversion</sys:String>
-  <sys:String x:Key="UiVideoEditV2SkipReviewHelp">Applies to one conversion action. If both compiler and writer are ready, a successful conversion starts work. The current writer is disabled, so it cannot auto-start.</sys:String>
+  <sys:String x:Key="UiVideoEditV2SkipReviewHelp">Applies to one conversion action. If both compiler and writer are ready, the same Start pipeline revalidates the source and three previews before continuing.</sys:String>
   <sys:String x:Key="UiVideoEditV2ReviewAutomation">Converted video-edit instruction review</sys:String>
   <sys:String x:Key="UiVideoEditV2CompiledPromptLabel">Converted edit prompt</sys:String>
   <sys:String x:Key="UiVideoEditV2CompiledPromptAutomation">Converted backend edit prompt</sys:String>
@@ -251,7 +251,7 @@
   <sys:String x:Key="UiVideoEditV2SummaryAutomation">Japanese summary of the converted prompt</sys:String>
   <sys:String x:Key="UiVideoEditV2ApplyButton">Approve this candidate</sys:String>
   <sys:String x:Key="UiVideoEditV2ApplyAutomation">Transiently approve the converted video-edit candidate</sys:String>
-  <sys:String x:Key="UiVideoEditV2ApplyHelp">Records approval only within this board. It changes no Job or setting, and Start remains disabled.</sys:String>
+  <sys:String x:Key="UiVideoEditV2ApplyHelp">Records approval only within this board and changes no Job or setting. Start becomes available only under the exact ready writer capability.</sys:String>
   <sys:String x:Key="UiVideoEditV2AudioLabel">Output audio</sys:String>
   <sys:String x:Key="UiVideoEditV2AudioAutomation">Edited clip audio policy</sys:String>
   <sys:String x:Key="UiVideoEditV2AudioOriginal">Use source audio</sys:String>
@@ -279,6 +279,13 @@
   <sys:String x:Key="UiVideoEditV2StepsLabel">Steps</sys:String>
   <sys:String x:Key="UiVideoEditV2StepsAutomation">Video edit iteration steps</sys:String>
   <sys:String x:Key="UiVideoEditV2WriterPending">The edit writer and exact runtime capability are not verified yet. Settings and converted candidates can be reviewed, but no Job is added.</sys:String>
+  <sys:String x:Key="UiVideoEditV2WriterChecking">Checking the exact edit-writer capability. This read alone never adds a Job.</sys:String>
+  <sys:String x:Key="UiVideoEditV2WriterReady">The exact edit writer, runtime, receipts, and resource bounds are verified. An approved candidate can start.</sys:String>
+  <sys:String x:Key="UiVideoEditV2Preparing">Revalidating the source, three previews, and converted candidate before saving the reservation…</sys:String>
+  <sys:String x:Key="UiVideoEditV2StartReady">Start video edit</sys:String>
+  <sys:String x:Key="UiVideoEditV2StartStale">The source, previews, converted candidate, or settings changed. No Job was added.</sys:String>
+  <sys:String x:Key="UiVideoEditV2Queued">The AI video edit Job was added. The source video remains unchanged.</sys:String>
+  <sys:String x:Key="UiVideoEditV2SavedForDelivery">The AI video edit reservation was saved safely and will be delivered after the local AI service recovers.</sys:String>
   <sys:String x:Key="UiVideoEditV2ReadinessAutomation">AI video edit readiness</sys:String>
   <sys:String x:Key="UiVideoEditV2StartPending">Start video edit · pending</sys:String>
   <sys:String x:Key="UiVideoEditV2StartAutomation">Start an AI video edit Job</sys:String>
@@ -293,7 +300,7 @@
   <sys:String x:Key="UiVideoEditV2CompileIdle">The Japanese instruction has not been refined yet. No Job is added here.</sys:String>
   <sys:String x:Key="UiVideoEditV2CompileUnavailable">The local compiler v2 capability is not connected yet. No HTTP request, worker launch, or Job addition occurred.</sys:String>
   <sys:String x:Key="UiVideoEditV2CandidateReady">Review the converted candidate and Japanese summary. No Job has started.</sys:String>
-  <sys:String x:Key="UiVideoEditV2CandidateApproved">The candidate is approved within this board. The disabled writer still prevents a Job from starting.</sys:String>
+  <sys:String x:Key="UiVideoEditV2CandidateApproved">The candidate is approved within this board. Checking the exact writer capability.</sys:String>
   <sys:String x:Key="UiVideoEditV2SkipNotStarted">The one-shot skip was consumed. The disabled writer started no Job, so only the candidate is shown.</sys:String>
   <sys:String x:Key="UiVideoEditV2CandidateAutoSuppressed">Conversion completed, but the disabled writer prevented auto-start. The candidate remains visible.</sys:String>
   <sys:String x:Key="UiVideoEditV2CandidateStale">The source, interval, three previews, or Japanese instruction changed. Refine the instruction again.</sys:String>
