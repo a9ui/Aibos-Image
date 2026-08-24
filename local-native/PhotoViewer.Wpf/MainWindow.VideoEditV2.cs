@@ -247,6 +247,7 @@ public partial class MainWindow
             ? Visibility.Visible
             : Visibility.Collapsed;
         ModalContextVideoEditV2.IsEnabled = visible;
+        SyncModalVideoTrimV1EntryPresentation();
 
         if (!visible && ModalVideoEditV2BoardVisible)
             InvalidateModalVideoEditV2ForSourceChange();
@@ -326,6 +327,8 @@ public partial class MainWindow
 
         if (ModalVideoToolsPopup?.Visibility == Visibility.Visible)
             CloseVideoToolsBoard(restoreFocus: false);
+        if (ModalVideoTrimV1BoardVisible)
+            CloseModalVideoTrimV1Board(restoreFocus: false, stale: false);
         if (ModalVideoGenerationPopup?.Visibility == Visibility.Visible)
             CloseModalVideoGenerationBoard();
 
@@ -615,7 +618,7 @@ public partial class MainWindow
         ModalVideoEditV2UseCurrentStartButton.IsEnabled = enabled;
         ModalVideoEditV2UseCurrentEndButton.IsEnabled = enabled;
         ModalVideoEditV2CompileButton.IsEnabled = false;
-        ModalVideoEditV2TrimButton.IsEnabled = false;
+        ModalVideoEditV2TrimButton.IsEnabled = ModalVideoEditV2BoardVisible;
         ModalVideoEditV2StartButton.IsEnabled =
             CanStartModalVideoEditV2Durably();
         ModalVideoEditV2StartButton.Content = VideoEditV2Text(
@@ -885,7 +888,7 @@ public partial class MainWindow
             plan.EndSeconds.ToString("0.000", CultureInfo.CurrentCulture),
             plan.MaximumSelectionFrames);
         UpdateModalVideoEditV2PlanPreviews(plan);
-        ModalVideoEditV2TrimButton.IsEnabled = false;
+        ModalVideoEditV2TrimButton.IsEnabled = ModalVideoEditV2BoardVisible;
         ModalVideoEditV2StartButton.IsEnabled = false;
         MarkModalVideoEditV2PreviewStaleIfNeeded();
         if (markCandidateStale)
@@ -1843,8 +1846,8 @@ public partial class MainWindow
     public bool VideoEditV2CompilerDisabledForSmoke
         => ModalVideoEditV2CompileButton?.IsEnabled == false;
 
-    public bool VideoEditV2TrimDisabledForSmoke
-        => ModalVideoEditV2TrimButton?.IsEnabled == false;
+    public bool VideoEditV2TrimEntryEnabledForSmoke
+        => ModalVideoEditV2TrimButton?.IsEnabled == true;
 
     public bool VideoEditV2ReviewVisibleForSmoke
         => ModalVideoEditV2ReviewPanel?.Visibility == Visibility.Visible;

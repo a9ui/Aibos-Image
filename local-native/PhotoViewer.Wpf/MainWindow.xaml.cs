@@ -5382,6 +5382,10 @@ public partial class MainWindow : Window
                     {
                         bool claimsVideoTools =
                             ClaimsVideoToolsWorkspaceSnapshot(job);
+                        bool claimsVideoTrim =
+                            ClaimsVideoTrimV1WorkspaceSnapshot(job);
+                        bool exactVideoTrim = claimsVideoTrim
+                            && TryReadVideoTrimV1WorkspaceSnapshot(job, out _);
                         bool dependencyRowComplete = operation == "video"
                             && HasSingleProperty(job, "id")
                             && HasSingleProperty(job, "status")
@@ -5413,13 +5417,14 @@ public partial class MainWindow : Window
                             activeVideoSourceProducerJobIds.Add(
                                 activeVideoToolsSourceJobId);
                         }
-                        else if (claimsVideoTools)
+                        else if (claimsVideoTools && !claimsVideoTrim)
                         {
                             dependencyRowComplete = false;
                         }
 
                         string? activeVideoSourcePath = null;
                         if (!claimsVideoTools
+                            && !claimsVideoTrim
                             && (!HasSingleProperty(job, "sourcePath")
                             || !TryGetStringProperty(
                                 job,
@@ -5436,6 +5441,8 @@ public partial class MainWindow : Window
                             activeVideoManagedSourcePaths.Add(
                                 activeVideoSourcePath);
                         }
+                        if (claimsVideoTrim && !exactVideoTrim)
+                            dependencyRowComplete = false;
 
                         activeVideoDependencySnapshotComplete &=
                             dependencyRowComplete;
@@ -5468,7 +5475,8 @@ public partial class MainWindow : Window
                     continue;
                 if (operation == "video")
                 {
-                    if (ClaimsVideoToolsV2WorkspaceSnapshot(job))
+                    if (ClaimsVideoToolsV2WorkspaceSnapshot(job)
+                        || ClaimsVideoTrimV1WorkspaceSnapshot(job))
                         pendingVideoToolsV2Jobs.Add(job);
                     else
                         pendingVideoJobs.Add(job);

@@ -1314,7 +1314,7 @@ public partial class MainWindow
         if (uniqueVideo is null || !Equals(uniqueVideo, candidate))
             return false;
 
-        if (candidate.VersionKind is "edit" or "finish")
+        if (candidate.VersionKind is "edit" or "trim" or "finish")
         {
             return TryValidateVideoToolsV2InventoryAncestry(
                 tile,
@@ -1710,6 +1710,8 @@ public partial class MainWindow
                 }
                 if (!_modalVideoSeekDragging)
                     UpdateModalVideoTimeline(ModalVideo.Position);
+                if (ModalVideoTrimV1BoardVisible)
+                    UpdateModalVideoTrimV1CurrentPosition();
             }
             catch
             {
@@ -1903,6 +1905,14 @@ public partial class MainWindow
         _modalVideoTransportStubForSmoke
         || (ModalVideo.NaturalDuration.HasTimeSpan
             && ModalVideo.NaturalDuration.TimeSpan > TimeSpan.Zero);
+
+    public bool ReinitializeModalVideoVersionsForSmoke()
+    {
+        if (!TryGetModalSourceTile(out Tile tile))
+            return false;
+        InitializeModalVideoVersions(tile);
+        return _modalVideoVersions.Count > 0;
+    }
 
     public void EnableModalVideoTransportStubForSmoke()
         => _modalVideoTransportStubForSmoke = true;

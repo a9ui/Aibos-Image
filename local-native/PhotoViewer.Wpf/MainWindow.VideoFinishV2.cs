@@ -181,6 +181,8 @@ public partial class MainWindow
                 restoreFocus: false,
                 stale: true);
         }
+        if (ModalVideoTrimV1BoardVisible)
+            CloseModalVideoTrimV1Board(restoreFocus: false, stale: false);
         if (ModalVideoToolsPopup?.Visibility == Visibility.Visible)
             CloseVideoToolsBoard(restoreFocus: false);
         if (ModalVideoGenerationPopup?.Visibility == Visibility.Visible)
