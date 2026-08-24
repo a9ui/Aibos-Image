@@ -339,24 +339,22 @@ public partial class MainWindow
         _videoEditV2CandidateStale = false;
         _videoEditV2CandidateApproved = false;
         _videoEditV2LastCloseWasStale = false;
+        if (!_videoEditV2SessionInputsInitialized)
+        {
+            ModalVideoEditV2InstructionTextBox.Text = "";
+            ModalVideoEditV2StyleNameTextBox.Text = "";
+            ApplyVideoEditV2DefaultsToBoardIfNeeded();
+        }
         _videoEditV2Syncing = true;
         try
         {
-            ModalVideoEditV2InstructionTextBox.Text = "";
-            ModalVideoEditV2AudioComboBox.SelectedIndex = 0;
-            ModalVideoEditV2StrengthComboBox.SelectedIndex = 1;
-            ModalVideoEditV2CanvasComboBox.SelectedIndex = 2;
-            ModalVideoEditV2StyleComboBox.SelectedIndex = 0;
-            ModalVideoEditV2StepsSlider.Value = VideoEditV2DefaultSteps;
-            ModalVideoEditV2StepsTextBox.Text =
-                VideoEditV2DefaultSteps.ToString(CultureInfo.InvariantCulture);
-            ModalVideoEditV2SkipReviewCheckBox.IsChecked = false;
             ModalVideoEditV2CompiledPromptTextBox.Text = "";
             ModalVideoEditV2SummaryText.Text = "";
             ClearModalVideoEditV2PreviewImages();
             ModalVideoEditV2ReviewPanel.Visibility = Visibility.Collapsed;
             ModalVideoEditV2CompileStatusText.Text =
                 VideoEditV2Text("UiVideoEditV2CompileIdle");
+            ModalVideoEditV2StyleStatusText.Text = "";
         }
         finally
         {

@@ -22602,6 +22602,7 @@ public partial class MainWindow : Window
         SyncUpscaleSettingsControls();
         SyncModalPhotorealSettingsControls();
         RefreshPhotorealStyleControls(updateNameFields: false);
+        SyncVideoToolsV2PreferenceControls();
         RefreshEnhancementOutputRootSettings();
         RefreshSharedDataSettings();
         DiagnosticsText.Text = BuildDiagnosticsText();
@@ -22636,6 +22637,8 @@ public partial class MainWindow : Window
             RefreshSharedDataSettings();
         else if (string.Equals(section, "video", StringComparison.Ordinal))
             SyncVideoGenerationSettingsControls();
+        else if (string.Equals(section, "video-tools-v2", StringComparison.Ordinal))
+            SyncVideoToolsV2PreferenceControls();
         else if (string.Equals(section, "upscale", StringComparison.Ordinal))
             SyncUpscaleSettingsControls();
         else if (string.Equals(section, "photoreal", StringComparison.Ordinal))
@@ -22644,6 +22647,9 @@ public partial class MainWindow : Window
         (FrameworkElement Target, RadioButton Navigation) selection = section switch
         {
             "video" => (AppVideoSettingsHeading, SettingsVideoNav),
+            "video-tools-v2" => (
+                VideoToolsV2SettingsHeading,
+                SettingsVideoToolsV2Nav),
             "upscale" => (UpscaleSettingsHeading, SettingsUpscaleNav),
             "photoreal" => (PhotorealSettingsHeading, SettingsPhotorealNav),
             "display" => (DisplaySettingsHeading, SettingsDisplayNav),
@@ -23792,6 +23798,7 @@ public partial class MainWindow : Window
             state?.ShowFavoriteChangeNotifications ?? true,
             persist: false);
         RestoreEnhancementNotificationPreferences(state);
+        RestoreVideoToolsV2Preferences(state);
         SetAccessibilityPreferences(
             state?.ReducedMotionOverride,
             state?.ReducedTransparencyOverride,
@@ -24161,6 +24168,7 @@ public partial class MainWindow : Window
                 EnhancementNotifications =
                     _enhancementNotificationPreferences.ToState(
                         _enhancementNotificationStateExtensionData),
+                VideoToolsV2 = SnapshotVideoToolsV2Preferences(),
                 UseLastDisplayedImageVersionForThumbnails =
                     _useLastDisplayedImageVersionForThumbnails,
                 UpscalePresetId = _modalEnhancementPresetId,
@@ -24261,6 +24269,9 @@ public partial class MainWindow : Window
                     CloneExtensionData(
                         latest?.EnhancementNotifications?.ExtensionData
                         ?? _enhancementNotificationStateExtensionData);
+                MergeLatestVideoToolsV2PreferenceExtensionData(
+                    state.VideoToolsV2,
+                    latest?.VideoToolsV2);
                 _ = KeyBindingSettings.NormalizePersisted(latest?.KeyBindings, out Dictionary<string, JsonElement>? latestUnknownKeyBindings);
                 state.KeyBindings = KeyBindingSettings.ToPersisted(
                     _keyBindings,
@@ -24306,6 +24317,7 @@ public partial class MainWindow : Window
             _stateExtensionData = CloneExtensionData(state.ExtensionData);
             _enhancementNotificationStateExtensionData = CloneExtensionData(
                 state.EnhancementNotifications?.ExtensionData);
+            ApplySavedVideoToolsV2PreferenceExtensionData(state.VideoToolsV2);
             _ = KeyBindingSettings.NormalizePersisted(state.KeyBindings, out _keyBindingUnknownEntries);
             if (!_aiStyleStoreReady)
                 ApplySavedStyleExtensionData(state);
@@ -31383,6 +31395,9 @@ public sealed class ViewerState
     // existing video-generation result preference during migration and never
     // change shared settings or a durable job.
     public EnhancementNotificationState? EnhancementNotifications { get; set; }
+    // WPF-local defaults for explicit Video Tools v2 actions. These values
+    // never rewrite an already queued/running immutable Job snapshot.
+    public VideoToolsV2PreferenceState? VideoToolsV2 { get; set; }
     // WPF-local gallery presentation. Per-image choices remain session-only.
     public bool? UseLastDisplayedImageVersionForThumbnails { get; set; }
     // WPF-local defaults for explicit AI upscale requests. They do not change

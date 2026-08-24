@@ -2432,6 +2432,7 @@
               <RadioButton x:Name="SettingsUpscaleNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="AI高画質化" Tag="upscale" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI upscale settings"/>
               <RadioButton x:Name="SettingsPhotorealNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="AI実写化" Tag="photoreal" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI photorealization settings"/>
               <RadioButton x:Name="SettingsVideoNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="動画化" Tag="video" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Video generation settings"/>
+              <RadioButton x:Name="SettingsVideoToolsV2Nav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiVideoToolsV2Settings}" Tag="video-tools-v2" Click="AppSettingsNavigation_Click" AutomationProperties.Name="AI video edit and enhancement settings"/>
               <RadioButton x:Name="SettingsDisplayNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsDisplay}" Tag="display" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Display settings"/>
               <RadioButton x:Name="SettingsThumbnailsNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsThumbnails}" Tag="thumbnails" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Thumbnail settings"/>
               <RadioButton x:Name="SettingsKeyboardNav" Style="{StaticResource SettingsNavItem}" GroupName="AppSettingsNavigation" Content="{DynamicResource UiSettingsKeyboard}" Tag="keyboard" Click="AppSettingsNavigation_Click" AutomationProperties.Name="Keyboard settings"/>
@@ -2829,6 +2830,111 @@
                          AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
           </Border>
+          <TextBlock x:Name="VideoToolsV2SettingsHeading"
+                     Text="{DynamicResource UiVideoToolsV2Settings}"
+                     Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold"
+                     Margin="0,0,0,6" AutomationProperties.Name="AI video edit and enhancement settings section"/>
+          <TextBlock Text="{DynamicResource UiVideoToolsV2SettingsHelp}"
+                     Foreground="{StaticResource TextTertiary}" FontSize="11.5"
+                     TextWrapping="Wrap" Margin="0,0,0,9"/>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
+                  BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
+            <StackPanel>
+              <TextBlock Text="{DynamicResource UiVideoToolsV2EditDefaultsTitle}"
+                         Foreground="{StaticResource TextPrimary}" FontSize="12" FontWeight="SemiBold"
+                         Margin="0,0,0,7"/>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/><ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="*"/><ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2AudioLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoEditV2DefaultAudioComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectionChanged="AppVideoToolsV2Preference_Changed" AutomationProperties.Name="Default AI video edit audio policy">
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2AudioOriginal}" Tag="preserve"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2AudioMuted}" Tag="mute"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2StrengthLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoEditV2DefaultStrengthComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectionChanged="AppVideoToolsV2Preference_Changed" AutomationProperties.Name="Default AI video edit strength">
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StrengthLight}" Tag="light"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StrengthBalanced}" Tag="balanced"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StrengthStrong}" Tag="strong"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="4">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2CanvasLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoEditV2DefaultCanvasComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectionChanged="AppVideoToolsV2Preference_Changed" AutomationProperties.Name="Default AI video edit output size tier">
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2CanvasLight}" Tag="light"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2CanvasStandard}" Tag="standard"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2CanvasHigh}" Tag="high"/>
+                  </ComboBox>
+                </StackPanel>
+              </Grid>
+              <Grid Margin="0,9,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="84"/><ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="48"/><ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{DynamicResource UiVideoEditV2StepsLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10.5" VerticalAlignment="Center"/>
+                <Slider x:Name="AppVideoEditV2DefaultStepsSlider" Grid.Column="1" Minimum="1" Maximum="40" Value="20" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="AppVideoEditV2DefaultSteps_Changed" AutomationProperties.Name="Default AI video edit steps"/>
+                <TextBlock x:Name="AppVideoEditV2DefaultStepsText" Grid.Column="2" Text="20" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <CheckBox x:Name="AppVideoEditV2DefaultSkipReviewCheckBox" Grid.Column="3" Content="{DynamicResource UiVideoEditV2SkipReview}" Margin="10,0,0,0" VerticalAlignment="Center" Checked="AppVideoToolsV2Preference_Changed" Unchecked="AppVideoToolsV2Preference_Changed" AutomationProperties.Name="Skip converted review by default"/>
+              </Grid>
+              <TextBlock Text="{DynamicResource UiVideoToolsV2EditDefaultsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,7,0,0"/>
+            </StackPanel>
+          </Border>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
+                  BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
+            <StackPanel>
+              <TextBlock Text="{DynamicResource UiVideoToolsV2FinishDefaultsTitle}"
+                         Foreground="{StaticResource TextPrimary}" FontSize="12" FontWeight="SemiBold"
+                         Margin="0,0,0,7"/>
+              <Grid Width="330" HorizontalAlignment="Left">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2ModeLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoFinishV2DefaultModeComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectionChanged="AppVideoToolsV2Preference_Changed" AutomationProperties.Name="Default AI video enhancement quality mode">
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2ModeFast}" Tag="fast"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2ModeStandard}" Tag="standard"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2ModeQuality}" Tag="quality"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="{DynamicResource UiVideoFinishV2ScaleLabel}" Foreground="{StaticResource TextSecondary}" FontSize="10.5" Margin="0,0,0,4"/>
+                  <ComboBox x:Name="AppVideoFinishV2DefaultScaleComboBox" Style="{StaticResource PhotorealSettingsComboBox}" SelectionChanged="AppVideoToolsV2Preference_Changed" AutomationProperties.Name="Default AI video enhancement scale">
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2Scale2}" Tag="2"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoFinishV2Scale4}" Tag="4"/>
+                  </ComboBox>
+                </StackPanel>
+              </Grid>
+              <TextBlock Text="{DynamicResource UiVideoToolsV2FinishDefaultsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,7,0,0"/>
+            </StackPanel>
+          </Border>
+          <Border Background="{StaticResource BgTertiary}" BorderBrush="{StaticResource GlassBorder}"
+                  BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
+            <StackPanel x:Name="AppVideoEditV2StyleListPanel">
+              <DockPanel LastChildFill="True" Margin="0,0,0,6">
+                <Button x:Name="AppVideoEditV2DeleteStyleButton" DockPanel.Dock="Right"
+                        Style="{StaticResource GhostButton}" Content="{DynamicResource UiDelete}"
+                        IsEnabled="False" MinWidth="72" Click="AppVideoEditV2DeleteStyle_Click"
+                        AutomationProperties.Name="Delete selected AI video edit style"/>
+                <StackPanel>
+                  <TextBlock Text="{DynamicResource UiVideoToolsV2SavedStylesTitle}" Foreground="{StaticResource TextPrimary}" FontSize="12" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="AppVideoEditV2StyleCountText" Foreground="{StaticResource TextTertiary}" FontSize="10.5" Margin="0,2,8,0"/>
+                </StackPanel>
+              </DockPanel>
+              <ListBox x:Name="AppVideoEditV2StyleListBox" MinHeight="52" MaxHeight="150"
+                       SelectionChanged="AppVideoEditV2Style_SelectionChanged"
+                       Background="{StaticResource BgPrimary}" BorderBrush="{StaticResource GlassBorder}"
+                       Foreground="{StaticResource TextPrimary}"
+                       AutomationProperties.Name="Saved AI video edit styles"/>
+              <TextBlock x:Name="AppVideoEditV2StyleStatusText" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
+            </StackPanel>
+          </Border>
+          <TextBlock x:Name="AppVideoToolsV2PreferenceStatusText" Foreground="{StaticResource TextSecondary}" FontSize="10.5" TextWrapping="Wrap" Margin="0,0,0,18" AutomationProperties.LiveSetting="Polite"/>
           <TextBlock x:Name="UpscaleSettingsHeading" Text="AI高画質化" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6" AutomationProperties.Name="AI upscale settings section"/>
           <TextBlock Text="通常のAI高画質化で使う共通設定です。拡大画面・右クリック・選択画像の一括処理へ同期し、次に追加するジョブから使われます。実写版だけをHQ化するときは、既存の実写向け固定プロファイルを維持します。"
                      Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,0,0,8"/>
@@ -4952,12 +5058,26 @@
                 </StackPanel>
               </Grid>
 
+              <StackPanel Margin="0,9,0,0">
+                <TextBlock Text="{DynamicResource UiVideoEditV2SavedStyleLabel}"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                           Margin="0,0,0,4"/>
+                <ComboBox x:Name="ModalVideoEditV2SavedStyleComboBox"
+                          Style="{StaticResource PhotorealSettingsComboBox}"
+                          SelectionChanged="ModalVideoEditV2SavedStyle_SelectionChanged"
+                          AutomationProperties.Name="{DynamicResource UiVideoEditV2SavedStyleAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoEditV2SavedStyleHelp}"/>
+              </StackPanel>
+
               <Grid Margin="0,9,0,0">
                 <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="146"/>
+                  <ColumnDefinition Width="8"/>
                   <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="8"/>
                   <ColumnDefinition Width="76"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                <StackPanel Grid.Column="0">
                   <TextBlock Text="{DynamicResource UiVideoEditV2StyleLabel}"
                              Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                              Margin="0,0,0,4"/>
@@ -4971,14 +5091,31 @@
                     <ComboBoxItem Content="{DynamicResource UiVideoEditV2StyleCinematic}" Tag="cinematic"/>
                   </ComboBox>
                 </StackPanel>
-                <Button x:Name="ModalVideoEditV2SaveStyleButton" Grid.Column="1"
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2StyleNameLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <TextBox x:Name="ModalVideoEditV2StyleNameTextBox"
+                           MaxLength="40" Padding="7,4"
+                           Foreground="{StaticResource TextPrimary}"
+                           Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}"
+                           SelectionBrush="{StaticResource AccentFill}"
+                           BorderBrush="{StaticResource BorderStrong}"
+                           AutomationProperties.Name="{DynamicResource UiVideoEditV2StyleNameAutomation}"/>
+                </StackPanel>
+                <Button x:Name="ModalVideoEditV2SaveStyleButton" Grid.Column="4"
                         Style="{StaticResource GhostButton}"
                         Content="{DynamicResource UiVideoEditV2SaveStyle}"
-                        Height="30" VerticalAlignment="Bottom" IsEnabled="False"
-                        ToolTip="{DynamicResource UiVideoEditV2SaveStylePending}"
+                        Height="30" VerticalAlignment="Bottom"
+                        Click="ModalVideoEditV2SaveStyle_Click"
                         AutomationProperties.Name="{DynamicResource UiVideoEditV2SaveStyleAutomation}"
-                        AutomationProperties.HelpText="{DynamicResource UiVideoEditV2SaveStylePending}"/>
+                        AutomationProperties.HelpText="{DynamicResource UiVideoEditV2SaveStyleHelp}"/>
               </Grid>
+              <TextBlock x:Name="ModalVideoEditV2StyleStatusText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,5,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
 
               <Grid Margin="0,9,0,0">
                 <Grid.ColumnDefinitions>
