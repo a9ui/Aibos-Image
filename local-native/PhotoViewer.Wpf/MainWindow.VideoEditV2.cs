@@ -1594,6 +1594,8 @@ public partial class MainWindow
             {
                 return false;
             }
+            if (!skipReviewAuthorization)
+                _ = ShowVideoEditCompileReviewNotification();
             bool automaticStartScheduled = skipReviewAuthorization
                 && await HandleModalVideoEditV2SkipReviewAsync(candidate);
             SetTransientStatusToast(VideoEditV2Text(

@@ -1,12 +1,15 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 
 namespace PhotoViewer.Wpf;
 
 public partial class App
 {
-    private void CaptureEnhancementNotificationSmoke(string resultPath)
+    private void CaptureEnhancementNotificationSmoke(
+        string resultPath,
+        string[] args)
     {
         string smokeRoot = Directory.CreateTempSubdirectory(
             "aibos-enhancement-notification-").FullName;
@@ -42,6 +45,16 @@ public partial class App
         object result;
         try
         {
+            string fixturePath = RequireVideoToolsV2ReaderArgument(
+                args,
+                "--fixture");
+            using JsonDocument fixtureDocument = JsonDocument.Parse(
+                File.ReadAllBytes(fixturePath));
+            JsonElement readerFixtures = fixtureDocument.RootElement
+                .GetProperty("readerFixtures");
+            JsonElement editFixture = readerFixtures.GetProperty("edit");
+            JsonElement finishFixture = readerFixtures.GetProperty("finish");
+
             var environment = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["PHOTOVIEWER_WPF_STATE_PATH"] = statePath,
@@ -62,9 +75,12 @@ public partial class App
             File.WriteAllText(statePath, """
                 {
                   "Version": 2,
+                  "UiLanguage": "ja",
                   "futureRoot": { "keep": true },
                   "EnhancementNotifications": {
                     "UpscaleSucceeded": false,
+                    "VideoSucceeded": false,
+                    "VideoFailed": true,
                     "futureNotificationMode": "keep"
                   }
                 }
@@ -73,13 +89,22 @@ public partial class App
             window = new MainWindow();
             bool surfaceContract =
                 window.EnhancementNotificationSurfaceContractForSmoke;
+            bool missingFieldMigration =
+                !window.VideoEditSucceededPreferenceForSmoke
+                && window.VideoEditFailedPreferenceForSmoke
+                && !window.VideoFinishSucceededPreferenceForSmoke
+                && window.VideoFinishFailedPreferenceForSmoke;
             window.SetEnhancementNotificationPreferencesForSmoke(
                 upscaleSucceeded: true,
                 upscaleFailed: false,
                 photorealSucceeded: true,
                 photorealFailed: true,
                 videoSucceeded: false,
-                videoFailed: true);
+                videoFailed: true,
+                videoEditSucceeded: true,
+                videoEditFailed: false,
+                videoFinishSucceeded: false,
+                videoFinishFailed: true);
 
             using JsonDocument persisted = JsonDocument.Parse(
                 File.ReadAllText(statePath));
@@ -92,7 +117,11 @@ public partial class App
                 && preferences.GetProperty("PhotorealSucceeded").GetBoolean()
                 && preferences.GetProperty("PhotorealFailed").GetBoolean()
                 && !preferences.GetProperty("VideoSucceeded").GetBoolean()
-                && preferences.GetProperty("VideoFailed").GetBoolean();
+                && preferences.GetProperty("VideoFailed").GetBoolean()
+                && preferences.GetProperty("VideoEditSucceeded").GetBoolean()
+                && !preferences.GetProperty("VideoEditFailed").GetBoolean()
+                && !preferences.GetProperty("VideoFinishSucceeded").GetBoolean()
+                && preferences.GetProperty("VideoFinishFailed").GetBoolean();
             bool unknownFieldsPreserved =
                 root.GetProperty("futureRoot").GetProperty("keep").GetBoolean()
                 && preferences.GetProperty("futureNotificationMode")
@@ -150,13 +179,305 @@ public partial class App
                     "unsupported",
                     StringComparison.Ordinal);
 
+            string malformedStatePath = Path.Combine(
+                storesRoot,
+                "malformed-notification-state.json");
+            File.WriteAllText(
+                malformedStatePath,
+                """
+                {
+                  "Version": 2,
+                  "EnhancementNotifications": {
+                    "VideoEditSucceeded": "not-a-boolean"
+                  }
+                }
+                """);
+            bool malformedStateSafeDefault = PhotoViewer.Wpf.MainWindow
+                .MalformedEnhancementNotificationStateUsesSafeDefaultsForSmoke(
+                    malformedStatePath);
+
+            using JsonDocument editQueued = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "11111111-2222-4333-8444-555555555551",
+                "queued");
+            using JsonDocument editSucceeded = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "11111111-2222-4333-8444-555555555551",
+                "succeeded");
+            using JsonDocument editFailed = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "11111111-2222-4333-8444-555555555551",
+                "failed");
+            using JsonDocument finishQueued = CreateVideoToolsV2WorkspaceJob(
+                finishFixture,
+                "22222222-3333-4444-8555-666666666662",
+                "queued");
+            using JsonDocument finishSucceeded =
+                CreateVideoToolsV2WorkspaceJob(
+                    finishFixture,
+                    "22222222-3333-4444-8555-666666666662",
+                    "succeeded");
+            using JsonDocument finishFailed = CreateVideoToolsV2WorkspaceJob(
+                finishFixture,
+                "22222222-3333-4444-8555-666666666662",
+                "failed");
+            using JsonDocument generationQueued =
+                CreateOrdinaryVideoJob("queued");
+            using JsonDocument generationSucceeded =
+                CreateOrdinaryVideoJob("succeeded");
+            using JsonDocument generationFailed =
+                CreateOrdinaryVideoJob("failed");
+
+            bool exactKindsClassified = string.Equals(
+                    PhotoViewer.Wpf.MainWindow
+                        .ReadEnhancementNotificationKindForSmoke(
+                        editQueued.RootElement),
+                    "video-edit",
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    PhotoViewer.Wpf.MainWindow
+                        .ReadEnhancementNotificationKindForSmoke(
+                        finishQueued.RootElement),
+                    "video-finish",
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    PhotoViewer.Wpf.MainWindow
+                        .ReadEnhancementNotificationKindForSmoke(
+                        generationQueued.RootElement),
+                    "video",
+                    StringComparison.Ordinal);
+
+            int beforeDisabledKinds =
+                window.EnhancementNotificationShownCountForSmoke;
+            window.TrackEnhancementNotificationJobForSmoke(
+                editQueued.RootElement);
+            window.ApplyEnhancementNotificationTerminalForSmoke(
+                editFailed.RootElement);
+            window.TrackEnhancementNotificationJobForSmoke(
+                finishQueued.RootElement);
+            window.ApplyEnhancementNotificationTerminalForSmoke(
+                finishSucceeded.RootElement);
+            window.TrackEnhancementNotificationJobForSmoke(
+                generationQueued.RootElement);
+            window.ApplyEnhancementNotificationTerminalForSmoke(
+                generationSucceeded.RootElement);
+            bool distinctSettingsSuppress =
+                window.EnhancementNotificationShownCountForSmoke
+                    == beforeDisabledKinds
+                && !window.EnhancementNotificationVisibleForSmoke;
+
+            window.SetEnhancementNotificationPreferencesForSmoke(
+                upscaleSucceeded: true,
+                upscaleFailed: false,
+                photorealSucceeded: true,
+                photorealFailed: true,
+                videoSucceeded: true,
+                videoFailed: true,
+                videoEditSucceeded: true,
+                videoEditFailed: true,
+                videoFinishSucceeded: true,
+                videoFinishFailed: true);
+
+            bool ShowTerminalNotification(
+                JsonElement active,
+                JsonElement terminal,
+                string expectedTitle)
+            {
+                int before = window.EnhancementNotificationShownCountForSmoke;
+                window.TrackEnhancementNotificationJobForSmoke(active);
+                window.ApplyEnhancementNotificationTerminalForSmoke(terminal);
+                bool shown = window.EnhancementNotificationVisibleForSmoke
+                    && string.Equals(
+                        window.EnhancementNotificationTitleForSmoke,
+                        expectedTitle,
+                        StringComparison.Ordinal)
+                    && window.EnhancementNotificationShownCountForSmoke
+                        == before + 1;
+                window.DismissEnhancementNotificationForSmoke();
+                return shown;
+            }
+
+            bool editSuccessTitle = ShowTerminalNotification(
+                editQueued.RootElement,
+                editSucceeded.RootElement,
+                "AI動画編集が完了しました");
+            bool editFailureTitle = ShowTerminalNotification(
+                editQueued.RootElement,
+                editFailed.RootElement,
+                "AI動画編集に失敗しました");
+            bool finishSuccessTitle = ShowTerminalNotification(
+                finishQueued.RootElement,
+                finishSucceeded.RootElement,
+                "AI動画高画質化が完了しました");
+            bool finishFailureTitle = ShowTerminalNotification(
+                finishQueued.RootElement,
+                finishFailed.RootElement,
+                "AI動画高画質化に失敗しました");
+            bool generationSuccessTitle = ShowTerminalNotification(
+                generationQueued.RootElement,
+                generationSucceeded.RootElement,
+                "AI動画生成が完了しました");
+            bool generationFailureTitle = ShowTerminalNotification(
+                generationQueued.RootElement,
+                generationFailed.RootElement,
+                "AI動画生成に失敗しました");
+
+            using JsonDocument malformedV2 = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "33333333-4444-4555-8666-777777777773",
+                "queued",
+                video => video.Remove("delivery"),
+                refreshPresetHash: true);
+            using JsonDocument futureSchemaV2 =
+                CreateVideoToolsV2WorkspaceJob(
+                    editFixture,
+                    "44444444-5555-4666-8777-888888888884",
+                    "queued",
+                    video => video["schemaVersion"] = 3,
+                    refreshPresetHash: true);
+            using JsonDocument futureProtocolV2 =
+                CreateVideoToolsV2WorkspaceJob(
+                    finishFixture,
+                    "55555555-6666-4777-8888-999999999995",
+                    "queued",
+                    video => video["protocol"] =
+                        "aibos-enhancement-video-tools-v3",
+                    refreshPresetHash: true);
+            int beforeProtectedRows =
+                window.EnhancementNotificationShownCountForSmoke;
+            bool unknownFutureProtected = new[]
+                {
+                    malformedV2.RootElement,
+                    futureSchemaV2.RootElement,
+                    futureProtocolV2.RootElement,
+                }
+                .All(job => string.Equals(
+                    PhotoViewer.Wpf.MainWindow
+                        .ReadEnhancementNotificationKindForSmoke(job),
+                    "unsupported",
+                    StringComparison.Ordinal));
+            foreach (JsonElement protectedJob in new[]
+                     {
+                         malformedV2.RootElement,
+                         futureSchemaV2.RootElement,
+                         futureProtocolV2.RootElement,
+                     })
+            {
+                window.TrackEnhancementNotificationJobForSmoke(protectedJob);
+                window.ApplyEnhancementNotificationTerminalForSmoke(
+                    protectedJob);
+            }
+            unknownFutureProtected &=
+                window.EnhancementNotificationShownCountForSmoke
+                    == beforeProtectedRows
+                && !window.EnhancementNotificationVisibleForSmoke;
+
+            int beforePassive =
+                window.EnhancementNotificationShownCountForSmoke;
+            _ = window.OpenVideoEditV2ForSmoke();
+            _ = PhotoViewer.Wpf.MainWindow
+                .ReadEnhancementNotificationKindForSmoke(
+                    editQueued.RootElement);
+            bool passiveReadNoNotification =
+                window.EnhancementNotificationShownCountForSmoke
+                    == beforePassive
+                && !window.EnhancementNotificationVisibleForSmoke;
+
+            bool compileReviewNotified =
+                window.NotifyVideoEditCompileReviewForSmoke(
+                    exactCandidateAccepted: true,
+                    stale: false,
+                    skipReviewAuthorization: false)
+                && string.Equals(
+                    window.EnhancementNotificationTitleForSmoke,
+                    "編集指示を整えました。変換結果を確認してください",
+                    StringComparison.Ordinal);
+            window.DismissEnhancementNotificationForSmoke();
+            int beforeCompileNegative =
+                window.EnhancementNotificationShownCountForSmoke;
+            bool compileResponseOnlyNoNotification =
+                !window.NotifyVideoEditCompileReviewForSmoke(
+                    exactCandidateAccepted: false,
+                    stale: false,
+                    skipReviewAuthorization: false)
+                && !window.NotifyVideoEditCompileReviewForSmoke(
+                    exactCandidateAccepted: true,
+                    stale: true,
+                    skipReviewAuthorization: false)
+                && !window.NotifyVideoEditCompileReviewForSmoke(
+                    exactCandidateAccepted: true,
+                    stale: false,
+                    skipReviewAuthorization: true)
+                && window.EnhancementNotificationShownCountForSmoke
+                    == beforeCompileNegative;
+
+            bool skipAcceptedStartNotified =
+                window.NotifyVideoEditStartAcceptedForSmoke(
+                    skipReviewAuthorization: true,
+                    acceptedOrSaved: true)
+                && string.Equals(
+                    window.EnhancementNotificationTitleForSmoke,
+                    "AI動画編集を開始しました",
+                    StringComparison.Ordinal);
+            window.DismissEnhancementNotificationForSmoke();
+            int beforeStartNegative =
+                window.EnhancementNotificationShownCountForSmoke;
+            bool disabledOrManualStartNoNotification =
+                !window.NotifyVideoEditStartAcceptedForSmoke(
+                    skipReviewAuthorization: true,
+                    acceptedOrSaved: false)
+                && !window.NotifyVideoEditStartAcceptedForSmoke(
+                    skipReviewAuthorization: false,
+                    acceptedOrSaved: true)
+                && window.EnhancementNotificationShownCountForSmoke
+                    == beforeStartNegative;
+
+            window.SetEnhancementNotificationPreferencesForSmoke(
+                upscaleSucceeded: true,
+                upscaleFailed: false,
+                photorealSucceeded: true,
+                photorealFailed: true,
+                videoSucceeded: false,
+                videoFailed: true,
+                videoEditSucceeded: false,
+                videoEditFailed: false,
+                videoFinishSucceeded: false,
+                videoFinishFailed: true);
+            int beforeDisabledPromptFlow =
+                window.EnhancementNotificationShownCountForSmoke;
+            bool notificationSettingOffSuppressesPromptFlow =
+                !window.NotifyVideoEditCompileReviewForSmoke(
+                    exactCandidateAccepted: true,
+                    stale: false,
+                    skipReviewAuthorization: false)
+                && !window.NotifyVideoEditStartAcceptedForSmoke(
+                    skipReviewAuthorization: true,
+                    acceptedOrSaved: true)
+                && window.EnhancementNotificationShownCountForSmoke
+                    == beforeDisabledPromptFlow;
+
+            window.SetEnhancementNotificationPreferencesForSmoke(
+                upscaleSucceeded: true,
+                upscaleFailed: false,
+                photorealSucceeded: true,
+                photorealFailed: true,
+                videoSucceeded: false,
+                videoFailed: true,
+                videoEditSucceeded: true,
+                videoEditFailed: false,
+                videoFinishSucceeded: false,
+                videoFinishFailed: true);
+            int legacyPresentationBaseline =
+                window.EnhancementNotificationShownCountForSmoke;
+
             window.ApplyEnhancementNotificationTerminalForSmoke(
                 "historical",
                 "upscale",
                 "succeeded");
             bool historicalSuppressed =
                 !window.EnhancementNotificationVisibleForSmoke
-                && window.EnhancementNotificationShownCountForSmoke == 0;
+                && window.EnhancementNotificationShownCountForSmoke
+                    == legacyPresentationBaseline;
 
             window.TrackEnhancementNotificationJobForSmoke(
                 "upscale-success",
@@ -169,13 +490,15 @@ public partial class App
                 window.EnhancementNotificationVisibleForSmoke
                 && window.EnhancementNotificationTitleForSmoke
                     .Contains("高画質化が完了", StringComparison.Ordinal)
-                && window.EnhancementNotificationShownCountForSmoke == 1;
+                && window.EnhancementNotificationShownCountForSmoke
+                    == legacyPresentationBaseline + 1;
             window.ApplyEnhancementNotificationTerminalForSmoke(
                 "upscale-success",
                 "upscale",
                 "succeeded");
             bool duplicateSuppressed =
-                window.EnhancementNotificationShownCountForSmoke == 1
+                window.EnhancementNotificationShownCountForSmoke
+                    == legacyPresentationBaseline + 1
                 && window.PendingEnhancementNotificationCountForSmoke == 0;
             window.DismissEnhancementNotificationForSmoke();
 
@@ -188,7 +511,8 @@ public partial class App
                 "failed");
             bool disabledOutcomeSuppressed =
                 !window.EnhancementNotificationVisibleForSmoke
-                && window.EnhancementNotificationShownCountForSmoke == 1;
+                && window.EnhancementNotificationShownCountForSmoke
+                    == legacyPresentationBaseline + 1;
 
             window.TrackEnhancementNotificationJobForSmoke(
                 "malformed-terminal-operation",
@@ -199,7 +523,8 @@ public partial class App
                 "failed");
             bool malformedOperationSuppressed =
                 !window.EnhancementNotificationVisibleForSmoke
-                && window.EnhancementNotificationShownCountForSmoke == 1;
+                && window.EnhancementNotificationShownCountForSmoke
+                    == legacyPresentationBaseline + 1;
 
             window.TrackEnhancementNotificationJobForSmoke(
                 "video-failed",
@@ -211,10 +536,11 @@ public partial class App
             bool videoFailureShown =
                 window.EnhancementNotificationVisibleForSmoke
                 && window.EnhancementNotificationTitleForSmoke
-                    .Contains("動画化に失敗", StringComparison.Ordinal)
+                    .Contains("AI動画生成に失敗", StringComparison.Ordinal)
                 && window.EnhancementNotificationMessageForSmoke
                     .Contains("現在設定でリトライ", StringComparison.Ordinal)
-                && window.EnhancementNotificationShownCountForSmoke == 2;
+                && window.EnhancementNotificationShownCountForSmoke
+                    == legacyPresentationBaseline + 2;
 
             window.TrackEnhancementNotificationJobForSmoke(
                 "photoreal-success",
@@ -230,13 +556,31 @@ public partial class App
                 window.EnhancementNotificationVisibleForSmoke
                 && window.EnhancementNotificationTitleForSmoke
                     .Contains("実写化が完了", StringComparison.Ordinal)
-                && window.EnhancementNotificationShownCountForSmoke == 3
+                && window.EnhancementNotificationShownCountForSmoke
+                    == legacyPresentationBaseline + 3
                 && window.PendingEnhancementNotificationCountForSmoke == 0;
 
             bool success = surfaceContract
+                && missingFieldMigration
                 && persistedSettings
                 && unknownFieldsPreserved
                 && legacySqliteShapeSupported
+                && malformedStateSafeDefault
+                && exactKindsClassified
+                && distinctSettingsSuppress
+                && editSuccessTitle
+                && editFailureTitle
+                && finishSuccessTitle
+                && finishFailureTitle
+                && generationSuccessTitle
+                && generationFailureTitle
+                && unknownFutureProtected
+                && passiveReadNoNotification
+                && compileReviewNotified
+                && compileResponseOnlyNoNotification
+                && skipAcceptedStartNotified
+                && disabledOrManualStartNoNotification
+                && notificationSettingOffSuppressesPromptFlow
                 && historicalSuppressed
                 && upscaleSuccessShown
                 && duplicateSuppressed
@@ -249,9 +593,26 @@ public partial class App
             {
                 success,
                 surfaceContract,
+                missingFieldMigration,
                 persistedSettings,
                 unknownFieldsPreserved,
                 legacySqliteShapeSupported,
+                malformedStateSafeDefault,
+                exactKindsClassified,
+                distinctSettingsSuppress,
+                editSuccessTitle,
+                editFailureTitle,
+                finishSuccessTitle,
+                finishFailureTitle,
+                generationSuccessTitle,
+                generationFailureTitle,
+                unknownFutureProtected,
+                passiveReadNoNotification,
+                compileReviewNotified,
+                compileResponseOnlyNoNotification,
+                skipAcceptedStartNotified,
+                disabledOrManualStartNoNotification,
+                notificationSettingOffSuppressesPromptFlow,
                 historicalSuppressed,
                 upscaleSuccessShown,
                 duplicateSuppressed,

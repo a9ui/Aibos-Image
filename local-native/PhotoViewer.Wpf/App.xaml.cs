@@ -1255,7 +1255,8 @@ public partial class App : Application
             && enhancementNotificationSmokeIdx + 1 < e.Args.Length)
         {
             CaptureEnhancementNotificationSmoke(
-                e.Args[enhancementNotificationSmokeIdx + 1]);
+                e.Args[enhancementNotificationSmokeIdx + 1],
+                e.Args);
             return;
         }
 

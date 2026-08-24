@@ -492,4 +492,23 @@
   <sys:String x:Key="UiVideoFinishV2StartStale">source、動画情報、または設定が変わりました。Jobは追加していません。</sys:String>
   <sys:String x:Key="UiVideoFinishV2SavedForDelivery">AI動画高画質化の予約を安全に保存しました。ローカルAIサービスの復帰後に配信します。</sys:String>
   <sys:String x:Key="UiVideoFinishV2Queued">AI動画高画質化Jobを追加しました。元動画は変更しません。</sys:String>
+  <sys:String x:Key="UiNotifySettingsTitle">AI処理の通知</sys:String>
+  <sys:String x:Key="UiNotifySucceededColumn">完了</sys:String>
+  <sys:String x:Key="UiNotifyFailedColumn">失敗</sys:String>
+  <sys:String x:Key="UiNotifySettingsHelp">処理中だけ既存の軽量監視を使い、完了または失敗を右下に1回表示します。</sys:String>
+  <sys:String x:Key="UiNotifyKindUpscale">画像高画質化</sys:String>
+  <sys:String x:Key="UiNotifyKindPhotoreal">実写化</sys:String>
+  <sys:String x:Key="UiNotifyKindVideoGeneration">AI動画生成</sys:String>
+  <sys:String x:Key="UiNotifyKindVideoEdit">AI動画編集</sys:String>
+  <sys:String x:Key="UiNotifyKindVideoFinish">AI動画高画質化</sys:String>
+  <sys:String x:Key="UiNotifyKindAiProcessing">AI処理</sys:String>
+  <sys:String x:Key="UiNotifySucceededTitleFormat">{0}が完了しました</sys:String>
+  <sys:String x:Key="UiNotifyFailedTitleFormat">{0}に失敗しました</sys:String>
+  <sys:String x:Key="UiNotifyFailedMessage">Jobsで内容を確認し、必要なら現在設定でリトライできます。</sys:String>
+  <sys:String x:Key="UiNotifyImageSucceededMessage">結果はJobsまたは元画像のバージョン切替から確認できます。</sys:String>
+  <sys:String x:Key="UiNotifyVideoSucceededMessage">結果はJobsまたは動画のバージョン切替から確認できます。</sys:String>
+  <sys:String x:Key="UiNotifyVideoEditCompileReadyTitle">編集指示を整えました。変換結果を確認してください</sys:String>
+  <sys:String x:Key="UiNotifyVideoEditCompileReadyMessage">変換後の指示と日本語の要約を確認してから開始できます。</sys:String>
+  <sys:String x:Key="UiNotifyVideoEditStartedTitle">AI動画編集を開始しました</sys:String>
+  <sys:String x:Key="UiNotifyVideoEditStartedMessage">進み具合とキャンセルはJobsで確認できます。</sys:String>
 </ResourceDictionary>
