@@ -532,6 +532,17 @@ public partial class App : Application
             return;
         }
 
+        int videoToolsV2PreferencesSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--video-tools-v2-preferences-smoke");
+        if (videoToolsV2PreferencesSmokeIdx >= 0
+            && videoToolsV2PreferencesSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoToolsV2PreferencesSmoke(
+                e.Args[videoToolsV2PreferencesSmokeIdx + 1]);
+            return;
+        }
+
         int videoToolsV2ReaderSmokeIdx = Array.IndexOf(
             e.Args,
             "--video-tools-v2-reader-smoke");

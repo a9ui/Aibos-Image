@@ -194,11 +194,10 @@ public partial class MainWindow
         _videoFinishV2WriterReady = false;
         _videoFinishV2ReadyContextStamp = null;
         _videoFinishV2LastCloseWasStale = false;
+        ApplyVideoFinishV2DefaultsToBoardIfNeeded();
         _videoFinishV2Syncing = true;
         try
         {
-            ModalVideoFinishV2ModeComboBox.SelectedIndex = 1;
-            ModalVideoFinishV2ScaleComboBox.SelectedIndex = 0;
             ModalVideoFinishV2ProbeStatusText.Text = source.Managed
                 ? VideoFinishV2Text("UiVideoFinishV2ManagedExact")
                 : VideoFinishV2Text("UiVideoFinishV2ProbeRequired");

@@ -212,6 +212,7 @@ public partial class MainWindow
             document?.I2iEditStyles ?? legacyState?.I2iEditStyles,
             document?.SelectedI2iEditStyleName
                 ?? legacyState?.SelectedI2iEditStyleName);
+        RestoreVideoEditV2Styles(document?.VideoEditV2Styles);
     }
 
     private void SaveAiStyles()
@@ -276,6 +277,7 @@ public partial class MainWindow
             SelectedVideoStyleName = _selectedVideoStyleName,
             I2iEditStyles = SnapshotI2iV3Styles(),
             SelectedI2iEditStyleName = _selectedI2iV3StyleName,
+            VideoEditV2Styles = SnapshotVideoEditV2Styles(),
             ExtensionData = CloneExtensionData(_aiStyleExtensionData),
         };
 
@@ -303,6 +305,7 @@ public partial class MainWindow
         => document.PhotorealStyles is { Count: > 0 }
             || document.VideoStyles is { Count: > 0 }
             || document.I2iEditStyles is { Count: > 0 }
+            || document.VideoEditV2Styles is { Count: > 0 }
             || !string.IsNullOrWhiteSpace(document.SelectedPhotorealStyleName)
             || !string.IsNullOrWhiteSpace(document.SelectedVideoStyleName)
             || !string.IsNullOrWhiteSpace(document.SelectedI2iEditStyleName)
@@ -365,6 +368,15 @@ public partial class MainWindow
         {
             PhotorealStyleState? normalized = NormalizePhotorealStyle(candidate);
             if (normalized is null || !photorealNames.Add(normalized.Name))
+                return false;
+        }
+        if (document.VideoEditV2Styles is { Count: > VideoEditV2MaximumStyleCount })
+            return false;
+        var videoEditNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (VideoEditV2StyleState? candidate in document.VideoEditV2Styles ?? [])
+        {
+            VideoEditV2StyleState? normalized = NormalizeVideoEditV2Style(candidate);
+            if (normalized is null || !videoEditNames.Add(normalized.Name))
                 return false;
         }
         return AreViewerStyleCollectionsSupported(new ViewerState
@@ -484,6 +496,8 @@ public partial class MainWindow
             style.ExtensionData = null;
         foreach (I2iEditStyleState style in clone.I2iEditStyles ?? [])
             style.ExtensionData = null;
+        foreach (VideoEditV2StyleState style in clone.VideoEditV2Styles ?? [])
+            style.ExtensionData = null;
         byte[] knownBytes = JsonSerializer.SerializeToUtf8Bytes(
             clone,
             new JsonSerializerOptions { MaxDepth = 64 });
@@ -500,6 +514,9 @@ public partial class MainWindow
         MergeStyleItemExtensionData(current.PhotorealStyles, latest.PhotorealStyles);
         MergeStyleItemExtensionData(current.VideoStyles, latest.VideoStyles);
         MergeStyleItemExtensionData(current.I2iEditStyles, latest.I2iEditStyles);
+        MergeStyleItemExtensionData(
+            current.VideoEditV2Styles,
+            latest.VideoEditV2Styles);
     }
 
     private static void MergeStyleItemExtensionData<T>(
@@ -514,6 +531,7 @@ public partial class MainWindow
                 PhotorealStyleState value => value.Name,
                 VideoStyleState value => value.Name,
                 I2iEditStyleState value => value.Name,
+                VideoEditV2StyleState value => value.Name,
                 _ => "",
             };
             T? match = (latest ?? []).FirstOrDefault(candidate =>
@@ -523,6 +541,7 @@ public partial class MainWindow
                         PhotorealStyleState value => value.Name,
                         VideoStyleState value => value.Name,
                         I2iEditStyleState value => value.Name,
+                        VideoEditV2StyleState value => value.Name,
                         _ => "",
                     },
                     name,
@@ -534,6 +553,7 @@ public partial class MainWindow
                 PhotorealStyleState value => value.ExtensionData,
                 VideoStyleState value => value.ExtensionData,
                 I2iEditStyleState value => value.ExtensionData,
+                VideoEditV2StyleState value => value.ExtensionData,
                 _ => null,
             };
             switch (item)
@@ -547,6 +567,9 @@ public partial class MainWindow
                 case I2iEditStyleState value:
                     value.ExtensionData = CloneExtensionData(extensionData);
                     break;
+                case VideoEditV2StyleState value:
+                    value.ExtensionData = CloneExtensionData(extensionData);
+                    break;
             }
         }
     }
@@ -558,6 +581,9 @@ public partial class MainWindow
         MergeStyleItemExtensionData(_photorealStyles, saved.PhotorealStyles);
         MergeStyleItemExtensionData(_videoStyles, saved.VideoStyles);
         MergeStyleItemExtensionData(_i2iV3Styles, saved.I2iEditStyles);
+        MergeStyleItemExtensionData(
+            _videoEditV2Styles,
+            saved.VideoEditV2Styles);
     }
 
     public string AiStylePathForSmoke => ResolvedAiStylePath;
@@ -620,6 +646,8 @@ public sealed class AiStyleDocument
     public List<I2iEditStyleState>? I2iEditStyles { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SelectedI2iEditStyleName { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<VideoEditV2StyleState>? VideoEditV2Styles { get; set; }
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }
