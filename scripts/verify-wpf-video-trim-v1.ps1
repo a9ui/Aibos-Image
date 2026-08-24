@@ -144,6 +144,14 @@ if (-not $openMethod.Success -or
     throw 'Opening Video Trim v1 must remain passive.'
 }
 
+$videoTrimJapaneseLabel = '"' + (-join @(
+    [char]0x52D5,
+    [char]0x753B,
+    [char]0x30C8,
+    [char]0x30EA,
+    [char]0x30E0
+)) + '"'
+
 foreach ($token in @(
     'ClaimsVideoTrimV1WorkspaceSnapshot',
     'IsVideoTrimReaderOnly',
@@ -152,7 +160,7 @@ foreach ($token in @(
     'VideoKindFilterKey',
     '"trim"',
     'TryBuildVideoTrimV1ManagedVideoVersion',
-    '"動画トリム"')) {
+    $videoTrimJapaneseLabel)) {
     if (($reader + $inventory + $jobs) -notmatch [regex]::Escape($token)) {
         throw "Video Trim v1 Jobs/inventory wiring is missing $token."
     }
@@ -184,7 +192,9 @@ foreach ($token in @(
 if ($smoke -match 'Process\.Start|Start-Process|Desktop\\Tools|AibosImage-Companion') {
     throw 'The focused Video Trim v1 smoke must not launch a live Companion or embed a private path.'
 }
-if ($resources -match 'remux runtime|remuxで') {
+$remuxJapaneseToken = 'remux' + [char]0x3067
+if ($resources -match 'remux runtime' -or
+    $resources -match [regex]::Escape($remuxJapaneseToken)) {
     throw 'The Video Trim v1 UI must describe exact re-encoding, not remux.'
 }
 
