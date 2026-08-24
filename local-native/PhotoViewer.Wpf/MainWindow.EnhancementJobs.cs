@@ -126,6 +126,7 @@ public partial class MainWindow
     private long _enhancementWorkspaceGeneration;
     private string _enhancementWorkspaceStatusFilter = "all";
     private string _enhancementWorkspaceOperationFilter = "all";
+    private string _enhancementWorkspaceVideoKindFilter = "all";
     private int _enhancementJobsHistoryLimit = EnhancementJobsDefaultHistoryLimit;
     private bool _settingEnhancementJobsHistoryLimitSelection;
     private EnhancementWorkspaceStatusCounts? _enhancementWorkspaceTotalCounts;
@@ -1337,6 +1338,12 @@ public partial class MainWindow
             ? filter
             : "all";
 
+    private static string NormalizeEnhancementWorkspaceVideoKindFilter(
+        string? filter)
+        => filter is "generation" or "edit" or "finish"
+            ? filter
+            : "all";
+
     private static int NormalizeEnhancementJobsHistoryLimit(int value)
         => value is 100 or 500 or 1_000
             ? value
@@ -1424,10 +1431,19 @@ public partial class MainWindow
 
     private bool MatchesEnhancementWorkspaceOperationFilter(
         EnhancementWorkspaceJobView job)
-        => _enhancementWorkspaceOperationFilter == "all"
+        => (_enhancementWorkspaceOperationFilter == "all"
+                || string.Equals(
+                    job.Operation,
+                    _enhancementWorkspaceOperationFilter,
+                    StringComparison.Ordinal))
+            && MatchesEnhancementWorkspaceVideoKindFilter(job);
+
+    private bool MatchesEnhancementWorkspaceVideoKindFilter(
+        EnhancementWorkspaceJobView job)
+        => _enhancementWorkspaceVideoKindFilter == "all"
             || string.Equals(
-                job.Operation,
-                _enhancementWorkspaceOperationFilter,
+                job.VideoKindFilterKey,
+                _enhancementWorkspaceVideoKindFilter,
                 StringComparison.Ordinal);
 
     private string EnhancementWorkspaceOperationFilterLabel()
@@ -1435,13 +1451,19 @@ public partial class MainWindow
         {
             "upscale" => "高画質化",
             "photoreal" => "実写化",
+            "video" when _enhancementWorkspaceVideoKindFilter == "edit" =>
+                "AI動画編集",
+            "video" when _enhancementWorkspaceVideoKindFilter == "finish" =>
+                "AI動画高画質化",
             "video" => "動画化",
             "i2i" => "AI編集",
             _ => "すべての処理",
         };
 
     private string EnhancementWorkspaceFilterLogMode()
-        => $"{_enhancementWorkspaceStatusFilter}:{_enhancementWorkspaceOperationFilter}";
+        => $"{_enhancementWorkspaceStatusFilter}:"
+            + $"{_enhancementWorkspaceOperationFilter}:"
+            + _enhancementWorkspaceVideoKindFilter;
 
     private bool CanCancelAllQueuedEnhancementJobs()
         => _enhancementWorkspaceJobs.Any(job =>
@@ -1752,6 +1774,7 @@ public partial class MainWindow
                 ? NormalizeEnhancementWorkspaceOperationFilter(initialFilter)
                 : NormalizeEnhancementWorkspaceOperationFilter(
                     initialOperationFilter);
+            _enhancementWorkspaceVideoKindFilter = "all";
             if (!restoreReturnViewport)
                 _enhancementWorkspacePageIndex = 0;
             RefreshEnhancementWorkspaceFilterToggleStates();
@@ -4038,8 +4061,16 @@ public partial class MainWindow
         // presentation still requires operation=video in the reader below.
         bool videoToolsEnvelopeClaimed =
             ClaimsVideoToolsWorkspaceSnapshot(element);
-        VideoToolsWorkspaceSnapshot? videoToolsSnapshot =
+        VideoToolsV2ReaderSnapshot? videoToolsV2Snapshot =
             videoToolsEnvelopeClaimed
+            && TryReadVideoToolsV2WorkspaceSnapshot(
+                element,
+                out VideoToolsV2ReaderSnapshot parsedVideoToolsV2Snapshot)
+                ? parsedVideoToolsV2Snapshot
+                : null;
+        VideoToolsWorkspaceSnapshot? videoToolsSnapshot =
+            videoToolsV2Snapshot is null
+            && videoToolsEnvelopeClaimed
             && TryReadVideoToolsWorkspaceSnapshot(
                 element,
                 out VideoToolsWorkspaceSnapshot parsedVideoToolsSnapshot)
@@ -4101,21 +4132,24 @@ public partial class MainWindow
             queueOrder,
             apiOrdinal,
             buildRequestDetails
-                ? BuildEnhancementJobRequestDetails(
-                    element,
-                    operation,
-                    id!,
-                    sourcePath ?? "",
-                    resolvedPresetId,
-                    resolvedAdapterId,
-                    i2iV3Info?.Snapshot)
+                ? videoToolsV2Snapshot is VideoToolsV2ReaderSnapshot exactV2
+                    ? BuildVideoToolsV2RequestDetails(exactV2)
+                    : BuildEnhancementJobRequestDetails(
+                        element,
+                        operation,
+                        id!,
+                        sourcePath ?? "",
+                        resolvedPresetId,
+                        resolvedAdapterId,
+                        i2iV3Info?.Snapshot)
                 : "",
             buildRequestDetails,
             i2iV3Info?.Snapshot,
             miniMaxH3VideoSnapshot,
             videoToolsEnvelopeClaimed,
-            videoToolsSnapshot?.Kind,
-            videoToolsSnapshot?.FinishMode);
+            videoToolsV2Snapshot?.Kind ?? videoToolsSnapshot?.Kind,
+            videoToolsSnapshot?.FinishMode,
+            videoToolsV2Snapshot);
         if (videoMutationProbe is not null)
             view.AttachVideoMutationProbe(videoMutationProbe);
         return view;
@@ -4318,6 +4352,29 @@ public partial class MainWindow
                 || toggle.IsChecked != true
                     ? "all"
                     : normalized;
+            if (_enhancementWorkspaceOperationFilter != "video")
+                _enhancementWorkspaceVideoKindFilter = "all";
+            RefreshEnhancementWorkspaceFilterToggleStates();
+            _enhancementWorkspacePageIndex = 0;
+            ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
+            RefreshEnhancementQueueBulkControls();
+        }
+    }
+
+    private void EnhancementJobsVideoKindFilter_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is CheckBox { Tag: string filter } toggle)
+        {
+            string normalized = NormalizeEnhancementWorkspaceVideoKindFilter(
+                filter);
+            _enhancementWorkspaceVideoKindFilter = normalized == "all"
+                || toggle.IsChecked != true
+                    ? "all"
+                    : normalized;
+            if (_enhancementWorkspaceVideoKindFilter != "all")
+                _enhancementWorkspaceOperationFilter = "video";
             RefreshEnhancementWorkspaceFilterToggleStates();
             _enhancementWorkspacePageIndex = 0;
             ApplyEnhancementWorkspaceFilter(loadThumbnails: true);
@@ -4347,6 +4404,14 @@ public partial class MainWindow
             _enhancementWorkspaceOperationFilter == "video";
         EnhancementJobsI2iFilter.IsChecked =
             _enhancementWorkspaceOperationFilter == "i2i";
+        EnhancementJobsAllVideoKindsFilter.IsChecked =
+            _enhancementWorkspaceVideoKindFilter == "all";
+        EnhancementJobsVideoGenerationKindFilter.IsChecked =
+            _enhancementWorkspaceVideoKindFilter == "generation";
+        EnhancementJobsVideoEditKindFilter.IsChecked =
+            _enhancementWorkspaceVideoKindFilter == "edit";
+        EnhancementJobsVideoFinishKindFilter.IsChecked =
+            _enhancementWorkspaceVideoKindFilter == "finish";
     }
 
     private void EnhancementJobsScrollTop_Click(object sender, RoutedEventArgs e)
@@ -9357,6 +9422,7 @@ public partial class MainWindow
 
         _enhancementWorkspaceStatusFilter = "all";
         _enhancementWorkspaceOperationFilter = "all";
+        _enhancementWorkspaceVideoKindFilter = "all";
         RefreshEnhancementWorkspaceFilterToggleStates();
         _enhancementWorkspacePageIndex = 0;
         EnhancementJobsDialog.Visibility = Visibility.Visible;
@@ -9469,11 +9535,34 @@ public partial class MainWindow
             NormalizeEnhancementWorkspaceStatusFilter(filter);
         _enhancementWorkspaceOperationFilter =
             NormalizeEnhancementWorkspaceOperationFilter(filter);
+        if (_enhancementWorkspaceOperationFilter != "video")
+            _enhancementWorkspaceVideoKindFilter = "all";
         RefreshEnhancementWorkspaceFilterToggleStates();
         _enhancementWorkspacePageIndex = 0;
         ApplyEnhancementWorkspaceFilter(loadThumbnails: false);
         RefreshEnhancementQueueBulkControls();
     }
+
+    public void SelectEnhancementJobsVideoKindFilterForSmoke(string filter)
+    {
+        _enhancementWorkspaceVideoKindFilter =
+            NormalizeEnhancementWorkspaceVideoKindFilter(filter);
+        if (_enhancementWorkspaceVideoKindFilter != "all")
+            _enhancementWorkspaceOperationFilter = "video";
+        RefreshEnhancementWorkspaceFilterToggleStates();
+        _enhancementWorkspacePageIndex = 0;
+        ApplyEnhancementWorkspaceFilter(loadThumbnails: false);
+        RefreshEnhancementQueueBulkControls();
+    }
+
+    public string EnhancementJobsOperationFilterForSmoke =>
+        _enhancementWorkspaceOperationFilter;
+
+    public string EnhancementJobsVideoKindFilterForSmoke =>
+        _enhancementWorkspaceVideoKindFilter;
+
+    public bool EnhancementJobsVideoKindPanelVisibleForSmoke =>
+        EnhancementJobsVideoKindFiltersPanel.Visibility == Visibility.Visible;
 
     public void SelectEnhancementJobsStatusFilterForSmoke(string filter)
     {
@@ -9489,6 +9578,8 @@ public partial class MainWindow
     {
         _enhancementWorkspaceOperationFilter =
             NormalizeEnhancementWorkspaceOperationFilter(filter);
+        if (_enhancementWorkspaceOperationFilter != "video")
+            _enhancementWorkspaceVideoKindFilter = "all";
         RefreshEnhancementWorkspaceFilterToggleStates();
         _enhancementWorkspacePageIndex = 0;
         ApplyEnhancementWorkspaceFilter(loadThumbnails: false);
@@ -9506,6 +9597,12 @@ public partial class MainWindow
             EnhancementJobsOperationFiltersPanel,
             filter,
             _enhancementWorkspaceOperationFilter);
+
+    public bool ToggleEnhancementJobsVideoKindFilterForSmoke(string filter)
+        => ToggleEnhancementJobsFilterForSmoke(
+            EnhancementJobsVideoKindFiltersPanel,
+            filter,
+            _enhancementWorkspaceVideoKindFilter);
 
     private static bool ToggleEnhancementJobsFilterForSmoke(
         Panel panel,
@@ -9692,6 +9789,13 @@ public partial class MainWindow
 
     public string[] EnhancementJobsOperationFilterOrderForSmoke =>
         EnhancementJobsOperationFiltersPanel.Children
+            .OfType<FrameworkElement>()
+            .Where(static item => item.Tag is string)
+            .Select(static item => (string)item.Tag)
+            .ToArray();
+
+    public string[] EnhancementJobsVideoKindFilterOrderForSmoke =>
+        EnhancementJobsVideoKindFiltersPanel.Children
             .OfType<FrameworkElement>()
             .Where(static item => item.Tag is string)
             .Select(static item => (string)item.Tag)
@@ -10415,7 +10519,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     private bool _photorealEnqueueNextCapabilitySafe;
     private EnhancementVideoMutationProbe? _videoMutationProbe;
 
-    public EnhancementWorkspaceJobView(
+    internal EnhancementWorkspaceJobView(
         string id,
         string sourceId,
         string sourcePath,
@@ -10450,7 +10554,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         MiniMaxH3VideoWorkspaceSnapshot? miniMaxH3VideoSnapshot = null,
         bool videoToolsEnvelopeClaimed = false,
         string? videoToolsKind = null,
-        string? videoToolsFinishMode = null)
+        string? videoToolsFinishMode = null,
+        VideoToolsV2ReaderSnapshot? videoToolsV2Snapshot = null)
     {
         Id = id;
         SourceId = sourceId;
@@ -10472,6 +10577,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         VideoToolsEnvelopeClaimed = videoToolsEnvelopeClaimed;
         VideoToolsKind = videoToolsKind;
         VideoToolsFinishMode = videoToolsFinishMode;
+        VideoToolsV2Snapshot = videoToolsV2Snapshot;
         Status = status;
         CancelRequested = cancelRequested;
         Progress = progress;
@@ -10509,6 +10615,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool VideoToolsEnvelopeClaimed { get; }
     public string? VideoToolsKind { get; }
     public string? VideoToolsFinishMode { get; }
+    internal VideoToolsV2ReaderSnapshot? VideoToolsV2Snapshot { get; }
     public bool IsVideoToolsReaderOnly => VideoToolsEnvelopeClaimed;
     public string Status { get; private set; }
     public bool CancelRequested { get; private set; }
@@ -11021,7 +11128,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => "キャンセル済みにする",
     };
     public string SourceName => string.IsNullOrWhiteSpace(SourcePath) ? "Unknown source" : Path.GetFileName(SourcePath);
-    public string SourceVersionLabel => IsVideoToolsReaderOnly
+    public string SourceVersionLabel => VideoToolsV2Snapshot is { } v2Source
+        ? v2Source.SourceKind == "managed-video-job"
+            ? "管理動画"
+            : "外部動画（Job所有コピー）"
+        : IsVideoToolsReaderOnly
         ? "管理動画"
         : (IsVideoOperation || Operation == "i2i")
         && !string.IsNullOrWhiteSpace(SourceProducerJobId)
@@ -11053,7 +11164,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         }
         return null;
     }
-    public string PresetSummary => VideoToolsKind == "retake"
+    public string PresetSummary => VideoToolsV2Snapshot is { Kind: "edit" } editV2
+        ? $"Video Tools v2 · AI動画編集 · [{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive}) · 非破壊child clip · Reader-only"
+        : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
+            ? $"Video Tools v2 · AI動画高画質化 · {finishV2.FinishMode} · {finishV2.FinishScale}x · Reader-only"
+        : VideoToolsKind == "retake"
         ? "Video Tools · 区間を作り直す · Reader-only"
         : VideoToolsKind == "finish"
             ? $"Video Tools · 動画高画質化 2x · {(VideoToolsFinishMode == "detail" ? "Detail" : "Faithful")} · Reader-only"
@@ -11072,20 +11187,33 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         : Operation == "i2i" && I2iMutationSafe
             ? $"Schema v{I2iSchemaVersion ?? 0}  ·  Target: {I2iTargetDisplayLabel}  ·  {SourceVersionLabel}"
         : $"{PresetId}  ·  {AdapterId}";
-    public string OperationLabel => VideoToolsKind switch
+    public string OperationLabel => BuildOperationLabel();
+
+    private string BuildOperationLabel()
     {
-        "retake" => "RETAKE  区間を作り直す",
-        "finish" => "VIDEO HQ  動画高画質化",
-        _ when VideoToolsEnvelopeClaimed => "VIDEO TOOLS  保護中",
-        _ => Operation switch
-    {
-        "upscale" => "HQ  高画質化",
-        "photoreal" => "REAL  実写化",
-        "i2i" => "EDIT  AI編集",
-        "video" => "VIDEO  動画化",
-        _ => "UNSUPPORTED  未対応",
-    },
-    };
+        if (VideoToolsV2Snapshot?.Kind == "edit")
+            return "VIDEO EDIT  AI動画編集";
+        if (VideoToolsV2Snapshot?.Kind == "finish")
+            return "VIDEO HQ  AI動画高画質化";
+        if (VideoToolsKind == "retake")
+            return "RETAKE  区間を作り直す";
+        if (VideoToolsKind == "finish")
+            return "VIDEO HQ  動画高画質化";
+        if (VideoToolsEnvelopeClaimed)
+            return "VIDEO TOOLS  保護中";
+        return Operation switch
+        {
+            "upscale" => "HQ  高画質化",
+            "photoreal" => "REAL  実写化",
+            "i2i" => "EDIT  AI編集",
+            "video" => "VIDEO  動画化",
+            _ => "UNSUPPORTED  未対応",
+        };
+    }
+    public string? VideoKindFilterKey => !IsVideoOperation
+        ? null
+        : VideoToolsV2Snapshot?.Kind
+            ?? (VideoToolsEnvelopeClaimed ? null : "generation");
     public string I2iTargetDisplayLabel => I2iTarget switch
     {
         "hair-color" => "髪色",
@@ -11126,7 +11254,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string StatusLabel => _isBusy
         ? $"反映中  ·  {PersistedStatusLabel}"
         : PersistedStatusLabel;
-    public string DetailText => VideoToolsKind == "retake"
+    public string DetailText => VideoToolsV2Snapshot is { Kind: "edit" } editV2
+        ? $"Video Tools v2 Editを読取専用で表示しています。管理元は{SourceVersionLabel}、出力は[{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive})だけの非破壊child clipです。cancel/retry/remove/delete/reorder/再実行は無効です。"
+        : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
+            ? $"Video Tools v2 Finishを読取専用で表示しています。管理元は{SourceVersionLabel}、{finishV2.FinishScale}x出力でもfps・フレーム数・長さ・元音声を維持します。cancel/retry/remove/delete/reorder/再実行は無効です。"
+        : VideoToolsKind == "retake"
         ? "Retake snapshotを読取専用で表示しています。選択区間と実際の差し替え窓、全尺・元音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
         : VideoToolsKind == "finish"
             ? "Video Finish 2x snapshotを読取専用で表示しています。fps・フレーム数・長さ・音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
@@ -11241,6 +11373,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 VideoToolsFinishMode,
                 candidate.VideoToolsFinishMode,
                 StringComparison.Ordinal)
+            && Equals(VideoToolsV2Snapshot, candidate.VideoToolsV2Snapshot)
             && Equals(_videoMutationProbe, candidate._videoMutationProbe)
             && CreatedAt == candidate.CreatedAt
             && SourceSize == candidate.SourceSize

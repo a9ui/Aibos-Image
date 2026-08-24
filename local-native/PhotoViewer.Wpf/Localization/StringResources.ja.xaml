@@ -393,4 +393,13 @@
   <sys:String x:Key="UiVideoH3StatusTimedOut">H3語化が6分以内に完了しませんでした。入力プロンプトは変更していません。もう一度試してください。</sys:String>
   <sys:String x:Key="UiVideoH3StatusApplied">候補を入力プロンプトへ反映しました。動画化はまだ開始していません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusUndone">入力プロンプトを反映前へ戻しました。</sys:String>
+  <sys:String x:Key="UiJobsVideoKindTitle">動画の種類</sys:String>
+  <sys:String x:Key="UiJobsVideoKindAll">すべての動画</sys:String>
+  <sys:String x:Key="UiJobsVideoKindGeneration">動画生成</sys:String>
+  <sys:String x:Key="UiJobsVideoKindEdit">AI動画編集</sys:String>
+  <sys:String x:Key="UiJobsVideoKindFinish">AI動画高画質化</sys:String>
+  <sys:String x:Key="UiJobsVideoKindAllHelp">動画生成、AI動画編集、AI動画高画質化と、分類できない保護中の動画Jobを表示します。</sys:String>
+  <sys:String x:Key="UiJobsVideoKindGenerationHelp">通常の動画生成だけを表示します。legacy Retake/Finishは新しい種類へ読み替えず、すべての動画にだけ残します。</sys:String>
+  <sys:String x:Key="UiJobsVideoKindEditHelp">正確なVideo Tools v2 Edit Jobだけを表示します。不明・破損・将来形式は推測分類しません。</sys:String>
+  <sys:String x:Key="UiJobsVideoKindFinishHelp">正確なVideo Tools v2 Finish Jobだけを表示します。不明・破損・将来形式は推測分類しません。</sys:String>
 </ResourceDictionary>
