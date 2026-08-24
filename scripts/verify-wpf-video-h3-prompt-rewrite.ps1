@@ -10,6 +10,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $xamlPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.xaml'
 $implementationPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoPromptRewrite.cs'
+$conformancePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MiniMaxH3I2vaPromptConformance.cs'
 $jaResourcePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\Localization\StringResources.ja.xaml'
 $enResourcePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\Localization\StringResources.en.xaml'
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
@@ -27,6 +28,7 @@ $contractFixturePath = Join-Path $runRoot 'enhancement-video-v2.json'
 $resultPath = Join-Path $runRoot 'result.json'
 $stdoutPath = Join-Path $runRoot 'stdout.log'
 $stderrPath = Join-Path $runRoot 'stderr.log'
+$nugetScratchRoot = Join-Path $runRoot 'nuget-scratch'
 $previousEnvironment = @{}
 $environmentPaths = [ordered]@{
     PHOTOVIEWER_WPF_STATE_PATH = (Join-Path $storesRoot 'state.json')
@@ -38,10 +40,14 @@ $environmentPaths = [ordered]@{
     PHOTOVIEWER_WPF_ENHANCEMENT_JOBS_PATH = (Join-Path $storesRoot 'enhance\jobs.json')
     AIBOS_SHARED_ROOT_LOCATOR_PATH = (Join-Path $storesRoot 'shared-root.v1.json')
     AIBOS_VIDEO_V2_CONTRACT_PATH = $contractFixturePath
+    NUGET_SCRATCH = $nugetScratchRoot
 }
 
 try {
-    New-Item -ItemType Directory -Path $runRoot, $storesRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $runRoot, $storesRoot, $nugetScratchRoot -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $conformancePath -PathType Leaf)) {
+        throw 'The pure MiniMax H3 I2VA conformance profile is missing.'
+    }
     $contract = Get-AibosVideoV2Bundle $repoRoot
     Write-AibosJsonFile $contractFixturePath $contract
     $rewriteContract = $contract.promptRewriteProtocol
@@ -54,6 +60,13 @@ try {
         -or (@($rewriteContract.request.allowedValues.frameCount) -join ',') -ne '124,243,294,362' `
         -or $rewriteContract.request.fixedValues.PSObject.Properties.Name -contains 'frameCount' `
         -or $rewriteContract.request.fixedValues.playbackFps -ne 24 `
+        -or $rewriteContract.conformanceProfile.id -ne 'minimax-h3-i2va' `
+        -or $rewriteContract.conformanceProfile.guide.commit -ne '35491cdba2adfe62a510f725e8619f8e58783ea2' `
+        -or $rewriteContract.conformanceProfile.guide.skill.gitBlobSha1 -ne '48d3bb470fefb96ced7e10f908c53d54d9785e62' `
+        -or $rewriteContract.conformanceProfile.guide.baseGuide.gitBlobSha1 -ne '40cf586a634d677d6b7107b367cf0ec9621be728' `
+        -or $rewriteContract.conformanceProfile.guide.capabilitySource.gitBlobSha1 -ne 'f70c43ecf20d367c343d4c2998d126bfcca76220' `
+        -or $rewriteContract.conformanceProfile.noMusicCompatibility.officialAlias -ne 'N/A' `
+        -or $rewriteContract.conformanceProfile.noMusicCompatibility.existingWriterValue -ne 'None; do not add music.' `
         -or $rewriteContract.responseFixture.rewriteRevision -ne $rewriteContract.rewriteRevision `
         -or @($rewriteContract.revisionFixtures).Count -lt 2 `
         -or @($rewriteContract.errorFixtures).Count -lt 1) {
@@ -64,6 +77,7 @@ try {
     if ($xaml -notmatch 'x:Name="ModalVideoH3PromptRewritePanel"[\s\S]{0,300}Background="\{StaticResource SoftFill\}"' `
         -or $xaml -notmatch 'x:Name="ModalVideoH3RewriteModeComboBox"[\s\S]{0,900}Tag="polish"[\s\S]{0,300}Tag="direction"[\s\S]{0,300}Tag="auto"' `
         -or $xaml -notmatch 'x:Name="ModalVideoH3PromptCandidateTextBox"[\s\S]{0,500}Background="\{StaticResource BgPrimary\}"' `
+        -or $xaml -notmatch 'x:Name="ModalVideoH3ConformanceText"[\s\S]{0,300}UiVideoH3ConformanceAutomation' `
         -or $xaml -notmatch 'x:Name="ModalVideoH3ApplyPromptButton"[\s\S]{0,180}Style="\{StaticResource PrimaryButton\}"' `
         -or $xaml -notmatch 'x:Name="ModalVideoH3UndoPromptButton"[\s\S]{0,180}Style="\{StaticResource GhostButton\}"' `
         -or $xaml -notmatch 'x:Name="ModalVideoH3PromptCandidateTextBox"[\s\S]{0,220}MaxLength="8001"') {
@@ -88,6 +102,14 @@ try {
         'UiVideoH3ImageAnalysisOn',
         'UiVideoH3CandidateLabel',
         'UiVideoH3CandidateAutomation',
+        'UiVideoH3ConformanceAutomation',
+        'UiVideoH3ConformancePrefix',
+        'UiVideoH3ConformanceReady',
+        'UiVideoH3ConformanceStale',
+        'UiVideoH3ConformanceTooLong',
+        'UiVideoH3ConformanceReferenceError',
+        'UiVideoH3ConformanceFormatError',
+        'UiVideoH3ConformanceErrorsFormat',
         'UiVideoH3ApplyButton',
         'UiVideoH3ApplyButtonAutomation',
         'UiVideoH3UndoButton',
@@ -112,6 +134,7 @@ try {
     }
 
     $implementation = Get-Content -Raw -Encoding UTF8 -LiteralPath $implementationPath
+    $conformance = Get-Content -Raw -Encoding UTF8 -LiteralPath $conformancePath
     if ($implementation -notmatch 'api/enhance/video-prompts/h3/rewrite' `
         -or $implementation -notmatch 'aibos-h3-i2va-local-v1' `
         -or $implementation -notmatch 'BuildVideoH3RewriteRequestPrompt' `
@@ -125,6 +148,21 @@ try {
         -or $implementation -match 'SendEnhancementEnqueueAsync' `
         -or $implementation -match '\bSaveState\s*\(') {
         throw 'The H3 prompt assistant crossed its non-queue or non-persistent boundary.'
+    }
+    if ($conformance -notmatch 'MiniMaxH3I2vaPromptConformance' `
+        -or $conformance -notmatch '35491cdba2adfe62a510f725e8619f8e58783ea2' `
+        -or $conformance -notmatch '48d3bb470fefb96ced7e10f908c53d54d9785e62' `
+        -or $conformance -notmatch '40cf586a634d677d6b7107b367cf0ec9621be728' `
+        -or $conformance -notmatch 'f70c43ecf20d367c343d4c2998d126bfcca76220' `
+        -or $conformance -notmatch 'H3_REFERENCE_FIRST_FRAME_BINDING' `
+        -or $conformance -notmatch 'H3_FORMAT_SECTION_DUPLICATE' `
+        -or $conformance -notmatch 'H3_REFERENCE_SHOT1_TIMESTAMP' `
+        -or $conformance -notmatch 'H3_TIMELINE_PRECISION' `
+        -or $conformance -match 'HttpClient|Process\.|File\.|Directory\.|CUDA|Enqueue') {
+        throw 'The H3 conformance profile is missing its pure fail-closed diagnostics.'
+    }
+    if ($implementation -notmatch 'CanApplyVideoH3PromptCandidate\([\s\S]{0,80}knownFresh[\s\S]{0,500}knownFresh\s*\?\?\s*IsVideoH3PromptCandidateFresh\(\)') {
+        throw 'A stale H3 candidate is not blocked at the Apply boundary.'
     }
 
     $dotNetExecutable = (Get-Command $DotNetPath -ErrorAction Stop).Source
@@ -142,7 +180,9 @@ try {
         & $dotNetExecutable build $project `
             -c $Configuration `
             --artifacts-path $buildRoot `
-            --nologo
+            --nologo `
+            -m:1 `
+            -p:BuildInParallel=false
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
@@ -187,11 +227,15 @@ try {
         -or -not $result.revisionFixturesExact `
         -or -not $result.errorFixturesFailClosed `
         -or -not $result.candidateSeparate `
+        -or -not $result.conformanceReady `
         -or -not $result.editorOversizeRejectedWhole `
         -or -not $result.candidateEditable `
         -or -not $result.rawUtf16LimitCheckedBeforeNormalization `
         -or -not $result.wholePromptMarkerUniqueness `
         -or -not $result.wholePromptMarkerOrder `
+        -or -not $result.untimedShotOneEnforced `
+        -or -not $result.officialTimingPrecisionEnforced `
+        -or -not $result.noMusicAliasesAccepted `
         -or -not $result.candidateNotPersisted `
         -or -not $result.queueReadsOnlyInput `
         -or -not $result.applied `
@@ -206,6 +250,7 @@ try {
         -or -not $result.sourceStale `
         -or -not $result.oversizeRejected `
         -or -not $result.hashMismatchRejected `
+        -or -not $result.manualEditStalesCandidateAndUndo `
         -or -not $result.modeOverflowRejectedExplicitly `
         -or -not $result.responseTransportBounded `
         -or -not $result.unavailableCompilerFailedClosed `

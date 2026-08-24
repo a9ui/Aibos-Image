@@ -478,6 +478,14 @@
   <sys:String x:Key="UiVideoH3CandidateLabel">変換後の英語候補</sys:String>
   <sys:String x:Key="UiVideoH3CandidateAutomation">編集可能なMiniMax H3プロンプト候補</sys:String>
   <sys:String x:Key="UiVideoH3CandidateHelp">この候補だけを編集します。入力プロンプトへ反映するまで動画化には使われません。</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceAutomation">MiniMax H3 I2VA適合状態</sys:String>
+  <sys:String x:Key="UiVideoH3ConformancePrefix">MiniMax H3 · I2VA</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceReady">✓ 適合</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceStale">Stale · 反映不可</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceTooLong">8000文字を超えています</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceReferenceError">Picture 1 / Shot 1参照を確認してください</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceFormatError">H3 section構造を確認してください</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceErrorsFormat">{0} error · {1}</sys:String>
   <sys:String x:Key="UiVideoH3ApplyButton">入力プロンプトへ反映</sys:String>
   <sys:String x:Key="UiVideoH3ApplyButtonAutomation">H3候補を動画生成の入力プロンプトへ反映</sys:String>
   <sys:String x:Key="UiVideoH3ApplyButtonHelp">候補を唯一の動画生成入力欄へ明示的にコピーします。動画化は開始しません。</sys:String>
@@ -487,7 +495,7 @@
   <sys:String x:Key="UiVideoH3StatusIdle">入力プロンプトをMiniMax語へ変換します。ここでは動画ジョブを追加しません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusWorking">CPUでMiniMax H3向け英語へ変換中です。JobsやGPU処理とは別に実行しています…</sys:String>
   <sys:String x:Key="UiVideoH3StatusReady">候補を編集できます。動画生成にはまだ使われていません。</sys:String>
-  <sys:String x:Key="UiVideoH3StatusStale">入力・画像・Model・Style・変換方法が変わりました。もう一度変換してください。</sys:String>
+  <sys:String x:Key="UiVideoH3StatusStale">入力・画像・Model・Style・変換方法が変わりました。候補は反映できません。もう一度変換してください。</sys:String>
   <sys:String x:Key="UiVideoH3StatusStaleResponse">変換中に入力・画像・Model・Style・変換方法が変わったため、結果を採用しませんでした。</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidCandidate">候補はH3形式ではないか、8000文字を超えています。入力には反映していません。</sys:String>
   <sys:String x:Key="UiVideoH3StatusInputTooLong">選んだ変換方法の指示を含めると8000文字を超えます。入力を少し短くしてください。ジョブやworkerは変更していません。</sys:String>

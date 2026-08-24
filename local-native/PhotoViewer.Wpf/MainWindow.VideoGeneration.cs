@@ -203,12 +203,12 @@ public partial class MainWindow
         string integratedDescription,
         string soundscape,
         string music)
-        => VideoH3PromptOpening
-            + VideoH3IntegratedPrefix
+        => MiniMaxH3I2vaPromptConformance.Opening
+            + MiniMaxH3I2vaPromptConformance.IntegratedPrefix
             + integratedDescription
-            + VideoH3SoundscapePrefix
+            + MiniMaxH3I2vaPromptConformance.SoundscapePrefix
             + soundscape
-            + VideoH3MusicPrefix
+            + MiniMaxH3I2vaPromptConformance.MusicPrefix
             + music;
 
     private static readonly IReadOnlyList<VideoPromptTemplateChoice>

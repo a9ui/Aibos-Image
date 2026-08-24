@@ -478,6 +478,14 @@
   <sys:String x:Key="UiVideoH3CandidateLabel">Converted English candidate</sys:String>
   <sys:String x:Key="UiVideoH3CandidateAutomation">Editable MiniMax H3 prompt candidate</sys:String>
   <sys:String x:Key="UiVideoH3CandidateHelp">Edits only this candidate. Video generation ignores it until you apply it to the input prompt.</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceAutomation">MiniMax H3 I2VA conformance status</sys:String>
+  <sys:String x:Key="UiVideoH3ConformancePrefix">MiniMax H3 · I2VA</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceReady">✓ Conformant</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceStale">Stale · apply blocked</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceTooLong">Exceeds 8,000 characters</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceReferenceError">Check the Picture 1 / Shot 1 binding</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceFormatError">Check the H3 section structure</sys:String>
+  <sys:String x:Key="UiVideoH3ConformanceErrorsFormat">{0} error · {1}</sys:String>
   <sys:String x:Key="UiVideoH3ApplyButton">Apply to input prompt</sys:String>
   <sys:String x:Key="UiVideoH3ApplyButtonAutomation">Apply the H3 candidate to the video generation input prompt</sys:String>
   <sys:String x:Key="UiVideoH3ApplyButtonHelp">Explicitly copies the candidate into the only video generation input. It does not start video generation.</sys:String>
@@ -487,7 +495,7 @@
   <sys:String x:Key="UiVideoH3StatusIdle">Convert the input prompt to MiniMax language. This does not add a video job.</sys:String>
   <sys:String x:Key="UiVideoH3StatusWorking">Converting to MiniMax H3 English on CPU, independently of Jobs and GPU work…</sys:String>
   <sys:String x:Key="UiVideoH3StatusReady">The candidate is editable. Video generation is not using it yet.</sys:String>
-  <sys:String x:Key="UiVideoH3StatusStale">The input, image, model, style, or conversion mode changed. Convert it again.</sys:String>
+  <sys:String x:Key="UiVideoH3StatusStale">The input, image, model, style, or conversion mode changed. Apply is blocked; convert it again.</sys:String>
   <sys:String x:Key="UiVideoH3StatusStaleResponse">The input, image, model, style, or conversion mode changed while conversion was running, so the result was not accepted.</sys:String>
   <sys:String x:Key="UiVideoH3StatusInvalidCandidate">The candidate is not valid H3 format or exceeds 8,000 characters. It was not applied.</sys:String>
   <sys:String x:Key="UiVideoH3StatusInputTooLong">The selected conversion guidance would exceed 8,000 characters. Shorten the input. No job or worker was changed.</sys:String>

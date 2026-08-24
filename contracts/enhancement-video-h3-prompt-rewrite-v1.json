@@ -66,6 +66,54 @@
     "emptySectionRule": "each section body contains at least one non-whitespace character",
     "controlCharacterRule": "only LF and TAB control characters are allowed"
   },
+  "conformanceProfile": {
+    "id": "minimax-h3-i2va",
+    "guide": {
+      "repository": "https://github.com/MiniMax-AI/MiniMax-H3",
+      "commit": "35491cdba2adfe62a510f725e8619f8e58783ea2",
+      "skill": {
+        "path": "skills/h3-prompt-writing/SKILL.md",
+        "gitBlobSha1": "48d3bb470fefb96ced7e10f908c53d54d9785e62",
+        "bytes": 1912
+      },
+      "baseGuide": {
+        "path": "skills/h3-prompt-writing/references/base-en.txt",
+        "gitBlobSha1": "40cf586a634d677d6b7107b367cf0ec9621be728",
+        "bytes": 15773
+      },
+      "capabilitySource": {
+        "path": "README.md",
+        "gitBlobSha1": "f70c43ecf20d367c343d4c2998d126bfcca76220",
+        "bytes": 36059
+      }
+    },
+    "guideAnchors": {
+      "openingAndDuration": "base-en.txt / 2. Final Prompt Structure / 2.1 Part One Is the Instruction",
+      "sectionOrder": "base-en.txt / 2.2 Part Two Contains the Three Core Fields",
+      "shotTiming": "base-en.txt / 4.2 Shots and Cuts",
+      "noMusic": "base-en.txt / 4.7 non_diegetic_music",
+      "fpsAndDurationRange": "README.md / System Overview / input and output specifications"
+    },
+    "timing": {
+      "outputFps": 24,
+      "nominalDurationSeconds": { "minimum": 4, "maximum": 15 },
+      "knownTimedPhraseFractionDigits": 2,
+      "profileFrameCountsRemainOwnedBy": "PV-ENHANCE-VIDEO-H3-PROFILES-001"
+    },
+    "shot1": "the first-frame anchor remains exactly [Shot 1] without a timestamp",
+    "noMusicCompatibility": {
+      "officialAlias": "N/A",
+      "existingWriterValue": "None; do not add music.",
+      "rule": "accept both as NoMusic without rewriting an existing candidate; changing the writer literal requires a future versioned contract"
+    },
+    "diagnostic": {
+      "requiredFields": ["code", "severity", "group", "path", "reason", "evidenceRefs"],
+      "groups": ["Format", "Timeline", "References", "Preservation"],
+      "severity": ["Error", "Warning"],
+      "mutation": "analysis is pure; never repair, apply, persist, enqueue, or start a worker"
+    },
+    "applyBoundary": "a candidate with any Error or a stale source/input/model/style/mode stamp cannot be applied; warning-only candidates remain eligible"
+  },
   "runtimeErrorMapping": {
     "H3_PROMPT_RUNTIME_INVALID_SOURCE": "H3_PROMPT_REWRITE_INVALID_SOURCE",
     "H3_PROMPT_RUNTIME_BUSY": "H3_PROMPT_REWRITE_BUSY",

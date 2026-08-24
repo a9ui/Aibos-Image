@@ -264,6 +264,11 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - MiniMax H3 requests use the additive version 2 contract. Profile, step, and
   canvas selections are separate versioned capabilities; clients require exact
   readiness before durable publication.
+- MiniMax H3 I2VA prompt candidates pass a pure, pinned conformance profile
+  before Apply. Format or reference errors and stale source, input, model,
+  style, or mode context disable Apply without repairing the candidate. The
+  guide revision and diagnostic evidence are defined by
+  `PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001`.
 - Motion Director is a deterministic, WPF-local planning surface for MiniMax
   H3. It compiles bounded action, camera, and frame-timeline choices into a
   transient prompt candidate. Opening it, changing its controls, or building a
