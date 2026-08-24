@@ -40,7 +40,7 @@ foreach ($requiredPath in @(
 }
 
 $fixtureHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fixturePath).Hash.ToLowerInvariant()
-if ($fixtureHash -cne '5a0d06662bc0ae57bbfc8cb5a2914093e8bda0789dd7523c60ddea6e0c663849') {
+if ($fixtureHash -cne '5944bee764d363d95aaa67f79444511eabc2aebaca90bccd2a88b2e095685c5a') {
     throw "Unexpected Video Tools v2 fixture hash: $fixtureHash"
 }
 
@@ -95,7 +95,11 @@ foreach ($token in @(
     'futureProtected',
     'v1MeaningPreserved',
     'kindFiltersExact',
-    'mutationsHidden',
+    'editLifecycle',
+    'finishLifecycle',
+    'knownLifecycleEnabled',
+    'lifecyclePresentationExact',
+    'existingLifecycleRegression',
     'passiveRead')) {
     if ($smoke -notmatch [regex]::Escape($token)) {
         throw "The focused reader smoke is missing $token."
@@ -244,7 +248,11 @@ try {
         'futureProtected',
         'v1MeaningPreserved',
         'kindFiltersExact',
-        'mutationsHidden',
+        'editLifecycle',
+        'finishLifecycle',
+        'knownLifecycleEnabled',
+        'lifecyclePresentationExact',
+        'existingLifecycleRegression',
         'passiveRead')
     $failed = @($required | Where-Object { $result.$_ -ne $true })
     if ($processExitCode -ne 0 -or $result.ok -ne $true -or $failed.Count -gt 0) {
