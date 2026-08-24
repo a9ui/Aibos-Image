@@ -1,0 +1,442 @@
+{
+  "schemaVersion": 1,
+  "contractId": "PV-ENHANCE-VIDEO-TRIM-001",
+  "protocol": "aibos-enhancement-video-trim-v1",
+  "operation": "video",
+  "mediaKind": "video",
+  "authority": "docs/product-contract.md",
+  "scope": "A separately versioned, non-AI, exact-frame trim/export operation for one bounded source video. It reuses durable Jobs infrastructure but is never an Edit or Finish Video Tools v2 kind.",
+  "wire": {
+    "topLevelClaim": "videoTrim",
+    "exactEnvelopeFields": [
+      "operation",
+      "mediaKind",
+      "videoTrim"
+    ],
+    "discriminators": {
+      "operation": "video",
+      "mediaKind": "video",
+      "videoTrim.schemaVersion": 1
+    },
+    "durablePublication": "The authenticated enqueue request is accepted only after the exact Video Trim capability, source capture, idempotency, resource, and writer gates pass. A passive reader never publishes this claim."
+  },
+  "request": {
+    "exactVideoTrimFields": [
+      "schemaVersion",
+      "source",
+      "selection",
+      "audioPolicy"
+    ],
+    "schemaVersion": 1,
+    "sourceSelector": {
+      "exactKinds": [
+        "managed-video-job",
+        "displayed-file"
+      ],
+      "managed-video-job": {
+        "exactFields": [
+          "kind",
+          "sourceVideoJobId"
+        ],
+        "producerState": "The exact producer Job must be supported, succeeded, immutable, and own one currently revalidated managed MP4. The child reserves that producer output without a gap before its durable request becomes visible."
+      },
+      "displayed-file": {
+        "exactFields": [
+          "kind",
+          "path",
+          "size",
+          "mtimeMs",
+          "sha256"
+        ],
+        "capture": "Only an explicit user action may capture the currently displayed regular file identity. The server reopens, bounds, canonicalizes, hashes, probes, and stages the exact bytes after idempotency replay lookup and before Job publication."
+      }
+    },
+    "selection": {
+      "exactFields": [
+        "startFrame",
+        "endFrameExclusive"
+      ],
+      "meaning": "A half-open source-decoded-frame interval. Client time labels and thumbnails are presentation only; the persisted frame indices are authoritative and are never rounded from milliseconds by the worker."
+    },
+    "audioPolicy": {
+      "exactValues": [
+        "preserve",
+        "mute"
+      ],
+      "default": "preserve"
+    },
+    "clientForbiddenFields": [
+      "prompt",
+      "instructionJa",
+      "compiled",
+      "compiler",
+      "style",
+      "styleId",
+      "steps",
+      "seed",
+      "backend",
+      "backendId",
+      "model",
+      "modelId",
+      "gpu",
+      "gpuLease",
+      "maximumPixelArea",
+      "strength",
+      "denoise"
+    ],
+    "forbiddenRule": "Any AI instruction, prompt compiler, style, sampling, seed, backend, model, GPU, enhancement-strength, or diffusion field makes a version 1 request invalid. Unknown request fields are never ignored by a writer."
+  },
+  "validation": {
+    "source": {
+      "pathKind": "bounded regular file below an exact managed owner or an explicitly captured displayed-file stage",
+      "maximumBytes": 536870912,
+      "maximumDurationMs": 300000,
+      "maximumWidth": 1920,
+      "maximumHeight": 1080,
+      "maximumPixelArea": 2073600,
+      "maximumFrames": 18000,
+      "allowedFps": [
+        "24/1",
+        "30/1",
+        "60/1"
+      ],
+      "frameRatePolicy": "The probed average and real rational frame rates must both resolve to the same allowed exact constant frame rate; variable, fractional, zero, negative, NaN, inferred, or conflicting rates are rejected.",
+      "container": "mp4",
+      "videoCodec": "h264",
+      "pixelFormat": "yuv420p",
+      "bitDepth": 8,
+      "dynamicRange": "SDR",
+      "videoStreamCount": 1,
+      "maximumAudioStreamCount": 1,
+      "extraStreamCount": 0,
+      "forbiddenStreamTypes": [
+        "subtitle",
+        "data",
+        "attachment",
+        "unknown"
+      ],
+      "probeRule": "The explicit writer path uses a sealed, bounded ffprobe argument array and rejects missing, malformed, contradictory, over-bound, unsupported, or extra-stream media before durable execution. Passive reads never probe."
+    },
+    "selection": {
+      "interval": "half-open [startFrame,endFrameExclusive)",
+      "minimumFrames": 1,
+      "maximumFrames": 18000,
+      "maximumDurationMs": 300000,
+      "allowsSelectionsLongerThan15Seconds": true,
+      "requiresSourceContainment": true,
+      "rule": "startFrame and endFrameExclusive are finite JSON integers; 0 <= startFrame < endFrameExclusive <= exact source frame count. Selected frame count and rational duration must fit both selection and source bounds without overflow."
+    },
+    "signature": {
+      "required": [
+        "canonicalPath",
+        "size",
+        "mtimeMs",
+        "sha256",
+        "probeDigest",
+        "sourceIdentityDigest"
+      ],
+      "rule": "All identities are recomputed from one proven closed source or staged-file handle and cross-bound before the immutable Job snapshot is published. A path string alone is never source ownership."
+    }
+  },
+  "planning": {
+    "authority": "server-owned",
+    "revision": "aibos-video-trim-plan-v1",
+    "immutableInputs": [
+      "source identity and probe",
+      "startFrame",
+      "endFrameExclusive",
+      "audioPolicy",
+      "sealed runtime receipt set",
+      "resource bounds",
+      "output allocation"
+    ],
+    "timeMapping": "For exact source fps numerator/denominator, start time is startFrame * denominator / numerator and end time is endFrameExclusive * denominator / numerator. Checked rational arithmetic is used through planning; decimal UI times are not execution authority.",
+    "videoFilter": "Decode from the proven source and select the exact requested decoded-frame interval, reset output video presentation timestamps to sequential zero-origin values, then encode H.264 yuv420p 8-bit SDR at the exact source rational fps.",
+    "audioFilter": "For preserve, select the source audio intersecting the same rational start/end interval, reset its timestamps to zero, and encode AAC. Encoder delay, priming, packet boundaries, and sample quantization are not represented as packet-bit-identity or sample-exact claims.",
+    "nonGoals": [
+      "keyframe-only stream-copy",
+      "smart-copy with mixed copied and encoded GOPs",
+      "AI semantic editing, generation, enhancement, interpolation, or restoration",
+      "source prefix/suffix splice around an AI-generated interval"
+    ]
+  },
+  "output": {
+    "kind": "new-managed-child",
+    "ownership": "One new Job-owned output below the canonical managed Videos date folder. The final path is allocated by the server and is never supplied by the client.",
+    "container": "mp4",
+    "videoCodec": "h264",
+    "pixelFormat": "yuv420p",
+    "bitDepth": 8,
+    "dynamicRange": "SDR",
+    "videoStreamCount": 1,
+    "maximumAudioStreamCount": 1,
+    "extraStreamCount": 0,
+    "forbiddenStreamTypes": [
+      "subtitle",
+      "data",
+      "attachment",
+      "unknown"
+    ],
+    "maximumBytes": 536870912,
+    "sourceMutationAllowed": false,
+    "metadataPolicy": "Do not inherit source global metadata, chapters, subtitles, data, attachments, stream titles, or unknown fields. Persist only bounded Aibos-owned Job and validator metadata outside user media bytes.",
+    "video": {
+      "frameCount": "endFrameExclusive - startFrame",
+      "fps": "exact source rational fps",
+      "timeBase": "source fps denominator / source fps numerator",
+      "firstRelativePts": 0,
+      "relativePts": "ordered sequential int64 values 0 through selectedFrameCount - 1 in the output time base",
+      "ptsDigestAlgorithm": "SHA-256 over ordered signed int64 big-endian PTS values",
+      "duration": "selectedFrameCount * source fps denominator / source fps numerator",
+      "requiresVideoReencode": true,
+      "keyframeOnlyStreamCopyAllowed": false,
+      "rule": "The reopened published file must contain the exact selected frame count, rational source fps, zero-origin PTS sequence and digest, and rational selected duration. Audio shortness never truncates video."
+    },
+    "audio": {
+      "preserve": {
+        "maximumStreamCount": 1,
+        "codec": "aac",
+        "requiresReencode": true,
+        "selection": "Only decoded source audio whose presentation interval intersects the exact rational frame selection is filtered, rebased, and encoded.",
+        "packetBitIdentityClaimed": false,
+        "sampleExactClaimed": false,
+        "rule": "Preserve means retain the audible selected interval when a valid source audio stream exists. It does not claim source packet identity, source sample identity, priming identity, or exact packet boundaries. No audio source yields zero output audio streams."
+      },
+      "mute": {
+        "audioStreamCount": 0,
+        "rule": "No source audio packets are decoded for delivery and no silence or generated audio is created."
+      }
+    },
+    "validator": {
+      "revision": "aibos-video-trim-child-mp4-validator-v1",
+      "temporaryFirst": true,
+      "atomicNoReplacePublish": true,
+      "reopenPublishedBytes": true,
+      "rule": "Validate one closed attempt-owned temporary regular file, persist its hash, length, exact probe, frame/PTS digest, audio policy result, and journal identity, publish atomically without replacement, reopen the same final bytes, and only then mark success."
+    }
+  },
+  "execution": {
+    "lane": "cpu-video",
+    "scheduler": "At most one Video Trim Job runs at once. This lane never obtains a GPU lease, mounts a model, starts an AI worker, or borrows Edit/Finish readiness.",
+    "process": {
+      "sealedExecutables": [
+        "ffmpeg",
+        "ffprobe"
+      ],
+      "argv": "bounded argument array; never shell text",
+      "stderr": "capture at most maximumCapturedStderrBytes, redact untrusted paths from durable user-visible errors, and terminate on overflow rather than accumulating unbounded output",
+      "timeout": "one monotonic processTimeoutMs deadline covers launch, decode, filter, encode, flush, and exit",
+      "cancel": "persist cancel-requested before signalling only the proven process identity, wait at most cancelGraceMs, publish nothing after cancellation, and never treat PID alone as ownership proof"
+    },
+    "resourceBounds": {
+      "maximumConcurrentJobs": 1,
+      "maximumGpuLeases": 0,
+      "maximumModelMounts": 0,
+      "maximumArgvEntries": 96,
+      "maximumArgvEntryBytes": 4096,
+      "maximumArgvBytes": 32768,
+      "maximumCapturedStderrBytes": 1048576,
+      "maximumHostRamBytes": 4294967296,
+      "maximumScratchBytes": 2147483648,
+      "maximumOutputBytes": 536870912,
+      "processTimeoutMs": 3600000,
+      "cancelGraceMs": 30000
+    },
+    "boundsRule": "The request, source, selected frame count, expected output, scratch allocation, argv, process, stderr, timeout, and one-Job CPU lease must all fit before process launch and again before publication. No bound is inferred from machine capacity."
+  },
+  "capability": {
+    "healthField": "capabilities.videoTrimV1",
+    "current": {
+      "contractId": "PV-ENHANCE-VIDEO-TRIM-001",
+      "protocol": "aibos-enhancement-video-trim-v1",
+      "readerReady": true,
+      "writerEnabled": false,
+      "runtimeVerified": false,
+      "ready": false,
+      "state": "disabled",
+      "reasonCode": "VIDEO_TRIM_V1_RUNTIME_UNPINNED"
+    },
+    "futureReadyVariant": {
+      "exactFields": [
+        "contractId",
+        "protocol",
+        "readerReady",
+        "writerEnabled",
+        "runtimeVerified",
+        "ready",
+        "state",
+        "reasonCode",
+        "capabilityRevision",
+        "resolvedRuntime",
+        "receipts",
+        "resourceBounds",
+        "outputPolicy"
+      ],
+      "constants": {
+        "contractId": "PV-ENHANCE-VIDEO-TRIM-001",
+        "protocol": "aibos-enhancement-video-trim-v1",
+        "readerReady": true,
+        "writerEnabled": true,
+        "runtimeVerified": true,
+        "ready": true,
+        "state": "ready",
+        "reasonCode": null,
+        "capabilityRevision": "aibos-video-trim-ready-v1"
+      },
+      "resolvedRuntime": {
+        "exactFields": [
+          "runtimeRevision",
+          "ffmpegRevision",
+          "ffprobeRevision",
+          "planRevision",
+          "journalRevision",
+          "outputValidatorRevision"
+        ],
+        "rule": "Every executable and runtime revision is sealed by path identity and SHA-256 and cross-bound to the same plan, journal, resource, cancel, recovery, and validator canary set. PATH discovery or version text alone is not sealed evidence."
+      },
+      "receipts": {
+        "exactFields": [
+          "ffmpegReceiptId",
+          "ffprobeReceiptId",
+          "runtimeReceiptId",
+          "qualityReceiptId",
+          "resourceReceiptId",
+          "cancelReceiptId",
+          "recoveryReceiptId",
+          "outputReceiptId",
+          "receiptSetSha256"
+        ],
+        "rule": "Each receipt resolves from the current authenticated private runtime, has a verified digest, names the same capability/runtime revisions and synthetic canary, and is included in receiptSetSha256. Structure without successful resolution is not readiness."
+      },
+      "resourceBounds": "An exact copy of the canaried Video Trim v1 resource bounds. Larger, missing, inferred, machine-derived, or client-supplied bounds invalidate readiness.",
+      "outputPolicy": "The exact aibos-video-trim-child-mp4-validator-v1 shape and digest, including frame, fps, PTS, AAC-or-mute, stream, byte, atomic publication, and reopen checks.",
+      "activation": {
+        "requireAll": [
+          "pairedPublicPrivateRevision",
+          "sealedFfmpegReceipt",
+          "sealedFfprobeReceipt",
+          "sealedRuntimeReceipt",
+          "qualityCanaryReceipt",
+          "resourceCanaryReceipt",
+          "cancelCanaryReceipt",
+          "recoveryCanaryReceipt",
+          "outputValidatorReceipt"
+        ],
+        "rule": "The exact ready shape, every resolved receipt, exact source/request/resource fit, and a separately reviewed paired public/private production gate must all agree in one authenticated health response. A boolean flip, synthetic receipt, previous canary, Video Tools capability, or executable presence is insufficient."
+      }
+    },
+    "passiveRead": {
+      "canonicalizesSource": false,
+      "opensSource": false,
+      "hashesSource": false,
+      "probesMedia": false,
+      "stagesSource": false,
+      "createsInboxItems": false,
+      "createsJobs": false,
+      "mutatesJobs": false,
+      "startsProcesses": false,
+      "acquiresCpuLane": false,
+      "acquiresGpuLease": false,
+      "mountsModels": false,
+      "startsWorker": false,
+      "wakesQueue": false,
+      "claimsJobs": false,
+      "retriesJobs": false,
+      "recoversJobs": false
+    }
+  },
+  "durableLifecycle": {
+    "inbox": "Use the authenticated bounded durable enqueue inbox. Commit idempotency ownership, managed producer dependency reservation or displayed staging intent, and the exact request before queue wake; incomplete or conflicting claims remain unavailable to the worker.",
+    "idempotency": "Replay the exact committed request and result for one idempotency key. A conflicting request never reuses, overwrites, stages, or republishes the prior Job.",
+    "sourceOwnership": "The source is never moved, overwritten, repaired, replaced, or deleted by trim execution, retry, cancel, recovery, publication, or Job deletion. Managed producers remain dependency-protected; displayed originals remain external and immutable.",
+    "displayedStaging": "One bounded staged source belongs to one logical Job, not one attempt. It is copied only after explicit enqueue and exact replay lookup, then independently closed, hashed, probed, and committed. Retry reuses that exact stage. Cleanup requires exact ownership and absence of every Job, retry, recovery, publication, or dependency reference; ambiguity preserves it.",
+    "managedDependency": "Reserve the exact supported succeeded producer output before a committed child request is visible, transfer the same reservation to the Job without a gap, and release only after the trim Job, retry, cancel, recovery, publication, and output references are durably absent.",
+    "jobSnapshot": {
+      "revision": "aibos-video-trim-job-snapshot-v1",
+      "required": [
+        "jobId",
+        "operation",
+        "mediaKind",
+        "videoTrim request",
+        "source identity and probe",
+        "source dependency or staging ownership",
+        "server plan",
+        "receiptSetSha256",
+        "output allocation"
+      ],
+      "rule": "The immutable snapshot is committed atomically with the latest durable state and preserves compatible unknown Job fields. Malformed, future, or conflicting snapshots are reader-only."
+    },
+    "attemptJournal": {
+      "revision": "aibos-video-trim-attempt-journal-v1",
+      "states": [
+        "reserved",
+        "source-validated",
+        "process-started",
+        "cancel-requested",
+        "process-exited",
+        "output-validating",
+        "output-validated",
+        "publishing",
+        "published",
+        "cleanup-pending",
+        "complete",
+        "failed"
+      ],
+      "requiredIdentity": [
+        "journalRevision",
+        "jobId",
+        "attemptId",
+        "snapshotSha256",
+        "receiptSetSha256",
+        "sourceIdentityDigest",
+        "dependencyOrStagingDigest",
+        "scratchOwnershipDigest",
+        "temporaryOutputIdentity",
+        "processIdentity",
+        "state"
+      ],
+      "rule": "Persist reserved and source-validated intent before launch, process ownership after launch, validator/hash/probe/frame/PTS/audio identity before publication, and every monotonic transition under durable mutation authority. Unknown state, missing identity, reverse transition, or drift blocks execution, cleanup, retry, delete, and success."
+    },
+    "retry": "Create a new attempt with new scratch, temporary output, and process identity while reusing the exact persisted request, selection, audio policy, source/stage identity, dependency reservation, plan, and compatible receipts. Revalidate all of them; never reopen an external original or reuse an unvalidated earlier output.",
+    "cancel": "Durably record cancel-requested before signalling only the proven attempt process, respect the bounded grace interval, publish nothing after cancellation, preserve source and ambiguous artifacts, and mark cancelled only after journal and process exit agree.",
+    "delete": "Delete only a proven terminal trim child output and unreferenced Job-owned staging/scratch after exact hashes, ownership, journal, dependency, retry, recovery, and publication checks. Never delete the source, managed producer output, external original, or ambiguous artifact.",
+    "recovery": "Only an authenticated explicit bounded recovery worker reconciles nonterminal journals, processes, staging, scratch, temporary output, final output, and Job state. Passive health, Jobs, viewing, navigation, search, and hydration never recover or mutate.",
+    "publish": "After temporary validation, atomically publish without overwrite under the canonical managed output root, reopen the same bytes, verify exact hash, length, streams, selected frame count, rational fps, zero-origin PTS digest, duration, and audio policy, then commit succeeded state.",
+    "failure": "Any malformed state, source drift, unsupported media, process ambiguity, bound failure, receipt drift, output mismatch, publication conflict, or ownership uncertainty publishes nothing, preserves source and unproven artifacts, and records a bounded reader-visible failure or needs-action state."
+  },
+  "compatibility": {
+    "unknownMalformedFuture": "Unknown, malformed, or unsupported future Video Trim claims preserve compatible unknown Job fields and remain reader-only. They never enqueue, wake, claim, retry, cancel, delete, recover, stage, execute, or publish through a version 1 writer.",
+    "videoToolsV2": {
+      "kindTrimAccepted": false,
+      "rule": "Video Tools v2 continues to accept only its exact edit and finish kinds and must reject kind=trim. Edit or Finish readiness, receipt sets, planners, writers, Jobs, retry, or output ownership never authorize Video Trim v1."
+    },
+    "sharedInfrastructure": [
+      "typed video Job envelope",
+      "authenticated durable enqueue inbox",
+      "idempotency",
+      "source pinning and managed dependencies",
+      "Jobs queue and mutation authority",
+      "managed output-root ownership",
+      "attempt journal framework"
+    ],
+    "separateMeanings": [
+      "request schema",
+      "CPU lane and runtime receipts",
+      "frame delivery",
+      "audio reencode policy",
+      "output validator",
+      "activation gate"
+    ]
+  },
+  "productionGate": {
+    "productionWriterEnabled": false,
+    "readyVariantAdvertised": false,
+    "liveReceiptsPresent": false,
+    "qualityAsserted": false,
+    "currentPostResult": {
+      "status": 503,
+      "code": "VIDEO_TRIM_V1_NOT_READY"
+    },
+    "activationRule": "A future paired public/private revision may enable the writer only after exact current health readiness, sealed ffmpeg/ffprobe/runtime receipts, long and non-keyframe exact-cut quality canaries, resource/cancel/recovery/output canaries, source ownership, durable lifecycle, and published-byte reopen validation all pass. Contract shape, candidate code, synthetic fixtures, executable presence, or a Video Tools capability never completes activation."
+  }
+}
