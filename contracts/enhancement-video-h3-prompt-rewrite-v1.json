@@ -24,8 +24,10 @@
     ],
     "managedSourceSelectors": "sourceProducerJobId and sourceManagedOutputPath are mutually exclusive; the latter follows PV-ENHANCE-VIDEO-002 displayedManagedSource validation and does not require a durable producer row",
     "unknownOrDuplicateFields": "reject before resolving or reading the source",
+    "allowedValues": {
+      "frameCount": [124, 243, 294, 362]
+    },
     "fixedValues": {
-      "frameCount": 124,
       "playbackFps": 24
     },
     "sourceIdMaximumUtf16CodeUnits": 32768,
