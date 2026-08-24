@@ -307,11 +307,22 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   `フレームを読み込む` action. It may bind, canonicalize, hash, and probe the
   source under a no-delete/read lease and decode bounded requested thumbnails.
   Its transient result contains exact frame count, rational fps, duration,
-  dimensions, and requested preview identities. Exact frame controls,
+  dimensions, and exactly three ordered start/middle/end displayable PNG
+  thumbnails. Every thumbnail is canonical base64 without a data-URL prefix,
+  at most 384 pixels on either edge, 147,456 pixels, and 512 KiB encoded; all
+  three are at most 1.5 MiB encoded. The full-resolution source RGB24 digest
+  remains the frame identity, while each separately records the encoded PNG
+  digest. Exact frame controls,
   compilation, and Start stay disabled until that result is current. A managed
   source may use its exact persisted producer probe and skip the media re-probe.
   Neither path infers 24 fps or frame count from MediaElement duration or
   playback state.
+- Probe, preview, and compile share only the exact authenticated Companion
+  `POST /api/enhance/video-prompts/v2/edit/compile` route. Requests are at most
+  128 KiB. Probe and compile responses remain at most 128 KiB; only explicit
+  preview permits a 2,113,536-byte JSON response for base64 expansion. Unknown
+  methods and paths fail closed. Health and Jobs reads never dispatch this
+  route or start its source/FFmpeg work.
 - `指示を整える` is another explicit authenticated action. It may recapture and
   revalidate the selected source, extract the exact start/middle/end
   preview-frame identities, and invoke the bounded local compiler, but it

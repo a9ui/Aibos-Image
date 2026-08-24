@@ -40,7 +40,7 @@ foreach ($requiredPath in @(
 }
 
 $fixtureHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fixturePath).Hash.ToLowerInvariant()
-if ($fixtureHash -cne '66af5882acf560ae078301070794bef5c1f21b9b649c3cc200c5908926676ea9') {
+if ($fixtureHash -cne '5a0d06662bc0ae57bbfc8cb5a2914093e8bda0789dd7523c60ddea6e0c663849') {
     throw "Unexpected Video Tools v2 fixture hash: $fixtureHash"
 }
 

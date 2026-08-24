@@ -3,7 +3,7 @@
   "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
   "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
   "compatibility": {
-    "contractSha256": "cb0335532f90d7e4d0c9b248861b6ed49e346e2ca84592f27d9e6bd8559138ca",
+    "contractSha256": "e669d1893324f1c4c270628574ab9091d653560c1094c3b81f417bf8cff3239e",
     "consumers": [
       "public-wpf",
       "private-companion"
@@ -62,6 +62,82 @@
       }
     },
     "expectedPassiveMutationRequests": 0
+  },
+  "previewProbeVector": {
+    "route": "/api/enhance/video-prompts/v2/edit/compile",
+    "method": "POST",
+    "maximumRequestBytes": 131072,
+    "maximumResponseBytes": 2113536,
+    "request": {
+      "action": "preview",
+      "source": {
+        "kind": "managed-video-job",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+      },
+      "selection": {
+        "startFrame": 24,
+        "endFrameExclusive": 72
+      }
+    },
+    "response": {
+      "action": "preview",
+      "source": {
+        "frameCount": 240,
+        "fpsNumerator": 24,
+        "fpsDenominator": 1,
+        "durationMs": 10000,
+        "width": 1280,
+        "height": 720
+      },
+      "previews": [
+        {
+          "role": "start",
+          "sourceFrame": 24,
+          "sourcePts": "24000",
+          "decodedPixelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "decoderRevision": "aibos-ffmpeg-rgb24-v1-synthetic",
+          "mime": "image/png",
+          "width": 1,
+          "height": 1,
+          "encodedBytes": 90,
+          "encodedSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+          "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC"
+        },
+        {
+          "role": "middle",
+          "sourceFrame": 47,
+          "sourcePts": "47000",
+          "decodedPixelSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "decoderRevision": "aibos-ffmpeg-rgb24-v1-synthetic",
+          "mime": "image/png",
+          "width": 1,
+          "height": 1,
+          "encodedBytes": 90,
+          "encodedSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+          "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC"
+        },
+        {
+          "role": "end",
+          "sourceFrame": 71,
+          "sourcePts": "71000",
+          "decodedPixelSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "decoderRevision": "aibos-ffmpeg-rgb24-v1-synthetic",
+          "mime": "image/png",
+          "width": 1,
+          "height": 1,
+          "encodedBytes": 90,
+          "encodedSha256": "999f1d1527ee7e79266f16add5430fff76b1225d742464a5b1ff1f02971bb8ee",
+          "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNgZGIGAAAOAAeCcsnOAAAAAElFTkSuQmCC"
+        }
+      ]
+    },
+    "expectedEffects": {
+      "createsJob": false,
+      "publishesDurableInbox": false,
+      "wakesQueue": false,
+      "stagesSource": false,
+      "createsOutput": false
+    }
   },
   "requestFixtures": {
     "editManaged": {
