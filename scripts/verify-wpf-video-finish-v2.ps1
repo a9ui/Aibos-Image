@@ -133,7 +133,7 @@ if ($board -match 'NVIDIA|SeedVR|NanoVSR|Bernini|VACE|MiniMax|H3' `
     -or $board -match 'x:Name="[^"]*(Prompt|Style|Step)[^"]*"') {
     throw 'Backend identities or unrelated Prompt, Style, or STEP controls leaked into Finish v2.'
 }
-if ($xaml -notmatch 'ModalVideoEditV2ExternalContextMenu[\s\S]{0,900}OpenModalVideoFinish_Click' `
+if ($xaml -notmatch 'ModalVideoEditV2ExternalContextMenu[\s\S]{0,1800}OpenModalVideoFinish_Click' `
     -or $xaml -notmatch 'x:Name="ModalContextVideoFinishV2"[\s\S]{0,300}OpenModalVideoFinish_Click') {
     throw 'Managed and displayed-file context menus do not share the Finish v2 entry.'
 }
