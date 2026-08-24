@@ -65,6 +65,7 @@ public partial class MainWindow
         Rejected,
         Folders,
         Images,
+        Video,
         Mixed,
     }
 
@@ -208,14 +209,27 @@ public partial class MainWindow
     }
 
     private IReadOnlyList<Tile> ModalNavigationTiles()
-        => ExternalFileDropSessionActive
-            ? _externalFileDropCohort
-            : _modalNavigationSnapshot.Length > 0
-                ? _modalNavigationSnapshot
-                : _tiles;
+    {
+        if (ExternalVideoDropSessionActive
+            && TryGetExternalVideoDropSessionTile(out Tile externalVideo))
+        {
+            return [externalVideo];
+        }
+        if (ExternalFileDropSessionActive)
+            return _externalFileDropCohort;
+        return _modalNavigationSnapshot.Length > 0
+            ? _modalNavigationSnapshot
+            : _tiles;
+    }
 
     private bool TryResolveModalNavigationTile(Tile candidate, out Tile tile)
     {
+        if (IsExternalVideoDropSessionTile(candidate)
+            && TryGetExternalVideoDropSessionTile(out tile))
+        {
+            return true;
+        }
+
         if (TryGetExternalFileDropSessionTile(candidate.Path, out tile))
             return true;
 
@@ -342,7 +356,7 @@ public partial class MainWindow
                 ViewerDropPayloadKind.Rejected,
                 [],
                 null,
-                "drop existing folders or supported image files from Explorer");
+                "drop existing folders, supported images, or one supported video from Explorer");
 
         try
         {
@@ -397,21 +411,52 @@ public partial class MainWindow
                 folders.RejectionReason);
         }
 
-        bool imageIntent = hasExistingFile
-            || materialized.Any(path =>
-                !string.IsNullOrWhiteSpace(path)
-                && SupportedImageExtensions.Contains(Path.GetExtension(path)));
-        return imageIntent
-            ? new ViewerDropPayload(
+        bool hasImageIntent = materialized.Any(path =>
+            !string.IsNullOrWhiteSpace(path)
+            && SupportedImageExtensions.Contains(Path.GetExtension(path)));
+        bool hasVideoIntent = materialized.Any(path =>
+            !string.IsNullOrWhiteSpace(path)
+            && SupportedExternalVideoExtensions.Contains(Path.GetExtension(path)));
+        bool allImages = materialized.All(path =>
+            !string.IsNullOrWhiteSpace(path)
+            && SupportedImageExtensions.Contains(Path.GetExtension(path)));
+        bool allVideos = materialized.All(path =>
+            !string.IsNullOrWhiteSpace(path)
+            && SupportedExternalVideoExtensions.Contains(Path.GetExtension(path)));
+        if (allImages)
+        {
+            return new ViewerDropPayload(
                 ViewerDropPayloadKind.Images,
                 materialized,
                 null,
-                "")
-            : new ViewerDropPayload(
-                ViewerDropPayloadKind.Rejected,
+                "");
+        }
+        if (allVideos)
+        {
+            return new ViewerDropPayload(
+                ViewerDropPayloadKind.Video,
                 materialized,
                 null,
-                "drop existing folders or supported image files from Explorer");
+                materialized.Length == 1
+                    ? ""
+                    : "open exactly one supported video at a time");
+        }
+        if (hasImageIntent || hasVideoIntent)
+        {
+            return new ViewerDropPayload(
+                ViewerDropPayloadKind.Mixed,
+                materialized,
+                null,
+                "image, video, and unsupported files cannot be opened in the same drop");
+        }
+
+        return new ViewerDropPayload(
+            ViewerDropPayloadKind.Rejected,
+            materialized,
+            null,
+            hasExistingFile
+                ? "the dropped file type is unsupported"
+                : "drop existing folders, supported images, or one supported video from Explorer");
     }
 
     private bool ViewerDropPayloadHasAcceptableAffordance(
@@ -419,6 +464,31 @@ public partial class MainWindow
     {
         if (payload.Kind == ViewerDropPayloadKind.Folders)
             return payload.Folders?.Folders.Count > 0;
+        if (payload.Kind == ViewerDropPayloadKind.Video)
+        {
+            if (payload.Paths.Length != 1)
+                return false;
+
+            string raw = payload.Paths[0];
+            if (string.IsNullOrWhiteSpace(raw)
+                || !Path.IsPathFullyQualified(raw)
+                || !File.Exists(raw)
+                || !SupportedExternalVideoExtensions.Contains(
+                    Path.GetExtension(raw)))
+            {
+                return false;
+            }
+
+            try
+            {
+                long length = new FileInfo(raw).Length;
+                return length is > 0 and <= MaxExternalFileDropBytes;
+            }
+            catch
+            {
+                return false;
+            }
+        }
         if (payload.Kind != ViewerDropPayloadKind.Images
             || payload.Paths.Length is < 1 or > MaxExternalFileDropImages)
         {

@@ -810,6 +810,7 @@ public partial class MainWindow : Window
         Closing += MainWindow_Closing;
         Closed += (_, _) =>
         {
+            CloseExternalVideoDropSession();
             DisposeAiProcessingMinimize();
             if (_windowChromeSource is not null)
             {
@@ -7510,6 +7511,13 @@ public partial class MainWindow : Window
             || string.IsNullOrWhiteSpace(_modalSourceTilePath))
         {
             return false;
+        }
+
+        if (TryGetExternalVideoDropSessionTile(
+                _modalSourceTilePath,
+                out tile))
+        {
+            return true;
         }
 
         if (TryGetExternalFileDropSessionTile(_modalSourceTilePath, out tile))
@@ -17985,6 +17993,10 @@ public partial class MainWindow : Window
             {
                 await ApplyDroppedImagesAsync(payload.Paths);
             }
+            else if (payload.Kind == ViewerDropPayloadKind.Video)
+            {
+                await ApplyDroppedVideoAsync(payload.Paths);
+            }
             else
             {
                 string status = UiLanguageResources.Format(
@@ -18623,6 +18635,12 @@ public partial class MainWindow : Window
         // background.
         QueueEnhancedStateRefreshIfChanged();
         if ((requestedTile ?? SelectedTile()) is not Tile t) return;
+        if (IsExternalVideoDropSessionTile(t))
+        {
+            OpenExternalVideoModal(t);
+            return;
+        }
+        SetExternalVideoViewOnlyPresentation(enabled: false);
         bool opening = Modal.Visibility != Visibility.Visible;
         if (opening && !ExternalFileDropSessionActive)
             _modalNavigationSnapshot = _tiles.ToArray();
@@ -18754,12 +18772,13 @@ public partial class MainWindow : Window
                     ? IndexOfTile(navigationTiles, tile)
                     : -1;
         int position = index >= 0 ? index + 1 : 0;
-        ModalPositionText.Text = $"画像 {position.ToString(CultureInfo.InvariantCulture)} / {total.ToString(CultureInfo.InvariantCulture)}";
+        bool externalVideo = IsExternalVideoDropSessionTile(tile);
+        ModalPositionText.Text = $"{(externalVideo ? "動画" : "画像")} {position.ToString(CultureInfo.InvariantCulture)} / {total.ToString(CultureInfo.InvariantCulture)}";
         AutomationProperties.SetName(
             ModalPositionText,
             total > 0 && position > 0
-                ? $"Image {position} of {total}"
-                : "No image position");
+                ? $"{(externalVideo ? "Video" : "Image")} {position} of {total}"
+                : externalVideo ? "No video position" : "No image position");
     }
 
     private void UpdateModalDisplayedImageInfo(Tile tile, int width, int height)
@@ -19698,6 +19717,7 @@ public partial class MainWindow : Window
             ? modalTile
             : null;
         bool hasRealSource = selectedTile is { IsRealFile: true }
+            && !IsExternalVideoDropSessionTile(selectedTile)
             && File.Exists(selectedTile.Path);
         string photorealUpscaleError =
             "高画質化できる実写版が見つかりません。先にAI実写化を完了してください。";
@@ -19821,6 +19841,7 @@ public partial class MainWindow : Window
             || active
             || !TryGetModalSourceTile(out Tile tile)
             || !tile.IsRealFile
+            || IsExternalVideoDropSessionTile(tile)
             || !File.Exists(tile.Path))
         {
             return;
@@ -20223,6 +20244,14 @@ public partial class MainWindow : Window
         string contextHeader;
         bool hasModalTile = TryGetModalSourceTile(out Tile modalTile);
         if (hasModalTile
+            && IsExternalVideoDropSessionTile(modalTile))
+        {
+            enabled = false;
+            toolTip = "Source deletion is unavailable while this video is temporarily open. Use Explorer if you intend to remove it.";
+            automationName = "Source deletion unavailable for temporary video";
+            contextHeader = "Delete unavailable for temporary video";
+        }
+        else if (hasModalTile
             && IsExternalFileDropSessionTile(modalTile))
         {
             enabled = false;
@@ -20379,6 +20408,8 @@ public partial class MainWindow : Window
         ResetModalTransform();
         if (wasVisible)
             RestoreExternalFileDropSession();
+        if (wasVisible)
+            CloseExternalVideoDropSession();
         if (wasVisible && restoreFocus)
             RestoreOverlayFocus(focusTarget, preferPrimaryGallery: true);
         ReturnToEnhancementJobsAfterModalClose(wasVisible);
@@ -21322,6 +21353,7 @@ public partial class MainWindow : Window
     private void UpdateModalEdgeNavigationPresentation()
     {
         bool chromeVisible = ModalChromeEffectivelyVisible
+            && !ExternalVideoDropSessionActive
             && _modalPointerState != ModalPointerState.Panning;
         bool hasImageRectangle = TryGetTransformedModalImageRectangle(out Rect imageRectangle);
         ModalEdgeTarget target = _modalPressedEdgeTarget != ModalEdgeTarget.None

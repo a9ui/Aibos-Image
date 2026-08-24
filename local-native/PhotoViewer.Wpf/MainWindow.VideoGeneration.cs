@@ -995,7 +995,9 @@ public partial class MainWindow
             // selection. Favorite/filter publication is allowed to move that
             // selection, but every modal action must keep targeting the image
             // the user can still see.
-            return TryGetModalSourceTile(out tile) && tile.IsRealFile;
+            return TryGetModalSourceTile(out tile)
+                && tile.IsRealFile
+                && !IsExternalVideoDropSessionTile(tile);
         }
 
         if (SelectedTile() is not Tile { IsRealFile: true } selected)
