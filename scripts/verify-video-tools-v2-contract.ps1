@@ -368,7 +368,7 @@ Assert-ExactSet @($v2.persistedSnapshot.stableIds.finishCandidateBackendIds) @(
     'seedvr2-3b-detail-candidate-v1',
     'nanovsr-1.7m-4x-candidate-v1'
 ) 'persisted Finish candidate backend IDs'
-Assert-ExactSet @($faithfulCandidate.serverQualityValues) @('MEDIUM', 'HIGH', 'ULTRA') 'NVIDIA faithful candidate values'
+Assert-ExactSet @($faithfulCandidate.serverQualityValues) @('LOW', 'MEDIUM', 'HIGH', 'ULTRA') 'NVIDIA faithful candidate values'
 if ($finishCandidates.status -cne 'candidate-canary-required' -or
     $finishCandidates.productionWriterEnabled -ne $false -or
     $faithfulCandidate.backendId -cne 'nvidia-vfx-vsr-1.2-candidate-v1' -or
@@ -512,6 +512,202 @@ if ($editCapability.discriminator -cne 'state' -or
     throw 'The future exact genuine-V2V ready capability or current closed evidence changed.'
 }
 
+$finishCapability = $v2.healthCapability.finishCapabilityVariants
+Assert-ExactSet @($finishCapability.currentDisabledCompatibility.exactKeys) @(
+    'writerEnabled', 'backendConfigured', 'runtimeVerified', 'ready', 'state',
+    'reasonCode'
+) 'current disabled Finish capability keys'
+Assert-ExactSet @($health.finish.PSObject.Properties.Name) @(
+    $finishCapability.currentDisabledCompatibility.exactKeys
+) 'current disabled Finish health shape'
+Assert-ExactSet @($finishCapability.ready.exactKeys) @(
+    'writerEnabled', 'backendConfigured', 'runtimeVerified', 'ready', 'state',
+    'reasonCode', 'capabilityRevision', 'resolvedBackend', 'receipts',
+    'resourceBounds', 'streamingPolicy', 'outputPolicy'
+) 'future ready Finish capability keys'
+Assert-ExactSet @($finishCapability.ready.resolvedBackend.exactKeys) @(
+    'backendId', 'semanticRole', 'backendFamily', 'package',
+    'internalSdkVersion', 'runnerRevision', 'outputValidatorRevision',
+    'attemptJournalRevision'
+) 'future ready Finish resolved backend keys'
+Assert-ExactSet @($finishCapability.ready.receipts.exactKeys) @(
+    'runtimeReceiptId', 'packageReceiptId', 'sdkReceiptId',
+    'driverGpuReceiptId', 'runnerReceiptId', 'frameStreamingReceiptId',
+    'timelinePreservationReceiptId', 'audioPacketCopyReceiptId',
+    'sceneCutReceiptId', 'resourceCanaryReceiptId', 'cancelCanaryReceiptId',
+    'recoveryCanaryReceiptId', 'journalReceiptId',
+    'outputValidatorReceiptId', 'receiptSetSha256'
+) 'future ready Finish receipt keys'
+Assert-ExactSet @($finishCapability.ready.resourceBounds.exactKeys) @(
+    'maximumSourceBytes', 'maximumSourceDurationMs', 'maximumSourceWidth',
+    'maximumSourceHeight', 'maximumSourcePixelArea', 'maximumSourceFrames',
+    'allowedSourceFps', 'supportedScales', 'maximumOutputWidth',
+    'maximumOutputHeight', 'maximumOutputPixelArea',
+    'maximumConcurrentGpuJobs', 'maximumBufferedFrames',
+    'maximumDecodedFrameBytes', 'maximumGpuVramBytes',
+    'maximumHostRamBytes', 'maximumScratchBytes', 'maximumOutputBytes',
+    'processTimeoutMs', 'cancelGraceMs'
+) 'future ready Finish resource bound keys'
+Assert-ExactSet @($finishCapability.ready.streamingPolicy.exactKeys) @(
+    'revision', 'boundedFrameStreaming', 'sourceLengthDependentRetention',
+    'maximumConcurrentGpuJobs', 'frameCountPreserved',
+    'rationalFpsPreserved', 'fullVideoPtsSequencePreserved',
+    'durationPreserved', 'frameInterpolation', 'frameRateConversion',
+    'generatedAudioAllowed', 'sourceAudioPacketIdentityPreserved'
+) 'future ready Finish streaming policy keys'
+Assert-ExactSet @($finishCapability.ready.outputPolicy.exactKeys) @(
+    'revision', 'container', 'videoCodec', 'pixelFormat', 'bitDepth',
+    'dynamicRange', 'videoStreamCount', 'maximumAudioStreamCount',
+    'subtitleStreamCount', 'dataStreamCount', 'attachmentStreamCount',
+    'implicitCrop', 'maximumWidth', 'maximumHeight', 'maximumPixelArea',
+    'maximumBytes'
+) 'future ready Finish output policy keys'
+$finishReadyFixed = $finishCapability.ready.fixedValues
+$finishReadyBackend = $finishCapability.ready.resolvedBackend.firstActivation
+$finishReadyResource = $finishCapability.ready.resourceBounds.fixedRequestBounds
+$finishStreaming = $finishCapability.ready.streamingPolicy.fixedValues
+$finishOutputPolicy = $finishCapability.ready.outputPolicy.fixedValues
+if ($finishCapability.discriminator -cne 'state' -or
+    $finishReadyFixed.writerEnabled -ne $true -or
+    $finishReadyFixed.backendConfigured -ne $true -or
+    $finishReadyFixed.runtimeVerified -ne $true -or
+    $finishReadyFixed.ready -ne $true -or
+    $finishReadyFixed.state -cne 'ready' -or
+    $null -ne $finishReadyFixed.reasonCode -or
+    $finishReadyFixed.capabilityRevision -cne 'aibos-video-finish-ready-v1' -or
+    $finishReadyBackend.backendId -cne 'nvidia-vfx-vsr-1.2-candidate-v1' -or
+    $finishReadyBackend.semanticRole -cne 'faithful' -or
+    $finishReadyBackend.package -cne 'nvidia-vfx 0.1.0.1' -or
+    $finishReadyBackend.internalSdkVersion -cne '1.2.0.0' -or
+    $finishReadyBackend.outputValidatorRevision -cne
+        'aibos-video-finish-mp4-validator-v1' -or
+    $finishReadyBackend.attemptJournalRevision -cne
+        'aibos-video-finish-attempt-journal-v1' -or
+    $finishReadyResource.maximumSourceBytes -ne 536870912 -or
+    $finishReadyResource.maximumSourceDurationMs -ne 300000 -or
+    $finishReadyResource.maximumSourceWidth -ne 1920 -or
+    $finishReadyResource.maximumSourceHeight -ne 1080 -or
+    $finishReadyResource.maximumSourcePixelArea -ne 2073600 -or
+    $finishReadyResource.maximumSourceFrames -ne 18000 -or
+    (@($finishReadyResource.allowedSourceFps) -join ',') -cne
+        '24/1,30/1,60/1' -or
+    (@($finishReadyResource.supportedScales) -join ',') -cne '2,4' -or
+    $finishReadyResource.maximumOutputWidth -ne 3840 -or
+    $finishReadyResource.maximumOutputHeight -ne 2160 -or
+    $finishReadyResource.maximumOutputPixelArea -ne 8294400 -or
+    $finishReadyResource.maximumConcurrentGpuJobs -ne 1 -or
+    $finishStreaming.boundedFrameStreaming -ne $true -or
+    $finishStreaming.sourceLengthDependentRetention -ne $false -or
+    $finishStreaming.frameCountPreserved -ne $true -or
+    $finishStreaming.rationalFpsPreserved -ne $true -or
+    $finishStreaming.fullVideoPtsSequencePreserved -ne $true -or
+    $finishStreaming.frameInterpolation -ne $false -or
+    $finishStreaming.generatedAudioAllowed -ne $false -or
+    $finishOutputPolicy.container -cne 'mp4' -or
+    $finishOutputPolicy.videoCodec -cne 'h264' -or
+    $finishOutputPolicy.pixelFormat -cne 'yuv420p' -or
+    $finishOutputPolicy.bitDepth -ne 8 -or
+    $finishOutputPolicy.dynamicRange -cne 'SDR' -or
+    $finishOutputPolicy.maximumWidth -ne 3840 -or
+    $finishOutputPolicy.maximumHeight -ne 2160 -or
+    $finishOutputPolicy.maximumPixelArea -ne 8294400 -or
+    $finishCapability.currentEvidence.readyVariantAdvertised -ne $false -or
+    $finishCapability.currentEvidence.liveCanaryReceiptsPresent -ne $false -or
+    $finishCapability.currentEvidence.productionWriterEnabled -ne $false -or
+    $finishCapability.currentEvidence.qualityAsserted -ne $false -or
+    $finishCapability.currentEvidence.firstFaithfulCandidateBackendId -cne
+        'nvidia-vfx-vsr-1.2-candidate-v1' -or
+    $finishCapability.ready.resolvedBackend.rule -notmatch 'NanoVSR' -or
+    $finishCapability.editIsolation -notmatch 'does not add') {
+    throw 'The future exact faithful Finish capability or current closed evidence changed.'
+}
+
+$finishModesCapability = $v2.healthCapability.finishModeCapabilityVariants
+Assert-ExactSet @($finishModesCapability.currentDisabledCompatibility.exactKeys) @(
+    'writerEnabled', 'backendConfigured', 'runtimeVerified', 'ready', 'state',
+    'reasonCode'
+) 'current disabled Finish mode capability keys'
+foreach ($mode in @('fast', 'standard', 'quality')) {
+    Assert-ExactSet @($health.finishModes.$mode.PSObject.Properties.Name) @(
+        $finishModesCapability.currentDisabledCompatibility.exactKeys
+    ) "current disabled Finish $mode health shape"
+}
+Assert-ExactSet @($finishModesCapability.ready.exactKeys) @(
+    'writerEnabled', 'backendConfigured', 'runtimeVerified', 'ready', 'state',
+    'reasonCode', 'modeCapabilityRevision', 'mode', 'resolvedBackend',
+    'receipts', 'sourceBounds', 'supportedScales', 'deliveryPolicy'
+) 'future ready Finish mode capability keys'
+Assert-ExactSet @($finishModesCapability.ready.resolvedBackend.exactKeys) @(
+    'backendId', 'semanticRole', 'backendSetting', 'modeMappingRevision',
+    'deliveryMappingRevision', 'sceneCutPolicyRevision'
+) 'future ready Finish mode backend keys'
+Assert-ExactSet @($finishModesCapability.ready.receipts.exactKeys) @(
+    'modeMappingReceiptId', 'qualityCanaryReceiptId',
+    'sourceBoundCanaryReceiptId', 'scale2CanaryReceiptId',
+    'scale4CanaryReceiptId', 'deliveryMappingReceiptId',
+    'sceneCutCanaryReceiptId', 'modeReceiptSetSha256'
+) 'future ready Finish mode receipt keys'
+Assert-ExactSet @($finishModesCapability.ready.sourceBounds.exactKeys) @(
+    'maximumSourceBytes', 'maximumSourceDurationMs', 'maximumSourceWidth',
+    'maximumSourceHeight', 'maximumSourcePixelArea', 'maximumSourceFrames',
+    'allowedSourceFps'
+) 'future ready Finish mode source bound keys'
+Assert-ExactSet @($finishModesCapability.ready.deliveryPolicy.exactKeys) @(
+    'revision', 'explicitScale4Required', 'scale4OutputBoundsRequired',
+    'silentScaleFallback', 'silentModeFallback', 'frameCountPreserved',
+    'rationalFpsPreserved', 'fullVideoPtsSequencePreserved',
+    'frameInterpolation', 'frameRateConversion', 'implicitCrop',
+    'sourceAudioPacketIdentityPreserved'
+) 'future ready Finish mode delivery policy keys'
+$modeFixed = $finishModesCapability.ready.fixedValues
+$modeMapping = $finishModesCapability.ready.resolvedBackend.modeMappings
+$modeDelivery = $finishModesCapability.ready.deliveryPolicy.fixedValues
+if ($finishModesCapability.discriminator -cne 'state' -or
+    $modeFixed.writerEnabled -ne $true -or
+    $modeFixed.backendConfigured -ne $true -or
+    $modeFixed.runtimeVerified -ne $true -or
+    $modeFixed.ready -ne $true -or
+    $modeFixed.state -cne 'ready' -or
+    $null -ne $modeFixed.reasonCode -or
+    $modeFixed.modeCapabilityRevision -cne
+        'aibos-video-finish-mode-ready-v1' -or
+    $modeMapping.fast.backendId -cne 'nvidia-vfx-vsr-1.2-candidate-v1' -or
+    $modeMapping.fast.semanticRole -cne 'faithful' -or
+    (@($modeMapping.fast.allowedBackendSettings) -join ',') -cne 'LOW,MEDIUM' -or
+    $modeMapping.standard.backendId -cne
+        'nvidia-vfx-vsr-1.2-candidate-v1' -or
+    $modeMapping.standard.semanticRole -cne 'faithful' -or
+    $modeMapping.standard.fixedBackendSetting -cne 'HIGH' -or
+    $modeMapping.quality.backendId -cne
+        'nvidia-vfx-vsr-1.2-candidate-v1' -or
+    $modeMapping.quality.semanticRole -cne 'faithful' -or
+    $modeMapping.quality.fixedBackendSetting -cne 'ULTRA' -or
+    (@($finishModesCapability.ready.supportedScales) -join ',') -cne '2,4' -or
+    $modeDelivery.explicitScale4Required -ne $true -or
+    $modeDelivery.scale4OutputBoundsRequired -ne $true -or
+    $modeDelivery.silentScaleFallback -ne $false -or
+    $modeDelivery.silentModeFallback -ne $false -or
+    $modeDelivery.frameCountPreserved -ne $true -or
+    $modeDelivery.fullVideoPtsSequencePreserved -ne $true -or
+    $modeDelivery.frameInterpolation -ne $false -or
+    $modeDelivery.implicitCrop -ne $false -or
+    $finishModesCapability.requestedModeRule -notmatch
+        'Finish overall' -or
+    $finishModesCapability.requestedModeRule -notmatch
+        'requested mode' -or
+    $finishModesCapability.currentEvidence.readyVariantsAdvertised.fast -ne
+        $false -or
+    $finishModesCapability.currentEvidence.readyVariantsAdvertised.standard -ne
+        $false -or
+    $finishModesCapability.currentEvidence.readyVariantsAdvertised.quality -ne
+        $false -or
+    $finishModesCapability.currentEvidence.liveCanaryReceiptsPresent -ne
+        $false -or
+    $finishModesCapability.currentEvidence.productionWriterEnabled -ne $false -or
+    $finishModesCapability.currentEvidence.qualityAsserted -ne $false) {
+    throw 'The future exact per-mode Finish mapping, scale, or conjunction changed.'
+}
+
 $outputValidator = $v2.editOutputValidator
 if ($outputValidator.file.container -cne 'mp4' -or
     $outputValidator.file.hardMaximumBytes -ne 536870912 -or
@@ -533,6 +729,42 @@ if ($outputValidator.file.container -cne 'mp4' -or
     (@($outputValidator.validationAndPublicationOrder) -join ' ') -notmatch
         'reopen and revalidate') {
     throw 'The final Edit child MP4 container, stream, PTS, pixel, audio, byte, or publication policy changed.'
+}
+
+$finishOutputValidator = $v2.finishOutputValidator
+if ($finishOutputValidator.policyRevision -cne
+        'aibos-video-finish-mp4-validator-v1' -or
+    $finishOutputValidator.productionValidated -ne $false -or
+    $finishOutputValidator.validatorCanaryVerified -ne $false -or
+    $finishOutputValidator.file.container -cne 'mp4' -or
+    $finishOutputValidator.file.hardMaximumBytes -ne 536870912 -or
+    $finishOutputValidator.streams.videoStreamCount -ne 1 -or
+    $finishOutputValidator.streams.maximumAudioStreamCount -ne 1 -or
+    $finishOutputValidator.streams.subtitleStreamCount -ne 0 -or
+    $finishOutputValidator.streams.dataStreamCount -ne 0 -or
+    $finishOutputValidator.streams.attachmentStreamCount -ne 0 -or
+    $finishOutputValidator.video.codec -cne 'h264' -or
+    $finishOutputValidator.video.pixelFormat -cne 'yuv420p' -or
+    $finishOutputValidator.video.bitDepth -ne 8 -or
+    $finishOutputValidator.video.dynamicRange -cne 'SDR' -or
+    $finishOutputValidator.video.frameCount -notmatch
+        'complete source video frame count' -or
+    $finishOutputValidator.video.frameInterpolation -ne $false -or
+    $finishOutputValidator.video.frameRateConversion -ne $false -or
+    $finishOutputValidator.pts.sequence -notmatch 'full' -or
+    $finishOutputValidator.pts.sequence -notmatch 'preserved exactly' -or
+    $finishOutputValidator.pts.digest -notmatch
+        'source.probe.videoPtsSha256' -or
+    $finishOutputValidator.pts.digest -notmatch 'delivery.videoPtsSha256' -or
+    $finishOutputValidator.audio.generatedAudioAllowed -ne $false -or
+    $finishOutputValidator.audio.packetCopy -notmatch
+        'packet payload SHA-256' -or
+    $finishOutputValidator.audio.videoTruncationToAudioAllowed -ne $false -or
+    (@($finishOutputValidator.validationAndPublicationOrder) -join ' ') -notmatch
+        'Finish output-validator receipt' -or
+    (@($finishOutputValidator.validationAndPublicationOrder) -join ' ') -notmatch
+        'reopen and revalidate') {
+    throw 'The separate Finish MP4, full timeline, audio packet-copy, byte, or publication validator changed.'
 }
 
 $durableWriter = $v2.editDurableWriter
@@ -564,6 +796,55 @@ if ($v2.durableDependencies.nestedManagedSource.maximumDepth -ne 64 -or
     $durableWriter.recoveryInvariants.delete -notmatch 'managed descendant' -or
     $v2.productionGate.writerRule -notmatch 'boolean-only flip') {
     throw 'Displayed staging, nested managed dependency, journal, retry, cancel, recovery, or delete invariants changed.'
+}
+$finishDurableWriter = $v2.finishDurableWriter
+Assert-ExactSet @($finishDurableWriter.attemptJournal.states) @(
+    'reserved', 'source-validated', 'process-started', 'cancel-requested',
+    'process-exited', 'output-validating', 'output-validated', 'publishing',
+    'published', 'cleanup-pending', 'complete', 'failed'
+) 'Finish attempt journal states'
+Assert-ExactSet @($finishDurableWriter.attemptJournal.requiredIdentity) @(
+    'journalRevision', 'jobId', 'attemptId', 'presetHash', 'mode', 'scale',
+    'backendId', 'backendSetting', 'receiptSetSha256', 'modeReceiptSetSha256',
+    'sourceIdentityDigest', 'dependencyClosureDigest',
+    'scratchOwnershipDigest', 'temporaryOutputIdentity', 'state'
+) 'Finish attempt journal identity'
+if ($finishDurableWriter.productionWriterEnabled -ne $false -or
+    $finishDurableWriter.attemptJournal.revision -cne
+        'aibos-video-finish-attempt-journal-v1' -or
+    $finishDurableWriter.attemptJournal.processOwnership -notmatch
+        'PID alone is never ownership proof' -or
+    $finishDurableWriter.attemptJournal.transitionRule -notmatch
+        'mode/setting/scale' -or
+    $finishDurableWriter.attemptJournal.publication -notmatch
+        'full source PTS digest' -or
+    $finishDurableWriter.displayedStaging.retry -notmatch
+        'Never reopen the external path' -or
+    $finishDurableWriter.recoveryInvariants.retry -notmatch 'new attemptId' -or
+    $finishDurableWriter.recoveryInvariants.retry -notmatch
+        'never changes mode or scale' -or
+    $finishDurableWriter.recoveryInvariants.cancel -notmatch
+        'advertised grace interval' -or
+    $finishDurableWriter.recoveryInvariants.startupRecovery -notmatch
+        'Passive health and Jobs reads never start recovery' -or
+    $finishDurableWriter.recoveryInvariants.delete -notmatch
+        'managed descendant') {
+    throw 'The independent Finish journal, staging, retry, cancel, recovery, or delete invariants changed.'
+}
+if ($v2.productionGate.currentFinish.productionWriterEnabled -ne $false -or
+    $v2.productionGate.currentFinish.readyVariantAdvertised -ne $false -or
+    $v2.productionGate.currentFinish.anyModeReadyVariantAdvertised -ne $false -or
+    $v2.productionGate.currentFinish.liveCanaryReceiptsPresent -ne $false -or
+    $v2.productionGate.currentFinish.qualityAsserted -ne $false -or
+    $v2.productionGate.currentFinish.firstFaithfulCandidateBackendId -cne
+        'nvidia-vfx-vsr-1.2-candidate-v1' -or
+    (@($v2.productionGate.finishActivationConjunction) -join ' ') -notmatch
+        'requested fast, standard, or quality mode' -or
+    (@($v2.productionGate.finishActivationConjunction) -join ' ') -notmatch
+        'bounded O\(1\) frame-streaming' -or
+    $v2.productionGate.writerRule -notmatch 'both Edit and Finish' -or
+    $v2.productionGate.writerRule -notmatch 'boolean-only flip') {
+    throw 'The current closed Finish evidence or future independent activation conjunction changed.'
 }
 $passive = $v2.healthCapability.passiveRead
 foreach ($property in @(
@@ -738,6 +1019,112 @@ if ($booleanFlip.capability.writerEnabled -ne $true -or
     $health.finishModes.standard.ready -ne $false -or
     $health.finishModes.quality.ready -ne $false) {
     throw 'Boolean-only, unresolved-receipt, or non-V2V capability vectors must remain closed; Finish must remain independent and disabled.'
+}
+$finishNegative = $fixture.finishCapabilityNegativeVectors
+$finishBooleanFlip = $finishNegative.booleanFlipOnly
+$finishModeBooleanFlip = $finishNegative.modeBooleanFlipOnly
+$finishUnresolved = $finishNegative.shapeCompleteButUnresolvedReceipts
+Assert-ExactSet @($finishBooleanFlip.capability.PSObject.Properties.Name) @(
+    $finishCapability.currentDisabledCompatibility.exactKeys
+) 'boolean-only Finish capability keys'
+Assert-ExactSet @($finishBooleanFlip.missingReadyKeys) @(
+    'capabilityRevision', 'resolvedBackend', 'receipts', 'resourceBounds',
+    'streamingPolicy', 'outputPolicy'
+) 'boolean-only Finish missing ready fields'
+Assert-ExactSet @($finishModeBooleanFlip.capability.PSObject.Properties.Name) @(
+    $finishModesCapability.currentDisabledCompatibility.exactKeys
+) 'boolean-only Finish mode capability keys'
+Assert-ExactSet @($finishModeBooleanFlip.missingReadyKeys) @(
+    'modeCapabilityRevision', 'mode', 'resolvedBackend', 'receipts',
+    'sourceBounds', 'supportedScales', 'deliveryPolicy'
+) 'boolean-only Finish mode missing ready fields'
+Assert-ExactSet @($finishUnresolved.overallCapability.PSObject.Properties.Name) @(
+    $finishCapability.ready.exactKeys
+) 'unresolved Finish overall capability keys'
+Assert-ExactSet @($finishUnresolved.overallCapability.resolvedBackend.PSObject.Properties.Name) @(
+    $finishCapability.ready.resolvedBackend.exactKeys
+) 'unresolved Finish backend keys'
+Assert-ExactSet @($finishUnresolved.overallCapability.receipts.PSObject.Properties.Name) @(
+    $finishCapability.ready.receipts.exactKeys
+) 'unresolved Finish receipt keys'
+Assert-ExactSet @($finishUnresolved.overallCapability.resourceBounds.PSObject.Properties.Name) @(
+    $finishCapability.ready.resourceBounds.exactKeys
+) 'unresolved Finish resource keys'
+Assert-ExactSet @($finishUnresolved.overallCapability.streamingPolicy.PSObject.Properties.Name) @(
+    $finishCapability.ready.streamingPolicy.exactKeys
+) 'unresolved Finish streaming keys'
+Assert-ExactSet @($finishUnresolved.overallCapability.outputPolicy.PSObject.Properties.Name) @(
+    $finishCapability.ready.outputPolicy.exactKeys
+) 'unresolved Finish output policy keys'
+Assert-ExactSet @($finishUnresolved.modeCapability.PSObject.Properties.Name) @(
+    $finishModesCapability.ready.exactKeys
+) 'unresolved requested Finish mode capability keys'
+Assert-ExactSet @($finishUnresolved.modeCapability.resolvedBackend.PSObject.Properties.Name) @(
+    $finishModesCapability.ready.resolvedBackend.exactKeys
+) 'unresolved requested Finish mode backend keys'
+Assert-ExactSet @($finishUnresolved.modeCapability.receipts.PSObject.Properties.Name) @(
+    $finishModesCapability.ready.receipts.exactKeys
+) 'unresolved requested Finish mode receipt keys'
+Assert-ExactSet @($finishUnresolved.modeCapability.sourceBounds.PSObject.Properties.Name) @(
+    $finishModesCapability.ready.sourceBounds.exactKeys
+) 'unresolved requested Finish mode source bound keys'
+Assert-ExactSet @($finishUnresolved.modeCapability.deliveryPolicy.PSObject.Properties.Name) @(
+    $finishModesCapability.ready.deliveryPolicy.exactKeys
+) 'unresolved requested Finish mode delivery keys'
+Assert-ExactSet @($finishNegative.overallReadyRequestedModeDisabled.requestedModeCapability.PSObject.Properties.Name) @(
+    $finishModesCapability.currentDisabledCompatibility.exactKeys
+) 'disabled requested Finish mode vector keys'
+Assert-ExactSet @($finishNegative.modeReadyOverallDisabled.overallCapability.PSObject.Properties.Name) @(
+    $finishCapability.currentDisabledCompatibility.exactKeys
+) 'disabled overall Finish vector keys'
+if ($finishBooleanFlip.expectedReady -ne $false -or
+    $finishBooleanFlip.expectedEnqueue -ne $false -or
+    $finishBooleanFlip.expectedReasonCode -cne
+        'VIDEO_TOOLS_V2_FINISH_READY_SHAPE_INCOMPLETE' -or
+    $finishModeBooleanFlip.requestedMode -cne 'standard' -or
+    $finishModeBooleanFlip.expectedReady -ne $false -or
+    $finishModeBooleanFlip.expectedEnqueue -ne $false -or
+    $finishModeBooleanFlip.expectedReasonCode -cne
+        'VIDEO_TOOLS_V2_FINISH_STANDARD_READY_SHAPE_INCOMPLETE' -or
+    $finishUnresolved.evidence -notmatch 'not live canary evidence' -or
+    $finishUnresolved.requestedMode -cne 'standard' -or
+    $finishUnresolved.overallCapability.resolvedBackend.backendId -cne
+        'nvidia-vfx-vsr-1.2-candidate-v1' -or
+    $finishUnresolved.modeCapability.resolvedBackend.backendSetting -cne
+        'HIGH' -or
+    (@($finishUnresolved.modeCapability.supportedScales) -join ',') -cne
+        '2,4' -or
+    $finishUnresolved.overallCapability.streamingPolicy.boundedFrameStreaming -ne
+        $true -or
+    $finishUnresolved.overallCapability.streamingPolicy.fullVideoPtsSequencePreserved -ne
+        $true -or
+    $finishUnresolved.overallReceiptResolutionSucceeded -ne $false -or
+    $finishUnresolved.modeReceiptResolutionSucceeded -ne $false -or
+    $finishUnresolved.pairedProductionGateEnabled -ne $false -or
+    $finishUnresolved.expectedReady -ne $false -or
+    $finishUnresolved.expectedEnqueue -ne $false -or
+    $finishUnresolved.expectedReasonCode -cne
+        'VIDEO_TOOLS_V2_FINISH_RECEIPT_SET_UNVERIFIED' -or
+    $finishNegative.overallReadyRequestedModeDisabled.requestedMode -cne
+        'quality' -or
+    $finishNegative.overallReadyRequestedModeDisabled.otherReadyModeVector -notmatch
+        'modeCapability' -or
+    $null -ne
+        $finishNegative.overallReadyRequestedModeDisabled.expectedFallbackMode -or
+    $finishNegative.overallReadyRequestedModeDisabled.expectedReady -ne $false -or
+    $finishNegative.overallReadyRequestedModeDisabled.expectedEnqueue -ne $false -or
+    $finishNegative.overallReadyRequestedModeDisabled.expectedReasonCode -cne
+        'VIDEO_TOOLS_V2_FINISH_REQUESTED_MODE_NOT_READY' -or
+    $finishNegative.modeReadyOverallDisabled.expectedReady -ne $false -or
+    $finishNegative.modeReadyOverallDisabled.expectedEnqueue -ne $false -or
+    $finishNegative.currentClaims.readyVariantAdvertised -ne $false -or
+    $finishNegative.currentClaims.anyModeReadyVariantAdvertised -ne $false -or
+    $finishNegative.currentClaims.liveCanaryReceiptsPresent -ne $false -or
+    $finishNegative.currentClaims.productionWriterEnabled -ne $false -or
+    $finishNegative.currentClaims.qualityAsserted -ne $false -or
+    $finishNegative.currentClaims.firstFaithfulCandidateBackendId -cne
+        'nvidia-vfx-vsr-1.2-candidate-v1') {
+    throw 'Finish boolean-only, unresolved-receipt, overall/mode conjunction, or no-fallback vectors must remain closed.'
 }
 $previewVector = $fixture.previewProbeVector
 Assert-ExactSet @($previewVector.response.source.PSObject.Properties.Name) @(
