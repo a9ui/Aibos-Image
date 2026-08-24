@@ -334,12 +334,16 @@ Assert-ExactSet @($v2.persistedSnapshot.stableIds.editCandidateBackendIds) @(
     'minimax-h3-masked-edit-research-v1'
 ) 'persisted Edit candidate backend IDs'
 if ($editCandidates.status -cne 'candidate-canary-required' -or
+    $editCandidates.productionWriterEnabled -ne $false -or
     $editCandidates.candidatePaths.'semantic-v2v'.backendId -cne
         'bernini-r-1.3b-edit-candidate-v1' -or
     $editCandidates.candidatePaths.'precise-mask'.backendId -cne
         'wan-vace-1.3b-edit-candidate-v1' -or
     $editCandidates.candidatePaths.'precise-mask'.readyWithoutMaskContract -ne $false -or
+    $editCandidates.candidatePaths.'precise-mask'.qualityAsserted -ne $false -or
+    $editCandidates.candidatePaths.'semantic-v2v'.qualityAsserted -ne $false -or
     $editCandidates.candidatePaths.research.productionCandidate -ne $false -or
+    $editCandidates.candidatePaths.research.qualityAsserted -ne $false -or
     $editCandidates.firstSemanticCanaryBackendId -cne
         'bernini-r-1.3b-edit-candidate-v1' -or
     $editCandidates.standardWinnerSelected -ne $false -or
@@ -366,16 +370,20 @@ Assert-ExactSet @($v2.persistedSnapshot.stableIds.finishCandidateBackendIds) @(
 ) 'persisted Finish candidate backend IDs'
 Assert-ExactSet @($faithfulCandidate.serverQualityValues) @('MEDIUM', 'HIGH', 'ULTRA') 'NVIDIA faithful candidate values'
 if ($finishCandidates.status -cne 'candidate-canary-required' -or
+    $finishCandidates.productionWriterEnabled -ne $false -or
     $faithfulCandidate.backendId -cne 'nvidia-vfx-vsr-1.2-candidate-v1' -or
     $faithfulCandidate.package -cne 'nvidia-vfx 0.1.0.1' -or
     $faithfulCandidate.internalSdkVersion -cne '1.2.0.0' -or
     $faithfulCandidate.frameIndependentAsserted -ne $false -or
+    $faithfulCandidate.qualityAsserted -ne $false -or
     @($faithfulCandidate.supportedScalesBeforeCanary).Count -ne 0 -or
     $detailCandidate.backendId -cne 'seedvr2-3b-detail-candidate-v1' -or
     $detailCandidate.semanticRole -cne 'generative-detail' -or
+    $detailCandidate.qualityAsserted -ne $false -or
     @($detailCandidate.supportedScalesBeforeCanary).Count -ne 0 -or
     $lightCandidate.backendId -cne 'nanovsr-1.7m-4x-candidate-v1' -or
     $lightCandidate.nativeScale -ne 4 -or
+    $lightCandidate.qualityAsserted -ne $false -or
     $lightCandidate.chunkSeamCanaryRequired -ne $true -or
     @($lightCandidate.supportedScalesBeforeCanary).Count -ne 0 -or
     $v2.finishPlan.backendMapping.silentBackendFallback -ne $false -or
@@ -417,6 +425,145 @@ if ($v2.healthCapability.property -cne 'capabilities.videoToolsV2' -or
     $health.finishModes.quality.runtimeVerified -ne $false -or
     $health.finishModes.quality.ready -ne $false) {
     throw 'Video Tools v2 health must remain reader-ready with both production writers closed.'
+}
+$editCapability = $v2.healthCapability.editCapabilityVariants
+Assert-ExactSet @($editCapability.currentDisabledCompatibility.exactKeys) @(
+    'writerEnabled', 'backendConfigured', 'runtimeVerified', 'ready', 'state',
+    'reasonCode'
+) 'current disabled Edit capability keys'
+Assert-ExactSet @($health.edit.PSObject.Properties.Name) @(
+    $editCapability.currentDisabledCompatibility.exactKeys
+) 'current disabled Edit health shape'
+Assert-ExactSet @($editCapability.ready.exactKeys) @(
+    'writerEnabled', 'backendConfigured', 'runtimeVerified', 'ready', 'state',
+    'reasonCode', 'capabilityRevision', 'resolvedBackend', 'receipts',
+    'resourceBounds', 'outputPolicy'
+) 'future ready Edit capability keys'
+Assert-ExactSet @($editCapability.ready.resolvedBackend.exactKeys) @(
+    'backendId', 'semanticRole', 'conditioningKind',
+    'genuineSourceVideoConditioning', 'imageGuideRetake', 'modelRevision',
+    'workflowRevision', 'promptCompilerRevision', 'timelineMappingRevision',
+    'deliveryMappingRevision'
+) 'future ready Edit resolved backend keys'
+Assert-ExactSet @($editCapability.ready.receipts.exactKeys) @(
+    'runtimeReceiptId', 'modelReceiptId', 'workflowReceiptId',
+    'promptCompilerReceiptId', 'timelineMapperReceiptId',
+    'audioDeliveryReceiptId', 'qualityCanaryReceiptId',
+    'resourceCanaryReceiptId', 'cancelCanaryReceiptId',
+    'recoveryCanaryReceiptId', 'outputValidatorReceiptId', 'receiptSetSha256'
+) 'future ready Edit receipt keys'
+Assert-ExactSet @($editCapability.ready.resourceBounds.exactKeys) @(
+    'maximumSourceBytes', 'maximumSourceDurationMs', 'maximumSourceWidth',
+    'maximumSourceHeight', 'maximumSourcePixelArea', 'maximumSourceFrames',
+    'allowedSourceFps', 'maximumSelectedDurationMs', 'maximumSelectedFrames',
+    'supportedMaximumPixelAreas', 'minimumSteps', 'maximumSteps',
+    'minimumStrength', 'maximumStrength', 'maximumConcurrentExecutions',
+    'maximumGpuVramBytes', 'maximumHostRamBytes', 'maximumScratchBytes',
+    'maximumOutputBytes', 'processTimeoutMs', 'cancelGraceMs'
+) 'future ready Edit resource bound keys'
+Assert-ExactSet @($editCapability.ready.outputPolicy.exactKeys) @(
+    'revision', 'container', 'videoCodec', 'pixelFormat', 'bitDepth',
+    'dynamicRange', 'videoStreamCount', 'maximumAudioStreamCount',
+    'subtitleStreamCount', 'dataStreamCount', 'attachmentStreamCount',
+    'maximumBytes'
+) 'future ready Edit output policy keys'
+$readyFixed = $editCapability.ready.fixedValues
+$readyBackend = $editCapability.ready.resolvedBackend.firstActivation
+$readyResource = $editCapability.ready.resourceBounds.fixedRequestBounds
+$readyOutput = $editCapability.ready.outputPolicy.fixedValues
+if ($editCapability.discriminator -cne 'state' -or
+    $readyFixed.writerEnabled -ne $true -or
+    $readyFixed.backendConfigured -ne $true -or
+    $readyFixed.runtimeVerified -ne $true -or
+    $readyFixed.ready -ne $true -or
+    $readyFixed.state -cne 'ready' -or
+    $null -ne $readyFixed.reasonCode -or
+    $readyFixed.capabilityRevision -cne 'aibos-video-edit-ready-v1' -or
+    $readyBackend.backendId -cne 'bernini-r-1.3b-edit-candidate-v1' -or
+    $readyBackend.semanticRole -cne 'semantic-v2v' -or
+    $readyBackend.conditioningKind -cne 'source-video-conditioned-semantic-v2v' -or
+    $readyBackend.genuineSourceVideoConditioning -ne $true -or
+    $readyBackend.imageGuideRetake -ne $false -or
+    $editCapability.ready.resolvedBackend.rule -notmatch 'FL2VA' -or
+    $readyResource.maximumSourceBytes -ne 536870912 -or
+    $readyResource.maximumSourceDurationMs -ne 300000 -or
+    $readyResource.maximumSelectedDurationMs -ne 5000 -or
+    $readyResource.maximumSelectedFrames -ne 300 -or
+    $readyResource.maximumConcurrentExecutions -ne 1 -or
+    (@($readyResource.allowedSourceFps) -join ',') -cne '24/1,30/1,60/1' -or
+    (@($readyResource.supportedMaximumPixelAreas) -join ',') -cne
+        '230400,307200,414720' -or
+    $readyOutput.revision -cne 'aibos-video-edit-child-mp4-validator-v1' -or
+    $readyOutput.container -cne 'mp4' -or
+    $readyOutput.videoCodec -cne 'h264' -or
+    $readyOutput.pixelFormat -cne 'yuv420p' -or
+    $readyOutput.bitDepth -ne 8 -or
+    $readyOutput.videoStreamCount -ne 1 -or
+    $readyOutput.maximumAudioStreamCount -ne 1 -or
+    $editCapability.currentEvidence.readyVariantAdvertised -ne $false -or
+    $editCapability.currentEvidence.liveCanaryReceiptsPresent -ne $false -or
+    $editCapability.currentEvidence.productionWriterEnabled -ne $false -or
+    $editCapability.currentEvidence.qualityAsserted -ne $false -or
+    $v2.editDurableWriter.productionWriterEnabled -ne $false -or
+    $v2.editOutputValidator.productionValidated -ne $false -or
+    $v2.editOutputValidator.validatorCanaryVerified -ne $false -or
+    $v2.productionGate.currentEdit.productionWriterEnabled -ne $false -or
+    $v2.productionGate.currentEdit.qualityAsserted -ne $false) {
+    throw 'The future exact genuine-V2V ready capability or current closed evidence changed.'
+}
+
+$outputValidator = $v2.editOutputValidator
+if ($outputValidator.file.container -cne 'mp4' -or
+    $outputValidator.file.hardMaximumBytes -ne 536870912 -or
+    $outputValidator.streams.videoStreamCount -ne 1 -or
+    $outputValidator.streams.maximumAudioStreamCount -ne 1 -or
+    $outputValidator.streams.subtitleStreamCount -ne 0 -or
+    $outputValidator.streams.dataStreamCount -ne 0 -or
+    $outputValidator.streams.attachmentStreamCount -ne 0 -or
+    $outputValidator.video.codec -cne 'h264' -or
+    $outputValidator.video.pixelFormat -cne 'yuv420p' -or
+    $outputValidator.video.bitDepth -ne 8 -or
+    $outputValidator.video.frameCount -notmatch 'selected source frame count' -or
+    $outputValidator.pts.startTimestamp -ne 0 -or
+    $outputValidator.pts.digest -notmatch 'delivery.videoPtsSha256' -or
+    $outputValidator.audio.generatedAudioAllowed -ne $false -or
+    $outputValidator.audio.muteOrEmpty -notmatch 'no audio stream' -or
+    (@($outputValidator.validationAndPublicationOrder) -join ' ') -notmatch
+        'output validator receipt' -or
+    (@($outputValidator.validationAndPublicationOrder) -join ' ') -notmatch
+        'reopen and revalidate') {
+    throw 'The final Edit child MP4 container, stream, PTS, pixel, audio, byte, or publication policy changed.'
+}
+
+$durableWriter = $v2.editDurableWriter
+Assert-ExactSet @($durableWriter.attemptJournal.states) @(
+    'reserved', 'source-validated', 'process-started', 'cancel-requested',
+    'process-exited', 'output-validating', 'output-validated', 'publishing',
+    'published', 'cleanup-pending', 'complete', 'failed'
+) 'Edit attempt journal states'
+Assert-ExactSet @($durableWriter.attemptJournal.requiredIdentity) @(
+    'journalRevision', 'jobId', 'attemptId', 'presetHash', 'backendId',
+    'receiptSetSha256', 'sourceIdentityDigest', 'dependencyClosureDigest',
+    'scratchOwnershipDigest', 'temporaryOutputIdentity', 'state'
+) 'Edit attempt journal identity'
+if ($v2.durableDependencies.nestedManagedSource.maximumDepth -ne 64 -or
+    $v2.durableDependencies.nestedManagedSource.maximumVisitedJobs -ne 64 -or
+    $v2.durableDependencies.nestedManagedSource.walk -notmatch 'cycle' -or
+    $v2.durableDependencies.nestedManagedSource.durableReservation -notmatch
+        'before a descendant inbox item becomes visible' -or
+    $v2.durableDependencies.nestedManagedSource.deleteGuard -notmatch
+        'ancestor output fails closed' -or
+    $durableWriter.displayedStaging.retry -notmatch 'Never reopen the external path' -or
+    $durableWriter.displayedStaging.delete -notmatch 'exact stage ownership' -or
+    $durableWriter.attemptJournal.revision -cne
+        'aibos-video-edit-attempt-journal-v1' -or
+    $durableWriter.attemptJournal.processOwnership -notmatch
+        'PID alone is never ownership proof' -or
+    $durableWriter.recoveryInvariants.retry -notmatch 'new attemptId' -or
+    $durableWriter.recoveryInvariants.cancel -notmatch 'publish' -or
+    $durableWriter.recoveryInvariants.delete -notmatch 'managed descendant' -or
+    $v2.productionGate.writerRule -notmatch 'boolean-only flip') {
+    throw 'Displayed staging, nested managed dependency, journal, retry, cancel, recovery, or delete invariants changed.'
 }
 $passive = $v2.healthCapability.passiveRead
 foreach ($property in @(
@@ -528,6 +675,69 @@ if ($fixture.schemaVersion -ne 1 -or
     $fixture.readerFixtures.finish.video.plan.backendDeliveryRevision -cne
         'nvidia-vfx-vsr-2x-v1') {
     throw 'The paired public/private v2 reader fixture identity is incomplete.'
+}
+$negative = $fixture.editCapabilityNegativeVectors
+$booleanFlip = $negative.booleanFlipOnly
+Assert-ExactSet @($booleanFlip.capability.PSObject.Properties.Name) @(
+    $editCapability.currentDisabledCompatibility.exactKeys
+) 'boolean-only Edit capability keys'
+Assert-ExactSet @($booleanFlip.missingReadyKeys) @(
+    'capabilityRevision', 'resolvedBackend', 'receipts', 'resourceBounds',
+    'outputPolicy'
+) 'boolean-only missing ready fields'
+$unresolved = $negative.shapeCompleteButUnresolvedReceipts
+Assert-ExactSet @($unresolved.capability.PSObject.Properties.Name) @(
+    $editCapability.ready.exactKeys
+) 'unresolved-receipt ready capability keys'
+Assert-ExactSet @($unresolved.capability.resolvedBackend.PSObject.Properties.Name) @(
+    $editCapability.ready.resolvedBackend.exactKeys
+) 'unresolved-receipt backend keys'
+Assert-ExactSet @($unresolved.capability.receipts.PSObject.Properties.Name) @(
+    $editCapability.ready.receipts.exactKeys
+) 'unresolved-receipt receipt keys'
+Assert-ExactSet @($unresolved.capability.resourceBounds.PSObject.Properties.Name) @(
+    $editCapability.ready.resourceBounds.exactKeys
+) 'unresolved-receipt resource keys'
+Assert-ExactSet @($unresolved.capability.outputPolicy.PSObject.Properties.Name) @(
+    $editCapability.ready.outputPolicy.exactKeys
+) 'unresolved-receipt output policy keys'
+Assert-ExactSet @($negative.nonV2vBackend.resolvedBackend.PSObject.Properties.Name) @(
+    $editCapability.ready.resolvedBackend.exactKeys
+) 'non-V2V resolved backend keys'
+if ($booleanFlip.capability.writerEnabled -ne $true -or
+    $booleanFlip.capability.backendConfigured -ne $true -or
+    $booleanFlip.capability.runtimeVerified -ne $true -or
+    $booleanFlip.capability.ready -ne $true -or
+    $booleanFlip.capability.state -cne 'ready' -or
+    $booleanFlip.expectedReady -ne $false -or
+    $booleanFlip.expectedEnqueue -ne $false -or
+    $booleanFlip.expectedReasonCode -cne
+        'VIDEO_TOOLS_V2_EDIT_READY_SHAPE_INCOMPLETE' -or
+    $unresolved.receiptResolutionSucceeded -ne $false -or
+    $unresolved.evidence -notmatch 'not measured production evidence' -or
+    $unresolved.pairedProductionGateEnabled -ne $false -or
+    $unresolved.expectedReady -ne $false -or
+    $unresolved.expectedEnqueue -ne $false -or
+    $unresolved.expectedReasonCode -cne
+        'VIDEO_TOOLS_V2_EDIT_RECEIPT_SET_UNVERIFIED' -or
+    $negative.nonV2vBackend.resolvedBackend.genuineSourceVideoConditioning -ne
+        $false -or
+    $negative.nonV2vBackend.resolvedBackend.imageGuideRetake -ne $true -or
+    $negative.nonV2vBackend.expectedReady -ne $false -or
+    $negative.nonV2vBackend.expectedEnqueue -ne $false -or
+    $negative.nonV2vBackend.expectedReasonCode -cne
+        'VIDEO_TOOLS_V2_EDIT_BACKEND_NOT_GENUINE_V2V' -or
+    $negative.currentClaims.readyVariantAdvertised -ne $false -or
+    $negative.currentClaims.liveCanaryReceiptsPresent -ne $false -or
+    $negative.currentClaims.productionWriterEnabled -ne $false -or
+    $negative.currentClaims.qualityAsserted -ne $false -or
+    $negative.currentClaims.firstSemanticCandidateBackendId -cne
+        'bernini-r-1.3b-edit-candidate-v1' -or
+    $health.finish.ready -ne $false -or
+    $health.finishModes.fast.ready -ne $false -or
+    $health.finishModes.standard.ready -ne $false -or
+    $health.finishModes.quality.ready -ne $false) {
+    throw 'Boolean-only, unresolved-receipt, or non-V2V capability vectors must remain closed; Finish must remain independent and disabled.'
 }
 $previewVector = $fixture.previewProbeVector
 Assert-ExactSet @($previewVector.response.source.PSObject.Properties.Name) @(
