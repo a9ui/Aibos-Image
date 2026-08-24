@@ -45,10 +45,17 @@ internal sealed record VideoEditV2PreviewSet(
     IReadOnlyList<VideoEditV2PreviewPayload> Previews,
     string SourceStamp);
 
+internal sealed record VideoEditV2RendererSidecar(
+    string TaskType,
+    string GuidanceMode,
+    string PromptCompilerRevision,
+    string RendererPromptSha256);
+
 internal sealed record VideoEditV2CompiledCandidate(
     string BackendPrompt,
     string SummaryJa,
     string CompilerRevision,
+    VideoEditV2RendererSidecar Renderer,
     string ContextDigest,
     string SourceStamp,
     string ContextStamp);
@@ -68,6 +75,15 @@ internal static class VideoEditV2TransientContract
     internal const int MaximumBackendPromptLength = 8_000;
     internal const int MaximumSummaryLength = 2_000;
     internal const int MaximumCompilerRevisionLength = 128;
+    internal const string OfficialPromptCompilerRevision =
+        "aibos-bernini-r-1p3b-source-video-prompt-v1";
+    internal const string OfficialGuidanceMode = "v2v_apg";
+    internal const string OfficialV2VSystemPrompt =
+        "You are a helpful assistant specialized in video editing.";
+    internal const string OfficialMV2VSystemPrompt =
+        "You are a helpful assistant for editing. You might need to adjust the video's style, lighting, colors, textures, and the subject's pose or action.";
+    internal const string OfficialContinuitySentence =
+        "Apply the requested change consistently throughout the complete source clip while preserving stable temporal continuity.";
 
     private static readonly byte[] PngSignature =
         [137, 80, 78, 71, 13, 10, 26, 10];
@@ -248,7 +264,8 @@ internal static class VideoEditV2TransientContract
                 "backendPrompt",
                 "summaryJa",
                 "compilerRevision",
-                "contextDigest")
+                "contextDigest",
+                "renderer")
             || !TryGetExactString(value, "backendPrompt", out string backendPrompt)
             || !TryGetExactString(value, "summaryJa", out string summaryJa)
             || !TryGetExactString(value, "compilerRevision", out string compilerRevision)
@@ -256,7 +273,13 @@ internal static class VideoEditV2TransientContract
             || !IsSafeText(backendPrompt, MaximumBackendPromptLength, allowLineBreaks: true)
             || !IsSafeText(summaryJa, MaximumSummaryLength, allowLineBreaks: true)
             || !IsSafeCompilerRevision(compilerRevision)
-            || !IsLowerSha256(contextDigest))
+            || !IsLowerSha256(contextDigest)
+            || !value.TryGetProperty("renderer", out JsonElement rendererElement)
+            || !TryParseOfficialRendererSidecar(
+                rendererElement,
+                backendPrompt,
+                compilerRevision,
+                out VideoEditV2RendererSidecar renderer))
         {
             return false;
         }
@@ -268,7 +291,8 @@ internal static class VideoEditV2TransientContract
             instructionJa,
             backendPrompt,
             summaryJa,
-            compilerRevision);
+            compilerRevision,
+            renderer);
         if (!CryptographicOperations.FixedTimeEquals(
                 Encoding.ASCII.GetBytes(contextDigest),
                 Encoding.ASCII.GetBytes(expectedDigest)))
@@ -280,6 +304,7 @@ internal static class VideoEditV2TransientContract
             backendPrompt,
             summaryJa,
             compilerRevision,
+            renderer,
             contextDigest,
             sourceStamp,
             contextStamp);
@@ -293,7 +318,8 @@ internal static class VideoEditV2TransientContract
         string instructionJa,
         string backendPrompt,
         string summaryJa,
-        string compilerRevision)
+        string compilerRevision,
+        VideoEditV2RendererSidecar renderer)
     {
         byte[] canonical = BuildUtf8(writer =>
         {
@@ -308,6 +334,7 @@ internal static class VideoEditV2TransientContract
             writer.WriteString("backendPrompt", backendPrompt);
             writer.WriteString("summaryJa", summaryJa);
             writer.WriteString("compilerRevision", compilerRevision);
+            WriteRenderer(writer, renderer);
             writer.WriteEndObject();
         });
         return Convert.ToHexString(SHA256.HashData(canonical)).ToLowerInvariant();
@@ -318,6 +345,7 @@ internal static class VideoEditV2TransientContract
         string backendPrompt,
         string summaryJa,
         string compilerRevision,
+        VideoEditV2RendererSidecar renderer,
         out string contextDigest)
     {
         contextDigest = "";
@@ -345,7 +373,11 @@ internal static class VideoEditV2TransientContract
                 summaryJa,
                 MaximumSummaryLength,
                 allowLineBreaks: true)
-            || !IsSafeCompilerRevision(compilerRevision))
+            || !IsSafeCompilerRevision(compilerRevision)
+            || !IsExactOfficialRendererSidecar(
+                renderer,
+                backendPrompt,
+                compilerRevision))
         {
             return false;
         }
@@ -363,11 +395,157 @@ internal static class VideoEditV2TransientContract
             writer.WriteString("backendPrompt", backendPrompt);
             writer.WriteString("summaryJa", summaryJa);
             writer.WriteString("compilerRevision", compilerRevision);
+            WriteRenderer(writer, renderer);
             writer.WriteEndObject();
         });
         contextDigest = Convert.ToHexString(SHA256.HashData(canonical))
             .ToLowerInvariant();
         return true;
+    }
+
+    internal static bool TryCreateOfficialRendererSidecarForSmoke(
+        string backendPrompt,
+        string taskType,
+        out VideoEditV2RendererSidecar renderer)
+    {
+        renderer = new(
+            taskType,
+            OfficialGuidanceMode,
+            OfficialPromptCompilerRevision,
+            Convert.ToHexString(SHA256.HashData(
+                Encoding.UTF8.GetBytes(backendPrompt))).ToLowerInvariant());
+        return IsExactOfficialRendererSidecar(
+            renderer,
+            backendPrompt,
+            OfficialPromptCompilerRevision);
+    }
+
+    internal static bool TryParseOfficialRendererSidecar(
+        JsonElement value,
+        string backendPrompt,
+        string compilerRevision,
+        out VideoEditV2RendererSidecar renderer)
+    {
+        renderer = null!;
+        if (!HasExactProperties(
+                value,
+                "taskType",
+                "guidanceMode",
+                "promptCompilerRevision",
+                "rendererPromptSha256")
+            || !TryGetExactString(value, "taskType", out string taskType)
+            || !TryGetExactString(value, "guidanceMode", out string guidanceMode)
+            || !TryGetExactString(
+                value,
+                "promptCompilerRevision",
+                out string promptCompilerRevision)
+            || !TryGetExactString(
+                value,
+                "rendererPromptSha256",
+                out string rendererPromptSha256))
+        {
+            return false;
+        }
+        var candidate = new VideoEditV2RendererSidecar(
+            taskType,
+            guidanceMode,
+            promptCompilerRevision,
+            rendererPromptSha256);
+        if (!IsExactOfficialRendererSidecar(
+                candidate,
+                backendPrompt,
+                compilerRevision))
+        {
+            return false;
+        }
+        renderer = candidate;
+        return true;
+    }
+
+    internal static bool IsExactOfficialRendererSidecar(
+        VideoEditV2RendererSidecar renderer,
+        string backendPrompt,
+        string compilerRevision)
+    {
+        if (renderer is null
+            || renderer.TaskType is not ("v2v" or "mv2v")
+            || !string.Equals(
+                renderer.GuidanceMode,
+                OfficialGuidanceMode,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                renderer.PromptCompilerRevision,
+                OfficialPromptCompilerRevision,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                compilerRevision,
+                OfficialPromptCompilerRevision,
+                StringComparison.Ordinal)
+            || !IsLowerSha256(renderer.RendererPromptSha256)
+            || !IsOfficialBackendPrompt(backendPrompt, renderer.TaskType))
+        {
+            return false;
+        }
+        string expectedSha = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(backendPrompt))).ToLowerInvariant();
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.ASCII.GetBytes(renderer.RendererPromptSha256),
+            Encoding.ASCII.GetBytes(expectedSha));
+    }
+
+    private static bool IsOfficialBackendPrompt(
+        string value,
+        string taskType)
+    {
+        string systemPrompt = taskType == "mv2v"
+            ? OfficialMV2VSystemPrompt
+            : OfficialV2VSystemPrompt;
+        return IsSafeText(value, MaximumBackendPromptLength, allowLineBreaks: false)
+            && value.All(static character => character is >= ' ' and <= '~')
+            && value.IndexOfAny(['&', '<', '>']) < 0
+            && value.StartsWith(systemPrompt, StringComparison.Ordinal)
+            && value.EndsWith(OfficialContinuitySentence, StringComparison.Ordinal)
+            && !ContainsOfficialCategoryHeading(
+                value[systemPrompt.Length..]);
+    }
+
+    private static bool ContainsOfficialCategoryHeading(string value)
+    {
+        foreach (string heading in new[]
+                 { "Edit task:", "Requested change:", "Preserve:" })
+        {
+            int offset = 0;
+            while (offset < value.Length)
+            {
+                int index = value.IndexOf(
+                    heading,
+                    offset,
+                    StringComparison.OrdinalIgnoreCase);
+                if (index < 0)
+                    break;
+                if (index == 0 || value[index - 1] == ' ')
+                    return true;
+                offset = index + 1;
+            }
+        }
+        return false;
+    }
+
+    private static void WriteRenderer(
+        Utf8JsonWriter writer,
+        VideoEditV2RendererSidecar renderer)
+    {
+        writer.WritePropertyName("renderer");
+        writer.WriteStartObject();
+        writer.WriteString("taskType", renderer.TaskType);
+        writer.WriteString("guidanceMode", renderer.GuidanceMode);
+        writer.WriteString(
+            "promptCompilerRevision",
+            renderer.PromptCompilerRevision);
+        writer.WriteString(
+            "rendererPromptSha256",
+            renderer.RendererPromptSha256);
+        writer.WriteEndObject();
     }
 
     internal static bool IsSafeInstruction(string value)

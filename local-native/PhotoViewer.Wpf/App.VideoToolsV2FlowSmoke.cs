@@ -190,22 +190,32 @@ public partial class App
                     }
                     if (action == "compile")
                     {
-                        const string backendPrompt =
-                            "Preserve subject, background, timing and camera. Change only clothing color to blue.";
+                        string backendPrompt =
+                            VideoEditV2TransientContract.OfficialV2VSystemPrompt
+                            + "Change only the clothing color to blue. Preserve the subject, background, timing, and camera. "
+                            + VideoEditV2TransientContract.OfficialContinuitySentence;
                         const string summaryJa =
                             "人物・背景・動き・カメラを保ち、服の色だけを青へ変えます。";
-                        const string revision = "aibos-video-edit-compiler-v1";
+                        const string revision =
+                            VideoEditV2TransientContract.OfficialPromptCompilerRevision;
                         string digest = "";
+                        VideoEditV2RendererSidecar renderer = null!;
                         bool exact = root.GetProperty("source").GetRawText()
                                 == capturedSelector
                             && root.GetProperty("instructionJa").GetString()
                                 is { Length: > 0 }
+                            && VideoEditV2TransientContract
+                                .TryCreateOfficialRendererSidecarForSmoke(
+                                    backendPrompt,
+                                    "v2v",
+                                    out renderer)
                             && VideoEditV2TransientContract
                                 .TryComputeContextDigestFromCompileRequestForSmoke(
                                     root,
                                     backendPrompt,
                                     summaryJa,
                                     revision,
+                                    renderer,
                                     out digest);
                         if (!exact)
                             unexpectedRequests++;
@@ -221,6 +231,15 @@ public partial class App
                                         summaryJa,
                                         compilerRevision = revision,
                                         contextDigest = digest,
+                                        renderer = new
+                                        {
+                                            taskType = renderer.TaskType,
+                                            guidanceMode = renderer.GuidanceMode,
+                                            promptCompilerRevision =
+                                                renderer.PromptCompilerRevision,
+                                            rendererPromptSha256 =
+                                                renderer.RendererPromptSha256,
+                                        },
                                     },
                                 })
                                 : "{\"error\":\"bad compile\"}");
@@ -882,21 +901,18 @@ public partial class App
         const string rootId = "41000000-0000-4000-8000-000000000001";
         const string editId = "41000000-0000-4000-8000-000000000002";
         const string finishId = "41000000-0000-4000-8000-000000000003";
-        using JsonDocument root = CreateInventoryJob(
+        using JsonDocument root = CreateVideoToolsV2WorkspaceJob(
             finishFixture,
             rootId,
-            "succeeded",
-            rootOutput,
-            video =>
-            {
-                video["source"]!["originalCanonicalPath"] = originalPath;
-                video["source"]!["stagingCanonicalPath"] = stagingPath;
-            });
-        using JsonDocument edit = CreateInventoryJob(
+            "succeeded");
+        JsonObject rootJob = JsonNode.Parse(root.RootElement.GetRawText())!
+            .AsObject();
+        rootOutput = MaterializeVideoToolsV2FlowOutput(rootJob, videosRoot);
+
+        using JsonDocument edit = CreateVideoToolsV2WorkspaceJob(
             editFixture,
             editId,
             "succeeded",
-            editOutput,
             video =>
             {
                 video["source"]!["producerJobId"] = rootId;
@@ -906,21 +922,27 @@ public partial class App
                     rootOutput);
                 video["requested"]!["source"]!["sourceVideoJobId"] = rootId;
             },
-            job => job["sourceVideoJobId"] = rootId);
-        using JsonDocument finish = CreateManagedFinishInventoryJob(
-            finishFixture,
-            finishId,
-            editId,
-            editOutput,
-            finishOutput,
-            "succeeded");
-
+            job => job["sourceVideoJobId"] = rootId,
+            refreshPresetHash: true);
         JsonObject editJob = JsonNode.Parse(edit.RootElement.GetRawText())!
             .AsObject();
+        editOutput = MaterializeVideoToolsV2FlowOutput(editJob, videosRoot);
+
+        using JsonDocument finish = CreateVideoToolsV2WorkspaceJob(
+            finishFixture,
+            finishId,
+            "succeeded",
+            video => ApplyVideoToolsV2FlowManagedSource(
+                video,
+                editId,
+                editOutput),
+            job => job["sourceVideoJobId"] = editId,
+            refreshPresetHash: true);
         JsonObject finishJob = JsonNode.Parse(finish.RootElement.GetRawText())!
             .AsObject();
-        JsonObject rootJob = JsonNode.Parse(root.RootElement.GetRawText())!
-            .AsObject();
+        finishOutput = MaterializeVideoToolsV2FlowOutput(
+            finishJob,
+            videosRoot);
         const string queuedId = "42000000-0000-4000-8000-000000000001";
         const string runningId = "42000000-0000-4000-8000-000000000002";
         const string failedId = "42000000-0000-4000-8000-000000000003";
@@ -943,28 +965,22 @@ public partial class App
             terminalId,
             "canceled");
         const string dependentId = "42000000-0000-4000-8000-000000000005";
-        string dependentOutput = Path.Combine(videosRoot, "dependent.mp4");
-        WriteIsoBmffSmokeVideo(dependentOutput);
-        using JsonDocument dependent = CreateManagedFinishInventoryJob(
+        using JsonDocument dependent = CreateVideoToolsV2WorkspaceJob(
             finishFixture,
             dependentId,
-            editId,
-            editOutput,
-            dependentOutput,
-            "running");
-        string futureOutput = Path.Combine(videosRoot, "future.mp4");
-        WriteIsoBmffSmokeVideo(futureOutput);
-        using JsonDocument future = CreateInventoryJob(
+            "running",
+            video => ApplyVideoToolsV2FlowManagedSource(
+                video,
+                editId,
+                editOutput),
+            job => job["sourceVideoJobId"] = editId,
+            refreshPresetHash: true);
+        using JsonDocument future = CreateVideoToolsV2WorkspaceJob(
             finishFixture,
             "42000000-0000-4000-8000-000000000006",
             "queued",
-            futureOutput,
-            video =>
-            {
-                video["schemaVersion"] = 3;
-                video["source"]!["originalCanonicalPath"] = originalPath;
-                video["source"]!["stagingCanonicalPath"] = stagingPath;
-            });
+            video => video["schemaVersion"] = 3,
+            refreshPresetHash: true);
 
         JsonObject[] all =
         [
@@ -1013,6 +1029,43 @@ public partial class App
             finishOutput,
             deliveryIdentity,
             future.RootElement.Clone());
+    }
+
+    private static void ApplyVideoToolsV2FlowManagedSource(
+        JsonObject video,
+        string sourceJobId,
+        string sourcePath)
+    {
+        JsonObject staged = video["source"]!.AsObject();
+        JsonObject signature = staged["stagingSignature"]!
+            .DeepClone().AsObject();
+        ApplyInventorySourceSignature(signature, sourcePath);
+        video["source"] = new JsonObject
+        {
+            ["kind"] = "managed-video-job",
+            ["producerJobId"] = sourceJobId,
+            ["canonicalPath"] = sourcePath,
+            ["signature"] = signature,
+            ["sha256"] = staged["stagingSha256"]!.DeepClone(),
+            ["probe"] = staged["probe"]!.DeepClone(),
+        };
+        video["requested"]!["source"] = new JsonObject
+        {
+            ["kind"] = "managed-video-job",
+            ["sourceVideoJobId"] = sourceJobId,
+        };
+    }
+
+    private static string MaterializeVideoToolsV2FlowOutput(
+        JsonObject job,
+        string videosRoot)
+    {
+        string filename = Path.GetFileName(
+            job["outputPath"]!.GetValue<string>());
+        string outputPath = Path.Combine(videosRoot, filename);
+        WriteIsoBmffSmokeVideo(outputPath);
+        job["outputPath"] = outputPath;
+        return outputPath;
     }
 
     private sealed record VideoToolsV2FlowJobFixture(

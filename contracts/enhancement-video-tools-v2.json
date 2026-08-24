@@ -158,12 +158,28 @@
           "backendPrompt",
           "summaryJa",
           "compilerRevision",
-          "contextDigest"
+          "contextDigest",
+          "renderer"
         ],
-        "backendPrompt": "trimmed, well-formed UTF-16, 1 through 8000 code units, validated for the currently advertised candidate compiler revision",
+        "backendPrompt": "trimmed promptClean-invariant printable ASCII, 1 through 8000 code units, exact official task-specific system prompt plus the natural-English edit prompt with no separator, ending in the frozen whole-clip continuity sentence; category headings, reserved control tokens, ampersand, and angle brackets are rejected",
         "summaryJa": "trimmed, well-formed UTF-16 Japanese summary, 1 through 2000 code units",
-        "compilerRevision": "one advertised stable compiler revision of 1 through 128 ASCII characters",
-        "contextDigest": "64 lowercase hexadecimal characters binding the exact captured or managed source selector identity, selected preview-frame identities, instructionJa, compiled texts, and compiler revision",
+        "compilerRevision": "exactly aibos-bernini-r-1p3b-source-video-prompt-v1",
+        "contextDigest": "64 lowercase hexadecimal characters binding the exact captured or managed source selector identity, selected preview-frame identities, instructionJa, compiled texts, compiler revision, and the complete renderer sidecar",
+        "renderer": {
+          "exactFields": [
+            "taskType",
+            "guidanceMode",
+            "promptCompilerRevision",
+            "rendererPromptSha256"
+          ],
+          "taskType": [
+            "v2v",
+            "mv2v"
+          ],
+          "guidanceMode": "v2v_apg",
+          "promptCompilerRevision": "aibos-bernini-r-1p3b-source-video-prompt-v1 and exactly equal to compiled.compilerRevision",
+          "rendererPromptSha256": "64 lowercase hexadecimal SHA-256 over the exact UTF-8 backendPrompt bytes"
+        },
         "serverValidation": "WPF validates the bounded shape before inbox publication. After dispatch, Companion revalidates every compiled field and exact context digest before Job commit or execution; it never trusts client compilation. A definitive rejection follows durable inbox needs-action semantics."
       },
       "audioPolicy": [
@@ -322,11 +338,18 @@
         "backendPrompt",
         "summaryJa",
         "compilerRevision",
-        "contextDigest"
+        "contextDigest",
+        "renderer"
       ],
       "transient": true,
       "durableBeforeStart": false,
-      "contextDigestBinding": "the exact source selector identity, selection, ordered start/middle/end preview identities, instructionJa, compiled texts, and compiler revision",
+      "rendererExactFields": [
+        "taskType",
+        "guidanceMode",
+        "promptCompilerRevision",
+        "rendererPromptSha256"
+      ],
+      "contextDigestBinding": "the exact source selector identity, selection, ordered start/middle/end preview identities, instructionJa, compiled texts, compiler revision, and the complete renderer sidecar in canonical field order",
       "staleOn": [
         "source identity change",
         "selection change",
@@ -862,7 +885,14 @@
           "backendPrompt",
           "summaryJa",
           "compilerRevision",
-          "contextDigest"
+          "contextDigest",
+          "renderer"
+        ],
+        "renderer": [
+          "taskType",
+          "guidanceMode",
+          "promptCompilerRevision",
+          "rendererPromptSha256"
         ],
         "receipts": [
           "workflowReceiptId",

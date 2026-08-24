@@ -3,7 +3,7 @@
   "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
   "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
   "compatibility": {
-    "contractSha256": "6a647819e675bfb8c4367290c0e015929f50d6e79d3dc4b757244b7a90c6cf26",
+    "contractSha256": "c4dbb0e595cb64fb71231e5d10ef20ecfa135d351089f009d08b298e8791f5cd",
     "consumers": [
       "public-wpf",
       "private-companion"
@@ -544,10 +544,16 @@
         },
         "instructionJa": "人物の顔と背景は保ち、手をゆっくり上げて小さく振る動きに変更する。",
         "compiled": {
-          "backendPrompt": "Keep the same adult subject, face, clothing, framing, lighting, and background. Edit only the selected time range so the subject slowly raises one hand and gives a small natural wave. Preserve continuous motion and avoid cuts or new objects.",
+          "backendPrompt": "You are a helpful assistant for editing. You might need to adjust the video's style, lighting, colors, textures, and the subject's pose or action.Change only the selected time range so the subject slowly raises one hand and gives a small natural wave. Preserve the same adult subject, face, clothing, framing, lighting, background, continuous motion, and all other visible objects. Apply the requested change consistently throughout the complete source clip while preserving stable temporal continuity.",
           "summaryJa": "顔・服・構図・背景を保ち、選択区間だけ片手をゆっくり上げて小さく振る動きへ変更します。",
-          "compilerRevision": "aibos-video-edit-compiler-v1",
-          "contextDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          "compilerRevision": "aibos-bernini-r-1p3b-source-video-prompt-v1",
+          "contextDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "renderer": {
+            "taskType": "mv2v",
+            "guidanceMode": "v2v_apg",
+            "promptCompilerRevision": "aibos-bernini-r-1p3b-source-video-prompt-v1",
+            "rendererPromptSha256": "88b7f7cee55068955bc07c7a00e27a84a717e8e9136638522ef94de3be669540"
+          }
         },
         "audioPolicy": "preserve",
         "steps": 20,
@@ -584,7 +590,7 @@
         "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
         "presetId": "aibos-video-edit-v2",
         "adapterId": "bernini-r-1.3b-edit-candidate-v1",
-        "presetHash": "3aadcfc17a7a"
+        "presetHash": "c61a1e8e0304"
       },
       "video": {
         "schemaVersion": 2,
@@ -654,10 +660,16 @@
           },
           "instructionJa": "人物の顔と背景は保ち、手をゆっくり上げて小さく振る動きに変更する。",
           "compiled": {
-            "backendPrompt": "Keep the same adult subject, face, clothing, framing, lighting, and background. Edit only the selected time range so the subject slowly raises one hand and gives a small natural wave. Preserve continuous motion and avoid cuts or new objects.",
+            "backendPrompt": "You are a helpful assistant for editing. You might need to adjust the video's style, lighting, colors, textures, and the subject's pose or action.Change only the selected time range so the subject slowly raises one hand and gives a small natural wave. Preserve the same adult subject, face, clothing, framing, lighting, background, continuous motion, and all other visible objects. Apply the requested change consistently throughout the complete source clip while preserving stable temporal continuity.",
             "summaryJa": "顔・服・構図・背景を保ち、選択区間だけ片手をゆっくり上げて小さく振る動きへ変更します。",
-            "compilerRevision": "aibos-video-edit-compiler-v1",
-            "contextDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            "compilerRevision": "aibos-bernini-r-1p3b-source-video-prompt-v1",
+            "contextDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "renderer": {
+              "taskType": "mv2v",
+              "guidanceMode": "v2v_apg",
+              "promptCompilerRevision": "aibos-bernini-r-1p3b-source-video-prompt-v1",
+              "rendererPromptSha256": "88b7f7cee55068955bc07c7a00e27a84a717e8e9136638522ef94de3be669540"
+            }
           },
           "audioPolicy": "preserve",
           "steps": 20,
@@ -880,7 +892,7 @@
           "startedAt": "2026-08-24T00:00:00.250Z",
           "finishedAt": "2026-08-24T00:00:00.900Z",
           "updatedAt": "2026-08-24T00:00:01.000Z",
-          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\${JOB_ID}__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__3aadcfc17a7a.mp4",
+          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\${JOB_ID}__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__c61a1e8e0304.mp4",
           "outputSha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "outputBytes": 1024
         },
@@ -934,7 +946,7 @@
           "startedAt": "2026-08-24T00:00:00.250Z",
           "finishedAt": "2026-08-24T00:00:00.900Z",
           "updatedAt": "2026-08-24T00:00:01.000Z",
-          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\${JOB_ID}__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__3aadcfc17a7a.mp4",
+          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\${JOB_ID}__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__c61a1e8e0304.mp4",
           "outputBytes": 1024
         },
         "runningUnicodeRunId": {
@@ -1019,7 +1031,7 @@
           "startedAt": "2026-08-24T00:00:00.250Z",
           "finishedAt": "2026-08-24T00:00:00.900Z",
           "updatedAt": "2026-08-24T00:00:01.000Z",
-          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\00000000-0000-4000-8000-000000000000__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__3aadcfc17a7a.mp4",
+          "outputPath": "C:\\AibosSynthetic\\Videos\\2026-08-24\\00000000-0000-4000-8000-000000000000__source__aaaaaaaaaaaaaaaa__aibos-video-edit-v2__bernini-r-1.3b-edit-candidate-v1__c61a1e8e0304.mp4",
           "outputSha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "outputBytes": 1024
         },

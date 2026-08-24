@@ -223,18 +223,26 @@ public partial class App
                             if (releaseCompile is not null)
                                 await releaseCompile.Task.WaitAsync(token);
                         }
-                        const string backendPrompt =
-                            "Preserve the subject, background, timing, and camera. Change only the clothing color to blue.";
+                        string backendPrompt =
+                            VideoEditV2TransientContract.OfficialV2VSystemPrompt
+                            + "Change only the clothing color to blue. Preserve the subject, background, timing, and camera. "
+                            + VideoEditV2TransientContract.OfficialContinuitySentence;
                         const string summaryJa =
                             "人物・背景・動き・カメラを保ち、服の色だけを青へ変えます。";
                         const string compilerRevision =
-                            "aibos-video-edit-compiler-v1";
+                            VideoEditV2TransientContract.OfficialPromptCompilerRevision;
                         if (!VideoEditV2TransientContract
+                                .TryCreateOfficialRendererSidecarForSmoke(
+                                    backendPrompt,
+                                    "v2v",
+                                    out VideoEditV2RendererSidecar renderer)
+                            || !VideoEditV2TransientContract
                             .TryComputeContextDigestFromCompileRequestForSmoke(
                                 root,
                                 backendPrompt,
                                 summaryJa,
                                 compilerRevision,
+                                renderer,
                                 out string digest))
                         {
                             exactRequests = false;
@@ -252,6 +260,15 @@ public partial class App
                                     summaryJa,
                                     compilerRevision,
                                     contextDigest = digest,
+                                    renderer = new
+                                    {
+                                        taskType = renderer.TaskType,
+                                        guidanceMode = renderer.GuidanceMode,
+                                        promptCompilerRevision =
+                                            renderer.PromptCompilerRevision,
+                                        rendererPromptSha256 =
+                                            renderer.RendererPromptSha256,
+                                    },
                                     model = "forbidden-model",
                                 }
                                 : new
@@ -260,6 +277,15 @@ public partial class App
                                     summaryJa,
                                     compilerRevision,
                                     contextDigest = digest,
+                                    renderer = new
+                                    {
+                                        taskType = renderer.TaskType,
+                                        guidanceMode = renderer.GuidanceMode,
+                                        promptCompilerRevision =
+                                            renderer.PromptCompilerRevision,
+                                        rendererPromptSha256 =
+                                            renderer.RendererPromptSha256,
+                                    },
                                 },
                         });
                         return VideoEditV2SmokeJsonResponse(
@@ -670,10 +696,28 @@ public partial class App
         if (!valid || previews is null)
             return false;
 
-        const string backendPrompt =
-            "Preserve the source except for the requested semantic edit.";
+        string backendPrompt =
+            VideoEditV2TransientContract.OfficialV2VSystemPrompt
+            + "Change only the clothing color to blue. Preserve the source except for the requested semantic edit. "
+            + VideoEditV2TransientContract.OfficialContinuitySentence;
         const string summaryJa = "指定部分だけを変更し、他は維持します。";
-        const string revision = "aibos-video-edit-compiler-v1";
+        const string revision =
+            VideoEditV2TransientContract.OfficialPromptCompilerRevision;
+        if (!VideoEditV2TransientContract
+            .TryCreateOfficialRendererSidecarForSmoke(
+                backendPrompt,
+                "v2v",
+                out VideoEditV2RendererSidecar renderer))
+        {
+            return false;
+        }
+        bool categoryHeadingRejected = !VideoEditV2TransientContract
+            .TryCreateOfficialRendererSidecarForSmoke(
+                VideoEditV2TransientContract.OfficialV2VSystemPrompt
+                    + "Edit task: change clothing color. "
+                    + VideoEditV2TransientContract.OfficialContinuitySentence,
+                "v2v",
+                out _);
         string digest = VideoEditV2TransientContract.ComputeContextDigest(
             selector,
             plan,
@@ -681,10 +725,11 @@ public partial class App
             "人物を保ち、服の色だけを青へ変える",
             backendPrompt,
             summaryJa,
-            revision);
+            revision,
+            renderer);
         bool crossLanguageDigest = string.Equals(
             digest,
-            "c9ab8a21bc7eea58a609c408447ece6b547f6c074aea828173ab59740bf19e75",
+            "6485039b3a85a796a23853da4dc35b0b6b4d040c5c8d8d21c7efa7f37a6ef06c",
             StringComparison.Ordinal);
         string candidateJson = JsonSerializer.Serialize(new
         {
@@ -695,6 +740,13 @@ public partial class App
                 summaryJa,
                 compilerRevision = revision,
                 contextDigest = digest,
+                renderer = new
+                {
+                    taskType = renderer.TaskType,
+                    guidanceMode = renderer.GuidanceMode,
+                    promptCompilerRevision = renderer.PromptCompilerRevision,
+                    rendererPromptSha256 = renderer.RendererPromptSha256,
+                },
             },
         });
         using JsonDocument candidateDocument = JsonDocument.Parse(candidateJson);
@@ -715,6 +767,21 @@ public partial class App
         bool forbiddenRejected = !VideoEditV2TransientContract
             .TryParseCompileResponse(
                 forbiddenDocument.RootElement,
+                selector,
+                plan,
+                previews.Previews,
+                "人物を保ち、服の色だけを青へ変える",
+                "synthetic-source",
+                "synthetic-context",
+                out _);
+        using JsonDocument forgedRendererDocument = JsonDocument.Parse(
+            candidateJson.Replace(
+                "\"taskType\":\"v2v\"",
+                "\"taskType\":\"r2v\"",
+                StringComparison.Ordinal));
+        bool forgedRendererRejected = !VideoEditV2TransientContract
+            .TryParseCompileResponse(
+                forgedRendererDocument.RootElement,
                 selector,
                 plan,
                 previews.Previews,
@@ -756,6 +823,14 @@ public partial class App
                 "strength",
                 "maximumPixelArea")
             && !tools.TryGetProperty("style", out _)
+            && HasExactVideoEditV2SmokeKeys(
+                tools.GetProperty("compiled").GetProperty("renderer"),
+                "taskType",
+                "guidanceMode",
+                "promptCompilerRevision",
+                "rendererPromptSha256")
+            && tools.GetProperty("compiled").GetProperty("renderer")
+                .GetProperty("taskType").GetString() == "v2v"
             && tools.GetProperty("strength").GetInt32() == 60;
         bool invalidDurableRejected = candidateValid
             && !VideoEditV2DurableContract.TryBuildEditRequest(
@@ -788,7 +863,8 @@ public partial class App
                     "人物を保ち、服の色だけを青へ変える",
                     parsedCandidate.BackendPrompt,
                     parsedCandidate.SummaryJa,
-                    parsedCandidate.CompilerRevision);
+                    parsedCandidate.CompilerRevision,
+                    parsedCandidate.Renderer);
             VideoEditV2CompiledCandidate displayedCandidate =
                 parsedCandidate with { ContextDigest = displayedDigest };
             displayedDurableExact = VideoEditV2DurableContract
@@ -834,9 +910,11 @@ public partial class App
         return valid
             && extraRejected
             && oversizeRejected
+            && categoryHeadingRejected
             && crossLanguageDigest
             && candidateValid
             && forbiddenRejected
+            && forgedRendererRejected
             && durableExact
             && invalidDurableRejected
             && displayedDurableExact

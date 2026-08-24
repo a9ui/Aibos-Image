@@ -1172,13 +1172,14 @@ public partial class MainWindow
                 "backendPrompt",
                 "summaryJa",
                 "compilerRevision",
-                "contextDigest")
+                "contextDigest",
+                "renderer")
             || !TryGetVideoToolsV2BoundedText(
                 compiled,
                 "backendPrompt",
                 8_000,
                 asciiOnly: false,
-                out _)
+                out string backendPrompt)
             || !TryGetVideoToolsV2BoundedText(
                 compiled,
                 "summaryJa",
@@ -1189,12 +1190,20 @@ public partial class MainWindow
                 compiled,
                 "compilerRevision",
                 128,
-                out _)
+                out string compilerRevision)
             || !TryGetSingleVideoToolsString(
                 compiled,
                 "contextDigest",
                 out string contextDigest)
             || !IsLowerHex(contextDigest, 64)
+            || !compiled.TryGetProperty(
+                "renderer",
+                out JsonElement renderer)
+            || !VideoEditV2TransientContract.TryParseOfficialRendererSidecar(
+                renderer,
+                backendPrompt,
+                compilerRevision,
+                out _)
             || !TryGetSingleVideoToolsString(
                 requested,
                 "audioPolicy",

@@ -784,6 +784,11 @@ public partial class MainWindow
             "compiled-marker-must-not-persist",
             "保存禁止の要約",
             "compiler-marker-must-not-persist",
+            new VideoEditV2RendererSidecar(
+                "v2v",
+                "guidance-marker-must-not-persist",
+                "renderer-compiler-marker-must-not-persist",
+                new string('b', 64)),
             new string('a', 64),
             "synthetic-source",
             "synthetic-context");

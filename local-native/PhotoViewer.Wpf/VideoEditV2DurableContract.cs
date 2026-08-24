@@ -63,6 +63,10 @@ internal static class VideoEditV2DurableContract
             || !IsSafeAsciiToken(
                 compiled.CompilerRevision,
                 VideoEditV2TransientContract.MaximumCompilerRevisionLength)
+            || !VideoEditV2TransientContract.IsExactOfficialRendererSidecar(
+                compiled.Renderer,
+                compiled.BackendPrompt,
+                compiled.CompilerRevision)
             || !VideoEditV2TransientContract.IsLowerSha256(
                 compiled.ContextDigest)
             || !TryValidateSettings(settings))
@@ -78,7 +82,8 @@ internal static class VideoEditV2DurableContract
                 instructionJa,
                 compiled.BackendPrompt,
                 compiled.SummaryJa,
-                compiled.CompilerRevision);
+                compiled.CompilerRevision,
+                compiled.Renderer);
         if (!CryptographicOperations.FixedTimeEquals(
                 System.Text.Encoding.ASCII.GetBytes(expectedDigest),
                 System.Text.Encoding.ASCII.GetBytes(
@@ -127,6 +132,15 @@ internal static class VideoEditV2DurableContract
                     summaryJa = compiled.SummaryJa,
                     compilerRevision = compiled.CompilerRevision,
                     contextDigest = compiled.ContextDigest,
+                    renderer = new
+                    {
+                        taskType = compiled.Renderer.TaskType,
+                        guidanceMode = compiled.Renderer.GuidanceMode,
+                        promptCompilerRevision =
+                            compiled.Renderer.PromptCompilerRevision,
+                        rendererPromptSha256 =
+                            compiled.Renderer.RendererPromptSha256,
+                    },
                 },
                 audioPolicy = settings.AudioPolicy,
                 steps = settings.Steps,

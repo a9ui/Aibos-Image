@@ -37,6 +37,23 @@ public partial class App
                 .GetProperty("readerFixtures");
             JsonElement editFixture = fixtures.GetProperty("edit");
             JsonElement finishFixture = fixtures.GetProperty("finish");
+            JsonElement editFixtureVideo = editFixture.GetProperty("video");
+            string computedEditPresetHash = PhotoViewer.Wpf.MainWindow
+                .ComputeVideoToolsSnapshotHashForSmoke(editFixtureVideo);
+            bool editPresetHashExact = string.Equals(
+                editFixture.GetProperty("job").GetProperty("presetHash")
+                    .GetString(),
+                computedEditPresetHash,
+                StringComparison.Ordinal);
+            JsonElement fixtureCompiled = editFixtureVideo
+                .GetProperty("requested")
+                .GetProperty("compiled");
+            bool editRendererExact =
+                VideoEditV2TransientContract.TryParseOfficialRendererSidecar(
+                    fixtureCompiled.GetProperty("renderer"),
+                    fixtureCompiled.GetProperty("backendPrompt").GetString()!,
+                    fixtureCompiled.GetProperty("compilerRevision").GetString()!,
+                    out _);
             JsonElement durableReaderStateVectors = fixtureDocument
                 .RootElement
                 .GetProperty("durableReaderStateVectors");
@@ -472,6 +489,20 @@ public partial class App
                 video => video["requested"]!["compiled"]!["summaryJa"] =
                     "要約\u0001破損",
                 refreshPresetHash: true);
+            using JsonDocument badRendererTask = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "dddddddd-eeee-4fff-8000-111111111112",
+                "queued",
+                video => video["requested"]!["compiled"]!["renderer"]!["taskType"] =
+                    "r2v",
+                refreshPresetHash: true);
+            using JsonDocument badRendererHash = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "dddddddd-eeee-4fff-8000-111111111113",
+                "queued",
+                video => video["requested"]!["compiled"]!["renderer"]!["rendererPromptSha256"] =
+                    new string('f', 64),
+                refreshPresetHash: true);
             using JsonDocument badTechnicalSpace = CreateVideoToolsV2WorkspaceJob(
                 finishFixture,
                 "eeeeeeee-ffff-4000-8111-222222222222",
@@ -485,6 +516,8 @@ public partial class App
                 && IsProtectedV2ReaderRow(forgedDependency.RootElement)
                 && IsProtectedV2ReaderRow(badCompilerDigest.RootElement)
                 && IsProtectedV2ReaderRow(badCompiledControl.RootElement)
+                && IsProtectedV2ReaderRow(badRendererTask.RootElement)
+                && IsProtectedV2ReaderRow(badRendererHash.RootElement)
                 && IsProtectedV2ReaderRow(badTechnicalSpace.RootElement);
 
             using JsonDocument printableAscii = CreateVideoToolsV2WorkspaceJob(
@@ -665,8 +698,6 @@ public partial class App
                         requested["selection"]!["endFrameExclusive"] = 131;
                         requested["instructionJa"] =
                             "一行目\n二行目\t編集指示";
-                        requested["compiled"]!["backendPrompt"] =
-                            "line one\nline two\tthree\r\nline four";
                         requested["compiled"]!["summaryJa"] =
                             "一行目\n二行目\t確認";
                         JsonNode plan = video["plan"]!;
@@ -980,7 +1011,9 @@ public partial class App
                 && resolverOrFileTouchCalls == 0
                 && storeOrJobMutationCalls == 0;
 
-            ok = exactEdit
+            ok = editPresetHashExact
+                && editRendererExact
+                && exactEdit
                 && exactFinish
                 && pairedPrivateJobsExact
                 && detailsExact
@@ -1007,6 +1040,9 @@ public partial class App
             result = new
             {
                 ok,
+                editPresetHashExact,
+                computedEditPresetHash,
+                editRendererExact,
                 exactEdit,
                 exactFinish,
                 pairedPrivateJobsExact,
