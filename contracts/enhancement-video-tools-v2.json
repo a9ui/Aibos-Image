@@ -1,0 +1,1038 @@
+{
+  "schemaVersion": 2,
+  "contractId": "PV-ENHANCE-VIDEO-TOOLS-002",
+  "protocol": "aibos-enhancement-video-tools-v2",
+  "jobStoreVersion": 1,
+  "operation": "video",
+  "mediaKind": "video",
+  "pairedRollout": {
+    "publicReaderBeforePrivateWriter": true,
+    "readerOnlyFoundation": true,
+    "productionWriterEnabled": false,
+    "pairedActivationRequired": true
+  },
+  "legacyV1": {
+    "contractId": "PV-ENHANCE-VIDEO-TOOLS-001",
+    "protocol": "aibos-enhancement-video-tools-v1",
+    "writerKind": "retake",
+    "productionWriterEnabled": false,
+    "readerOnlyProtected": true,
+    "v2ReinterpretationAllowed": false,
+    "rule": "Version 1 remains byte-for-byte legacy reader evidence. A version 1 Retake request or row is never upgraded, rewritten, or executed as version 2 Edit."
+  },
+  "compatibility": {
+    "discriminator": "video.protocol, video.schemaVersion, and video.kind",
+    "unknownMalformedFuture": "preserve every compatible unknown field and keep the whole row reader-only protected; prohibit enqueue, claim, retry, cancel, reorder, output deletion, staging deletion, publish, and execution",
+    "mixedVersion": "reject a version 2 request that carries a version 1 discriminator or field shape",
+    "publicRequestBackendIndependent": true,
+    "futureBackends": "Any additional editor is advertised by a separate exact backend capability and receipt without changing the semantic Edit request; Qwen-Video-Edit and JoyAI-Video-Edit are future-only."
+  },
+  "featureIsolation": {
+    "sharedOnly": [
+      "operation and mediaKind envelope",
+      "source selector and bounded source pinning",
+      "Jobs, idempotency, durable inbox, queue, output-root, and lifecycle infrastructure"
+    ],
+    "editOwns": "Edit request schema, compiler, seed, timeline mapping, child-clip delivery, backend candidates, capability, receipts, and canaries",
+    "finishOwns": "Finish request schema, semantic mode and scale mapping, full-video delivery, backend candidates, capability, receipts, and canaries",
+    "nonAiTrim": "The exact frame-selection UI may be reused only by a separately versioned non-AI trim/export operation. Non-AI trim is not an Edit or Finish kind, and its writer, output, and audio-boundary semantics are never inferred from Video Tools v2 readiness.",
+    "crossFeatureBackendFallback": false,
+    "crossFeatureReceiptReuse": false,
+    "rule": "Edit and Finish are separate product operations inside the video Job family. Readiness or a receipt for either never enables, validates, retries, or executes the other."
+  },
+  "request": {
+    "commonRequiredFields": [
+      "sourceId",
+      "operation",
+      "mediaKind",
+      "videoTools"
+    ],
+    "optionalEnvelopeFields": [
+      "clientRequestId"
+    ],
+    "unknownEnvelopeFields": "reject",
+    "operation": "video",
+    "mediaKind": "video",
+    "kinds": [
+      "edit",
+      "finish"
+    ],
+    "sourceIdMeaning": "stable gallery or dropped-item identity for presentation and audit; it is never filesystem authority",
+    "sourceSelector": {
+      "location": "videoTools.source",
+      "exactKinds": [
+        "managed-video-job",
+        "displayed-file"
+      ],
+      "managed-video-job": {
+        "exactFields": [
+          "kind",
+          "sourceVideoJobId"
+        ],
+        "kind": "managed-video-job",
+        "sourceVideoJobIdPattern": "case-insensitive UUID with 8-4-4-4-12 hexadecimal groups or exactly 32 hexadecimal characters",
+        "authority": "one succeeded exact managed Videos producer resolved by the Companion after the explicit action"
+      },
+      "displayed-file": {
+        "exactFields": [
+          "kind",
+          "path",
+          "size",
+          "mtimeMs",
+          "sha256"
+        ],
+        "kind": "displayed-file",
+        "path": "one non-empty bounded canonical Windows path naming the exact current single dropped or displayed regular video; untrusted request input only",
+        "size": "captured regular-file byte length, integer 1 through 536870912",
+        "mtimeMs": "captured finite safe-integer last-write time in Unix milliseconds",
+        "sha256": "captured 64-character lowercase hexadecimal SHA-256",
+        "binding": "WPF may bind and measure the selector through one no-delete/read lease on the exact current single displayed video only during the explicit authenticated preview-probe, prompt-compiler, or Start action. Only the final Start revalidation may publish the selector; navigation, passive view, text or selection changes, skip-review toggles, health, and Jobs reads never construct, resolve, open, or hash it.",
+        "companionRevalidation": "After the committed inbox item is claimed, Companion canonicalizes and remeasures the opened source and requires exact path, size, mtimeMs, and SHA-256 equality before staging. Replacement or drift returns an authenticated definitive 4xx, creates no Job or output, and leaves the envelope in needs-action under the durable inbox contract."
+      },
+      "exactlyOne": true,
+      "clientPathAuthority": false
+    },
+    "clientForbiddenFields": [
+      "seed",
+      "backendId",
+      "runtimeReceiptId",
+      "workflowReceiptId",
+      "modelReceiptId",
+      "contextWindow",
+      "actualAffectedRange",
+      "actualMask",
+      "denoise",
+      "backendFps",
+      "backendFrameCount",
+      "alignmentPadding",
+      "deliveryCrop",
+      "delivery",
+      "canonicalSourcePath",
+      "stagingPath",
+      "sourceSignature",
+      "sourceSha256",
+      "sourceProbe"
+    ],
+    "legacyEnvelopeFieldsRejected": [
+      "sourceVideoJobId",
+      "sourcePath",
+      "sourceManagedOutputPath",
+      "sourceRecoveredOutputPath",
+      "sourceProducerJobId",
+      "presetId",
+      "adapterId",
+      "video",
+      "seed"
+    ],
+    "edit": {
+      "exactVideoToolsFields": [
+        "schemaVersion",
+        "kind",
+        "source",
+        "selection",
+        "instructionJa",
+        "compiled",
+        "steps",
+        "strength",
+        "maximumPixelArea"
+      ],
+      "schemaVersion": 2,
+      "kind": "edit",
+      "unknownFields": "reject",
+      "selection": {
+        "exactFields": [
+          "startFrame",
+          "endFrameExclusive"
+        ],
+        "timeline": "zero-based source frames on the probed exact rational source timeline",
+        "interval": "half-open",
+        "bounds": "0 <= startFrame < endFrameExclusive <= probed source frameCount; exact selected duration is positive and <= 5000 milliseconds; selected frame count is <= 300"
+      },
+      "instructionJa": {
+        "meaning": "one user-authored Japanese instruction describing what should change and what should remain",
+        "validation": "trimmed, well-formed UTF-16, 1 through 4000 code units, no internal command language or reserved control token"
+      },
+      "compiled": {
+        "exactFields": [
+          "backendPrompt",
+          "summaryJa",
+          "compilerRevision",
+          "contextDigest"
+        ],
+        "backendPrompt": "trimmed, well-formed UTF-16, 1 through 8000 code units, validated for the currently advertised candidate compiler revision",
+        "summaryJa": "trimmed, well-formed UTF-16 Japanese summary, 1 through 2000 code units",
+        "compilerRevision": "one advertised stable compiler revision of 1 through 128 ASCII characters",
+        "contextDigest": "64 lowercase hexadecimal characters binding the exact captured or managed source selector identity, selected preview-frame identities, instructionJa, compiled texts, and compiler revision",
+        "serverValidation": "WPF validates the bounded shape before inbox publication. After dispatch, Companion revalidates every compiled field and exact context digest before Job commit or execution; it never trusts client compilation. A definitive rejection follows durable inbox needs-action semantics."
+      },
+      "steps": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 40
+      },
+      "strength": {
+        "type": "integer",
+        "minimum": 10,
+        "maximum": 100,
+        "meaning": "higher values permit a larger requested visual change; it is not a client-supplied sampler denoise value"
+      },
+      "maximumPixelArea": [
+        230400,
+        307200,
+        414720
+      ],
+      "reviewSkipPolicy": "the UI checkbox that skips a second compiled-prompt confirmation is transient one-shot UI policy. It is not stored in the generation snapshot and authorizes no work until source, compiler, capability, and request validation all pass."
+    },
+    "finish": {
+      "exactVideoToolsFields": [
+        "schemaVersion",
+        "kind",
+        "source",
+        "mode",
+        "scale"
+      ],
+      "schemaVersion": 2,
+      "kind": "finish",
+      "unknownFields": "reject",
+      "mode": [
+        "fast",
+        "standard",
+        "quality"
+      ],
+      "scale": [
+        2,
+        4
+      ],
+      "scale4Rule": "4x must be explicitly selected and is rejected when exact multiplication would exceed any output bound; there is no implicit crop, downscale, or fallback to 2x",
+      "meaning": "AI spatial video super-resolution only. Frame interpolation, frame-rate conversion, and per-frame still-image Enhancement are different operations."
+    }
+  },
+  "promptCompiler": {
+    "labelJa": "指示を整える",
+    "action": "explicit authenticated Edit action",
+    "previewProbe": {
+      "labelJa": "フレームを読み込む",
+      "action": "explicit authenticated transient source-preview action",
+      "displayedFile": "required before exact frame controls, prompt compilation, or Start. It binds, canonicalizes, hashes, and probes the current displayed-file through one no-delete/read lease and may decode only the bounded requested thumbnails.",
+      "managedVideoJob": "may use the producer Job's exact persisted source probe and identity without reopening or reprobing the source; explicit bounded thumbnail extraction remains an action rather than a passive read",
+      "exactSourceSummaryFields": [
+        "frameCount",
+        "fpsNumerator",
+        "fpsDenominator",
+        "durationMs",
+        "width",
+        "height"
+      ],
+      "response": "one transient exact source summary plus the requested bounded preview identities under previewIdentities; it is not a request, Job snapshot, retry authority, or readiness receipt",
+      "effects": {
+        "createsJob": false,
+        "publishesDurableInbox": false,
+        "wakesQueue": false,
+        "stagesSource": false,
+        "createsOutput": false
+      },
+      "gate": "For displayed-file, frame controls, prompt compilation, and Start stay disabled until the current source identity has one valid non-stale preview-probe response. Source identity drift clears it and disables them again.",
+      "fpsRule": "Use only the exact rational fps and frame count from the bounded media probe. Never assume 24 fps or derive frame count from MediaElement position, natural duration, rounded milliseconds, or UI playback state."
+    },
+    "effects": {
+      "mayBindCanonicalizeHashAndProbeSelectedSource": true,
+      "mayDecodeBoundedPreviewFrames": true,
+      "mayInvokeLocalCompiler": true,
+      "stagesSource": false,
+      "createsJob": false,
+      "publishesDurableInbox": false,
+      "wakesQueue": false,
+      "createsOutput": false
+    },
+    "previewIdentities": {
+      "exactRoles": [
+        "start",
+        "middle",
+        "end"
+      ],
+      "exactFields": [
+        "role",
+        "sourceFrame",
+        "sourcePts",
+        "decodedPixelSha256",
+        "decoderRevision"
+      ],
+      "frameRules": {
+        "start": "selection.startFrame",
+        "middle": "floor((selection.startFrame + selection.endFrameExclusive - 1) / 2)",
+        "end": "selection.endFrameExclusive - 1"
+      },
+      "identityRule": "Each role is retained even when a one- or two-frame selection maps more than one role to the same source frame. SHA-256 is lowercase hexadecimal over the exact bounded decoded preview pixels under the persisted transient decoder revision."
+    },
+    "candidate": {
+      "exactFields": [
+        "backendPrompt",
+        "summaryJa",
+        "compilerRevision",
+        "contextDigest"
+      ],
+      "transient": true,
+      "durableBeforeStart": false,
+      "contextDigestBinding": "the exact source selector identity, selection, ordered start/middle/end preview identities, instructionJa, compiled texts, and compiler revision",
+      "staleOn": [
+        "source identity change",
+        "selection change",
+        "instructionJa change",
+        "compiler revision change",
+        "any preview identity change"
+      ],
+      "staleBehavior": "clear or visibly mark the candidate unusable; a stale candidate cannot be reviewed, started, published, retried, or silently recompiled"
+    },
+    "reviewUnchecked": "A successful compile displays the backend prompt and Japanese summary and sends the completion notification. It creates no Job or inbox item; the user must perform a separate explicit Start.",
+    "reviewSkipChecked": "Changing the checkbox is passive. Clicking the explicit prompt-compiler action while it is checked grants one transient single-use authorization for compile, final source/context/capability/request revalidation, and then durable Start publication. A compiler response by itself never authorizes or performs publication, and failure consumes the one-shot without enqueueing.",
+    "startRevalidation": "Before either the later explicit Start or the checked one-shot continuation publishes anything, WPF recaptures the same source identity through a no-delete/read lease, regenerates the exact preview identities, and requires the same non-stale contextDigest and current compiler/capability result. Drift or mismatch fails with no durable inbox publication, Job, wake, staging, or output.",
+    "passive": "Opening or hydrating the board, editing instructionJa, changing selection, seeking preview, toggling review-skip, and reading health or Jobs never bind, canonicalize, open, hash, probe, decode compiler previews, invoke the compiler, create a Job, publish an inbox item, or wake work."
+  },
+  "source": {
+    "container": "mp4",
+    "regularFileRequired": true,
+    "requiredVideoStreams": 1,
+    "maximumVideoStreams": 1,
+    "maximumAudioStreams": 1,
+    "maximumBytes": 536870912,
+    "maximumDurationMs": 300000,
+    "maximumWidth": 1920,
+    "maximumHeight": 1080,
+    "maximumPixelArea": 2073600,
+    "maximumFrames": 18000,
+    "editAllowedFps": [
+      {
+        "numerator": 24,
+        "denominator": 1
+      },
+      {
+        "numerator": 30,
+        "denominator": 1
+      },
+      {
+        "numerator": 60,
+        "denominator": 1
+      }
+    ],
+    "finishAllowedFps": [
+      {
+        "numerator": 24,
+        "denominator": 1
+      },
+      {
+        "numerator": 30,
+        "denominator": 1
+      },
+      {
+        "numerator": 60,
+        "denominator": 1
+      }
+    ],
+    "unsupported": "WPF rejects known request/captured-file bound failures before inbox publication. Companion probe or identity rejection after dispatch is a definitive 4xx needs-action result with no Job, process, or output. Never coerce container, streams, fps, dimensions, duration, or frame count.",
+    "managed-video-job": {
+      "requiredProducerState": "succeeded",
+      "requiredOwnership": "one exact canonical regular managed Videos output inside the current configured Enhancement output root",
+      "dependency": "reserve the exact producer job and output before the child Job or committed inbox item becomes visible"
+    },
+    "displayed-file": {
+      "scope": "the exact current single dropped or displayed regular video selected at the explicit action",
+      "requestCapture": "WPF captures canonical path, size, mtimeMs, and SHA-256 through one no-delete/read lease during explicit Start and publishes them only after authenticated capability validation",
+      "canonicalization": "Companion canonicalizes from its own opened no-delete/no-write lease, rejects reparse or non-regular targets according to the platform boundary, proves the same opened file before and after bounded hash and probe, and requires exact equality with every captured request field",
+      "staging": "copy through the validated opened handle to a newly allocated job-owned staging file, then independently canonicalize, bound, hash, probe, and pin that staging file before committing the immutable snapshot",
+      "retryAuthority": "the exact persisted job-owned staging identity; retry never re-resolves the raw client path or silently imports newer external bytes",
+      "originalOwnership": "external and user-managed",
+      "stagingOwnership": "job-owned internal input copy"
+    },
+    "explicitActionPinOrder": [
+      "prove authenticated Companion ownership and exact v2 capability",
+      "bind the exact current selector and, for displayed-file, capture canonical path, size, mtimeMs, and SHA-256 through a WPF no-delete/read lease",
+      "under the existing shared Jobs publication interlock, validate the final bounded request, atomically publish one durable inbox item, then close the WPF source lease",
+      "after lock release, send only the authenticated bodyless recovery-aware wake; passive reads never dispatch the item",
+      "Companion atomically claims the committed item, revalidates the exact request and source through its own no-delete/no-write lease, and computes the bounded media probe",
+      "for displayed-file, create and independently canonicalize, bound, hash, probe, and pin one job-owned staged copy",
+      "commit the immutable Job snapshot and idempotency receipt before execution; only that snapshot contains the server-owned canonical source identity, signature, SHA-256, probe, and dependency or staging ownership",
+      "on an authenticated definitive validation rejection, create no Job, process, staging residue, or output and move the envelope to needs-action after later valid items are processed"
+    ],
+    "persistedIdentity": "The committed inbox retains the exact untrusted request selector and fingerprint for durable delivery. Only a successfully committed Job snapshot contains server-owned canonical source and, for displayed-file, staging paths plus exact signature, SHA-256, and bounded probe; no client-supplied path snapshot is accepted as retry or execution authority.",
+    "probePin": "persist and reverify container, dimensions, exact frame count, fps rational, video time base and PTS digest, duration, stream counts, source signature, SHA-256, and exact audio packet identity before execute, retry, child-clip timeline mapping, publish, cancel cleanup, or delete cleanup",
+    "videoPtsProbe": {
+      "requiredProbeFields": [
+        "videoTimeBaseNumerator",
+        "videoTimeBaseDenominator",
+        "videoStartTimestamp",
+        "videoPtsSha256"
+      ],
+      "sequence": "one finite signed 64-bit presentation timestamp for every decoded source frame in presentation order, expressed in the persisted positive rational video time base; missing, duplicate, decreasing, over-bound, or count-mismatched timestamps are unsupported",
+      "digestAlgorithm": "initialize SHA-256, then append every presentation timestamp as one signed 64-bit big-endian two's-complement integer in presentation order; the lowercase digest is videoPtsSha256",
+      "bounds": "at most 18000 timestamp entries, 1048576 bytes combined bounded probe metadata, and 30000 milliseconds"
+    },
+    "audioProbe": {
+      "coupling": "audio is null if and only if audioStreamCount is 0; audio is one exact object if and only if audioStreamCount is 1",
+      "exactFields": [
+        "codec",
+        "codecTag",
+        "profile",
+        "sampleRate",
+        "channels",
+        "timeBaseNumerator",
+        "timeBaseDenominator",
+        "startTimestamp",
+        "durationTimestamp",
+        "packetCount",
+        "packetPayloadBytes",
+        "packetPayloadSha256"
+      ],
+      "packetPayloadDigestAlgorithm": "SHA-256 over each demux-order encoded packet payload length as unsigned 64-bit big-endian followed by the exact packet payload bytes read through the unchanged opened source handle",
+      "maximumPacketEntries": 65536,
+      "maximumPacketBytes": 4194304,
+      "maximumTotalPacketPayloadBytes": 536870912,
+      "maximumProbeMetadataBytes": 8388608,
+      "packetMetadataTimeoutMs": 30000,
+      "bounds": "all packet offsets and sizes are safe integers wholly inside the unchanged opened source; the entry, packet, total payload, metadata, source-byte, and timeout limits apply together"
+    },
+    "externalSourceDeletion": "never",
+    "sourceOverwrite": "never"
+  },
+  "durableInbox": {
+    "contractId": "PV-ENHANCE-ENQUEUE-INBOX-001",
+    "publication": "explicit Start only; WPF atomically publishes the exact bounded create body and request fingerprint before any wake or Companion dispatch",
+    "displayedFileItem": "bodyJson contains the exact displayed-file request selector path, captured size, mtimeMs, and SHA-256. They are untrusted equality requirements, not a persisted canonical execution snapshot.",
+    "managedReservation": "WPF pins the exact managed producer and publishes the inbox item while holding the existing shared Jobs writer interlock; the committed pending or processing item reserves that producer under the durable inbox contract",
+    "dispatch": "Companion claims pending to processing and performs full v2 parser, source, hash, probe, staging, capability, and compiler validation before committing a Job and idempotency receipt",
+    "definitiveRejection": "authenticated definitive 4xx creates no Job, worker, model process, or managed output; after processing later valid items the envelope moves to needs-action, remains reader-visible, and no longer reserves a managed producer when the durable inbox contract proves the no-Job outcome",
+    "needsActionRedelivery": "delivery may be tried again only for the same exact captured displayed-file identity and unchanged request fingerprint. Different source bytes require a new explicit Start and new request id; an old committed item is never rewritten to name them.",
+    "retryableFailure": "transport failure, timeout, supported retryable status, job-store contention, or restart keeps the committed item recoverable under the durable inbox contract and never imports different source bytes",
+    "passiveRead": "never creates directories, claims or moves envelopes, dispatches requests, canonicalizes or opens a source, stages a file, or mutates inbox or Jobs state"
+  },
+  "editBackendCandidates": {
+    "status": "candidate-canary-required",
+    "productionWriterEnabled": false,
+    "publicRequestSelectsBackend": false,
+    "candidatePaths": {
+      "precise-mask": {
+        "backendId": "wan-vace-1.3b-edit-candidate-v1",
+        "backendFamily": "Wan2.1-VACE-1.3B",
+        "semanticRole": "precise-mask",
+        "intent": "precise source-video editing candidate after an exact spatial mask or auto-mask plus preview contract exists",
+        "readyWithoutMaskContract": false,
+        "maskContractInV2": false,
+        "exactArtifactWorkflowAndControlReceiptRequired": true,
+        "qualityAsserted": false
+      },
+      "semantic-v2v": {
+        "backendId": "bernini-r-1.3b-edit-candidate-v1",
+        "backendFamily": "Bernini-R-1.3B",
+        "semanticRole": "semantic-v2v",
+        "intent": "one-Japanese-prompt natural-language and creative source-video editing candidate without a spatial mask request",
+        "exactArtifactWorkflowAndInstructionReceiptRequired": true,
+        "qualityAsserted": false
+      },
+      "research": {
+        "backendId": "minimax-h3-masked-edit-research-v1",
+        "backendFamily": "MiniMax H3 masked source-video research",
+        "intent": "research comparison only",
+        "productionCandidate": false,
+        "qualityAsserted": false
+      }
+    },
+    "separateFeatureNames": {
+      "fl2va": "MiniMax H3 image-to-video generation",
+      "ref2va": "MiniMax H3 reference-conditioned generation",
+      "addGuide": "MiniMax H3 guided generation",
+      "rule": "FL2VA, Ref2VA, and AddGuide are not aliases for source-video Edit and are never silently selected as its backend"
+    },
+    "futureOnly": [
+      "Qwen-Video-Edit",
+      "JoyAI-Video-Edit"
+    ],
+    "canaryOrder": [
+      "no-download schema, inventory, and synthetic timeline preflight",
+      "shared UMT5 and VAE receipt",
+      "bernini-r-1.3b-edit-candidate-v1 incremental canary",
+      "wan-vace-1.3b-edit-candidate-v1 only after exact mask or auto-mask plus preview contract"
+    ],
+    "noDownloadCanary": {
+      "downloadsModels": false,
+      "checks": [
+        "exact Comfy object_info and graph input schema",
+        "existing local artifact inventory without activation inference",
+        "synthetic source-frame, PTS, backend-map, pad, crop, and selected-audio mapper"
+      ]
+    },
+    "firstSemanticCanaryBackendId": "bernini-r-1.3b-edit-candidate-v1",
+    "standardWinnerSelected": false,
+    "selectionRule": "A paired capability advertises one exact resolved Edit backend and receipts only after source-fidelity, instruction-following, temporal, resource, cancellation, and child-clip output canaries. There is no automatic fallback and the semantic public request remains unchanged.",
+    "activationRequires": [
+      "exact model artifact and runtime receipt",
+      "exact Aibos workflow and input schema receipt",
+      "exact source-to-backend timeline mapping and output crop receipt",
+      "bounded VRAM, timeout, cancellation, cleanup, and recovery canary",
+      "source-fidelity and requested-change A/B canary",
+      "non-destructive child-clip timeline, audio, output ownership, and retry canary"
+    ]
+  },
+  "editPlan": {
+    "allowedSourceFps": [
+      { "numerator": 24, "denominator": 1 },
+      { "numerator": 30, "denominator": 1 },
+      { "numerator": 60, "denominator": 1 }
+    ],
+    "maximumSelectedDurationMs": 5000,
+    "maximumSelectedFrames": 300,
+    "selectionDuration": "derive exactly from the selected half-open source-frame range and persisted rational source fps; duration must be positive and no greater than 5000 milliseconds",
+    "planOrder": [
+      "persist the exact selected half-open source-frame and PTS intent",
+      "resolve one exact backend from the current Edit capability",
+      "derive and persist the backend-owned frame-rate map, internal frame count, alignment padding, and delivery crop without changing the request",
+      "persist the strength mapping, seed, model canvas, workflow/model/runtime receipts, and child-clip delivery plan before execution"
+    ],
+    "backendTimeline": {
+      "requestFields": "none",
+      "serverOwned": [
+        "backend fps rational",
+        "backend frame count",
+        "4n+1 or other alignment padding",
+        "leading and trailing pad",
+        "source-to-backend frame map revision",
+        "delivery crop and source-fps reconstruction revision"
+      ],
+      "rule": "a 16-fps or 4n+1 backend constraint is internal receipt data and never changes the source-frame selection contract"
+    },
+    "strengthMapping": {
+      "mappingRevision": "one exact backend-specific revision advertised by the current capability and persisted in the immutable plan",
+      "value": "one reduced non-negative rational numerator/denominator accepted by the resolved workflow; the mapping is monotonic with requested strength within that backend revision",
+      "crossBackendEqualityClaimed": false,
+      "clientSupplied": false
+    },
+    "spatialMaskRequestInV2": false,
+    "spatialMaskFutureCapability": "additive, separately advertised, and never inferred from an unknown request field",
+    "canvas": "derive one source-aspect, no-crop model canvas inside requested maximumPixelArea using the resolved workflow alignment rules and persist it",
+    "ui": "show the exact selected source range and the resulting child-clip duration; internal backend padding and crop are diagnostics, not a second editable range"
+  },
+  "editDelivery": {
+    "outputKind": "non-destructive managed child clip",
+    "fullSourceSplice": false,
+    "sourceOverwrite": false,
+    "sourcePrefixOrSuffixIncluded": false,
+    "timeline": "delivery starts at zero and reconstructs exactly the selected source frame count, rational fps, relative PTS sequence, and duration after the persisted internal map and crop",
+    "dimensions": "the persisted resolved model delivery dimensions; no implicit crop",
+    "discardGeneratedAudio": true,
+    "audio": "when source audio exists, remux only the persisted encoded source packet window intersecting the selected source PTS range without re-encoding, rebase it through one exact delivery edit-list revision, and make no sample-exact trim claim",
+    "sourceAudioOutsideSelectionIncluded": false,
+    "publish": "one new managed Videos output and child Job; never modify, replace, or automatically splice into the long source"
+  },
+  "finishBackendCandidates": {
+    "status": "candidate-canary-required",
+    "productionWriterEnabled": false,
+    "publicRequestSelectsBackend": false,
+    "candidateFamilies": {
+      "faithful": {
+        "backendId": "nvidia-vfx-vsr-1.2-candidate-v1",
+        "semanticRole": "faithful",
+        "backendFamily": "NVIDIA VFX VideoSuperRes 1.2",
+        "package": "nvidia-vfx 0.1.0.1",
+        "internalSdkVersion": "1.2.0.0",
+        "evidenceRevision": "NVIDIA FlashDreams e580e27d408b3cf8bd8a549f990c361b94d3379f",
+        "serverQualityValues": [
+          "MEDIUM",
+          "HIGH",
+          "ULTRA"
+        ],
+        "supportedScalesBeforeCanary": [],
+        "frameIndependentAsserted": false,
+        "sceneCutResetOrRecreateCanaryRequired": true,
+        "qualityAsserted": false
+      },
+      "generative-detail": {
+        "backendId": "seedvr2-3b-detail-candidate-v1",
+        "semanticRole": "generative-detail",
+        "backendFamily": "SeedVR2 3B",
+        "intent": "generative detail restoration candidate that may synthesize texture",
+        "exactArtifactWorkflowAndVramReceiptRequired": true,
+        "sourceFidelityCanaryRequired": true,
+        "supportedScalesBeforeCanary": [],
+        "qualityAsserted": false
+      },
+      "lightweight-4x": {
+        "backendId": "nanovsr-1.7m-4x-candidate-v1",
+        "semanticRole": "lightweight-4x",
+        "backendFamily": "NanoVSR-1.7M",
+        "intent": "lightweight native 4x restoration candidate",
+        "nativeScale": 4,
+        "reportedTemporalShape": "bidirectional recurrent with an official T=15 disjoint-chunk demonstration",
+        "aibosChunkPolicy": "one exact overlap-and-crop revision must be advertised and persisted; official disjoint chunks are not accepted as seamless output evidence",
+        "chunkSeamCanaryRequired": true,
+        "supportedScalesBeforeCanary": [],
+        "scale2": "unsupported until an exact separately canaried 4x-to-2x delivery mapping is advertised",
+        "exactArtifactReceiptRequired": true,
+        "qualityAsserted": false
+      }
+    },
+    "modeMapping": "No candidate ID implies a public mode or default. Each fast, standard, or quality capability independently resolves and persists an exact backendId, semanticRole, backend setting, supported scales/source bounds, delivery mapping, temporal policy, and receipts after canary.",
+    "selectionRule": "The public mode and scale are backend-independent. No mode, semantic role, or backend silently falls back to another, and generative-detail behavior is never substituted for faithful restoration without the exact advertised mode mapping.",
+    "activationRequires": [
+      "exact backend artifact, package or model, runtime, driver/GPU, runner, and API receipt",
+      "bounded VRAM, timeout, cancellation, cleanup, and process-ownership canary",
+      "2x and explicit 4x pixel-bound canary",
+      "frame count, rational fps, PTS, duration, no-crop, and exact source-audio packet canary",
+      "scene-cut state reset or recreation A/B canary for every temporal backend",
+      "NanoVSR overlap/crop and chunk-seam canary",
+      "SeedVR2 3B source-fidelity, texture-generation, and bounded-VRAM canary",
+      "independent fast, standard, and quality visual A/B canaries"
+    ]
+  },
+  "finishPlan": {
+    "semanticModes": [
+      "fast",
+      "standard",
+      "quality"
+    ],
+    "backendMapping": {
+      "clientSuppliedBackendOrSetting": false,
+      "revisionRequired": true,
+      "persistResolvedBackendId": true,
+      "persistResolvedBackendSetting": true,
+      "silentBackendFallback": false,
+      "silentModeFallback": false,
+      "capabilityOwnsSupportedScaleAndSourceBounds": true,
+      "rule": "health advertises one exact server-owned mode-to-backend mapping revision and the immutable snapshot persists its resolved backendId and backend setting"
+    },
+    "spatialScale": [
+      2,
+      4
+    ],
+    "maximumOutputWidth": 3840,
+    "maximumOutputHeight": 2160,
+    "maximumOutputPixelArea": 8294400,
+    "exactScale": "output width = input width * requested scale and output height = input height * requested scale; reject overflow or any exceeded bound",
+    "initialBitDepth": 8,
+    "initialDynamicRange": "SDR",
+    "futureColor": "HDR, 10-bit, tone mapping, and color-space conversion require a future additive capability and are unsupported in v2",
+    "preserve": [
+      "source frame count",
+      "source rational fps",
+      "source video presentation timestamp sequence",
+      "source duration",
+      "exact source encoded audio packets when present"
+    ],
+    "frameInterpolation": false,
+    "frameRateConversion": false,
+    "implicitCrop": false,
+    "implicitResizeFallback": false,
+    "sceneCutResetCanaryRequired": true,
+    "sceneCut": "backend temporal-state behavior is not inferred from a model, SDK, or integration description. Production stays closed until a pinned runner proves reset or recreation at detected scene boundaries and persists its detector, threshold, and reset-policy receipts."
+  },
+  "persistedSnapshot": {
+    "protocol": "aibos-enhancement-video-tools-v2",
+    "schemaVersion": 2,
+    "requestNormalization": {
+      "managed-video-job": "persist requested.source as kind plus sourceVideoJobId",
+      "displayed-file": "persist requested.source as kind only; consume but do not retain the raw untrusted request path as retry authority",
+      "authority": "video.source is the server-owned canonical managed or staged identity used by retry and execution"
+    },
+    "stableIds": {
+      "editPresetId": "aibos-video-edit-v2",
+      "finishPresetId": "aibos-video-finish-v2",
+      "editCandidateBackendIds": [
+        "wan-vace-1.3b-edit-candidate-v1",
+        "bernini-r-1.3b-edit-candidate-v1",
+        "minimax-h3-masked-edit-research-v1"
+      ],
+      "finishCandidateBackendIds": [
+        "nvidia-vfx-vsr-1.2-candidate-v1",
+        "seedvr2-3b-detail-candidate-v1",
+        "nanovsr-1.7m-4x-candidate-v1"
+      ]
+    },
+    "jobEnvelope": {
+      "common": "job.operation and job.mediaKind are video; job.sourceId remains presentation identity; job.presetId is the semantic v2 preset; job.adapterId is the exact resolved server backend; job.presetHash binds the complete immutable video snapshot",
+      "managed-video-job": "job.sourceVideoJobId is required and exactly equals video.source.producerJobId",
+      "staged-displayed-file": "job.sourceVideoJobId is absent; video.source.stagingCanonicalPath and its identity are retry authority",
+      "clientPathFields": "absent from the Job envelope"
+    },
+    "exactKeys": {
+      "edit": {
+        "video": [
+          "schemaVersion",
+          "protocol",
+          "kind",
+          "presetId",
+          "backendId",
+          "seed",
+          "receipts",
+          "source",
+          "requested",
+          "plan",
+          "delivery"
+        ],
+        "requested": [
+          "schemaVersion",
+          "kind",
+          "source",
+          "selection",
+          "instructionJa",
+          "compiled",
+          "steps",
+          "strength",
+          "maximumPixelArea"
+        ],
+        "selection": [
+          "startFrame",
+          "endFrameExclusive"
+        ],
+        "compiled": [
+          "backendPrompt",
+          "summaryJa",
+          "compilerRevision",
+          "contextDigest"
+        ],
+        "receipts": [
+          "workflowReceiptId",
+          "modelReceiptId",
+          "runtimeReceiptId",
+          "timelineMappingReceiptId",
+          "deliveryMappingReceiptId"
+        ],
+        "plan": [
+          "selected",
+          "sourceToBackendMap",
+          "backendWindow",
+          "deliveryCrop",
+          "strengthMapping",
+          "modelCanvas",
+          "audioWindow"
+        ],
+        "selected": [
+          "startFrame",
+          "endFrameExclusive",
+          "startPts",
+          "endPtsExclusive",
+          "durationMs"
+        ],
+        "sourceToBackendMap": [
+          "revision",
+          "sourceFpsNumerator",
+          "sourceFpsDenominator",
+          "backendFpsNumerator",
+          "backendFpsDenominator",
+          "sourceStartFrame",
+          "sourceEndFrameExclusive",
+          "backendStartFrame",
+          "backendEndFrameExclusive"
+        ],
+        "backendWindow": [
+          "frameCount",
+          "leadingPadFrames",
+          "trailingPadFrames",
+          "alignmentRevision"
+        ],
+        "deliveryCrop": [
+          "revision",
+          "backendStartFrame",
+          "backendEndFrameExclusive",
+          "outputFrameCount",
+          "outputFpsNumerator",
+          "outputFpsDenominator"
+        ],
+        "strengthMapping": [
+          "mappingRevision",
+          "numerator",
+          "denominator"
+        ],
+        "modelCanvas": [
+          "width",
+          "height",
+          "maximumPixelArea"
+        ],
+        "audioWindow": [
+          "packetStartIndex",
+          "packetEndIndexExclusive",
+          "editListRevision"
+        ],
+        "delivery": [
+          "width",
+          "height",
+          "frameCount",
+          "fpsNumerator",
+          "fpsDenominator",
+          "durationMs",
+          "videoPtsSha256",
+          "childClip",
+          "fullSourceSplice",
+          "discardGeneratedAudio",
+          "preserveSelectedSourceAudioPackets",
+          "sourceAudioPacketStartIndex",
+          "sourceAudioPacketEndIndexExclusive"
+        ]
+      },
+      "finish": {
+        "video": [
+          "schemaVersion",
+          "protocol",
+          "kind",
+          "presetId",
+          "backendId",
+          "receipts",
+          "source",
+          "requested",
+          "plan",
+          "delivery"
+        ],
+        "requested": [
+          "schemaVersion",
+          "kind",
+          "source",
+          "mode",
+          "scale"
+        ],
+        "receipts": [
+          "runtimeReceiptId",
+          "modelReceiptId",
+          "backendMappingRevision",
+          "deliveryMappingReceiptId",
+          "sceneCutCanaryReceiptId",
+          "chunkSeamCanaryReceiptId"
+        ],
+        "plan": [
+          "inputWidth",
+          "inputHeight",
+          "outputWidth",
+          "outputHeight",
+          "frameCount",
+          "fpsNumerator",
+          "fpsDenominator",
+          "durationMs",
+          "videoPtsSha256",
+          "semanticRole",
+          "backendSetting",
+          "backendDeliveryRevision",
+          "bitDepth",
+          "dynamicRange",
+          "sceneCutPolicyRevision",
+          "chunkPolicyRevision",
+          "preserveAudioPackets",
+          "frameInterpolation",
+          "implicitCrop"
+        ],
+        "delivery": [
+          "width",
+          "height",
+          "frameCount",
+          "fpsNumerator",
+          "fpsDenominator",
+          "durationMs",
+          "videoPtsSha256",
+          "preserveSourceAudioPackets"
+        ]
+      },
+      "source": {
+        "managed-video-job": [
+          "kind",
+          "producerJobId",
+          "canonicalPath",
+          "signature",
+          "sha256",
+          "probe"
+        ],
+        "staged-displayed-file": [
+          "kind",
+          "originalCanonicalPath",
+          "originalSignature",
+          "originalSha256",
+          "stagingCanonicalPath",
+          "stagingSignature",
+          "stagingSha256",
+          "probe"
+        ],
+        "signature": [
+          "size",
+          "mtimeMs"
+        ],
+        "probe": [
+          "container",
+          "width",
+          "height",
+          "frameCount",
+          "fpsNumerator",
+          "fpsDenominator",
+          "durationMs",
+          "videoStreamCount",
+          "audioStreamCount",
+          "videoTimeBaseNumerator",
+          "videoTimeBaseDenominator",
+          "videoStartTimestamp",
+          "videoPtsSha256",
+          "bitDepth",
+          "dynamicRange",
+          "audio"
+        ],
+        "audio": [
+          "codec",
+          "codecTag",
+          "profile",
+          "sampleRate",
+          "channels",
+          "timeBaseNumerator",
+          "timeBaseDenominator",
+          "startTimestamp",
+          "durationTimestamp",
+          "packetCount",
+          "packetPayloadBytes",
+          "packetPayloadSha256"
+        ]
+      }
+    },
+    "seed": "Edit uses one server-owned integer from 0 through 2147483647. It is never accepted from a request and exact retry reuses it.",
+    "presetHash": "recursively sort object keys with ordinal string comparison, serialize compact JSON, SHA-256 UTF-8 bytes, and take the first 12 lowercase hexadecimal characters",
+    "unknownOrMalformed": "reader-only protected and byte-preserving under the compatibility rule"
+  },
+  "healthCapability": {
+    "property": "capabilities.videoToolsV2",
+    "exactShape": {
+      "contractId": "PV-ENHANCE-VIDEO-TOOLS-002",
+      "protocol": "aibos-enhancement-video-tools-v2",
+      "readerReady": true,
+      "edit": {
+        "writerEnabled": false,
+        "backendConfigured": false,
+        "runtimeVerified": false,
+        "ready": false,
+        "state": "disabled",
+        "reasonCode": "VIDEO_TOOLS_V2_EDIT_BACKEND_CANARY_REQUIRED"
+      },
+      "finish": {
+        "writerEnabled": false,
+        "backendConfigured": false,
+        "runtimeVerified": false,
+        "ready": false,
+        "state": "disabled",
+        "reasonCode": "VIDEO_TOOLS_V2_FINISH_RUNTIME_UNPINNED"
+      },
+      "finishModes": {
+        "fast": {
+          "writerEnabled": false,
+          "backendConfigured": false,
+          "runtimeVerified": false,
+          "ready": false,
+          "state": "disabled",
+          "reasonCode": "VIDEO_TOOLS_V2_FINISH_FAST_CANARY_REQUIRED"
+        },
+        "standard": {
+          "writerEnabled": false,
+          "backendConfigured": false,
+          "runtimeVerified": false,
+          "ready": false,
+          "state": "disabled",
+          "reasonCode": "VIDEO_TOOLS_V2_FINISH_STANDARD_CANARY_REQUIRED"
+        },
+        "quality": {
+          "writerEnabled": false,
+          "backendConfigured": false,
+          "runtimeVerified": false,
+          "ready": false,
+          "state": "disabled",
+          "reasonCode": "VIDEO_TOOLS_V2_FINISH_QUALITY_MODE_MAPPING_CANARY_REQUIRED"
+        }
+      }
+    },
+    "reasonCodes": {
+      "edit": [
+        "VIDEO_TOOLS_V2_EDIT_WRITER_DISABLED",
+        "VIDEO_TOOLS_V2_EDIT_BACKEND_UNCONFIGURED",
+        "VIDEO_TOOLS_V2_EDIT_RUNTIME_UNPINNED",
+        "VIDEO_TOOLS_V2_EDIT_COMPILER_UNCONFIGURED",
+        "VIDEO_TOOLS_V2_EDIT_COMPILER_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_EDIT_BACKEND_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_EDIT_VACE_MASK_CONTRACT_REQUIRED",
+        "VIDEO_TOOLS_V2_EDIT_BERNINI_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_EDIT_H3_RESEARCH_ONLY",
+        "VIDEO_TOOLS_V2_EDIT_TIMELINE_MAPPING_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_EDIT_GPU_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_EDIT_OUTPUT_CANARY_REQUIRED"
+      ],
+      "finish": [
+        "VIDEO_TOOLS_V2_FINISH_WRITER_DISABLED",
+        "VIDEO_TOOLS_V2_FINISH_BACKEND_UNCONFIGURED",
+        "VIDEO_TOOLS_V2_FINISH_RUNTIME_UNPINNED",
+        "VIDEO_TOOLS_V2_FINISH_SCENE_CUT_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_GPU_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_OUTPUT_CANARY_REQUIRED"
+      ],
+      "finishFast": [
+        "VIDEO_TOOLS_V2_FINISH_FAST_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_FAST_MODE_MAPPING_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_FAST_SCENE_CUT_CANARY_REQUIRED"
+      ],
+      "finishStandard": [
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_MODE_MAPPING_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_SOURCE_BOUND_UNVERIFIED",
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_TEMPORAL_SEAM_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_STANDARD_SCALE_MAPPING_CANARY_REQUIRED"
+      ],
+      "finishQuality": [
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_MODE_MAPPING_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_DETAIL_POLICY_UNVERIFIED",
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_GPU_CANARY_REQUIRED",
+        "VIDEO_TOOLS_V2_FINISH_QUALITY_SCALE_UNSUPPORTED"
+      ]
+    },
+    "passiveRead": {
+      "canonicalizesSource": false,
+      "opensSource": false,
+      "hashesSource": false,
+      "probesMedia": false,
+      "stagesSource": false,
+      "createsJobs": false,
+      "mutatesJobs": false,
+      "startsProcesses": false,
+      "mountsModels": false,
+      "startsWorker": false,
+      "wakesQueue": false,
+      "claimsJobs": false,
+      "retriesJobs": false
+    },
+    "writerRule": "readerReady never authorizes durable publication. Edit requires its exact lane fields. Finish additionally requires the exact requested mode's independent writerEnabled, backendConfigured, runtimeVerified, and ready fields. All must be true under one authenticated current health response, and its supported scales, source bounds, backend/delivery mappings, temporal policy, and receipts must exactly match the request planner. No other mode is a fallback."
+  },
+  "durableDependencies": {
+    "managedActiveJob": "producerJobId reserves its exact producer output while the child is queued or running",
+    "managedDurableInbox": "a bounded exact committed create or retry item reserves the producer output before the child Job exists",
+    "managedDelete": "producer output deletion passively fails closed while an active or committed pending dependency exists",
+    "externalStaging": "staging is owned only by its Video Tools job and remains available for exact retry while any row, durable item, or recovery journal may refer to it",
+    "externalOriginal": "never deleted, moved, overwritten, repaired, or replaced by Aibos",
+    "cleanup": "remove only a proven job-owned staging or scratch artifact after all active, durable, retry, cancel, recovery, and publish dependencies are absent; ambiguous identity preserves the artifact and fails closed"
+  },
+  "lifecycle": {
+    "retry": {
+      "reuseExactPersistedSnapshot": true,
+      "reusePersistedSeed": true,
+      "revalidateSourceSignature": true,
+      "revalidateSourceHashes": true,
+      "revalidateSourceProbe": true,
+      "reResolveClientPath": false,
+      "rule": "retry creates one replacement child from the exact snapshot and current pinned receipts; source mismatch, missing staging, unsupported capability, or ambiguous publication keeps the source row and fails closed"
+    },
+    "cancel": {
+      "ownershipFailure": "fail-closed",
+      "sourceDeletion": false,
+      "rule": "cancel only a mutation-safe known v2 row through existing authenticated queue ownership; preserve source, committed durable state, and unproven process or staging ownership"
+    },
+    "delete": {
+      "ownershipFailure": "fail-closed",
+      "sourceDeletion": false,
+      "rule": "delete only a proven terminal v2 output and proven unreferenced job-owned artifacts; never delete a managed producer output or external original"
+    },
+    "publish": {
+      "ownershipFailure": "fail-closed",
+      "rule": "publish one validated final MP4 below the canonical managed Videos date folder only after exact source, output, frame timeline, audio, runtime, journal, and idempotency ownership validation"
+    }
+  },
+  "productionGate": {
+    "currentPostResult": {
+      "status": 503,
+      "code": "VIDEO_TOOLS_V2_NOT_READY"
+    },
+    "writerRule": "both Edit and Finish writers remain false. A lane may be enabled only in a paired revision after its exact backend/runtime/workflow/canary receipts and all passive, ownership, cancellation, recovery, and output invariants pass. Enabling one lane never enables the other."
+  }
+}

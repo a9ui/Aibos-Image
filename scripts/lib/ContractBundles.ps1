@@ -9,6 +9,12 @@ function Read-AibosJsonFile {
     return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
+function Get-AibosLowerSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
 function Resolve-AibosIndexedPath {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -128,6 +134,38 @@ function Get-AibosVideoToolsV1Bundle {
         Resolve-AibosIndexedPath $RepoRoot ([string]$bundle.core))
 }
 
+function Get-AibosVideoToolsV2Bundle {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    $index = Get-AibosContractIndex $RepoRoot
+    $bundle = Get-AibosVerificationBundle $index 'enhancement-video-tools-v2'
+    $corePath = Resolve-AibosIndexedPath $RepoRoot ([string]$bundle.core)
+    $fixtureRelativePath = [string]@($bundle.fixtures)[0]
+    $fixturePath = Resolve-AibosIndexedPath $RepoRoot $fixtureRelativePath
+    $core = Read-AibosJsonFile $corePath
+    $fixture = Read-AibosJsonFile $fixturePath
+
+    $contractEntry = @($index.contracts | Where-Object {
+        $_.contractId -ceq 'PV-ENHANCE-VIDEO-TOOLS-002'
+    })
+    $fixtureEntry = @($index.fixtures | Where-Object {
+        $_.fixtureId -ceq 'PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES'
+    })
+    $coreSha256 = Get-AibosLowerSha256 $corePath
+    $fixtureSha256 = Get-AibosLowerSha256 $fixturePath
+    if ($contractEntry.Count -ne 1 -or
+        $fixtureEntry.Count -ne 1 -or
+        $contractEntry[0].sha256 -cne $coreSha256 -or
+        $fixtureEntry[0].sha256 -cne $fixtureSha256 -or
+        $fixture.forContractId -cne $core.contractId -or
+        $fixture.compatibility.contractSha256 -cne $coreSha256) {
+        throw 'Video Tools v2 indexed hashes or paired reader fixture ownership do not match.'
+    }
+
+    $core | Add-Member -NotePropertyName readerFixture -NotePropertyValue $fixture
+    return $core
+}
+
 function Write-AibosJsonFile {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -195,11 +233,16 @@ function Test-AibosContractIndex {
     $videoV1 = Get-AibosVideoV1Bundle $RepoRoot
     $videoV2 = Get-AibosVideoV2Bundle $RepoRoot
     $videoToolsV1 = Get-AibosVideoToolsV1Bundle $RepoRoot
+    $videoToolsV2 = Get-AibosVideoToolsV2Bundle $RepoRoot
     if (@($shared.contracts).Count -ne 6 -or
         $videoV1.contractId -cne 'PV-ENHANCE-VIDEO-001' -or
         $videoV2.contractId -cne 'PV-ENHANCE-VIDEO-002' -or
         $videoToolsV1.contractId -cne 'PV-ENHANCE-VIDEO-TOOLS-001' -or
         $videoToolsV1.protocol -cne 'aibos-enhancement-video-tools-v1' -or
+        $videoToolsV2.contractId -cne 'PV-ENHANCE-VIDEO-TOOLS-002' -or
+        $videoToolsV2.protocol -cne 'aibos-enhancement-video-tools-v2' -or
+        $videoToolsV2.readerFixture.fixtureId -cne
+            'PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES' -or
         $videoV2.promptRewriteProtocol.contractId -cne
             'PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001') {
         throw 'A verification bundle could not be materialized with its expected identity.'

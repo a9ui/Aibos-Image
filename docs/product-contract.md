@@ -163,6 +163,15 @@ The executable cases for these meanings are routed by
   WPF and companion validate its canonical managed-root ownership, supported
   operation folder, current file identity, decoded bounds, and content hash.
   No other client-supplied managed output path is accepted.
+- Video Tools version 2 may instead select the exact current single dropped or
+  displayed regular video. During the explicit Start action, WPF captures its
+  canonical request path, size, last-write time, and SHA-256 through a
+  no-delete/read lease. The companion independently canonicalizes and measures
+  the same opened file after the committed inbox item is claimed, requires
+  every captured value to match, applies the bounded media probe, and creates a
+  separately verified job-owned staging copy before committing a Job. The
+  request path is never source authority, and passive view, health, and Jobs
+  reads do not open, hash, probe, or stage it.
 - Original and managed output identities remain distinct. Enhancement never
   overwrites the source.
 
@@ -216,6 +225,11 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   row depends on its producer id or names that exact canonical output as its
   persisted source path. This protection remains fail-closed for an active
   video row whose other mutation fields are malformed or reader-only.
+- A managed video output cannot be deleted while a queued or running Video
+  Tools child, or an exact committed pending durable item, depends on its
+  producer id. An imported external-video staging copy is owned only by its
+  Video Tools Job and remains pinned through retry and recovery. Aibos never
+  deletes, moves, overwrites, repairs, or replaces the external original.
 - Durable video create and retry publication reserves the same managed source
   before a Jobs row is visible. Publication and managed-output deletion share
   the Jobs writer lock; DELETE passively scans bounded committed pending,
@@ -260,6 +274,9 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   prefix and suffix frames remain, source frame count, duration, and fps remain
   exact, original source audio is preserved, and generated-window audio is
   discarded.
+- Video Tools version 1 is frozen legacy reader evidence. Its production
+  writer remains disabled, and a version 1 `retake` request or snapshot is
+  never rewritten, upgraded, or executed as a version 2 `edit`.
 - Video Finish is a separate spatial 2x super-resolution intent. Faithful and
   detail modes preserve source fps, duration, frame count, and audio, reset
   temporal state at scene cuts, and do not perform frame interpolation. RIFE
@@ -272,6 +289,130 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   committed pending durable inbox reservation for it, blocks deletion of that
   producer output. The exact wire, bounds, persisted snapshot, delivery, and
   production gate are defined by `PV-ENHANCE-VIDEO-TOOLS-001`.
+- Video Tools version 2 keeps `operation=video` but exposes only the semantic
+  `edit` and `finish` kinds. Edit is direct source-video-conditioned work, not
+  a keyframe-completion contract. Its request contains one Japanese
+  instruction, one validated compiled backend prompt and Japanese summary,
+  compiler revision and context digest, an exact half-open frame selection,
+  STEP, integer strength, and a maximum pixel tier. Seed, backend, context,
+  actual mask, affected range, denoise, source snapshot, and delivery are
+  server-owned. The UI's skip-review checkbox is transient one-shot policy and
+  is not durable generation semantics.
+- Opening or hydrating the Edit board, changing the instruction or selection,
+  ordinary seeking, toggling skip-review, and reading health or Jobs are
+  passive: they do not resolve, open, hash, or probe a source, extract compiler
+  previews, invoke the compiler, publish an inbox item, create a Job, or wake
+  work. A displayed file first requires the explicit authenticated
+  `フレームを読み込む` action. It may bind, canonicalize, hash, and probe the
+  source under a no-delete/read lease and decode bounded requested thumbnails.
+  Its transient result contains exact frame count, rational fps, duration,
+  dimensions, and requested preview identities. Exact frame controls,
+  compilation, and Start stay disabled until that result is current. A managed
+  source may use its exact persisted producer probe and skip the media re-probe.
+  Neither path infers 24 fps or frame count from MediaElement duration or
+  playback state.
+- `指示を整える` is another explicit authenticated action. It may recapture and
+  revalidate the selected source, extract the exact start/middle/end
+  preview-frame identities, and invoke the bounded local compiler, but it
+  creates no Job, inbox item, wake, staging copy, or output.
+- The compiled candidate is transient and its context digest binds the exact
+  source identity, half-open selection, ordered preview identities, Japanese
+  instruction, compiled prompt and summary, and compiler revision. It becomes
+  unusable when any of those inputs changes. With review enabled, compilation
+  only displays and announces the result; the user must perform a later
+  explicit Start. With skip-review checked, the compiler click supplies one
+  transient single-use authorization to compile, perform final validation, and
+  then publish. A successful compiler response alone never starts work. Before
+  either path publishes, Start recaptures the same source and preview identities
+  and requires the same current context digest; drift or mismatch fails without
+  durable publication, Job creation, wake, staging, or output.
+- A version 2 source is either one succeeded exact managed Videos producer id,
+  or the explicitly captured current `displayed-file` selector described
+  above. Both resolve to an immutable canonical source signature, SHA-256, and
+  bounded probe; imported files additionally resolve to a job-owned staging
+  identity. Common input is one regular MP4 with exactly one video stream, at
+  most one audio stream, no more than 512 MiB, 300 seconds, 1920 x 1080, and
+  18,000 frames. Edit and Finish initially accept exact 24/1, 30/1, or 60/1
+  fps. Initial Edit accepts an exact selected interval no longer than 5,000
+  milliseconds and 300 source frames. Unsupported input fails capability or
+  request validation closed instead of being coerced.
+- Explicit Start first atomically publishes the exact captured request through
+  `PV-ENHANCE-ENQUEUE-INBOX-001`, then sends the authenticated bodyless wake.
+  The Companion performs full source, probe, compiler, staging, and capability
+  validation after claiming that committed item and before committing a Job.
+  A displayed-file mismatch, missing source, or unsupported probe is an
+  authenticated definitive 4xx: no Job, process, retained staging residue, or
+  output is created, and the committed envelope moves to `needs-action` after
+  later valid items are processed. Delivery may be tried again only against
+  the same captured identity. Different bytes require a new explicit Start and
+  request id; an old committed item is never rewritten to import them.
+- Edit backend selection remains open behind exact receipts. Bernini-R-1.3B is
+  the first canary for the current one-Japanese-prompt, mask-free semantic V2V
+  request. Wan2.1-VACE-1.3B is the precise-mask candidate but cannot become
+  ready until a separate exact spatial-mask or auto-mask plus preview contract
+  exists. MiniMax H3 masked Edit remains research-only. H3 FL2VA, Ref2VA, and
+  AddGuide retain their distinct generation feature names and are never aliases
+  or silent fallbacks for source-video Edit. Qwen-Video-Edit and JoyAI-Video-Edit
+  remain future-only, and no standard winner is declared.
+- Edit canary zero downloads no model: it checks exact Comfy graph/object input
+  schema, the existing artifact inventory without inferring readiness, and a
+  synthetic source-frame, PTS, backend-map, pad, crop, and selected-audio
+  mapper. Shared UMT5/VAE receipts and an incremental Bernini canary come only
+  after that preflight. Every Edit writer remains false until its own model,
+  workflow, instruction, timeline, memory, cancellation, and output receipts
+  pass.
+- Edit persists the exact selected source frames and PTS, then the server-owned
+  backend fps, frame map, internal frame count, alignment padding such as
+  `4n+1`, delivery crop and source-fps reconstruction, strength mapping, seed,
+  canvas, audio packet window, and receipts. Backend 16-fps or alignment needs
+  never leak into or rewrite the request selection. Initial output is one new
+  non-destructive managed child clip for the selected interval, with no source
+  prefix/suffix and no splice into the long source. It reconstructs the exact
+  selected source frame count, rational fps, relative PTS, and duration.
+  Generated audio is discarded; when source audio exists, only the persisted
+  intersecting encoded packet window is remuxed and rebased without re-encoding
+  or a sample-exact trim claim. The source is never overwritten.
+- Version 2 Finish is a separate AI spatial super-resolution Job. Its public
+  modes are `fast`, `standard`, and `quality`, with explicit 2x or 4x scale.
+  Each mode has an independent backend, source-bound, scale, delivery, and
+  canary capability; no backend or mode silently falls back to another and no
+  candidate ID implies a default mode. The faithful candidate is NVIDIA VFX
+  VideoSuperRes via `nvidia-vfx 0.1.0.1`, internal VFX SDK `1.2.0.0`, with a
+  server-owned `MEDIUM`, `HIGH`, or `ULTRA` setting. It is not claimed
+  frame-independent, so scene-cut reset or effect recreation remains a gate.
+  SeedVR2 3B is the generative-detail candidate and must explicitly pass source
+  fidelity, synthesized-texture, and bounded-VRAM canaries. NanoVSR-1.7M is the
+  lightweight native-4x candidate; its reported bidirectional recurrent,
+  15-frame disjoint-chunk demonstration requires an exact Aibos overlap/crop
+  revision and chunk-seam canary. NanoVSR 2x remains unsupported until a
+  separate 4x-to-2x delivery mapping passes.
+- Finish output is initially 8-bit SDR, no larger than 3840 x 2160 or
+  8,294,400 pixels, with exact source frame count, rational fps, video PTS,
+  duration, and encoded audio packets. It performs no interpolation,
+  frame-rate conversion, implicit crop, or implicit scale fallback. Every
+  candidate's scene-boundary temporal-state behavior remains an exact canary
+  requirement rather than an inferred SDK or model property.
+- Edit and Finish share only the typed video Job envelope, source pinning,
+  idempotency, durable inbox, queue, output-root, and lifecycle infrastructure.
+  Their request schemas, capabilities, receipts, backend candidates, planners,
+  and output meanings are separate. Readiness or a receipt for either never
+  enables, validates, retries, or executes the other.
+- `capabilities.videoToolsV2` is an exact passive health shape with reader
+  readiness separate from each lane's writer, backend, runtime, ready state,
+  and reason code. Finish additionally reports independent fast, standard, and
+  quality readiness. Every production writer is currently false. Passive reads
+  do not canonicalize, open, hash, probe, or stage source files; mutate Jobs;
+  mount models; create processes; enqueue; wake; claim; or retry. Unknown,
+  malformed, and future snapshots preserve compatible fields and remain
+  reader-only. Retry reuses the exact snapshot, Edit seed, source identities,
+  and hashes, then revalidates them. Cancel, delete, cleanup, and publish fail
+  closed when ownership is not exact. The version 2 wire, fixture, bounds,
+  snapshot, delivery, lifecycle, and production gates are defined by
+  `PV-ENHANCE-VIDEO-TOOLS-002`.
+- The exact frame-selection UI may later be reused by a separately versioned
+  non-AI trim/export operation. Non-AI trim is not an `edit` or `finish` kind in
+  Video Tools v2, and its writer, output ownership, frame delivery, and audio
+  boundary semantics are separate; Edit readiness authorizes none of them.
 - Readiness is obtained from the current authenticated health response. It is
   not inferred from a committed activation record, benchmark, previous
   process, or candidate revision.
