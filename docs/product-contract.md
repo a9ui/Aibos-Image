@@ -152,6 +152,11 @@ The executable cases for these meanings are routed by
   managed-operation path.
 - Every job snapshots the effective request needed for deterministic retry.
   Later settings changes do not silently rewrite queued or running jobs.
+- Opening or selecting a native photoreal Style is passive and creates no Job.
+  A shipped built-in Style changes only the current positive and blank-positive
+  prompt pair; it preserves the current LoRA, strength, CFG, quality,
+  resolution, seed, Negative text, and Negative-enabled state. User-saved
+  Styles remain separate and may restore the full settings snapshot they own.
 - A successful retry first commits the replacement child job and its durable
   idempotency receipt. Only then is the failed or canceled source row removed
   from terminal history. Rejected, pending-delivery, ambiguous, or malformed

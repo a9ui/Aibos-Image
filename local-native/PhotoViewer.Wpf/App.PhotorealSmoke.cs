@@ -801,6 +801,70 @@ public partial class App
                     emptyPrompt: customEmptyPrompt,
                     negativePrompt: customNegativePrompt);
                 bool customPromptApplied = window.ModalPhotorealSettingsForSmoke.Prompt == customPrompt;
+                var beforeBuiltInStyle = window.ModalPhotorealSettingsForSmoke;
+                var beforeBuiltInSeed = window.PhotorealSeedForSmoke;
+                bool builtInStyleCatalogContract =
+                    window.BuiltInPhotorealStyleIdsForSmoke.SequenceEqual(
+                        new[]
+                        {
+                            "soft-beauty-glamour",
+                            "beauty-natural",
+                            "lifestyle-beauty",
+                            "clean-beauty",
+                            "cinematic-glamour",
+                            "wet-underwater-beauty",
+                        },
+                        StringComparer.Ordinal);
+                bool builtInStyleSelected =
+                    window.SelectBuiltInPhotorealStyleForSmoke(
+                        "soft-beauty-glamour");
+                var appliedBuiltInStyle = window.ModalPhotorealSettingsForSmoke;
+                bool builtInStylePromptOnlyContract = builtInStyleSelected
+                    && appliedBuiltInStyle.Prompt.Contains(
+                        "soft beauty glamour photography",
+                        StringComparison.Ordinal)
+                    && appliedBuiltInStyle.EmptyPrompt == appliedBuiltInStyle.Prompt
+                    && appliedBuiltInStyle.LoraEnabled == beforeBuiltInStyle.LoraEnabled
+                    && Math.Abs(
+                        appliedBuiltInStyle.Strength
+                            - beforeBuiltInStyle.Strength) < 0.001
+                    && Math.Abs(
+                        appliedBuiltInStyle.CfgScale
+                            - beforeBuiltInStyle.CfgScale) < 0.001
+                    && appliedBuiltInStyle.Steps == beforeBuiltInStyle.Steps
+                    && appliedBuiltInStyle.MaxDimension
+                        == beforeBuiltInStyle.MaxDimension
+                    && appliedBuiltInStyle.NegativePrompt
+                        == beforeBuiltInStyle.NegativePrompt
+                    && appliedBuiltInStyle.NegativePromptEnabled
+                        == beforeBuiltInStyle.NegativePromptEnabled
+                    && window.PhotorealSeedForSmoke == beforeBuiltInSeed
+                    && window.BuiltInPhotorealStyleDeleteDisabledForSmoke;
+                window.FlushStateForSmoke();
+                bool builtInStyleReloadContract;
+                var builtInReloadWindow = new MainWindow();
+                try
+                {
+                    builtInReloadWindow.SuppressStatePersistence();
+                    var reloadedBuiltInStyle =
+                        builtInReloadWindow.ModalPhotorealSettingsForSmoke;
+                    builtInStyleReloadContract = string.Equals(
+                            builtInReloadWindow.SelectedBuiltInPhotorealStyleIdForSmoke,
+                            "soft-beauty-glamour",
+                            StringComparison.Ordinal)
+                        && reloadedBuiltInStyle.Prompt
+                            == appliedBuiltInStyle.Prompt
+                        && reloadedBuiltInStyle.EmptyPrompt
+                            == appliedBuiltInStyle.EmptyPrompt
+                        && reloadedBuiltInStyle.NegativePrompt
+                            == appliedBuiltInStyle.NegativePrompt
+                        && builtInReloadWindow.PhotorealSeedForSmoke
+                            == beforeBuiltInSeed;
+                }
+                finally
+                {
+                    builtInReloadWindow.Close();
+                }
                 const string styleName = "Soft Japanese portrait";
                 const string stylePrompt = "adult Japanese portrait preserving the source expression";
                 const string styleEmptyPrompt = "same scene as a photograph";
@@ -911,6 +975,9 @@ public partial class App
                     && appliedStyle.NegativePrompt == styleNegativePrompt;
                 bool styleDeleted = window.DeleteSelectedPhotorealStyleForSmoke();
                 styleContract = window.PhotorealStyleSurfaceForSmoke
+                    && builtInStyleCatalogContract
+                    && builtInStylePromptOnlyContract
+                    && builtInStyleReloadContract
                     && styleSaved
                     && styleSelected
                     && styleApplied
