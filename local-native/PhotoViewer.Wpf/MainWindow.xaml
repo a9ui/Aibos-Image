@@ -1731,6 +1731,44 @@
                             AutomationProperties.Name="Show video generation jobs"/>
                   <CheckBox x:Name="EnhancementJobsI2iFilter" Style="{StaticResource EnhancementJobsFilterPill}" Content="AI編集" Tag="i2i" Click="EnhancementJobsOperationFilter_Click" ToolTip="AI編集Jobだけを表示"/>
                 </UniformGrid>
+                <TextBlock Text="{DynamicResource UiJobsVideoKindTitle}"
+                           Foreground="{StaticResource TextSecondary}"
+                           FontSize="11" FontWeight="SemiBold"
+                           Margin="4,14,0,4"/>
+                <UniformGrid x:Name="EnhancementJobsVideoKindFiltersPanel" Columns="1">
+                  <CheckBox x:Name="EnhancementJobsAllVideoKindsFilter"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Content="{DynamicResource UiJobsVideoKindAll}"
+                            Tag="all" IsChecked="True"
+                            Click="EnhancementJobsVideoKindFilter_Click"
+                            ToolTip="{DynamicResource UiJobsVideoKindAllHelp}"
+                            AutomationProperties.Name="{DynamicResource UiJobsVideoKindAll}"
+                            AutomationProperties.HelpText="{DynamicResource UiJobsVideoKindAllHelp}"/>
+                  <CheckBox x:Name="EnhancementJobsVideoGenerationKindFilter"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Content="{DynamicResource UiJobsVideoKindGeneration}"
+                            Tag="generation"
+                            Click="EnhancementJobsVideoKindFilter_Click"
+                            ToolTip="{DynamicResource UiJobsVideoKindGenerationHelp}"
+                            AutomationProperties.Name="{DynamicResource UiJobsVideoKindGeneration}"
+                            AutomationProperties.HelpText="{DynamicResource UiJobsVideoKindGenerationHelp}"/>
+                  <CheckBox x:Name="EnhancementJobsVideoEditKindFilter"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Content="{DynamicResource UiJobsVideoKindEdit}"
+                            Tag="edit"
+                            Click="EnhancementJobsVideoKindFilter_Click"
+                            ToolTip="{DynamicResource UiJobsVideoKindEditHelp}"
+                            AutomationProperties.Name="{DynamicResource UiJobsVideoKindEdit}"
+                            AutomationProperties.HelpText="{DynamicResource UiJobsVideoKindEditHelp}"/>
+                  <CheckBox x:Name="EnhancementJobsVideoFinishKindFilter"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Content="{DynamicResource UiJobsVideoKindFinish}"
+                            Tag="finish"
+                            Click="EnhancementJobsVideoKindFilter_Click"
+                            ToolTip="{DynamicResource UiJobsVideoKindFinishHelp}"
+                            AutomationProperties.Name="{DynamicResource UiJobsVideoKindFinish}"
+                            AutomationProperties.HelpText="{DynamicResource UiJobsVideoKindFinishHelp}"/>
+                </UniformGrid>
                 <TextBlock Text="履歴の表示件数" Foreground="{StaticResource TextSecondary}" FontSize="11" FontWeight="SemiBold" Margin="4,14,0,4"/>
                 <ComboBox x:Name="EnhancementJobsHistoryLimitComboBox"
                           Style="{StaticResource PhotorealSettingsComboBox}"

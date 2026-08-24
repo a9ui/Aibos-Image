@@ -393,4 +393,13 @@
   <sys:String x:Key="UiVideoH3StatusTimedOut">H3 rewriting did not finish within 6 minutes. The input prompt was not changed. Try again.</sys:String>
   <sys:String x:Key="UiVideoH3StatusApplied">Applied the candidate to the input prompt. Video generation has not started.</sys:String>
   <sys:String x:Key="UiVideoH3StatusUndone">Restored the input prompt to its value before the apply.</sys:String>
+  <sys:String x:Key="UiJobsVideoKindTitle">Video kind</sys:String>
+  <sys:String x:Key="UiJobsVideoKindAll">All videos</sys:String>
+  <sys:String x:Key="UiJobsVideoKindGeneration">Generation</sys:String>
+  <sys:String x:Key="UiJobsVideoKindEdit">AI video edit</sys:String>
+  <sys:String x:Key="UiJobsVideoKindFinish">AI video enhancement</sys:String>
+  <sys:String x:Key="UiJobsVideoKindAllHelp">Show generation, AI video edit, AI video enhancement, and protected video jobs whose kind cannot be classified.</sys:String>
+  <sys:String x:Key="UiJobsVideoKindGenerationHelp">Show ordinary video generation only. Legacy Retake and Finish remain in All videos and are never reinterpreted as a new kind.</sys:String>
+  <sys:String x:Key="UiJobsVideoKindEditHelp">Show only exact Video Tools v2 Edit jobs. Unknown, malformed, and future rows are not guessed.</sys:String>
+  <sys:String x:Key="UiJobsVideoKindFinishHelp">Show only exact Video Tools v2 Finish jobs. Unknown, malformed, and future rows are not guessed.</sys:String>
 </ResourceDictionary>

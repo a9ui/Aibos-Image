@@ -590,24 +590,57 @@ public partial class MainWindow
 
     private static bool ClaimsVideoToolsWorkspaceSnapshot(JsonElement job)
     {
-        if (!job.TryGetProperty("video", out JsonElement video)
-            || video.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
+        bool jobClaimsVideoToolsV2 = job.ValueKind == JsonValueKind.Object
+            && job.EnumerateObject().Any(static property =>
+                property.Value.ValueKind == JsonValueKind.String
+                && property.Value.GetString() is string value
+                && (property.NameEquals("presetId")
+                        && value is "aibos-video-edit-v2"
+                            or "aibos-video-finish-v2"
+                    || property.NameEquals("adapterId")
+                        && (VideoToolsV2EditBackends.Contains(value)
+                            || VideoToolsV2FinishBackends.Contains(value))));
+        return jobClaimsVideoToolsV2
+            || job.ValueKind == JsonValueKind.Object
+            && job.EnumerateObject().Any(static property =>
+                property.NameEquals("video")
+                && property.Value.ValueKind == JsonValueKind.Object
+                && ClaimsVideoToolsPayload(property.Value));
+    }
+
+    private static bool ClaimsVideoToolsPayload(JsonElement video)
+    {
         bool protocolClaimsVideoTools =
-            HasSingleProperty(video, "protocol")
-            && video.TryGetProperty("protocol", out JsonElement protocol)
-            && protocol.ValueKind == JsonValueKind.String
-            && protocol.GetString() is string protocolValue
-            && protocolValue.StartsWith(
-                "aibos-enhancement-video-tools-",
-                StringComparison.Ordinal);
+            video.EnumerateObject().Any(static property =>
+                property.NameEquals("protocol")
+                && property.Value.ValueKind == JsonValueKind.String
+                && property.Value.GetString() is string protocolValue
+                && protocolValue.StartsWith(
+                    "aibos-enhancement-video-tools-",
+                    StringComparison.Ordinal));
+        bool schemaAndKindClaimVideoToolsV2 =
+            video.EnumerateObject().Any(static property =>
+                property.NameEquals("schemaVersion")
+                && property.Value.ValueKind == JsonValueKind.Number
+                && property.Value.TryGetInt32(out int value)
+                && value == 2)
+            && video.EnumerateObject().Any(static property =>
+                property.NameEquals("kind")
+                && property.Value.ValueKind == JsonValueKind.String
+                && property.Value.GetString() is "edit" or "finish");
+        bool schemaAndKindClaimVideoToolsV1 =
+            video.EnumerateObject().Any(static property =>
+                property.NameEquals("schemaVersion")
+                && property.Value.ValueKind == JsonValueKind.Number
+                && property.Value.TryGetInt32(out int value)
+                && value == 1)
+            && video.EnumerateObject().Any(static property =>
+                property.NameEquals("kind")
+                && property.Value.ValueKind == JsonValueKind.String
+                && property.Value.GetString() is "retake" or "finish");
         return protocolClaimsVideoTools
-            || (VideoToolsExactInt32(video, "schemaVersion", 1)
-                && video.TryGetProperty("kind", out JsonElement kind)
-                && kind.ValueKind == JsonValueKind.String
-                && kind.GetString() is "retake" or "finish");
+            || schemaAndKindClaimVideoToolsV2
+            || schemaAndKindClaimVideoToolsV1;
     }
 
     private static bool TryReadVideoToolsWorkspaceSnapshot(

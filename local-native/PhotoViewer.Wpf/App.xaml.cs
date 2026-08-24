@@ -520,6 +520,18 @@ public partial class App : Application
             return;
         }
 
+        int videoToolsV2ReaderSmokeIdx = Array.IndexOf(
+            e.Args,
+            "--video-tools-v2-reader-smoke");
+        if (videoToolsV2ReaderSmokeIdx >= 0
+            && videoToolsV2ReaderSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoToolsV2ReaderSmoke(
+                e.Args[videoToolsV2ReaderSmokeIdx + 1],
+                e.Args);
+            return;
+        }
+
         int highContrastSmokeIdx = Array.IndexOf(e.Args, "--high-contrast-smoke");
         if (highContrastSmokeIdx >= 0 && highContrastSmokeIdx + 1 < e.Args.Length)
         {
