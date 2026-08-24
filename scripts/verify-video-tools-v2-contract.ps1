@@ -126,6 +126,22 @@ Assert-ExactSet @($v2.request.clientForbiddenFields) @(
 ) 'client-forbidden fields'
 
 $compiler = $v2.promptCompiler
+$compilerTransport = $compiler.transport
+Assert-ExactSet @($compilerTransport.exactActions) @(
+    'probe', 'preview', 'compile'
+) 'prompt compiler transport actions'
+if ($compilerTransport.route -cne '/api/enhance/video-prompts/v2/edit/compile' -or
+    $compilerTransport.method -cne 'POST' -or
+    $compilerTransport.maximumRequestBytes -ne 131072 -or
+    $compilerTransport.maximumResponseBytesByAction.probe -ne 131072 -or
+    $compilerTransport.maximumResponseBytesByAction.preview -ne 2113536 -or
+    $compilerTransport.maximumResponseBytesByAction.compile -ne 131072 -or
+    $compilerTransport.routing -notmatch '404' -or
+    $compilerTransport.routing -notmatch '405' -or
+    $compilerTransport.routing -notmatch 'Allow: POST' -or
+    $compilerTransport.passiveReads -notmatch 'never dispatch') {
+    throw 'The authenticated exact Video Edit route or its action-specific byte limits changed.'
+}
 Assert-ExactSet @($compiler.previewIdentities.exactRoles) @(
     'start', 'middle', 'end'
 ) 'prompt compiler preview roles'
@@ -140,40 +156,77 @@ Assert-ExactSet @($compiler.previewProbe.exactSourceSummaryFields) @(
     'width',
     'height'
 ) 'transient preview-probe source summary fields'
+Assert-ExactSet @($compiler.previewProbe.exactPreviewFields) @(
+    'role',
+    'sourceFrame',
+    'sourcePts',
+    'decodedPixelSha256',
+    'decoderRevision',
+    'mime',
+    'width',
+    'height',
+    'encodedBytes',
+    'encodedSha256',
+    'base64'
+) 'transient preview payload fields'
+Assert-ExactSet @($compiler.previewProbe.thumbnail.orderedRoles) @(
+    'start', 'middle', 'end'
+) 'transient preview thumbnail roles'
+if ($compiler.previewProbe.thumbnail.mime -cne 'image/png' -or
+    $compiler.previewProbe.thumbnail.exactCount -ne 3 -or
+    $compiler.previewProbe.thumbnail.maximumEdge -ne 384 -or
+    $compiler.previewProbe.thumbnail.maximumPixels -ne 147456 -or
+    $compiler.previewProbe.thumbnail.maximumEncodedBytesEach -ne 524288 -or
+    $compiler.previewProbe.thumbnail.maximumEncodedBytesTotal -ne 1572864 -or
+    $compiler.previewProbe.thumbnail.base64 -notmatch 'no data-URL prefix' -or
+    $compiler.previewProbe.thumbnail.encodedSha256 -notmatch 'separate from decodedPixelSha256' -or
+    $compiler.previewProbe.thumbnail.decodedPixelIdentity -notmatch 'full-resolution source-frame RGB24' -or
+    $compiler.previewProbe.thumbnail.runtime -notmatch 'shell=false' -or
+    $compiler.previewProbe.thumbnail.sourceLease -notmatch 'pre/post source SHA-256') {
+    throw 'The exact bounded PNG thumbnail payload or immutable source/runtime boundary changed.'
+}
 Assert-ExactSet @($compiler.candidate.exactFields) @(
     'backendPrompt', 'summaryJa', 'compilerRevision', 'contextDigest'
 ) 'prompt compiler candidate fields'
-if ($compiler.labelJa -cne '指示を整える' -or
-    $compiler.action -cne 'explicit authenticated Edit action' -or
-    $compiler.previewProbe.labelJa -cne 'フレームを読み込む' -or
-    $compiler.previewProbe.action -cne
-        'explicit authenticated transient source-preview action' -or
-    $compiler.previewProbe.effects.createsJob -ne $false -or
-    $compiler.previewProbe.effects.publishesDurableInbox -ne $false -or
-    $compiler.previewProbe.effects.wakesQueue -ne $false -or
-    $compiler.previewProbe.effects.stagesSource -ne $false -or
-    $compiler.previewProbe.effects.createsOutput -ne $false -or
-    $compiler.previewProbe.gate -notmatch 'stay disabled' -or
-    $compiler.previewProbe.fpsRule -notmatch 'Never assume 24 fps' -or
-    $compiler.previewProbe.managedVideoJob -notmatch 'persisted source probe' -or
-    $compiler.effects.mayBindCanonicalizeHashAndProbeSelectedSource -ne $true -or
-    $compiler.effects.mayDecodeBoundedPreviewFrames -ne $true -or
-    $compiler.effects.mayInvokeLocalCompiler -ne $true -or
-    $compiler.effects.stagesSource -ne $false -or
-    $compiler.effects.createsJob -ne $false -or
-    $compiler.effects.publishesDurableInbox -ne $false -or
-    $compiler.effects.wakesQueue -ne $false -or
-    $compiler.effects.createsOutput -ne $false -or
-    $compiler.candidate.transient -ne $true -or
-    $compiler.candidate.durableBeforeStart -ne $false -or
-    $compiler.reviewUnchecked -notmatch 'separate explicit Start' -or
-    $compiler.reviewSkipChecked -notmatch 'single-use authorization' -or
-    $compiler.reviewSkipChecked -notmatch 'response by itself never' -or
-    $compiler.startRevalidation -notmatch 'no durable inbox publication' -or
-    $compiler.passive -notmatch 'never bind' -or
-    $v2.featureIsolation.nonAiTrim -notmatch 'separately versioned' -or
-    $v2.featureIsolation.nonAiTrim -notmatch 'not an Edit or Finish kind') {
-    throw 'The explicit transient prompt-compiler flow or separate non-AI trim boundary changed.'
+$expectedCompilerLabel = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('5oyH56S644KS5pW044GI44KL'))
+$expectedPreviewLabel = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('44OV44Os44O844Og44KS6Kqt44G/6L6844KA'))
+$compilerFlowChecks = [ordered]@{
+    label = $compiler.labelJa -cne $expectedCompilerLabel
+    action = $compiler.action -cne 'explicit authenticated Edit action'
+    previewLabel = $compiler.previewProbe.labelJa -cne $expectedPreviewLabel
+    previewAction = $compiler.previewProbe.action -cne 'explicit authenticated transient source-preview action'
+    previewCreatesJob = $compiler.previewProbe.effects.createsJob -ne $false
+    previewPublishesInbox = $compiler.previewProbe.effects.publishesDurableInbox -ne $false
+    previewWakesQueue = $compiler.previewProbe.effects.wakesQueue -ne $false
+    previewStagesSource = $compiler.previewProbe.effects.stagesSource -ne $false
+    previewCreatesOutput = $compiler.previewProbe.effects.createsOutput -ne $false
+    previewGate = $compiler.previewProbe.gate -notmatch 'stay disabled'
+    previewFps = $compiler.previewProbe.fpsRule -notmatch 'Never assume 24 fps'
+    previewManaged = $compiler.previewProbe.managedVideoJob -notmatch 'persisted source probe'
+    bindsSource = $compiler.effects.mayBindCanonicalizeHashAndProbeSelectedSource -ne $true
+    decodesPreview = $compiler.effects.mayDecodeBoundedPreviewFrames -ne $true
+    invokesCompiler = $compiler.effects.mayInvokeLocalCompiler -ne $true
+    stagesSource = $compiler.effects.stagesSource -ne $false
+    createsJob = $compiler.effects.createsJob -ne $false
+    publishesInbox = $compiler.effects.publishesDurableInbox -ne $false
+    wakesQueue = $compiler.effects.wakesQueue -ne $false
+    createsOutput = $compiler.effects.createsOutput -ne $false
+    candidateTransient = $compiler.candidate.transient -ne $true
+    candidateDurable = $compiler.candidate.durableBeforeStart -ne $false
+    review = $compiler.reviewUnchecked -notmatch 'separate explicit Start'
+    skipAuthorization = $compiler.reviewSkipChecked -notmatch 'single-use authorization'
+    skipResponse = $compiler.reviewSkipChecked -notmatch 'response by itself never'
+    revalidation = $compiler.startRevalidation -notmatch 'no durable inbox publication'
+    passive = $compiler.passive -notmatch 'never bind'
+    nonAiVersion = $v2.featureIsolation.nonAiTrim -notmatch 'separately versioned'
+    nonAiKind = $v2.featureIsolation.nonAiTrim -notmatch 'not an Edit or Finish kind'
+}
+$compilerFlowFailures = @($compilerFlowChecks.GetEnumerator() |
+    Where-Object { $_.Value } | ForEach-Object { $_.Key })
+if ($compilerFlowFailures.Count -ne 0) {
+    throw "The explicit transient prompt-compiler flow or separate non-AI trim boundary changed: $($compilerFlowFailures -join ', ')."
 }
 
 $source = $v2.source
@@ -475,6 +528,75 @@ if ($fixture.schemaVersion -ne 1 -or
     $fixture.readerFixtures.finish.video.plan.backendDeliveryRevision -cne
         'nvidia-vfx-vsr-2x-v1') {
     throw 'The paired public/private v2 reader fixture identity is incomplete.'
+}
+$previewVector = $fixture.previewProbeVector
+Assert-ExactSet @($previewVector.response.source.PSObject.Properties.Name) @(
+    'frameCount',
+    'fpsNumerator',
+    'fpsDenominator',
+    'durationMs',
+    'width',
+    'height'
+) 'preview fixture source summary fields'
+if ($previewVector.route -cne $compilerTransport.route -or
+    $previewVector.method -cne 'POST' -or
+    $previewVector.maximumRequestBytes -ne 131072 -or
+    $previewVector.maximumResponseBytes -ne 2113536 -or
+    $previewVector.request.action -cne 'preview' -or
+    $previewVector.response.action -cne 'preview' -or
+    (@($previewVector.response.previews.role) -join ',') -cne 'start,middle,end' -or
+    (@($previewVector.response.previews.sourceFrame) -join ',') -cne '24,47,71' -or
+    $previewVector.expectedEffects.createsJob -ne $false -or
+    $previewVector.expectedEffects.publishesDurableInbox -ne $false -or
+    $previewVector.expectedEffects.wakesQueue -ne $false -or
+    $previewVector.expectedEffects.stagesSource -ne $false -or
+    $previewVector.expectedEffects.createsOutput -ne $false) {
+    throw 'The exact synthetic explicit-preview fixture routing, ordering, or passive effect boundary changed.'
+}
+$previewEncodedTotal = 0
+foreach ($preview in @($previewVector.response.previews)) {
+    Assert-ExactSet @($preview.PSObject.Properties.Name) @(
+        $compiler.previewProbe.exactPreviewFields
+    ) "preview fixture $($preview.role) fields"
+    if ($preview.mime -cne 'image/png' -or
+        $preview.width -lt 1 -or
+        $preview.height -lt 1 -or
+        $preview.width -gt 384 -or
+        $preview.height -gt 384 -or
+        ($preview.width * $preview.height) -gt 147456 -or
+        $preview.encodedBytes -lt 1 -or
+        $preview.encodedBytes -gt 524288 -or
+        $preview.decodedPixelSha256 -notmatch '^[0-9a-f]{64}$' -or
+        $preview.encodedSha256 -notmatch '^[0-9a-f]{64}$' -or
+        $preview.decodedPixelSha256 -ceq $preview.encodedSha256 -or
+        $preview.base64 -match '^data:') {
+        throw "The $($preview.role) preview fixture thumbnail is not exact and bounded."
+    }
+    try {
+        $encoded = [Convert]::FromBase64String([string]$preview.base64)
+    } catch {
+        throw "The $($preview.role) preview fixture base64 is invalid."
+    }
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $encodedHash = $sha256.ComputeHash($encoded)
+    } finally {
+        $sha256.Dispose()
+    }
+    $encodedSha256 = -join @($encodedHash | ForEach-Object {
+        $_.ToString('x2')
+    })
+    if ($encoded.Length -ne $preview.encodedBytes -or
+        [Convert]::ToBase64String($encoded) -cne $preview.base64 -or
+        $encodedSha256 -cne $preview.encodedSha256 -or
+        (-join @($encoded[0..7] | ForEach-Object { $_.ToString('X2') })) -cne
+            '89504E470D0A1A0A') {
+        throw "The $($preview.role) preview fixture PNG bytes or digest are invalid."
+    }
+    $previewEncodedTotal += $encoded.Length
+}
+if ($previewEncodedTotal -gt 1572864) {
+    throw 'The preview fixture exceeds the exact total encoded PNG byte limit.'
 }
 Assert-ExactSet @($fixture.audioPolicyVectors.mute.plan.PSObject.Properties.Name) @(
     $audioPlanVariants.mute.exactKeys

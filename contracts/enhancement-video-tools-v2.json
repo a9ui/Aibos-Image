@@ -215,6 +215,23 @@
   "promptCompiler": {
     "labelJa": "指示を整える",
     "action": "explicit authenticated Edit action",
+    "transport": {
+      "route": "/api/enhance/video-prompts/v2/edit/compile",
+      "method": "POST",
+      "exactActions": [
+        "probe",
+        "preview",
+        "compile"
+      ],
+      "maximumRequestBytes": 131072,
+      "maximumResponseBytesByAction": {
+        "probe": 131072,
+        "preview": 2113536,
+        "compile": 131072
+      },
+      "routing": "The exact POST route is registered only inside the authenticated loopback Companion dispatch. Unknown paths fail 404 and unsupported methods fail 405 with Allow: POST.",
+      "passiveReads": "Health and Jobs reads never dispatch this route or bind, open, hash, probe, or decode its source."
+    },
     "previewProbe": {
       "labelJa": "フレームを読み込む",
       "action": "explicit authenticated transient source-preview action",
@@ -228,7 +245,38 @@
         "width",
         "height"
       ],
-      "response": "one transient exact source summary plus the requested bounded preview identities under previewIdentities; it is not a request, Job snapshot, retry authority, or readiness receipt",
+      "response": "one transient exact source summary plus exactly three ordered start/middle/end displayable PNG payloads under previews; it is not a request, Job snapshot, retry authority, or readiness receipt",
+      "exactPreviewFields": [
+        "role",
+        "sourceFrame",
+        "sourcePts",
+        "decodedPixelSha256",
+        "decoderRevision",
+        "mime",
+        "width",
+        "height",
+        "encodedBytes",
+        "encodedSha256",
+        "base64"
+      ],
+      "thumbnail": {
+        "mime": "image/png",
+        "exactCount": 3,
+        "orderedRoles": [
+          "start",
+          "middle",
+          "end"
+        ],
+        "maximumEdge": 384,
+        "maximumPixels": 147456,
+        "maximumEncodedBytesEach": 524288,
+        "maximumEncodedBytesTotal": 1572864,
+        "base64": "canonical RFC 4648 base64 only, with no data-URL prefix",
+        "encodedSha256": "lowercase SHA-256 of the exact encoded PNG bytes and separate from decodedPixelSha256",
+        "decodedPixelIdentity": "decodedPixelSha256 remains lowercase SHA-256 of the exact full-resolution source-frame RGB24 bytes before thumbnail scaling or PNG encoding",
+        "runtime": "Use only the existing exactly pinned FFmpeg/FFprobe runtime through a direct owned process with shell=false, bounded timeout/cancel/stdout/stderr, verifier-owned scratch cleanup, and no fallback binary.",
+        "sourceLease": "The no-delete/read source lease, opened-handle pre/post source SHA-256 checks, exact tool re-resolution, and scratch cleanup cover both full RGB24 identity decoding and bounded PNG extraction."
+      },
       "effects": {
         "createsJob": false,
         "publishesDurableInbox": false,

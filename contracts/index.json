@@ -102,7 +102,7 @@
       "contractId": "PV-ENHANCE-VIDEO-TOOLS-002",
       "path": "contracts/enhancement-video-tools-v2.json",
       "scope": "Reader-first source-video Edit and spatial Video Finish protocol",
-      "sha256": "cb0335532f90d7e4d0c9b248861b6ed49e346e2ca84592f27d9e6bd8559138ca"
+      "sha256": "e669d1893324f1c4c270628574ab9091d653560c1094c3b81f417bf8cff3239e"
     },
     {
       "contractId": "PV-ENHANCE-VIDEO-H3-PROMPT-REWRITE-001",
@@ -160,7 +160,7 @@
       "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
       "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
       "path": "contracts/fixtures/enhancement-video-tools-v2-reader-v1.json",
-      "sha256": "66af5882acf560ae078301070794bef5c1f21b9b649c3cc200c5908926676ea9"
+      "sha256": "5a0d06662bc0ae57bbfc8cb5a2914093e8bda0789dd7523c60ddea6e0c663849"
     }
   ],
   "verificationBundles": [
