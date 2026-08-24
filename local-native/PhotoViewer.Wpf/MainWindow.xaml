@@ -3381,6 +3381,25 @@
                   AutomationProperties.HelpText="{DynamicResource UiVideoToolsFinishHelp}"
                   MinWidth="94" Height="32" Padding="8,0" Margin="0,0,4,0"
                   Visibility="Collapsed" Click="OpenModalVideoFinish_Click"/>
+          <Button x:Name="ModalVideoEditV2Button"
+                  Style="{StaticResource GhostButton}"
+                  Content="{DynamicResource UiVideoEditV2Action}"
+                  ToolTip="{DynamicResource UiVideoEditV2ActionHelp}"
+                  AutomationProperties.Name="{DynamicResource UiVideoEditV2ActionAutomation}"
+                  AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ActionHelp}"
+                  MinWidth="126" Height="32" Padding="9,0" Margin="0,0,4,0"
+                  Visibility="Collapsed" Click="OpenModalVideoEditV2_Click">
+            <Button.ContextMenu>
+              <ContextMenu x:Name="ModalVideoEditV2ExternalContextMenu"
+                           Placement="MousePoint"
+                           AutomationProperties.Name="{DynamicResource UiVideoEditV2ContextMenuAutomation}">
+                <MenuItem Header="{DynamicResource UiVideoEditV2Action}"
+                          Click="OpenModalVideoEditV2_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoEditV2ActionAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ActionHelp}"/>
+              </ContextMenu>
+            </Button.ContextMenu>
+          </Button>
           <Button x:Name="ModalI2iEditButton" Style="{StaticResource GhostButton}"
                   ToolTip="表示中のOriginalまたは実写化版をAI編集"
                   AutomationProperties.Name="実写編集"
@@ -4345,6 +4364,426 @@
         </Border>
       </Grid>
 
+      <Grid x:Name="ModalVideoEditV2Popup" Grid.RowSpan="3" Grid.ColumnSpan="2"
+            Visibility="Collapsed" Panel.ZIndex="92" Background="Transparent"
+            WindowChrome.IsHitTestVisibleInChrome="True"
+            IsVisibleChanged="ModalVideoEditV2Popup_IsVisibleChanged"
+            AutomationProperties.Name="{DynamicResource UiVideoEditV2BoardAutomation}"
+            AutomationProperties.HelpText="{DynamicResource UiVideoEditV2BoardHelp}">
+        <Border x:Name="ModalVideoEditV2BoardBorder" Width="500" MaxHeight="720"
+                Padding="16" CornerRadius="7"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+                Background="{StaticResource BgElevated}"
+                BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                KeyboardNavigation.TabNavigation="Cycle"
+                KeyboardNavigation.ControlTabNavigation="Cycle">
+          <ScrollViewer VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,6,0">
+              <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                        Width="28" Height="28" Click="CloseModalVideoEditV2_Click"
+                        ToolTip="{DynamicResource UiVideoEditV2Close}"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2Close}">
+                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE711;"
+                             Foreground="{StaticResource TextSecondary}" FontSize="12"/>
+                </Button>
+                <StackPanel>
+                  <TextBlock Text="{DynamicResource UiVideoEditV2Action}"
+                             Foreground="{StaticResource TextPrimary}"
+                             FontSize="17" FontWeight="SemiBold"/>
+                  <TextBlock Text="{DynamicResource UiVideoEditV2Subtitle}"
+                             Foreground="{StaticResource TextSecondary}"
+                             FontSize="10.5" Margin="0,2,0,0"/>
+                </StackPanel>
+              </DockPanel>
+
+              <Border Padding="10" CornerRadius="5" Margin="0,0,0,10"
+                      Background="{StaticResource SoftFill}"
+                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                <StackPanel>
+                  <TextBlock x:Name="ModalVideoEditV2SourceText"
+                             Foreground="{StaticResource TextPrimary}" FontSize="10.5"
+                             FontWeight="SemiBold" TextWrapping="Wrap"
+                             AutomationProperties.Name="{DynamicResource UiVideoEditV2SourceAutomation}"/>
+                  <TextBlock Text="{DynamicResource UiVideoEditV2ChildClipNotice}"
+                             Foreground="{StaticResource TextTertiary}" FontSize="10.5"
+                             TextWrapping="Wrap" Margin="0,4,0,0"/>
+                  <Button x:Name="ModalVideoEditV2ProbeButton"
+                          Style="{StaticResource GhostButton}"
+                          Content="{DynamicResource UiVideoEditV2ProbeAction}"
+                          Height="30" Margin="0,8,0,0" HorizontalAlignment="Stretch"
+                          Visibility="Collapsed"
+                          Click="ProbeModalVideoEditV2Frames_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoEditV2ProbeAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ProbeHelp}"/>
+                  <TextBlock x:Name="ModalVideoEditV2ProbeStatusText"
+                             Foreground="{StaticResource TextTertiary}" FontSize="9.5"
+                             TextWrapping="Wrap" Margin="0,5,0,0"
+                             AutomationProperties.LiveSetting="Polite"/>
+                </StackPanel>
+              </Border>
+
+              <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="104"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{DynamicResource UiVideoEditV2RangeTitle}"
+                           Foreground="{StaticResource TextPrimary}" FontSize="12"
+                           FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <ComboBox x:Name="ModalVideoEditV2FpsComboBox" Grid.Column="1"
+                          Style="{StaticResource PhotorealSettingsComboBox}"
+                          SelectedIndex="0" Height="30"
+                          SelectionChanged="ModalVideoEditV2Fps_SelectionChanged"
+                          AutomationProperties.Name="{DynamicResource UiVideoEditV2FpsAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoEditV2FpsHelp}">
+                  <ComboBoxItem Content="24 fps" Tag="24"/>
+                  <ComboBoxItem Content="30 fps" Tag="30"/>
+                  <ComboBoxItem Content="60 fps" Tag="60"/>
+                </ComboBox>
+              </Grid>
+
+              <Grid Margin="0,0,0,7">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="94"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="82"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2StartFrameLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <TextBox x:Name="ModalVideoEditV2StartFrameTextBox" Text="0"
+                           MaxLength="6" Padding="7,4"
+                           Foreground="{StaticResource TextPrimary}"
+                           Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}"
+                           SelectionBrush="{StaticResource AccentFill}"
+                           BorderBrush="{StaticResource BorderStrong}"
+                           TextChanged="ModalVideoEditV2RangeText_Changed"
+                           AutomationProperties.Name="{DynamicResource UiVideoEditV2StartFrameAutomation}"/>
+                </StackPanel>
+                <Slider x:Name="ModalVideoEditV2StartSlider" Grid.Column="1"
+                        Minimum="0" Maximum="1" Value="0" TickFrequency="1"
+                        IsSnapToTickEnabled="True" IsMoveToPointEnabled="True"
+                        VerticalAlignment="Bottom" Margin="0,0,8,6"
+                        ValueChanged="ModalVideoEditV2StartSlider_Changed"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2StartSliderAutomation}"/>
+                <Button x:Name="ModalVideoEditV2UseCurrentStartButton"
+                        Grid.Column="2" Style="{StaticResource GhostButton}"
+                        Content="{DynamicResource UiVideoEditV2UseCurrent}"
+                        Height="29" VerticalAlignment="Bottom"
+                        Click="ModalVideoEditV2UseCurrentStart_Click"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2UseCurrentStartAutomation}"/>
+              </Grid>
+
+              <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="94"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="82"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2EndFrameLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <TextBox x:Name="ModalVideoEditV2EndFrameTextBox" Text="120"
+                           MaxLength="6" Padding="7,4"
+                           Foreground="{StaticResource TextPrimary}"
+                           Background="{StaticResource BgPrimary}"
+                           CaretBrush="{StaticResource TextPrimary}"
+                           SelectionBrush="{StaticResource AccentFill}"
+                           BorderBrush="{StaticResource BorderStrong}"
+                           TextChanged="ModalVideoEditV2RangeText_Changed"
+                           AutomationProperties.Name="{DynamicResource UiVideoEditV2EndFrameAutomation}"/>
+                </StackPanel>
+                <Slider x:Name="ModalVideoEditV2EndSlider" Grid.Column="1"
+                        Minimum="1" Maximum="1" Value="1" TickFrequency="1"
+                        IsSnapToTickEnabled="True" IsMoveToPointEnabled="True"
+                        VerticalAlignment="Bottom" Margin="0,0,8,6"
+                        ValueChanged="ModalVideoEditV2EndSlider_Changed"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2EndSliderAutomation}"/>
+                <Button x:Name="ModalVideoEditV2UseCurrentEndButton"
+                        Grid.Column="2" Style="{StaticResource GhostButton}"
+                        Content="{DynamicResource UiVideoEditV2UseCurrent}"
+                        Height="29" VerticalAlignment="Bottom"
+                        Click="ModalVideoEditV2UseCurrentEnd_Click"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2UseCurrentEndAutomation}"/>
+              </Grid>
+
+              <TextBlock x:Name="ModalVideoEditV2RangeStatusText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,0,0,9"
+                         AutomationProperties.Name="{DynamicResource UiVideoEditV2RangeStatusAutomation}"
+                         AutomationProperties.LiveSetting="Polite"/>
+
+              <UniformGrid Columns="3" Margin="0,0,0,5">
+                <Button x:Name="ModalVideoEditV2StartPreviewButton"
+                        Style="{StaticResource GhostButton}" Tag="start"
+                        MinHeight="76" Margin="0,0,4,0" Padding="8,6"
+                        Click="ModalVideoEditV2PreviewSeek_Click"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2StartPreviewAutomation}"
+                        AutomationProperties.HelpText="{DynamicResource UiVideoEditV2PreviewSeekHelp}">
+                  <StackPanel>
+                    <TextBlock Text="{DynamicResource UiVideoEditV2StartPreviewLabel}"
+                               Foreground="{StaticResource TextSecondary}" FontSize="10"/>
+                    <TextBlock x:Name="ModalVideoEditV2StartPreviewFrameText"
+                               Text="f --" Foreground="{StaticResource TextPrimary}"
+                               FontFamily="{StaticResource MonoFont}" FontSize="12"
+                               FontWeight="SemiBold" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="ModalVideoEditV2StartPreviewTimeText"
+                               Text="-- s" Foreground="{StaticResource TextTertiary}"
+                               FontFamily="{StaticResource MonoFont}" FontSize="10"/>
+                  </StackPanel>
+                </Button>
+                <Button x:Name="ModalVideoEditV2MiddlePreviewButton"
+                        Style="{StaticResource GhostButton}" Tag="middle"
+                        MinHeight="76" Margin="2,0" Padding="8,6"
+                        Click="ModalVideoEditV2PreviewSeek_Click"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2MiddlePreviewAutomation}"
+                        AutomationProperties.HelpText="{DynamicResource UiVideoEditV2PreviewSeekHelp}">
+                  <StackPanel>
+                    <TextBlock Text="{DynamicResource UiVideoEditV2MiddlePreviewLabel}"
+                               Foreground="{StaticResource TextSecondary}" FontSize="10"/>
+                    <TextBlock x:Name="ModalVideoEditV2MiddlePreviewFrameText"
+                               Text="f --" Foreground="{StaticResource TextPrimary}"
+                               FontFamily="{StaticResource MonoFont}" FontSize="12"
+                               FontWeight="SemiBold" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="ModalVideoEditV2MiddlePreviewTimeText"
+                               Text="-- s" Foreground="{StaticResource TextTertiary}"
+                               FontFamily="{StaticResource MonoFont}" FontSize="10"/>
+                  </StackPanel>
+                </Button>
+                <Button x:Name="ModalVideoEditV2EndPreviewButton"
+                        Style="{StaticResource GhostButton}" Tag="end"
+                        MinHeight="76" Margin="4,0,0,0" Padding="8,6"
+                        Click="ModalVideoEditV2PreviewSeek_Click"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2EndPreviewAutomation}"
+                        AutomationProperties.HelpText="{DynamicResource UiVideoEditV2PreviewSeekHelp}">
+                  <StackPanel>
+                    <TextBlock Text="{DynamicResource UiVideoEditV2EndPreviewLabel}"
+                               Foreground="{StaticResource TextSecondary}" FontSize="10"/>
+                    <TextBlock x:Name="ModalVideoEditV2EndPreviewFrameText"
+                               Text="f --" Foreground="{StaticResource TextPrimary}"
+                               FontFamily="{StaticResource MonoFont}" FontSize="12"
+                               FontWeight="SemiBold" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="ModalVideoEditV2EndPreviewTimeText"
+                               Text="-- s" Foreground="{StaticResource TextTertiary}"
+                               FontFamily="{StaticResource MonoFont}" FontSize="10"/>
+                  </StackPanel>
+                </Button>
+              </UniformGrid>
+              <TextBlock Text="{DynamicResource UiVideoEditV2PreviewSeekNotice}"
+                         Foreground="{StaticResource TextTertiary}" FontSize="9.5"
+                         TextWrapping="Wrap" Margin="0,0,0,7"/>
+              <Button x:Name="ModalVideoEditV2TrimButton"
+                      Style="{StaticResource GhostButton}"
+                      Content="{DynamicResource UiVideoEditV2TrimAction}"
+                      Height="31" HorizontalAlignment="Stretch" IsEnabled="False"
+                      ToolTip="{DynamicResource UiVideoEditV2TrimPending}"
+                      AutomationProperties.Name="{DynamicResource UiVideoEditV2TrimAutomation}"
+                      AutomationProperties.HelpText="{DynamicResource UiVideoEditV2TrimPending}"/>
+              <TextBlock Text="{DynamicResource UiVideoEditV2TrimSeparationNotice}"
+                         Foreground="{StaticResource TextTertiary}" FontSize="9.5"
+                         TextWrapping="Wrap" Margin="0,4,0,11"/>
+
+              <TextBlock Text="{DynamicResource UiVideoEditV2InstructionLabel}"
+                         Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                         FontWeight="SemiBold" Margin="0,0,0,4"/>
+              <TextBox x:Name="ModalVideoEditV2InstructionTextBox"
+                       MinHeight="82" MaxHeight="142" MaxLength="2000"
+                       AcceptsReturn="True" TextWrapping="Wrap"
+                       VerticalScrollBarVisibility="Auto" Padding="8,6"
+                       Foreground="{StaticResource TextPrimary}"
+                       Background="{StaticResource BgPrimary}"
+                       CaretBrush="{StaticResource TextPrimary}"
+                       SelectionBrush="{StaticResource AccentFill}"
+                       BorderBrush="{StaticResource BorderStrong}"
+                       TextChanged="ModalVideoEditV2Input_Changed"
+                       AutomationProperties.Name="{DynamicResource UiVideoEditV2InstructionAutomation}"
+                       AutomationProperties.HelpText="{DynamicResource UiVideoEditV2InstructionHelp}"/>
+
+              <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="ModalVideoEditV2CompileButton" Grid.Column="0"
+                        Style="{StaticResource GhostButton}"
+                        Content="{DynamicResource UiVideoEditV2CompileButton}"
+                        Height="32" HorizontalAlignment="Stretch"
+                        Click="CompileModalVideoEditV2Prompt_Click"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2CompileAutomation}"
+                        AutomationProperties.HelpText="{DynamicResource UiVideoEditV2CompileHelp}"/>
+                <CheckBox x:Name="ModalVideoEditV2SkipReviewCheckBox" Grid.Column="1"
+                          Content="{DynamicResource UiVideoEditV2SkipReview}"
+                          Margin="12,0,0,0" VerticalAlignment="Center"
+                          Checked="ModalVideoEditV2Input_Changed"
+                          Unchecked="ModalVideoEditV2Input_Changed"
+                          AutomationProperties.Name="{DynamicResource UiVideoEditV2SkipReviewAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoEditV2SkipReviewHelp}"/>
+              </Grid>
+              <TextBlock x:Name="ModalVideoEditV2CompileStatusText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                         TextWrapping="Wrap" Margin="0,6,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+
+              <Border x:Name="ModalVideoEditV2ReviewPanel" Visibility="Collapsed"
+                      Padding="10" CornerRadius="5" Margin="0,9,0,0"
+                      Background="{StaticResource SoftFill}"
+                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                      AutomationProperties.Name="{DynamicResource UiVideoEditV2ReviewAutomation}">
+                <StackPanel>
+                  <TextBlock Text="{DynamicResource UiVideoEditV2CompiledPromptLabel}"
+                             Foreground="{StaticResource TextPrimary}" FontSize="10.5"
+                             FontWeight="SemiBold" Margin="0,0,0,4"/>
+                  <TextBox x:Name="ModalVideoEditV2CompiledPromptTextBox"
+                           MinHeight="64" MaxHeight="118" IsReadOnly="True"
+                           TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                           Padding="7,5" Foreground="{StaticResource TextPrimary}"
+                           Background="{StaticResource BgPrimary}"
+                           BorderBrush="{StaticResource BorderStrong}"
+                           AutomationProperties.Name="{DynamicResource UiVideoEditV2CompiledPromptAutomation}"/>
+                  <TextBlock Text="{DynamicResource UiVideoEditV2SummaryLabel}"
+                             Foreground="{StaticResource TextPrimary}" FontSize="10.5"
+                             FontWeight="SemiBold" Margin="0,8,0,3"/>
+                  <TextBlock x:Name="ModalVideoEditV2SummaryText"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             TextWrapping="Wrap"
+                             AutomationProperties.Name="{DynamicResource UiVideoEditV2SummaryAutomation}"/>
+                </StackPanel>
+              </Border>
+
+              <Grid Margin="0,11,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="8"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2AudioLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <ComboBox x:Name="ModalVideoEditV2AudioComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="0"
+                            SelectionChanged="ModalVideoEditV2Input_Changed"
+                            AutomationProperties.Name="{DynamicResource UiVideoEditV2AudioAutomation}">
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2AudioOriginal}" Tag="preserve"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2AudioMuted}" Tag="mute"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2StrengthLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <ComboBox x:Name="ModalVideoEditV2StrengthComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="1"
+                            SelectionChanged="ModalVideoEditV2Input_Changed"
+                            AutomationProperties.Name="{DynamicResource UiVideoEditV2StrengthAutomation}"
+                            AutomationProperties.HelpText="{DynamicResource UiVideoEditV2StrengthHelp}">
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StrengthLight}" Tag="light"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StrengthBalanced}" Tag="balanced"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StrengthStrong}" Tag="strong"/>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="4">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2CanvasLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <ComboBox x:Name="ModalVideoEditV2CanvasComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="2"
+                            SelectionChanged="ModalVideoEditV2Input_Changed"
+                            AutomationProperties.Name="{DynamicResource UiVideoEditV2CanvasAutomation}"
+                            AutomationProperties.HelpText="{DynamicResource UiVideoEditV2CanvasHelp}">
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2CanvasLight}" Tag="230400"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2CanvasStandard}" Tag="307200"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2CanvasHigh}" Tag="414720"/>
+                  </ComboBox>
+                </StackPanel>
+              </Grid>
+
+              <Grid Margin="0,9,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="76"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                  <TextBlock Text="{DynamicResource UiVideoEditV2StyleLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                             Margin="0,0,0,4"/>
+                  <ComboBox x:Name="ModalVideoEditV2StyleComboBox"
+                            Style="{StaticResource PhotorealSettingsComboBox}"
+                            SelectedIndex="0"
+                            SelectionChanged="ModalVideoEditV2Input_Changed"
+                            AutomationProperties.Name="{DynamicResource UiVideoEditV2StyleAutomation}">
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StyleNone}" Tag="none"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StyleSourceFaithful}" Tag="source-faithful"/>
+                    <ComboBoxItem Content="{DynamicResource UiVideoEditV2StyleCinematic}" Tag="cinematic"/>
+                  </ComboBox>
+                </StackPanel>
+                <Button x:Name="ModalVideoEditV2SaveStyleButton" Grid.Column="1"
+                        Style="{StaticResource GhostButton}"
+                        Content="{DynamicResource UiVideoEditV2SaveStyle}"
+                        Height="30" VerticalAlignment="Bottom" IsEnabled="False"
+                        ToolTip="{DynamicResource UiVideoEditV2SaveStylePending}"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2SaveStyleAutomation}"
+                        AutomationProperties.HelpText="{DynamicResource UiVideoEditV2SaveStylePending}"/>
+              </Grid>
+
+              <Grid Margin="0,9,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="94"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="52"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{DynamicResource UiVideoEditV2StepsLabel}"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                           VerticalAlignment="Center"/>
+                <Slider x:Name="ModalVideoEditV2StepsSlider" Grid.Column="1"
+                        Minimum="1" Maximum="40" Value="20" TickFrequency="1"
+                        IsSnapToTickEnabled="True" IsMoveToPointEnabled="True"
+                        ValueChanged="ModalVideoEditV2Steps_Changed"
+                        AutomationProperties.Name="{DynamicResource UiVideoEditV2StepsAutomation}"/>
+                <TextBox x:Name="ModalVideoEditV2StepsTextBox" Grid.Column="2"
+                         Text="20" MaxLength="2" Margin="8,0,0,0" Padding="5,3"
+                         Foreground="{StaticResource TextPrimary}"
+                         Background="{StaticResource BgPrimary}"
+                         CaretBrush="{StaticResource TextPrimary}"
+                         SelectionBrush="{StaticResource AccentFill}"
+                         BorderBrush="{StaticResource BorderStrong}"
+                         TextChanged="ModalVideoEditV2StepsText_Changed"
+                         AutomationProperties.Name="{DynamicResource UiVideoEditV2StepsAutomation}"/>
+              </Grid>
+
+              <Border Padding="10" CornerRadius="5" Margin="0,11,0,0"
+                      Background="{StaticResource SoftFill}"
+                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                <TextBlock x:Name="ModalVideoEditV2ReadinessText"
+                           Text="{DynamicResource UiVideoEditV2WriterPending}"
+                           Foreground="{StaticResource TextSecondary}" FontSize="10.5"
+                           TextWrapping="Wrap"
+                           AutomationProperties.Name="{DynamicResource UiVideoEditV2ReadinessAutomation}"
+                           AutomationProperties.LiveSetting="Polite"/>
+              </Border>
+              <Button x:Name="ModalVideoEditV2StartButton"
+                      Style="{StaticResource PrimaryButton}"
+                      Content="{DynamicResource UiVideoEditV2StartPending}"
+                      Height="36" Margin="0,11,0,0"
+                      HorizontalAlignment="Stretch" IsEnabled="False"
+                      Click="StartModalVideoEditV2_Click"
+                      AutomationProperties.Name="{DynamicResource UiVideoEditV2StartAutomation}"
+                      AutomationProperties.HelpText="{DynamicResource UiVideoEditV2StartHelp}"/>
+            </StackPanel>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+
       <!-- image area -->
       <Grid x:Name="ModalImageArea" Grid.Row="0" Grid.RowSpan="3" Grid.Column="1" Margin="0"
             Background="Transparent" ClipToBounds="True"
@@ -4353,6 +4792,7 @@
             PreviewMouseMove="ModalImage_MouseMove"
             PreviewMouseLeftButtonUp="ModalImage_MouseLeftButtonUp"
             LostMouseCapture="ModalImage_LostMouseCapture"
+            PreviewMouseRightButtonUp="ModalVideoEditV2_RightClick"
             ContextMenuOpening="Modal_ContextMenuOpening" Panel.ZIndex="0">
         <Grid.ContextMenu>
           <ContextMenu x:Name="ModalContextMenu" AutomationProperties.Name="Image actions">
@@ -4363,6 +4803,12 @@
             <MenuItem x:Name="ModalContextPhotoreal" Header="AI実写化" Click="StartModalPhotoreal_Click" AutomationProperties.Name="AI実写化"/>
             <MenuItem x:Name="ModalContextPhotorealUpscale" Header="AI実写高画質化のみ" Click="StartModalPhotorealUpscale_Click" AutomationProperties.Name="AI実写高画質化のみ"/>
             <MenuItem Header="表示中の画像を動画化..." Click="ModalContextVideo_Click" AutomationProperties.Name="Open video generation board for displayed image"/>
+            <MenuItem x:Name="ModalContextVideoEditV2"
+                      Header="{DynamicResource UiVideoEditV2Action}"
+                      Visibility="Collapsed"
+                      Click="OpenModalVideoEditV2_Click"
+                      AutomationProperties.Name="{DynamicResource UiVideoEditV2ActionAutomation}"
+                      AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ActionHelp}"/>
             <MenuItem x:Name="ModalContextI2iEditMenu" Header="AI編集" AutomationProperties.Name="AI編集の種類を選ぶ">
               <MenuItem x:Name="ModalContextI2iEdit" Header="髪色…" Click="OpenModalI2iEdit_Click" AutomationProperties.Name="髪色のAI編集を開く"/>
               <MenuItem x:Name="ModalContextI2iV2Edit" Header="統合AI編集（全体・表情・服装・背景・ポーズ）…" Click="OpenModalI2iEditV3_Click"
@@ -4410,6 +4856,8 @@
             <MediaElement x:Name="ModalVideo" Stretch="Uniform" Visibility="Collapsed"
                           LoadedBehavior="Manual" UnloadedBehavior="Manual"
                           ScrubbingEnabled="True" IsHitTestVisible="False"
+                          Loaded="ModalVideoEditV2Video_Loaded"
+                          IsVisibleChanged="ModalVideoEditV2Video_IsVisibleChanged"
                           MediaOpened="ModalVideo_MediaOpened"
                           MediaEnded="ModalVideo_MediaEnded"
                           MediaFailed="ModalVideo_MediaFailed"

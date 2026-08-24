@@ -510,6 +510,16 @@ public partial class App : Application
             return;
         }
 
+        int videoEditV2SmokeIdx = Array.IndexOf(
+            e.Args,
+            "--video-edit-v2-smoke");
+        if (videoEditV2SmokeIdx >= 0
+            && videoEditV2SmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoEditV2Smoke(e.Args[videoEditV2SmokeIdx + 1]);
+            return;
+        }
+
         int highContrastSmokeIdx = Array.IndexOf(e.Args, "--high-contrast-smoke");
         if (highContrastSmokeIdx >= 0 && highContrastSmokeIdx + 1 < e.Args.Length)
         {

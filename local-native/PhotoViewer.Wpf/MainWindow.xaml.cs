@@ -18648,6 +18648,8 @@ public partial class MainWindow : Window
         UpdateModalPositionText(t, projectedIndex);
         StopGalleryAutoScroll();
         bool sourceChanged = !string.Equals(_modalSourceTilePath, t.Path, StringComparison.OrdinalIgnoreCase);
+        if (sourceChanged)
+            InvalidateModalVideoEditV2ForSourceChange();
         bool restoreVideoOnOpen = false;
         if (opening)
             _modalFocusBeforeOverlay = Keyboard.FocusedElement;
@@ -20371,6 +20373,8 @@ public partial class MainWindow : Window
             ModalVideoGenerationPopup.Visibility = Visibility.Collapsed;
         if (ModalVideoToolsPopup is not null)
             CloseVideoToolsBoard(restoreFocus: false);
+        if (ModalVideoEditV2Popup is not null)
+            CloseModalVideoEditV2Board(restoreFocus: false, stale: true);
         if (I2iEditDialog?.Visibility == Visibility.Visible)
             CloseI2iEditBoard(restoreFocus: false);
         if (I2iV2EditDialog?.Visibility == Visibility.Visible)
@@ -21255,6 +21259,7 @@ public partial class MainWindow : Window
             || IsDescendantOrSelf(target, ModalPhotorealSettingsPopup)
             || IsDescendantOrSelf(target, ModalVideoGenerationPopup)
             || IsDescendantOrSelf(target, ModalVideoToolsPopup)
+            || IsDescendantOrSelf(target, ModalVideoEditV2Popup)
             || IsDescendantOrSelf(target, ModalMetadataSidebar)
             || IsDescendantOrSelf(target, ModalFooter)
             || IsDescendantOrSelf(target, ModalFilmstripOverlay)
@@ -24614,6 +24619,14 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
+        {
+            CloseModalVideoEditV2Board(
+                restoreFocus: true,
+                stale: true);
+            return true;
+        }
+
         if (ModalVideoToolsPopup?.Visibility == Visibility.Visible)
         {
             CloseVideoToolsBoard(restoreFocus: true);
@@ -24689,6 +24702,16 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible
+            && key == Key.Escape
+            && modifiers == ModifierKeys.None)
+        {
+            CloseModalVideoEditV2Board(
+                restoreFocus: true,
+                stale: true);
+            e.Handled = true;
+            return;
+        }
         if (ModalVideoToolsPopup?.Visibility == Visibility.Visible
             && key == Key.Escape
             && modifiers == ModifierKeys.None)
@@ -24725,9 +24748,14 @@ public partial class MainWindow : Window
         if (ModalUpscaleSettingsPopup?.Visibility == Visibility.Visible
             || ModalPhotorealSettingsPopup?.Visibility == Visibility.Visible
             || ModalVideoGenerationPopup?.Visibility == Visibility.Visible
-            || ModalVideoToolsPopup?.Visibility == Visibility.Visible)
+            || ModalVideoToolsPopup?.Visibility == Visibility.Visible
+            || ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
         {
-            if (ModalVideoToolsPopup?.Visibility == Visibility.Visible
+            if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
+            {
+                FocusModalVideoEditV2Board();
+            }
+            else if (ModalVideoToolsPopup?.Visibility == Visibility.Visible
                 && !ModalVideoToolsPopup.IsKeyboardFocusWithin)
             {
                 Keyboard.Focus(_videoToolsKind == VideoToolsKind.Retake
@@ -25348,6 +25376,13 @@ public partial class MainWindow : Window
 
     private bool DismissModalSettingsBoardForWindowChrome()
     {
+        if (ModalVideoEditV2Popup?.Visibility == Visibility.Visible)
+        {
+            CloseModalVideoEditV2Board(
+                restoreFocus: false,
+                stale: true);
+            return true;
+        }
         if (ModalUpscaleSettingsPopup?.Visibility == Visibility.Visible)
         {
             CloseModalUpscaleSettingsBoard();
