@@ -104,6 +104,8 @@ public partial class App
             int wakeRequests = 0;
             int unexpectedRequests = 0;
             bool loopbackOnly = true;
+            int authenticatedRoundTrips = 0;
+            bool authenticatedInnerExact = true;
             string? capturedSelector = null;
             string healthLane = "edit";
 
@@ -111,7 +113,8 @@ public partial class App
             window = HiddenWindow();
             window.EnableModalVideoTransportStubForSmoke();
             window.SetCanonicalPathResolverForSmoke(Path.GetFullPath);
-            window.ConfigureModalEnhancementForSmoke(async (request, token) =>
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>
+                flowSender = async (request, token) =>
             {
                 string route = request.RequestUri?.AbsolutePath ?? "";
                 loopbackOnly &= request.RequestUri is { IsLoopback: true };
@@ -270,11 +273,71 @@ public partial class App
                 return VideoEditV2SmokeJsonResponse(
                     HttpStatusCode.NotFound,
                     "{\"error\":\"unexpected route\"}");
-            });
+            };
+            window.ConfigureEnhancementCompanionAutoStartForSmoke(
+                async (request, token) =>
+                {
+                    string route = request.RequestUri?.AbsolutePath ?? "";
+                    if (request.Method == HttpMethod.Get
+                        && route == "/api/enhance/identity"
+                        && request.Headers.TryGetValues(
+                            "X-Aibos-Companion-Challenge",
+                            out IEnumerable<string>? challenges))
+                    {
+                        return VideoEditV2SmokeJsonResponse(
+                            HttpStatusCode.OK,
+                            JsonSerializer.Serialize(
+                                window.EnhancementCompanionIdentityPayloadForSmoke(
+                                    challenges.Single())));
+                    }
+                    if (request.Method == HttpMethod.Post
+                        && route == "/api/enhance/secure")
+                    {
+                        EnhancementCompanionSecureRequestSmokeSnapshot? decoded =
+                            await window.DecodeEnhancementCompanionSecureRequestForSmokeAsync(
+                                request,
+                                token);
+                        bool exact = decoded is not null
+                            && decoded.Method == "GET"
+                            && decoded.PathAndQuery.EndsWith(
+                                "/api/enhance/health",
+                                StringComparison.Ordinal)
+                            && string.IsNullOrEmpty(decoded.BodyJson);
+                        authenticatedInnerExact &= exact;
+                        if (!exact)
+                        {
+                            return VideoEditV2SmokeJsonResponse(
+                                HttpStatusCode.BadRequest,
+                                "{\"error\":\"invalid secure request\"}");
+                        }
+                        authenticatedRoundTrips++;
+                        using JsonDocument payload = JsonDocument.Parse(
+                            editReadyHealth);
+                        return window.EnhancementCompanionSecureResponseForSmoke(
+                            request,
+                            200,
+                            payload.RootElement.Clone());
+                    }
+                    return VideoEditV2SmokeJsonResponse(
+                        HttpStatusCode.NotFound,
+                        "{\"error\":\"unexpected auth route\"}");
+                },
+                static _ => (true, ""));
 
             window.Show();
             Task flowTask = await window.Dispatcher.InvokeAsync(async () =>
             {
+                bool identityReady = await window
+                    .EnsureEnhancementCompanionForExplicitActionForSmokeAsync();
+                MainWindow.IdempotentEnhancementMutationSmokeSnapshot
+                    authenticatedHealth = await window
+                        .SendIdempotentEnhancementMutationForSmokeAsync(
+                            HttpMethod.Get,
+                            "api/enhance/health");
+                bool authenticatedFake = authenticatedRoundTrips >= 1
+                    && authenticatedInnerExact;
+                window.ConfigureModalEnhancementForSmoke(flowSender);
+
                 ExternalVideoDropSmokeSnapshot multiple =
                     await window.DropExternalVideoForSmokeAsync(
                         [sourcePath, secondPath]);
@@ -549,6 +612,7 @@ public partial class App
                 bool sourceUntouched = sourceFingerprint
                     == FingerprintVideoEditV2File(sourcePath);
                 bool exactNetwork = loopbackOnly
+                    && authenticatedFake
                     && unexpectedRequests == 0
                     && transientActions.Count(action => action == "compile") >= 2
                     && enqueueKinds.Count(kind => kind == "edit") == 2
@@ -598,6 +662,8 @@ public partial class App
                     futureReadOnly,
                     sourceUntouched,
                     exactNetwork,
+                    authenticatedFake,
+                    authenticatedRoundTrips,
                     transientActions,
                     enqueueKinds,
                     healthReads,
