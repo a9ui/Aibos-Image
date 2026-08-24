@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj"
+$fixturePath = Join-Path $repoRoot "contracts\fixtures\enhancement-video-tools-v2-reader-v1.json"
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $tempPrefix = $tempRoot + [IO.Path]::DirectorySeparatorChar
 $runRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot ('aibos-wpf-notification-verifier-' + [guid]::NewGuid().ToString('N'))))
@@ -52,7 +53,12 @@ try {
 
     $process = Start-Process `
         -FilePath $DotnetPath `
-        -ArgumentList @(('"{0}"' -f $dll), '--enhancement-notification-smoke', ('"{0}"' -f $fullOutputPath)) `
+        -ArgumentList @(
+            ('"{0}"' -f $dll),
+            '--enhancement-notification-smoke',
+            ('"{0}"' -f $fullOutputPath),
+            '--fixture',
+            ('"{0}"' -f $fixturePath)) `
         -WindowStyle Hidden `
         -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds($OverallTimeoutSeconds)

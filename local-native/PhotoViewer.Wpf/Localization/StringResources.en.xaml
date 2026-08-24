@@ -492,4 +492,23 @@
   <sys:String x:Key="UiVideoFinishV2StartStale">The source, video information, or setting changed. No job was added.</sys:String>
   <sys:String x:Key="UiVideoFinishV2SavedForDelivery">The AI video enhancement request was saved safely and will be delivered after the local AI service recovers.</sys:String>
   <sys:String x:Key="UiVideoFinishV2Queued">AI video enhancement job added. The source video was not modified.</sys:String>
+  <sys:String x:Key="UiNotifySettingsTitle">AI processing notifications</sys:String>
+  <sys:String x:Key="UiNotifySucceededColumn">Complete</sys:String>
+  <sys:String x:Key="UiNotifyFailedColumn">Failed</sys:String>
+  <sys:String x:Key="UiNotifySettingsHelp">A lightweight watcher shows one lower-right notification when an active task completes or fails.</sys:String>
+  <sys:String x:Key="UiNotifyKindUpscale">Image enhancement</sys:String>
+  <sys:String x:Key="UiNotifyKindPhotoreal">Photorealization</sys:String>
+  <sys:String x:Key="UiNotifyKindVideoGeneration">AI video generation</sys:String>
+  <sys:String x:Key="UiNotifyKindVideoEdit">AI video edit</sys:String>
+  <sys:String x:Key="UiNotifyKindVideoFinish">AI video enhancement</sys:String>
+  <sys:String x:Key="UiNotifyKindAiProcessing">AI processing</sys:String>
+  <sys:String x:Key="UiNotifySucceededTitleFormat">{0} completed</sys:String>
+  <sys:String x:Key="UiNotifyFailedTitleFormat">{0} failed</sys:String>
+  <sys:String x:Key="UiNotifyFailedMessage">Review the details in Jobs and retry with the same settings if needed.</sys:String>
+  <sys:String x:Key="UiNotifyImageSucceededMessage">Open the result from Jobs or the source image's version selector.</sys:String>
+  <sys:String x:Key="UiNotifyVideoSucceededMessage">Open the result from Jobs or the video's version selector.</sys:String>
+  <sys:String x:Key="UiNotifyVideoEditCompileReadyTitle">Editing instructions are ready. Review the converted result.</sys:String>
+  <sys:String x:Key="UiNotifyVideoEditCompileReadyMessage">Review the converted instruction and Japanese summary before starting.</sys:String>
+  <sys:String x:Key="UiNotifyVideoEditStartedTitle">AI video editing started</sys:String>
+  <sys:String x:Key="UiNotifyVideoEditStartedMessage">Track progress or cancel from Jobs.</sys:String>
 </ResourceDictionary>

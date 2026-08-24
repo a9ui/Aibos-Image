@@ -2462,27 +2462,33 @@
           <TextBlock Text="{DynamicResource UiUnseenDotsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
            <CheckBox x:Name="FavoriteChangeNotificationsCheckBox" Content="{DynamicResource UiFavoriteChangeNotifications}" Foreground="{StaticResource TextSecondary}" Checked="FavoriteChangeNotifications_Changed" Unchecked="FavoriteChangeNotifications_Changed" AutomationProperties.Name="Show favorite change notifications"/>
            <TextBlock Text="{DynamicResource UiFavoriteChangeNotificationsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="24,4,0,14"/>
-           <TextBlock Text="AI処理の通知" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,7" AutomationProperties.Name="AI processing notification settings"/>
-           <Grid Width="360" HorizontalAlignment="Left" Margin="0,0,0,5">
+           <TextBlock Text="{DynamicResource UiNotifySettingsTitle}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,7" AutomationProperties.Name="AI processing notification settings"/>
+           <Grid Width="390" HorizontalAlignment="Left" Margin="0,0,0,5">
              <Grid.RowDefinitions>
-               <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+               <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
              </Grid.RowDefinitions>
              <Grid.ColumnDefinitions>
-               <ColumnDefinition Width="160"/><ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
+               <ColumnDefinition Width="190"/><ColumnDefinition Width="96"/><ColumnDefinition Width="96"/>
              </Grid.ColumnDefinitions>
-             <TextBlock Grid.Row="0" Grid.Column="1" Text="完了" Foreground="{StaticResource TextTertiary}" FontSize="11" HorizontalAlignment="Center" Margin="0,0,0,5"/>
-             <TextBlock Grid.Row="0" Grid.Column="2" Text="失敗" Foreground="{StaticResource TextTertiary}" FontSize="11" HorizontalAlignment="Center" Margin="0,0,0,5"/>
-             <TextBlock Grid.Row="1" Grid.Column="0" Text="高画質化" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,6"/>
+             <TextBlock Grid.Row="0" Grid.Column="1" Text="{DynamicResource UiNotifySucceededColumn}" Foreground="{StaticResource TextTertiary}" FontSize="11" HorizontalAlignment="Center" Margin="0,0,0,5"/>
+             <TextBlock Grid.Row="0" Grid.Column="2" Text="{DynamicResource UiNotifyFailedColumn}" Foreground="{StaticResource TextTertiary}" FontSize="11" HorizontalAlignment="Center" Margin="0,0,0,5"/>
+             <TextBlock Grid.Row="1" Grid.Column="0" Text="{DynamicResource UiNotifyKindUpscale}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,6"/>
              <CheckBox x:Name="NotifyUpscaleSucceededCheckBox" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when upscale completes"/>
              <CheckBox x:Name="NotifyUpscaleFailedCheckBox" Grid.Row="1" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when upscale fails"/>
-             <TextBlock Grid.Row="2" Grid.Column="0" Text="実写化" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,6"/>
+             <TextBlock Grid.Row="2" Grid.Column="0" Text="{DynamicResource UiNotifyKindPhotoreal}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,6"/>
              <CheckBox x:Name="NotifyPhotorealSucceededCheckBox" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when photorealization completes"/>
              <CheckBox x:Name="NotifyPhotorealFailedCheckBox" Grid.Row="2" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when photorealization fails"/>
-             <TextBlock Grid.Row="3" Grid.Column="0" Text="動画化" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+             <TextBlock Grid.Row="3" Grid.Column="0" Text="{DynamicResource UiNotifyKindVideoGeneration}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,6"/>
              <CheckBox x:Name="NotifyVideoSucceededCheckBox" Grid.Row="3" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when video generation completes"/>
              <CheckBox x:Name="NotifyVideoFailedCheckBox" Grid.Row="3" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when video generation fails"/>
+             <TextBlock Grid.Row="4" Grid.Column="0" Text="{DynamicResource UiNotifyKindVideoEdit}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,6"/>
+             <CheckBox x:Name="NotifyVideoEditSucceededCheckBox" Grid.Row="4" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when AI video edit completes"/>
+             <CheckBox x:Name="NotifyVideoEditFailedCheckBox" Grid.Row="4" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when AI video edit fails"/>
+             <TextBlock Grid.Row="5" Grid.Column="0" Text="{DynamicResource UiNotifyKindVideoFinish}" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+             <CheckBox x:Name="NotifyVideoFinishSucceededCheckBox" Grid.Row="5" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when AI video enhancement completes"/>
+             <CheckBox x:Name="NotifyVideoFinishFailedCheckBox" Grid.Row="5" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Checked="EnhancementNotificationPreference_Changed" Unchecked="EnhancementNotificationPreference_Changed" AutomationProperties.Name="Notify when AI video enhancement fails"/>
            </Grid>
-           <TextBlock Text="処理中だけ既存の軽量監視を使い、完了または失敗を右下に1回表示します。" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,0,14"/>
+           <TextBlock Text="{DynamicResource UiNotifySettingsHelp}" Foreground="{StaticResource TextTertiary}" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,0,14"/>
            <TextBlock Text="{DynamicResource UiAccessibilityEffects}" Foreground="{StaticResource TextTertiary}" FontSize="10.5" FontWeight="SemiBold" Margin="0,0,0,6"/>
           <Grid Margin="0,0,0,6">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

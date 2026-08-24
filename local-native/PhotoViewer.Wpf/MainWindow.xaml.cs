@@ -5349,18 +5349,21 @@ public partial class MainWindow : Window
                 }
 
                 string operation = ReadEnhancementOperation(job);
+                string notificationOperation =
+                    ReadEnhancementNotificationOperation(job);
                 TryGetStringProperty(job, "id", out string? notificationJobId);
                 if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(status, "running", StringComparison.OrdinalIgnoreCase))
                 {
                     if (!string.IsNullOrWhiteSpace(notificationJobId)
-                        && IsEnhancementNotificationOperation(operation)
+                        && IsEnhancementNotificationOperation(
+                            notificationOperation)
                         && activeNotificationJobs.Count
                             < MaxTrackedEnhancementNotificationJobs)
                     {
                         activeNotificationJobs.Add(new(
                             notificationJobId!,
-                            operation,
+                            notificationOperation,
                             status!.ToLowerInvariant()));
                     }
                     TryRecordActiveEnhancementQueueActivity(
@@ -5458,7 +5461,7 @@ public partial class MainWindow : Window
                 {
                     terminalNotificationJobs.Add(new(
                         notificationJobId!,
-                        operation,
+                        notificationOperation,
                         status.ToLowerInvariant()));
                 }
                 if (!string.Equals(status, "succeeded", StringComparison.OrdinalIgnoreCase))
@@ -31376,8 +31379,9 @@ public sealed class ViewerState
     public bool? ShowLoadTiming { get; set; }
     // WPF-local presentation only. Missing in older state keeps notifications on.
     public bool? ShowFavoriteChangeNotifications { get; set; }
-    // WPF-local presentation only. Missing older state enables all six result
-    // notifications and never changes shared settings or a durable job.
+    // WPF-local presentation only. Missing Edit/Finish fields inherit the
+    // existing video-generation result preference during migration and never
+    // change shared settings or a durable job.
     public EnhancementNotificationState? EnhancementNotifications { get; set; }
     // WPF-local gallery presentation. Per-image choices remain session-only.
     public bool? UseLastDisplayedImageVersionForThumbnails { get; set; }

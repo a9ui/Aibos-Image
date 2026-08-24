@@ -42,7 +42,11 @@ public partial class MainWindow
         bool PhotorealSucceeded,
         bool PhotorealFailed,
         bool VideoSucceeded,
-        bool VideoFailed)
+        bool VideoFailed,
+        bool VideoEditSucceeded,
+        bool VideoEditFailed,
+        bool VideoFinishSucceeded,
+        bool VideoFinishFailed)
     {
         public static EnhancementNotificationPreferences Default => new(
             UpscaleSucceeded: true,
@@ -50,7 +54,11 @@ public partial class MainWindow
             PhotorealSucceeded: true,
             PhotorealFailed: true,
             VideoSucceeded: true,
-            VideoFailed: true);
+            VideoFailed: true,
+            VideoEditSucceeded: true,
+            VideoEditFailed: true,
+            VideoFinishSucceeded: true,
+            VideoFinishFailed: true);
 
         public bool Allows(string operation, string status)
             => (operation, status) switch
@@ -61,6 +69,10 @@ public partial class MainWindow
                 ("photoreal", "failed") => PhotorealFailed,
                 ("video", "succeeded") => VideoSucceeded,
                 ("video", "failed") => VideoFailed,
+                ("video-edit", "succeeded") => VideoEditSucceeded,
+                ("video-edit", "failed") => VideoEditFailed,
+                ("video-finish", "succeeded") => VideoFinishSucceeded,
+                ("video-finish", "failed") => VideoFinishFailed,
                 _ => false,
             };
 
@@ -74,7 +86,19 @@ public partial class MainWindow
                     state.PhotorealSucceeded ?? true,
                     state.PhotorealFailed ?? true,
                     state.VideoSucceeded ?? true,
-                    state.VideoFailed ?? true);
+                    state.VideoFailed ?? true,
+                    state.VideoEditSucceeded
+                        ?? state.VideoSucceeded
+                        ?? true,
+                    state.VideoEditFailed
+                        ?? state.VideoFailed
+                        ?? true,
+                    state.VideoFinishSucceeded
+                        ?? state.VideoSucceeded
+                        ?? true,
+                    state.VideoFinishFailed
+                        ?? state.VideoFailed
+                        ?? true);
 
         public EnhancementNotificationState ToState(
             Dictionary<string, JsonElement>? extensionData)
@@ -86,6 +110,10 @@ public partial class MainWindow
                 PhotorealFailed = PhotorealFailed,
                 VideoSucceeded = VideoSucceeded,
                 VideoFailed = VideoFailed,
+                VideoEditSucceeded = VideoEditSucceeded,
+                VideoEditFailed = VideoEditFailed,
+                VideoFinishSucceeded = VideoFinishSucceeded,
+                VideoFinishFailed = VideoFinishFailed,
                 ExtensionData = CloneExtensionData(extensionData),
             };
     }
@@ -122,7 +150,35 @@ public partial class MainWindow
     }
 
     private static bool IsEnhancementNotificationOperation(string operation)
-        => operation is "upscale" or "photoreal" or "video";
+        => operation is "upscale"
+            or "photoreal"
+            or "video"
+            or "video-edit"
+            or "video-finish";
+
+    private static string ReadEnhancementNotificationOperation(
+        JsonElement job)
+    {
+        if (TryReadVideoToolsV2WorkspaceSnapshot(
+                job,
+                out VideoToolsV2ReaderSnapshot snapshot))
+        {
+            return snapshot.Kind switch
+            {
+                "edit" => "video-edit",
+                "finish" => "video-finish",
+                _ => UnsupportedEnhancementOperation,
+            };
+        }
+
+        // Any Video Tools-shaped row which is not an exact current v2
+        // snapshot stays unclassified. In particular, malformed and future
+        // rows must never inherit ordinary video-generation notifications.
+        if (ClaimsVideoToolsWorkspaceSnapshot(job))
+            return UnsupportedEnhancementOperation;
+
+        return ReadEnhancementOperation(job);
+    }
 
     private void RestoreEnhancementNotificationPreferences(ViewerState? state)
     {
@@ -153,7 +209,15 @@ public partial class MainWindow
             VideoSucceeded:
                 NotifyVideoSucceededCheckBox.IsChecked == true,
             VideoFailed:
-                NotifyVideoFailedCheckBox.IsChecked == true),
+                NotifyVideoFailedCheckBox.IsChecked == true,
+            VideoEditSucceeded:
+                NotifyVideoEditSucceededCheckBox.IsChecked == true,
+            VideoEditFailed:
+                NotifyVideoEditFailedCheckBox.IsChecked == true,
+            VideoFinishSucceeded:
+                NotifyVideoFinishSucceededCheckBox.IsChecked == true,
+            VideoFinishFailed:
+                NotifyVideoFinishFailedCheckBox.IsChecked == true),
             persist: true);
     }
 
@@ -174,6 +238,14 @@ public partial class MainWindow
                 preferences.PhotorealFailed;
             NotifyVideoSucceededCheckBox.IsChecked = preferences.VideoSucceeded;
             NotifyVideoFailedCheckBox.IsChecked = preferences.VideoFailed;
+            NotifyVideoEditSucceededCheckBox.IsChecked =
+                preferences.VideoEditSucceeded;
+            NotifyVideoEditFailedCheckBox.IsChecked =
+                preferences.VideoEditFailed;
+            NotifyVideoFinishSucceededCheckBox.IsChecked =
+                preferences.VideoFinishSucceeded;
+            NotifyVideoFinishFailedCheckBox.IsChecked =
+                preferences.VideoFinishFailed;
         }
         finally
         {
@@ -192,7 +264,9 @@ public partial class MainWindow
         {
             return;
         }
-        TrackActiveEnhancementNotificationJob(id!, ReadEnhancementOperation(job));
+        TrackActiveEnhancementNotificationJob(
+            id!,
+            ReadEnhancementNotificationOperation(job));
     }
 
     private void TrackActiveEnhancementNotificationJob(
@@ -230,11 +304,15 @@ public partial class MainWindow
         {
             if (!_trackedEnhancementNotificationJobs.Remove(
                     terminal.Id,
-                    out _))
+                    out string? trackedOperation))
             {
                 continue;
             }
-            if (IsEnhancementNotificationOperation(terminal.Operation)
+            if (string.Equals(
+                    trackedOperation,
+                    terminal.Operation,
+                    StringComparison.Ordinal)
+                && IsEnhancementNotificationOperation(terminal.Operation)
                 && terminal.Status is "succeeded" or "failed"
                 && _enhancementNotificationPreferences.Allows(
                     terminal.Operation,
@@ -254,20 +332,107 @@ public partial class MainWindow
     {
         string operationLabel = operation switch
         {
-            "upscale" => "高画質化",
-            "photoreal" => "実写化",
-            "video" => "動画化",
-            _ => "AI処理",
+            "upscale" => EnhancementNotificationText(
+                "UiNotifyKindUpscale",
+                "高画質化"),
+            "photoreal" => EnhancementNotificationText(
+                "UiNotifyKindPhotoreal",
+                "実写化"),
+            "video" => EnhancementNotificationText(
+                "UiNotifyKindVideoGeneration",
+                "AI動画生成"),
+            "video-edit" => EnhancementNotificationText(
+                "UiNotifyKindVideoEdit",
+                "AI動画編集"),
+            "video-finish" => EnhancementNotificationText(
+                "UiNotifyKindVideoFinish",
+                "AI動画高画質化"),
+            _ => EnhancementNotificationText(
+                "UiNotifyKindAiProcessing",
+                "AI処理"),
         };
         bool failed = status == "failed";
         var presentation = new EnhancementNotificationPresentation(
             failed
-                ? $"{operationLabel}に失敗しました"
-                : $"{operationLabel}が完了しました",
+                ? string.Format(
+                    EnhancementNotificationText(
+                        "UiNotifyFailedTitleFormat",
+                        "{0}に失敗しました"),
+                    operationLabel)
+                : string.Format(
+                    EnhancementNotificationText(
+                        "UiNotifySucceededTitleFormat",
+                        "{0}が完了しました"),
+                    operationLabel),
             failed
-                ? "Jobsで内容を確認し、必要なら現在設定でリトライできます。"
-                : "結果はJobsまたは元画像のバージョン切替から確認できます。",
+                ? EnhancementNotificationText(
+                    "UiNotifyFailedMessage",
+                    "Jobsで内容を確認し、必要なら現在設定でリトライできます。")
+                : operation is "video" or "video-edit" or "video-finish"
+                    ? EnhancementNotificationText(
+                        "UiNotifyVideoSucceededMessage",
+                        "結果はJobsまたは動画のバージョン切替から確認できます。")
+                    : EnhancementNotificationText(
+                        "UiNotifyImageSucceededMessage",
+                        "結果はJobsまたは元画像のバージョン切替から確認できます。"),
             failed);
+
+        QueueEnhancementNotification(presentation);
+    }
+
+    private string EnhancementNotificationText(string key, string fallback)
+        => TryFindResource(key) is string text
+            && !string.IsNullOrWhiteSpace(text)
+                ? text
+                : fallback;
+
+    private bool ShowVideoEditCompileReviewNotification()
+    {
+        if (!_enhancementNotificationPreferences.Allows(
+                "video-edit",
+                "succeeded"))
+        {
+            return false;
+        }
+
+        QueueEnhancementNotification(new(
+            EnhancementNotificationText(
+                "UiNotifyVideoEditCompileReadyTitle",
+                "編集指示を整えました。変換結果を確認してください"),
+            EnhancementNotificationText(
+                "UiNotifyVideoEditCompileReadyMessage",
+                "変換後の指示と日本語の要約を確認してから開始できます。"),
+            Failed: false));
+        return true;
+    }
+
+    private bool ShowVideoEditStartAcceptedNotification(
+        bool skipReviewAuthorization,
+        bool acceptedOrSaved)
+    {
+        if (!skipReviewAuthorization
+            || !acceptedOrSaved
+            || !_enhancementNotificationPreferences.Allows(
+                "video-edit",
+                "succeeded"))
+        {
+            return false;
+        }
+
+        QueueEnhancementNotification(new(
+            EnhancementNotificationText(
+                "UiNotifyVideoEditStartedTitle",
+                "AI動画編集を開始しました"),
+            EnhancementNotificationText(
+                "UiNotifyVideoEditStartedMessage",
+                "進み具合とキャンセルはJobsで確認できます。"),
+            Failed: false));
+        return true;
+    }
+
+    private void QueueEnhancementNotification(
+        EnhancementNotificationPresentation presentation)
+    {
 
         _ = ShowAiProcessingTrayNotification(
             presentation.Title,
@@ -332,6 +497,16 @@ public partial class MainWindow
             && string.Equals(
                 AutomationProperties.GetName(NotifyVideoFailedCheckBox),
                 "Notify when video generation fails",
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(
+                    NotifyVideoEditSucceededCheckBox),
+                "Notify when AI video edit completes",
+                StringComparison.Ordinal)
+            && string.Equals(
+                AutomationProperties.GetName(
+                    NotifyVideoFinishFailedCheckBox),
+                "Notify when AI video enhancement fails",
                 StringComparison.Ordinal);
 
     public void SetEnhancementNotificationPreferencesForSmoke(
@@ -340,20 +515,40 @@ public partial class MainWindow
         bool photorealSucceeded,
         bool photorealFailed,
         bool videoSucceeded,
-        bool videoFailed)
+        bool videoFailed,
+        bool videoEditSucceeded = true,
+        bool videoEditFailed = true,
+        bool videoFinishSucceeded = true,
+        bool videoFinishFailed = true)
         => SetEnhancementNotificationPreferences(new(
             upscaleSucceeded,
             upscaleFailed,
             photorealSucceeded,
             photorealFailed,
             videoSucceeded,
-            videoFailed),
+            videoFailed,
+            videoEditSucceeded,
+            videoEditFailed,
+            videoFinishSucceeded,
+            videoFinishFailed),
             persist: true);
+
+    public bool VideoEditSucceededPreferenceForSmoke
+        => _enhancementNotificationPreferences.VideoEditSucceeded;
+    public bool VideoEditFailedPreferenceForSmoke
+        => _enhancementNotificationPreferences.VideoEditFailed;
+    public bool VideoFinishSucceededPreferenceForSmoke
+        => _enhancementNotificationPreferences.VideoFinishSucceeded;
+    public bool VideoFinishFailedPreferenceForSmoke
+        => _enhancementNotificationPreferences.VideoFinishFailed;
 
     public void TrackEnhancementNotificationJobForSmoke(
         string id,
         string operation)
         => TrackActiveEnhancementNotificationJob(id, operation);
+
+    public void TrackEnhancementNotificationJobForSmoke(JsonElement job)
+        => TrackActiveEnhancementNotificationJob(job);
 
     public void ApplyEnhancementNotificationTerminalForSmoke(
         string id,
@@ -362,6 +557,61 @@ public partial class MainWindow
         => ApplyEnhancementNotificationSnapshot(
             [],
             [new EnhancementNotificationJobState(id, operation, status)]);
+
+    public void ApplyEnhancementNotificationTerminalForSmoke(JsonElement job)
+    {
+        if (!TryGetStringProperty(job, "id", out string? id)
+            || !TryGetStringProperty(job, "status", out string? status))
+        {
+            return;
+        }
+        ApplyEnhancementNotificationSnapshot(
+            [],
+            [new EnhancementNotificationJobState(
+                id!,
+                ReadEnhancementNotificationOperation(job),
+                status!.ToLowerInvariant())]);
+    }
+
+    public bool NotifyVideoEditCompileReviewForSmoke(
+        bool exactCandidateAccepted,
+        bool stale,
+        bool skipReviewAuthorization)
+        => exactCandidateAccepted
+            && !stale
+            && !skipReviewAuthorization
+            && ShowVideoEditCompileReviewNotification();
+
+    public bool NotifyVideoEditStartAcceptedForSmoke(
+        bool skipReviewAuthorization,
+        bool acceptedOrSaved)
+        => ShowVideoEditStartAcceptedNotification(
+            skipReviewAuthorization,
+            acceptedOrSaved);
+
+    public static string ReadEnhancementNotificationKindForSmoke(
+        JsonElement job)
+        => ReadEnhancementNotificationOperation(job);
+
+    public static bool MalformedEnhancementNotificationStateUsesSafeDefaultsForSmoke(
+        string statePath)
+    {
+        if (TryReadViewerStateFile(
+                Path.GetFullPath(statePath),
+                out ViewerState? malformedState))
+        {
+            return false;
+        }
+        EnhancementNotificationPreferences preferences =
+            EnhancementNotificationPreferences.FromState(
+                malformedState?.EnhancementNotifications);
+        return preferences.VideoSucceeded
+            && preferences.VideoFailed
+            && preferences.VideoEditSucceeded
+            && preferences.VideoEditFailed
+            && preferences.VideoFinishSucceeded
+            && preferences.VideoFinishFailed;
+    }
 
     public void DismissEnhancementNotificationForSmoke()
         => HideCurrentEnhancementNotification(showNext: true);
@@ -396,7 +646,7 @@ public partial class MainWindow
             if (TryGetStringProperty(job, "id", out string? id)
                 && string.Equals(id, jobId, StringComparison.Ordinal))
             {
-                return ReadEnhancementOperation(job);
+                return ReadEnhancementNotificationOperation(job);
             }
         }
         return null;
@@ -411,6 +661,10 @@ public sealed class EnhancementNotificationState
     public bool? PhotorealFailed { get; set; }
     public bool? VideoSucceeded { get; set; }
     public bool? VideoFailed { get; set; }
+    public bool? VideoEditSucceeded { get; set; }
+    public bool? VideoEditFailed { get; set; }
+    public bool? VideoFinishSucceeded { get; set; }
+    public bool? VideoFinishFailed { get; set; }
     [System.Text.Json.Serialization.JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }

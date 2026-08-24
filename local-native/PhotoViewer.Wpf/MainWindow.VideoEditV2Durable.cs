@@ -163,7 +163,8 @@ public partial class MainWindow
         RefreshModalVideoEditV2ActionControls();
         _ = Dispatcher.BeginInvoke(
             new Action(async () =>
-                await StartModalVideoEditV2Async()),
+                await StartModalVideoEditV2Async(
+                    skipReviewAuthorization: true)),
             DispatcherPriority.Background);
         return true;
     }
@@ -171,9 +172,11 @@ public partial class MainWindow
     private async void StartModalVideoEditV2_Click(
         object sender,
         RoutedEventArgs e)
-        => await StartModalVideoEditV2Async();
+        => await StartModalVideoEditV2Async(
+            skipReviewAuthorization: false);
 
-    private async Task<bool> StartModalVideoEditV2Async()
+    private async Task<bool> StartModalVideoEditV2Async(
+        bool skipReviewAuthorization = false)
     {
         _videoEditV2StartAttemptCount++;
         if (!CanStartModalVideoEditV2Durably())
@@ -254,6 +257,9 @@ public partial class MainWindow
                 && job.ValueKind == JsonValueKind.Object;
             if (response.SavedForDelivery || hasJob)
             {
+                _ = ShowVideoEditStartAcceptedNotification(
+                    skipReviewAuthorization,
+                    acceptedOrSaved: true);
                 RecordActiveVideoSourceDependency(context.DependencySource);
                 UpdateModalDisplayedDeletePresentation();
                 string message = VideoEditV2Text(
