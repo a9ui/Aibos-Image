@@ -91,11 +91,13 @@ public partial class MainWindow
 
     private sealed record ManagedVideoVersion(
         string JobId,
+        string VersionKind,
         string PresetId,
         string BackendId,
         string ModelName,
         bool IsMiniMaxH3,
         string? SourceProducerJobId,
+        string? SourceManagedOutputPath,
         double DurationSeconds,
         int RequestedPlaybackFps,
         int PlaybackFps,
@@ -501,11 +503,13 @@ public partial class MainWindow
             resolvedSource = resolvedSourceId;
             version = new ManagedVideoVersion(
                 jobId!,
+                "generation",
                 presetId!,
                 backendId!,
                 modelName!,
                 false,
                 sourceProducerJobId,
+                null,
                 durationSeconds,
                 playbackFps,
                 outputPlaybackFps,
@@ -715,11 +719,13 @@ public partial class MainWindow
             resolvedSource = resolvedSourceId;
             version = new ManagedVideoVersion(
                 jobId!,
+                "generation",
                 MiniMaxH3VideoPresetId,
                 MiniMaxH3VideoBackendId,
                 "MiniMax-H3",
                 true,
                 sourceProducerJobId,
+                null,
                 durationSeconds,
                 MiniMaxH3VideoPlaybackFps,
                 MiniMaxH3VideoPlaybackFps,
@@ -1307,6 +1313,14 @@ public partial class MainWindow
         }
         if (uniqueVideo is null || !Equals(uniqueVideo, candidate))
             return false;
+
+        if (candidate.VersionKind is "edit" or "finish")
+        {
+            return TryValidateVideoToolsV2InventoryAncestry(
+                tile,
+                candidate,
+                out version);
+        }
 
         try
         {

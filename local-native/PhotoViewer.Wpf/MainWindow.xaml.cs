@@ -5285,6 +5285,7 @@ public partial class MainWindow : Window
             new Dictionary<string, ManagedEnhancementQueueActivity>(
                 StringComparer.OrdinalIgnoreCase);
         var pendingVideoJobs = new List<JsonElement>();
+        var pendingVideoToolsV2Jobs = new List<JsonElement>();
         var pendingI2iJobs = new List<JsonElement>();
         var activeI2iSourceProducerJobIds = new HashSet<string>(
             StringComparer.Ordinal);
@@ -5464,7 +5465,10 @@ public partial class MainWindow : Window
                     continue;
                 if (operation == "video")
                 {
-                    pendingVideoJobs.Add(job);
+                    if (ClaimsVideoToolsV2WorkspaceSnapshot(job))
+                        pendingVideoToolsV2Jobs.Add(job);
+                    else
+                        pendingVideoJobs.Add(job);
                     continue;
                 }
                 if (operation == "i2i")
@@ -5606,6 +5610,16 @@ public partial class MainWindow : Window
                     videoVersions.Add(videoVersion);
                 }
             }
+
+            // Video Tools v2 may consume another succeeded managed video.
+            // Resolve staged roots and already-known generated producers first,
+            // then advance a bounded fixpoint. Unresolved ancestry is omitted.
+            ResolveVideoToolsV2ManagedInventory(
+                pendingVideoToolsV2Jobs,
+                ambiguousJobIds,
+                nextVideoVersions,
+                nextCatalogVideoVersionsByPath,
+                ref nextVideoCandidateCount);
 
             RecoverOrphanedEnhancementReferences(
                 path,

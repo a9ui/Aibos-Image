@@ -9114,6 +9114,51 @@ public partial class MainWindow
     {
         managedVideo = null!;
         reason = "the video is missing, stale, malformed, or outside managed storage";
+        if (job.VideoToolsV2Snapshot is VideoToolsV2ReaderSnapshot v2)
+        {
+            if (!job.CanUseVideoToolsV2Output
+                || !TryResolveVideoToolsV2ManagedOutput(
+                    job.OutputPath!,
+                    out string canonicalV2Output))
+            {
+                return false;
+            }
+
+            ManagedVideoVersion[] matches = _videoVersions.Values
+                .SelectMany(static versions => versions)
+                .Where(version => string.Equals(
+                        version.JobId,
+                        job.Id,
+                        StringComparison.Ordinal)
+                    && string.Equals(
+                        version.Output.OutputPath,
+                        canonicalV2Output,
+                        StringComparison.OrdinalIgnoreCase))
+                .Distinct()
+                .Take(2)
+                .ToArray();
+            if (matches.Length != 1
+                || !string.Equals(
+                    matches[0].VersionKind,
+                    v2.Kind,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    matches[0].PresetId,
+                    job.PresetId,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    matches[0].BackendId,
+                    job.AdapterId,
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            managedVideo = matches[0];
+            reason = "";
+            return true;
+        }
+
         if (!job.IsVideoOperation
             || job.Status != "succeeded"
             || string.IsNullOrWhiteSpace(job.OutputPath)
@@ -10753,10 +10798,23 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     }
     public bool CanUseOutput =>
         !_isBusy
-        && IsSupportedMutationOperation
+        && (IsSupportedMutationOperation || CanUseVideoToolsV2Output)
         && Status == "succeeded"
         && !string.IsNullOrWhiteSpace(OutputPath);
-    public bool CanDeleteOutput => CanUseOutput && !OutputDependencyProtected;
+    public bool CanUseVideoToolsV2Output =>
+        !_isBusy
+        && VideoToolsV2Snapshot is not null
+        && Status == "succeeded"
+        && OutputPath is { Length: > 0 and <= 32768 } outputPath
+        && Path.IsPathFullyQualified(outputPath)
+        && string.Equals(
+            Path.GetExtension(outputPath),
+            ".mp4",
+            StringComparison.OrdinalIgnoreCase);
+    public bool CanDeleteOutput =>
+        CanUseOutput
+        && IsSupportedMutationOperation
+        && !OutputDependencyProtected;
     public string RequestDetailsText => _requestDetailsText;
     public bool RequestDetailsLoaded => _requestDetailsLoaded;
     public bool RequestDetailsExpanded
@@ -10828,7 +10886,15 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     }
     public EnhancementJobActionPresentation Action1 =>
         IsVideoToolsReaderOnly
-        ? EnhancementJobActionPresentation.Hidden
+        ? CanUseVideoToolsV2Output
+            ? JobAction(
+                "open-output",
+                "Open output",
+                OpenOutputToolTip,
+                visible: true,
+                enabled: true,
+                minWidth: 88)
+            : EnhancementJobActionPresentation.Hidden
         : CanRerunMiniMaxH3VideoWithSavedPrompt
         ? JobAction(
             "video-rerun-saved",
