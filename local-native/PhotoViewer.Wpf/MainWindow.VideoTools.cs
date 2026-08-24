@@ -1796,19 +1796,11 @@ public partial class MainWindow
             VideoToolsKind.Retake,
             out _,
             out _);
-        bool finishReady = TryCaptureDisplayedVideoToolsSource(
-            VideoToolsKind.Finish,
-            out _,
-            out _);
         ModalVideoRetakeButton.Visibility = retakeReady
             ? Visibility.Visible
             : Visibility.Collapsed;
-        ModalVideoFinishButton.Visibility = finishReady
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        SyncModalVideoFinishV2EntryPresentation();
         if (!retakeReady && _videoToolsKind == VideoToolsKind.Retake)
-            CloseVideoToolsBoard(restoreFocus: false);
-        else if (!finishReady && _videoToolsKind == VideoToolsKind.Finish)
             CloseVideoToolsBoard(restoreFocus: false);
     }
 
@@ -1816,7 +1808,7 @@ public partial class MainWindow
         => OpenVideoToolsBoard(VideoToolsKind.Retake);
 
     private void OpenModalVideoFinish_Click(object sender, RoutedEventArgs e)
-        => OpenVideoToolsBoard(VideoToolsKind.Finish);
+        => OpenModalVideoFinishV2Board();
 
     private void OpenVideoToolsBoard(VideoToolsKind kind)
     {
