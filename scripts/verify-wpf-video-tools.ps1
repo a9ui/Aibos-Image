@@ -168,7 +168,7 @@ try {
     if ($implementation -notmatch 'TryReadVideoToolsWorkspaceSnapshot' `
         -or $implementation -notmatch 'TryReadVideoToolsWorkspacePresentationForSmoke' `
         -or $jobsSource -notmatch 'IsVideoToolsReaderOnly' `
-        -or $jobsSource -notmatch '!IsVideoToolsReaderOnly[\s\S]{0,200}IsKnownOperation' `
+        -or $jobsSource -notmatch '!IsProtectedVideoReaderOnly[\s\S]{0,250}IsKnownOperation' `
         -or $smokeSource -notmatch 'readerSnapshots' `
         -or $smokeSource -notmatch 'malformedReaderProtected' `
         -or $smokeSource -notmatch 'futureReaderProtected' `

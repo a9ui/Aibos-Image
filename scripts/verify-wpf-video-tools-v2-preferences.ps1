@@ -173,7 +173,7 @@ try {
     }
     else {
         Get-ChildItem -LiteralPath $buildRoot -Recurse -Filter 'PhotoViewer.Wpf.dll' |
-            Where-Object FullName -Match '\\bin\\PhotoViewer.Wpf\\release_' |
+            Where-Object FullName -Match '\\bin\\PhotoViewer.Wpf\\release(?:_|\\)' |
             Select-Object -First 1
     }
     if ($null -eq $appDll) { throw 'Built PhotoViewer.Wpf.dll was not found.' }

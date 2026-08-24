@@ -1917,6 +1917,279 @@
     }
   },
   "lifecycle": {
+    "durableReader": {
+      "scope": "A Job is mutable or executable as Video Tools v2 only when the immutable video snapshot, exact durable preset, top-level source envelope, and one supported lifecycle state all validate together. Unknown top-level fields are preserved, but every recognized lifecycle or source field must have the exact state-specific meaning below.",
+      "supportedStates": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "canceled",
+        "deleted"
+      ],
+      "commonRequiredFields": [
+        "id",
+        "status",
+        "operation",
+        "mediaKind",
+        "sourceId",
+        "sourcePath",
+        "sourceSignature",
+        "sourceSha256",
+        "presetId",
+        "adapterId",
+        "presetHash",
+        "preset",
+        "progress",
+        "cancelRequested",
+        "createdAt",
+        "updatedAt",
+        "video"
+      ],
+      "timestampFormat": "Every recognized lifecycle timestamp is one canonical UTC string yyyy-MM-ddTHH:mm:ss.fffZ. updatedAt is not before createdAt; startedAt is not before createdAt; finishedAt is not before startedAt and is not after updatedAt; running heartbeat/progress timestamps are within [startedAt, updatedAt].",
+      "numberTokenRule": "Every recognized JSON number token is finite, at most 256 bytes, within its semantic and safe-integer bounds, and mathematically identical to the shortest round-trip representation of the parsed IEEE-754 value. Exact equivalent integer forms such as 2, 2.0 and 2e0 are accepted; extra precision, underflow-to-zero, unsafe integer, and other lossy tokens are reader-only.",
+      "identifierRule": "id is one safe durable Job identifier. Duplicate recognized properties, non-finite or non-integer numeric forms, invalid UTF-16, forbidden controls, leading/trailing ECMAScript whitespace, and unsupported recognized values make the row reader-only.",
+      "runningScalarRules": {
+        "technicalTextFields": [
+          "runId",
+          "workerInstanceId",
+          "externalPromptId"
+        ],
+        "technicalTextRule": "when present, 1 through 128 UTF-16 code units consisting only of printable ASCII U+0021 through U+007E; Unicode, space, tab, newline, controls, leading/trailing whitespace, and longer values are rejected",
+        "externalProcessIdRule": "when present, one positive integer from 1 through 2147483647",
+        "diagnosticsRule": "when present, one JSON object; it is attempt-only and is removed from every terminal state",
+        "timestampRule": "all lifecycle timestamps use exactly four decimal year digits and the canonical UTC yyyy-MM-ddTHH:mm:ss.fffZ representation; JavaScript extended-year, missing millisecond, offset, lowercase z, and other parseable drift are rejected"
+      },
+      "sourceEnvelope": {
+        "exactRequiredFields": [
+          "sourcePath",
+          "sourceSignature",
+          "sourceSha256"
+        ],
+        "pathScalarRule": "video.source canonicalPath, originalCanonicalPath and stagingCanonicalPath are bounded canonical fully-qualified Windows paths to lowercase .mp4 files: backslash separators only, no dot-segment or normalization drift, no NUL/control, no leading/trailing ECMAScript whitespace. The top-level sourcePath is the exact ordinal persisted execution path, not a case-insensitive alias.",
+        "managedRule": "sourcePath is ordinal byte-for-byte equal to video.source.canonicalPath; sourceSignature is the exact {size,mtimeMs} signature and sourceSha256 is the exact lowercase SHA-256 from that managed source snapshot.",
+        "stagedRule": "sourcePath is ordinal byte-for-byte equal to video.source.stagingCanonicalPath; sourceSignature is the exact staging signature and sourceSha256 is the exact staging lowercase SHA-256. originalCanonicalPath and stagingCanonicalPath are distinct under Windows lexical comparison.",
+        "forbiddenConflicts": [
+          "sourceProducerJobId",
+          "sourceManagedOutputPath",
+          "sourceRecoveredAdapterId",
+          "sourceRecoveredSignature",
+          "sourceRecoveredSha256",
+          "videoTrim"
+        ],
+        "pathDriftRule": "Case, separator, dot-segment, alias, or other lexical drift between the top-level sourcePath and the immutable snapshot is not repaired or canonicalized by a reader; the row remains visible and reader-only."
+      },
+      "presetEnvelope": {
+        "exactFields": [
+          "id",
+          "label",
+          "modelFamily",
+          "modelName",
+          "scale",
+          "outputFormat",
+          "denoise",
+          "sharpen",
+          "detail",
+          "smoothness",
+          "colorBrightness",
+          "colorContrast",
+          "colorSaturation",
+          "options"
+        ],
+        "exactOptionFields": [
+          "backendId",
+          "protocol",
+          "kind",
+          "container"
+        ],
+        "rule": "id, label, modelName, scale, backendId, protocol, kind and container agree exactly with the immutable video snapshot; modelFamily=general, outputFormat=png, every image tuning integer is zero, and the container is mp4."
+      },
+      "knownLifecycleFields": [
+        "status",
+        "progress",
+        "cancelRequested",
+        "queueOrder",
+        "createdAt",
+        "updatedAt",
+        "startedAt",
+        "finishedAt",
+        "runId",
+        "workerInstanceId",
+        "lastHeartbeatAt",
+        "lastProgressAt",
+        "externalPromptId",
+        "externalProcessId",
+        "diagnostics",
+        "outputPath",
+        "outputSha256",
+        "outputBytes",
+        "errorCode",
+        "errorMessage"
+      ],
+      "states": {
+        "queued": {
+          "exactValues": {
+            "progress": 0,
+            "cancelRequested": false
+          },
+          "requiredFields": [
+            "queueOrder"
+          ],
+          "queueOrderRule": "integer from 0 through Number.MAX_SAFE_INTEGER",
+          "forbiddenFields": [
+            "startedAt",
+            "finishedAt",
+            "runId",
+            "workerInstanceId",
+            "lastHeartbeatAt",
+            "lastProgressAt",
+            "externalPromptId",
+            "externalProcessId",
+            "diagnostics",
+            "outputPath",
+            "outputSha256",
+            "outputBytes",
+            "errorCode",
+            "errorMessage"
+          ]
+        },
+        "running": {
+          "valueRules": {
+            "progress": "integer 1 through 99",
+            "cancelRequested": false
+          },
+          "requiredFields": [
+            "startedAt",
+            "runId",
+            "workerInstanceId",
+            "lastHeartbeatAt"
+          ],
+          "optionalFields": [
+            "lastProgressAt",
+            "externalPromptId",
+            "externalProcessId",
+            "diagnostics"
+          ],
+          "forbiddenFields": [
+            "queueOrder",
+            "finishedAt",
+            "outputPath",
+            "outputSha256",
+            "outputBytes",
+            "errorCode",
+            "errorMessage"
+          ]
+        },
+        "succeeded": {
+          "exactValues": {
+            "progress": 100,
+            "cancelRequested": false
+          },
+          "requiredFields": [
+            "startedAt",
+            "finishedAt",
+            "outputPath",
+            "outputSha256",
+            "outputBytes"
+          ],
+          "outputIdentityRule": "outputPath is one bounded canonical fully-qualified Windows path with backslash separators and lowercase .mp4 extension. Its exact leaf is {jobId}__{safe source base up to 64}__{first 16 sourceSha256}__{presetId}__{backendId}__{presetHash}.mp4 and its immediate managed namespace is Videos or Videos\\yyyy-MM-dd with one real canonical date. Case, job, source, preset, backend, hash, date, namespace, separator, extension, dot-segment or alias drift is reader-only. outputSha256 is the exact 64-character lowercase SHA-256 and outputBytes is the exact positive integer no greater than 536870912 obtained by reopening and validating that published Job-owned managed output. A writer must not derive this identity by blindly trusting or hashing an unvalidated path.",
+          "forbiddenFields": [
+            "queueOrder",
+            "runId",
+            "workerInstanceId",
+            "lastHeartbeatAt",
+            "lastProgressAt",
+            "externalPromptId",
+            "externalProcessId",
+            "diagnostics",
+            "errorCode",
+            "errorMessage"
+          ]
+        },
+        "failed": {
+          "valueRules": {
+            "progress": "integer 0 through 99",
+            "cancelRequested": false
+          },
+          "requiredFields": [
+            "startedAt",
+            "finishedAt",
+            "errorCode",
+            "errorMessage"
+          ],
+          "errorRule": "errorCode is 1 through 128 ASCII characters from [A-Z0-9_]. errorMessage is 1 through 2000 well-formed UTF-16 characters, has no forbidden controls, and has no leading or trailing ECMAScript whitespace.",
+          "forbiddenFields": [
+            "queueOrder",
+            "runId",
+            "workerInstanceId",
+            "lastHeartbeatAt",
+            "lastProgressAt",
+            "externalPromptId",
+            "externalProcessId",
+            "diagnostics",
+            "outputPath",
+            "outputSha256",
+            "outputBytes"
+          ]
+        },
+        "canceled": {
+          "valueRules": {
+            "progress": "integer 0 through 99",
+            "cancelRequested": true
+          },
+          "requiredFields": [
+            "startedAt",
+            "finishedAt"
+          ],
+          "forbiddenFields": [
+            "queueOrder",
+            "runId",
+            "workerInstanceId",
+            "lastHeartbeatAt",
+            "lastProgressAt",
+            "externalPromptId",
+            "externalProcessId",
+            "diagnostics",
+            "outputPath",
+            "outputSha256",
+            "outputBytes",
+            "errorCode",
+            "errorMessage"
+          ]
+        },
+        "deleted": {
+          "exactValues": {
+            "progress": 100,
+            "cancelRequested": false
+          },
+          "requiredFields": [
+            "startedAt",
+            "finishedAt"
+          ],
+          "forbiddenFields": [
+            "queueOrder",
+            "runId",
+            "workerInstanceId",
+            "lastHeartbeatAt",
+            "lastProgressAt",
+            "externalPromptId",
+            "externalProcessId",
+            "diagnostics",
+            "outputPath",
+            "outputSha256",
+            "outputBytes",
+            "errorCode",
+            "errorMessage"
+          ]
+        }
+      },
+      "runningCancellationTransient": {
+        "shape": "The exact running state above with only cancelRequested=true.",
+        "publicReader": "visible but reader-only with no cancel, retry, dismiss, delete, reorder, recovery, execution, queue wake, or output action",
+        "privateWorker": "accepted only by the strict worker-owned settlement predicate and compare-and-swap transition that owns the exact runId and workerInstanceId; it is never a generally runnable or generally mutable row"
+      },
+      "unknownAndMalformedRule": "Compatible unknown top-level fields are preserved. Any unknown status, duplicate recognized property, missing required field, forbidden known field, invalid value, future snapshot, or mismatch between lifecycle, source, preset and immutable video shape leaves the row visible but reader-only. Passive reading performs zero filesystem, source, queue, worker, recovery, network, or durable-state mutation."
+    },
     "retry": {
       "reuseExactPersistedSnapshot": true,
       "reusePersistedSeed": true,

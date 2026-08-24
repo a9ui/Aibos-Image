@@ -3,7 +3,7 @@
   "fixtureId": "PV-ENHANCE-VIDEO-TRIM-001-READER-FIXTURES",
   "forContractId": "PV-ENHANCE-VIDEO-TRIM-001",
   "compatibility": {
-    "contractSha256": "11686813d4b18791d7895f08e272c41ac9567790ad4cc7c41eed17e1d18591c5",
+    "contractSha256": "f0e2b48c06c78a04ec64cb70bd36f03c8ed1f65a89ce31551cd34e225bfe3c40",
     "consumers": [
       "public-wpf",
       "private-companion"
@@ -387,7 +387,7 @@
     "expectedMutationRequests": 0
   },
   "durableJobVectors": {
-    "evidence": "Synthetic reader vectors for one immutable managed-source Video Trim snapshot across the five exact visible states. They do not assert writer activation, runtime readiness, a live receipt, or user durable state.",
+    "evidence": "Synthetic reader vectors for one immutable managed-source Video Trim snapshot across the six exact visible states. They do not assert writer activation, runtime readiness, a live receipt, or user durable state.",
     "jobs": [
       {
         "id": "trim-fixture-queued",
@@ -971,8 +971,152 @@
             }
           }
         }
+      },
+      {
+        "id": "trim-fixture-deleted",
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceId": "fixture-managed-video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "aibos-video-trim-v1",
+        "adapterId": "ffmpeg-video-trim-v1",
+        "presetHash": "b01dad55571c",
+        "status": "deleted",
+        "progress": 100,
+        "cancelRequested": false,
+        "createdAt": "2026-08-24T00:00:00.000Z",
+        "updatedAt": "2026-08-24T00:00:06.000Z",
+        "startedAt": "2026-08-24T00:00:01.000Z",
+        "finishedAt": "2026-08-24T00:00:06.000Z",
+        "videoTrim": {
+          "schemaVersion": 1,
+          "protocol": "aibos-enhancement-video-trim-v1",
+          "presetId": "aibos-video-trim-v1",
+          "adapterId": "ffmpeg-video-trim-v1",
+          "receiptSetSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "source": {
+            "kind": "managed-video-job",
+            "producerJobId": "11111111-2222-4333-8444-555555555555",
+            "canonicalPath": "${OUTPUT_ROOT}/Videos/2026-08-24/source.mp4",
+            "signature": {
+              "size": 123456,
+              "mtimeMs": 1787529600000
+            },
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "probe": {
+              "container": "mp4",
+              "videoCodec": "h264",
+              "pixelFormat": "yuv420p",
+              "bitDepth": 8,
+              "dynamicRange": "SDR",
+              "width": 1280,
+              "height": 720,
+              "frameCount": 240,
+              "fpsNumerator": 24,
+              "fpsDenominator": 1,
+              "durationMs": 10000,
+              "durationNumerator": 10,
+              "durationDenominator": 1,
+              "videoStreamCount": 1,
+              "audioStreamCount": 1,
+              "extraStreamCount": 0,
+              "videoTimeBaseNumerator": 1,
+              "videoTimeBaseDenominator": 24000,
+              "videoStartTimestamp": 0,
+              "videoPtsSha256": "c6518c90a14cb148e05d1561e6f57a52d23c8dd0c80dbe8c984f92f58ab4d240"
+            },
+            "probeDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sourceIdentityDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "dependencyDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "requested": {
+            "schemaVersion": 1,
+            "source": {
+              "kind": "managed-video-job",
+              "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+            },
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "audioPolicy": "preserve"
+          },
+          "plan": {
+            "revision": "aibos-video-trim-plan-v1",
+            "selection": {
+              "startFrame": 24,
+              "endFrameExclusive": 72
+            },
+            "startPts": 24000,
+            "endPtsExclusive": 72000,
+            "selectedFrameCount": 48,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "audioPlan": {
+              "kind": "reencode-selected-interval",
+              "policy": "preserve",
+              "codec": "aac"
+            }
+          },
+          "delivery": {
+            "revision": "aibos-video-trim-delivery-v1",
+            "container": "mp4",
+            "videoCodec": "h264",
+            "pixelFormat": "yuv420p",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "width": 1280,
+            "height": 720,
+            "frameCount": 48,
+            "fpsNumerator": 24,
+            "fpsDenominator": 1,
+            "timeBaseNumerator": 1,
+            "timeBaseDenominator": 24,
+            "durationNumerator": 2,
+            "durationDenominator": 1,
+            "firstRelativePts": 0,
+            "lastRelativePts": 47,
+            "videoPtsSha256": "d0d071432418c7297fa97aa32c18bb5244a20ec4b1b8edaa30e0e96637138d51",
+            "audio": {
+              "kind": "aac-selected-interval",
+              "policy": "preserve",
+              "audioStreamCount": 1,
+              "codec": "aac",
+              "packetBitIdentityClaimed": false,
+              "sampleExactClaimed": false
+            }
+          }
+        }
       }
     ],
+    "knownLifecyclePolicyVectors": {
+      "attemptWorkerFields": [
+        "runId",
+        "workerInstanceId",
+        "lastHeartbeatAt",
+        "lastProgressAt",
+        "externalPromptId",
+        "externalProcessId",
+        "diagnostics"
+      ],
+      "allowedStatus": "running",
+      "forbiddenStatuses": [
+        "queued",
+        "succeeded",
+        "failed",
+        "canceled",
+        "deleted"
+      ],
+      "expectedForbiddenMode": "reader-only",
+      "expectedMutationRequests": 0,
+      "expectedPreserveCompatibleUnknownFields": true,
+      "timestampFormat": "yyyy-MM-ddTHH:mm:ss.fffZ",
+      "maximumDiagnosticsStableJsonCodeUnits": 32768,
+      "sourceIdMaximumCodeUnits": 32768,
+      "expectedControlFreeRunningIds": true,
+      "expectedStagedSourceIdOrdinalExact": true,
+      "recognizedNumberPolicy": "lossless-safe-exact-with-stable-exponent"
+    },
     "audioPolicyVectors": {
       "preserve": {
         "requestedValue": "preserve",

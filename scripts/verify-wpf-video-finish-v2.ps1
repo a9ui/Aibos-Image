@@ -44,8 +44,8 @@ foreach ($requiredPath in @(
 
 $contractHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $contractPath).Hash.ToLowerInvariant()
 $fixtureHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fixturePath).Hash.ToLowerInvariant()
-if ($contractHash -cne 'eee8bc37402923717936576402357d93d8150b7f6874852f8a0e18dde3e33eb7' `
-    -or $fixtureHash -cne '5944bee764d363d95aaa67f79444511eabc2aebaca90bccd2a88b2e095685c5a') {
+if ($contractHash -cne '6a647819e675bfb8c4367290c0e015929f50d6e79d3dc4b757244b7a90c6cf26' `
+    -or $fixtureHash -cne 'c5631834efcf408b81b321fd9f40a07afb5ec977a564c080a335fae0eb9eea2a') {
     throw "Unexpected Video Tools v2 authority. contract=$contractHash fixture=$fixtureHash"
 }
 

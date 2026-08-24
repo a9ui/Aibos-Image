@@ -56,10 +56,14 @@ if ($v2Raw -match '(?i)firstAnchor|lastAnchor|two[- ]anchor') {
     throw 'Video Tools v2 must not contain an anchor-based Retake contract.'
 }
 $v2 = $v2Raw | ConvertFrom-Json
-$fixture = Read-ExactJson $fixturePath
+$fixtureRaw = Get-Content -LiteralPath $fixturePath -Raw -Encoding UTF8 -ErrorAction Stop
+$fixture = $fixtureRaw | ConvertFrom-Json
 $index = Read-ExactJson $indexPath
 $v2Sha256 = Get-LowerSha256 $v2Path
 $fixtureSha256 = Get-LowerSha256 $fixturePath
+if ($fixtureRaw -notmatch '"queueOrder"\s*:\s*2\.0000000000000001') {
+    throw 'The Video Tools v2 lossy-number reader vector is missing its exact raw token.'
+}
 
 if ($v2.schemaVersion -ne 2 -or
     $v2.contractId -cne 'PV-ENHANCE-VIDEO-TOOLS-002' -or
@@ -74,6 +78,56 @@ if ($v2.schemaVersion -ne 2 -or
 }
 
 Assert-ExactSet @($v2.request.kinds) @('edit', 'finish') 'request.kinds'
+$durableReader = $v2.lifecycle.durableReader
+Assert-ExactSet @($durableReader.supportedStates) @(
+    'queued', 'running', 'succeeded', 'failed', 'canceled', 'deleted'
+) 'durable reader states'
+Assert-ExactSet @($durableReader.sourceEnvelope.exactRequiredFields) @(
+    'sourcePath', 'sourceSignature', 'sourceSha256'
+) 'durable reader source envelope fields'
+Assert-ExactSet @($durableReader.sourceEnvelope.forbiddenConflicts) @(
+    'sourceProducerJobId', 'sourceManagedOutputPath',
+    'sourceRecoveredAdapterId', 'sourceRecoveredSignature',
+    'sourceRecoveredSha256', 'videoTrim'
+) 'durable reader source conflicts'
+Assert-ExactSet @($durableReader.presetEnvelope.exactFields) @(
+    'id', 'label', 'modelFamily', 'modelName', 'scale', 'outputFormat',
+    'denoise', 'sharpen', 'detail', 'smoothness', 'colorBrightness',
+    'colorContrast', 'colorSaturation', 'options'
+) 'durable reader preset fields'
+Assert-ExactSet @($durableReader.presetEnvelope.exactOptionFields) @(
+    'backendId', 'protocol', 'kind', 'container'
+) 'durable reader preset option fields'
+Assert-ExactSet @($durableReader.knownLifecycleFields) @(
+    'status', 'progress', 'cancelRequested', 'queueOrder', 'createdAt',
+    'updatedAt', 'startedAt', 'finishedAt', 'runId', 'workerInstanceId',
+    'lastHeartbeatAt', 'lastProgressAt', 'externalPromptId',
+    'externalProcessId', 'diagnostics', 'outputPath', 'outputSha256',
+    'outputBytes', 'errorCode', 'errorMessage'
+) 'durable reader known lifecycle fields'
+if ($durableReader.states.queued.exactValues.progress -ne 0 -or
+    $durableReader.states.queued.exactValues.cancelRequested -ne $false -or
+    $durableReader.states.running.valueRules.progress -cne 'integer 1 through 99' -or
+    $durableReader.states.running.valueRules.cancelRequested -ne $false -or
+    $durableReader.states.succeeded.exactValues.progress -ne 100 -or
+    $durableReader.states.succeeded.exactValues.cancelRequested -ne $false -or
+    $durableReader.states.succeeded.outputIdentityRule -notmatch '536870912' -or
+    $durableReader.states.failed.valueRules.progress -cne 'integer 0 through 99' -or
+    $durableReader.states.failed.valueRules.cancelRequested -ne $false -or
+    $durableReader.states.canceled.valueRules.cancelRequested -ne $true -or
+    $durableReader.states.deleted.exactValues.progress -ne 100 -or
+    $durableReader.states.deleted.exactValues.cancelRequested -ne $false -or
+    $durableReader.runningScalarRules.technicalTextRule -notmatch 'U\+0021 through U\+007E' -or
+    $durableReader.runningScalarRules.externalProcessIdRule -notmatch '2147483647' -or
+    $durableReader.runningScalarRules.timestampRule -notmatch 'four decimal year digits' -or
+    $durableReader.numberTokenRule -notmatch 'mathematically identical' -or
+    $durableReader.numberTokenRule -notmatch '2e0' -or
+    $durableReader.sourceEnvelope.pathScalarRule -notmatch 'fully-qualified Windows' -or
+    $durableReader.runningCancellationTransient.publicReader -notmatch 'reader-only' -or
+    $durableReader.runningCancellationTransient.privateWorker -notmatch 'compare-and-swap' -or
+    $durableReader.unknownAndMalformedRule -notmatch 'zero filesystem') {
+    throw 'The exact Video Tools v2 durable lifecycle state envelope is incomplete.'
+}
 Assert-ExactSet @($v2.request.sourceSelector.exactKinds) @('managed-video-job', 'displayed-file') 'source selector kinds'
 Assert-ExactSet @($v2.request.sourceSelector.'managed-video-job'.exactFields) @(
     'kind', 'sourceVideoJobId'
@@ -956,6 +1010,83 @@ if ($fixture.schemaVersion -ne 1 -or
     $fixture.readerFixtures.finish.video.plan.backendDeliveryRevision -cne
         'nvidia-vfx-vsr-2x-v1') {
     throw 'The paired public/private v2 reader fixture identity is incomplete.'
+}
+$stateVectors = $fixture.durableReaderStateVectors
+$validStateNames = @('queued', 'running', 'succeeded', 'failed', 'canceled', 'deleted')
+$readerOnlyStateNames = @(
+    'runningCancellationTransient',
+    'succeededMissingOutputSha256',
+    'futureSnapshotVersion'
+)
+foreach ($kind in @('edit', 'finish')) {
+    $kindVectors = $stateVectors.$kind
+    Assert-ExactSet @($kindVectors.valid.PSObject.Properties.Name) `
+        $validStateNames "fixture $kind valid lifecycle vectors"
+    $expectedReaderOnly = if ($kind -ceq 'edit') {
+        @(
+            'runningCancellationTransient',
+            'succeededMissingOutputSha256',
+            'runningUnicodeRunId',
+            'runningInternalWhitespaceRunId',
+            'runningExternalPromptId129',
+            'runningExternalProcessIdOverflow',
+            'extendedYearTimestamp',
+            'lossyQueueOrderToken',
+            'succeededRelativeOutputPath',
+            'succeededWrongJobOutputPath',
+            'futureSnapshotVersion'
+        )
+    }
+    else { $readerOnlyStateNames }
+    Assert-ExactSet @($kindVectors.readerOnly.PSObject.Properties.Name) `
+        $expectedReaderOnly "fixture $kind reader-only lifecycle vectors"
+    if ($kindVectors.valid.queued.status -cne 'queued' -or
+        $kindVectors.valid.queued.progress -ne 0 -or
+        $kindVectors.valid.queued.cancelRequested -ne $false -or
+        $kindVectors.valid.running.status -cne 'running' -or
+        $kindVectors.valid.running.progress -ne 50 -or
+        $kindVectors.valid.running.cancelRequested -ne $false -or
+        $kindVectors.valid.succeeded.status -cne 'succeeded' -or
+        $kindVectors.valid.succeeded.progress -ne 100 -or
+        $kindVectors.valid.succeeded.cancelRequested -ne $false -or
+        $kindVectors.valid.succeeded.outputSha256 -notmatch '^[0-9a-f]{64}$' -or
+        $kindVectors.valid.succeeded.outputBytes -le 0 -or
+        $kindVectors.valid.failed.status -cne 'failed' -or
+        $kindVectors.valid.failed.errorCode -notmatch '^[A-Z0-9_]{1,128}$' -or
+        $kindVectors.valid.canceled.status -cne 'canceled' -or
+        $kindVectors.valid.canceled.cancelRequested -ne $true -or
+        $kindVectors.valid.deleted.status -cne 'deleted' -or
+        $kindVectors.valid.deleted.progress -ne 100 -or
+        $kindVectors.readerOnly.runningCancellationTransient.status -cne 'running' -or
+        $kindVectors.readerOnly.runningCancellationTransient.cancelRequested -ne $true -or
+        $null -ne $kindVectors.readerOnly.succeededMissingOutputSha256.PSObject.Properties['outputSha256'] -or
+        $kindVectors.readerOnly.futureSnapshotVersion.lifecycle.status -cne 'queued' -or
+        $kindVectors.readerOnly.futureSnapshotVersion.videoSchemaVersion -ne 99 -or
+        $kindVectors.sourceEnvelopeReaderOnly.topLevelSourcePathTransform -cne 'uppercase') {
+        throw "The synthetic $kind durable lifecycle fixture vectors are incomplete."
+    }
+    if ($kind -ceq 'edit' -and (
+        $kindVectors.readerOnly.runningUnicodeRunId.runId -notmatch '[^\x00-\x7f]' -or
+        $kindVectors.readerOnly.runningInternalWhitespaceRunId.runId -notmatch ' ' -or
+        $kindVectors.readerOnly.runningExternalPromptId129.externalPromptId.Length -ne 129 -or
+        $kindVectors.readerOnly.runningExternalProcessIdOverflow.externalProcessId -ne 2147483648 -or
+        $kindVectors.readerOnly.extendedYearTimestamp.createdAt -notmatch '^\+010000-' -or
+        $kindVectors.readerOnly.lossyQueueOrderToken.queueOrder -ne 2 -or
+        $kindVectors.readerOnly.succeededRelativeOutputPath.outputPath -cne 'relative.txt' -or
+        $kindVectors.readerOnly.succeededWrongJobOutputPath.outputPath -notmatch '^C:\\AibosSynthetic\\Videos\\' -or
+        $kindVectors.sourceEnvelopeReaderOnly.snapshotRelativePath -cne 'relative.mp4' -or
+        $kindVectors.sourceEnvelopeReaderOnly.snapshotWrongExtension -notmatch '\.mov$' -or
+        $kindVectors.sourceEnvelopeReaderOnly.snapshotControlPath -notmatch "`t")) {
+        throw 'The paired Video Tools v2 scalar/path drift vectors are incomplete.'
+    }
+}
+if ($stateVectors.passiveReadExpected.rowVisible -ne $true -or
+    $stateVectors.passiveReadExpected.mutable -ne $false -or
+    $stateVectors.passiveReadExpected.enqueueCalls -ne 0 -or
+    $stateVectors.passiveReadExpected.workerWakeCalls -ne 0 -or
+    $stateVectors.passiveReadExpected.filesystemCalls -ne 0 -or
+    $stateVectors.passiveReadExpected.durableMutationCalls -ne 0) {
+    throw 'The durable lifecycle fixture passive-read expectation is incomplete.'
 }
 $negative = $fixture.editCapabilityNegativeVectors
 $booleanFlip = $negative.booleanFlipOnly

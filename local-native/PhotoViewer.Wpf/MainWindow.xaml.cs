@@ -20412,6 +20412,7 @@ public partial class MainWindow : Window
             CloseI2iV2EditBoard(restoreFocus: false);
         if (I2iV3EditDialog?.Visibility == Visibility.Visible)
             CloseI2iV3EditBoard(restoreFocus: false);
+        StopAndHideModalVideo(clearSource: true);
         Modal.Visibility = Visibility.Collapsed;
         ModalBitmap.Source = null;
         ModalBitmap.Visibility = Visibility.Collapsed;

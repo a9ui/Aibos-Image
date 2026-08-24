@@ -199,7 +199,7 @@ public partial class App
                         && accepted.AiActionsDisabled
                         && accepted.MutationActionsDisabled
                         && !window.VideoToolsEntryVisibleForSmoke("retake")
-                        && !window.VideoToolsEntryVisibleForSmoke("finish");
+                        && window.VideoToolsEntryVisibleForSmoke("finish");
 
                     window.CloseModalForSmoke();
                     bool staleSourceSeamRejected = sourceSeam is not null

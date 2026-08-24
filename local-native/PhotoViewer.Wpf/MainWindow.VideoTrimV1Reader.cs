@@ -42,6 +42,10 @@ public partial class MainWindow
         string? ProducerJobId,
         string CanonicalPath,
         string? StagingCanonicalPath,
+        string ExecutionCanonicalPath,
+        long ExecutionSize,
+        double ExecutionMtimeMs,
+        string ExecutionSha256,
         long Size,
         double MtimeMs,
         int Width,
@@ -79,7 +83,7 @@ public partial class MainWindow
             || !TrimV1LowerHex(presetHash, 12)
             || !TrimV1SingleString(job, "status", out string status)
             || status is not ("queued" or "running" or "succeeded"
-                or "failed" or "canceled")
+                or "failed" or "canceled" or "deleted")
             || !TrimV1Int32(job, "progress", out int progress)
             || !TrimV1Boolean(job, "cancelRequested", out bool cancelRequested)
             || !TryReadVideoTrimV1StateEnvelope(
@@ -209,7 +213,8 @@ public partial class MainWindow
                 && !hasStarted
                 && !hasFinished
                 && !hasOutput
-                && !hasError;
+                && !hasError
+                && !HasVideoTrimV1AttemptWorkerFields(job);
         }
         if (!TrimV1Timestamp(job, "startedAt", out DateTimeOffset started)
             || started < created)
@@ -223,12 +228,17 @@ public partial class MainWindow
                 && !hasQueue
                 && !hasFinished
                 && !hasOutput
-                && !hasError;
+                && !hasError
+                && TryReadVideoTrimV1RunningLifecycle(
+                    job,
+                    started,
+                    updated);
         }
         if (!TrimV1Timestamp(job, "finishedAt", out DateTimeOffset finished)
             || finished < started
             || updated < finished
-            || hasQueue)
+            || hasQueue
+            || HasVideoTrimV1AttemptWorkerFields(job))
         {
             return false;
         }
@@ -254,11 +264,96 @@ public partial class MainWindow
                 && TrimV1SafeTechnical(job, "errorCode", 128, out _)
                 && TrimV1BoundedText(job, "errorMessage", 2_000, out _);
         }
+        if (status == "deleted")
+        {
+            return progress == 100
+                && !cancelRequested
+                && !hasOutput
+                && !hasError;
+        }
         return status == "canceled"
             && cancelRequested
             && progress is >= 0 and <= 99
             && !hasOutput
             && !hasError;
+    }
+
+    private static bool HasVideoTrimV1AttemptWorkerFields(JsonElement job)
+        => job.TryGetProperty("runId", out _)
+            || job.TryGetProperty("workerInstanceId", out _)
+            || job.TryGetProperty("lastHeartbeatAt", out _)
+            || job.TryGetProperty("lastProgressAt", out _)
+            || job.TryGetProperty("externalPromptId", out _)
+            || job.TryGetProperty("externalProcessId", out _)
+            || job.TryGetProperty("diagnostics", out _);
+
+    private static bool TryReadVideoTrimV1RunningLifecycle(
+        JsonElement job,
+        DateTimeOffset started,
+        DateTimeOffset updated)
+    {
+        foreach (string name in new[]
+        {
+            "runId", "workerInstanceId", "lastHeartbeatAt", "lastProgressAt",
+            "externalPromptId", "externalProcessId", "diagnostics",
+        })
+        {
+            if (job.EnumerateObject().Count(property =>
+                    string.Equals(property.Name, name, StringComparison.Ordinal)) > 1)
+            {
+                return false;
+            }
+        }
+        if (job.TryGetProperty("runId", out _)
+            && !TrimV1BoundedText(job, "runId", 128, out _))
+        {
+            return false;
+        }
+        if (job.TryGetProperty("workerInstanceId", out _)
+            && !TrimV1BoundedText(job, "workerInstanceId", 128, out _))
+        {
+            return false;
+        }
+        if (job.TryGetProperty("externalPromptId", out _)
+            && !TrimV1BoundedText(job, "externalPromptId", 512, out _))
+        {
+            return false;
+        }
+        if (job.TryGetProperty("externalProcessId", out _)
+            && (!TrimV1Int32(job, "externalProcessId", out int processId)
+                || processId <= 0))
+        {
+            return false;
+        }
+        foreach (string name in new[] { "lastHeartbeatAt", "lastProgressAt" })
+        {
+            if (job.TryGetProperty(name, out _)
+                && (!TrimV1Timestamp(job, name, out DateTimeOffset timestamp)
+                    || timestamp < started
+                    || timestamp > updated))
+            {
+                return false;
+            }
+        }
+        return !job.TryGetProperty("diagnostics", out JsonElement diagnostics)
+            || diagnostics.ValueKind == JsonValueKind.Object
+                && VideoTrimV1StableJsonLengthWithin(diagnostics, 32_768);
+    }
+
+    private static bool VideoTrimV1StableJsonLengthWithin(
+        JsonElement value,
+        int maximumLength)
+    {
+        try
+        {
+            var builder = new StringBuilder();
+            AppendStableJson(builder, value);
+            return builder.Length <= maximumLength;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool TryReadVideoTrimV1Source(
@@ -272,6 +367,10 @@ public partial class MainWindow
         string? producerJobId = null;
         string canonicalPath;
         string? stagingPath = null;
+        string executionPath;
+        long executionSize;
+        double executionMtimeMs;
+        string executionSha;
         long size;
         double mtimeMs;
         JsonElement probe;
@@ -298,7 +397,8 @@ public partial class MainWindow
                 || !TrimV1Path(value, "canonicalPath", out canonicalPath)
                 || !value.TryGetProperty("signature", out JsonElement signature)
                 || !TryReadVideoTrimV1Signature(signature, out size, out mtimeMs)
-                || !TrimV1Sha(value, "sha256")
+                || !TrimV1SingleString(value, "sha256", out executionSha)
+                || !TrimV1LowerHex(executionSha, 64)
                 || !TrimV1Sha(value, "dependencyDigest")
                 || !value.TryGetProperty("probe", out probe)
                 || !TrimV1SingleString(
@@ -312,6 +412,9 @@ public partial class MainWindow
             {
                 return false;
             }
+            executionPath = canonicalPath;
+            executionSize = size;
+            executionMtimeMs = mtimeMs;
         }
         else if (kind == "staged-displayed-file")
         {
@@ -349,10 +452,14 @@ public partial class MainWindow
                 || !TryReadVideoTrimV1Signature(
                     stagingSignature,
                     out long stagingSize,
-                    out _)
+                    out double stagingMtimeMs)
                 || stagingSize != size
                 || !TrimV1Sha(value, "originalSha256")
-                || !TrimV1Sha(value, "stagingSha256")
+                || !TrimV1SingleString(
+                    value,
+                    "stagingSha256",
+                    out executionSha)
+                || !TrimV1LowerHex(executionSha, 64)
                 || !TrimV1Sha(value, "stagingOwnershipDigest")
                 || !value.TryGetProperty("probe", out probe)
                 || !TrimV1SingleString(
@@ -366,6 +473,9 @@ public partial class MainWindow
             {
                 return false;
             }
+            executionPath = stagingPath;
+            executionSize = stagingSize;
+            executionMtimeMs = stagingMtimeMs;
         }
         else
         {
@@ -397,6 +507,10 @@ public partial class MainWindow
             producerJobId,
             canonicalPath,
             stagingPath,
+            executionPath,
+            executionSize,
+            executionMtimeMs,
+            executionSha,
             size,
             mtimeMs,
             width,
@@ -538,6 +652,37 @@ public partial class MainWindow
         JsonElement job,
         VideoTrimV1SourceSnapshot source)
     {
+        bool hasPath = job.TryGetProperty("sourcePath", out _);
+        bool hasSignature = job.TryGetProperty("sourceSignature", out _);
+        bool hasSha = job.TryGetProperty("sourceSha256", out _);
+        bool hasPrivateExecutionEnvelope = hasPath || hasSignature || hasSha;
+        if (hasPrivateExecutionEnvelope
+            && (!hasPath || !hasSignature || !hasSha
+                || !TrimV1Path(job, "sourcePath", out string sourcePath)
+                || !string.Equals(
+                    sourcePath,
+                    source.ExecutionCanonicalPath,
+                    StringComparison.Ordinal)
+                || !job.TryGetProperty(
+                    "sourceSignature",
+                    out JsonElement sourceSignature)
+                || !TryReadVideoTrimV1Signature(
+                    sourceSignature,
+                    out long sourceSize,
+                    out double sourceMtimeMs)
+                || sourceSize != source.ExecutionSize
+                || sourceMtimeMs != source.ExecutionMtimeMs
+                || !TrimV1SingleString(
+                    job,
+                    "sourceSha256",
+                    out string sourceSha)
+                || !string.Equals(
+                    sourceSha,
+                    source.ExecutionSha256,
+                    StringComparison.Ordinal)))
+        {
+            return false;
+        }
         if (source.Kind == "managed-video-job")
         {
             return source.ProducerJobId is string producer
@@ -549,13 +694,16 @@ public partial class MainWindow
                 && string.Equals(
                     producer,
                     sourceVideoJobId,
-                    StringComparison.Ordinal)
-                && !job.TryGetProperty("sourcePath", out _);
+                    StringComparison.Ordinal);
         }
         return !job.TryGetProperty("sourceVideoJobId", out _)
-            && !job.TryGetProperty("sourcePath", out _)
             && source.ProducerJobId is null
-            && source.StagingCanonicalPath is not null;
+            && source.StagingCanonicalPath is not null
+            && TrimV1BoundedText(job, "sourceId", 32_768, out string sourceId)
+            && string.Equals(
+                sourceId,
+                source.CanonicalPath,
+                StringComparison.Ordinal);
     }
 
     private static bool TryReadVideoTrimV1Requested(
@@ -1015,7 +1163,9 @@ public partial class MainWindow
         result = 0;
         return value.TryGetProperty(name, out JsonElement property)
             && property.ValueKind == JsonValueKind.Number
-            && property.TryGetInt64(out result);
+            && property.TryGetInt64(out result)
+            && result is >= -9_007_199_254_740_991L
+                and <= 9_007_199_254_740_991L;
     }
 
     private static bool TrimV1ExactInt32(
@@ -1061,7 +1211,100 @@ public partial class MainWindow
         return value.TryGetProperty(name, out JsonElement property)
             && property.ValueKind == JsonValueKind.Number
             && property.TryGetDouble(out result)
-            && double.IsFinite(result);
+            && double.IsFinite(result)
+            && VideoTrimV1LosslessJsonNumber(property.GetRawText(), result);
+    }
+
+    private static bool VideoTrimV1LosslessJsonNumber(
+        string token,
+        double value)
+    {
+        if (!TryNormalizeVideoTrimV1Decimal(
+                token,
+                out bool negative,
+                out string digits,
+                out int exponent))
+        {
+            return false;
+        }
+        if (value == 0 && digits != "0")
+            return false;
+        if (exponent >= 0
+            && (value < -9_007_199_254_740_991d
+                || value > 9_007_199_254_740_991d
+                || Math.Truncate(value) != value))
+        {
+            return false;
+        }
+        if (BitConverter.DoubleToInt64Bits(value)
+            == BitConverter.DoubleToInt64Bits(-0d))
+        {
+            return true;
+        }
+        string roundTrip = value.ToString("R", CultureInfo.InvariantCulture);
+        return TryNormalizeVideoTrimV1Decimal(
+                roundTrip,
+                out bool roundTripNegative,
+                out string roundTripDigits,
+                out int roundTripExponent)
+            && negative == roundTripNegative
+            && string.Equals(digits, roundTripDigits, StringComparison.Ordinal)
+            && exponent == roundTripExponent;
+    }
+
+    private static bool TryNormalizeVideoTrimV1Decimal(
+        string token,
+        out bool negative,
+        out string digits,
+        out int exponent)
+    {
+        exponent = 0;
+        negative = token.StartsWith("-", StringComparison.Ordinal);
+        string unsigned = negative ? token[1..] : token;
+        int exponentIndex = unsigned.IndexOfAny(['e', 'E']);
+        string mantissa = exponentIndex < 0
+            ? unsigned
+            : unsigned[..exponentIndex];
+        string? exponentText = exponentIndex < 0
+            ? null
+            : unsigned[(exponentIndex + 1)..];
+        int decimalIndex = mantissa.IndexOf('.');
+        int decimalPlaces = decimalIndex < 0
+            ? 0
+            : mantissa.Length - decimalIndex - 1;
+        digits = mantissa.Replace(".", string.Empty, StringComparison.Ordinal)
+            .TrimStart('0');
+        if (digits.Length == 0)
+        {
+            negative = false;
+            digits = "0";
+            exponent = 0;
+            return true;
+        }
+        if (exponentText is not null
+            && !int.TryParse(
+                exponentText,
+                NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture,
+                out exponent))
+        {
+            exponent = 0;
+            return false;
+        }
+        try
+        {
+            exponent = checked(exponent - decimalPlaces);
+            while (digits.EndsWith('0'))
+            {
+                digits = digits[..^1];
+                exponent = checked(exponent + 1);
+            }
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+        return digits.All(character => character is >= '0' and <= '9');
     }
 
     private static bool TrimV1Timestamp(
@@ -1071,15 +1314,10 @@ public partial class MainWindow
     {
         result = default;
         return TrimV1SingleString(value, name, out string text)
-            && text.Length is > 0 and <= 64
-            && text.EndsWith('Z')
+            && text.Length == 24
             && DateTimeOffset.TryParseExact(
                 text,
-                new[]
-                {
-                    "yyyy-MM-dd'T'HH:mm:ss'Z'",
-                    "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'",
-                },
+                "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal
                     | DateTimeStyles.AdjustToUniversal,

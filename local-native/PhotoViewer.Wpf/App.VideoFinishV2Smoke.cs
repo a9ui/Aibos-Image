@@ -285,8 +285,8 @@ public partial class App
                         + unexpectedRequests;
                     bool entryRerouted = window
                         .InvokeVideoFinishProductionEntryForSmoke()
-                        && window.VideoFinishV2ModeForSmoke == "standard"
-                        && window.VideoFinishV2ScaleForSmoke == 2
+                        && window.VideoFinishV2ModeForSmoke == "quality"
+                        && window.VideoFinishV2ScaleForSmoke == 4
                         && probeRequests
                             + healthReads
                             + enqueueRequests
