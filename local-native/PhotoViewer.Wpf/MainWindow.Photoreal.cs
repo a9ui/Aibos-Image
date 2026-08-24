@@ -24,6 +24,10 @@ public partial class MainWindow
     private const int MaxPhotorealStyleCount = 32;
     private const int MaxPhotorealStyleNameLength = 40;
     private const int MaxPhotorealPromptLength = 2_000;
+    // Keep the persisted selection token longer than any valid user Style name
+    // so a previously saved user Style can never collide with a built-in.
+    private const string BuiltInPhotorealStylePrefix =
+        "aibos:built-in-photoreal-style:";
     private const string PhotorealUpscalePresetId = "photo-natural-x2";
     private const string PhotorealUpscaleAdapterId = "realesrgan-ncnn";
     private const int PhotorealUpscaleScale = 2;
@@ -61,7 +65,81 @@ public partial class MainWindow
         _thumbnailImageDisplayPreferencesByPath =
             new(StringComparer.OrdinalIgnoreCase);
 
-    private sealed record PhotorealStyleChoice(string Label, string? StyleName);
+    private sealed record BuiltInPhotorealStyle(
+        string Id,
+        string Label,
+        string Prompt)
+    {
+        public string SelectionKey => BuiltInPhotorealStylePrefix + Id;
+    }
+
+    private sealed record PhotorealStyleChoice(
+        string Label,
+        string? StyleName,
+        string? BuiltInId = null)
+    {
+        public string? SelectionKey => BuiltInId is null
+            ? StyleName
+            : BuiltInPhotorealStylePrefix + BuiltInId;
+    }
+
+    private static readonly IReadOnlyList<BuiltInPhotorealStyle>
+        BuiltInPhotorealStyles =
+        [
+            new(
+                "soft-beauty-glamour",
+                "標準: Soft Beauty Glamour",
+                BuildBuiltInPhotorealPrompt(
+                    "Use soft beauty glamour photography with flattering diffused light, luminous natural-looking skin, subtle realistic beauty retouching, gentle tonal transitions, realistic individual hair strands, and an elegant but believable photographic finish. Preserve the original expression; do not add a smile or redesign the face.")),
+            new(
+                "beauty-natural",
+                "標準: 美肌ナチュラル",
+                BuildBuiltInPhotorealPrompt(
+                    "Use natural beauty portrait photography with soft natural light, clean healthy skin, restrained realistic retouching, gentle contrast, and believable everyday photographic detail.")),
+            new(
+                "lifestyle-beauty",
+                "標準: 生活感",
+                BuildBuiltInPhotorealPrompt(
+                    "Use natural lifestyle beauty photography with available window light, restrained retouching, realistic everyday skin and fabric texture, neutral color grading, subtle imperfections, and a lived-in photographic atmosphere.")),
+            new(
+                "clean-beauty",
+                "標準: クリーンビューティー",
+                BuildBuiltInPhotorealPrompt(
+                    "Use clean beauty portrait photography with even diffused studio lighting, clear luminous skin, controlled highlights, refined but realistic retouching, and clean natural color. Keep natural skin texture and avoid a plastic or porcelain finish.")),
+            new(
+                "cinematic-glamour",
+                "標準: シネマティック",
+                BuildBuiltInPhotorealPrompt(
+                    "Use cinematic beauty glamour photography with directional natural light, soft highlight rolloff, subtle shadow depth, restrained saturation, atmospheric separation, and elegant filmic color grading.")),
+            new(
+                "wet-underwater-beauty",
+                "標準: Wet / Underwater",
+                BuildBuiltInPhotorealPrompt(
+                    "Use wet or underwater beauty editorial photography consistent with the source scene, with physically believable water, wet hair, bubbles or caustic light only when visibly present, soft skin highlights, and a natural photographic finish.")),
+        ];
+
+    private static string BuildBuiltInPhotorealPrompt(string styleDirection)
+        => "Transform the supplied image into a faithful realistic photograph. "
+            + "Preserve the visible subject identity, facial proportions, expression, "
+            + "hairstyle, hair color, body shape, pose, clothing, camera angle, "
+            + "framing, and background layout. "
+            + styleDirection;
+
+    private static BuiltInPhotorealStyle? FindBuiltInPhotorealStyle(
+        string? selectionKey)
+    {
+        if (string.IsNullOrWhiteSpace(selectionKey)
+            || !selectionKey.StartsWith(
+                BuiltInPhotorealStylePrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string id = selectionKey[BuiltInPhotorealStylePrefix.Length..];
+        return BuiltInPhotorealStyles.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, id, StringComparison.OrdinalIgnoreCase));
+    }
     private enum ModalDisplayVersionKind
     {
         Original,
@@ -1826,6 +1904,35 @@ public partial class MainWindow
         if (choice is null)
             return;
 
+        if (choice.BuiltInId is not null)
+        {
+            BuiltInPhotorealStyle? builtIn = FindBuiltInPhotorealStyle(
+                choice.SelectionKey);
+            if (builtIn is null)
+                return;
+
+            _selectedPhotorealStyleName = builtIn.SelectionKey;
+            RestoreModalPhotorealSettings(
+                _modalPhotorealStrength,
+                _modalPhotorealSteps,
+                _modalPhotorealMaxDimension,
+                builtIn.Prompt,
+                _modalPhotorealCfgScale,
+                builtIn.Prompt,
+                _modalPhotorealNegativePrompt,
+                _modalPhotorealLoraEnabled,
+                _modalPhotorealNegativePromptEnabled);
+            RefreshPhotorealStyleControls(updateNameFields: true);
+            SetPhotorealStyleStatus(
+                $"「{builtIn.Label}」を反映しました。LoRA・強度・CFG・品質・Negativeは変更していません。");
+            if (!_initializing)
+            {
+                SaveAiStyles();
+                SaveState();
+            }
+            return;
+        }
+
         if (choice.StyleName is null)
         {
             _selectedPhotorealStyleName = null;
@@ -1939,10 +2046,20 @@ public partial class MainWindow
         _photorealStyles.Sort(static (left, right) =>
             StringComparer.CurrentCultureIgnoreCase.Compare(left.Name, right.Name));
 
-        PhotorealStyleState? selected = FindPhotorealStyle(selectedStyleName);
-        _selectedPhotorealStyleName = selected is not null && PhotorealStyleMatchesCurrent(selected)
-            ? selected.Name
-            : null;
+        BuiltInPhotorealStyle? builtIn = FindBuiltInPhotorealStyle(
+            selectedStyleName);
+        if (builtIn is not null && BuiltInPhotorealStyleMatchesCurrent(builtIn))
+        {
+            _selectedPhotorealStyleName = builtIn.SelectionKey;
+        }
+        else
+        {
+            PhotorealStyleState? selected = FindPhotorealStyle(selectedStyleName);
+            _selectedPhotorealStyleName = selected is not null
+                && PhotorealStyleMatchesCurrent(selected)
+                    ? selected.Name
+                    : null;
+        }
         RefreshPhotorealStyleControls(updateNameFields: true);
     }
 
@@ -2021,6 +2138,17 @@ public partial class MainWindow
             : _photorealStyles.FirstOrDefault(candidate =>
                 string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
 
+    private bool BuiltInPhotorealStyleMatchesCurrent(
+        BuiltInPhotorealStyle style)
+        => string.Equals(
+                style.Prompt,
+                _modalPhotorealPrompt,
+                StringComparison.Ordinal)
+            && string.Equals(
+                style.Prompt,
+                _modalPhotorealEmptyPrompt,
+                StringComparison.Ordinal);
+
     private bool PhotorealStyleMatchesCurrent(PhotorealStyleState style)
         => (style.LoraEnabled ?? LegacyPhotorealStyleLoraEnabled) == _modalPhotorealLoraEnabled
             && Math.Abs(style.Strength - _modalPhotorealStrength) < 0.0001
@@ -2073,10 +2201,15 @@ public partial class MainWindow
         {
             new("カスタム（現在の設定）", null),
         };
+        choices.AddRange(BuiltInPhotorealStyles.Select(static style =>
+            new PhotorealStyleChoice(style.Label, null, style.Id)));
         choices.AddRange(_photorealStyles.Select(static style =>
             new PhotorealStyleChoice(style.Name, style.Name)));
         PhotorealStyleChoice selectedChoice = choices.FirstOrDefault(choice =>
-                string.Equals(choice.StyleName, _selectedPhotorealStyleName, StringComparison.OrdinalIgnoreCase))
+                string.Equals(
+                    choice.SelectionKey,
+                    _selectedPhotorealStyleName,
+                    StringComparison.OrdinalIgnoreCase))
             ?? choices[0];
 
         bool wasSyncing = _syncingModalPhotorealSettings;
@@ -2087,7 +2220,8 @@ public partial class MainWindow
             AppPhotorealStyleListBox.ItemsSource = choices;
             ModalPhotorealStyleComboBox.SelectedItem = selectedChoice;
             AppPhotorealStyleListBox.SelectedItem = selectedChoice;
-            bool canDelete = selectedChoice.StyleName is not null;
+            bool canDelete = selectedChoice.StyleName is not null
+                && selectedChoice.BuiltInId is null;
             DeleteModalPhotorealStyleButton.IsEnabled = canDelete;
             DeleteAppPhotorealStyleButton.IsEnabled = canDelete;
             if (updateNameFields)
@@ -2739,10 +2873,20 @@ public partial class MainWindow
             && AutomationProperties.GetName(ModalPhotorealStyleComboBox)
                 == "AI photorealization style"
             && AutomationProperties.GetName(AppPhotorealStyleListBox)
-                == "Saved AI photorealization styles";
+                == "AI photorealization styles";
 
     public IReadOnlyList<string> PhotorealStyleNamesForSmoke
         => _photorealStyles.Select(static style => style.Name).ToList();
+
+    public IReadOnlyList<string> BuiltInPhotorealStyleIdsForSmoke
+        => BuiltInPhotorealStyles.Select(static style => style.Id).ToList();
+
+    public string? SelectedBuiltInPhotorealStyleIdForSmoke
+        => FindBuiltInPhotorealStyle(_selectedPhotorealStyleName)?.Id;
+
+    public bool BuiltInPhotorealStyleDeleteDisabledForSmoke
+        => DeleteModalPhotorealStyleButton.IsEnabled == false
+            && DeleteAppPhotorealStyleButton.IsEnabled == false;
 
     public bool SavePhotorealStyleForSmoke(string name)
     {
@@ -2762,6 +2906,22 @@ public partial class MainWindow
 
         ModalPhotorealStyleComboBox.SelectedItem = choice;
         return string.Equals(_selectedPhotorealStyleName, name, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool SelectBuiltInPhotorealStyleForSmoke(string id)
+    {
+        PhotorealStyleChoice? choice = ModalPhotorealStyleComboBox.Items
+            .OfType<PhotorealStyleChoice>()
+            .FirstOrDefault(candidate =>
+                string.Equals(candidate.BuiltInId, id, StringComparison.OrdinalIgnoreCase));
+        if (choice is null)
+            return false;
+
+        ModalPhotorealStyleComboBox.SelectedItem = choice;
+        return string.Equals(
+            _selectedPhotorealStyleName,
+            BuiltInPhotorealStylePrefix + id,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     public bool DeleteSelectedPhotorealStyleForSmoke()

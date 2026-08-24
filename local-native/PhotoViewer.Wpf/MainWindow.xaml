@@ -3080,8 +3080,8 @@
                        ScrollViewer.VerticalScrollBarVisibility="Auto"
                        IsSynchronizedWithCurrentItem="False"
                        SelectionChanged="PhotorealStyle_SelectionChanged"
-                       AutomationProperties.Name="Saved AI photorealization styles"
-                       AutomationProperties.HelpText="Choose a saved style or the current unsaved settings.">
+                       AutomationProperties.Name="AI photorealization styles"
+                       AutomationProperties.HelpText="Choose a built-in style, a saved style, or the current unsaved settings.">
                 <ListBox.ItemContainerStyle>
                   <Style TargetType="{x:Type ListBoxItem}">
                     <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -3710,7 +3710,7 @@
                       IsSynchronizedWithCurrentItem="False"
                       SelectionChanged="PhotorealStyle_SelectionChanged"
                       AutomationProperties.Name="AI photorealization style"
-                      AutomationProperties.HelpText="Apply saved Positive, blank-state Positive, Negative, strength, CFG, quality, and resolution settings."/>
+                      AutomationProperties.HelpText="Built-in styles change only Positive prompts. Saved styles restore all stored settings."/>
             <Grid Margin="0,6,0,10">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
