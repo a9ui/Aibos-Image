@@ -88,10 +88,14 @@ Assert-ExactSet @($v2.request.edit.exactVideoToolsFields) @(
     'selection',
     'instructionJa',
     'compiled',
+    'audioPolicy',
     'steps',
     'strength',
     'maximumPixelArea'
 ) 'edit request fields'
+Assert-ExactSet @($v2.request.edit.audioPolicy) @(
+    'preserve', 'mute'
+) 'Edit audio policy values'
 Assert-ExactSet @($v2.request.finish.exactVideoToolsFields) @(
     'schemaVersion',
     'kind',
@@ -219,6 +223,56 @@ if ($v2.editPlan.maximumSelectedDurationMs -ne 5000 -or
     throw 'The initial Edit child-clip selection bound is not exact.'
 }
 Assert-ExactSet @($v2.request.edit.maximumPixelArea) @(230400, 307200, 414720) 'Edit pixel tiers'
+if (@($v2.request.edit.exactVideoToolsFields) -notcontains 'maximumPixelArea' -or
+    $fixture.requestFixtures.editManaged.videoTools.maximumPixelArea -ne 414720 -or
+    $fixture.readerFixtures.edit.video.requested.maximumPixelArea -ne 414720) {
+    throw 'Edit maximumPixelArea must remain a required request and persisted-request field.'
+}
+Assert-ExactSet @($v2.persistedSnapshot.exactKeys.edit.requested) @(
+    'schemaVersion', 'kind', 'source', 'selection', 'instructionJa', 'compiled',
+    'audioPolicy', 'steps', 'strength', 'maximumPixelArea'
+) 'persisted Edit requested keys'
+Assert-ExactSet @($v2.persistedSnapshot.exactKeys.edit.plan) @(
+    'selected', 'sourceToBackendMap', 'backendWindow', 'deliveryCrop',
+    'strengthMapping', 'modelCanvas', 'audioPlan'
+) 'persisted Edit plan keys'
+Assert-ExactSet @($v2.persistedSnapshot.exactKeys.edit.delivery) @(
+    'width', 'height', 'frameCount', 'fpsNumerator', 'fpsDenominator',
+    'durationMs', 'videoPtsSha256', 'childClip', 'fullSourceSplice',
+    'discardGeneratedAudio', 'audioDelivery'
+) 'persisted Edit delivery keys'
+
+$audioPlanVariants = $v2.persistedSnapshot.exactKeys.edit.audioPlan.variants
+Assert-ExactSet @($audioPlanVariants.'preserve-packets'.exactKeys) @(
+    'kind', 'policy', 'packetStartIndex', 'packetEndIndexExclusive',
+    'editListRevision'
+) 'Edit preserve-packets plan keys'
+Assert-ExactSet @($audioPlanVariants.'preserve-no-packets'.exactKeys) @(
+    'kind', 'policy'
+) 'Edit preserve-no-packets plan keys'
+Assert-ExactSet @($audioPlanVariants.mute.exactKeys) @(
+    'kind', 'policy'
+) 'Edit mute plan keys'
+$audioDeliveryVariants = $v2.persistedSnapshot.exactKeys.edit.audioDelivery.variants
+Assert-ExactSet @($audioDeliveryVariants.'remuxed-source-packets'.exactKeys) @(
+    'kind', 'policy', 'audioStreamCount', 'sourcePacketStartIndex',
+    'sourcePacketEndIndexExclusive', 'sourcePacketPayloadSha256'
+) 'Edit remuxed-source-packets delivery keys'
+Assert-ExactSet @($audioDeliveryVariants.'no-audio-preserve-empty'.exactKeys) @(
+    'kind', 'policy', 'audioStreamCount'
+) 'Edit no-audio-preserve-empty delivery keys'
+Assert-ExactSet @($audioDeliveryVariants.'no-audio-muted'.exactKeys) @(
+    'kind', 'policy', 'audioStreamCount'
+) 'Edit no-audio-muted delivery keys'
+if ($v2.persistedSnapshot.exactKeys.edit.audioPlan.discriminator -cne 'kind' -or
+    $v2.persistedSnapshot.exactKeys.edit.audioDelivery.discriminator -cne 'kind' -or
+    $audioPlanVariants.mute.policy -cne 'mute' -or
+    $audioDeliveryVariants.'no-audio-muted'.policy -cne 'mute' -or
+    $audioDeliveryVariants.'no-audio-muted'.rule -notmatch 'no packet range' -or
+    $audioDeliveryVariants.'no-audio-muted'.rule -notmatch 'zero-range placeholder' -or
+    $v2.editDelivery.audio.mute -notmatch 'emit no audio stream') {
+    throw 'Edit audio plan/delivery discrimination or mute no-audio semantics changed.'
+}
 
 $editCandidates = $v2.editBackendCandidates
 Assert-ExactSet @($v2.persistedSnapshot.stableIds.editCandidateBackendIds) @(
@@ -392,6 +446,22 @@ if ($fixture.schemaVersion -ne 1 -or
     $fixture.durableInboxVectors.passiveRead.opensSource -ne $false -or
     $fixture.readerFixtures.edit.job.adapterId -cne
         'bernini-r-1.3b-edit-candidate-v1' -or
+    $fixture.requestFixtures.editManaged.videoTools.audioPolicy -cne 'preserve' -or
+    $fixture.readerFixtures.edit.video.requested.audioPolicy -cne 'preserve' -or
+    $fixture.readerFixtures.edit.video.plan.audioPlan.kind -cne
+        'preserve-packets' -or
+    $fixture.readerFixtures.edit.video.plan.audioPlan.policy -cne 'preserve' -or
+    $fixture.readerFixtures.edit.video.plan.audioPlan.packetStartIndex -ge
+        $fixture.readerFixtures.edit.video.plan.audioPlan.packetEndIndexExclusive -or
+    $fixture.readerFixtures.edit.video.delivery.audioDelivery.kind -cne
+        'remuxed-source-packets' -or
+    $fixture.readerFixtures.edit.video.delivery.audioDelivery.policy -cne
+        'preserve' -or
+    $fixture.readerFixtures.edit.video.delivery.audioDelivery.audioStreamCount -ne 1 -or
+    $fixture.readerFixtures.edit.video.delivery.audioDelivery.sourcePacketStartIndex -ge
+        $fixture.readerFixtures.edit.video.delivery.audioDelivery.sourcePacketEndIndexExclusive -or
+    $fixture.readerFixtures.edit.video.delivery.audioDelivery.sourcePacketPayloadSha256 -notmatch
+        '^[0-9a-f]{64}$' -or
     $fixture.readerFixtures.edit.video.delivery.childClip -ne $true -or
     $fixture.readerFixtures.edit.video.delivery.fullSourceSplice -ne $false -or
     $fixture.readerFixtures.edit.video.delivery.frameCount -ne 30 -or
@@ -405,6 +475,30 @@ if ($fixture.schemaVersion -ne 1 -or
     $fixture.readerFixtures.finish.video.plan.backendDeliveryRevision -cne
         'nvidia-vfx-vsr-2x-v1') {
     throw 'The paired public/private v2 reader fixture identity is incomplete.'
+}
+Assert-ExactSet @($fixture.audioPolicyVectors.mute.plan.PSObject.Properties.Name) @(
+    $audioPlanVariants.mute.exactKeys
+) 'mute fixture plan keys'
+Assert-ExactSet @($fixture.audioPolicyVectors.mute.delivery.PSObject.Properties.Name) @(
+    $audioDeliveryVariants.'no-audio-muted'.exactKeys
+) 'mute fixture delivery keys'
+Assert-ExactSet @($fixture.audioPolicyVectors.preserveNoPackets.plan.PSObject.Properties.Name) @(
+    $audioPlanVariants.'preserve-no-packets'.exactKeys
+) 'preserve-no-packets fixture plan keys'
+Assert-ExactSet @($fixture.audioPolicyVectors.preserveNoPackets.delivery.PSObject.Properties.Name) @(
+    $audioDeliveryVariants.'no-audio-preserve-empty'.exactKeys
+) 'preserve-no-packets fixture delivery keys'
+if ($fixture.audioPolicyVectors.mute.requestValue -cne 'mute' -or
+    $fixture.audioPolicyVectors.mute.plan.kind -cne 'mute' -or
+    $fixture.audioPolicyVectors.mute.delivery.kind -cne 'no-audio-muted' -or
+    $fixture.audioPolicyVectors.mute.delivery.audioStreamCount -ne 0 -or
+    $fixture.audioPolicyVectors.preserveNoPackets.requestValue -cne 'preserve' -or
+    $fixture.audioPolicyVectors.preserveNoPackets.plan.kind -cne
+        'preserve-no-packets' -or
+    $fixture.audioPolicyVectors.preserveNoPackets.delivery.kind -cne
+        'no-audio-preserve-empty' -or
+    $fixture.audioPolicyVectors.preserveNoPackets.delivery.audioStreamCount -ne 0) {
+    throw 'Mute and preserve-without-packets fixtures must emit no audio and no fabricated packet identity.'
 }
 $contractHealthJson = $v2.healthCapability.exactShape |
     ConvertTo-Json -Depth 30 -Compress

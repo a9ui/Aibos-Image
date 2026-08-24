@@ -132,6 +132,7 @@
         "selection",
         "instructionJa",
         "compiled",
+        "audioPolicy",
         "steps",
         "strength",
         "maximumPixelArea"
@@ -165,6 +166,10 @@
         "contextDigest": "64 lowercase hexadecimal characters binding the exact captured or managed source selector identity, selected preview-frame identities, instructionJa, compiled texts, and compiler revision",
         "serverValidation": "WPF validates the bounded shape before inbox publication. After dispatch, Companion revalidates every compiled field and exact context digest before Job commit or execution; it never trusts client compilation. A definitive rejection follows durable inbox needs-action semantics."
       },
+      "audioPolicy": [
+        "preserve",
+        "mute"
+      ],
       "steps": {
         "type": "integer",
         "minimum": 1,
@@ -484,7 +489,7 @@
       "persist the exact selected half-open source-frame and PTS intent",
       "resolve one exact backend from the current Edit capability",
       "derive and persist the backend-owned frame-rate map, internal frame count, alignment padding, and delivery crop without changing the request",
-      "persist the strength mapping, seed, model canvas, workflow/model/runtime receipts, and child-clip delivery plan before execution"
+      "persist the strength mapping, seed, model canvas, exact audio policy plan, workflow/model/runtime receipts, and child-clip delivery plan before execution"
     ],
     "backendTimeline": {
       "requestFields": "none",
@@ -507,6 +512,10 @@
     "spatialMaskRequestInV2": false,
     "spatialMaskFutureCapability": "additive, separately advertised, and never inferred from an unknown request field",
     "canvas": "derive one source-aspect, no-crop model canvas inside requested maximumPixelArea using the resolved workflow alignment rules and persist it",
+    "audioPolicy": {
+      "preserve": "when at least one encoded source audio packet intersects the selected source PTS interval, persist one non-empty half-open source packet range and exact edit-list revision for packet remux; when no packet intersects, persist the preserve-no-packets variant without any packet range",
+      "mute": "persist the mute variant and no packet range or packet identity; generated and source audio are both excluded from delivery"
+    },
     "ui": "show the exact selected source range and the resulting child-clip duration; internal backend padding and crop are diagnostics, not a second editable range"
   },
   "editDelivery": {
@@ -517,8 +526,12 @@
     "timeline": "delivery starts at zero and reconstructs exactly the selected source frame count, rational fps, relative PTS sequence, and duration after the persisted internal map and crop",
     "dimensions": "the persisted resolved model delivery dimensions; no implicit crop",
     "discardGeneratedAudio": true,
-    "audio": "when source audio exists, remux only the persisted encoded source packet window intersecting the selected source PTS range without re-encoding, rebase it through one exact delivery edit-list revision, and make no sample-exact trim claim",
-    "sourceAudioOutsideSelectionIncluded": false,
+    "audio": {
+      "preserve": "remux only a persisted non-empty encoded source packet range intersecting the selected source PTS interval, without re-encoding, and rebase it through the persisted edit-list revision. If no source packet intersects, emit no audio stream and persist no packet range or fabricated identity. No sample-exact trim claim is made.",
+      "mute": "emit no audio stream. Do not add silence, decode generated audio, preserve source packets, or fabricate a zero-length packet range or hash identity."
+    },
+    "whollyDisjointSourceAudioPacketsIncluded": false,
+    "boundaryPacketRule": "an encoded packet intersecting a selection boundary may decode to samples outside the exact frame-derived interval; this is why preserve makes no sample-exact trim claim",
     "publish": "one new managed Videos output and child Job; never modify, replace, or automatically splice into the long source"
   },
   "finishBackendCandidates": {
@@ -672,6 +685,7 @@
           "selection",
           "instructionJa",
           "compiled",
+          "audioPolicy",
           "steps",
           "strength",
           "maximumPixelArea"
@@ -700,7 +714,7 @@
           "deliveryCrop",
           "strengthMapping",
           "modelCanvas",
-          "audioWindow"
+          "audioPlan"
         ],
         "selected": [
           "startFrame",
@@ -744,11 +758,38 @@
           "height",
           "maximumPixelArea"
         ],
-        "audioWindow": [
-          "packetStartIndex",
-          "packetEndIndexExclusive",
-          "editListRevision"
-        ],
+        "audioPlan": {
+          "discriminator": "kind",
+          "variants": {
+            "preserve-packets": {
+              "policy": "preserve",
+              "exactKeys": [
+                "kind",
+                "policy",
+                "packetStartIndex",
+                "packetEndIndexExclusive",
+                "editListRevision"
+              ],
+              "range": "0 <= packetStartIndex < packetEndIndexExclusive <= persisted source audio packetCount"
+            },
+            "preserve-no-packets": {
+              "policy": "preserve",
+              "exactKeys": [
+                "kind",
+                "policy"
+              ],
+              "rule": "source has no audio stream or no encoded packet intersects the selected source PTS interval; no packet index, edit-list, or packet identity field is present"
+            },
+            "mute": {
+              "policy": "mute",
+              "exactKeys": [
+                "kind",
+                "policy"
+              ],
+              "rule": "no source packet range, edit-list, or packet identity field is present"
+            }
+          }
+        },
         "delivery": [
           "width",
           "height",
@@ -760,10 +801,43 @@
           "childClip",
           "fullSourceSplice",
           "discardGeneratedAudio",
-          "preserveSelectedSourceAudioPackets",
-          "sourceAudioPacketStartIndex",
-          "sourceAudioPacketEndIndexExclusive"
-        ]
+          "audioDelivery"
+        ],
+        "audioDelivery": {
+          "discriminator": "kind",
+          "variants": {
+            "remuxed-source-packets": {
+              "policy": "preserve",
+              "exactKeys": [
+                "kind",
+                "policy",
+                "audioStreamCount",
+                "sourcePacketStartIndex",
+                "sourcePacketEndIndexExclusive",
+                "sourcePacketPayloadSha256"
+              ],
+              "rule": "audioStreamCount is exactly 1, the source packet range is non-empty and equals the persisted plan, and SHA-256 identifies the ordered encoded payload bytes of that exact range"
+            },
+            "no-audio-preserve-empty": {
+              "policy": "preserve",
+              "exactKeys": [
+                "kind",
+                "policy",
+                "audioStreamCount"
+              ],
+              "rule": "audioStreamCount is exactly 0 and no packet range or packet identity field is present"
+            },
+            "no-audio-muted": {
+              "policy": "mute",
+              "exactKeys": [
+                "kind",
+                "policy",
+                "audioStreamCount"
+              ],
+              "rule": "audioStreamCount is exactly 0 and no packet range, zero-range placeholder, packet identity, or synthesized-silence field is present"
+            }
+          }
+        }
       },
       "finish": {
         "video": [

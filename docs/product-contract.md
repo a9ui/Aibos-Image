@@ -294,10 +294,11 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   a keyframe-completion contract. Its request contains one Japanese
   instruction, one validated compiled backend prompt and Japanese summary,
   compiler revision and context digest, an exact half-open frame selection,
-  STEP, integer strength, and a maximum pixel tier. Seed, backend, context,
-  actual mask, affected range, denoise, source snapshot, and delivery are
-  server-owned. The UI's skip-review checkbox is transient one-shot policy and
-  is not durable generation semantics.
+  explicit `preserve|mute` audio policy, STEP, integer strength, and a required
+  maximum pixel tier. Seed, backend, context, actual mask, affected range,
+  denoise, source snapshot, and delivery are server-owned. The UI's skip-review
+  checkbox is transient one-shot policy and is not durable generation
+  semantics.
 - Opening or hydrating the Edit board, changing the instruction or selection,
   ordinary seeking, toggling skip-review, and reading health or Jobs are
   passive: they do not resolve, open, hash, or probe a source, extract compiler
@@ -364,14 +365,17 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
 - Edit persists the exact selected source frames and PTS, then the server-owned
   backend fps, frame map, internal frame count, alignment padding such as
   `4n+1`, delivery crop and source-fps reconstruction, strength mapping, seed,
-  canvas, audio packet window, and receipts. Backend 16-fps or alignment needs
-  never leak into or rewrite the request selection. Initial output is one new
-  non-destructive managed child clip for the selected interval, with no source
-  prefix/suffix and no splice into the long source. It reconstructs the exact
-  selected source frame count, rational fps, relative PTS, and duration.
-  Generated audio is discarded; when source audio exists, only the persisted
-  intersecting encoded packet window is remuxed and rebased without re-encoding
-  or a sample-exact trim claim. The source is never overwritten.
+  canvas, discriminated audio plan, and receipts. Backend 16-fps or alignment
+  needs never leak into or rewrite the request selection. Initial output is one
+  new non-destructive managed child clip for the selected interval, with no
+  source prefix/suffix and no splice into the long source. It reconstructs the
+  exact selected source frame count, rational fps, relative PTS, and duration.
+  Generated audio is always discarded. `preserve` remuxes and rebases only a
+  persisted non-empty encoded source packet range intersecting the selection,
+  without re-encoding or a sample-exact trim claim. If no packet intersects, it
+  emits no audio stream and stores no packet-range identity. `mute` always emits
+  no audio stream and never fabricates a zero-range/hash identity or synthesized
+  silence. The source is never overwritten.
 - Version 2 Finish is a separate AI spatial super-resolution Job. Its public
   modes are `fast`, `standard`, and `quality`, with explicit 2x or 4x scale.
   Each mode has an independent backend, source-bound, scale, delivery, and
