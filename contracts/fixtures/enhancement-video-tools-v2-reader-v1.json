@@ -1,0 +1,408 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-TOOLS-002-READER-FIXTURES",
+  "forContractId": "PV-ENHANCE-VIDEO-TOOLS-002",
+  "compatibility": {
+    "contractSha256": "50202ccc16e6452b98d6ff542c3fbcdf6993c4d09c22be6888035dab5e909c5b",
+    "consumers": [
+      "public-wpf",
+      "private-companion"
+    ],
+    "materialization": "synthetic TEMP only",
+    "rule": "Both readers consume this exact indexed fixture against the exact contract SHA-256. No private path, user media, runtime receipt, or live durable state is embedded."
+  },
+  "health": {
+    "capabilities": {
+      "videoToolsV2": {
+        "contractId": "PV-ENHANCE-VIDEO-TOOLS-002",
+        "protocol": "aibos-enhancement-video-tools-v2",
+        "readerReady": true,
+        "edit": {
+          "writerEnabled": false,
+          "backendConfigured": false,
+          "runtimeVerified": false,
+          "ready": false,
+          "state": "disabled",
+          "reasonCode": "VIDEO_TOOLS_V2_EDIT_BACKEND_CANARY_REQUIRED"
+        },
+        "finish": {
+          "writerEnabled": false,
+          "backendConfigured": false,
+          "runtimeVerified": false,
+          "ready": false,
+          "state": "disabled",
+          "reasonCode": "VIDEO_TOOLS_V2_FINISH_RUNTIME_UNPINNED"
+        },
+        "finishModes": {
+          "fast": {
+            "writerEnabled": false,
+            "backendConfigured": false,
+            "runtimeVerified": false,
+            "ready": false,
+            "state": "disabled",
+            "reasonCode": "VIDEO_TOOLS_V2_FINISH_FAST_CANARY_REQUIRED"
+          },
+          "standard": {
+            "writerEnabled": false,
+            "backendConfigured": false,
+            "runtimeVerified": false,
+            "ready": false,
+            "state": "disabled",
+            "reasonCode": "VIDEO_TOOLS_V2_FINISH_STANDARD_CANARY_REQUIRED"
+          },
+          "quality": {
+            "writerEnabled": false,
+            "backendConfigured": false,
+            "runtimeVerified": false,
+            "ready": false,
+            "state": "disabled",
+            "reasonCode": "VIDEO_TOOLS_V2_FINISH_QUALITY_MODE_MAPPING_CANARY_REQUIRED"
+          }
+        }
+      }
+    },
+    "expectedPassiveMutationRequests": 0
+  },
+  "requestFixtures": {
+    "editManaged": {
+      "sourceId": "fixture-managed-video",
+      "operation": "video",
+      "mediaKind": "video",
+      "clientRequestId": "22222222-3333-4444-8555-666666666666",
+      "videoTools": {
+        "schemaVersion": 2,
+        "kind": "edit",
+        "source": {
+          "kind": "managed-video-job",
+          "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+        },
+        "selection": {
+          "startFrame": 100,
+          "endFrameExclusive": 130
+        },
+        "instructionJa": "人物の顔と背景は保ち、手をゆっくり上げて小さく振る動きに変更する。",
+        "compiled": {
+          "backendPrompt": "Keep the same adult subject, face, clothing, framing, lighting, and background. Edit only the selected time range so the subject slowly raises one hand and gives a small natural wave. Preserve continuous motion and avoid cuts or new objects.",
+          "summaryJa": "顔・服・構図・背景を保ち、選択区間だけ片手をゆっくり上げて小さく振る動きへ変更します。",
+          "compilerRevision": "aibos-video-edit-compiler-v1",
+          "contextDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "steps": 20,
+        "strength": 55,
+        "maximumPixelArea": 414720
+      }
+    },
+    "finishDisplayed": {
+      "sourceId": "fixture-dropped-video",
+      "operation": "video",
+      "mediaKind": "video",
+      "clientRequestId": "33333333-4444-4555-8666-777777777777",
+      "videoTools": {
+        "schemaVersion": 2,
+        "kind": "finish",
+        "source": {
+          "kind": "displayed-file",
+          "path": "${ROOT}\\source.mp4",
+          "size": 45678,
+          "mtimeMs": 1786320000000,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "mode": "standard",
+        "scale": 2
+      }
+    }
+  },
+  "readerFixtures": {
+    "edit": {
+      "job": {
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceId": "fixture-managed-video",
+        "sourceVideoJobId": "11111111-2222-4333-8444-555555555555",
+        "presetId": "aibos-video-edit-v2",
+        "adapterId": "bernini-r-1.3b-edit-candidate-v1",
+        "presetHash": "b38cfda1331f"
+      },
+      "video": {
+        "schemaVersion": 2,
+        "protocol": "aibos-enhancement-video-tools-v2",
+        "kind": "edit",
+        "presetId": "aibos-video-edit-v2",
+        "backendId": "bernini-r-1.3b-edit-candidate-v1",
+        "seed": 1234567890,
+        "receipts": {
+          "workflowReceiptId": "synthetic-edit-workflow-receipt-v1",
+          "modelReceiptId": "synthetic-bernini-r-1.3b-model-receipt-v1",
+          "runtimeReceiptId": "synthetic-edit-runtime-receipt-v1",
+          "timelineMappingReceiptId": "synthetic-bernini-timeline-map-receipt-v1",
+          "deliveryMappingReceiptId": "synthetic-bernini-child-clip-delivery-receipt-v1"
+        },
+        "source": {
+          "kind": "managed-video-job",
+          "producerJobId": "11111111-2222-4333-8444-555555555555",
+          "canonicalPath": "${OUTPUT_ROOT}\\Videos\\2026-08-24\\source.mp4",
+          "signature": {
+            "size": 12345,
+            "mtimeMs": 1786320000000
+          },
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "probe": {
+            "container": "mp4",
+            "width": 1280,
+            "height": 720,
+            "frameCount": 300,
+            "fpsNumerator": 24,
+            "fpsDenominator": 1,
+            "durationMs": 12500,
+            "videoStreamCount": 1,
+            "audioStreamCount": 1,
+            "videoTimeBaseNumerator": 1,
+            "videoTimeBaseDenominator": 24,
+            "videoStartTimestamp": 0,
+            "videoPtsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "audio": {
+              "codec": "aac",
+              "codecTag": "mp4a",
+              "profile": "LC",
+              "sampleRate": 48000,
+              "channels": 2,
+              "timeBaseNumerator": 1,
+              "timeBaseDenominator": 48000,
+              "startTimestamp": 0,
+              "durationTimestamp": 600000,
+              "packetCount": 587,
+              "packetPayloadBytes": 160000,
+              "packetPayloadSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          }
+        },
+        "requested": {
+          "schemaVersion": 2,
+          "kind": "edit",
+          "source": {
+            "kind": "managed-video-job",
+            "sourceVideoJobId": "11111111-2222-4333-8444-555555555555"
+          },
+          "selection": {
+            "startFrame": 100,
+            "endFrameExclusive": 130
+          },
+          "instructionJa": "人物の顔と背景は保ち、手をゆっくり上げて小さく振る動きに変更する。",
+          "compiled": {
+            "backendPrompt": "Keep the same adult subject, face, clothing, framing, lighting, and background. Edit only the selected time range so the subject slowly raises one hand and gives a small natural wave. Preserve continuous motion and avoid cuts or new objects.",
+            "summaryJa": "顔・服・構図・背景を保ち、選択区間だけ片手をゆっくり上げて小さく振る動きへ変更します。",
+            "compilerRevision": "aibos-video-edit-compiler-v1",
+            "contextDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "steps": 20,
+          "strength": 55,
+          "maximumPixelArea": 414720
+        },
+        "plan": {
+          "selected": {
+            "startFrame": 100,
+            "endFrameExclusive": 130,
+            "startPts": 100,
+            "endPtsExclusive": 130,
+            "durationMs": 1250
+          },
+          "sourceToBackendMap": {
+            "revision": "synthetic-source-24-to-backend-16-v1",
+            "sourceFpsNumerator": 24,
+            "sourceFpsDenominator": 1,
+            "backendFpsNumerator": 16,
+            "backendFpsDenominator": 1,
+            "sourceStartFrame": 100,
+            "sourceEndFrameExclusive": 130,
+            "backendStartFrame": 0,
+            "backendEndFrameExclusive": 20
+          },
+          "backendWindow": {
+            "frameCount": 21,
+            "leadingPadFrames": 0,
+            "trailingPadFrames": 1,
+            "alignmentRevision": "synthetic-4n-plus-1-pad-v1"
+          },
+          "deliveryCrop": {
+            "revision": "synthetic-backend-16-to-source-24-crop-v1",
+            "backendStartFrame": 0,
+            "backendEndFrameExclusive": 20,
+            "outputFrameCount": 30,
+            "outputFpsNumerator": 24,
+            "outputFpsDenominator": 1
+          },
+          "strengthMapping": {
+            "mappingRevision": "synthetic-edit-strength-map-v1",
+            "numerator": 55,
+            "denominator": 100
+          },
+          "modelCanvas": {
+            "width": 864,
+            "height": 480,
+            "maximumPixelArea": 414720
+          },
+          "audioWindow": {
+            "packetStartIndex": 195,
+            "packetEndIndexExclusive": 255,
+            "editListRevision": "synthetic-source-audio-window-edit-list-v1"
+          }
+        },
+        "delivery": {
+          "width": 864,
+          "height": 480,
+          "frameCount": 30,
+          "fpsNumerator": 24,
+          "fpsDenominator": 1,
+          "durationMs": 1250,
+          "videoPtsSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "childClip": true,
+          "fullSourceSplice": false,
+          "discardGeneratedAudio": true,
+          "preserveSelectedSourceAudioPackets": true,
+          "sourceAudioPacketStartIndex": 195,
+          "sourceAudioPacketEndIndexExclusive": 255
+        }
+      }
+    },
+    "finish": {
+      "job": {
+        "operation": "video",
+        "mediaKind": "video",
+        "sourceId": "fixture-dropped-video",
+        "presetId": "aibos-video-finish-v2",
+        "adapterId": "nvidia-vfx-vsr-1.2-candidate-v1",
+        "presetHash": "0de44dba6b60"
+      },
+      "video": {
+        "schemaVersion": 2,
+        "protocol": "aibos-enhancement-video-tools-v2",
+        "kind": "finish",
+        "presetId": "aibos-video-finish-v2",
+        "backendId": "nvidia-vfx-vsr-1.2-candidate-v1",
+        "receipts": {
+          "runtimeReceiptId": "synthetic-nvidia-vfx-runtime-receipt-v1",
+          "modelReceiptId": "synthetic-nvidia-vfx-vsr-1.2-receipt-v1",
+          "backendMappingRevision": "synthetic-finish-backend-map-v1",
+          "deliveryMappingReceiptId": "synthetic-nvidia-vfx-2x-delivery-receipt-v1",
+          "sceneCutCanaryReceiptId": "synthetic-scene-cut-canary-v1",
+          "chunkSeamCanaryReceiptId": "not-applicable-v1"
+        },
+        "source": {
+          "kind": "staged-displayed-file",
+          "originalCanonicalPath": "${ROOT}\\source.mp4",
+          "originalSignature": {
+            "size": 45678,
+            "mtimeMs": 1786320000000
+          },
+          "originalSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "stagingCanonicalPath": "${STAGING}\\33333333-4444-4555-8666-777777777777\\source.mp4",
+          "stagingSignature": {
+            "size": 45678,
+            "mtimeMs": 1786320001000
+          },
+          "stagingSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe": {
+            "container": "mp4",
+            "width": 960,
+            "height": 540,
+            "frameCount": 181,
+            "fpsNumerator": 30,
+            "fpsDenominator": 1,
+            "durationMs": 6033,
+            "videoStreamCount": 1,
+            "audioStreamCount": 1,
+            "videoTimeBaseNumerator": 1,
+            "videoTimeBaseDenominator": 30,
+            "videoStartTimestamp": 0,
+            "videoPtsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "bitDepth": 8,
+            "dynamicRange": "SDR",
+            "audio": {
+              "codec": "aac",
+              "codecTag": "mp4a",
+              "profile": "LC",
+              "sampleRate": 48000,
+              "channels": 2,
+              "timeBaseNumerator": 1,
+              "timeBaseDenominator": 48000,
+              "startTimestamp": 0,
+              "durationTimestamp": 289584,
+              "packetCount": 284,
+              "packetPayloadBytes": 64000,
+              "packetPayloadSha256": "9999999999999999999999999999999999999999999999999999999999999999"
+            }
+          }
+        },
+        "requested": {
+          "schemaVersion": 2,
+          "kind": "finish",
+          "source": {
+            "kind": "displayed-file"
+          },
+          "mode": "standard",
+          "scale": 2
+        },
+        "plan": {
+          "inputWidth": 960,
+          "inputHeight": 540,
+          "outputWidth": 1920,
+          "outputHeight": 1080,
+          "frameCount": 181,
+          "fpsNumerator": 30,
+          "fpsDenominator": 1,
+          "durationMs": 6033,
+          "videoPtsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "semanticRole": "faithful",
+          "backendSetting": "HIGH",
+          "backendDeliveryRevision": "nvidia-vfx-vsr-2x-v1",
+          "bitDepth": 8,
+          "dynamicRange": "SDR",
+          "sceneCutPolicyRevision": "synthetic-scene-cut-reset-v1",
+          "chunkPolicyRevision": "not-applicable-v1",
+          "preserveAudioPackets": true,
+          "frameInterpolation": false,
+          "implicitCrop": false
+        },
+        "delivery": {
+          "width": 1920,
+          "height": 1080,
+          "frameCount": 181,
+          "fpsNumerator": 30,
+          "fpsDenominator": 1,
+          "durationMs": 6033,
+          "videoPtsSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "preserveSourceAudioPackets": true
+        }
+      }
+    }
+  },
+  "readerProtection": {
+    "unknownNestedField": "preserve the row and expose reader-only presentation without mutation actions",
+    "futureSchemaVersion": "preserve the row and expose reader-only presentation without mutation actions",
+    "legacyV1Retake": "read only under PV-ENHANCE-VIDEO-TOOLS-001 and never reinterpret as Edit",
+    "expectedMutationRequestsDuringHealthAndJobsRead": 0
+  },
+  "durableInboxVectors": {
+    "displayedFileDriftAfterPublication": {
+      "committedStateBeforeDispatch": "pending",
+      "authenticatedStatusClass": "definitive-4xx",
+      "stateAfterDispatch": "needs-action",
+      "jobCreated": false,
+      "processStarted": false,
+      "stagingResidueRetained": false,
+      "outputCreated": false,
+      "oldItemRewritten": false,
+      "redelivery": "same captured identity only",
+      "differentBytes": "new explicit Start and request id"
+    },
+    "passiveRead": {
+      "claimsEnvelope": false,
+      "movesEnvelope": false,
+      "opensSource": false,
+      "stagesSource": false,
+      "createsJob": false
+    }
+  }
+}
