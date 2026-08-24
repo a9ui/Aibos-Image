@@ -839,6 +839,15 @@ public partial class App : Application
             return;
         }
 
+        int videoDragInSmokeIdx = Array.IndexOf(e.Args, "--video-drag-in-smoke");
+        if (videoDragInSmokeIdx >= 0 && videoDragInSmokeIdx + 1 < e.Args.Length)
+        {
+            CaptureVideoDragInSmoke(
+                e.Args[videoDragInSmokeIdx + 1],
+                e.Args);
+            return;
+        }
+
         int shortcutTypingSmokeIdx = Array.IndexOf(e.Args, "--shortcut-typing-smoke");
         if (shortcutTypingSmokeIdx >= 0 && shortcutTypingSmokeIdx + 1 < e.Args.Length)
         {

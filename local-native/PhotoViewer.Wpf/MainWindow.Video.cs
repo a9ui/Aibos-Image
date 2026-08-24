@@ -909,7 +909,8 @@ public partial class MainWindow
             _suppressModalVideoVersionSelection = false;
         }
 
-        bool available = _modalVideoVersions.Count > 0;
+        bool available = _modalVideoVersions.Count > 0
+            || ExternalVideoDropSessionActive;
         // The top display-version selector is the single user-facing media
         // inventory. Keep this legacy control populated for compatibility and
         // smoke inspection, but never expose a second video-only dropdown.
@@ -1096,6 +1097,8 @@ public partial class MainWindow
         _modalShowingVideo = false;
         _modalVideoPlaying = false;
         _modalVideoAutoplayPending = false;
+        if (clearSource)
+            _externalModalVideoPath = null;
         if (ModalVideo is not null)
             ModalVideo.Visibility = Visibility.Collapsed;
         ResetModalVideoTimeline(0, show: false);
@@ -1127,6 +1130,12 @@ public partial class MainWindow
 
     private void RestoreModalOriginalAfterVideoFailure()
     {
+        if (ExternalVideoDropSessionActive)
+        {
+            CloseModal(restoreFocus: false);
+            return;
+        }
+
         StopAndHideModalVideo(clearSource: true);
         if (!TryGetModalSourceTile(out Tile tile))
         {
@@ -1155,11 +1164,20 @@ public partial class MainWindow
 
     private bool ToggleModalVideoPlayback()
     {
-        if (Modal.Visibility != Visibility.Visible || _modalVideoVersions.Count == 0)
+        if (Modal.Visibility != Visibility.Visible
+            || _modalVideoVersions.Count == 0
+                && !ExternalVideoDropSessionActive)
             return false;
 
         if (!_modalShowingVideo)
-            return ShowModalVideoVersion(_modalVideoVersionIndex, autoplay: true);
+        {
+            return ExternalVideoDropSessionActive
+                && _externalModalVideoPath is string externalPath
+                    ? ShowExternalModalVideo(externalPath, autoplay: true)
+                    : ShowModalVideoVersion(
+                        _modalVideoVersionIndex,
+                        autoplay: true);
+        }
 
         try
         {
@@ -1579,6 +1597,17 @@ public partial class MainWindow
         {
             _modalVideoDurationSeconds = ModalVideo.NaturalDuration.TimeSpan.TotalSeconds;
         }
+        if (ExternalVideoDropSessionActive
+            && TryGetExternalVideoDropSessionTile(out Tile externalVideoTile)
+            && ModalVideo.NaturalVideoWidth > 0
+            && ModalVideo.NaturalVideoHeight > 0)
+        {
+            UpdateModalDisplayedDimensionsInfo(
+                externalVideoTile,
+                ModalVideo.NaturalVideoWidth,
+                ModalVideo.NaturalVideoHeight);
+            ScheduleModalFitUpdate();
+        }
         UpdateModalVideoTimeline(TimeSpan.Zero);
         _modalVideoMediaOpenCompletion?.TrySetResult(true);
         UpdateModalVideoPlaybackPresentation();
@@ -1795,6 +1824,12 @@ public partial class MainWindow
         _modalVideoMediaFailureForSmoke =
             e.ErrorException?.Message ?? "Media Foundation rejected the video.";
         _modalVideoMediaOpenCompletion?.TrySetResult(false);
+        if (ExternalVideoDropSessionActive)
+        {
+            CloseModal(restoreFocus: false);
+            SetStatusToast("動画を再生できません。対応形式を確認してください。");
+            return;
+        }
         RestoreModalOriginalAfterVideoFailure();
         SetStatusToast("動画を再生できません。元画像を表示します。");
     }
@@ -1829,9 +1864,10 @@ public partial class MainWindow
     public double ModalVideoSeekMaximumForSmoke => ModalVideoSeekSlider.Maximum;
     public string ModalVideoSeekTimeForSmoke => ModalVideoSeekTimeText.Text;
     public string? ModalVideoPathForSmoke =>
-        _modalVideoVersionIndex >= 0 && _modalVideoVersionIndex < _modalVideoVersions.Count
+        _externalModalVideoPath
+        ?? (_modalVideoVersionIndex >= 0 && _modalVideoVersionIndex < _modalVideoVersions.Count
             ? _modalVideoVersions[_modalVideoVersionIndex].Output.OutputPath
-            : null;
+            : null);
     public string? ModalVideoElementSourcePathForSmoke =>
         ModalVideo.Source is { IsFile: true } source
             ? source.LocalPath
