@@ -51,6 +51,9 @@ try {
         -or $rewriteContract.route.method -ne 'POST' `
         -or $rewriteContract.route.path -ne '/api/enhance/video-prompts/h3/rewrite' `
         -or $rewriteContract.rewriteRevision -ne 'aibos-h3-i2va-local-v1' `
+        -or (@($rewriteContract.request.allowedValues.frameCount) -join ',') -ne '124,243,294,362' `
+        -or $rewriteContract.request.fixedValues.PSObject.Properties.Name -contains 'frameCount' `
+        -or $rewriteContract.request.fixedValues.playbackFps -ne 24 `
         -or $rewriteContract.responseFixture.rewriteRevision -ne $rewriteContract.rewriteRevision `
         -or @($rewriteContract.revisionFixtures).Count -lt 2 `
         -or @($rewriteContract.errorFixtures).Count -lt 1) {
