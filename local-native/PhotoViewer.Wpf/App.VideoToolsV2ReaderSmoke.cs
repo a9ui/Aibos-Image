@@ -57,10 +57,10 @@ public partial class App
                 && editSummary.Contains("[100, 130)", StringComparison.Ordinal)
                 && editSummary.Contains("非破壊child clip", StringComparison.Ordinal)
                 && editDetail.Contains("管理動画", StringComparison.Ordinal)
-                && !editMutation
+                && editMutation
                 && editCanUseOutput
                 && editActions.SequenceEqual(
-                    ["open-output"],
+                    ["open-output", "delete-output"],
                     StringComparer.Ordinal);
 
             using JsonDocument finish = CreateVideoToolsV2WorkspaceJob(
@@ -89,11 +89,175 @@ public partial class App
                 && finishDetail.Contains(
                     "外部動画（Job所有コピー）",
                     StringComparison.Ordinal)
-                && !finishMutation
+                && finishMutation
                 && finishCanUseOutput
                 && finishActions.SequenceEqual(
-                    ["open-output"],
+                    ["open-output", "delete-output"],
                     StringComparer.Ordinal);
+
+            using JsonDocument editQueued = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "44444444-5555-4666-8777-888888888881",
+                "queued");
+            using JsonDocument editRunning = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "44444444-5555-4666-8777-888888888882",
+                "running");
+            using JsonDocument editFailed = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "44444444-5555-4666-8777-888888888883",
+                "failed");
+            using JsonDocument editCanceled = CreateVideoToolsV2WorkspaceJob(
+                editFixture,
+                "44444444-5555-4666-8777-888888888884",
+                "canceled");
+            using JsonDocument finishQueued = CreateVideoToolsV2WorkspaceJob(
+                finishFixture,
+                "55555555-6666-4777-8888-999999999991",
+                "queued");
+            using JsonDocument finishRunning = CreateVideoToolsV2WorkspaceJob(
+                finishFixture,
+                "55555555-6666-4777-8888-999999999992",
+                "running");
+            using JsonDocument finishFailed = CreateVideoToolsV2WorkspaceJob(
+                finishFixture,
+                "55555555-6666-4777-8888-999999999993",
+                "failed");
+            using JsonDocument finishCanceled = CreateVideoToolsV2WorkspaceJob(
+                finishFixture,
+                "55555555-6666-4777-8888-999999999994",
+                "canceled");
+
+            EnhancementJobLifecycleSmokeSnapshot? editQueuedLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        editQueued.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? editRunningLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        editRunning.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? editFailedLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        editFailed.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? editCanceledLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        editCanceled.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? editSucceededLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(edit.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? finishQueuedLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        finishQueued.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? finishRunningLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        finishRunning.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? finishFailedLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        finishFailed.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? finishCanceledLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        finishCanceled.RootElement);
+            EnhancementJobLifecycleSmokeSnapshot? finishSucceededLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(finish.RootElement);
+
+            bool editLifecycle = IsExpectedCurrentV2Lifecycle(
+                    editQueuedLifecycle,
+                    "edit",
+                    canCancel: true,
+                    canRetry: false,
+                    canDismiss: false,
+                    canReorder: true,
+                    canDeleteOutput: false,
+                    ["move-up", "move-down", "move-next", "cancel"])
+                && IsExpectedCurrentV2Lifecycle(
+                    editRunningLifecycle,
+                    "edit",
+                    canCancel: true,
+                    canRetry: false,
+                    canDismiss: false,
+                    canReorder: false,
+                    canDeleteOutput: false,
+                    ["cancel"])
+                && IsExpectedCurrentV2Lifecycle(
+                    editFailedLifecycle,
+                    "edit",
+                    canCancel: false,
+                    canRetry: true,
+                    canDismiss: true,
+                    canReorder: false,
+                    canDeleteOutput: false,
+                    ["retry", "dismiss"])
+                && IsExpectedCurrentV2Lifecycle(
+                    editCanceledLifecycle,
+                    "edit",
+                    canCancel: false,
+                    canRetry: true,
+                    canDismiss: true,
+                    canReorder: false,
+                    canDeleteOutput: false,
+                    ["retry", "dismiss"])
+                && IsExpectedCurrentV2Lifecycle(
+                    editSucceededLifecycle,
+                    "edit",
+                    canCancel: false,
+                    canRetry: false,
+                    canDismiss: false,
+                    canReorder: false,
+                    canDeleteOutput: true,
+                    ["open-output", "delete-output"]);
+            bool finishLifecycle = IsExpectedCurrentV2Lifecycle(
+                    finishQueuedLifecycle,
+                    "finish",
+                    canCancel: true,
+                    canRetry: false,
+                    canDismiss: false,
+                    canReorder: true,
+                    canDeleteOutput: false,
+                    ["move-up", "move-down", "move-next", "cancel"])
+                && IsExpectedCurrentV2Lifecycle(
+                    finishRunningLifecycle,
+                    "finish",
+                    canCancel: true,
+                    canRetry: false,
+                    canDismiss: false,
+                    canReorder: false,
+                    canDeleteOutput: false,
+                    ["cancel"])
+                && IsExpectedCurrentV2Lifecycle(
+                    finishFailedLifecycle,
+                    "finish",
+                    canCancel: false,
+                    canRetry: true,
+                    canDismiss: true,
+                    canReorder: false,
+                    canDeleteOutput: false,
+                    ["retry", "dismiss"])
+                && IsExpectedCurrentV2Lifecycle(
+                    finishCanceledLifecycle,
+                    "finish",
+                    canCancel: false,
+                    canRetry: true,
+                    canDismiss: true,
+                    canReorder: false,
+                    canDeleteOutput: false,
+                    ["retry", "dismiss"])
+                && IsExpectedCurrentV2Lifecycle(
+                    finishSucceededLifecycle,
+                    "finish",
+                    canCancel: false,
+                    canRetry: false,
+                    canDismiss: false,
+                    canReorder: false,
+                    canDeleteOutput: true,
+                    ["open-output", "delete-output"]);
+            bool knownLifecycleEnabled = editLifecycle && finishLifecycle;
 
             bool detailsExact = editRequestDetails.Contains(
                     "入力依存: 管理動画 Job 11111111-2222-4333-8444-555555555555",
@@ -179,7 +343,8 @@ public partial class App
                     "queued",
                     video => video.Remove("protocol"),
                     refreshPresetHash: true);
-            using JsonDocument ordinaryForForgery = CreateOrdinaryVideoJob();
+            using JsonDocument ordinaryForForgery = CreateOrdinaryVideoJob(
+                "succeeded");
             JsonObject forgedPresetJob = JsonNode.Parse(
                     ordinaryForForgery.RootElement.GetRawText())!
                 .AsObject();
@@ -630,7 +795,8 @@ public partial class App
                 && PhotoViewer.Wpf.MainWindow.ReadEnhancementVideoKindForSmoke(
                     v1Finish.RootElement) is null;
 
-            using JsonDocument generation = CreateOrdinaryVideoJob();
+            using JsonDocument generation = CreateOrdinaryVideoJob(
+                "succeeded");
             bool kindFiltersExact =
                 PhotoViewer.Wpf.MainWindow.ReadEnhancementVideoKindForSmoke(edit.RootElement)
                     == "edit"
@@ -664,15 +830,47 @@ public partial class App
                 && kindSelectionSwitchesToVideo
                 && leavingVideoClearsKind;
 
-            bool mutationsHidden = !editMutation
-                && !finishMutation
+            using JsonDocument ordinaryImageQueued =
+                CreateOrdinaryUpscaleJob("queued");
+            using JsonDocument ordinaryVideoQueued =
+                CreateOrdinaryVideoJob("queued");
+            EnhancementJobLifecycleSmokeSnapshot? imageLifecycle =
+                PhotoViewer.Wpf.MainWindow
+                    .ReadEnhancementJobLifecycleForSmoke(
+                        ordinaryImageQueued.RootElement);
+            bool generationCancellation = PhotoViewer.Wpf.MainWindow
+                    .TryReadEnhancementJobCancellationForSmoke(
+                        ordinaryVideoQueued.RootElement,
+                        out _,
+                        out bool generationCanCancel,
+                        out bool generationCancelVisible,
+                        out bool generationCancelEnabled,
+                        out _)
+                && generationCanCancel
+                && generationCancelVisible
+                && generationCancelEnabled;
+            bool existingLifecycleRegression = imageLifecycle is
+                {
+                    ExactCurrentVideoToolsV2: false,
+                    ReaderOnly: false,
+                    SupportedMutation: true,
+                    CanCancel: true,
+                    CanReorder: true,
+                }
+                && imageLifecycle.VisibleActionKinds.SequenceEqual(
+                    ["move-up", "move-down", "move-next", "cancel"],
+                    StringComparer.Ordinal)
+                && generationCancellation;
+
+            bool lifecyclePresentationExact = editMutation
+                && finishMutation
                 && editCanUseOutput
                 && finishCanUseOutput
                 && editActions.SequenceEqual(
-                    ["open-output"],
+                    ["open-output", "delete-output"],
                     StringComparer.Ordinal)
                 && finishActions.SequenceEqual(
-                    ["open-output"],
+                    ["open-output", "delete-output"],
                     StringComparer.Ordinal);
             const int companionCalls = 0;
             const int resolverOrFileTouchCalls = 0;
@@ -702,7 +900,9 @@ public partial class App
                 && futureProtected
                 && v1MeaningPreserved
                 && kindFiltersExact
-                && mutationsHidden
+                && knownLifecycleEnabled
+                && lifecyclePresentationExact
+                && existingLifecycleRegression
                 && passiveRead;
             result = new
             {
@@ -727,7 +927,11 @@ public partial class App
                 kindPanelFromNonVideo,
                 kindSelectionSwitchesToVideo,
                 leavingVideoClearsKind,
-                mutationsHidden,
+                editLifecycle,
+                finishLifecycle,
+                knownLifecycleEnabled,
+                lifecyclePresentationExact,
+                existingLifecycleRegression,
                 passiveRead,
                 companionCalls,
                 resolverOrFileTouchCalls,
@@ -784,14 +988,58 @@ public partial class App
                 out _,
                 out bool supportedMutation,
                 out string[] visibleActions);
+        EnhancementJobLifecycleSmokeSnapshot? lifecycle =
+            PhotoViewer.Wpf.MainWindow
+                .ReadEnhancementJobLifecycleForSmoke(job);
         return !exactV2
             && protectedV1
             && readerKind == "protected"
             && !supportedMutation
             && visibleActions.Length == 0
+            && lifecycle is
+                {
+                    ExactCurrentVideoToolsV2: false,
+                    ReaderOnly: true,
+                    SupportedMutation: false,
+                    CanCancel: false,
+                    CanRetry: false,
+                    CanDismiss: false,
+                    CanReorder: false,
+                    CanUseOutput: false,
+                    CanDeleteOutput: false,
+                }
+            && lifecycle.VisibleActionKinds.Length == 0
             && PhotoViewer.Wpf.MainWindow.ReadEnhancementVideoKindForSmoke(job)
                 is null;
     }
+
+    private static bool IsExpectedCurrentV2Lifecycle(
+        EnhancementJobLifecycleSmokeSnapshot? lifecycle,
+        string expectedKind,
+        bool canCancel,
+        bool canRetry,
+        bool canDismiss,
+        bool canReorder,
+        bool canDeleteOutput,
+        string[] visibleActions)
+        => lifecycle is
+            {
+                ExactCurrentVideoToolsV2: true,
+                ReaderOnly: false,
+                SupportedMutation: true,
+            }
+            && string.Equals(
+                lifecycle.Kind,
+                expectedKind,
+                StringComparison.Ordinal)
+            && lifecycle.CanCancel == canCancel
+            && lifecycle.CanRetry == canRetry
+            && lifecycle.CanDismiss == canDismiss
+            && lifecycle.CanReorder == canReorder
+            && lifecycle.CanDeleteOutput == canDeleteOutput
+            && lifecycle.VisibleActionKinds.SequenceEqual(
+                visibleActions,
+                StringComparer.Ordinal);
 
     private static JsonDocument CreateVideoToolsV2WorkspaceJob(
         JsonElement fixture,
@@ -882,12 +1130,12 @@ public partial class App
             jobJson[..^1] + ",\"video\":" + rawVideo + "}");
     }
 
-    private static JsonDocument CreateOrdinaryVideoJob()
+    private static JsonDocument CreateOrdinaryVideoJob(string status)
         => JsonDocument.Parse(
-            """
+            $$"""
             {
               "id": "66666666-7777-4888-8999-aaaaaaaaaaab",
-              "status": "succeeded",
+              "status": "{{status}}",
               "operation": "video",
               "mediaKind": "video",
               "sourceId": "synthetic-generation-source",
@@ -896,6 +1144,25 @@ public partial class App
               "adapterId": "minimax-h3-local-v1",
               "progress": 100,
               "outputPath": "C:\\synthetic\\Videos\\generation.mp4",
+              "createdAt": "2026-08-24T00:00:00.000Z",
+              "updatedAt": "2026-08-24T00:00:01.000Z"
+            }
+            """);
+
+    private static JsonDocument CreateOrdinaryUpscaleJob(string status)
+        => JsonDocument.Parse(
+            $$"""
+            {
+              "id": "77777777-8888-4999-8aaa-bbbbbbbbbbad",
+              "status": "{{status}}",
+              "operation": "upscale",
+              "mediaKind": "image",
+              "sourceId": "C:\\synthetic\\source.png",
+              "sourcePath": "C:\\synthetic\\source.png",
+              "presetId": "anime-sharp-x2",
+              "adapterId": "realesrgan-ncnn",
+              "progress": 0,
+              "queueOrder": 2,
               "createdAt": "2026-08-24T00:00:00.000Z",
               "updatedAt": "2026-08-24T00:00:01.000Z"
             }

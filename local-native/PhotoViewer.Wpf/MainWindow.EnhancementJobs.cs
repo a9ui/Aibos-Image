@@ -4090,10 +4090,11 @@ public partial class MainWindow
                 out EnhancementVideoMutationProbe? parsedVideoMutationProbe)
                 ? parsedVideoMutationProbe
                 : null;
-        bool queueReorderSafe = !videoToolsEnvelopeClaimed
-            && (operation is "upscale" or "photoreal"
-                || (operation == "i2i" && i2iMutationSafe)
-                || structurallySafeVideo);
+        bool queueReorderSafe = videoToolsV2Snapshot is not null
+            || !videoToolsEnvelopeClaimed
+                && (operation is "upscale" or "photoreal"
+                    || (operation == "i2i" && i2iMutationSafe)
+                    || structurallySafeVideo);
         string resolvedPresetId = presetId ?? "Default preset";
         string resolvedAdapterId = adapterId ?? "local companion";
         var view = new EnhancementWorkspaceJobView(
@@ -4133,7 +4134,7 @@ public partial class MainWindow
             apiOrdinal,
             buildRequestDetails
                 ? videoToolsV2Snapshot is VideoToolsV2ReaderSnapshot exactV2
-                    ? BuildVideoToolsV2RequestDetails(exactV2)
+                    ? BuildCurrentVideoToolsV2RequestDetails(exactV2)
                     : BuildEnhancementJobRequestDetails(
                         element,
                         operation,
@@ -4154,6 +4155,18 @@ public partial class MainWindow
             view.AttachVideoMutationProbe(videoMutationProbe);
         return view;
     }
+
+    private static string BuildCurrentVideoToolsV2RequestDetails(
+        VideoToolsV2ReaderSnapshot snapshot)
+        => BuildVideoToolsV2RequestDetails(snapshot)
+            .Replace(
+                "Protocol: Video Tools v2（読取専用）",
+                "Protocol: Video Tools v2",
+                StringComparison.Ordinal)
+            .Replace(
+                "保護: cancel/retry/remove/delete/reorder/saved rerunは無効です。元動画と入力依存は変更しません。",
+                "Lifecycle: 状態に応じたcancel/retry/remove/delete/reorderを認証済みCompanionへ委譲します。元動画と入力依存は変更しません。",
+                StringComparison.Ordinal);
 
     private static bool TryReadEnhancementVideoMutationProbe(
         JsonElement job,
@@ -7978,6 +7991,7 @@ public partial class MainWindow
             healthValidator: retryHealthValidator,
             requireExactHealthValidation: retryHealthValidator is not null,
             onBeforeDurablePublish: job.IsVideoOperation
+                && !job.IsExactCurrentVideoToolsV2
                 ? _ => AcquireVideoDurablePublishLease(
                     () => PinVideoRetrySourceForDurablePublish(job))
                 : null);
@@ -10346,6 +10360,44 @@ public partial class MainWindow
         return true;
     }
 
+    public static EnhancementJobLifecycleSmokeSnapshot?
+        ReadEnhancementJobLifecycleForSmoke(JsonElement job)
+    {
+        EnhancementWorkspaceJobView? view = ParseEnhancementWorkspaceJob(
+            job,
+            0,
+            static _ => false);
+        if (view is null)
+            return null;
+        if (view.Status == "queued")
+        {
+            view.ApplyQueuePresentation(
+                queuePosition: 2,
+                queueCount: 3,
+                queueOrder: view.QueueOrder ?? 1);
+        }
+
+        string[] visibleActions = new[]
+            { view.Action1, view.Action2, view.Action3, view.Action4,
+                view.Action5, view.DangerAction }
+            .Where(static action => action.Visible)
+            .Select(static action => action.Kind)
+            .ToArray();
+        return new EnhancementJobLifecycleSmokeSnapshot(
+            view.IsExactCurrentVideoToolsV2,
+            view.IsVideoToolsReaderOnly,
+            view.IsSupportedMutationOperation,
+            view.VideoToolsKind,
+            view.Status,
+            view.CanCancel,
+            view.CanRetry,
+            view.CanDismiss,
+            view.CanReorder,
+            view.CanUseOutput,
+            view.CanDeleteOutput,
+            visibleActions);
+    }
+
     public static bool IsMiniMaxH3VideoMutationSafeForSmoke(JsonElement job)
         => IsMiniMaxH3VideoMutationSafe(job);
 
@@ -10661,7 +10713,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string? VideoToolsKind { get; }
     public string? VideoToolsFinishMode { get; }
     internal VideoToolsV2ReaderSnapshot? VideoToolsV2Snapshot { get; }
-    public bool IsVideoToolsReaderOnly => VideoToolsEnvelopeClaimed;
+    public bool IsExactCurrentVideoToolsV2 => VideoToolsV2Snapshot is not null;
+    public bool IsVideoToolsReaderOnly =>
+        VideoToolsEnvelopeClaimed && !IsExactCurrentVideoToolsV2;
     public string Status { get; private set; }
     public bool CancelRequested { get; private set; }
     public int Progress { get; private set; }
@@ -10683,10 +10737,11 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool IsKnownOperation =>
         Operation is "upscale" or "photoreal" or "i2i" or "video";
     public bool IsSupportedMutationOperation =>
-        !IsVideoToolsReaderOnly
-        && (Operation is "upscale" or "photoreal"
-            || (Operation == "i2i" && I2iMutationSafe)
-            || (IsVideoOperation && VideoMutationSafe));
+        IsExactCurrentVideoToolsV2
+        || !IsVideoToolsReaderOnly
+            && (Operation is "upscale" or "photoreal"
+                || (Operation == "i2i" && I2iMutationSafe)
+                || (IsVideoOperation && VideoMutationSafe));
     public bool OutputDependencyProtected { get; set; }
     public bool QueueMutationScopeSafe { get; set; } = true;
     public bool CanCancel =>
@@ -10695,12 +10750,16 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         && !IsVideoToolsReaderOnly
         && (Status is "queued" or "running"
             ? IsKnownOperation
-            : Status == "failed" && IsSupportedMutationOperation);
+            : !IsExactCurrentVideoToolsV2
+                && Status == "failed"
+                && IsSupportedMutationOperation);
     public bool ShowCancelAction =>
         !IsVideoToolsReaderOnly
         && (Status is "queued" or "running"
             ? IsKnownOperation
-            : Status == "failed" && IsSupportedMutationOperation);
+            : !IsExactCurrentVideoToolsV2
+                && Status == "failed"
+                && IsSupportedMutationOperation);
     public string CancelToolTip => CanCancel
         ? Status == "queued"
             ? "この待機Jobだけをキャンセルします。実行中のJobは変更しません"
@@ -10714,11 +10773,19 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         !_isBusy
         && IsSupportedMutationOperation
         && Status is "failed" or "canceled";
-    public string RetryLabel => IsVideoOperation
-        ? "動画をやり直す"
+    public string RetryLabel => VideoToolsV2Snapshot?.Kind == "edit"
+        ? "同じ設定でAI動画編集をRetry"
+        : VideoToolsV2Snapshot?.Kind == "finish"
+            ? "同じモードで高画質化をRetry"
+        : IsVideoOperation
+            ? "動画をやり直す"
         : "元設定でRetry";
-    public string RetryToolTip => IsVideoOperation
-        ? "失敗・キャンセルした動画を、保存された長さ・STEP数・Prompt・Seedで再生成"
+    public string RetryToolTip => VideoToolsV2Snapshot?.Kind == "edit"
+        ? "保存されたEdit snapshot・Seed・Job所有入力を変更せず再試行"
+        : VideoToolsV2Snapshot?.Kind == "finish"
+            ? "保存されたモード・倍率・Job所有入力を変更せず再試行"
+        : IsVideoOperation
+            ? "失敗・キャンセルした動画を、保存された長さ・STEP数・Prompt・Seedで再生成"
         : "失敗・キャンセル時に保存された元の設定で再試行";
     public bool CanDismiss =>
         !_isBusy
@@ -11188,6 +11255,10 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         "queued" => "待機を削除",
         "running" when Operation == "photoreal" => "実写化を中止",
         "running" when Operation == "i2i" => "AI編集を中止",
+        "running" when VideoToolsV2Snapshot?.Kind == "edit" =>
+            "AI動画編集を中止",
+        "running" when VideoToolsV2Snapshot?.Kind == "finish" =>
+            "AI動画高画質化を中止",
         "running" when Operation == "video" => "動画化を中止",
         "running" when !IsImageOperation => "未対応操作",
         "running" => "高画質化を中止",
@@ -11231,9 +11302,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         return null;
     }
     public string PresetSummary => VideoToolsV2Snapshot is { Kind: "edit" } editV2
-        ? $"Video Tools v2 · AI動画編集 · [{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive}) · 非破壊child clip · Reader-only"
+        ? $"Video Tools v2 · AI動画編集 · [{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive}) · 非破壊child clip"
         : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
-            ? $"Video Tools v2 · AI動画高画質化 · {finishV2.FinishMode} · {finishV2.FinishScale}x · Reader-only"
+            ? $"Video Tools v2 · AI動画高画質化 · {finishV2.FinishMode} · {finishV2.FinishScale}x"
         : VideoToolsKind == "retake"
         ? "Video Tools · 区間を作り直す · Reader-only"
         : VideoToolsKind == "finish"
@@ -11321,9 +11392,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? $"反映中  ·  {PersistedStatusLabel}"
         : PersistedStatusLabel;
     public string DetailText => VideoToolsV2Snapshot is { Kind: "edit" } editV2
-        ? $"Video Tools v2 Editを読取専用で表示しています。管理元は{SourceVersionLabel}、出力は[{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive})だけの非破壊child clipです。cancel/retry/remove/delete/reorder/再実行は無効です。"
+        ? $"Video Tools v2 Edit Jobです。管理元は{SourceVersionLabel}、出力は[{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive})だけの非破壊child clipです。状態に応じたJobs操作は認証済みCompanionが最終判定します。"
         : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
-            ? $"Video Tools v2 Finishを読取専用で表示しています。管理元は{SourceVersionLabel}、{finishV2.FinishScale}x出力でもfps・フレーム数・長さ・元音声を維持します。cancel/retry/remove/delete/reorder/再実行は無効です。"
+            ? $"Video Tools v2 Finish Jobです。管理元は{SourceVersionLabel}、{finishV2.FinishScale}x出力でもfps・フレーム数・長さ・元音声を維持します。状態に応じたJobs操作は認証済みCompanionが最終判定します。"
         : VideoToolsKind == "retake"
         ? "Retake snapshotを読取専用で表示しています。選択区間と実際の差し替え窓、全尺・元音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
         : VideoToolsKind == "finish"
@@ -11710,6 +11781,20 @@ public sealed record EnhancementJobActionPresentation(
     public static EnhancementJobActionPresentation Hidden { get; } =
         new("", "", "", false, false, 0, "");
 }
+
+public sealed record EnhancementJobLifecycleSmokeSnapshot(
+    bool ExactCurrentVideoToolsV2,
+    bool ReaderOnly,
+    bool SupportedMutation,
+    string? Kind,
+    string Status,
+    bool CanCancel,
+    bool CanRetry,
+    bool CanDismiss,
+    bool CanReorder,
+    bool CanUseOutput,
+    bool CanDeleteOutput,
+    string[] VisibleActionKinds);
 
 public sealed record MiniMaxH3VideoWorkspaceSnapshot(
     string ProfileId,
