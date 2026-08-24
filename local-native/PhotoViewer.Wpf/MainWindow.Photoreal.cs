@@ -802,6 +802,7 @@ public partial class MainWindow
         string kind = version.VersionKind switch
         {
             "edit" => "AI編集",
+            "trim" => "トリム",
             "finish" => "AI高画質化",
             _ => "生成",
         };

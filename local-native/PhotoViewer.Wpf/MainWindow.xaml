@@ -1760,6 +1760,14 @@
                             ToolTip="{DynamicResource UiJobsVideoKindEditHelp}"
                             AutomationProperties.Name="{DynamicResource UiJobsVideoKindEdit}"
                             AutomationProperties.HelpText="{DynamicResource UiJobsVideoKindEditHelp}"/>
+                  <CheckBox x:Name="EnhancementJobsVideoTrimKindFilter"
+                            Style="{StaticResource EnhancementJobsFilterPill}"
+                            Content="{DynamicResource UiJobsVideoKindTrim}"
+                            Tag="trim"
+                            Click="EnhancementJobsVideoKindFilter_Click"
+                            ToolTip="{DynamicResource UiJobsVideoKindTrimHelp}"
+                            AutomationProperties.Name="{DynamicResource UiJobsVideoKindTrim}"
+                            AutomationProperties.HelpText="{DynamicResource UiJobsVideoKindTrimHelp}"/>
                   <CheckBox x:Name="EnhancementJobsVideoFinishKindFilter"
                             Style="{StaticResource EnhancementJobsFilterPill}"
                             Content="{DynamicResource UiJobsVideoKindFinish}"
@@ -3523,14 +3531,6 @@
                   AutomationProperties.HelpText="{DynamicResource UiVideoToolsRetakeHelp}"
                   MinWidth="92" Height="32" Padding="8,0" Margin="0,0,4,0"
                   Visibility="Collapsed" Click="OpenModalVideoRetake_Click"/>
-          <Button x:Name="ModalVideoFinishButton"
-                  Style="{StaticResource GhostButton}"
-                  Content="{DynamicResource UiVideoFinishV2Action}"
-                  ToolTip="{DynamicResource UiVideoFinishV2ActionHelp}"
-                  AutomationProperties.Name="{DynamicResource UiVideoFinishV2ActionAutomation}"
-                  AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ActionHelp}"
-                  MinWidth="94" Height="32" Padding="8,0" Margin="0,0,4,0"
-                  Visibility="Collapsed" Click="OpenModalVideoFinish_Click"/>
           <Button x:Name="ModalVideoEditV2Button"
                   Style="{StaticResource GhostButton}"
                   Content="{DynamicResource UiVideoEditV2Action}"
@@ -3547,6 +3547,11 @@
                           Click="OpenModalVideoEditV2_Click"
                           AutomationProperties.Name="{DynamicResource UiVideoEditV2ActionAutomation}"
                           AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ActionHelp}"/>
+                <MenuItem x:Name="ModalVideoTrimV1ExternalMenuItem"
+                          Header="{DynamicResource UiVideoTrimV1Action}"
+                          Click="OpenModalVideoTrimV1_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoTrimV1ActionAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoTrimV1ActionHelp}"/>
                 <MenuItem x:Name="ModalVideoFinishV2ExternalMenuItem"
                           Header="{DynamicResource UiVideoFinishV2Action}"
                           Click="OpenModalVideoFinish_Click"
@@ -3555,6 +3560,22 @@
               </ContextMenu>
             </Button.ContextMenu>
           </Button>
+          <Button x:Name="ModalVideoTrimV1Button"
+                  Style="{StaticResource GhostButton}"
+                  Content="{DynamicResource UiVideoTrimV1Action}"
+                  ToolTip="{DynamicResource UiVideoTrimV1ActionHelp}"
+                  AutomationProperties.Name="{DynamicResource UiVideoTrimV1ActionAutomation}"
+                  AutomationProperties.HelpText="{DynamicResource UiVideoTrimV1ActionHelp}"
+                  MinWidth="94" Height="32" Padding="8,0" Margin="0,0,4,0"
+                  Visibility="Collapsed" Click="OpenModalVideoTrimV1_Click"/>
+          <Button x:Name="ModalVideoFinishButton"
+                  Style="{StaticResource GhostButton}"
+                  Content="{DynamicResource UiVideoFinishV2Action}"
+                  ToolTip="{DynamicResource UiVideoFinishV2ActionHelp}"
+                  AutomationProperties.Name="{DynamicResource UiVideoFinishV2ActionAutomation}"
+                  AutomationProperties.HelpText="{DynamicResource UiVideoFinishV2ActionHelp}"
+                  MinWidth="94" Height="32" Padding="8,0" Margin="0,0,4,0"
+                  Visibility="Collapsed" Click="OpenModalVideoFinish_Click"/>
           <Button x:Name="ModalI2iEditButton" Style="{StaticResource GhostButton}"
                   ToolTip="表示中のOriginalまたは実写化版をAI編集"
                   AutomationProperties.Name="実写編集"
@@ -4689,6 +4710,226 @@
         </Border>
       </Grid>
 
+      <Grid x:Name="ModalVideoTrimV1Popup" Grid.RowSpan="3" Grid.ColumnSpan="2"
+            Visibility="Collapsed" Panel.ZIndex="92" Background="Transparent"
+            WindowChrome.IsHitTestVisibleInChrome="True"
+            MouseLeftButtonDown="ModalVideoTrimV1Backdrop_MouseLeftButtonDown"
+            PreviewKeyDown="ModalVideoTrimV1_PreviewKeyDown"
+            IsVisibleChanged="ModalVideoTrimV1Popup_IsVisibleChanged"
+            AutomationProperties.Name="{DynamicResource UiVideoTrimV1BoardAutomation}"
+            AutomationProperties.HelpText="{DynamicResource UiVideoTrimV1BoardHelp}">
+        <Border x:Name="ModalVideoTrimV1BoardBorder" Width="520" MaxHeight="720"
+                Padding="16" CornerRadius="7"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,52,150,12"
+                Background="{StaticResource BgElevated}"
+                BorderBrush="{StaticResource BorderStrong}" BorderThickness="1"
+                KeyboardNavigation.TabNavigation="Cycle"
+                KeyboardNavigation.ControlTabNavigation="Cycle">
+          <ScrollViewer VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="0,0,6,0">
+              <DockPanel LastChildFill="True" Margin="0,0,0,10">
+                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}"
+                        Width="28" Height="28" Click="CloseModalVideoTrimV1_Click"
+                        ToolTip="{DynamicResource UiVideoTrimV1Close}"
+                        AutomationProperties.Name="{DynamicResource UiVideoTrimV1Close}">
+                  <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE711;"
+                             Foreground="{StaticResource TextSecondary}" FontSize="12"/>
+                </Button>
+                <StackPanel>
+                  <TextBlock Text="{DynamicResource UiVideoTrimV1Action}"
+                             Foreground="{StaticResource TextPrimary}"
+                             FontSize="17" FontWeight="SemiBold"/>
+                  <TextBlock Text="{DynamicResource UiVideoTrimV1Subtitle}"
+                             Foreground="{StaticResource TextSecondary}"
+                             FontSize="10.5" Margin="0,2,0,0"/>
+                </StackPanel>
+              </DockPanel>
+
+              <Border Padding="10" CornerRadius="5" Margin="0,0,0,10"
+                      Background="{StaticResource SoftFill}"
+                      BorderBrush="{StaticResource BorderStrong}" BorderThickness="1">
+                <StackPanel>
+                  <TextBlock x:Name="ModalVideoTrimV1SourceText"
+                             Foreground="{StaticResource TextPrimary}" FontSize="10.5"
+                             FontWeight="SemiBold" TextWrapping="Wrap"
+                             AutomationProperties.Name="{DynamicResource UiVideoTrimV1SourceAutomation}"/>
+                  <TextBlock Text="{DynamicResource UiVideoTrimV1SourceNotice}"
+                             Foreground="{StaticResource TextTertiary}" FontSize="9.5"
+                             TextWrapping="Wrap" Margin="0,4,0,0"/>
+                  <Button x:Name="ModalVideoTrimV1ProbeButton"
+                          Style="{StaticResource GhostButton}"
+                          Content="{DynamicResource UiVideoTrimV1ProbeAction}"
+                          Height="31" Margin="0,8,0,0" HorizontalAlignment="Stretch"
+                          Click="ProbeModalVideoTrimV1_Click"
+                          AutomationProperties.Name="{DynamicResource UiVideoTrimV1ProbeAutomation}"
+                          AutomationProperties.HelpText="{DynamicResource UiVideoTrimV1ProbeHelp}"/>
+                  <TextBlock x:Name="ModalVideoTrimV1ProbeStatusText"
+                             Foreground="{StaticResource TextTertiary}" FontSize="9.5"
+                             TextWrapping="Wrap" Margin="0,5,0,0"
+                             AutomationProperties.LiveSetting="Polite"/>
+                </StackPanel>
+              </Border>
+
+              <TextBlock Text="{DynamicResource UiVideoTrimV1OverviewLabel}"
+                         Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                         FontWeight="SemiBold" Margin="0,0,0,4"/>
+              <ProgressBar x:Name="ModalVideoTrimV1OverviewProgressBar"
+                           Height="8" Minimum="0" Maximum="1" Value="0"
+                           AutomationProperties.Name="{DynamicResource UiVideoTrimV1OverviewAutomation}"/>
+              <TextBlock x:Name="ModalVideoTrimV1CurrentFrameText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10"
+                         FontFamily="{StaticResource MonoFont}" Margin="0,5,0,8"
+                         AutomationProperties.Name="{DynamicResource UiVideoTrimV1CurrentFrameAutomation}"/>
+
+              <Grid Margin="0,0,0,7">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="10"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                  <TextBlock Text="{DynamicResource UiVideoTrimV1StartFrameLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"/>
+                  <TextBox x:Name="ModalVideoTrimV1StartFrameTextBox"
+                           MaxLength="5" Height="29" Margin="0,4,0,4"
+                           TextChanged="ModalVideoTrimV1Input_Changed"
+                           AutomationProperties.Name="{DynamicResource UiVideoTrimV1StartFrameAutomation}"/>
+                  <UniformGrid Columns="3">
+                    <Button x:Name="ModalVideoTrimV1StartMinusButton"
+                            Style="{StaticResource GhostButton}" Content="−1" Tag="start:-1"
+                            Height="27" Margin="0,0,3,0" Click="ModalVideoTrimV1StepFrame_Click"/>
+                    <Button x:Name="ModalVideoTrimV1UseCurrentStartButton"
+                            Style="{StaticResource GhostButton}"
+                            Content="{DynamicResource UiVideoTrimV1UseCurrent}"
+                            Height="27" Margin="0,0,3,0"
+                            Click="ModalVideoTrimV1UseCurrentStart_Click"/>
+                    <Button x:Name="ModalVideoTrimV1StartPlusButton"
+                            Style="{StaticResource GhostButton}" Content="+1" Tag="start:1"
+                            Height="27" Click="ModalVideoTrimV1StepFrame_Click"/>
+                  </UniformGrid>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="{DynamicResource UiVideoTrimV1EndFrameLabel}"
+                             Foreground="{StaticResource TextSecondary}" FontSize="10.5"/>
+                  <TextBox x:Name="ModalVideoTrimV1EndFrameTextBox"
+                           MaxLength="5" Height="29" Margin="0,4,0,4"
+                           TextChanged="ModalVideoTrimV1Input_Changed"
+                           AutomationProperties.Name="{DynamicResource UiVideoTrimV1EndFrameAutomation}"/>
+                  <UniformGrid Columns="3">
+                    <Button x:Name="ModalVideoTrimV1EndMinusButton"
+                            Style="{StaticResource GhostButton}" Content="−1" Tag="end:-1"
+                            Height="27" Margin="0,0,3,0" Click="ModalVideoTrimV1StepFrame_Click"/>
+                    <Button x:Name="ModalVideoTrimV1UseCurrentEndButton"
+                            Style="{StaticResource GhostButton}"
+                            Content="{DynamicResource UiVideoTrimV1UseCurrent}"
+                            Height="27" Margin="0,0,3,0"
+                            Click="ModalVideoTrimV1UseCurrentEnd_Click"/>
+                    <Button x:Name="ModalVideoTrimV1EndPlusButton"
+                            Style="{StaticResource GhostButton}" Content="+1" Tag="end:1"
+                            Height="27" Click="ModalVideoTrimV1StepFrame_Click"/>
+                  </UniformGrid>
+                </StackPanel>
+              </Grid>
+              <TextBlock x:Name="ModalVideoTrimV1RangeStatusText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10"
+                         TextWrapping="Wrap" Margin="0,0,0,8"
+                         AutomationProperties.LiveSetting="Polite"/>
+
+              <UniformGrid Columns="3" Margin="0,0,0,7">
+                <Button x:Name="ModalVideoTrimV1StartPreviewButton"
+                        Style="{StaticResource GhostButton}" Tag="start"
+                        Margin="0,0,4,0" Padding="5" Height="104"
+                        Click="ModalVideoTrimV1PreviewSeek_Click">
+                  <StackPanel>
+                    <Image x:Name="ModalVideoTrimV1StartPreviewImage"
+                           Height="55" Stretch="Uniform"/>
+                    <TextBlock Text="{DynamicResource UiVideoTrimV1StartPreviewLabel}"
+                               HorizontalAlignment="Center" FontSize="9.5"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                      <TextBlock x:Name="ModalVideoTrimV1StartPreviewFrameText" Text="--"
+                                 FontFamily="{StaticResource MonoFont}" FontSize="9"/>
+                      <TextBlock x:Name="ModalVideoTrimV1StartPreviewTimeText" Text="--"
+                                 Margin="5,0,0,0" FontFamily="{StaticResource MonoFont}" FontSize="9"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Button>
+                <Button x:Name="ModalVideoTrimV1MiddlePreviewButton"
+                        Style="{StaticResource GhostButton}" Tag="middle"
+                        Margin="0,0,4,0" Padding="5" Height="104"
+                        Click="ModalVideoTrimV1PreviewSeek_Click">
+                  <StackPanel>
+                    <Image x:Name="ModalVideoTrimV1MiddlePreviewImage"
+                           Height="55" Stretch="Uniform"/>
+                    <TextBlock Text="{DynamicResource UiVideoTrimV1MiddlePreviewLabel}"
+                               HorizontalAlignment="Center" FontSize="9.5"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                      <TextBlock x:Name="ModalVideoTrimV1MiddlePreviewFrameText" Text="--"
+                                 FontFamily="{StaticResource MonoFont}" FontSize="9"/>
+                      <TextBlock x:Name="ModalVideoTrimV1MiddlePreviewTimeText" Text="--"
+                                 Margin="5,0,0,0" FontFamily="{StaticResource MonoFont}" FontSize="9"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Button>
+                <Button x:Name="ModalVideoTrimV1EndPreviewButton"
+                        Style="{StaticResource GhostButton}" Tag="end"
+                        Padding="5" Height="104"
+                        Click="ModalVideoTrimV1PreviewSeek_Click">
+                  <StackPanel>
+                    <Image x:Name="ModalVideoTrimV1EndPreviewImage"
+                           Height="55" Stretch="Uniform"/>
+                    <TextBlock Text="{DynamicResource UiVideoTrimV1EndPreviewLabel}"
+                               HorizontalAlignment="Center" FontSize="9.5"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                      <TextBlock x:Name="ModalVideoTrimV1EndPreviewFrameText" Text="--"
+                                 FontFamily="{StaticResource MonoFont}" FontSize="9"/>
+                      <TextBlock x:Name="ModalVideoTrimV1EndPreviewTimeText" Text="--"
+                                 Margin="5,0,0,0" FontFamily="{StaticResource MonoFont}" FontSize="9"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Button>
+              </UniformGrid>
+              <TextBlock Text="{DynamicResource UiVideoTrimV1PreviewNotice}"
+                         Foreground="{StaticResource TextTertiary}" FontSize="9.5"
+                         TextWrapping="Wrap" Margin="0,0,0,9"/>
+
+              <TextBlock Text="{DynamicResource UiVideoTrimV1AudioLabel}"
+                         Foreground="{StaticResource TextPrimary}" FontSize="11.5"
+                         FontWeight="SemiBold" Margin="0,0,0,4"/>
+              <ComboBox x:Name="ModalVideoTrimV1AudioComboBox"
+                        Style="{StaticResource PhotorealSettingsComboBox}"
+                        SelectedIndex="0" SelectionChanged="ModalVideoTrimV1Input_Changed"
+                        AutomationProperties.Name="{DynamicResource UiVideoTrimV1AudioAutomation}">
+                <ComboBoxItem Content="{DynamicResource UiVideoTrimV1AudioPreserve}" Tag="preserve"/>
+                <ComboBoxItem Content="{DynamicResource UiVideoTrimV1AudioMute}" Tag="mute"/>
+              </ComboBox>
+              <TextBlock Text="{DynamicResource UiVideoTrimV1ReencodePolicy}"
+                         Foreground="{StaticResource TextTertiary}" FontSize="9.5"
+                         TextWrapping="Wrap" Margin="0,5,0,10"/>
+
+              <Button x:Name="ModalVideoTrimV1ReadinessButton"
+                      Style="{StaticResource GhostButton}"
+                      Content="{DynamicResource UiVideoTrimV1ReadinessAction}"
+                      Height="31" HorizontalAlignment="Stretch"
+                      Click="RefreshModalVideoTrimV1Readiness_Click"
+                      AutomationProperties.Name="{DynamicResource UiVideoTrimV1ReadinessAutomation}"/>
+              <TextBlock x:Name="ModalVideoTrimV1ReadinessText"
+                         Foreground="{StaticResource TextSecondary}" FontSize="10"
+                         TextWrapping="Wrap" Margin="0,5,0,0"
+                         AutomationProperties.LiveSetting="Polite"/>
+              <Button x:Name="ModalVideoTrimV1StartButton"
+                      Style="{StaticResource PrimaryButton}"
+                      Content="{DynamicResource UiVideoTrimV1StartPending}"
+                      Height="36" Margin="0,10,0,0"
+                      HorizontalAlignment="Stretch" IsEnabled="False"
+                      Click="StartModalVideoTrimV1_Click"
+                      AutomationProperties.Name="{DynamicResource UiVideoTrimV1StartAutomation}"
+                      AutomationProperties.HelpText="{DynamicResource UiVideoTrimV1StartHelp}"/>
+            </StackPanel>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+
       <Grid x:Name="ModalVideoEditV2Popup" Grid.RowSpan="3" Grid.ColumnSpan="2"
             Visibility="Collapsed" Panel.ZIndex="92" Background="Transparent"
             WindowChrome.IsHitTestVisibleInChrome="True"
@@ -4922,11 +5163,12 @@
                          TextWrapping="Wrap" Margin="0,0,0,7"/>
               <Button x:Name="ModalVideoEditV2TrimButton"
                       Style="{StaticResource GhostButton}"
-                      Content="{DynamicResource UiVideoEditV2TrimAction}"
-                      Height="31" HorizontalAlignment="Stretch" IsEnabled="False"
-                      ToolTip="{DynamicResource UiVideoEditV2TrimPending}"
-                      AutomationProperties.Name="{DynamicResource UiVideoEditV2TrimAutomation}"
-                      AutomationProperties.HelpText="{DynamicResource UiVideoEditV2TrimPending}"/>
+                      Content="{DynamicResource UiVideoTrimV1Action}"
+                      Height="31" HorizontalAlignment="Stretch"
+                      Click="OpenModalVideoTrimV1_Click"
+                      ToolTip="{DynamicResource UiVideoTrimV1ActionHelp}"
+                      AutomationProperties.Name="{DynamicResource UiVideoTrimV1ActionAutomation}"
+                      AutomationProperties.HelpText="{DynamicResource UiVideoTrimV1ActionHelp}"/>
               <TextBlock Text="{DynamicResource UiVideoEditV2TrimSeparationNotice}"
                          Foreground="{StaticResource TextTertiary}" FontSize="9.5"
                          TextWrapping="Wrap" Margin="0,4,0,11"/>
@@ -5190,6 +5432,12 @@
                       Click="OpenModalVideoEditV2_Click"
                       AutomationProperties.Name="{DynamicResource UiVideoEditV2ActionAutomation}"
                       AutomationProperties.HelpText="{DynamicResource UiVideoEditV2ActionHelp}"/>
+            <MenuItem x:Name="ModalContextVideoTrimV1"
+                      Header="{DynamicResource UiVideoTrimV1Action}"
+                      Visibility="Collapsed"
+                      Click="OpenModalVideoTrimV1_Click"
+                      AutomationProperties.Name="{DynamicResource UiVideoTrimV1ActionAutomation}"
+                      AutomationProperties.HelpText="{DynamicResource UiVideoTrimV1ActionHelp}"/>
             <MenuItem x:Name="ModalContextVideoFinishV2"
                       Header="{DynamicResource UiVideoFinishV2Action}"
                       Visibility="Collapsed"

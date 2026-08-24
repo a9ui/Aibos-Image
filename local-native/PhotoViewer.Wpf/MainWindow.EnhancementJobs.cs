@@ -1340,7 +1340,7 @@ public partial class MainWindow
 
     private static string NormalizeEnhancementWorkspaceVideoKindFilter(
         string? filter)
-        => filter is "generation" or "edit" or "finish"
+        => filter is "generation" or "edit" or "trim" or "finish"
             ? filter
             : "all";
 
@@ -1455,6 +1455,8 @@ public partial class MainWindow
                 "AI動画編集",
             "video" when _enhancementWorkspaceVideoKindFilter == "finish" =>
                 "AI動画高画質化",
+            "video" when _enhancementWorkspaceVideoKindFilter == "trim" =>
+                "動画トリム",
             "video" => "動画化",
             "i2i" => "AI編集",
             _ => "すべての処理",
@@ -4053,7 +4055,17 @@ public partial class MainWindow
                 || i2iV3Info is not null);
         bool structurallySafeVideo = operation == "video"
             && IsStructurallyVideoMutationSafe(element);
+        bool videoTrimEnvelopeClaimed =
+            ClaimsVideoTrimV1WorkspaceSnapshot(element);
+        VideoTrimV1ReaderSnapshot? videoTrimV1Snapshot =
+            videoTrimEnvelopeClaimed
+            && TryReadVideoTrimV1WorkspaceSnapshot(
+                element,
+                out VideoTrimV1ReaderSnapshot parsedVideoTrimV1Snapshot)
+                ? parsedVideoTrimV1Snapshot
+                : null;
         bool videoMutationSafe = operation == "video"
+            && !videoTrimEnvelopeClaimed
             && (videoMutationValidator?.Invoke(element)
                 ?? structurallySafeVideo);
         // The snapshot discriminator owns fail-closed protection even when
@@ -4078,6 +4090,7 @@ public partial class MainWindow
                 : null;
         MiniMaxH3VideoWorkspaceSnapshot? miniMaxH3VideoSnapshot =
             operation == "video"
+            && !videoTrimEnvelopeClaimed
             && TryReadMiniMaxH3VideoWorkspaceSnapshot(
                 element,
                 out MiniMaxH3VideoWorkspaceSnapshot? parsedVideoSnapshot)
@@ -4091,7 +4104,9 @@ public partial class MainWindow
                 ? parsedVideoMutationProbe
                 : null;
         bool queueReorderSafe = videoToolsV2Snapshot is not null
+            || videoTrimV1Snapshot is not null
             || !videoToolsEnvelopeClaimed
+                && !videoTrimEnvelopeClaimed
                 && (operation is "upscale" or "photoreal"
                     || (operation == "i2i" && i2iMutationSafe)
                     || structurallySafeVideo);
@@ -4133,7 +4148,9 @@ public partial class MainWindow
             queueOrder,
             apiOrdinal,
             buildRequestDetails
-                ? videoToolsV2Snapshot is VideoToolsV2ReaderSnapshot exactV2
+                ? videoTrimV1Snapshot is VideoTrimV1ReaderSnapshot exactTrim
+                    ? BuildVideoTrimV1RequestDetails(exactTrim)
+                    : videoToolsV2Snapshot is VideoToolsV2ReaderSnapshot exactV2
                     ? BuildCurrentVideoToolsV2RequestDetails(exactV2)
                     : BuildEnhancementJobRequestDetails(
                         element,
@@ -4150,7 +4167,9 @@ public partial class MainWindow
             videoToolsEnvelopeClaimed,
             videoToolsV2Snapshot?.Kind ?? videoToolsSnapshot?.Kind,
             videoToolsSnapshot?.FinishMode,
-            videoToolsV2Snapshot);
+            videoToolsV2Snapshot,
+            videoTrimEnvelopeClaimed,
+            videoTrimV1Snapshot);
         if (videoMutationProbe is not null)
             view.AttachVideoMutationProbe(videoMutationProbe);
         return view;
@@ -4423,6 +4442,8 @@ public partial class MainWindow
             _enhancementWorkspaceVideoKindFilter == "generation";
         EnhancementJobsVideoEditKindFilter.IsChecked =
             _enhancementWorkspaceVideoKindFilter == "edit";
+        EnhancementJobsVideoTrimKindFilter.IsChecked =
+            _enhancementWorkspaceVideoKindFilter == "trim";
         EnhancementJobsVideoFinishKindFilter.IsChecked =
             _enhancementWorkspaceVideoKindFilter == "finish";
     }
@@ -7992,6 +8013,7 @@ public partial class MainWindow
             requireExactHealthValidation: retryHealthValidator is not null,
             onBeforeDurablePublish: job.IsVideoOperation
                 && !job.IsExactCurrentVideoToolsV2
+                && !job.IsExactCurrentVideoTrimV1
                 ? _ => AcquireVideoDurablePublishLease(
                     () => PinVideoRetrySourceForDurablePublish(job))
                 : null);
@@ -8331,13 +8353,17 @@ public partial class MainWindow
 
     private Func<JsonElement, string?>? CreateEnhancementRetryHealthValidator(
         EnhancementWorkspaceJobView job)
-        => CreateEnhancementRetryHealthValidator(
-            job.Operation,
-            job.VideoMutationSafe,
-            job.PresetId,
-            job.AdapterId,
-            job.I2iSchemaVersion,
-            job.I2iTarget);
+        => job.IsExactCurrentVideoTrimV1
+            ? payload => VideoTrimV1Contract.IsExactReadyHealth(payload)
+                ? null
+                : VideoTrimV1Text("UiVideoTrimV1WriterPending")
+            : CreateEnhancementRetryHealthValidator(
+                job.Operation,
+                job.VideoMutationSafe,
+                job.PresetId,
+                job.AdapterId,
+                job.I2iSchemaVersion,
+                job.I2iTarget);
 
     private Func<JsonElement, string?>? CreateEnhancementRetryHealthValidator(
         string operation,
@@ -9128,9 +9154,14 @@ public partial class MainWindow
     {
         managedVideo = null!;
         reason = "the video is missing, stale, malformed, or outside managed storage";
-        if (job.VideoToolsV2Snapshot is VideoToolsV2ReaderSnapshot v2)
+        if (job.VideoToolsV2Snapshot is not null
+            || job.VideoTrimV1Snapshot is not null)
         {
-            if (!job.CanUseVideoToolsV2Output
+            string expectedKind = job.VideoTrimV1Snapshot is not null
+                ? "trim"
+                : job.VideoToolsV2Snapshot!.Kind;
+            if (!(job.CanUseVideoToolsV2Output
+                    || job.CanUseVideoTrimV1Output)
                 || !TryResolveVideoToolsV2ManagedOutput(
                     job.OutputPath!,
                     out string canonicalV2Output))
@@ -9154,7 +9185,7 @@ public partial class MainWindow
             if (matches.Length != 1
                 || !string.Equals(
                     matches[0].VersionKind,
-                    v2.Kind,
+                    expectedKind,
                     StringComparison.Ordinal)
                 || !string.Equals(
                     matches[0].PresetId,
@@ -10652,7 +10683,9 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         bool videoToolsEnvelopeClaimed = false,
         string? videoToolsKind = null,
         string? videoToolsFinishMode = null,
-        VideoToolsV2ReaderSnapshot? videoToolsV2Snapshot = null)
+        VideoToolsV2ReaderSnapshot? videoToolsV2Snapshot = null,
+        bool videoTrimEnvelopeClaimed = false,
+        VideoTrimV1ReaderSnapshot? videoTrimV1Snapshot = null)
     {
         Id = id;
         SourceId = sourceId;
@@ -10675,6 +10708,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         VideoToolsKind = videoToolsKind;
         VideoToolsFinishMode = videoToolsFinishMode;
         VideoToolsV2Snapshot = videoToolsV2Snapshot;
+        VideoTrimEnvelopeClaimed = videoTrimEnvelopeClaimed;
+        VideoTrimV1Snapshot = videoTrimV1Snapshot;
         Status = status;
         CancelRequested = cancelRequested;
         Progress = progress;
@@ -10713,9 +10748,16 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public string? VideoToolsKind { get; }
     public string? VideoToolsFinishMode { get; }
     internal VideoToolsV2ReaderSnapshot? VideoToolsV2Snapshot { get; }
+    public bool VideoTrimEnvelopeClaimed { get; }
+    internal VideoTrimV1ReaderSnapshot? VideoTrimV1Snapshot { get; }
     public bool IsExactCurrentVideoToolsV2 => VideoToolsV2Snapshot is not null;
+    public bool IsExactCurrentVideoTrimV1 => VideoTrimV1Snapshot is not null;
     public bool IsVideoToolsReaderOnly =>
         VideoToolsEnvelopeClaimed && !IsExactCurrentVideoToolsV2;
+    public bool IsVideoTrimReaderOnly =>
+        VideoTrimEnvelopeClaimed && !IsExactCurrentVideoTrimV1;
+    public bool IsProtectedVideoReaderOnly =>
+        IsVideoToolsReaderOnly || IsVideoTrimReaderOnly;
     public string Status { get; private set; }
     public bool CancelRequested { get; private set; }
     public int Progress { get; private set; }
@@ -10738,7 +10780,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         Operation is "upscale" or "photoreal" or "i2i" or "video";
     public bool IsSupportedMutationOperation =>
         IsExactCurrentVideoToolsV2
-        || !IsVideoToolsReaderOnly
+        || IsExactCurrentVideoTrimV1
+        || !IsProtectedVideoReaderOnly
             && (Operation is "upscale" or "photoreal"
                 || (Operation == "i2i" && I2iMutationSafe)
                 || (IsVideoOperation && VideoMutationSafe));
@@ -10747,17 +10790,19 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     public bool CanCancel =>
         !_isBusy
         && !CancelRequested
-        && !IsVideoToolsReaderOnly
+        && !IsProtectedVideoReaderOnly
         && (Status is "queued" or "running"
             ? IsKnownOperation
             : !IsExactCurrentVideoToolsV2
+                && !IsExactCurrentVideoTrimV1
                 && Status == "failed"
                 && IsSupportedMutationOperation);
     public bool ShowCancelAction =>
-        !IsVideoToolsReaderOnly
+        !IsProtectedVideoReaderOnly
         && (Status is "queued" or "running"
             ? IsKnownOperation
             : !IsExactCurrentVideoToolsV2
+                && !IsExactCurrentVideoTrimV1
                 && Status == "failed"
                 && IsSupportedMutationOperation);
     public string CancelToolTip => CanCancel
@@ -10777,6 +10822,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? "同じ設定でAI動画編集をRetry"
         : VideoToolsV2Snapshot?.Kind == "finish"
             ? "同じモードで高画質化をRetry"
+        : VideoTrimV1Snapshot is not null
+            ? "同じ区間で動画トリムをRetry"
         : IsVideoOperation
             ? "動画をやり直す"
         : "元設定でRetry";
@@ -10784,6 +10831,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? "保存されたEdit snapshot・Seed・Job所有入力を変更せず再試行"
         : VideoToolsV2Snapshot?.Kind == "finish"
             ? "保存されたモード・倍率・Job所有入力を変更せず再試行"
+        : VideoTrimV1Snapshot is not null
+            ? "保存されたexact frame区間・音声policy・Job所有入力を変更せず再試行"
         : IsVideoOperation
             ? "失敗・キャンセルした動画を、保存された長さ・STEP数・Prompt・Seedで再生成"
         : "失敗・キャンセル時に保存された元の設定で再試行";
@@ -10865,12 +10914,24 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     }
     public bool CanUseOutput =>
         !_isBusy
-        && (IsSupportedMutationOperation || CanUseVideoToolsV2Output)
+        && (IsSupportedMutationOperation
+            || CanUseVideoToolsV2Output
+            || CanUseVideoTrimV1Output)
         && Status == "succeeded"
         && !string.IsNullOrWhiteSpace(OutputPath);
     public bool CanUseVideoToolsV2Output =>
         !_isBusy
         && VideoToolsV2Snapshot is not null
+        && Status == "succeeded"
+        && OutputPath is { Length: > 0 and <= 32768 } outputPath
+        && Path.IsPathFullyQualified(outputPath)
+        && string.Equals(
+            Path.GetExtension(outputPath),
+            ".mp4",
+            StringComparison.OrdinalIgnoreCase);
+    public bool CanUseVideoTrimV1Output =>
+        !_isBusy
+        && VideoTrimV1Snapshot is not null
         && Status == "succeeded"
         && OutputPath is { Length: > 0 and <= 32768 } outputPath
         && Path.IsPathFullyQualified(outputPath)
@@ -10952,8 +11013,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             nameof(RequestDetailsLoaded)));
     }
     public EnhancementJobActionPresentation Action1 =>
-        IsVideoToolsReaderOnly
-        ? CanUseVideoToolsV2Output
+        IsProtectedVideoReaderOnly
+        ? IsVideoToolsReaderOnly && CanUseVideoToolsV2Output
             ? JobAction(
                 "open-output",
                 "Open output",
@@ -11011,7 +11072,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => EnhancementJobActionPresentation.Hidden,
     };
     public EnhancementJobActionPresentation Action2 =>
-        IsVideoToolsReaderOnly
+        IsProtectedVideoReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : CanEditMiniMaxH3VideoPrompt
         ? JobAction(
@@ -11061,7 +11122,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             144),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action3 => IsVideoToolsReaderOnly
+    public EnhancementJobActionPresentation Action3 => IsProtectedVideoReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : CanRerunI2iV3
             ? JobAction(
@@ -11105,7 +11166,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         _ => EnhancementJobActionPresentation.Hidden,
     };
     public EnhancementJobActionPresentation Action4 =>
-        IsVideoToolsReaderOnly
+        IsProtectedVideoReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : I2iV3Snapshot is not null && Status == "succeeded"
         ? JobAction(
@@ -11133,7 +11194,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             144),
         _ => EnhancementJobActionPresentation.Hidden,
     };
-    public EnhancementJobActionPresentation Action5 => IsVideoToolsReaderOnly
+    public EnhancementJobActionPresentation Action5 => IsProtectedVideoReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : Status == "queued"
         ? JobAction(
@@ -11145,7 +11206,7 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             76)
         : EnhancementJobActionPresentation.Hidden;
     public EnhancementJobActionPresentation DangerAction =>
-        IsVideoToolsReaderOnly
+        IsProtectedVideoReaderOnly
         ? EnhancementJobActionPresentation.Hidden
         : Status switch
     {
@@ -11259,6 +11320,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             "AI動画編集を中止",
         "running" when VideoToolsV2Snapshot?.Kind == "finish" =>
             "AI動画高画質化を中止",
+        "running" when VideoTrimV1Snapshot is not null =>
+            "動画トリムを中止",
         "running" when Operation == "video" => "動画化を中止",
         "running" when !IsImageOperation => "未対応操作",
         "running" => "高画質化を中止",
@@ -11269,8 +11332,14 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? v2Source.SourceKind == "managed-video-job"
             ? "管理動画"
             : "外部動画（Job所有コピー）"
+        : VideoTrimV1Snapshot is { } trimSource
+            ? trimSource.SourceKind == "managed-video-job"
+                ? "管理動画"
+                : "外部動画（Job所有コピー）"
         : IsVideoToolsReaderOnly
         ? "管理動画"
+        : IsVideoTrimReaderOnly
+        ? "管理動画（保護中）"
         : (IsVideoOperation || Operation == "i2i")
         && !string.IsNullOrWhiteSpace(SourceProducerJobId)
             ? "実写版"
@@ -11305,12 +11374,16 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? $"Video Tools v2 · AI動画編集 · [{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive}) · 非破壊child clip"
         : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
             ? $"Video Tools v2 · AI動画高画質化 · {finishV2.FinishMode} · {finishV2.FinishScale}x"
+        : VideoTrimV1Snapshot is { } trimV1
+            ? $"Video Trim v1 · [{trimV1.SelectionStartFrame}, {trimV1.SelectionEndFrameExclusive}) · {trimV1.OutputFrameCount} frame · {trimV1.AudioPolicy}"
         : VideoToolsKind == "retake"
         ? "Video Tools · 区間を作り直す · Reader-only"
         : VideoToolsKind == "finish"
             ? $"Video Tools · 動画高画質化 2x · {(VideoToolsFinishMode == "detail" ? "Detail" : "Faithful")} · Reader-only"
         : VideoToolsEnvelopeClaimed
             ? "Video Tools · 互換性を確認できないため保護"
+        : VideoTrimEnvelopeClaimed
+            ? "Video Trim · 互換性を確認できないため保護"
         : IsVideoOperation
         ? $"{(PresetId switch
         {
@@ -11332,12 +11405,16 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
             return "VIDEO EDIT  AI動画編集";
         if (VideoToolsV2Snapshot?.Kind == "finish")
             return "VIDEO HQ  AI動画高画質化";
+        if (VideoTrimV1Snapshot is not null)
+            return "VIDEO TRIM  動画トリム";
         if (VideoToolsKind == "retake")
             return "RETAKE  区間を作り直す";
         if (VideoToolsKind == "finish")
             return "VIDEO HQ  動画高画質化";
         if (VideoToolsEnvelopeClaimed)
             return "VIDEO TOOLS  保護中";
+        if (VideoTrimEnvelopeClaimed)
+            return "VIDEO TRIM  保護中";
         return Operation switch
         {
             "upscale" => "HQ  高画質化",
@@ -11349,8 +11426,12 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
     }
     public string? VideoKindFilterKey => !IsVideoOperation
         ? null
-        : VideoToolsV2Snapshot?.Kind
-            ?? (VideoToolsEnvelopeClaimed ? null : "generation");
+        : VideoTrimV1Snapshot is not null
+            ? "trim"
+            : VideoToolsV2Snapshot?.Kind
+                ?? (VideoToolsEnvelopeClaimed || VideoTrimEnvelopeClaimed
+                    ? null
+                    : "generation");
     public string I2iTargetDisplayLabel => I2iTarget switch
     {
         "hair-color" => "髪色",
@@ -11395,12 +11476,16 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
         ? $"Video Tools v2 Edit Jobです。管理元は{SourceVersionLabel}、出力は[{editV2.SelectionStartFrame}, {editV2.SelectionEndFrameExclusive})だけの非破壊child clipです。状態に応じたJobs操作は認証済みCompanionが最終判定します。"
         : VideoToolsV2Snapshot is { Kind: "finish" } finishV2
             ? $"Video Tools v2 Finish Jobです。管理元は{SourceVersionLabel}、{finishV2.FinishScale}x出力でもfps・フレーム数・長さ・元音声を維持します。状態に応じたJobs操作は認証済みCompanionが最終判定します。"
+        : VideoTrimV1Snapshot is { } trimV1
+            ? $"Video Trim v1 Jobです。管理元は{SourceVersionLabel}、出力は[{trimV1.SelectionStartFrame}, {trimV1.SelectionEndFrameExclusive})の{trimV1.OutputFrameCount} frameです。映像と保持音声はexact区間へ再エンコードし、元動画は変更しません。"
         : VideoToolsKind == "retake"
         ? "Retake snapshotを読取専用で表示しています。選択区間と実際の差し替え窓、全尺・元音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
         : VideoToolsKind == "finish"
             ? "Video Finish 2x snapshotを読取専用で表示しています。fps・フレーム数・長さ・音声保持の情報は保存済みです。runtime検証前の変更操作は無効です。"
         : VideoToolsEnvelopeClaimed
             ? "This Video Tools row is malformed, future, or incomplete and remains protected from every mutation action."
+        : VideoTrimEnvelopeClaimed
+            ? "This Video Trim row is malformed, future, or incomplete and remains protected from every mutation and output action."
         : IsStructuredI2iEnvelope
         ? SafeI2iV2DetailText
         : !string.IsNullOrWhiteSpace(ErrorMessage)
@@ -11511,6 +11596,8 @@ public sealed class EnhancementWorkspaceJobView : INotifyPropertyChanged
                 candidate.VideoToolsFinishMode,
                 StringComparison.Ordinal)
             && Equals(VideoToolsV2Snapshot, candidate.VideoToolsV2Snapshot)
+            && VideoTrimEnvelopeClaimed == candidate.VideoTrimEnvelopeClaimed
+            && Equals(VideoTrimV1Snapshot, candidate.VideoTrimV1Snapshot)
             && Equals(_videoMutationProbe, candidate._videoMutationProbe)
             && CreatedAt == candidate.CreatedAt
             && SourceSize == candidate.SourceSize

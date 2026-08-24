@@ -276,7 +276,12 @@ public partial class MainWindow
                         job,
                         producers,
                         duplicateProducerIds,
-                        out VideoToolsV2InventoryProducer resolution))
+                        out VideoToolsV2InventoryProducer resolution)
+                    && !TryBuildVideoTrimV1ManagedVideoVersion(
+                        job,
+                        producers,
+                        duplicateProducerIds,
+                        out resolution))
                 {
                     next.Add(job);
                     continue;
@@ -329,7 +334,12 @@ public partial class MainWindow
             StringComparer.OrdinalIgnoreCase);
         foreach (JsonElement job in pendingJobs)
         {
-            if (!TryReadVideoToolsV2WorkspaceSnapshot(job, out _)
+            bool exactVideoToolsV2 =
+                TryReadVideoToolsV2WorkspaceSnapshot(job, out _);
+            bool exactVideoTrimV1 =
+                TryReadVideoTrimV1WorkspaceSnapshot(job, out _);
+            if (!exactVideoToolsV2
+                && !exactVideoTrimV1
                 || !HasSingleProperty(job, "id")
                 || !TryGetStringProperty(job, "id", out string? jobId)
                 || !IsSafeVideoToolsJobId(jobId!)
@@ -392,7 +402,7 @@ public partial class MainWindow
                 version = candidate;
                 return true;
             }
-            if (current.VersionKind is not ("edit" or "finish"))
+            if (current.VersionKind is not ("edit" or "trim" or "finish"))
                 return false;
             if (current.SourceProducerJobId is null)
             {
