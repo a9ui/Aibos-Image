@@ -55,7 +55,9 @@ function Get-SequentialPtsSha256 {
     try {
         $bytes = [byte[]]::new(8)
         for ($pts = 0L; $pts -lt $Count; $pts++) {
-            [Buffers.Binary.BinaryPrimitives]::WriteInt64BigEndian($bytes, $pts)
+            $bytes = [BitConverter]::GetBytes(
+                [Net.IPAddress]::HostToNetworkOrder($pts)
+            )
             $null = $sha256.TransformBlock($bytes, 0, 8, $null, 0)
         }
         $null = $sha256.TransformFinalBlock([byte[]]::new(0), 0, 0)
@@ -78,7 +80,9 @@ function Get-StridedPtsSha256 {
         $bytes = [byte[]]::new(8)
         for ($index = 0L; $index -lt $Count; $index++) {
             [int64]$pts = $Start + ($index * $Step)
-            [Buffers.Binary.BinaryPrimitives]::WriteInt64BigEndian($bytes, $pts)
+            $bytes = [BitConverter]::GetBytes(
+                [Net.IPAddress]::HostToNetworkOrder($pts)
+            )
             $null = $sha256.TransformBlock($bytes, 0, 8, $null, 0)
         }
         $null = $sha256.TransformFinalBlock([byte[]]::new(0), 0, 0)
