@@ -40,7 +40,7 @@ function Assert-ExactSet {
 }
 
 $v1Sha256 = Get-LowerSha256 $v1Path
-if ($v1Sha256 -cne '484b2ab0160bc420bc6e1f29b52e8780ec9260f48023bd7a9e33945bacb53207') {
+if ($v1Sha256 -cne 'bd39b41392791133bb0959d2a6d524af79f95b91fab2bd69dc1b94e342ba809c') {
     throw "Video Tools v1 changed; it must remain the exact reader-only legacy contract. sha256=$v1Sha256"
 }
 $v1 = Read-ExactJson $v1Path
@@ -240,8 +240,35 @@ if ($compiler.previewProbe.thumbnail.mime -cne 'image/png' -or
     throw 'The exact bounded PNG thumbnail payload or immutable source/runtime boundary changed.'
 }
 Assert-ExactSet @($compiler.candidate.exactFields) @(
-    'backendPrompt', 'summaryJa', 'compilerRevision', 'contextDigest'
+    'backendPrompt', 'summaryJa', 'compilerRevision', 'contextDigest', 'renderer'
 ) 'prompt compiler candidate fields'
+Assert-ExactSet @($compiler.candidate.rendererExactFields) @(
+    'taskType', 'guidanceMode', 'promptCompilerRevision',
+    'rendererPromptSha256'
+) 'prompt compiler renderer fields'
+Assert-ExactSet @($v2.request.edit.compiled.exactFields) @(
+    'backendPrompt', 'summaryJa', 'compilerRevision', 'contextDigest', 'renderer'
+) 'Edit compiled request fields'
+Assert-ExactSet @($v2.request.edit.compiled.renderer.exactFields) @(
+    'taskType', 'guidanceMode', 'promptCompilerRevision',
+    'rendererPromptSha256'
+) 'Edit compiled renderer fields'
+Assert-ExactSet @($v2.persistedSnapshot.exactKeys.edit.compiled) @(
+    'backendPrompt', 'summaryJa', 'compilerRevision', 'contextDigest', 'renderer'
+) 'persisted Edit compiled keys'
+Assert-ExactSet @($v2.persistedSnapshot.exactKeys.edit.renderer) @(
+    'taskType', 'guidanceMode', 'promptCompilerRevision',
+    'rendererPromptSha256'
+) 'persisted Edit renderer keys'
+if ($v2.request.edit.compiled.compilerRevision -cne
+        'exactly aibos-bernini-r-1p3b-source-video-prompt-v1' -or
+    $v2.request.edit.compiled.renderer.guidanceMode -cne 'v2v_apg' -or
+    $v2.request.edit.compiled.renderer.promptCompilerRevision -notmatch
+        'exactly equal to compiled.compilerRevision' -or
+    $v2.request.edit.compiled.contextDigest -notmatch 'renderer sidecar' -or
+    $compiler.candidate.contextDigestBinding -notmatch 'renderer sidecar') {
+    throw 'The exact Bernini renderer sidecar or digest binding changed.'
+}
 $expectedCompilerLabel = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('5oyH56S644KS5pW044GI44KL'))
 $expectedPreviewLabel = [Text.Encoding]::UTF8.GetString(

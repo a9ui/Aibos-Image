@@ -1937,18 +1937,27 @@ public partial class MainWindow
         => ApplyVideoEditV2CompiledCandidateForSmoke(
             backendPrompt,
             summaryJa,
-            "synthetic-compiler-v1",
+            VideoEditV2TransientContract.OfficialPromptCompilerRevision,
             contextDigest: null);
 
     public bool ApplyVideoEditV2CompiledCandidateForSmoke(
         string backendPrompt,
         string summaryJa,
         string compilerRevision,
-        string? contextDigest)
+        string? contextDigest,
+        string taskType = "v2v")
     {
         if (_videoEditV2Source is not VideoEditV2SourceChoice source
             || _videoEditV2Plan is not VideoEditV2SelectionPlan plan
             || _videoEditV2PreviewSet is not VideoEditV2PreviewSet previews)
+        {
+            return false;
+        }
+        if (!VideoEditV2TransientContract
+            .TryCreateOfficialRendererSidecarForSmoke(
+                backendPrompt,
+                taskType,
+                out VideoEditV2RendererSidecar renderer))
         {
             return false;
         }
@@ -1961,7 +1970,8 @@ public partial class MainWindow
                 instruction,
                 backendPrompt,
                 summaryJa,
-                compilerRevision);
+                compilerRevision,
+                renderer);
         if (contextDigest is not null
             && !string.Equals(
                 contextDigest,
@@ -1975,6 +1985,7 @@ public partial class MainWindow
                 backendPrompt,
                 summaryJa,
                 compilerRevision,
+                renderer,
                 expectedDigest,
                 source.SourceStamp,
                 BuildModalVideoEditV2ContextStamp()),

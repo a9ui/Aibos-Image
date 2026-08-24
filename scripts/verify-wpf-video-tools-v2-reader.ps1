@@ -41,7 +41,7 @@ foreach ($requiredPath in @(
 }
 
 $fixtureHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fixturePath).Hash.ToLowerInvariant()
-if ($fixtureHash -cne 'c5631834efcf408b81b321fd9f40a07afb5ec977a564c080a335fae0eb9eea2a') {
+if ($fixtureHash -cne 'a6e307d401d911e0e0bdc6e4296bc6f95d6a76b8b3a25be11dee2012e7a19e46') {
     throw "Unexpected Video Tools v2 fixture hash: $fixtureHash"
 }
 
@@ -84,6 +84,8 @@ if ($app -notmatch '--video-tools-v2-reader-smoke' `
     throw 'The focused Video Tools v2 reader smoke dispatch is missing.'
 }
 foreach ($token in @(
+    'editPresetHashExact',
+    'editRendererExact',
     'nestedExtraRejected',
     'duplicateRejected',
     'missingRejected',
