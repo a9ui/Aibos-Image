@@ -84,25 +84,28 @@ for exact reader compatibility and protected mutation behavior.
   and then publish. The compiler response alone never starts work. Before
   either path publishes, Start recaptures the same source and preview identities
   and requires the same current context digest; drift fails without publication.
-- STEP is an integer from 1 through 40. Strength is an integer from 10 through
-  100 and is mapped by the pinned server planner; a client cannot send seed,
-  sampler denoise, backend, model context, mask, actual affected range,
-  delivery, or source snapshot.
+- Edit requires an explicit `preserve` or `mute` audio policy and one of the
+  required maximum-pixel tiers. STEP is an integer from 1 through 40. Strength
+  is an integer from 10 through 100 and is mapped by the pinned server planner;
+  a client cannot send seed, sampler denoise, backend, model context, mask,
+  actual affected range, delivery, or source snapshot.
 - Initial Edit accepts exact 24/1-, 30/1-, or 60/1-fps source and a selected
   interval no longer than 5,000 milliseconds or 300 source frames. Planning
   persists exact selected frames and PTS, the resolved backend fps and frame
   map, internal frame count, alignment padding such as `4n+1`, delivery crop
   and source-fps reconstruction, strength mapping, seed, model canvas, selected
-  audio packet window, and workflow/model/runtime/timeline/delivery receipts.
+  audio-policy plan, and workflow/model/runtime/timeline/delivery receipts.
 - Backend 16-fps or alignment needs are server-owned and never appear in or
   rewrite the request. The UI shows the exact source selection and resulting
   child-clip duration; internal padding and crop are diagnostics.
 - Edit outputs one new non-destructive managed child clip for the selected
   interval. It includes no long-source prefix or suffix and performs no source
   splice or overwrite. The delivery reconstructs the selected frame count,
-  rational fps, relative PTS, and duration. Generated audio is discarded; only
-  the intersecting encoded source packet window is remuxed and rebased without
-  re-encoding or a sample-exact trim claim.
+  rational fps, relative PTS, and duration. Generated audio is discarded.
+  `preserve` remuxes only a non-empty intersecting encoded source packet range;
+  no intersecting packet produces no audio stream and no range identity.
+  `mute` produces no audio stream, synthesized silence, or fabricated zero-range
+  identity. Neither policy makes a sample-exact trim claim.
 - Finish is a separate Job and is never implicitly chained after Edit. Its
   public mode is `fast`, `standard`, or `quality`; scale is explicit 2x or 4x.
   Each mode independently advertises and persists its resolved backend,
@@ -227,9 +230,10 @@ receipt, plan, and delivery types; a private backend alone is not completion.
   reason, expose only ownership-safe retry/cancel/publish/delete actions, and
   open the managed child-clip or finished output without treating the external
   source as owned output.
-- Settings carry bounded defaults and saved styles per feature. Edit's
-  skip-review choice is transient UI policy and never becomes durable
-  generation semantics; compiled prompt provenance remains Job data.
+- Settings carry bounded defaults and saved styles per feature, including a
+  visible Edit audio-policy default. Edit's skip-review choice is transient UI
+  policy and never becomes durable generation semantics; compiled prompt
+  provenance remains Job data.
 - Gallery filtering, sorting, version selection, and source/output ownership
   distinguish an Edit child clip, a Finish output, a managed source, and an
   external displayed file without deleting or rewriting the source.
