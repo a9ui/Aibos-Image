@@ -520,10 +520,47 @@ startup rules are in `contracts/enhancement-companion-auth-v2.json`.
   closed when ownership is not exact. The version 2 wire, fixture, bounds,
   snapshot, delivery, lifecycle, and production gates are defined by
   `PV-ENHANCE-VIDEO-TOOLS-002`.
-- The exact frame-selection UI may later be reused by a separately versioned
-  non-AI trim/export operation. Non-AI trim is not an `edit` or `finish` kind in
-  Video Tools v2, and its writer, output ownership, frame delivery, and audio
-  boundary semantics are separate; Edit readiness authorizes none of them.
+- The exact frame-selection UI is also reused by separately versioned non-AI
+  trim/export version 1. Its wire is the top-level `videoTrim` claim with
+  `operation=video`, `mediaKind=video`, and its own `schemaVersion=1`. It is not
+  an `edit`, `finish`, or `trim` kind in Video Tools v2; that reader continues
+  to reject `kind=trim`. Prompt, compiler, style, STEP, seed, backend, model,
+  strength, denoise, and GPU fields are invalid in a Video Trim request.
+- Video Trim selects one half-open exact source-frame interval
+  `[startFrame,endFrameExclusive)` from either a proven managed producer or an
+  explicitly captured displayed file. The source is bounded to 512 MiB,
+  300 seconds, 1920 x 1080, 18,000 frames, and exact 24, 30, or 60 fps. The
+  selection may use the full bounded source and is not limited to 15 seconds.
+  Time labels and thumbnails are presentation only; persisted frame indices and
+  checked rational source fps are execution authority.
+- The result is one new non-destructive managed child MP4 containing exactly
+  the selected frame count at source rational fps, with zero-origin relative
+  PTS and a persisted full PTS digest. Version 1 deliberately re-encodes video
+  as H.264 `yuv420p` 8-bit SDR so non-keyframe boundaries remain exact; fast
+  keyframe-only stream-copy is not supported. It publishes no source prefix or
+  suffix, extra streams, inherited metadata, or source mutation.
+- `preserve` selects the same rational interval from source audio and
+  re-encodes it as AAC. It does not claim packet bit identity, sample-exact
+  boundaries, priming identity, or packet identity. A source without audio
+  yields no audio stream. `mute` always yields no audio and never synthesizes
+  silence. Audio shortness never truncates the exact selected video frames.
+- Video Trim uses a separate single-job CPU-video lane with sealed, bounded
+  FFmpeg/FFprobe argv, stderr, process timeout, cancellation, memory, scratch,
+  and output limits. It obtains no GPU lease and mounts no model. It reuses only
+  the durable inbox, idempotency, source staging/dependencies, Jobs queue,
+  attempt-journal framework, and managed output ownership; retry, cancel,
+  delete, recovery, publication, frame delivery, audio semantics, readiness,
+  and receipts remain its own exact meanings.
+- `capabilities.videoTrimV1` is passive and reader-ready, while the current
+  runtime, writer, ready advertisement, live receipts, and quality assertion
+  remain false. Passive viewing, health, Jobs, search, navigation, and hydration
+  never open, hash, probe, stage, enqueue, wake, claim, retry, recover, or start
+  a process. A future exact ready variant requires the paired public/private
+  activation revision plus sealed FFmpeg, FFprobe, runtime, quality, resource,
+  cancel, recovery, and output-validator receipts. Unknown, malformed, and
+  future claims preserve compatible fields and remain reader-only. The exact
+  wire, fixture, bounds, output, lifecycle, and gate are defined by
+  `PV-ENHANCE-VIDEO-TRIM-001`.
 - Readiness is obtained from the current authenticated health response. It is
   not inferred from a committed activation record, benchmark, previous
   process, or candidate revision.

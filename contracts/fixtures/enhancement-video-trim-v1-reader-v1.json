@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "PV-ENHANCE-VIDEO-TRIM-001-READER-FIXTURES",
+  "forContractId": "PV-ENHANCE-VIDEO-TRIM-001",
+  "compatibility": {
+    "contractSha256": "ed9f00f0a96e69e45fef1f3263b6f72773957ab03dd237992ea3ac39d2eeff25",
+    "consumers": [
+      "public-wpf",
+      "private-companion"
+    ],
+    "materialization": "synthetic TEMP only",
+    "rule": "Paired readers consume this exact indexed fixture against the exact contract SHA-256. It contains no private path, user media, live process, runtime receipt, or durable user state."
+  },
+  "currentHealth": {
+    "capabilities": {
+      "videoTrimV1": {
+        "contractId": "PV-ENHANCE-VIDEO-TRIM-001",
+        "protocol": "aibos-enhancement-video-trim-v1",
+        "readerReady": true,
+        "writerEnabled": false,
+        "runtimeVerified": false,
+        "ready": false,
+        "state": "disabled",
+        "reasonCode": "VIDEO_TRIM_V1_RUNTIME_UNPINNED"
+      }
+    },
+    "expectedPassiveMutationRequests": 0
+  },
+  "futureReadyShape": {
+    "evidence": "Synthetic shape vector only. Every named receipt is unresolved and the paired production gate remains false; this is never activation authority.",
+    "capability": {
+      "contractId": "PV-ENHANCE-VIDEO-TRIM-001",
+      "protocol": "aibos-enhancement-video-trim-v1",
+      "readerReady": true,
+      "writerEnabled": true,
+      "runtimeVerified": true,
+      "ready": true,
+      "state": "ready",
+      "reasonCode": null,
+      "capabilityRevision": "aibos-video-trim-ready-v1",
+      "resolvedRuntime": {
+        "runtimeRevision": "synthetic-unsealed-video-trim-runtime-v1",
+        "ffmpegRevision": "synthetic-unsealed-ffmpeg",
+        "ffprobeRevision": "synthetic-unsealed-ffprobe",
+        "planRevision": "aibos-video-trim-plan-v1",
+        "journalRevision": "aibos-video-trim-attempt-journal-v1",
+        "outputValidatorRevision": "aibos-video-trim-child-mp4-validator-v1"
+      },
+      "receipts": {
+        "ffmpegReceiptId": "synthetic-unresolved-ffmpeg",
+        "ffprobeReceiptId": "synthetic-unresolved-ffprobe",
+        "runtimeReceiptId": "synthetic-unresolved-runtime",
+        "qualityReceiptId": "synthetic-unresolved-quality",
+        "resourceReceiptId": "synthetic-unresolved-resource",
+        "cancelReceiptId": "synthetic-unresolved-cancel",
+        "recoveryReceiptId": "synthetic-unresolved-recovery",
+        "outputReceiptId": "synthetic-unresolved-output",
+        "receiptSetSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "resourceBounds": {
+        "maximumConcurrentJobs": 1,
+        "maximumGpuLeases": 0,
+        "maximumModelMounts": 0,
+        "maximumArgvEntries": 96,
+        "maximumArgvEntryBytes": 4096,
+        "maximumArgvBytes": 32768,
+        "maximumCapturedStderrBytes": 1048576,
+        "maximumHostRamBytes": 4294967296,
+        "maximumScratchBytes": 2147483648,
+        "maximumOutputBytes": 536870912,
+        "processTimeoutMs": 3600000,
+        "cancelGraceMs": 30000
+      },
+      "outputPolicy": {
+        "revision": "aibos-video-trim-child-mp4-validator-v1",
+        "container": "mp4",
+        "videoCodec": "h264",
+        "pixelFormat": "yuv420p",
+        "bitDepth": 8,
+        "dynamicRange": "SDR",
+        "videoStreamCount": 1,
+        "maximumAudioStreamCount": 1,
+        "extraStreamCount": 0,
+        "maximumBytes": 536870912,
+        "exactSelectedFrameCount": true,
+        "exactSourceRationalFps": true,
+        "zeroOriginPtsDigest": true,
+        "atomicNoReplacePublish": true,
+        "reopenPublishedBytes": true
+      }
+    },
+    "receiptResolutionSucceeded": false,
+    "pairedProductionGateEnabled": false,
+    "expectedReady": false,
+    "expectedEnqueue": false,
+    "expectedReasonCode": "VIDEO_TRIM_V1_RECEIPT_SET_UNVERIFIED"
+  },
+  "longSelectionVector": {
+    "sourceProbe": {
+      "container": "mp4",
+      "videoCodec": "h264",
+      "pixelFormat": "yuv420p",
+      "bitDepth": 8,
+      "dynamicRange": "SDR",
+      "width": 1920,
+      "height": 1080,
+      "fps": "60/1",
+      "frameCount": 18000,
+      "durationMs": 300000,
+      "videoStreamCount": 1,
+      "audioStreamCount": 1,
+      "extraStreamCount": 0,
+      "size": 536870912
+    },
+    "request": {
+      "operation": "video",
+      "mediaKind": "video",
+      "videoTrim": {
+        "schemaVersion": 1,
+        "source": {
+          "kind": "displayed-file",
+          "path": "${ROOT}/long-selection.mp4",
+          "size": 536870912,
+          "mtimeMs": 1787497200000,
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "selection": {
+          "startFrame": 600,
+          "endFrameExclusive": 18000
+        },
+        "audioPolicy": "preserve"
+      }
+    },
+    "expectedDelivery": {
+      "frameCount": 17400,
+      "fps": "60/1",
+      "selectedDurationMs": 290000,
+      "firstRelativePts": 0,
+      "lastRelativePts": 17399,
+      "ptsSha256": "2e7e64705e8ab5ff92718fa5721742d3108db5fa33a9b18f8e200b1d83bd7fca",
+      "videoCodec": "h264",
+      "pixelFormat": "yuv420p",
+      "audioCodec": "aac",
+      "packetBitIdentityClaimed": false,
+      "sampleExactClaimed": false,
+      "sourceMutation": false,
+      "outputKind": "new-managed-child"
+    },
+    "expectedMutationRequests": 0
+  },
+  "negativeVectors": {
+    "videoToolsV2KindTrim": {
+      "request": {
+        "operation": "video",
+        "mediaKind": "video",
+        "videoTools": {
+          "schemaVersion": 2,
+          "kind": "trim"
+        }
+      },
+      "expectedAccepted": false,
+      "expectedWriterAction": "reject"
+    },
+    "malformedSelection": {
+      "videoTrim": {
+        "schemaVersion": 1,
+        "source": {
+          "kind": "managed-video-job",
+          "sourceVideoJobId": "fixture-producer"
+        },
+        "selection": {
+          "startFrame": 900,
+          "endFrameExclusive": 900
+        },
+        "audioPolicy": "preserve"
+      },
+      "expectedWriterAction": "reject"
+    },
+    "futureSchema": {
+      "videoTrim": {
+        "schemaVersion": 2,
+        "futureField": {
+          "keep": true
+        }
+      },
+      "expectedMode": "reader-only",
+      "expectedMutationRequests": 0
+    },
+    "forbiddenAiFields": {
+      "videoTrim": {
+        "schemaVersion": 1,
+        "source": {
+          "kind": "managed-video-job",
+          "sourceVideoJobId": "fixture-producer"
+        },
+        "selection": {
+          "startFrame": 0,
+          "endFrameExclusive": 3600
+        },
+        "audioPolicy": "mute",
+        "prompt": "change the scene",
+        "steps": 20,
+        "seed": 1234,
+        "backendId": "fixture-ai",
+        "modelId": "fixture-model",
+        "gpuLease": true
+      },
+      "expectedWriterAction": "reject"
+    }
+  }
+}
