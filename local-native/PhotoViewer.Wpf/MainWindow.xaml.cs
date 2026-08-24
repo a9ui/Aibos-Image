@@ -264,7 +264,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _activeI2iSourceProducerJobIds =
         new(StringComparer.Ordinal);
     private readonly HashSet<string> _activeVideoSourceProducerJobIds =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _activeVideoManagedSourcePaths =
         new(StringComparer.OrdinalIgnoreCase);
     private bool _activeVideoDependencySnapshotComplete;
@@ -5288,7 +5288,7 @@ public partial class MainWindow : Window
         var activeI2iSourceProducerJobIds = new HashSet<string>(
             StringComparer.Ordinal);
         var activeVideoSourceProducerJobIds = new HashSet<string>(
-            StringComparer.Ordinal);
+            StringComparer.OrdinalIgnoreCase);
         var activeVideoManagedSourcePaths = new HashSet<string>(
             StringComparer.OrdinalIgnoreCase);
         bool activeVideoDependencySnapshotComplete = true;
@@ -5375,6 +5375,8 @@ public partial class MainWindow : Window
                     }
                     if (claimsVideo)
                     {
+                        bool claimsVideoTools =
+                            ClaimsVideoToolsWorkspaceSnapshot(job);
                         bool dependencyRowComplete = operation == "video"
                             && HasSingleProperty(job, "id")
                             && HasSingleProperty(job, "status")
@@ -5394,19 +5396,37 @@ public partial class MainWindow : Window
                                 activeVideoProducerJobId);
                         }
 
+                        if (!TryReadOptionalVideoToolsSourceJobId(
+                                job,
+                                out string? activeVideoToolsSourceJobId))
+                        {
+                            dependencyRowComplete = false;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(
+                                     activeVideoToolsSourceJobId))
+                        {
+                            activeVideoSourceProducerJobIds.Add(
+                                activeVideoToolsSourceJobId);
+                        }
+                        else if (claimsVideoTools)
+                        {
+                            dependencyRowComplete = false;
+                        }
+
                         string? activeVideoSourcePath = null;
-                        if (!HasSingleProperty(job, "sourcePath")
+                        if (!claimsVideoTools
+                            && (!HasSingleProperty(job, "sourcePath")
                             || !TryGetStringProperty(
                                 job,
                                 "sourcePath",
                                 out string? rawActiveVideoSourcePath)
                             || (activeVideoSourcePath =
                                 NormalizeEnhancementDependencyPath(
-                                    rawActiveVideoSourcePath)) is null)
+                                    rawActiveVideoSourcePath)) is null))
                         {
                             dependencyRowComplete = false;
                         }
-                        else
+                        else if (activeVideoSourcePath is not null)
                         {
                             activeVideoManagedSourcePaths.Add(
                                 activeVideoSourcePath);
@@ -20213,7 +20233,7 @@ public partial class MainWindow : Window
         else if (_modalShowingVideo)
         {
             enabled = hasModalTile
-                && TryGetDisplayedModalVideoVersion(modalTile, out _);
+                && TryGetDeletableCurrentModalVideoVersion(modalTile, out _);
             toolTip = $"Delete only the displayed video output; keep the original and other AI versions ({shortcut})";
             automationName = "Delete displayed managed video output";
             contextHeader = "Delete displayed video output";

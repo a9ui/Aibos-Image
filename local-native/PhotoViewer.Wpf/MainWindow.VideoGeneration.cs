@@ -2841,10 +2841,26 @@ public partial class MainWindow
     }
 
     private bool IsPendingVideoSourceDependencyProtected(
+        ManagedVideoVersion version)
+        => IsPendingVideoSourceDependencyProtected(
+            version.JobId,
+            version.Output.OutputPath,
+            StringComparison.OrdinalIgnoreCase);
+
+    private bool IsPendingVideoSourceDependencyProtected(
         ManagedEnhancementVersion version)
+        => IsPendingVideoSourceDependencyProtected(
+            version.JobId,
+            version.Output.OutputPath,
+            StringComparison.Ordinal);
+
+    private bool IsPendingVideoSourceDependencyProtected(
+        string producerJobId,
+        string outputPath,
+        StringComparison producerComparison)
     {
         string? normalizedOutputPath = NormalizeEnhancementDependencyPath(
-            version.Output.OutputPath);
+            outputPath);
         if (normalizedOutputPath is null)
             return true;
 
@@ -2854,8 +2870,8 @@ public partial class MainWindow
             if (!dependency.Complete
                 || string.Equals(
                     dependency.ProducerJobId,
-                    version.JobId,
-                    StringComparison.Ordinal)
+                    producerJobId,
+                    producerComparison)
                 || string.Equals(
                     dependency.ManagedSourcePath,
                     normalizedOutputPath,

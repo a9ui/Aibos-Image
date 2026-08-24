@@ -123,11 +123,26 @@ public partial class MainWindow
         string Kind,
         string? FinishMode);
 
+    private sealed record VideoToolsRetakeActionContext(
+        long Generation,
+        VideoToolsSourceChoice Source,
+        VideoSourceChoice DependencySource,
+        VideoRetakePlanSmokeSnapshot Plan,
+        string Prompt,
+        int Steps,
+        int MaximumPixelArea,
+        Tile? ModalTile,
+        string? ModalSourcePath,
+        VideoH3SourceStamp SourceStamp,
+        string SourceSha256);
+
     private VideoToolsKind _videoToolsKind = VideoToolsKind.Retake;
     private VideoFinishMode _videoFinishMode = VideoFinishMode.Faithful;
     private VideoToolsSourceChoice? _videoToolsSource;
     private VideoToolsCapabilityState? _videoToolsCapability;
     private long _videoToolsHealthGeneration;
+    private long _videoToolsActionGeneration;
+    private bool _videoToolsRequestPending;
     private bool _syncingVideoToolsControls;
     private VideoToolsSourceChoice? _videoToolsSourceForSmoke;
 
@@ -1354,6 +1369,29 @@ public partial class MainWindow
                 StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool TryReadOptionalVideoToolsSourceJobId(
+        JsonElement job,
+        out string? sourceVideoJobId)
+    {
+        sourceVideoJobId = null;
+        int count = 0;
+        foreach (JsonProperty property in job.EnumerateObject())
+        {
+            if (!property.NameEquals("sourceVideoJobId"))
+                continue;
+            count++;
+            if (count > 1
+                || property.Value.ValueKind != JsonValueKind.String
+                || property.Value.GetString() is not string value
+                || !IsSafeVideoToolsJobId(value))
+            {
+                return false;
+            }
+            sourceVideoJobId = value;
+        }
+        return true;
+    }
+
     public static JsonElement BuildVideoToolsRetakeRequestForSmoke(
         string sourceId,
         string sourceVideoJobId,
@@ -1615,6 +1653,7 @@ public partial class MainWindow
             return;
         }
 
+        _videoToolsActionGeneration++;
         _videoToolsKind = kind;
         _videoToolsSource = source;
         _videoToolsCapability = null;
@@ -1710,7 +1749,10 @@ public partial class MainWindow
     private void VideoToolsInput_Changed(object sender, RoutedEventArgs e)
     {
         if (!_syncingVideoToolsControls)
+        {
+            _videoToolsActionGeneration++;
             SyncVideoToolsControls();
+        }
     }
 
     private void VideoToolsFinishMode_SelectionChanged(
@@ -1723,6 +1765,7 @@ public partial class MainWindow
             as ComboBoxItem)?.Tag?.ToString();
         if (TryParseVideoFinishMode(mode, out VideoFinishMode parsed))
             _videoFinishMode = parsed;
+        _videoToolsActionGeneration++;
         SyncVideoToolsControls();
     }
 
@@ -1884,16 +1927,40 @@ public partial class MainWindow
             : feature.Value.Ready
                 ? VideoToolsText("UiVideoToolsRuntimeReady")
                 : DescribeVideoToolsReason(feature.Value.ReasonCode);
-        VideoToolsStatusText.Text = planReady
-            ? availability
-            : planText;
-
-        // Reader-first release: until the paired writer and runtime canaries
-        // are sealed, this client intentionally has no enqueue call site.
-        VideoToolsStartButton.IsEnabled = false;
+        bool retakeReady = _videoToolsKind == VideoToolsKind.Retake
+            && feature is { Ready: true };
+        bool canStart = retakeReady
+            && !_videoToolsRequestPending
+            && sourceCurrent
+            && planReady;
+        VideoToolsStatusText.Text = _videoToolsRequestPending
+            ? VideoToolsText("UiVideoToolsRetakePreparing")
+            : planReady
+                ? availability
+                : planText;
+        VideoToolsStartButton.IsEnabled = canStart;
+        VideoToolsStartButton.Content = _videoToolsKind == VideoToolsKind.Retake
+            ? _videoToolsRequestPending
+                ? VideoToolsText("UiVideoToolsRetakeStartPending")
+                : retakeReady
+                    ? VideoToolsText("UiVideoToolsRetakeStartReady")
+                    : VideoToolsText("UiVideoToolsStartButton")
+            : VideoToolsText("UiVideoToolsStartButton");
+        AutomationProperties.SetName(
+            VideoToolsStartButton,
+            VideoToolsStartButton.Content?.ToString() ?? "");
         AutomationProperties.SetHelpText(
             VideoToolsStartButton,
-            VideoToolsText("UiVideoToolsStartHelp"));
+            retakeReady
+                ? VideoToolsText("UiVideoToolsRetakeStartHelp")
+                : VideoToolsText("UiVideoToolsStartHelp"));
+        bool inputsEnabled = !_videoToolsRequestPending;
+        VideoToolsSelectionStartTextBox.IsEnabled = inputsEnabled;
+        VideoToolsSelectionEndTextBox.IsEnabled = inputsEnabled;
+        VideoToolsPromptTextBox.IsEnabled = inputsEnabled;
+        VideoToolsStepsTextBox.IsEnabled = inputsEnabled;
+        VideoToolsCanvasTierComboBox.IsEnabled = inputsEnabled;
+        VideoToolsFinishModeComboBox.IsEnabled = inputsEnabled;
     }
 
     private string BuildVideoRetakePreviewText(
@@ -1965,11 +2032,352 @@ public partial class MainWindow
             _ => VideoToolsText("UiVideoToolsRuntimeUnavailable"),
         };
 
-    private void StartVideoTools_Click(object sender, RoutedEventArgs e)
+    private string? ValidateExactVideoToolsRetakeHealth(JsonElement payload)
     {
+        if (!TryParseVideoToolsCapability(payload, out var capability))
+            return VideoToolsText("UiVideoToolsCapabilityUnavailable");
+        return capability.Retake.Ready
+            ? null
+            : DescribeVideoToolsReason(capability.Retake.ReasonCode);
+    }
+
+    private bool TryCaptureVideoToolsRetakeModalContext(
+        VideoToolsSourceChoice source,
+        out Tile? modalTile,
+        out string? modalSourcePath)
+    {
+        modalTile = null;
+        modalSourcePath = null;
+        if (_videoToolsSourceForSmoke is not null)
+            return true;
+        if (!TryGetModalSourceTile(out Tile tile)
+            || !TryGetDisplayedModalVideoVersion(
+                tile,
+                out ManagedVideoVersion video)
+            || !string.Equals(
+                video.JobId,
+                source.SourceVideoJobId,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                video.Output.OutputPath,
+                source.OutputPath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        modalTile = tile;
+        modalSourcePath = tile.Path;
+        return true;
+    }
+
+    private string? ValidateVideoToolsRetakeActionBeforePublish(
+        VideoToolsRetakeActionContext context)
+    {
+        string stale = VideoToolsText("UiVideoToolsRetakeStale");
+        if (!_videoToolsRequestPending
+            || context.Generation != _videoToolsActionGeneration
+            || _videoToolsKind != VideoToolsKind.Retake
+            || ModalVideoToolsPopup?.Visibility != Visibility.Visible
+            || _videoToolsSource is not VideoToolsSourceChoice captured
+            || !Equals(captured, context.Source)
+            || !TryRevalidateVideoToolsSource(
+                context.Source,
+                VideoToolsKind.Retake,
+                out VideoToolsSourceChoice current,
+                out _)
+            || !Equals(current, context.Source)
+            || !TryReadVideoToolsRetakeInputs(
+                current,
+                out VideoRetakePlanSmokeSnapshot plan,
+                out string prompt,
+                out int steps,
+                out int maximumPixelArea,
+                out _)
+            || !TryNormalizeAndValidateVideoToolsRetakePrompt(
+                prompt,
+                out string normalizedPrompt)
+            || !Equals(plan, context.Plan)
+            || !string.Equals(
+                normalizedPrompt,
+                context.Prompt,
+                StringComparison.Ordinal)
+            || steps != context.Steps
+            || maximumPixelArea != context.MaximumPixelArea
+            || !TryCaptureVideoSourceStamp(
+                context.DependencySource,
+                out VideoH3SourceStamp currentStamp)
+            || !VideoH3SourceStampsEqual(
+                currentStamp,
+                context.SourceStamp))
+        {
+            return stale;
+        }
+
+        if (context.ModalTile is Tile modalTile
+            && (!TryGetModalSourceTile(out Tile currentTile)
+                || !ReferenceEquals(currentTile, modalTile)
+                || !string.Equals(
+                    currentTile.Path,
+                    context.ModalSourcePath,
+                    StringComparison.OrdinalIgnoreCase)
+                || !TryGetDisplayedModalVideoVersion(
+                    currentTile,
+                    out ManagedVideoVersion video)
+                || !string.Equals(
+                    video.JobId,
+                    context.Source.SourceVideoJobId,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    video.Output.OutputPath,
+                    context.Source.OutputPath,
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            return stale;
+        }
+        return null;
+    }
+
+    private async Task<string?> ValidateVideoToolsRetakeActionBeforePublishAsync(
+        VideoToolsRetakeActionContext context,
+        CancellationToken token)
+    {
+        string? error = ValidateVideoToolsRetakeActionBeforePublish(context);
+        if (error is not null)
+            return error;
+        try
+        {
+            string sourceSha256 = await ComputeVideoH3SourceSha256Async(
+                context.Source.OutputPath,
+                token);
+            if (!string.Equals(
+                    sourceSha256,
+                    context.SourceSha256,
+                    StringComparison.OrdinalIgnoreCase)
+                || !TryCaptureVideoSourceStamp(
+                    context.DependencySource,
+                    out VideoH3SourceStamp finalStamp)
+                || !VideoH3SourceStampsEqual(
+                    finalStamp,
+                    context.SourceStamp))
+            {
+                return VideoToolsText("UiVideoToolsRetakeStale");
+            }
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException)
+        {
+            return VideoToolsText("UiVideoToolsRetakeStale");
+        }
+        return ValidateVideoToolsRetakeActionBeforePublish(context);
+    }
+
+    private async Task<bool> StartVideoToolsRetakeAsync()
+    {
+        if (_videoToolsRequestPending)
+            return false;
         SyncVideoToolsControls();
-        SetTransientStatusToast(
-            VideoToolsText("UiVideoToolsPreviewOnly"));
+        if (_videoToolsKind != VideoToolsKind.Retake
+            || VideoToolsStartButton?.IsEnabled != true
+            || _videoToolsCapability is not { Retake.Ready: true }
+            || _videoToolsSource is not VideoToolsSourceChoice captured)
+        {
+            if (ModalVideoToolsPopup?.Visibility == Visibility.Visible)
+            {
+                VideoToolsStatusText.Text = VideoToolsText(
+                    "UiVideoToolsRuntimeUnavailable");
+            }
+            return false;
+        }
+        if (!TryRevalidateVideoToolsSource(
+                captured,
+                VideoToolsKind.Retake,
+                out VideoToolsSourceChoice source,
+                out string sourceError))
+        {
+            VideoToolsStatusText.Text = string.IsNullOrWhiteSpace(sourceError)
+                ? VideoToolsText("UiVideoToolsRetakeStale")
+                : sourceError;
+            return false;
+        }
+        if (!TryReadVideoToolsRetakeInputs(
+                source,
+                out VideoRetakePlanSmokeSnapshot plan,
+                out string prompt,
+                out int steps,
+                out int maximumPixelArea,
+                out string inputError)
+            || !TryNormalizeAndValidateVideoToolsRetakePrompt(
+                prompt,
+                out string normalizedPrompt))
+        {
+            VideoToolsStatusText.Text = string.IsNullOrWhiteSpace(inputError)
+                ? VideoToolsText("UiVideoToolsRetakePromptError")
+                : inputError;
+            return false;
+        }
+        if (!TryCaptureVideoToolsRetakeModalContext(
+                source,
+                out Tile? modalTile,
+                out string? modalSourcePath))
+        {
+            VideoToolsStatusText.Text = VideoToolsText(
+                "UiVideoToolsRetakeStale");
+            return false;
+        }
+
+        var dependencySource = new VideoSourceChoice(
+            source.SourceId,
+            source.OutputPath,
+            source.SourceVideoJobId,
+            "Video Tools Retake",
+            UsesDisplayedFileDirectly: true);
+        if (!TryCaptureVideoSourceStamp(
+                dependencySource,
+                out VideoH3SourceStamp sourceStamp))
+        {
+            VideoToolsStatusText.Text = VideoToolsText(
+                "UiVideoToolsRetakeStale");
+            return false;
+        }
+
+        long generation = ++_videoToolsActionGeneration;
+        _videoToolsRequestPending = true;
+        string? pendingDeliveryRequestId = null;
+        string? actionStatus = null;
+        SyncVideoToolsControls();
+        try
+        {
+            string sourceSha256 = await ComputeVideoH3SourceSha256Async(
+                source.OutputPath,
+                CancellationToken.None);
+            if (!TryCaptureVideoSourceStamp(
+                    dependencySource,
+                    out VideoH3SourceStamp hashedStamp)
+                || !VideoH3SourceStampsEqual(sourceStamp, hashedStamp))
+            {
+                actionStatus = VideoToolsText("UiVideoToolsRetakeStale");
+                return false;
+            }
+
+            var context = new VideoToolsRetakeActionContext(
+                generation,
+                source,
+                dependencySource,
+                plan,
+                normalizedPrompt,
+                steps,
+                maximumPixelArea,
+                modalTile,
+                modalSourcePath,
+                hashedStamp,
+                sourceSha256);
+            string? validationError =
+                ValidateVideoToolsRetakeActionBeforePublish(context);
+            if (validationError is not null)
+            {
+                actionStatus = validationError;
+                return false;
+            }
+
+            JsonElement requestBody = BuildVideoToolsRetakeRequest(
+                source.SourceId,
+                source.SourceVideoJobId,
+                plan,
+                normalizedPrompt,
+                steps,
+                maximumPixelArea);
+            EnhancementApiResponse response = await SendEnhancementEnqueueAsync(
+                requestBody,
+                includeQueuePlacementInBody: false,
+                healthValidator: ValidateExactVideoToolsRetakeHealth,
+                requireExactHealthValidation: true,
+                recoverySourceIdentity: source.SourceId,
+                prePublishValidator: () =>
+                    ValidateVideoToolsRetakeActionBeforePublish(context),
+                asyncPrePublishValidator: token =>
+                    ValidateVideoToolsRetakeActionBeforePublishAsync(
+                        context,
+                        token),
+                onBeforeDurablePublish: item =>
+                {
+                    IDisposable publishLease =
+                        AcquireVideoDurablePublishLease(
+                            () => PinVideoSourceForDurablePublish(
+                                context.SourceStamp));
+                    try
+                    {
+                        pendingDeliveryRequestId = item.RequestId;
+                        RecordPendingVideoSourceDependency(
+                            item.RequestId,
+                            context.DependencySource);
+                        UpdateModalDisplayedDeletePresentation();
+                        return publishLease;
+                    }
+                    catch
+                    {
+                        publishLease.Dispose();
+                        throw;
+                    }
+                });
+
+            bool hasJob = response.Ok
+                && response.Payload is JsonElement payload
+                && payload.TryGetProperty("job", out JsonElement job)
+                && job.ValueKind == JsonValueKind.Object;
+            if (response.SavedForDelivery || hasJob)
+            {
+                RecordActiveVideoSourceDependency(dependencySource);
+                UpdateModalDisplayedDeletePresentation();
+                string message = response.SavedForDelivery
+                    ? VideoToolsText("UiVideoToolsRetakeSavedForDelivery")
+                    : VideoToolsText("UiVideoToolsRetakeQueued");
+                SetTransientStatusToast(message);
+                if (generation == _videoToolsActionGeneration
+                    && ModalVideoToolsPopup?.Visibility == Visibility.Visible)
+                {
+                    VideoToolsStatusText.Text = message;
+                    CloseVideoToolsBoard(restoreFocus: true);
+                }
+                QueueEnhancedStateRefreshIfChanged();
+                return true;
+            }
+
+            actionStatus = string.IsNullOrWhiteSpace(response.Error)
+                ? VideoToolsText("UiVideoToolsRuntimeUnavailable")
+                : response.Error;
+            return false;
+        }
+        catch (Exception ex) when (
+            ex is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException)
+        {
+            actionStatus = VideoToolsText("UiVideoToolsRetakeStale");
+            return false;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(pendingDeliveryRequestId))
+                _pendingVideoSourceDependencies.Remove(pendingDeliveryRequestId);
+            _videoToolsRequestPending = false;
+            UpdateModalDisplayedDeletePresentation();
+            SyncVideoToolsControls();
+            if (actionStatus is not null
+                && ModalVideoToolsPopup?.Visibility == Visibility.Visible)
+            {
+                VideoToolsStatusText.Text = actionStatus;
+            }
+        }
+    }
+
+    private async void StartVideoTools_Click(object sender, RoutedEventArgs e)
+    {
+        if (_videoToolsKind == VideoToolsKind.Retake)
+            _ = await StartVideoToolsRetakeAsync();
     }
 
     private void CloseVideoTools_Click(object sender, RoutedEventArgs e)
@@ -1986,6 +2394,7 @@ public partial class MainWindow
     private void CloseVideoToolsBoard(bool restoreFocus)
     {
         _videoToolsHealthGeneration++;
+        _videoToolsActionGeneration++;
         _videoToolsSource = null;
         _videoToolsCapability = null;
         if (ModalVideoToolsPopup is not null)
@@ -2009,6 +2418,17 @@ public partial class MainWindow
 
     public bool VideoToolsStartEnabledForSmoke
         => VideoToolsStartButton?.IsEnabled == true;
+
+    public bool VideoToolsRequestPendingForSmoke
+        => _videoToolsRequestPending;
+
+    public string VideoToolsStartContentForSmoke
+        => VideoToolsStartButton?.Content?.ToString() ?? "";
+
+    public string VideoToolsStartHelpForSmoke
+        => VideoToolsStartButton is null
+            ? ""
+            : AutomationProperties.GetHelpText(VideoToolsStartButton);
 
     public string VideoToolsPlanForSmoke
         => _videoToolsKind == VideoToolsKind.Retake
@@ -2039,12 +2459,25 @@ public partial class MainWindow
         int width,
         int height,
         bool audio,
-        string prompt)
+        string prompt,
+        string? outputPath = null)
     {
+        string resolvedOutputPath = string.IsNullOrWhiteSpace(outputPath)
+            ? @"C:\synthetic\managed-video.mp4"
+            : Path.GetFullPath(outputPath);
+        long outputSize = 1_024;
+        double outputMtimeMs = 1_000;
+        if (File.Exists(resolvedOutputPath))
+        {
+            var info = new FileInfo(resolvedOutputPath);
+            outputSize = info.Length;
+            outputMtimeMs = new DateTimeOffset(info.LastWriteTimeUtc)
+                .ToUnixTimeMilliseconds();
+        }
         _videoToolsSourceForSmoke = new VideoToolsSourceChoice(
             "synthetic-source",
             sourceVideoJobId,
-            @"C:\synthetic\managed-video.mp4",
+            resolvedOutputPath,
             isExactMiniMaxH3,
             durationSeconds,
             playbackFps,
@@ -2055,9 +2488,41 @@ public partial class MainWindow
             prompt,
             Steps: VideoToolsDefaultSteps,
             MaximumPixelArea: VideoToolsDefaultMaximumPixelArea,
-            OutputSize: 1_024,
-            OutputMtimeMs: 1_000);
+            OutputSize: outputSize,
+            OutputMtimeMs: outputMtimeMs);
         SyncModalVideoToolsEntryPresentation();
+    }
+
+    public void SetVideoToolsRetakeSelectionForSmoke(
+        string startSeconds,
+        string endSeconds)
+    {
+        VideoToolsSelectionStartTextBox.Text = startSeconds;
+        VideoToolsSelectionEndTextBox.Text = endSeconds;
+    }
+
+    public bool VideoToolsSourceDependencyProtectedForSmoke(
+        string sourceVideoJobId,
+        string outputPath)
+    {
+        string? normalized = NormalizeEnhancementDependencyPath(outputPath);
+        if (_activeVideoSourceProducerJobIds.Contains(sourceVideoJobId)
+            || normalized is not null
+                && _activeVideoManagedSourcePaths.Contains(normalized))
+        {
+            return true;
+        }
+        return _pendingVideoSourceDependencies.Values.Any(dependency =>
+            !dependency.Complete
+            || string.Equals(
+                dependency.ProducerJobId,
+                sourceVideoJobId,
+                StringComparison.OrdinalIgnoreCase)
+            || normalized is not null
+                && string.Equals(
+                    dependency.ManagedSourcePath,
+                    normalized,
+                    StringComparison.OrdinalIgnoreCase));
     }
 
     public bool OpenVideoToolsBoardForSmoke(string kind)
@@ -2073,4 +2538,10 @@ public partial class MainWindow
 
     public async Task RefreshVideoToolsCapabilityForSmokeAsync()
         => await RefreshVideoToolsCapabilityAsync();
+
+    public async Task<bool> StartVideoToolsRetakeForSmokeAsync()
+        => await StartVideoToolsRetakeAsync();
+
+    public void CloseVideoToolsBoardForSmoke()
+        => CloseVideoToolsBoard(restoreFocus: false);
 }

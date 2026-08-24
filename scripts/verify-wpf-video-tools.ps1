@@ -10,6 +10,9 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\PhotoViewer.Wpf.csproj'
 $xamlPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.xaml'
 $implementationPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoTools.cs'
+$videoGenerationPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.VideoGeneration.cs'
+$videoPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.Video.cs'
+$mainWindowPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.xaml.cs'
 $jobsPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\MainWindow.EnhancementJobs.cs'
 $smokePath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\App.VideoToolsSmoke.cs'
 $appPath = Join-Path $repoRoot 'local-native\PhotoViewer.Wpf\App.xaml.cs'
@@ -85,7 +88,14 @@ try {
         'UiVideoToolsRetakePlanAutomation',
         'UiVideoToolsFinishDescription',
         'UiVideoToolsFinishPlanAutomation',
-        'UiVideoToolsStartButton'
+        'UiVideoToolsStartButton',
+        'UiVideoToolsRetakeStartReady',
+        'UiVideoToolsRetakeStartPending',
+        'UiVideoToolsRetakeStartHelp',
+        'UiVideoToolsRetakePreparing',
+        'UiVideoToolsRetakeSavedForDelivery',
+        'UiVideoToolsRetakeQueued',
+        'UiVideoToolsRetakeStale'
     )
     foreach ($resourcePath in @($jaResourcePath, $enResourcePath)) {
         [xml]$resource = Get-Content -Raw -Encoding UTF8 -LiteralPath $resourcePath
@@ -106,11 +116,28 @@ try {
         -or $implementation -notmatch 'TryGetDisplayedModalVideoVersion' `
         -or $implementation -notmatch 'TryNormalizeAndValidateVideoH3Prompt' `
         -or $implementation -notmatch 'SendPassiveEnhancementReadAsync\("api/enhance/health"\)' `
-        -or $implementation -match 'SendEnhancementEnqueueAsync' `
+        -or $implementation -notmatch 'StartVideoToolsRetakeAsync' `
+        -or $implementation -notmatch 'ValidateExactVideoToolsRetakeHealth' `
+        -or $implementation -notmatch 'SendEnhancementEnqueueAsync' `
+        -or $implementation -notmatch 'includeQueuePlacementInBody:\s*false' `
+        -or $implementation -notmatch 'requireExactHealthValidation:\s*true' `
+        -or $implementation -notmatch 'ValidateVideoToolsRetakeActionBeforePublish' `
+        -or $implementation -notmatch 'ValidateVideoToolsRetakeActionBeforePublishAsync' `
+        -or $implementation -notmatch 'AcquireVideoDurablePublishLease' `
+        -or $implementation -notmatch 'PinVideoSourceForDurablePublish' `
+        -or $implementation -notmatch 'RecordPendingVideoSourceDependency' `
         -or $implementation -match 'EnsureEnhancementCompanionReadyForExplicitActionAsync' `
         -or $implementation -match '\["sourcePath"\]' `
         -or $implementation -match 'sourceManagedOutputPath') {
-        throw 'Video Tools crossed its passive reader-first or Job-ID-only source boundary.'
+        throw 'Video Tools Retake durable publication or its passive/Job-ID-only boundary is incomplete.'
+    }
+    $videoGenerationSource = Get-Content -Raw -Encoding UTF8 -LiteralPath $videoGenerationPath
+    $videoSource = Get-Content -Raw -Encoding UTF8 -LiteralPath $videoPath
+    $mainWindowSource = Get-Content -Raw -Encoding UTF8 -LiteralPath $mainWindowPath
+    if ($videoGenerationSource -notmatch 'IsPendingVideoSourceDependencyProtected[\s\S]{0,300}ManagedVideoVersion' `
+        -or $videoSource -notmatch 'IsManagedVideoOutputDependencyProtected' `
+        -or $mainWindowSource -notmatch 'TryReadOptionalVideoToolsSourceJobId') {
+        throw 'The Retake sourceVideoJobId overlay and managed-video DELETE guard are incomplete.'
     }
     $jobsSource = Get-Content -Raw -Encoding UTF8 -LiteralPath $jobsPath
     $smokeSource = Get-Content -Raw -Encoding UTF8 -LiteralPath $smokePath
@@ -121,7 +148,13 @@ try {
         -or $smokeSource -notmatch 'readerSnapshots' `
         -or $smokeSource -notmatch 'malformedReaderProtected' `
         -or $smokeSource -notmatch 'futureReaderProtected' `
-        -or $smokeSource -notmatch 'operationMismatchProtected') {
+        -or $smokeSource -notmatch 'operationMismatchProtected' `
+        -or $smokeSource -notmatch 'retakeReadyGate' `
+        -or $smokeSource -notmatch 'freshRetakeCapabilityRequired' `
+        -or $smokeSource -notmatch 'retakeDurableRequestExact' `
+        -or $smokeSource -notmatch 'retakeStaleContextNoPublish' `
+        -or $smokeSource -notmatch 'retakeDoubleStartSinglePublish' `
+        -or $smokeSource -notmatch 'retakeSourceReservationProtected') {
         throw 'The Video Tools Jobs reader or fail-closed mutation protection is incomplete.'
     }
     $appSource = Get-Content -Raw -Encoding UTF8 -LiteralPath $appPath
@@ -269,9 +302,17 @@ try {
         -or -not $result.videoProducerDependencyGated `
         -or -not $result.localeFocused `
         -or -not $result.passiveOpen `
+        -or -not $result.retakeReadyGate `
+        -or -not $result.freshRetakeCapabilityRequired `
+        -or -not $result.retakeDurableRequestExact `
+        -or -not $result.retakeStaleContextNoPublish `
+        -or -not $result.retakeDoubleStartSinglePublish `
+        -or -not $result.retakeSourceReservationProtected `
+        -or -not $result.finishRemainsDisabled `
         -or $result.healthGets -lt 2 `
-        -or $result.mutationRequests -ne 0 `
-        -or $result.enqueueCallSites -ne 0) {
+        -or $result.passiveOpenMutationRequests -ne 0 `
+        -or $result.explicitRetakeNudges -ne 1 `
+        -or $result.finishMutationRequests -ne 0) {
         throw ('Video Tools smoke failed: ' + ($result | ConvertTo-Json -Compress -Depth 6))
     }
 

@@ -185,11 +185,11 @@
   <sys:String x:Key="UiVideoToolsTitle">Video Tools</sys:String>
   <sys:String x:Key="UiVideoToolsRetakeAction">区間を作り直す</sys:String>
   <sys:String x:Key="UiVideoToolsRetakeAutomation">表示中の動画の区間を作り直す</sys:String>
-  <sys:String x:Key="UiVideoToolsRetakeHelp">正確なMiniMax H3動画の選択区間を、先頭・末尾anchorつきで作り直すPreviewを開きます。開くだけではJobを追加しません。</sys:String>
+  <sys:String x:Key="UiVideoToolsRetakeHelp">正確なMiniMax H3動画の選択区間を、先頭・末尾anchorつきで作り直す設定を開きます。開くだけではJobを追加しません。</sys:String>
   <sys:String x:Key="UiVideoToolsFinishAction">動画を高画質化</sys:String>
   <sys:String x:Key="UiVideoToolsFinishAutomation">表示中の動画を2倍高画質化</sys:String>
   <sys:String x:Key="UiVideoToolsFinishHelp">フレーム数、fps、長さ、音声を保つ2倍の動画高画質化Previewを開きます。フレーム補間は行いません。</sys:String>
-  <sys:String x:Key="UiVideoToolsBoardAutomation">表示中の管理動画用Video Tools Preview</sys:String>
+  <sys:String x:Key="UiVideoToolsBoardAutomation">表示中の管理動画用Video Tools</sys:String>
   <sys:String x:Key="UiVideoToolsClose">Video Toolsを閉じる</sys:String>
   <sys:String x:Key="UiVideoToolsSourceAutomation">Video Toolsで照合済みの入力動画</sys:String>
   <sys:String x:Key="UiVideoToolsRetakeDescription">直したい時間を選びます。最小のH3対応フレーム窓を再生成してその区間だけ差し替えます。再生成側の音声は使わず、完成動画の全フレーム・長さ・元動画音声を保ちます。</sys:String>
@@ -213,6 +213,13 @@
   <sys:String x:Key="UiVideoToolsStartButton">Start · runtime検証待ち</sys:String>
   <sys:String x:Key="UiVideoToolsStartAutomationButton">Video Tools Jobを開始</sys:String>
   <sys:String x:Key="UiVideoToolsStartHelp">paired Video Tools writerが有効になるまで、この計画は読取専用です。</sys:String>
+  <sys:String x:Key="UiVideoToolsRetakeStartReady">区間を作り直す</sys:String>
+  <sys:String x:Key="UiVideoToolsRetakeStartPending">準備中...</sys:String>
+  <sys:String x:Key="UiVideoToolsRetakeStartHelp">表示中の動画と設定をもう一度照合し、元動画を保護してから区間作り直しJobを保存します。</sys:String>
+  <sys:String x:Key="UiVideoToolsRetakePreparing">動画と実行準備を再確認しています。Jobはまだ追加していません。</sys:String>
+  <sys:String x:Key="UiVideoToolsRetakeSavedForDelivery">区間作り直しの予約を保存しました。Jobsへの登録を継続しています。</sys:String>
+  <sys:String x:Key="UiVideoToolsRetakeQueued">区間作り直しJobを共有GPUキューへ追加しました。</sys:String>
+  <sys:String x:Key="UiVideoToolsRetakeStale">表示中の動画または設定が準備中に変わりました。Jobは追加していません。</sys:String>
   <sys:String x:Key="UiVideoToolsCanvasLight">軽量 · 230,400px</sys:String>
   <sys:String x:Key="UiVideoToolsCanvasStandard">標準 · 307,200px</sys:String>
   <sys:String x:Key="UiVideoToolsCanvasHigh">高画質 · 414,720px</sys:String>
@@ -227,7 +234,7 @@
   <sys:String x:Key="UiVideoToolsCanvasError">動画サイズを選び直してください。</sys:String>
   <sys:String x:Key="UiVideoToolsFinishLimitError">2x出力がVideo Tools v1の8,294,400px上限を超えます。</sys:String>
   <sys:String x:Key="UiVideoToolsCapabilityUnavailable">ローカルAIサービスの正確なVideo Tools契約を確認できません。</sys:String>
-  <sys:String x:Key="UiVideoToolsRuntimeReady">実行runtimeは準備済みです。paired rolloutでStartが有効になります。</sys:String>
+  <sys:String x:Key="UiVideoToolsRuntimeReady">実行runtimeは準備済みです。計画を確認して開始できます。</sys:String>
   <sys:String x:Key="UiVideoToolsAudioOriginal">元音声</sys:String>
   <sys:String x:Key="UiVideoToolsAudioNone">音声なし</sys:String>
   <sys:String x:Key="UiVideoToolsRetakePreviewFormat">選択 {0}〜{1}秒（{2}〜{3}f） / 再生成・差し替え {4}〜{5}秒（{6}f、先頭/末尾anchor {7}/{8}）。完成動画は全{9}f・{10}秒・{11}を保持します。</sys:String>

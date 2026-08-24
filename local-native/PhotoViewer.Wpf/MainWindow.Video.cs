@@ -1230,6 +1230,38 @@ public partial class MainWindow
             out version);
     }
 
+    private bool TryGetDeletableCurrentModalVideoVersion(
+        Tile tile,
+        out ManagedVideoVersion version)
+    {
+        version = null!;
+        if (!TryGetDisplayedModalVideoVersion(
+                tile,
+                out ManagedVideoVersion exact)
+            || IsManagedVideoOutputDependencyProtected(exact))
+        {
+            return false;
+        }
+        version = exact;
+        return true;
+    }
+
+    private bool IsManagedVideoOutputDependencyProtected(
+        ManagedVideoVersion version)
+    {
+        if (!_enhancementReadOk
+            || !_activeVideoDependencySnapshotComplete
+            || _activeVideoSourceProducerJobIds.Contains(version.JobId)
+            || IsPendingVideoSourceDependencyProtected(version))
+        {
+            return true;
+        }
+        string? normalizedOutputPath = NormalizeEnhancementDependencyPath(
+            version.Output.OutputPath);
+        return normalizedOutputPath is null
+            || _activeVideoManagedSourcePaths.Contains(normalizedOutputPath);
+    }
+
     private bool TryValidateManagedVideoVersion(
         Tile tile,
         ManagedVideoVersion candidate,
@@ -1359,7 +1391,7 @@ public partial class MainWindow
 
     public bool DisplayedManagedVideoDeleteVerifiedForSmoke
         => TryGetModalSourceTile(out Tile tile)
-            && TryGetDisplayedModalVideoVersion(tile, out _);
+            && TryGetDeletableCurrentModalVideoVersion(tile, out _);
 
     public bool DisplayedManagedVideoDuplicateJobRejectedForSmoke()
     {
@@ -1409,7 +1441,7 @@ public partial class MainWindow
     {
         if (_modalEnhancementRequestPending
             || !TryGetModalSourceTile(out Tile tile)
-            || !TryGetDisplayedModalVideoVersion(
+            || !TryGetDeletableCurrentModalVideoVersion(
                 tile,
                 out ManagedVideoVersion version))
         {
@@ -1432,7 +1464,7 @@ public partial class MainWindow
             return false;
 
         if (!IsCurrentModalEnhancementContext(tile, sourcePath, requestGeneration)
-            || !TryGetDisplayedModalVideoVersion(
+            || !TryGetDeletableCurrentModalVideoVersion(
                 tile,
                 out ManagedVideoVersion revalidated)
             || !Equals(revalidated, version))

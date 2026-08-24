@@ -112,6 +112,16 @@ public partial class App
                 && !parsedCapability.FinishReady
                 && parsedCapability.FinishReasonCode
                     == "FINISH_RUNTIME_UNPINNED";
+            using JsonDocument readyCapability = JsonDocument.Parse(
+                CreateReadyVideoToolsHealthJson());
+            bool retakeReadyCapabilityExact = PhotoViewer.Wpf.MainWindow
+                .TryParseVideoToolsCapabilityForSmoke(
+                    readyCapability.RootElement,
+                    out var parsedReadyCapability)
+                && parsedReadyCapability.RetakeReady
+                && parsedReadyCapability.RetakeState == "ready"
+                && parsedReadyCapability.RetakeReasonCode is null
+                && !parsedReadyCapability.FinishReady;
             using JsonDocument extraCapability = JsonDocument.Parse(
                 CreateVideoToolsHealthJson().Replace(
                     "\"readerReady\": true",
@@ -612,12 +622,208 @@ public partial class App
                 && mutationRequests == 0;
             window.Close();
 
+            string fixtureRoot = Path.Combine(
+                Path.GetDirectoryName(resultFullPath)!,
+                "retake-fixtures");
+            Directory.CreateDirectory(fixtureRoot);
+            string managedVideoPath = Path.Combine(
+                fixtureRoot,
+                "managed-video.mp4");
+            File.WriteAllBytes(
+                managedVideoPath,
+                Enumerable.Range(0, 4096)
+                    .Select(static value => (byte)(value % 251))
+                    .ToArray());
+            const string sourceVideoJobId =
+                "11111111-1111-4111-8111-111111111111";
+
+            int durableHealthGets = 0;
+            int explicitRetakePosts = 0;
+            var postObserved = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePost = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            PhotoViewer.Wpf.MainWindow durableWindow = HiddenWindow();
+            _ = durableWindow.SetUiLanguageForSmoke(
+                UiLanguageResources.Japanese);
+            durableWindow.ConfigureModalEnhancementForSmoke(async (request, token) =>
+            {
+                if (request.Method == HttpMethod.Get
+                    && request.RequestUri?.AbsolutePath
+                        == "/api/enhance/health")
+                {
+                    durableHealthGets++;
+                    return VideoToolsJsonResponse(
+                        CreateReadyVideoToolsHealthJson());
+                }
+                explicitRetakePosts++;
+                postObserved.TrySetResult(true);
+                await releasePost.Task.WaitAsync(token);
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            });
+            durableWindow.ConfigureVideoToolsSourceForSmoke(
+                sourceVideoJobId,
+                isExactMiniMaxH3: true,
+                124d / 24d,
+                24,
+                124,
+                864,
+                480,
+                audio: true,
+                prompt,
+                managedVideoPath);
+            durableWindow.Show();
+            bool durableRetakeOpened = durableWindow.OpenVideoToolsBoardForSmoke(
+                "retake");
+            await durableWindow.RefreshVideoToolsCapabilityForSmokeAsync();
+            bool retakeReadyGate = retakeReadyCapabilityExact
+                && durableRetakeOpened
+                && durableWindow.VideoToolsStartEnabledForSmoke
+                && durableWindow.VideoToolsStartContentForSmoke
+                    == "区間を作り直す"
+                && durableWindow.VideoToolsStartHelpForSmoke.Contains(
+                    "元動画を保護",
+                    StringComparison.Ordinal);
+            Task<bool> firstRetake =
+                durableWindow.StartVideoToolsRetakeForSmokeAsync();
+            await postObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            bool retakeSourceReservationProtected =
+                durableWindow.VideoToolsRequestPendingForSmoke
+                && durableWindow.VideoToolsSourceDependencyProtectedForSmoke(
+                    sourceVideoJobId,
+                    managedVideoPath);
+            bool secondRetake = await durableWindow
+                .StartVideoToolsRetakeForSmokeAsync();
+            bool retakeDoubleStartSinglePublish = !secondRetake
+                && explicitRetakePosts == 1;
+
+            string pendingDirectory = EnhancementEnqueueInboxStore
+                .GetPendingDirectory(durableWindow.EnhancementJobsPathForSmoke);
+            string[] pendingFiles = Directory.Exists(pendingDirectory)
+                ? Directory.GetFiles(pendingDirectory, "*.json")
+                : [];
+            bool retakeDurableRequestExact = false;
+            if (pendingFiles.Length == 1)
+            {
+                using JsonDocument envelope = JsonDocument.Parse(
+                    File.ReadAllBytes(pendingFiles[0]));
+                JsonElement item = envelope.RootElement
+                    .GetProperty("items")[0];
+                using JsonDocument durableBody = JsonDocument.Parse(
+                    item.GetProperty("bodyJson").GetString() ?? "");
+                JsonElement body = durableBody.RootElement;
+                JsonElement videoTools = body.GetProperty("videoTools");
+                retakeDurableRequestExact = HasExactVideoToolsSmokeKeys(
+                        body,
+                        "sourceId",
+                        "sourceVideoJobId",
+                        "operation",
+                        "mediaKind",
+                        "videoTools")
+                    && HasExactVideoToolsSmokeKeys(
+                        videoTools,
+                        "schemaVersion",
+                        "kind",
+                        "selection",
+                        "prompt",
+                        "steps",
+                        "maximumPixelArea")
+                    && body.GetProperty("sourceVideoJobId").GetString()
+                        == sourceVideoJobId
+                    && body.GetProperty("operation").GetString() == "video"
+                    && body.GetProperty("mediaKind").GetString() == "video"
+                    && videoTools.GetProperty("kind").GetString() == "retake"
+                    && !body.TryGetProperty("queuePlacement", out _)
+                    && !body.TryGetProperty("sourcePath", out _)
+                    && !body.TryGetProperty("sourceManagedOutputPath", out _)
+                    && !videoTools.TryGetProperty("actualWindow", out _);
+            }
+            releasePost.TrySetResult(true);
+            bool firstRetakeCompleted = await firstRetake;
+            retakeSourceReservationProtected &= firstRetakeCompleted
+                && durableWindow.VideoToolsSourceDependencyProtectedForSmoke(
+                    sourceVideoJobId,
+                    managedVideoPath);
+            bool finishOpenedReadyHealth = durableWindow
+                .OpenVideoToolsBoardForSmoke("finish");
+            await durableWindow.RefreshVideoToolsCapabilityForSmokeAsync();
+            int postsBeforeFinish = explicitRetakePosts;
+            bool finishStartRejected = !await durableWindow
+                .StartVideoToolsRetakeForSmokeAsync();
+            bool finishRemainsDisabled = finishOpenedReadyHealth
+                && !durableWindow.VideoToolsStartEnabledForSmoke
+                && finishStartRejected
+                && explicitRetakePosts == postsBeforeFinish;
+            durableWindow.Close();
+
+            int pendingBeforeFreshReject = pendingFiles.Length;
+            bool serveReady = true;
+            int freshRejectPosts = 0;
+            PhotoViewer.Wpf.MainWindow freshWindow = HiddenWindow();
+            freshWindow.ConfigureModalEnhancementForSmoke((request, _) =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    return Task.FromResult(VideoToolsJsonResponse(
+                        serveReady
+                            ? CreateReadyVideoToolsHealthJson()
+                            : CreateVideoToolsHealthJson()));
+                }
+                freshRejectPosts++;
+                return Task.FromResult(new HttpResponseMessage(
+                    HttpStatusCode.ServiceUnavailable));
+            });
+            freshWindow.ConfigureVideoToolsSourceForSmoke(
+                sourceVideoJobId,
+                true,
+                124d / 24d,
+                24,
+                124,
+                864,
+                480,
+                true,
+                prompt,
+                managedVideoPath);
+            freshWindow.Show();
+            _ = freshWindow.OpenVideoToolsBoardForSmoke("retake");
+            await freshWindow.RefreshVideoToolsCapabilityForSmokeAsync();
+            bool cachedReadyBeforeFreshReject =
+                freshWindow.VideoToolsStartEnabledForSmoke;
+            serveReady = false;
+            bool freshRejected = !await freshWindow
+                .StartVideoToolsRetakeForSmokeAsync();
+            int pendingAfterFreshReject = Directory.Exists(pendingDirectory)
+                ? Directory.GetFiles(pendingDirectory, "*.json").Length
+                : 0;
+            bool freshRetakeCapabilityRequired = cachedReadyBeforeFreshReject
+                && freshRejected
+                && freshRejectPosts == 0
+                && pendingAfterFreshReject == pendingBeforeFreshReject;
+            freshWindow.Close();
+
+            bool staleInput = await RunVideoToolsStaleScenarioAsync(
+                Path.Combine(fixtureRoot, "stale-input.mp4"),
+                prompt,
+                "input");
+            bool staleCloseReopen = await RunVideoToolsStaleScenarioAsync(
+                Path.Combine(fixtureRoot, "stale-close.mp4"),
+                prompt,
+                "close-reopen");
+            bool staleSource = await RunVideoToolsStaleScenarioAsync(
+                Path.Combine(fixtureRoot, "stale-source.mp4"),
+                prompt,
+                "source");
+            bool retakeStaleContextNoPublish = staleInput
+                && staleCloseReopen
+                && staleSource;
+
             ok = shortestExact
                 && leftClamp
                 && rightClamp
                 && oddPaddingTieBreak
                 && invalidSelectionRejected
                 && capabilityExact
+                && retakeReadyCapabilityExact
                 && capabilityMalformedRejected
                 && motionDirectorPromptInterop
                 && retakeRequestExact
@@ -630,7 +836,14 @@ public partial class App
                 && readerSnapshots
                 && videoProducerDependencyGated
                 && localeFocused
-                && passiveOpen;
+                && passiveOpen
+                && retakeReadyGate
+                && freshRetakeCapabilityRequired
+                && retakeDurableRequestExact
+                && retakeStaleContextNoPublish
+                && retakeDoubleStartSinglePublish
+                && retakeSourceReservationProtected
+                && finishRemainsDisabled;
             result = new
             {
                 ok,
@@ -640,6 +853,7 @@ public partial class App
                 oddPaddingTieBreak,
                 invalidSelectionRejected,
                 capabilityExact,
+                retakeReadyCapabilityExact,
                 capabilityMalformedRejected,
                 motionDirectorPromptInterop,
                 retakeRequestExact,
@@ -666,7 +880,18 @@ public partial class App
                 passiveOpen,
                 healthGets,
                 mutationRequests,
-                enqueueCallSites = mutationRequests,
+                passiveOpenMutationRequests = mutationRequests,
+                retakeReadyGate,
+                freshRetakeCapabilityRequired,
+                retakeDurableRequestExact,
+                retakeStaleContextNoPublish,
+                retakeDoubleStartSinglePublish,
+                retakeSourceReservationProtected,
+                finishRemainsDisabled,
+                durableHealthGets,
+                explicitRetakePosts,
+                explicitRetakeNudges = explicitRetakePosts,
+                finishMutationRequests = finishRemainsDisabled ? 0 : 1,
             };
         }
         catch (Exception ex)
@@ -688,6 +913,167 @@ public partial class App
                 new JsonSerializerOptions { WriteIndented = true }));
         Shutdown(ok ? 0 : 1);
     }
+
+    private async Task<bool> RunVideoToolsStaleScenarioAsync(
+        string sourcePath,
+        string prompt,
+        string mutation)
+    {
+        File.WriteAllBytes(
+            sourcePath,
+            Enumerable.Range(0, 2048)
+                .Select(static value => (byte)(value % 239))
+                .ToArray());
+        const string sourceVideoJobId =
+            "22222222-2222-4222-8222-222222222222";
+        var freshHealthObserved = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFreshHealth = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        bool blockFreshHealth = false;
+        int posts = 0;
+        PhotoViewer.Wpf.MainWindow window = HiddenWindow();
+        try
+        {
+            _ = window.SetUiLanguageForSmoke(UiLanguageResources.Japanese);
+            window.ConfigureModalEnhancementForSmoke(async (request, token) =>
+            {
+                if (request.Method == HttpMethod.Get)
+                {
+                    if (blockFreshHealth)
+                    {
+                        freshHealthObserved.TrySetResult(true);
+                        await releaseFreshHealth.Task.WaitAsync(token);
+                    }
+                    return VideoToolsJsonResponse(
+                        CreateReadyVideoToolsHealthJson());
+                }
+                posts++;
+                return new HttpResponseMessage(
+                    HttpStatusCode.ServiceUnavailable);
+            });
+            window.ConfigureVideoToolsSourceForSmoke(
+                sourceVideoJobId,
+                true,
+                124d / 24d,
+                24,
+                124,
+                864,
+                480,
+                true,
+                prompt,
+                sourcePath);
+            window.Show();
+            _ = window.OpenVideoToolsBoardForSmoke("retake");
+            await window.RefreshVideoToolsCapabilityForSmokeAsync();
+            if (!window.VideoToolsStartEnabledForSmoke)
+                return false;
+            string pendingDirectory = EnhancementEnqueueInboxStore
+                .GetPendingDirectory(window.EnhancementJobsPathForSmoke);
+            int before = Directory.Exists(pendingDirectory)
+                ? Directory.GetFiles(pendingDirectory, "*.json").Length
+                : 0;
+            blockFreshHealth = true;
+            Task<bool> start = window.StartVideoToolsRetakeForSmokeAsync();
+            await freshHealthObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            switch (mutation)
+            {
+                case "input":
+                    window.SetVideoToolsRetakeSelectionForSmoke(
+                        "0.125",
+                        "5.000");
+                    break;
+                case "close-reopen":
+                    blockFreshHealth = false;
+                    window.CloseVideoToolsBoardForSmoke();
+                    _ = window.OpenVideoToolsBoardForSmoke("retake");
+                    break;
+                case "source":
+                    File.WriteAllBytes(
+                        sourcePath,
+                        Enumerable.Range(0, 3073)
+                            .Select(static value => (byte)(value % 227))
+                            .ToArray());
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(mutation));
+            }
+            releaseFreshHealth.TrySetResult(true);
+            bool started = await start;
+            int after = Directory.Exists(pendingDirectory)
+                ? Directory.GetFiles(pendingDirectory, "*.json").Length
+                : 0;
+            return !started
+                && posts == 0
+                && after == before
+                && window.VideoToolsStatusForSmoke.Contains(
+                    "Jobは追加していません",
+                    StringComparison.Ordinal);
+        }
+        finally
+        {
+            releaseFreshHealth.TrySetResult(true);
+            window.Close();
+        }
+    }
+
+    private static bool HasExactVideoToolsSmokeKeys(
+        JsonElement element,
+        params string[] keys)
+    {
+        var remaining = new HashSet<string>(keys, StringComparer.Ordinal);
+        int count = 0;
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            count++;
+            if (!remaining.Remove(property.Name))
+                return false;
+        }
+        return count == keys.Length && remaining.Count == 0;
+    }
+
+    private static HttpResponseMessage VideoToolsJsonResponse(string json)
+        => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                json,
+                Encoding.UTF8,
+                "application/json"),
+        };
+
+    private static string CreateReadyVideoToolsHealthJson()
+        => """
+        {
+          "capabilities": {
+            "durableEnqueueInboxV1": {
+              "ready": true,
+              "protocolVersion": 1,
+              "backendGeneration": "json-v1"
+            },
+            "videoToolsV1": {
+              "contractId": "PV-ENHANCE-VIDEO-TOOLS-001",
+              "protocol": "aibos-enhancement-video-tools-v1",
+              "readerReady": true,
+              "retake": {
+                "writerEnabled": true,
+                "backendConfigured": true,
+                "runtimeVerified": true,
+                "ready": true,
+                "state": "ready",
+                "reasonCode": null
+              },
+              "finish": {
+                "writerEnabled": false,
+                "backendConfigured": false,
+                "runtimeVerified": false,
+                "ready": false,
+                "state": "disabled",
+                "reasonCode": "FINISH_RUNTIME_UNPINNED"
+              }
+            }
+          }
+        }
+        """;
 
     private static string CreateVideoToolsHealthJson()
         => """
