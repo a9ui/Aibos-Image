@@ -49,6 +49,7 @@ foreach ($token in @(
     'VideoEditV2CandidateStaleForStyleSmoke',
     'futureReadOnly',
     'sourceUntouched',
+    'authenticatedFake',
     'qualityNoFallback',
     'passiveJobs')) {
     if ($smoke -notmatch [regex]::Escape($token)) {
@@ -166,7 +167,7 @@ try {
     }
     $result = Get-Content -Raw -Encoding UTF8 -LiteralPath $resultPath | ConvertFrom-Json
     if ($result.ok -ne $true) {
-        throw "Video Tools v2 flow smoke returned a failing result."
+        throw "Video Tools v2 flow smoke returned a failing result: $($result | ConvertTo-Json -Depth 10 -Compress)"
     }
     $result | ConvertTo-Json -Depth 10
 }
