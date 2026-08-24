@@ -8,6 +8,10 @@ internal sealed record VideoToolsV2ReaderSnapshot(
     string Kind,
     string SourceKind,
     string? SourceVideoJobId,
+    string SourceCanonicalPath,
+    string? SourceStagingCanonicalPath,
+    long SourceSize,
+    double SourceMtimeMs,
     string PresetId,
     string BackendId,
     int SourceWidth,
@@ -72,6 +76,10 @@ public partial class MainWindow
     private readonly record struct VideoToolsV2SourceSnapshot(
         string Kind,
         string? ProducerJobId,
+        string CanonicalPath,
+        string? StagingCanonicalPath,
+        long Size,
+        double MtimeMs,
         int Width,
         int Height,
         int FrameCount,
@@ -252,6 +260,10 @@ public partial class MainWindow
         }
 
         string? producerJobId = null;
+        string canonicalPath;
+        string? stagingCanonicalPath = null;
+        long sourceSize;
+        long sourceMtimeMs;
         JsonElement signature;
         JsonElement probe;
         if (kind == "managed-video-job")
@@ -269,9 +281,12 @@ public partial class MainWindow
                     "producerJobId",
                     out producerJobId)
                 || !IsSafeVideoToolsJobId(producerJobId)
-                || !TryGetVideoToolsV2Path(source, "canonicalPath", out _)
+                || !TryGetVideoToolsV2Path(source, "canonicalPath", out canonicalPath)
                 || !source.TryGetProperty("signature", out signature)
-                || !TryReadVideoToolsV2Signature(signature, out _, out _)
+                || !TryReadVideoToolsV2Signature(
+                    signature,
+                    out sourceSize,
+                    out sourceMtimeMs)
                 || !TryGetSingleVideoToolsString(
                     source,
                     "sha256",
@@ -297,14 +312,14 @@ public partial class MainWindow
                 || !TryGetVideoToolsV2Path(
                     source,
                     "originalCanonicalPath",
-                    out string originalPath)
+                    out canonicalPath)
                 || !TryGetVideoToolsV2Path(
                     source,
                     "stagingCanonicalPath",
-                    out string stagingPath)
+                    out stagingCanonicalPath)
                 || VideoToolsV2WindowsLexicalPathsEqual(
-                    originalPath,
-                    stagingPath)
+                    canonicalPath,
+                    stagingCanonicalPath)
                 || !source.TryGetProperty(
                     "originalSignature",
                     out JsonElement originalSignature)
@@ -313,13 +328,13 @@ public partial class MainWindow
                     out JsonElement stagingSignature)
                 || !TryReadVideoToolsV2Signature(
                     originalSignature,
-                    out long originalSize,
-                    out _)
+                    out sourceSize,
+                    out sourceMtimeMs)
                 || !TryReadVideoToolsV2Signature(
                     stagingSignature,
                     out long stagingSize,
                     out _)
-                || originalSize != stagingSize
+                || sourceSize != stagingSize
                 || !TryGetSingleVideoToolsString(
                     source,
                     "originalSha256",
@@ -366,6 +381,10 @@ public partial class MainWindow
         snapshot = new VideoToolsV2SourceSnapshot(
             kind,
             producerJobId,
+            canonicalPath,
+            stagingCanonicalPath,
+            sourceSize,
+            sourceMtimeMs,
             width,
             height,
             frameCount,
@@ -695,6 +714,10 @@ public partial class MainWindow
             "edit",
             source.Kind,
             source.ProducerJobId,
+            source.CanonicalPath,
+            source.StagingCanonicalPath,
+            source.Size,
+            source.MtimeMs,
             presetId,
             backendId,
             source.Width,
@@ -1470,6 +1493,10 @@ public partial class MainWindow
             "finish",
             source.Kind,
             source.ProducerJobId,
+            source.CanonicalPath,
+            source.StagingCanonicalPath,
+            source.Size,
+            source.MtimeMs,
             presetId,
             backendId,
             source.Width,

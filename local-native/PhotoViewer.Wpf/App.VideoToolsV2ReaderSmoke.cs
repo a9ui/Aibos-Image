@@ -58,8 +58,10 @@ public partial class App
                 && editSummary.Contains("非破壊child clip", StringComparison.Ordinal)
                 && editDetail.Contains("管理動画", StringComparison.Ordinal)
                 && !editMutation
-                && !editCanUseOutput
-                && editActions.Length == 0;
+                && editCanUseOutput
+                && editActions.SequenceEqual(
+                    ["open-output"],
+                    StringComparer.Ordinal);
 
             using JsonDocument finish = CreateVideoToolsV2WorkspaceJob(
                 finishFixture,
@@ -88,8 +90,10 @@ public partial class App
                     "外部動画（Job所有コピー）",
                     StringComparison.Ordinal)
                 && !finishMutation
-                && !finishCanUseOutput
-                && finishActions.Length == 0;
+                && finishCanUseOutput
+                && finishActions.SequenceEqual(
+                    ["open-output"],
+                    StringComparer.Ordinal);
 
             bool detailsExact = editRequestDetails.Contains(
                     "入力依存: 管理動画 Job 11111111-2222-4333-8444-555555555555",
@@ -662,10 +666,14 @@ public partial class App
 
             bool mutationsHidden = !editMutation
                 && !finishMutation
-                && !editCanUseOutput
-                && !finishCanUseOutput
-                && editActions.Length == 0
-                && finishActions.Length == 0;
+                && editCanUseOutput
+                && finishCanUseOutput
+                && editActions.SequenceEqual(
+                    ["open-output"],
+                    StringComparer.Ordinal)
+                && finishActions.SequenceEqual(
+                    ["open-output"],
+                    StringComparer.Ordinal);
             const int companionCalls = 0;
             const int resolverOrFileTouchCalls = 0;
             const int storeOrJobMutationCalls = 0;

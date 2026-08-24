@@ -760,7 +760,7 @@ public partial class MainWindow
             || _modalEnhancementVersionIndex < 1
             || _modalEnhancementVersionIndex > _modalEnhancementVersions.Count)
         {
-            return "Original";
+            return ModalOriginalVersionChoiceLabel();
         }
 
         return ModalEnhancementVersionChoiceLabel(_modalEnhancementVersionIndex);
@@ -796,9 +796,50 @@ public partial class MainWindow
     private string ModalVideoVersionChoiceLabel(int versionIndex)
     {
         if (versionIndex < 0 || versionIndex >= _modalVideoVersions.Count)
-            return "動画化";
+            return "生成";
 
-        return $"動画化 {versionIndex + 1}/{_modalVideoVersions.Count}";
+        ManagedVideoVersion version = _modalVideoVersions[versionIndex];
+        string kind = version.VersionKind switch
+        {
+            "edit" => "AI編集",
+            "finish" => "AI高画質化",
+            _ => "生成",
+        };
+        int kindTotal = _modalVideoVersions.Count(candidate =>
+            string.Equals(
+                candidate.VersionKind,
+                version.VersionKind,
+                StringComparison.Ordinal));
+        int kindIndex = _modalVideoVersions
+            .Take(versionIndex + 1)
+            .Count(candidate => string.Equals(
+                candidate.VersionKind,
+                version.VersionKind,
+                StringComparison.Ordinal));
+        return $"{kind} {kindIndex}/{kindTotal}";
+    }
+
+    private string ModalOriginalVersionChoiceLabel()
+        => ExternalVideoDropSessionActive
+            || string.Equals(
+                Path.GetExtension(_modalSourceTilePath),
+                ManagedVideoExtension,
+                StringComparison.OrdinalIgnoreCase)
+                ? "元動画"
+                : "Original";
+
+    public string OriginalVideoVersionLabelForSmoke(string path)
+    {
+        string? previous = _modalSourceTilePath;
+        _modalSourceTilePath = path;
+        try
+        {
+            return ModalOriginalVersionChoiceLabel();
+        }
+        finally
+        {
+            _modalSourceTilePath = previous;
+        }
     }
 
     private IReadOnlyList<ModalDisplayVersionChoice>
@@ -806,7 +847,10 @@ public partial class MainWindow
     {
         var choices = new List<ModalDisplayVersionChoice>
         {
-            new(ModalDisplayVersionKind.Original, 0, "Original"),
+            new(
+                ModalDisplayVersionKind.Original,
+                0,
+                ModalOriginalVersionChoiceLabel()),
         };
         IEnumerable<int> enhancementIndices = Enumerable.Range(
             1,

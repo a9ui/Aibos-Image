@@ -133,7 +133,7 @@ if ($StaticOnly) {
         operation = 'video'
         kinds = @('generation', 'edit', 'finish')
         writerEnabled = $false
-        openOutputEnabled = $false
+        openOutputEnabled = $true
     } | ConvertTo-Json -Depth 5
     return
 }
